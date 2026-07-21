@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 四大业务系统共用的非业务基础平台 |
-| 文档版本 | v0.4 |
+| 文档版本 | v0.5 |
 | 文档状态 | 草案 |
 | 技术方向 | Golang 平台服务、React 全局壳层、Codex/Skills/Computer Use 运行时 |
 
@@ -57,6 +57,8 @@ cookies 由四个独立的垂直业务系统组成：需求与策略、创意创
 
 壳层不得合并四个系统的业务菜单。用户切换系统后，由该系统自己的导航组件接管左侧栏、面包屑和页面级快捷入口。
 
+L0 全局壳层、四个系统的 L1 至 L3 导航结构和路由规则统一见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)。
+
 ## 5. 共享管理台导航
 
 路由前缀：`/admin/*`
@@ -82,10 +84,12 @@ cookies 由四个独立的垂直业务系统组成：需求与策略、创意创
 - Membership：用户在组织中的成员关系。
 - Team：组织内团队和默认资源范围。
 - GlobalRole：组织管理员、平台管理员、审计员等全局角色。
-- ProjectContext：跨系统引用的项目 ID、品牌 ID 和可见范围，不保存系统业务字段。
+- Project：四系统共同的全局业务上下文根，拥有稳定主数据、生命周期和成员范围，不拥有模块业务状态。
+- ProjectContext：跨系统引用的项目 ID、品牌 ID、授权 Scope 和可见范围，不保存系统业务字段。
+- ProjectResourceIndex：消费四系统事件形成的只读资源链接与状态摘要，用于 Project 总览、搜索和深链。
 - ServiceIdentity：异步任务、连接器和自动化使用的受限身份。
 
-BrandProfile、ProductProfile 和 CampaignProject 由共享基座中的 Project & Brand 服务拥有；ProjectContext 是其面向四系统的最小授权投影。详细数据、版本和权限见 [项目、品牌与产品域](./08-project-brand-domain.md)。
+BrandProfile、ProductProfile 和 Project 由共享基座中的 Project & Brand 服务拥有；ProjectContext 是其面向四系统的最小授权投影。所有四系统业务主实体必须携带非空 `project_id`，ProjectResourceIndex 只保存事件生成的链接和摘要。详细数据、版本、导航和权限见 [项目、品牌与产品域](./08-project-brand-domain.md)。
 
 ### 6.2 权限原则
 
@@ -317,6 +321,7 @@ MVP 可部署为模块化单体，但包、数据库 Schema、迁移、API 和�
 10. 停用一个 Provider 或 Skill 时，受影响系统获得明确错误和降级路径。
 11. ORAG submodule 未初始化时，开发/构建检查给出明确命令；初始化后可运行摄取、查询、citation 和 trace 主路径。
 12. ORAG 升级需通过 OpenAPI 契约、多租户隔离和固定广告知识评测集，生产构建不使用浮动 main。
+13. 同一 Project 在四系统保持一致 `project_id`、成员范围和品牌产品版本，ProjectResourceIndex 延迟不阻塞模块写入。
 
 ## 17. 变更记录
 
@@ -326,3 +331,4 @@ MVP 可部署为模块化单体，但包、数据库 Schema、迁移、API 和�
 | v0.2 | 2026-07-20 | 指定 ORAG 为知识库实现，补充 submodule、Knowledge Gateway、服务边界和升级门禁 |
 | v0.3 | 2026-07-20 | 将模型调用统一到 Provider Gateway，默认火山引擎并覆盖 LLM、VLM、图片、视频、音频和 3D |
 | v0.4 | 2026-07-20 | 补充项目品牌域、Agent/Computer Use、媒体与数据平台、API 事件及工程安全基线 |
+| v0.5 | 2026-07-21 | 将 Project 升级为跨四系统上下文根，增加 ProjectResourceIndex 和强制 project_id 边界 |

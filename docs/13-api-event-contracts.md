@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 四个业务系统与共享基座共同遵循的接口和事件标准 |
-| 文档版本 | v0.1 |
+| 文档版本 | v0.2 |
 | 文档状态 | 草案 |
 
 ## 1. 命名空间
@@ -58,6 +58,10 @@
 
 请求身份包含用户或服务账号、Organization、ProjectContext 和授权 Scope。服务端从可信身份计算组织，不接受客户端任意覆盖 `organization_id`。
 
+- 四系统业务写接口必须从可信 ProjectContext 校验非空 `project_id`，并确认资源、来源版本和用户均属于允许的 Project 范围。
+- `project_id` 创建后不可通过普通 PATCH 改写；跨 Project 复用使用显式复制或授权引用接口，并记录 `source_project_id`。
+- 组织级配置、模型、账户绑定和原始媒体可以不独占 Project，但它们产生的业务任务、使用关系和审计记录必须落到具体 Project。
+
 - 系统间调用使用短期服务身份和明确 audience。
 - 代表用户执行时传递可验证 delegation，不转发浏览器 Token。
 - 授权在资源读取和写入时校验；长任务恢复、审批消费和最终执行前重新校验。
@@ -99,7 +103,7 @@ SSE：
 
 | 领域 | 事件 |
 | --- | --- |
-| 项目/品牌 | `project.created.v1`、`project.status.changed.v1`、`brand.version.approved.v1`、`product.version.approved.v1` |
+| 项目/品牌 | `project.created.v1`、`project.updated.v1`、`project.status.changed.v1`、`project.membership.changed.v1`、`project.archived.v1`、`brand.version.approved.v1`、`product.version.approved.v1` |
 | 策略 | `strategy.approved.v1`、`strategy.superseded.v1` |
 | 创意 | `creative.approved.v1`、`creative.delivered.v1`、`creative.deactivated.v1` |
 | 素材洞察 | `insight.confirmed.v1`、`insight.challenged.v1`、`experience.invalidated.v1` |
@@ -108,6 +112,8 @@ SSE：
 | 平台 | `agent.task.completed.v1`、`model.job.completed.v1`、`asset.ready.v1` |
 
 每个事件需要单独维护 JSON Schema、示例、数据分级、Owner、消费者、兼容策略和最长延迟目标。
+
+除 Project 创建前的组织级事件外，四系统业务事件必须携带非空 `project_id`。ProjectResourceIndex 可以消费事件生成跨系统关系和状态摘要，但不得成为模块对象的写入入口或权威状态源。
 
 ## 9. Webhook
 
@@ -131,9 +137,11 @@ SSE：
 4. 事件重复、乱序、消费者停机和死信可演练、重放与审计。
 5. API 错误不会泄露凭据、SQL、厂商请求或跨租户资源。
 6. OpenAPI/事件破坏性变化能在 CI 阶段阻止合并。
+7. 四系统业务写入与事件均通过 Project Scope 校验，不能通过普通更新把资源移动到其他 Project。
 
 ## 12. 变更记录
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 统一 API 命名、错误、幂等、并发、异步任务和领域事件治理 |
+| v0.2 | 2026-07-21 | 增加 Project Scope、跨项目复用、project_id 不可变和资源索引事件约束 |

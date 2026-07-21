@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 模块 | 广告智能投放 |
-| 文档版本 | v0.4 |
+| 文档版本 | v0.7 |
 | 文档状态 | 草案 |
 | 目标版本 | M1 / MVP |
 | 核心实现 | Codex + 平台 Skills + Computer Use |
@@ -36,6 +36,8 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ## 系统边界与模块导航
 
+完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)；子板块功能、必要性、价值和展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。本 PRD 维护业务职责。
+
 ### 系统边界
 
 智能投放是独立垂直系统，路由前缀为 `/delivery/*`。它拥有广告账户业务映射、投放计划、变更、平台对象、执行证据、监控、告警和优化建议；共享基座提供用户权限、Codex/Skills、Computer Use 环境、通用审批与审计。
@@ -47,6 +49,13 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | 从其他系统消费 | `strategy.approved.v1`、`creative.approved.v1`、`insight.confirmed.v1` |
 | 向其他系统发布 | `delivery.executed.v1`、`delivery.metrics.updated.v1`、`delivery.status.changed.v1` |
 | 明确不拥有 | Brief、Strategy、CreativeVersion、AssetExperience、全局设备/站点策略 |
+
+### Project 关联
+
+- DeliveryPlan、DeliveryChangeSet、PlatformEntity 使用关系、DeliveryEvidence、Alert 和 Recommendation 必须携带非空 `project_id`。
+- AdAccountBinding 和 ComputerUseEnvironment 可以是组织级资源，但每次计划、审批、执行和证据都必须落到具体 Project，并在最终提交前复核 Project、账户、预算和创意归属。
+- 投放计划默认只选择同一 Project 的批准策略和 CreativePackage；跨 Project 复用必须显式授权并冻结来源版本快照。
+- 切换 Project 不得让正在执行的 Computer Use 会话静默改换上下文；进行中的执行需先完成、暂停或接管，所有结果继续写回原 Project。
 
 ### 一级导航
 
@@ -133,7 +142,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ### 6.1 创建投放
 
-1. 用户在对话中说“把已批准的三条快手买量视频按 3 万日预算创建测试计划”。
+1. 用户在对话中说“把已批准的三条快手效果广告按 3 万日预算创建测试计划”。
 2. Codex 读取批准策略、创意版本、素材授权、账户范围和组织预算政策。
 3. 调用 `delivery-preflight` 和目标 Platform Skill，生成结构化执行计划。
 4. 工作台展示账户、目标、预算、受众、版位、创意、排期、转化与最大花费。
@@ -171,7 +180,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | 账户 | 平台、账户、币种、时区、权限和当前页面身份 |
 | 预算 | 总预算、日预算、上限、节奏和最大可能花费 |
 | 受众 | 地域、人群、排除、版位、设备和优化条件 |
-| 创意 | 已批准 CreativePackage、品牌/买量类型、授权和数量 |
+| 创意 | 已批准 CreativePackage、品牌/效果类型、效果广告功能、授权和数量 |
 | 排期 | 起止时间、时区、分时段和观察周期 |
 | 追踪 | 落地页、转化、参数、归因和数据健康 |
 | 执行 | Platform Skill 版本、步骤、审批点和恢复策略 |
@@ -415,3 +424,6 @@ Computer Use 适合在结构化集成不足时操作图形界面，但会影响�
 | v0.2 | 2026-07-20 | 重构为 Codex + Platform Skills + Computer Use，补充页面证据、人工接管和敏感动作审批 |
 | v0.3 | 2026-07-20 | 明确独立投放系统边界，新增账户环境、计划、执行、监控、优化、审批和证据导航 |
 | v0.4 | 2026-07-20 | 接入受控 Computer Use 运行时、广告数据 Connector 与通用 PRD 质量要求 |
+| v0.5 | 2026-07-20 | 明确计划、执行、监控、优化、审批和证据的三级导航分布并接入统一导航规范 |
+| v0.6 | 2026-07-20 | 投放计划与创意筛选统一使用品牌广告和效果广告术语，并记录效果广告功能类型 |
+| v0.7 | 2026-07-21 | 接入全局 Project 上下文，明确计划、账户、执行会话、证据和跨项目素材的安全边界 |

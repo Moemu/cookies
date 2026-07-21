@@ -5,13 +5,13 @@
 | 项目名称 | cookies |
 | 产品名称 | cookies |
 | Slogan | **从一句需求，到持续增长。** |
-| 文档版本 | v0.6 |
+| 文档版本 | v0.8 |
 | 文档状态 | 草案 |
 | 技术方向 | 四个独立垂直系统 + Golang/React 共享基座 + 火山引擎统一模型 Provider + ORAG RAG + Codex/Skills/Computer Use |
 
 ## 1. 产品定义
 
-cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需求与策略、创意创作、素材洞察、智能投放分别作为完整垂直系统建设；它们拥有独立导航、领域模型、权限和发布节奏，仅共享 Provider、知识库、用户组织、Codex/Skills、Computer Use、任务与治理基座。
+cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需求与策略、创意创作、素材洞察、智能投放分别作为完整垂直系统建设；它们拥有独立导航、领域模型、权限和发布节奏，由全局 Project 连接同一业务闭环，并共享 Provider、知识库、用户组织、Codex/Skills、Computer Use、任务与治理基座。
 
 一句话定位：**以结构化业务目标为起点、以真实投放结果为反馈的 AI 广告工作台。**
 
@@ -29,9 +29,10 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 
 1. 通过对话让用户表达需求，由 Codex 按需调用 Skills 完成澄清、分析和策略交付。
 2. 围绕明确渠道生产两类创意：小红书/公众号图文，以及抖音/快手视频。
-3. 针对品牌广告和买量广告建立不同的视频创作方法、评审标准和分析指标。
+3. 针对电影感品牌广告和效果广告建立不同的视频创作方法、评审标准和分析指标；效果广告首期覆盖数字人、广告前贴和爆款视频复刻。
 4. 从素材内容、投放数据和实验结果中提炼可复用经验，反向指导下一轮创作。
 5. 通过 Codex + Computer Use 在人工审批下完成广告平台配置、上线、监控和优化。
+6. 以 Project 统一连接需求、策略、创意、素材洞察和投放对象，让跨系统进度、版本血缘与责任可追溯。
 
 ### 2.4 非目标
 
@@ -49,7 +50,7 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 | --- | --- | --- |
 | 市场/品牌负责人 | 需求难传达、品牌一致性弱、过程不可见 | 快速形成标准 Brief，控制品牌与合规 |
 | 广告策略人员 | 信息收集耗时、研究分散、方案复用难 | AI 辅助洞察、生成策略并沉淀方法论 |
-| 创意/设计人员 | 改稿频繁、不同内容形态混用、缺少效果反馈 | 按图文/品牌视频/买量视频生产并引用素材经验 |
+| 创意/设计人员 | 改稿频繁、不同内容形态混用、缺少效果反馈 | 按图文、品牌广告和效果广告功能生产并引用素材经验 |
 | 广告投手/优化师 | 平台界面配置重复、监控压力大、复盘滞后 | Codex 规划、Computer Use 执行并保留证据 |
 | 中小企业经营者 | 缺少专业团队，不知道如何开始 | 用对话完成从需求到投放的引导式流程 |
 | 管理者 | 成本、进度、效果和责任边界不透明 | 统一看板、审批、审计与投入产出分析 |
@@ -61,7 +62,7 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 3. **确认 Brief**：系统评估完整度，用户确认后冻结一个可追溯版本。
 4. **生成策略**：输出受众洞察、核心卖点、渠道组合、创意方向、实验设计和指标建议。
 5. **创作图文**：为小红书和公众号生成标题、正文、封面、配图方案和发布包。
-6. **创作视频**：为抖音和快手生成品牌广告或买量广告的概念、脚本、分镜、素材和成片草稿。
+6. **创作视频**：为抖音和快手生成电影感品牌故事，或通过数字人、广告前贴、爆款视频复刻制作效果广告。
 7. **分析素材**：融合内容特征与投放数据，归纳有效模式、失效原因、疲劳趋势和适用场景。
 8. **规划投放**：Codex 将批准策略转成可执行步骤，调用平台 Skill 校验账户、预算、受众、素材和追踪。
 9. **受控执行**：Computer Use 操作已授权平台界面，在最终提交或敏感动作前暂停并请求人工确认。
@@ -74,7 +75,7 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 | 模块 | 输入 | 核心能力 | 输出 |
 | --- | --- | --- | --- |
 | 需求收集及策略分析 | 用户对话、品牌资料、历史经验 | Codex 对话编排、Skills 调用、动态追问、研究与策略生成 | 已确认 Brief、策略方案、Skill 执行记录 |
-| 广告创意创作 | Brief、策略、品牌规范、素材经验 | 小红书/公众号图文；抖音/快手品牌视频与买量视频 | 图文发布包、视频创意包、实验变体 |
+| 广告创意创作 | Brief、策略、品牌规范、素材经验 | 小红书/公众号图文；抖音/快手品牌广告与效果广告 | 图文发布包、品牌故事包、效果广告包、实验变体 |
 | 广告素材经验与数据分析 | 创意内容、投放明细、实验与人工评价 | 内容理解、维度拆解、对比分析、疲劳分析、经验归纳 | 素材洞察卡、经验库、创作建议、复盘报告 |
 | 广告智能投放 | 已批准计划、创意包、已登录平台会话 | Codex 规划、平台 Skills、Computer Use 操作、人工审批、结果验证 | 平台侧投放、证据记录、告警、优化动作 |
 
@@ -85,7 +86,7 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 | 基座能力 | 内容 |
 | --- | --- |
 | 用户与组织 | 登录、租户、成员、团队、全局角色和项目上下文 |
-| 项目、品牌与产品 | CampaignProject、BrandProfile、ProductProfile、规范版本和跨系统上下文 |
+| 项目、品牌与产品 | Project、BrandProfile、ProductProfile、规范版本、资源关系索引和跨系统上下文 |
 | Provider 中心 | 统一提供 LLM、VLM、图片、视频、音频、3D 及 RAG 内部模型能力；默认火山引擎，管理凭据、模型目录、路由、任务、配额和成本 |
 | 知识库 | 通过 ORAG 实现组织、品牌、项目、规则和经验知识的摄取、混合检索、引用、评测与优化 |
 | Agent 能力 | Codex Task、Skill Registry、Tool/MCP Registry、评测和运行事件 |
@@ -99,22 +100,25 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 3. 系统之间不能直接写对方数据库；通过契约 API 和版本化领域事件协作。
 4. 下游引用上游产物时保存来源系统、来源 ID、版本和必要快照。
 5. 一个系统的失败或发布不应阻塞其他系统的基础读写与独立迭代。
+6. Project 是四系统共同的全局上下文根；四系统主实体必须携带 `project_id`，Project 只聚合链接和摘要，不接管模块业务状态。
 
 ### 5.4 系统关系
 
 ```mermaid
 flowchart TB
   Shell["cookies 全局壳层"]
+  Project["Project：全局业务上下文与资源链接"]
   Strategy["需求与策略系统"]
   Creative["创意创作系统"]
   Insights["素材洞察系统"]
   Delivery["智能投放系统"]
   Platform["共享基座：用户、Provider、知识、Agent、Computer Use、治理"]
 
-  Shell --> Strategy
-  Shell --> Creative
-  Shell --> Insights
-  Shell --> Delivery
+  Shell --> Project
+  Project -.-> Strategy
+  Project -.-> Creative
+  Project -.-> Insights
+  Project -.-> Delivery
 
   Strategy --> Platform
   Creative --> Platform
@@ -130,7 +134,7 @@ flowchart TB
   Insights -->|"已确认经验"| Creative
 ```
 
-图中的业务箭头代表 API/领域事件，不代表数据库依赖。
+图中的业务箭头代表 API/领域事件，不代表数据库依赖；Project 虚线只表示共同上下文和只读资源索引，不表示拥有模块业务对象。
 
 ### 5.5 关键领域事件
 
@@ -209,19 +213,19 @@ flowchart TB
 
 ### 9.1 全局壳层
 
-全局壳层仅提供 cookies 标识、组织/项目切换、四系统切换器、全局 Agent 任务、审批、通知和个人菜单。它不承载任何业务系统的二级菜单。
+全局壳层仅提供 cookies 标识、组织/Project 切换、四系统切换器、全局 Agent 任务、审批、通知和个人菜单。Project 切换器可进入 `/projects/:project_id/overview`，通过关键产物、待办、风险和深链连接四系统；它不承载任何业务系统的二级菜单。
 
 ### 9.2 系统入口
 
 | 系统 | 路由前缀 | 独立导航摘要 |
 | --- | --- | --- |
-| 需求与策略 | `/strategy/*` | 工作台、对话项目、Brief、策略、研究洞察、评审、能力运营 |
+| 需求与策略 | `/strategy/*` | 工作台、策略工作区、需求中心、策略中心、研究洞察、评审、能力运营 |
 | 创意创作 | `/creative/*` | 工作台、图文创作、视频创作、创意任务、评审、交付、创意运营 |
 | 素材洞察 | `/insights/*` | 工作台、数据接入、分析素材库、内容/效果分析、实验、经验库、报告 |
 | 智能投放 | `/delivery/*` | 作战台、账户环境、投放计划、执行中心、监控告警、优化、证据审计 |
 | 共享管理台 | `/admin/*` | 用户组织、Provider、知识库、Agent、Computer Use、工作流、安全、用量 |
 
-每个系统的完整导航与页面职责在对应 PRD 中维护。
+每个系统的完整页面职责在对应 PRD 中维护；统一导航层级、完整导航树、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)；子板块的必要性、价值、优先级与展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。
 
 ## 10. 领域数据归属
 
@@ -231,9 +235,9 @@ flowchart TB
 | 创意创作 | CreativeTask、Direction、CreativeVersion、CreativePackage | 策略快照、品牌知识、素材经验引用 |
 | 素材洞察 | AssetFeature、AnalysisMetricSnapshot、AnalysisRun、Insight、Experience | 创意快照、投放指标来源 |
 | 智能投放 | DeliveryPlan、ChangeSet、PlatformEntity、DeliveryMetricSnapshot、DeliveryEvidence | 策略与创意快照、共享 ComputerUseRun |
-| 共享基座 | User、Organization、CampaignProject、BrandProfile、ProductProfile、ProviderConfig、KnowledgeDocument、AgentTask、SkillDefinition、AuditLog | 不拥有四个系统的业务实体 |
+| 共享基座 | User、Organization、Project、ProjectMembership、ProjectResourceIndex、BrandProfile、ProductProfile、ProviderConfig、KnowledgeDocument、AgentTask、SkillDefinition、AuditLog | 不拥有四个系统的业务实体 |
 
-所有主实体使用全局唯一 ID 和 `organization_id`。版本实体不可变；跨系统引用包含 `source_system`、`source_id` 和 `source_version`，避免上游修改历史事实。
+所有主实体使用全局唯一 ID、`organization_id`；四系统业务主实体还必须包含非空 `project_id`。版本实体不可变；跨系统引用包含 `source_system`、`source_project_id`、`source_id` 和 `source_version`，避免上游修改历史事实。
 
 ## 11. 技术方案
 
@@ -352,7 +356,7 @@ MVP 可采用模块化单体部署，但逻辑上是**四个垂直系统 + 一�
 ### M1：MVP 闭环
 
 - Codex + Skills 对话生成 Brief 和策略并确认版本。
-- 交付小红书/公众号图文，以及抖音/快手品牌与买量视频创意包。
+- 交付小红书/公众号图文，以及抖音/快手品牌广告与效果广告创意包。
 - 分析创意内容与投放数据，生成素材洞察和经验卡。
 - 通过一个首发平台 Skill + Computer Use 完成草稿、校验、审批、上线和结果验证。
 - 建立核心埋点、质量评测和错误监控。
@@ -421,3 +425,5 @@ MVP 上线前必须满足：
 | v0.4 | 2026-07-20 | 将 ORAG 以 `third_party/orag` submodule 接入共享知识基座，明确 Knowledge Gateway 和服务边界 |
 | v0.5 | 2026-07-20 | 统一模型 Provider，默认火山引擎，覆盖 LLM、VLM、图片、视频、音频和 3D |
 | v0.6 | 2026-07-20 | 补充项目品牌域、Agent/Computer Use 运行时、数据 Connector、媒体资产、API 事件和工程安全规格 |
+| v0.7 | 2026-07-20 | 视频创作拆分为电影感品牌广告和效果广告，效果广告首期覆盖数字人、广告前贴和爆款视频复刻 |
+| v0.8 | 2026-07-21 | 将 Project 定义为四系统全局上下文根，补充资源链接、项目总览与策略工作区边界 |
