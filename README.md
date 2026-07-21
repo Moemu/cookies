@@ -6,9 +6,7 @@
 
 `cookies` is an open-source product foundation for advertising teams. It connects strategy, creative production, asset intelligence, and governed delivery in one traceable workflow—while keeping people in control of consequential actions.
 
-> **Project status:** pre-release. This repository currently contains the product, design, and architecture foundation; the application implementation and public demo are not yet available. The screenshots below are concept explorations, not shipped UI.
-
-![cookies strategy workbench concept](./docs/assets/module-concepts/01-strategy-workbench.png)
+> **Project status:** pre-release. This repository currently contains the product, design, and architecture foundation; the application implementation and public demo are not yet available.
 
 ## Why cookies
 
@@ -24,16 +22,6 @@ Advertising work is usually fragmented across briefs, creative tools, performanc
 | **Delivery** | Plans and operates advertising delivery through controlled execution, approvals, rollback, and evidence. |
 
 Shared platform capabilities include organization and project context, a unified model-provider gateway, knowledge retrieval via [ORAG](https://github.com/shikanon/orag), agent/skill execution, media handling, auditability, and security controls.
-
-## Product concepts
-
-| Strategy | Creative |
-| --- | --- |
-| ![Strategy workbench](./docs/assets/module-concepts/01-strategy-workbench.png) | ![Creative graphic studio](./docs/assets/module-concepts/03-creative-graphic-studio.png) |
-| Insights | Governed delivery |
-| ![Insights overview](./docs/assets/module-concepts/05-insights-overview.png) | ![Delivery operations console](./docs/assets/module-concepts/07-delivery-operations-console.png) |
-
-See the complete [concept gallery](./docs/18-module-concept-gallery.md) and [design system](./DESIGN.md).
 
 ## Architecture
 
