@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kuangyngtao/cookies-integration-mvp/api/events/asset-ready-v1.schema.json",
+  "title": "asset.ready.v1",
+  "allOf": [
+    { "$ref": "./event-envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": { "const": "asset.ready.v1" },
+        "producer": { "const": "assets" },
+        "subject": {
+          "type": "object",
+          "required": ["type", "id", "version"],
+          "properties": {
+            "type": { "const": "asset" },
+            "id": { "type": "string", "minLength": 1 },
+            "version": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "data": {
+          "type": "object",
+          "required": ["media_type", "source_kind"],
+          "properties": {
+            "media_type": { "type": "string", "minLength": 1 },
+            "source_kind": { "enum": ["upload", "generated", "imported", "captured"] },
+            "provider_job_id": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false,
+          "if": {
+            "properties": {
+              "source_kind": { "const": "generated" }
+            }
+          },
+          "then": { "required": ["provider_job_id"] }
+        }
+      }
+    }
+  ]
+}

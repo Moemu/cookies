@@ -27,6 +27,10 @@ Invoke-Go test ./...
 Invoke-Go build ./cmd/cookies-api
 Invoke-Go build ./cmd/cookies-migrate
 
+Get-ChildItem -Path .\api\events -File -Filter *.json | ForEach-Object {
+    Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json | Out-Null
+}
+
 if (-not (Test-Path -LiteralPath '.\web\node_modules')) {
     Write-Error 'Frontend dependencies are missing. Run npm ci --prefix web first.'
     exit 1

@@ -6,8 +6,8 @@
 | 默认 Provider | 火山引擎 |
 | 默认 Go SDK | [`github.com/volcengine/volcengine-go-sdk/service/arkruntime`](https://github.com/volcengine/volcengine-go-sdk/tree/master/service/arkruntime) |
 | 覆盖能力 | LLM、VLM、图片、视频、音频、3D；内部补充 Embedding、Rerank |
-| 文档版本 | v0.2 |
-| 文档状态 | 草案 |
+| 文档版本 | v0.3 |
+| 文档状态 | 实现基线 |
 
 ## 1. 定位与原则
 
@@ -162,7 +162,11 @@ flowchart LR
 
 ### 5.3 Job 状态
 
-`queued → submitted → running → succeeded | partially_succeeded | failed | cancelled | expired`
+公共 Job 状态为：
+
+`queued → running → succeeded | partially_succeeded | failed | cancelled | expired`
+
+`submitted` 是 Provider Adapter 可记录的内部执行阶段，不进入共享 `contract.Job` 状态枚举。多产物通过 `result_refs` 返回；`partially_succeeded` 必须同时包含至少一个成功引用和稳定的汇总错误码。Bootstrap 契约的单值 `result_ref` 仅为兼容保留，新实现不得继续依赖。
 
 - Provider 外部任务 ID 只保存在平台数据和诊断视图，不作为业务主键。
 - 查询外部状态采用指数退避和抖动；支持官方回调时仍需签名校验与对账轮询。
@@ -264,3 +268,4 @@ ORAG 若暂不支持远程 Provider Gateway，需要在 ORAG 上游实现 `Cooki
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 建立统一模型 Provider，默认火山引擎，覆盖 LLM、VLM、图片、视频、音频、3D 与 RAG 内部能力 |
 | v0.2 | 2026-07-20 | 接入媒体资产和 API/事件统一契约，明确生成产物的转存与稳定引用 |
+| v0.3 | 2026-07-21 | 收口公共 Job 状态、多产物引用和 Provider 内部提交阶段语义 |

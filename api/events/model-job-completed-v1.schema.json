@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kuangyngtao/cookies-integration-mvp/api/events/model-job-completed-v1.schema.json",
+  "title": "model.job.completed.v1",
+  "allOf": [
+    { "$ref": "./event-envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": { "const": "model.job.completed.v1" },
+        "producer": { "const": "provider" },
+        "subject": {
+          "type": "object",
+          "required": ["type", "id", "version"],
+          "properties": {
+            "type": { "const": "provider_job" },
+            "id": { "type": "string", "minLength": 1 },
+            "version": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "data": {
+          "type": "object",
+          "required": ["status", "capability", "result_refs"],
+          "properties": {
+            "status": {
+              "enum": ["succeeded", "partially_succeeded", "failed", "cancelled", "expired"]
+            },
+            "capability": { "type": "string", "minLength": 1 },
+            "result_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["type", "id"],
+                "properties": {
+                  "type": { "type": "string", "minLength": 1 },
+                  "id": { "type": "string", "minLength": 1 },
+                  "version": { "type": "integer", "minimum": 1 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "error_code": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": { "enum": ["failed", "partially_succeeded"] }
+                }
+              },
+              "then": { "required": ["error_code"] }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": { "const": "partially_succeeded" }
+                }
+              },
+              "then": {
+                "properties": {
+                  "result_refs": { "type": "array", "minItems": 1 }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

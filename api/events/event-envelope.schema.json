@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Cecillia803/cookies/api/events/event-envelope.schema.json",
+  "$id": "https://github.com/kuangyngtao/cookies-integration-mvp/api/events/event-envelope.schema.json",
   "title": "cookies domain event envelope",
   "type": "object",
   "required": [

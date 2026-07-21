@@ -24,6 +24,12 @@ jobs:
       - name: Check Go formatting
         run: test -z "$(gofmt -l $(find cmd internal -name '*.go' -type f))"
 
+      - name: Validate event schema JSON
+        run: |
+          for schema in api/events/*.json; do
+            python3 -m json.tool "$schema" > /dev/null
+          done
+
       - name: Run static analysis
         run: go vet ./...
 

@@ -4,8 +4,8 @@
 | --- | --- |
 | 定位 | 图文、图片、音频、视频、3D、文档和 Computer Use 证据的共享存储与处理基座 |
 | 原则 | 共享物理资产能力，业务语义和版本归各垂直系统所有 |
-| 文档版本 | v0.1 |
-| 文档状态 | 草案 |
+| 文档版本 | v0.2 |
+| 文档状态 | 实现基线 |
 
 ## 1. 边界
 
@@ -66,6 +66,9 @@
 - 厂商临时 URL 不进入 CreativePackage 或长期业务引用。
 - 记录逻辑模型、实际模型版本、Prompt/参数引用、种子、来源素材和生成时间。
 - 部分生成结果分别建 Asset，失败项可单独重试。
+- `POST /platform/v1/assets/generated-intakes` 是生成结果成为正式资产的唯一入口，要求 `Idempotency-Key`，组织和项目范围来自可信请求上下文。
+- 请求只携带成功产物；每个产物具有任务内唯一 `output_id`、短期 URI、过期时间、MIME、大小和 SHA-256。资产平台只通过允许的 Provider Adapter 获取 URI，禁止将任意网络地址当作可信下载源。
+- 同一幂等键重试返回相同的一组 `ProjectAssetRef`；任何产物尚未完成持久化和校验时，不得向调用方宣告整批接入成功。
 
 ## 7. 权利与合规元数据
 
@@ -89,6 +92,7 @@
 
 ## 9. API
 
+- `POST /platform/v1/assets/generated-intakes`：接入已完成的 Provider 产物并返回稳定 `ProjectAssetRef` 列表。
 - `POST /platform/v1/assets/upload-sessions`、`:complete`、`:abort`。
 - `GET /platform/v1/assets/{id}`、`/versions/{version}`、`/derivatives`。
 - `POST /platform/v1/assets/{id}/processing-jobs`。
@@ -128,3 +132,4 @@
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 定义媒体上传、处理、生成接入、授权、分发、成本和删除生命周期 |
+| v0.2 | 2026-07-21 | 收口生成产物接入请求、可信下载、幂等和多产物返回语义 |
