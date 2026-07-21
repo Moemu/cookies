@@ -1,7 +1,10 @@
-.PHONY: build test vet fmt check web-install web-check
+.PHONY: build test vet fmt check migrate contract-check web-install web-check
 
 build:
 	go build ./cmd/cookies-api
+
+migrate:
+	go run ./cmd/cookies-migrate
 
 test:
 	go test ./...
@@ -17,6 +20,10 @@ check:
 	go vet ./...
 	go test ./...
 	npm run check --prefix web
+	$(MAKE) contract-check
+
+contract-check:
+	npm run contract:check --prefix web
 
 web-install:
 	npm ci --prefix web

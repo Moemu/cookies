@@ -25,9 +25,10 @@ and versioned event envelopes.
    content.
 5. `projectcontext.Reference` is a versioned, minimal projection. Downstream
    systems retain its stable IDs and version, not mutable brand or product facts.
-6. `contract.Job` and `contract.AssetRef` are shared transport contracts.
-   Provider returns completed output; Assets alone admits it into a project
-   library and returns the durable AssetRef.
+6. `contract.Job`, `contract.AssetVersionRef`, and `contract.ProjectAssetRef`
+   are shared transport contracts. Provider returns completed output; Assets
+   alone admits it into a project library and returns the durable project-scoped
+   reference.
 7. Every future mutable write requires an idempotency key and expected resource
    version. Immutable versions are never updated in place.
 8. New persistent modules must use tenant-aware repositories, forward-compatible
@@ -37,7 +38,8 @@ and versioned event envelopes.
 
 ## Bootstrap limits
 
-This initial skeleton deliberately has no database, queue, SSO, Provider, ORAG,
-or Computer Use implementation. `StaticResolver` is only enabled by explicit
-local environment configuration; all non-local startup paths fail closed for
-protected routes until a trusted identity adapter is supplied.
+This initial skeleton includes only MySQL readiness, forward-only migrations,
+and a durable job-execution seam. It deliberately has no Redis, SSO, Provider,
+ORAG, or Computer Use implementation. `StaticResolver` is only enabled by
+explicit local environment configuration; all non-local startup paths fail
+closed for protected routes until a trusted identity adapter is supplied.

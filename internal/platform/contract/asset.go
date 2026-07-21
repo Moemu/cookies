@@ -7,29 +7,33 @@ import (
 
 type AssetID string
 
-// AssetRef is the cross-module reference returned by the Assets platform
-// module after an upload or generated result has been admitted to a project
-// library. It intentionally excludes URLs, prompts, rights metadata, and
-// source classification, which are owned by the Assets module.
-type AssetRef struct {
-	AssetID        AssetID        `json:"asset_id"`
-	Version        int64          `json:"version"`
-	OrganizationID OrganizationID `json:"organization_id"`
-	ProjectID      ProjectID      `json:"project_id"`
+// AssetVersionRef identifies an immutable media version. Authorization is
+// evaluated from the request and business relationship, not from a URL.
+type AssetVersionRef struct {
+	AssetID AssetID `json:"asset_id"`
+	Version int64   `json:"version"`
 }
 
-func (r AssetRef) Validate() error {
+func (r AssetVersionRef) Validate() error {
 	if strings.TrimSpace(string(r.AssetID)) == "" {
 		return fmt.Errorf("asset_id is required")
 	}
 	if r.Version < 1 {
 		return fmt.Errorf("asset version must be positive")
 	}
-	if strings.TrimSpace(string(r.OrganizationID)) == "" {
-		return fmt.Errorf("organization_id is required")
-	}
+	return nil
+}
+
+// ProjectAssetRef records a project-library relationship to an immutable
+// asset version. The Assets module owns the relationship's lifecycle.
+type ProjectAssetRef struct {
+	ProjectID    ProjectID       `json:"project_id"`
+	AssetVersion AssetVersionRef `json:"asset_version"`
+}
+
+func (r ProjectAssetRef) Validate() error {
 	if strings.TrimSpace(string(r.ProjectID)) == "" {
 		return fmt.Errorf("project_id is required")
 	}
-	return nil
+	return r.AssetVersion.Validate()
 }

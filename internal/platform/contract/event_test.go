@@ -41,3 +41,20 @@ func TestEventEnvelopeRejectsUnversionedNameAndNonObjectData(t *testing.T) {
 		t.Fatal("expected invalid event to be rejected")
 	}
 }
+
+func TestEventEnvelopeRejectsVersionZero(t *testing.T) {
+	t.Parallel()
+	event := EventEnvelope{
+		EventID:        "evt_1",
+		EventType:      "creative.approved.v0",
+		OccurredAt:     time.Now(),
+		Producer:       "creative",
+		OrganizationID: "org_1",
+		Subject:        Subject{Type: "creative_version", ID: "cv_1"},
+		Data:           json.RawMessage(`{}`),
+		TraceID:        "trace_1",
+	}
+	if err := event.Validate(); err == nil {
+		t.Fatal("expected version zero to be rejected")
+	}
+}

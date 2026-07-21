@@ -42,6 +42,29 @@ func TestContextFailsClosedWithoutTrustedIdentity(t *testing.T) {
 	if body.Error.Code != "UNAUTHENTICATED" || body.Error.RequestID == "" {
 		t.Fatalf("unexpected problem: %#v", body)
 	}
+	if body.Error.Details == nil {
+		t.Fatal("problem details must serialize as an empty array")
+	}
+}
+
+func TestProjectProbeUsesSharedAuthenticationAndAuthorization(t *testing.T) {
+	t.Parallel()
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, ProjectID: "project_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{}})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/context", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+
+	denied := httptest.NewRecorder()
+	server.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_2/context", nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("denied status = %d", denied.Code)
+	}
 }
 
 func TestContextReturnsTrustedTenantAndTrace(t *testing.T) {

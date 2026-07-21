@@ -1,32 +1,20 @@
 services:
-  postgres:
-    image: postgres:16-alpine
+  mysql:
+    image: mysql:8.4
     environment:
-      POSTGRES_DB: ${COOKIES_POSTGRES_DB:-cookies}
-      POSTGRES_USER: ${COOKIES_POSTGRES_USER:-cookies}
-      POSTGRES_PASSWORD: ${COOKIES_POSTGRES_PASSWORD:-cookies_local_development_only}
+      MYSQL_DATABASE: ${COOKIES_MYSQL_DATABASE:-cookies}
+      MYSQL_USER: ${COOKIES_MYSQL_USER:-cookies}
+      MYSQL_PASSWORD: ${COOKIES_MYSQL_PASSWORD:-cookies_local_development_only}
+      MYSQL_ROOT_PASSWORD: ${COOKIES_MYSQL_ROOT_PASSWORD:-root_local_development_only}
     ports:
-      - "${COOKIES_POSTGRES_PORT:-5432}:5432"
+      - "${COOKIES_MYSQL_PORT:-3306}:3306"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "${COOKIES_REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
       interval: 5s
       timeout: 3s
       retries: 20
 
 volumes:
-  postgres-data:
-  redis-data:
+  mysql-data:

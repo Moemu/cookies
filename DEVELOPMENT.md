@@ -10,6 +10,7 @@ capabilities live under `internal/platform/`.
 Copy-Item .env.example .env
 docker compose up -d
 npm ci --prefix web
+go run ./cmd/cookies-migrate
 ```
 
 Start the API and frontend in separate terminals:
@@ -35,4 +36,7 @@ make check
 ```
 
 Both commands verify Go formatting, Go static checks and tests, then lint,
-test and build the React shell.
+test and build the React shell, and validate the OpenAPI and event schemas.
+
+Migrations are forward-only and are not applied by API startup. Apply them
+explicitly with `go run ./cmd/cookies-migrate` after MySQL is healthy.

@@ -8,20 +8,25 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "contract:check": "redocly lint ../api/openapi/platform-v1.yaml && ajv compile -s ../api/events/event-envelope.schema.json --spec=draft2020 -c ajv-formats",
     "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.18.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@redocly/cli": "^2.39.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.1",
+    "ajv-cli": "^5.0.0",
+    "ajv-formats": "^3.0.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

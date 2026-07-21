@@ -29,9 +29,6 @@ func (r Reference) Validate() error {
 	if strings.TrimSpace(string(r.ProjectID)) == "" {
 		return fmt.Errorf("project_id is required")
 	}
-	if strings.TrimSpace(string(r.BrandID)) == "" {
-		return fmt.Errorf("brand_id is required")
-	}
 	if r.Version < 1 {
 		return fmt.Errorf("project context version must be positive")
 	}

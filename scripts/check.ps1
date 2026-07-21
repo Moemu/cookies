@@ -25,6 +25,7 @@ if ($unformatted.Count -gt 0) {
 Invoke-Go vet ./...
 Invoke-Go test ./...
 Invoke-Go build ./cmd/cookies-api
+Invoke-Go build ./cmd/cookies-migrate
 
 if (-not (Test-Path -LiteralPath '.\web\node_modules')) {
     Write-Error 'Frontend dependencies are missing. Run npm ci --prefix web first.'
@@ -32,6 +33,11 @@ if (-not (Test-Path -LiteralPath '.\web\node_modules')) {
 }
 
 & npm run check --prefix web
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& npm run contract:check --prefix web
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

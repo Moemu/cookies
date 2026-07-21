@@ -61,7 +61,11 @@ func validVersionedName(value string) bool {
 			return false
 		}
 	}
-	for _, character := range parts[len(parts)-1][1:] {
+	version := parts[len(parts)-1][1:]
+	if version[0] == '0' {
+		return false
+	}
+	for _, character := range version {
 		if character < '0' || character > '9' {
 			return false
 		}

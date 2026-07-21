@@ -11,26 +11,49 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Cecillia803/cookies/internal/platform/contract"
 	"github.com/Cecillia803/cookies/internal/platform/identity"
 )
 
 type Server struct {
-	resolver identity.Resolver
-	mux      *http.ServeMux
-	newID    func() (string, error)
+	resolver          identity.Resolver
+	projectAuthorizer identity.ProjectAuthorizer
+	readiness         ReadinessChecker
+	mux               *http.ServeMux
+	newID             func() (string, error)
 }
 
+type ReadinessChecker interface {
+	Check(context.Context) error
+}
+
+type Dependencies struct {
+	Resolver          identity.Resolver
+	ProjectAuthorizer identity.ProjectAuthorizer
+	Readiness         ReadinessChecker
+}
+
+// New retains the bootstrap construction path for focused HTTP tests. The
+// application uses NewWithDependencies so readiness and project checks are real.
 func New(resolver identity.Resolver) *Server {
-	if resolver == nil {
-		resolver = identity.RejectingResolver{}
+	return NewWithDependencies(Dependencies{Resolver: resolver})
+}
+
+func NewWithDependencies(dependencies Dependencies) *Server {
+	if dependencies.Resolver == nil {
+		dependencies.Resolver = identity.RejectingResolver{}
 	}
-	server := &Server{resolver: resolver, newID: newRequestID}
+	if dependencies.ProjectAuthorizer == nil {
+		dependencies.ProjectAuthorizer = identity.RejectingProjectAuthorizer{}
+	}
+	server := &Server{resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer, readiness: dependencies.Readiness, newID: newRequestID}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
 	server.mux.HandleFunc("GET /readyz", server.ready)
-	server.mux.HandleFunc("GET /platform/v1/context", server.requestContext)
+	server.mux.Handle("GET /platform/v1/context", server.requireAuthentication(http.HandlerFunc(server.requestContext)))
+	server.mux.Handle("GET /platform/v1/projects/{projectID}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }
@@ -59,48 +82,82 @@ func (s *Server) health(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) ready(writer http.ResponseWriter, request *http.Request) {
-	// Dependency readiness is added by each platform module; this process has
-	// no persistent dependency in the bootstrap stage.
+	if s.readiness != nil {
+		checkContext, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.readiness.Check(checkContext); err != nil {
+			writeProblem(writer, http.StatusServiceUnavailable, contract.Error{
+				Code:      "DEPENDENCY_UNAVAILABLE",
+				Message:   "服务依赖暂时不可用，请稍后重试",
+				RequestID: requestIDFrom(request.Context()),
+				Retryable: true,
+			})
+			return
+		}
+	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-func (s *Server) requestContext(writer http.ResponseWriter, request *http.Request) {
-	actor, err := s.resolver.Authenticate(request.Context(), request)
-	if err != nil {
-		if errors.Is(err, identity.ErrUnauthenticated) {
-			writeProblem(writer, http.StatusUnauthorized, contract.Error{
-				Code:      "UNAUTHENTICATED",
-				Message:   "需要有效身份后才能访问该资源",
+func (s *Server) requireAuthentication(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		actor, err := s.resolver.Authenticate(request.Context(), request)
+		if err != nil {
+			if errors.Is(err, identity.ErrUnauthenticated) {
+				writeProblem(writer, http.StatusUnauthorized, contract.Error{
+					Code:      "UNAUTHENTICATED",
+					Message:   "需要有效身份后才能访问该资源",
+					RequestID: requestIDFrom(request.Context()),
+					Retryable: false,
+				})
+				return
+			}
+			writeProblem(writer, http.StatusInternalServerError, contract.Error{
+				Code:      "IDENTITY_UNAVAILABLE",
+				Message:   "身份服务暂时不可用，请稍后重试",
+				RequestID: requestIDFrom(request.Context()),
+				Retryable: true,
+			})
+			return
+		}
+
+		requestContext := contract.RequestContext{
+			RequestID: requestIDFrom(request.Context()),
+			TraceID:   traceID(request.Header.Get("traceparent"), requestIDFrom(request.Context())),
+			Actor:     actor,
+		}
+		if err := requestContext.Validate(); err != nil {
+			writeProblem(writer, http.StatusInternalServerError, contract.Error{
+				Code:      "IDENTITY_CONTEXT_INVALID",
+				Message:   "身份上下文无效",
 				RequestID: requestIDFrom(request.Context()),
 				Retryable: false,
 			})
 			return
 		}
-		writeProblem(writer, http.StatusInternalServerError, contract.Error{
-			Code:      "IDENTITY_UNAVAILABLE",
-			Message:   "身份服务暂时不可用，请稍后重试",
-			RequestID: requestIDFrom(request.Context()),
-			Retryable: true,
-		})
-		return
-	}
+		next.ServeHTTP(writer, request.WithContext(contract.WithRequestContext(request.Context(), requestContext)))
+	})
+}
 
-	requestContext := contract.RequestContext{
-		RequestID: requestIDFrom(request.Context()),
-		TraceID:   traceID(request.Header.Get("traceparent"), requestIDFrom(request.Context())),
-		Actor:     actor,
-	}
-	if err := requestContext.Validate(); err != nil {
-		writeProblem(writer, http.StatusInternalServerError, contract.Error{
-			Code:      "IDENTITY_CONTEXT_INVALID",
-			Message:   "身份上下文无效",
-			RequestID: requestIDFrom(request.Context()),
-			Retryable: false,
-		})
-		return
-	}
+func (s *Server) requireProject(next http.Handler) http.Handler {
+	return s.requireAuthentication(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestContext, ok := contract.RequestContextFrom(request.Context())
+		projectID := contract.ProjectID(request.PathValue("projectID"))
+		if !ok || projectID == "" || s.projectAuthorizer.AuthorizeProject(request.Context(), requestContext.Actor, projectID) != nil {
+			writeProblem(writer, http.StatusForbidden, contract.Error{Code: "PROJECT_ACCESS_DENIED", Message: "当前身份无权访问该项目", RequestID: requestContext.RequestID, Retryable: false})
+			return
+		}
+		next.ServeHTTP(writer, request)
+	}))
+}
 
+func (s *Server) requestContext(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
 	writeJSON(writer, http.StatusOK, requestContext)
+}
+
+func (s *Server) projectContext(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
+	writeJSON(writer, http.StatusOK, map[string]any{"request_context": requestContext, "project_id": request.PathValue("projectID")})
 }
 
 func (s *Server) notFound(writer http.ResponseWriter, request *http.Request) {
@@ -172,5 +229,8 @@ func writeJSON(writer http.ResponseWriter, status int, payload any) {
 }
 
 func writeProblem(writer http.ResponseWriter, status int, problem contract.Error) {
+	if problem.Details == nil {
+		problem.Details = []contract.FieldViolation{}
+	}
 	writeJSON(writer, status, contract.Problem{Error: problem})
 }

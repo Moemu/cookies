@@ -29,7 +29,16 @@ type LocalIdentity struct {
 type Config struct {
 	Environment   Environment
 	HTTPAddr      string
+	MySQL         MySQL
 	LocalIdentity *LocalIdentity
+}
+
+// MySQL contains only connection-pool configuration. No business module owns
+// a second pool; modules receive this shared dependency instead.
+type MySQL struct {
+	DSN          string
+	MaxOpenConns int
+	MaxIdleConns int
 }
 
 func Load() (Config, error) {
@@ -41,6 +50,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
+		MySQL: MySQL{
+			DSN:          valueOr(lookup, "COOKIES_MYSQL_DSN", "cookies:cookies_local_development_only@tcp(127.0.0.1:3306)/cookies?parseTime=true&multiStatements=true"),
+			MaxOpenConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_OPEN_CONNS", 10),
+			MaxIdleConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_IDLE_CONNS", 5),
+		},
 	}
 
 	identityValues := map[string]string{
@@ -74,6 +88,12 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.HTTPAddr) == "" {
 		return fmt.Errorf("COOKIES_HTTP_ADDR must not be empty")
+	}
+	if strings.TrimSpace(c.MySQL.DSN) == "" {
+		return fmt.Errorf("COOKIES_MYSQL_DSN must not be empty")
+	}
+	if c.MySQL.MaxOpenConns < 1 || c.MySQL.MaxIdleConns < 0 || c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
+		return fmt.Errorf("MySQL connection pool limits are invalid")
 	}
 	if c.LocalIdentity == nil {
 		return nil
@@ -115,6 +135,18 @@ func splitCSV(value string) []string {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			result = append(result, trimmed)
 		}
+	}
+	return result
+}
+
+func intValueOr(lookup func(string) (string, bool), key string, fallback int) int {
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	var result int
+	if _, err := fmt.Sscanf(strings.TrimSpace(value), "%d", &result); err != nil {
+		return -1
 	}
 	return result
 }

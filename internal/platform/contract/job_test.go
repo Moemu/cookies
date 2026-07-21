@@ -17,6 +17,7 @@ func TestJobLifecycleDoesNotReopenTerminalJobs(t *testing.T) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 		Cancellable:    true,
+		MaxAttempts:    1,
 		Version:        1,
 	}
 	if err := job.Validate(); err != nil {

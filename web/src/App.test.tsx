@@ -7,7 +7,7 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: '策略工作区' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '创意' }))
+    fireEvent.click(screen.getByRole('link', { name: '创意' }))
     expect(screen.getByRole('heading', { name: '创意工作区' })).toBeInTheDocument()
   })
 })

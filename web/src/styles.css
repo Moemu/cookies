@@ -40,6 +40,7 @@ button { cursor: pointer; }
   color: #566375;
   padding: 18px 21px;
   text-align: left;
+  text-decoration: none;
   transition: background-color 160ms ease, color 160ms ease;
 }
 
@@ -77,8 +78,8 @@ button { cursor: pointer; }
 .chevron { margin-left: 13px; color: #576477; font-size: 20px; line-height: 1; }
 
 .project-menu { position: absolute; z-index: 2; top: 62px; width: 228px; overflow: hidden; border: 1px solid #e5ebf2; border-radius: 10px; background: #ffffff; box-shadow: 0 12px 30px rgb(21 37 61 / 12%); padding: 5px; }
-.project-menu button { width: 100%; border: 0; border-radius: 7px; background: transparent; padding: 10px 12px; text-align: left; color: #263445; }
-.project-menu button:hover { background: #f3f7fb; }
+.project-menu a { display: block; width: 100%; border: 0; border-radius: 7px; background: transparent; padding: 10px 12px; text-align: left; color: #263445; text-decoration: none; }
+.project-menu a:hover { background: #f3f7fb; }
 
 .global-status { display: flex; align-items: center; gap: 34px; color: #465467; font-weight: 600; }
 .avatar { display: grid; width: 37px; height: 37px; place-items: center; border-radius: 50%; background: #eaf3ff; color: #1677ff; }

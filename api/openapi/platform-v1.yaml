@@ -2,9 +2,17 @@ openapi: 3.1.0
 info:
   title: cookies Platform API
   version: 0.1.0
+  license:
+    name: Apache License 2.0
+    identifier: Apache-2.0
   description: >-
     Shared, business-agnostic platform APIs. Vertical systems publish their own
     contracts under /api/{system}/v1.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+security:
+  - cookiesAuth: []
 paths:
   /platform/v1/context:
     get:
@@ -19,10 +27,52 @@ paths:
                 $ref: '#/components/schemas/RequestContext'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /platform/v1/projects/{projectID}/context:
+    get:
+      operationId: getProjectContext
+      summary: Verify project access and return the scoped request context.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: The caller is authorized for the requested project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request_context, project_id]
+                properties:
+                  request_context:
+                    $ref: '#/components/schemas/RequestContext'
+                  project_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
 components:
+  parameters:
+    ProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  securitySchemes:
+    cookiesAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   responses:
     Unauthenticated:
       description: The request has no trusted identity.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ProjectAccessDenied:
+      description: The caller cannot access the requested project.
       content:
         application/json:
           schema:

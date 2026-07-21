@@ -17,6 +17,7 @@ import (
 
 	"github.com/Cecillia803/cookies/internal/platform/config"
 	"github.com/Cecillia803/cookies/internal/platform/contract"
+	"github.com/Cecillia803/cookies/internal/platform/database"
 	"github.com/Cecillia803/cookies/internal/platform/httpserver"
 	"github.com/Cecillia803/cookies/internal/platform/identity"
 )
@@ -31,10 +32,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid identity configuration: %v", err)
 	}
+	db, err := database.Open(context.Background(), cfg.MySQL)
+	if err != nil {
+		log.Fatalf("open MySQL: %v", err)
+	}
+	defer db.Close()
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(resolver),
+		Addr: cfg.HTTPAddr,
+		Handler: httpserver.NewWithDependencies(httpserver.Dependencies{
+			Resolver:          resolver,
+			ProjectAuthorizer: buildProjectAuthorizer(cfg),
+			Readiness:         database.Readiness{DB: db},
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -57,6 +67,13 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server stopped unexpectedly: %v", err)
 	}
+}
+
+func buildProjectAuthorizer(cfg config.Config) identity.ProjectAuthorizer {
+	if cfg.LocalIdentity != nil {
+		return identity.StaticProjectAuthorizer{}
+	}
+	return identity.RejectingProjectAuthorizer{}
 }
 
 func buildIdentityResolver(cfg config.Config) (identity.Resolver, error) {

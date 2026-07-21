@@ -41,6 +41,17 @@ func TestFromLookupBuildsExplicitLocalIdentity(t *testing.T) {
 	}
 }
 
+func TestFromLookupRejectsInvalidMySQLPool(t *testing.T) {
+	t.Parallel()
+
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_MYSQL_MAX_OPEN_CONNS": "0",
+	}))
+	if err == nil {
+		t.Fatal("expected invalid MySQL connection pool to be rejected")
+	}
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

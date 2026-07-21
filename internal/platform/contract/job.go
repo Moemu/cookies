@@ -37,6 +37,8 @@ type Job struct {
 	ResultRef      *ResourceRef   `json:"result_ref,omitempty"`
 	Error          *JobError      `json:"error,omitempty"`
 	Cancellable    bool           `json:"cancellable"`
+	AttemptCount   int            `json:"attempt_count"`
+	MaxAttempts    int            `json:"max_attempts"`
 	Version        int64          `json:"version"`
 }
 
@@ -58,6 +60,9 @@ func (j Job) Validate() error {
 	}
 	if j.Version < 1 {
 		return fmt.Errorf("job version must be positive")
+	}
+	if j.AttemptCount < 0 || j.MaxAttempts < 1 || j.AttemptCount > j.MaxAttempts {
+		return fmt.Errorf("job attempts are invalid")
 	}
 	if !j.Status.valid() {
 		return fmt.Errorf("job status is invalid")
