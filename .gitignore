@@ -27,6 +27,12 @@ go.work.sum
 # env file
 .env
 
+# Node / Vite frontend artifacts
+node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+
 # Editor/IDE
 # .idea/
 # .vscode/

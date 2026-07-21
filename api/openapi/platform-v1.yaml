@@ -1,0 +1,83 @@
+openapi: 3.1.0
+info:
+  title: cookies Platform API
+  version: 0.1.0
+  description: >-
+    Shared, business-agnostic platform APIs. Vertical systems publish their own
+    contracts under /api/{system}/v1.
+paths:
+  /platform/v1/context:
+    get:
+      operationId: getRequestContext
+      summary: Return the caller's trusted, scoped request context.
+      responses:
+        '200':
+          description: Authenticated context.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestContext'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+components:
+  responses:
+    Unauthenticated:
+      description: The request has no trusted identity.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    RequestContext:
+      type: object
+      required: [request_id, trace_id, actor]
+      properties:
+        request_id:
+          type: string
+        trace_id:
+          type: string
+        actor:
+          $ref: '#/components/schemas/ActorContext'
+    ActorContext:
+      type: object
+      required: [organization_id, principal, scopes]
+      properties:
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        principal:
+          type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [user, service]
+            id:
+              type: string
+        scopes:
+          type: array
+          items:
+            type: string
+    Problem:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id, retryable, details]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: array
+              items:
+                type: object
+            help_url:
+              type: [string, 'null']

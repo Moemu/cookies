@@ -1,0 +1,49 @@
+name: Platform CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Check Go formatting
+        run: test -z "$(gofmt -l $(find cmd internal -name '*.go' -type f))"
+
+      - name: Validate event schema JSON
+        run: python3 -m json.tool api/events/event-envelope.schema.json > /dev/null
+
+      - name: Run static analysis
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -race ./...
+
+      - name: Build platform API
+        run: go build ./cmd/cookies-api
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci --prefix web
+
+      - name: Check web shell
+        run: npm run check --prefix web
