@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a focused improvement to cookies.
+title: "feat: "
+labels: ["kind: feature", "status: needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the smallest useful result; avoid prescribing implementation prematurely.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

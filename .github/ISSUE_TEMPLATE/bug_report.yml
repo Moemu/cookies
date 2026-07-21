@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible problem in cookies.
+title: "bug: "
+labels: ["kind: bug", "status: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: "Please remove credentials, customer data, account identifiers, and copyrighted media. For vulnerabilities, follow SUPPORT.md instead."
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.0.0 or abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, browser/runtime, deployment method, and relevant configuration without secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe logs or screenshots
+      description: Redact all sensitive information before attaching.
