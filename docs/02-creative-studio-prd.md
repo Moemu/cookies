@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 模块 | 广告创意创作 |
-| 文档版本 | v0.6 |
+| 文档版本 | v0.7 |
 | 文档状态 | 草案 |
 | 目标版本 | M1 / MVP |
 | 核心形态 | 图文创作 + 视频创作 |
@@ -37,7 +37,7 @@
 
 ## 系统边界与模块导航
 
-完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)。本 PRD 维护业务职责，导航规范文档维护跨页面层级和呈现方式。
+完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)；子板块功能、必要性、价值和展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。本 PRD 维护业务职责。
 
 ### 系统边界
 
@@ -50,6 +50,13 @@
 | 从其他系统消费 | `strategy.approved.v1`、`insight.confirmed.v1` 及对应版本 API |
 | 向其他系统发布 | `creative.approved.v1`、`creative.delivered.v1`、`creative.deactivated.v1` |
 | 明确不拥有 | Brief、Strategy、AssetExperience、DeliveryPlan、平台效果事实 |
+
+### Project 关联
+
+- CreativeTask、CreativeDirection、CreativeVersion、CreativePackage 和 CreativeReview 必须携带非空 `project_id`，并在页面标题区持续显示当前 Project。
+- 从策略创建任务时默认只接受同一 Project 的批准 Strategy；交付包进入素材分析与投放时继续保留该 `project_id` 和来源版本链。
+- 跨 Project 复用创意必须使用“复制到 Project”或授权引用，保留 `source_project_id`、原版本和权利范围；不得直接修改已批准对象的归属。
+- 原始媒体文件可以是组织级共享资产，但 CreativeTask 中的使用关系、生成任务、评审和交付始终属于具体 Project。
 
 ### 一级导航
 
@@ -430,3 +437,4 @@
 | v0.4 | 2026-07-20 | 接入媒体资产平台、生成内容权利元数据和通用 PRD 质量要求 |
 | v0.5 | 2026-07-20 | 明确图文、视频、制作、评审和交付的三级导航分布并接入统一导航规范 |
 | v0.6 | 2026-07-20 | 视频创作拆分为电影感品牌故事和效果广告制作，效果广告首期包含数字人、广告前贴、爆款视频复刻 |
+| v0.7 | 2026-07-21 | 接入全局 Project 上下文，明确创意任务、交付、跨项目复用与资源归属规则 |

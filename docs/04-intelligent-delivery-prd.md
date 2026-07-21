@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 模块 | 广告智能投放 |
-| 文档版本 | v0.6 |
+| 文档版本 | v0.7 |
 | 文档状态 | 草案 |
 | 目标版本 | M1 / MVP |
 | 核心实现 | Codex + 平台 Skills + Computer Use |
@@ -36,7 +36,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ## 系统边界与模块导航
 
-完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)。本 PRD 维护业务职责，导航规范文档维护跨页面层级和呈现方式。
+完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)；子板块功能、必要性、价值和展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。本 PRD 维护业务职责。
 
 ### 系统边界
 
@@ -49,6 +49,13 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | 从其他系统消费 | `strategy.approved.v1`、`creative.approved.v1`、`insight.confirmed.v1` |
 | 向其他系统发布 | `delivery.executed.v1`、`delivery.metrics.updated.v1`、`delivery.status.changed.v1` |
 | 明确不拥有 | Brief、Strategy、CreativeVersion、AssetExperience、全局设备/站点策略 |
+
+### Project 关联
+
+- DeliveryPlan、DeliveryChangeSet、PlatformEntity 使用关系、DeliveryEvidence、Alert 和 Recommendation 必须携带非空 `project_id`。
+- AdAccountBinding 和 ComputerUseEnvironment 可以是组织级资源，但每次计划、审批、执行和证据都必须落到具体 Project，并在最终提交前复核 Project、账户、预算和创意归属。
+- 投放计划默认只选择同一 Project 的批准策略和 CreativePackage；跨 Project 复用必须显式授权并冻结来源版本快照。
+- 切换 Project 不得让正在执行的 Computer Use 会话静默改换上下文；进行中的执行需先完成、暂停或接管，所有结果继续写回原 Project。
 
 ### 一级导航
 
@@ -419,3 +426,4 @@ Computer Use 适合在结构化集成不足时操作图形界面，但会影响�
 | v0.4 | 2026-07-20 | 接入受控 Computer Use 运行时、广告数据 Connector 与通用 PRD 质量要求 |
 | v0.5 | 2026-07-20 | 明确计划、执行、监控、优化、审批和证据的三级导航分布并接入统一导航规范 |
 | v0.6 | 2026-07-20 | 投放计划与创意筛选统一使用品牌广告和效果广告术语，并记录效果广告功能类型 |
+| v0.7 | 2026-07-21 | 接入全局 Project 上下文，明确计划、账户、执行会话、证据和跨项目素材的安全边界 |

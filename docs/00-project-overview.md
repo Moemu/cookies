@@ -5,13 +5,13 @@
 | 项目名称 | cookies |
 | 产品名称 | cookies |
 | Slogan | **从一句需求，到持续增长。** |
-| 文档版本 | v0.7 |
+| 文档版本 | v0.8 |
 | 文档状态 | 草案 |
 | 技术方向 | 四个独立垂直系统 + Golang/React 共享基座 + 火山引擎统一模型 Provider + ORAG RAG + Codex/Skills/Computer Use |
 
 ## 1. 产品定义
 
-cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需求与策略、创意创作、素材洞察、智能投放分别作为完整垂直系统建设；它们拥有独立导航、领域模型、权限和发布节奏，仅共享 Provider、知识库、用户组织、Codex/Skills、Computer Use、任务与治理基座。
+cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需求与策略、创意创作、素材洞察、智能投放分别作为完整垂直系统建设；它们拥有独立导航、领域模型、权限和发布节奏，由全局 Project 连接同一业务闭环，并共享 Provider、知识库、用户组织、Codex/Skills、Computer Use、任务与治理基座。
 
 一句话定位：**以结构化业务目标为起点、以真实投放结果为反馈的 AI 广告工作台。**
 
@@ -32,6 +32,7 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 3. 针对电影感品牌广告和效果广告建立不同的视频创作方法、评审标准和分析指标；效果广告首期覆盖数字人、广告前贴和爆款视频复刻。
 4. 从素材内容、投放数据和实验结果中提炼可复用经验，反向指导下一轮创作。
 5. 通过 Codex + Computer Use 在人工审批下完成广告平台配置、上线、监控和优化。
+6. 以 Project 统一连接需求、策略、创意、素材洞察和投放对象，让跨系统进度、版本血缘与责任可追溯。
 
 ### 2.4 非目标
 
@@ -85,7 +86,7 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 | 基座能力 | 内容 |
 | --- | --- |
 | 用户与组织 | 登录、租户、成员、团队、全局角色和项目上下文 |
-| 项目、品牌与产品 | CampaignProject、BrandProfile、ProductProfile、规范版本和跨系统上下文 |
+| 项目、品牌与产品 | Project、BrandProfile、ProductProfile、规范版本、资源关系索引和跨系统上下文 |
 | Provider 中心 | 统一提供 LLM、VLM、图片、视频、音频、3D 及 RAG 内部模型能力；默认火山引擎，管理凭据、模型目录、路由、任务、配额和成本 |
 | 知识库 | 通过 ORAG 实现组织、品牌、项目、规则和经验知识的摄取、混合检索、引用、评测与优化 |
 | Agent 能力 | Codex Task、Skill Registry、Tool/MCP Registry、评测和运行事件 |
@@ -99,22 +100,25 @@ cookies 是面向品牌方、代理商和增长团队的 AI 广告助手。需�
 3. 系统之间不能直接写对方数据库；通过契约 API 和版本化领域事件协作。
 4. 下游引用上游产物时保存来源系统、来源 ID、版本和必要快照。
 5. 一个系统的失败或发布不应阻塞其他系统的基础读写与独立迭代。
+6. Project 是四系统共同的全局上下文根；四系统主实体必须携带 `project_id`，Project 只聚合链接和摘要，不接管模块业务状态。
 
 ### 5.4 系统关系
 
 ```mermaid
 flowchart TB
   Shell["cookies 全局壳层"]
+  Project["Project：全局业务上下文与资源链接"]
   Strategy["需求与策略系统"]
   Creative["创意创作系统"]
   Insights["素材洞察系统"]
   Delivery["智能投放系统"]
   Platform["共享基座：用户、Provider、知识、Agent、Computer Use、治理"]
 
-  Shell --> Strategy
-  Shell --> Creative
-  Shell --> Insights
-  Shell --> Delivery
+  Shell --> Project
+  Project -.-> Strategy
+  Project -.-> Creative
+  Project -.-> Insights
+  Project -.-> Delivery
 
   Strategy --> Platform
   Creative --> Platform
@@ -130,7 +134,7 @@ flowchart TB
   Insights -->|"已确认经验"| Creative
 ```
 
-图中的业务箭头代表 API/领域事件，不代表数据库依赖。
+图中的业务箭头代表 API/领域事件，不代表数据库依赖；Project 虚线只表示共同上下文和只读资源索引，不表示拥有模块业务对象。
 
 ### 5.5 关键领域事件
 
@@ -209,19 +213,19 @@ flowchart TB
 
 ### 9.1 全局壳层
 
-全局壳层仅提供 cookies 标识、组织/项目切换、四系统切换器、全局 Agent 任务、审批、通知和个人菜单。它不承载任何业务系统的二级菜单。
+全局壳层仅提供 cookies 标识、组织/Project 切换、四系统切换器、全局 Agent 任务、审批、通知和个人菜单。Project 切换器可进入 `/projects/:project_id/overview`，通过关键产物、待办、风险和深链连接四系统；它不承载任何业务系统的二级菜单。
 
 ### 9.2 系统入口
 
 | 系统 | 路由前缀 | 独立导航摘要 |
 | --- | --- | --- |
-| 需求与策略 | `/strategy/*` | 工作台、策略项目、需求中心、策略中心、研究洞察、评审、能力运营 |
+| 需求与策略 | `/strategy/*` | 工作台、策略工作区、需求中心、策略中心、研究洞察、评审、能力运营 |
 | 创意创作 | `/creative/*` | 工作台、图文创作、视频创作、创意任务、评审、交付、创意运营 |
 | 素材洞察 | `/insights/*` | 工作台、数据接入、分析素材库、内容/效果分析、实验、经验库、报告 |
 | 智能投放 | `/delivery/*` | 作战台、账户环境、投放计划、执行中心、监控告警、优化、证据审计 |
 | 共享管理台 | `/admin/*` | 用户组织、Provider、知识库、Agent、Computer Use、工作流、安全、用量 |
 
-每个系统的完整页面职责在对应 PRD 中维护；统一导航层级、完整导航树、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)。
+每个系统的完整页面职责在对应 PRD 中维护；统一导航层级、完整导航树、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)；子板块的必要性、价值、优先级与展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。
 
 ## 10. 领域数据归属
 
@@ -231,9 +235,9 @@ flowchart TB
 | 创意创作 | CreativeTask、Direction、CreativeVersion、CreativePackage | 策略快照、品牌知识、素材经验引用 |
 | 素材洞察 | AssetFeature、AnalysisMetricSnapshot、AnalysisRun、Insight、Experience | 创意快照、投放指标来源 |
 | 智能投放 | DeliveryPlan、ChangeSet、PlatformEntity、DeliveryMetricSnapshot、DeliveryEvidence | 策略与创意快照、共享 ComputerUseRun |
-| 共享基座 | User、Organization、CampaignProject、BrandProfile、ProductProfile、ProviderConfig、KnowledgeDocument、AgentTask、SkillDefinition、AuditLog | 不拥有四个系统的业务实体 |
+| 共享基座 | User、Organization、Project、ProjectMembership、ProjectResourceIndex、BrandProfile、ProductProfile、ProviderConfig、KnowledgeDocument、AgentTask、SkillDefinition、AuditLog | 不拥有四个系统的业务实体 |
 
-所有主实体使用全局唯一 ID 和 `organization_id`。版本实体不可变；跨系统引用包含 `source_system`、`source_id` 和 `source_version`，避免上游修改历史事实。
+所有主实体使用全局唯一 ID、`organization_id`；四系统业务主实体还必须包含非空 `project_id`。版本实体不可变；跨系统引用包含 `source_system`、`source_project_id`、`source_id` 和 `source_version`，避免上游修改历史事实。
 
 ## 11. 技术方案
 
@@ -422,3 +426,4 @@ MVP 上线前必须满足：
 | v0.5 | 2026-07-20 | 统一模型 Provider，默认火山引擎，覆盖 LLM、VLM、图片、视频、音频和 3D |
 | v0.6 | 2026-07-20 | 补充项目品牌域、Agent/Computer Use 运行时、数据 Connector、媒体资产、API 事件和工程安全规格 |
 | v0.7 | 2026-07-20 | 视频创作拆分为电影感品牌广告和效果广告，效果广告首期覆盖数字人、广告前贴和爆款视频复刻 |
+| v0.8 | 2026-07-21 | 将 Project 定义为四系统全局上下文根，补充资源链接、项目总览与策略工作区边界 |

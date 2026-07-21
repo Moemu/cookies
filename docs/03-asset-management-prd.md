@@ -4,7 +4,7 @@
 | --- | --- |
 | 模块 | 广告素材管理 |
 | 产品定位 | 素材经验分析与数据分析 |
-| 文档版本 | v0.6 |
+| 文档版本 | v0.7 |
 | 文档状态 | 草案 |
 | 目标版本 | M1 / MVP |
 | 上游输入 | 图文/视频创意、投放数据、实验信息、人工评价 |
@@ -35,7 +35,7 @@
 
 ## 系统边界与模块导航
 
-完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)。本 PRD 维护业务职责，导航规范文档维护跨页面层级和呈现方式。
+完整的 L0 至 L3 导航分布、路由与交互规则见 [四大模块导航与信息架构](./19-module-navigation-architecture.md)；子板块功能、必要性、价值和展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。本 PRD 维护业务职责。
 
 ### 系统边界
 
@@ -48,6 +48,13 @@
 | 从其他系统消费 | `creative.approved.v1`、`delivery.metrics.updated.v1`、`delivery.executed.v1` |
 | 向其他系统发布 | `insight.confirmed.v1`、`insight.challenged.v1`、`experience.invalidated.v1` |
 | 明确不拥有 | CreativeVersion 原文事实、DeliveryPlan、广告账户、Brief、Strategy |
+
+### Project 关联
+
+- AnalysisRun、AnalysisCohort、Insight、InsightReport 及项目内经验引用必须携带非空 `project_id`；Project 总览只读取它们的摘要和深链。
+- 原始媒体或 AssetIndex 可以被组织内多个 Project 授权复用，使用 `ProjectAssetLink` 记录项目、素材版本、用途、授权和来源；不得通过复制文件制造无血缘副本。
+- 效果数据、创意版本和实验信息默认只在同一 Project 内自动关联；跨 Project 对标必须由用户显式选择，并显示数据范围、可比性和权限边界。
+- Experience 可以沉淀为品牌或组织级知识，但发布时保留来源 Project、证据版本、适用条件和脱敏策略。
 
 ### 一级导航
 
@@ -67,7 +74,7 @@
 
 ### 素材分析内导航
 
-进入一个 Asset/Analysis Project 后，导航为：`概览 → 内容拆解 → 效果趋势 → 对比组 → 实验 → 洞察 → 经验引用 → 数据与方法`。“数据与方法”必须展示数据截止时间、指标版本、Cohort 规则和 Skill/算法版本。
+进入一个素材或 AnalysisRun 后，导航为：`概览 → 内容拆解 → 效果趋势 → 对比组 → 实验 → 洞察 → 经验引用 → 数据与方法`。“数据与方法”必须展示数据截止时间、指标版本、Cohort 规则和 Skill/算法版本。
 
 ### 导航规则
 
@@ -361,3 +368,4 @@
 | v0.4 | 2026-07-20 | 接入广告数据 Connector、媒体资产引用与通用 PRD 质量要求 |
 | v0.5 | 2026-07-20 | 明确数据、分析、经验、报告和治理的三级导航分布并接入统一导航规范 |
 | v0.6 | 2026-07-20 | 素材分析适配电影感品牌广告，以及数字人、广告前贴和爆款复刻三类效果广告 |
+| v0.7 | 2026-07-21 | 接入全局 Project 上下文，增加 ProjectAssetLink、项目内自动关联和跨项目经验复用边界 |
