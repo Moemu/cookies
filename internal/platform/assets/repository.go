@@ -36,4 +36,5 @@ type Repository interface {
 
 	GetProjectAsset(context.Context, contract.OrganizationID, contract.ProjectID, contract.AssetVersionRef) (ProjectAsset, error)
 	ListProjectAssets(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ProjectAsset, error)
+	RemoveProjectAsset(context.Context, contract.OrganizationID, contract.ProjectID, contract.AssetVersionRef) error
 }

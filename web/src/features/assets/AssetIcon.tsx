@@ -1,4 +1,4 @@
-type AssetIconName = 'close' | 'grid' | 'image' | 'list' | 'refresh' | 'search' | 'upload'
+type AssetIconName = 'close' | 'delete' | 'grid' | 'image' | 'list' | 'refresh' | 'search' | 'upload'
 
 export function AssetIcon({ name, size = 20 }: { name: AssetIconName; size?: number }) {
   const common = {
@@ -16,6 +16,8 @@ export function AssetIcon({ name, size = 20 }: { name: AssetIconName; size?: num
   switch (name) {
     case 'close':
       return <svg {...common}><path d="m6 6 12 12M18 6 6 18" /></svg>
+    case 'delete':
+      return <svg {...common}><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" /></svg>
     case 'grid':
       return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
     case 'image':

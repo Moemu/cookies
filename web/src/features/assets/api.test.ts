@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { putAssetContent } from './api'
+import { putAssetContent, removeProjectAsset } from './api'
 
 describe('asset upload API', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -28,5 +28,14 @@ describe('asset upload API', () => {
     expect(headers.get('content-type')).toBe('image/png')
     expect(headers.get('x-tos-forbid-overwrite')).toBe('true')
     expect(request.body).toBe(file)
+  })
+
+  it('removes only the selected project asset relationship', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await removeProjectAsset('project/one', 'asset/two', 3)
+
+    expect(fetchMock).toHaveBeenCalledWith('/platform/v1/projects/project%2Fone/assets/asset%2Ftwo/versions/3', expect.objectContaining({ method: 'DELETE' }))
   })
 })

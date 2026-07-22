@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,6 +61,106 @@ func TestGeneratedIntakeRouteRequiresScopeAndReturnsLocation(t *testing.T) {
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("scope denied status=%d", denied.Code)
 	}
+}
+
+func TestRemoveProjectAssetRequiresWriteScope(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.write"}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploads := &fakeUploadManager{}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: uploads})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/platform/v1/projects/project_1/assets/asset_1/versions/3", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if uploads.removed.AssetID != "asset_1" || uploads.removed.Version != 3 {
+		t.Fatalf("removed=%#v", uploads.removed)
+	}
+
+	actor.Scopes = nil
+	resolver, _ = identity.NewStaticResolver(actor)
+	deniedServer := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: &fakeUploadManager{}})
+	denied := httptest.NewRecorder()
+	deniedServer.ServeHTTP(denied, httptest.NewRequest(http.MethodDelete, "/platform/v1/projects/project_1/assets/asset_1/versions/3", nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("scope denied status=%d", denied.Code)
+	}
+}
+
+func TestLocalAssetPreviewReturnsProtectedContentURL(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.read"}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploads := &fakeUploadManager{content: []byte("png-bytes"), mime: "image/png"}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: uploads})
+
+	preview := httptest.NewRecorder()
+	server.ServeHTTP(preview, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/assets/asset_1/versions/2/preview", nil))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var signed assets.SignedRequest
+	if err := json.NewDecoder(preview.Body).Decode(&signed); err != nil {
+		t.Fatal(err)
+	}
+	wantURL := "/platform/v1/projects/project_1/assets/asset_1/versions/2/content"
+	if signed.URL != wantURL || signed.Method != http.MethodGet {
+		t.Fatalf("signed request=%#v, want URL %q", signed, wantURL)
+	}
+
+	content := httptest.NewRecorder()
+	server.ServeHTTP(content, httptest.NewRequest(http.MethodGet, signed.URL, nil))
+	if content.Code != http.StatusOK || content.Body.String() != "png-bytes" {
+		t.Fatalf("content status=%d body=%q", content.Code, content.Body.String())
+	}
+	if content.Header().Get("Content-Type") != "image/png" || content.Header().Get("Cache-Control") != "private, no-store" || content.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("unexpected content headers: %#v", content.Header())
+	}
+
+	actor.Scopes = nil
+	resolver, _ = identity.NewStaticResolver(actor)
+	deniedServer := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: uploads})
+	denied := httptest.NewRecorder()
+	deniedServer.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, wantURL, nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("scope denied status=%d", denied.Code)
+	}
+}
+
+type fakeUploadManager struct {
+	removed contract.AssetVersionRef
+	content []byte
+	mime    string
+}
+
+func (*fakeUploadManager) Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.CreateUploadRequest) (assets.CreateUploadResponse, error) {
+	return assets.CreateUploadResponse{}, nil
+}
+func (*fakeUploadManager) PutContent(context.Context, contract.ActorContext, contract.ProjectID, string, io.Reader, int64) error {
+	return nil
+}
+func (*fakeUploadManager) Finalize(context.Context, contract.RequestContext, contract.ProjectID, string) (assets.UploadSession, error) {
+	return assets.UploadSession{}, nil
+}
+func (*fakeUploadManager) List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]assets.ProjectAsset, error) {
+	return nil, nil
+}
+func (*fakeUploadManager) Preview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (assets.SignedRequest, error) {
+	return assets.SignedRequest{Method: http.MethodGet}, nil
+}
+func (f *fakeUploadManager) OpenPreview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (io.ReadCloser, assets.ObjectInfo, error) {
+	return io.NopCloser(bytes.NewReader(f.content)), assets.ObjectInfo{SizeBytes: int64(len(f.content)), MIMEType: f.mime}, nil
+}
+func (f *fakeUploadManager) Remove(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, ref contract.AssetVersionRef) error {
+	f.removed = ref
+	return nil
 }
 
 type fakeIntakeManager struct{}

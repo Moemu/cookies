@@ -41,6 +41,22 @@ export type Project = {
   updated_at: string
 }
 
+export type Brand = {
+  id: string
+  organization_id: string
+  name: string
+  status: 'active' | 'archived'
+  created_at: string
+  updated_at: string
+}
+
+export type CreateProjectInput = {
+  name: string
+  primary_brand_id: string | null
+  product_ids: string[]
+  activate: boolean
+}
+
 export type ProjectContext = {
   organization_id: string
   project_id: string

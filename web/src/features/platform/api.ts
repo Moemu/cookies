@@ -1,5 +1,5 @@
 import { apiRequest } from '../../shared/api/client'
-import type { CurrentIdentity, Project, ProjectContext, ProviderJob, WorkspaceBootstrap } from './types'
+import type { Brand, CreateProjectInput, CurrentIdentity, Project, ProjectContext, ProviderJob, WorkspaceBootstrap } from './types'
 
 export async function getWorkspaceBootstrap(signal?: AbortSignal): Promise<WorkspaceBootstrap> {
   const [identity, projectList] = await Promise.all([
@@ -23,4 +23,20 @@ export function createImageJob(projectId: string, projectContextVersion: number,
 
 export function getProviderJob(projectId: string, jobId: string, signal?: AbortSignal) {
   return apiRequest<ProviderJob>(`/platform/v1/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`, { signal })
+}
+
+export function createBrand(name: string, signal?: AbortSignal) {
+  return apiRequest<Brand>('/platform/v1/brands', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+    signal,
+  })
+}
+
+export function createProject(input: CreateProjectInput, signal?: AbortSignal) {
+  return apiRequest<Project>('/platform/v1/projects', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    signal,
+  })
 }

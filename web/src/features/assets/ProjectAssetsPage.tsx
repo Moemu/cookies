@@ -1,10 +1,12 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { ApiProblem } from '../../shared/api/client'
 import { getProjectContext } from '../platform/api'
-import type { ProjectContext } from '../platform/types'
-import { getAssetPreview, listProjectAssets } from './api'
+import type { Project, ProjectContext } from '../platform/types'
+import { getAssetPreview, listProjectAssets, removeProjectAsset } from './api'
 import { AssetIcon } from './AssetIcon'
 import type { AssetSource, AssetStatus, ProjectAsset, UploadSession } from './types'
+import { RemoveAssetDialog } from './RemoveAssetDialog'
 import { UploadDrawer } from './UploadDrawer'
 
 type ViewMode = 'grid' | 'list'
@@ -38,15 +40,22 @@ function assetLabel(asset: ProjectAsset) {
   return `${asset.asset.id} · v${asset.version.version}`
 }
 
-function AssetCard({ asset, previewUrl, view }: { asset: ProjectAsset; previewUrl?: string; view: ViewMode }) {
+function removeErrorMessage(error: unknown) {
+  if (error instanceof ApiProblem) return `${error.problem.error.message}（${error.problem.error.code}）`
+  if (error instanceof Error) return error.message
+  return '素材删除失败，请稍后重试。'
+}
+
+function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, view }: { asset: ProjectAsset; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; view: ViewMode }) {
   const dimensions = asset.version.width_pixels && asset.version.height_pixels
     ? `${asset.version.width_pixels} × ${asset.version.height_pixels}`
     : '尺寸未记录'
   const content = previewUrl
     ? <img alt={`${asset.asset.id} 预览`} loading="lazy" src={previewUrl} />
-    : <div className="asset-thumbnail__fallback"><AssetIcon name="image" size={30} /><span>{asset.version.mime_type.replace('image/', '').toUpperCase()}</span></div>
+    : <div className="asset-thumbnail__fallback" title={previewUnavailable ? '\u539f\u59cb\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20' : undefined}><AssetIcon name="image" size={30} /><span>{asset.version.mime_type.replace('image/', '').toUpperCase()}</span>{previewUnavailable ? <small>{'\u9884\u89c8\u4e0d\u53ef\u7528'}</small> : null}</div>
 
   return <article className={view === 'list' ? 'asset-card asset-card--list' : 'asset-card'}>
+    <button aria-label={`删除 ${assetLabel(asset)}`} className="asset-card__remove" onClick={onRemove} title="从项目中删除" type="button"><AssetIcon name="delete" size={17} /></button>
     {previewUrl
       ? <a className="asset-thumbnail" href={previewUrl} rel="noreferrer" target="_blank" title="在新窗口查看预览">{content}</a>
       : <div className="asset-thumbnail">{content}</div>}
@@ -59,11 +68,12 @@ function AssetCard({ asset, previewUrl, view }: { asset: ProjectAsset; previewUr
   </article>
 }
 
-export function ProjectAssetsPage() {
+export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' | 'status'> }) {
   const { projectId = '' } = useParams()
   const [assets, setAssets] = useState<ProjectAsset[]>([])
   const [context, setContext] = useState<ProjectContext | null>(null)
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
+  const [unavailablePreviewIds, setUnavailablePreviewIds] = useState<Set<string>>(() => new Set())
   const [localPreviewUrls, setLocalPreviewUrls] = useState<Record<string, string>>({})
   const ownedObjectUrls = useRef<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,6 +83,9 @@ export function ProjectAssetsPage() {
   const [status, setStatus] = useState<'all' | AssetStatus>('all')
   const [view, setView] = useState<ViewMode>('grid')
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [assetToRemove, setAssetToRemove] = useState<ProjectAsset | null>(null)
+  const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState('')
   const deferredQuery = useDeferredValue(query.trim().toLowerCase())
 
   const loadLibrary = useCallback(async (signal?: AbortSignal) => {
@@ -90,12 +103,14 @@ export function ProjectAssetsPage() {
       const previews = await Promise.all(assetList.items.map(async (item) => {
         try {
           const signed = await getAssetPreview(projectId, item.asset.id, item.version.version, signal)
-          return [item.asset.id, signed.url] as const
-        } catch {
-          return [item.asset.id, ''] as const
+          return [item.asset.id, signed.url, !signed.url] as const
+        } catch (caught) {
+          if (caught instanceof DOMException && caught.name === 'AbortError') throw caught
+          return [item.asset.id, '', true] as const
         }
       }))
-      setPreviewUrls(Object.fromEntries(previews.filter(([, url]) => Boolean(url))))
+      setPreviewUrls(Object.fromEntries(previews.filter(([, url]) => Boolean(url)).map(([id, url]) => [id, url])))
+      setUnavailablePreviewIds(new Set(previews.filter(([, , unavailable]) => unavailable).map(([id]) => id)))
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
       setError(caught instanceof Error ? caught.message : '素材库加载失败。')
@@ -121,6 +136,9 @@ export function ProjectAssetsPage() {
     if (!deferredQuery) return true
     return `${asset.asset.id} ${asset.version.mime_type} ${sourceLabels[asset.version.source_type]}`.toLowerCase().includes(deferredQuery)
   }), [assets, deferredQuery, source, status])
+  const readyCount = assets.filter((asset) => asset.asset.status === 'ready').length
+  const generatedCount = assets.filter((asset) => asset.version.source_type === 'provider_generated').length
+  const projectCanAcceptAssets = project?.status === 'draft' ? false : context ? Boolean(context.brand_id) : true
 
   function handleUploadComplete(file: File, session: UploadSession) {
     const assetId = session.project_asset_ref?.asset_version.asset_id
@@ -128,15 +146,57 @@ export function ProjectAssetsPage() {
       const url = URL.createObjectURL(file)
       ownedObjectUrls.current.push(url)
       setLocalPreviewUrls((current) => ({ ...current, [assetId]: url }))
+      setUnavailablePreviewIds((current) => {
+        const next = new Set(current)
+        next.delete(assetId)
+        return next
+      })
     }
     void loadLibrary()
+  }
+
+  async function handleRemove() {
+    if (!assetToRemove || removing) return
+    setRemoving(true)
+    setRemoveError('')
+    const assetId = assetToRemove.asset.id
+    const version = assetToRemove.version.version
+    try {
+      await removeProjectAsset(projectId, assetId, version)
+      setAssets((current) => current.filter((item) => item.asset.id !== assetId || item.version.version !== version))
+      setPreviewUrls((current) => {
+        const next = { ...current }
+        delete next[assetId]
+        return next
+      })
+      setUnavailablePreviewIds((current) => {
+        const next = new Set(current)
+        next.delete(assetId)
+        return next
+      })
+      const localUrl = localPreviewUrls[assetId]
+      if (localUrl) {
+        URL.revokeObjectURL(localUrl)
+        ownedObjectUrls.current = ownedObjectUrls.current.filter((url) => url !== localUrl)
+        setLocalPreviewUrls((current) => {
+          const next = { ...current }
+          delete next[assetId]
+          return next
+        })
+      }
+      setAssetToRemove(null)
+    } catch (caught) {
+      setRemoveError(removeErrorMessage(caught))
+    } finally {
+      setRemoving(false)
+    }
   }
 
   return <section className={uploadOpen ? 'asset-page asset-page--drawer-open' : 'asset-page'}>
     <header className="page-header">
       <div>
-        <h1>项目素材库</h1>
-        <p>统一管理项目图片与生成素材，所有版本都保留来源和项目上下文。</p>
+        <h1>{project?.name ? `${project.name} · 素材库` : '项目素材库'}</h1>
+      <p>统一管理上传与 Provider 生成素材。删除会移除项目关联，底层不可变版本仍保留用于审计和溯源。</p>
       </div>
       <div className="context-summary" title={context?.brand_id || '未绑定品牌'}>
         <span className={context?.brand_id ? 'context-dot context-dot--active' : 'context-dot'} />
@@ -144,6 +204,17 @@ export function ProjectAssetsPage() {
         {context ? <strong>v{context.project_context_version}</strong> : null}
       </div>
     </header>
+
+    <div className="asset-summary" aria-label="素材库概况">
+      <div><span>全部素材</span><strong>{assets.length}</strong></div>
+      <div><span>已就绪</span><strong>{readyCount}</strong></div>
+      <div><span>Provider 生成</span><strong>{generatedCount}</strong></div>
+      <div><span>上下文版本</span><strong>{context ? `v${context.project_context_version}` : '—'}</strong></div>
+      <p><span className="immutability-mark" aria-hidden="true">↳</span> 统计当前项目中未删除的素材；预览链接按访问即时签发。</p>
+    </div>
+    <details className="asset-metric-help"><summary>这些指标怎么看？</summary><p><strong>全部素材</strong>是当前项目可见数量；<strong>已就绪</strong>表示可预览；<strong>Provider 生成</strong>按来源统计；<strong>上下文版本</strong>表示生成或上传时采用的品牌与产品上下文版本。</p></details>
+
+    {!projectCanAcceptAssets ? <div className="context-warning" role="status"><strong>该项目尚未启用素材写入</strong><span>需要先绑定有效品牌并激活项目。</span></div> : null}
 
     <div className="asset-toolbar">
       <label className="search-control"><AssetIcon name="search" /><span className="sr-only">搜索素材</span><input onChange={(event) => setQuery(event.target.value)} placeholder="搜索资产 ID 或类型" value={query} /></label>
@@ -155,7 +226,7 @@ export function ProjectAssetsPage() {
         <button aria-label="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')} type="button"><AssetIcon name="grid" /></button>
         <button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')} type="button"><AssetIcon name="list" /></button>
       </div>
-      <button className="button button--primary upload-button" onClick={() => setUploadOpen(true)} type="button"><AssetIcon name="upload" />上传素材</button>
+      <button className="button button--primary upload-button" disabled={!projectCanAcceptAssets} onClick={() => setUploadOpen(true)} title={projectCanAcceptAssets ? '添加新素材' : '项目未绑定有效品牌'} type="button"><AssetIcon name="upload" />添加素材</button>
     </div>
 
     {error ? <div className="library-error" role="alert"><div><strong>无法加载素材库</strong><span>{error}</span></div><button className="text-button" onClick={() => void loadLibrary()} type="button">重试</button></div> : null}
@@ -165,15 +236,24 @@ export function ProjectAssetsPage() {
       <div className="empty-image"><AssetIcon name="image" size={32} /></div>
       <h2>{assets.length === 0 ? '项目还没有素材' : '没有匹配的素材'}</h2>
       <p>{assets.length === 0 ? '上传第一张 PNG 或 JPEG，建立项目的可复用资产库。' : '尝试清除搜索词或调整筛选条件。'}</p>
-      {assets.length === 0 ? <button className="button button--primary" onClick={() => setUploadOpen(true)} type="button">上传第一张素材</button> : null}
+      {assets.length === 0 && projectCanAcceptAssets ? <button className="button button--primary" onClick={() => setUploadOpen(true)} type="button">添加第一张素材</button> : null}
     </div> : null}
 
     {filteredAssets.length > 0 ? <div className={view === 'list' ? 'asset-collection asset-collection--list' : 'asset-collection'} aria-busy={loading}>
-      {filteredAssets.map((asset) => <AssetCard asset={asset} key={`${asset.asset.id}:${asset.version.version}`} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} view={view} />)}
+      {filteredAssets.map((asset) => <AssetCard asset={asset} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
+        setRemoveError('')
+        setAssetToRemove(asset)
+      }} previewUnavailable={unavailablePreviewIds.has(asset.asset.id)} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} view={view} />)}
     </div> : null}
 
     {assets.length > 0 ? <footer className="library-count">显示 {filteredAssets.length} / {assets.length} 条素材</footer> : null}
 
     <UploadDrawer open={uploadOpen} projectId={projectId} onClose={() => setUploadOpen(false)} onComplete={handleUploadComplete} />
+    <RemoveAssetDialog asset={assetToRemove} busy={removing} error={removeError} onClose={() => {
+      if (!removing) {
+        setAssetToRemove(null)
+        setRemoveError('')
+      }
+    }} onConfirm={() => void handleRemove()} />
   </section>
 }

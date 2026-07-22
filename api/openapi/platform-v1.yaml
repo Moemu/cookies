@@ -181,6 +181,18 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/ProjectAsset'}}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}:
+    delete:
+      operationId: removeProjectAssetVersion
+      summary: Remove an immutable asset version from the project library without deleting its durable record.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: asset_id, in: path, required: true, schema: {type: string}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '204':
+          description: Project asset relationship removed or already absent.
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
   /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/preview:
     get:
       operationId: previewAssetVersion
@@ -195,6 +207,24 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SignedRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/content:
+    get:
+      operationId: streamAssetVersionContent
+      summary: Stream authorized asset content when the active blob provider cannot issue an external signed URL.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: asset_id, in: path, required: true, schema: {type: string}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200':
+          description: Private no-store asset bytes.
+          headers:
+            Cache-Control: {schema: {type: string, example: 'private, no-store'}}
+            X-Content-Type-Options: {schema: {type: string, example: nosniff}}
+          content:
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/png: {schema: {type: string, format: binary}}
         '404': {$ref: '#/components/responses/NotFound'}
   /platform/v1/projects/{project_id}/model/jobs:
     post:

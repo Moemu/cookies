@@ -41,6 +41,7 @@ type Config struct {
 
 type ObjectStorage struct {
 	Provider         string
+	FilesystemRoot   string
 	Endpoint         string
 	Region           string
 	AccessKey        string
@@ -163,8 +164,9 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MaxIdleConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_IDLE_CONNS", 5),
 		},
 		ObjectStorage: ObjectStorage{
-			Provider: valueOr(lookup, "COOKIES_BLOB_PROVIDER", "memory"),
-			Endpoint: valueOr(lookup, "COOKIES_TOS_ENDPOINT", ""), Region: valueOr(lookup, "COOKIES_TOS_REGION", ""),
+			Provider:       valueOr(lookup, "COOKIES_BLOB_PROVIDER", "filesystem"),
+			FilesystemRoot: valueOr(lookup, "COOKIES_FILESYSTEM_BLOB_ROOT", ".data/blobs"),
+			Endpoint:       valueOr(lookup, "COOKIES_TOS_ENDPOINT", ""), Region: valueOr(lookup, "COOKIES_TOS_REGION", ""),
 			AccessKey: valueOr(lookup, "COOKIES_TOS_ACCESS_KEY", ""), SecretKey: valueOr(lookup, "COOKIES_TOS_SECRET_KEY", ""),
 			SecurityToken:    valueOr(lookup, "COOKIES_TOS_SECURITY_TOKEN", ""),
 			QuarantineBucket: valueOr(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "cookies-quarantine"),
@@ -224,14 +226,17 @@ func (c Config) Validate() error {
 	if c.MySQL.MaxOpenConns < 1 || c.MySQL.MaxIdleConns < 0 || c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
 		return fmt.Errorf("MySQL connection pool limits are invalid")
 	}
-	if c.ObjectStorage.Provider != "memory" && c.ObjectStorage.Provider != "tos" {
-		return fmt.Errorf("COOKIES_BLOB_PROVIDER must be memory or tos")
+	if c.ObjectStorage.Provider != "memory" && c.ObjectStorage.Provider != "filesystem" && c.ObjectStorage.Provider != "tos" {
+		return fmt.Errorf("COOKIES_BLOB_PROVIDER must be memory, filesystem, or tos")
 	}
 	if strings.TrimSpace(c.ObjectStorage.QuarantineBucket) == "" || strings.TrimSpace(c.ObjectStorage.AssetsBucket) == "" || c.ObjectStorage.QuarantineBucket == c.ObjectStorage.AssetsBucket {
 		return fmt.Errorf("object storage requires distinct quarantine and assets buckets")
 	}
 	if c.ObjectStorage.Provider == "tos" && (c.ObjectStorage.Endpoint == "" || c.ObjectStorage.Region == "" || c.ObjectStorage.AccessKey == "" || c.ObjectStorage.SecretKey == "") {
 		return fmt.Errorf("TOS storage requires endpoint, region, access key, and secret key")
+	}
+	if c.ObjectStorage.Provider == "filesystem" && strings.TrimSpace(c.ObjectStorage.FilesystemRoot) == "" {
+		return fmt.Errorf("filesystem storage requires COOKIES_FILESYSTEM_BLOB_ROOT")
 	}
 	if c.Scanner.Mode != "noop" && c.Scanner.Mode != "clamav" {
 		return fmt.Errorf("COOKIES_SCANNER_MODE must be noop or clamav")

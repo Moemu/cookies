@@ -9,6 +9,13 @@ export function getAssetPreview(projectId: string, assetId: string, version: num
   return apiRequest<SignedRequest>(`/platform/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}/preview`, { signal })
 }
 
+export function removeProjectAsset(projectId: string, assetId: string, version: number, signal?: AbortSignal) {
+  return apiRequest<void>(`/platform/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}`, {
+    method: 'DELETE',
+    signal,
+  })
+}
+
 export function createAssetUpload(projectId: string, file: File, sha256: string, signal?: AbortSignal) {
   return apiRequest<CreateUploadResponse>(`/platform/v1/projects/${encodeURIComponent(projectId)}/assets/uploads`, {
     method: 'POST',

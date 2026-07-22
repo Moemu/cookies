@@ -51,6 +51,25 @@ func TestUploadCreatesImmutableProjectAsset(t *testing.T) {
 	if asset.Version.SHA256 != hash || asset.Version.SourceType != contract.AssetSourceUpload || asset.Version.ProjectContextVersion != 4 {
 		t.Fatalf("unexpected version: %#v", asset.Version)
 	}
+	preview, info, err := service.OpenPreview(context.Background(), rc.Actor, "project_1", result.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatalf("open preview: %v", err)
+	}
+	previewData, readErr := io.ReadAll(preview)
+	closeErr := preview.Close()
+	if readErr != nil || closeErr != nil || !bytes.Equal(previewData, data) || info.MIMEType != "image/png" {
+		t.Fatalf("unexpected preview: size=%d mime=%q read=%v close=%v", len(previewData), info.MIMEType, readErr, closeErr)
+	}
+	if err := service.Remove(context.Background(), rc.Actor, "project_1", result.ProjectAssetRef.AssetVersion); err != nil {
+		t.Fatalf("remove project asset: %v", err)
+	}
+	items, err := service.List(context.Background(), rc.Actor, "project_1", 10)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("list after remove: count=%d err=%v", len(items), err)
+	}
+	if err := service.Remove(context.Background(), rc.Actor, "project_1", result.ProjectAssetRef.AssetVersion); err != nil {
+		t.Fatalf("idempotent remove: %v", err)
+	}
 }
 
 func TestUploadRejectsDeclaredMetadataMismatch(t *testing.T) {
@@ -326,6 +345,12 @@ func (r *fakeRepository) ListProjectAssets(_ context.Context, o contract.Organiz
 		}
 	}
 	return out, nil
+}
+func (r *fakeRepository) RemoveProjectAsset(_ context.Context, o contract.OrganizationID, p contract.ProjectID, ref contract.AssetVersionRef) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.assets, string(o)+"/"+string(p)+"/"+string(ref.AssetID))
+	return nil
 }
 
 func testRequestContext(org contract.OrganizationID, _ contract.ProjectID) contract.RequestContext {
