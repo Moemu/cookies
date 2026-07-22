@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Shell } from './components/Shell'
 import { DashboardPage, HomePage, ModulePage } from './components/Pages'
+import { ModelSettingsPage } from './components/ModelSettingsPage'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
 import { projectPath, useAppRoute } from './lib/router'
@@ -22,7 +23,7 @@ export default function App() {
     navigate(projectPath(projectId, next, navId))
   }
 
-  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} onHome={() => navigate('/')} onSystemChange={changeSystem} onProjectChange={openProject} onNavChange={id => navigate(projectPath(currentProject.id, system.key, id))}>
-    {route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject}/> : navItem.id === 'home' ? <DashboardPage system={system} onSystemChange={changeSystem}/> : <ModulePage key={`${system.key}-${navItem.id}`} system={system} item={navItem}/>}
+  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings/models')} onSystemChange={changeSystem} onProjectChange={openProject} onNavChange={id => navigate(projectPath(currentProject.id, system.key, id))}>
+    {route.isModelSettings ? <ModelSettingsPage/> : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject}/> : navItem.id === 'home' ? <DashboardPage system={system} onSystemChange={changeSystem}/> : <ModulePage key={`${system.key}-${navItem.id}`} system={system} item={navItem}/>}
   </Shell>
 }
