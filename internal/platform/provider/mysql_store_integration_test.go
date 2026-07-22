@@ -33,6 +33,7 @@ func TestMySQLStoreUsesProviderIdempotencyScope(t *testing.T) {
 		t.Fatalf("Create() = (%+v, duplicate=%v, err=%v)", created, duplicate, err)
 	}
 	t.Cleanup(func() {
+		_, _ = db.ExecContext(t.Context(), "DELETE FROM provider_job_outputs WHERE provider_job_id = ?", record.Job.ID)
 		_, _ = db.ExecContext(t.Context(), "DELETE FROM provider_jobs WHERE id = ?", record.Job.ID)
 	})
 
@@ -46,6 +47,39 @@ func TestMySQLStoreUsesProviderIdempotencyScope(t *testing.T) {
 	_, _, err = store.Create(t.Context(), conflicting)
 	if !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("conflicting Create() err=%v, want ErrIdempotencyConflict", err)
+	}
+
+	created.Job.ExecutionStatus = contract.JobRunning
+	created.Job.ProviderStatus = contract.ProviderJobOutputsReady
+	created.Job.Progress = 70
+	created.Job.UpdatedAt = now.Add(time.Second)
+	created.ProviderCode = "fake"
+	created.ModelVersion = "fake-image-v1"
+	created.ExternalTaskID = "task_1"
+	created.Outputs = []OutputRecord{{
+		Ref: contract.ProviderOutputRef{
+			ProviderCode: "fake", ProviderJobID: created.Job.ID, OutputID: "output_1",
+			RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "image/png", DeclaredSizeBytes: 1024,
+		},
+		Status: OutputReady,
+	}}
+	updated, err := store.Update(t.Context(), created)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Job.Version != 2 {
+		t.Fatalf("Update() version = %d, want 2", updated.Job.Version)
+	}
+
+	loaded, err := store.Get(t.Context(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if loaded.ProviderCode != "fake" || loaded.ModelVersion != "fake-image-v1" || loaded.ExternalTaskID != "task_1" {
+		t.Fatalf("Get() lost provider metadata: %+v", loaded)
+	}
+	if len(loaded.Outputs) != 1 || loaded.Outputs[0].Ref.OutputID != "output_1" || loaded.Outputs[0].Status != OutputReady {
+		t.Fatalf("Get() outputs = %+v, want persisted ready output", loaded.Outputs)
 	}
 }
 

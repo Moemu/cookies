@@ -4,10 +4,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
@@ -15,6 +17,9 @@ const ScopeJobCreate contract.Scope = "provider.job.create"
 
 const imageJobKind = "provider.image.generate"
 const imageOperation = "image.generate"
+
+var ErrJobNotFound = errors.New("provider job not found")
+var ErrVersionConflict = errors.New("provider job version conflict")
 
 // ImageGenerationInput is the stable Provider-owned input for image creation.
 // Prompt contents may be persisted in protected Provider storage, but callers
@@ -91,19 +96,52 @@ type JobRecord struct {
 	SourceSystem          string
 	SourceTaskID          string
 	Input                 ImageGenerationInput
+	ProviderCode          string
+	ModelVersion          string
+	ExternalTaskID        string
+	Outputs               []OutputRecord
+}
+
+type OutputStatus string
+
+const (
+	OutputReady     OutputStatus = "ready"
+	OutputIngesting OutputStatus = "ingesting"
+	OutputSucceeded OutputStatus = "succeeded"
+	OutputFailed    OutputStatus = "failed"
+)
+
+type OutputRecord struct {
+	Ref             contract.ProviderOutputRef
+	Status          OutputStatus
+	IntakeID        string
+	ProjectAssetRef *contract.ProjectAssetRef
+	Error           *contract.JobError
 }
 
 // JobStore owns ProviderJob durability and Provider-specific idempotency. It
 // intentionally does not reuse platform_jobs' narrower idempotency scope.
 type JobStore interface {
 	Create(ctx context.Context, record JobRecord) (stored JobRecord, duplicate bool, err error)
+	Get(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (JobRecord, error)
+	Update(ctx context.Context, record JobRecord) (JobRecord, error)
+}
+
+// GeneratedIntakeClient is Provider's seam to the Assets-owned intake
+// capability. Its types remain owned by Assets; Provider never receives a
+// database handle or object-storage URL from this interface.
+type GeneratedIntakeClient interface {
+	Create(ctx context.Context, projectID contract.ProjectID, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error)
+	Get(ctx context.Context, projectID contract.ProjectID, intakeID string) (assets.GeneratedAssetIntakeResponse, error)
 }
 
 // Service is the small application seam used by transport and workers.
 type Service struct {
-	Store JobStore
-	NewID func() string
-	Now   func() time.Time
+	Store        JobStore
+	ImageAdapter ImageProviderAdapter
+	Intake       GeneratedIntakeClient
+	NewID        func() string
+	Now          func() time.Time
 }
 
 func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobRequest) (contract.ProviderJob, bool, error) {
@@ -155,6 +193,146 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		return contract.ProviderJob{}, false, err
 	}
 	return stored.Job, duplicate, nil
+}
+
+// ProcessImageJob advances only the Assets handoff portion of a ProviderJob.
+// Adapter submission and polling are separate seams; this method starts after
+// a verified ProviderOutputRef has been persisted at outputs_ready.
+func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, *time.Time, error) {
+	if s.Store == nil || s.Intake == nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job store and generated intake client are required")
+	}
+	record, err := s.Store.Get(ctx, organizationID, projectID, jobID)
+	if err != nil {
+		return contract.ProviderJob{}, nil, err
+	}
+	if isProviderTerminal(record.Job.ProviderStatus) {
+		return record.Job, nil, nil
+	}
+	if record.Job.ProviderStatus != contract.ProviderJobOutputsReady && record.Job.ProviderStatus != contract.ProviderJobIngesting {
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s is not ready for intake", jobID)
+	}
+	if strings.TrimSpace(record.ProviderCode) == "" || strings.TrimSpace(record.ModelVersion) == "" {
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s is missing resolved provider model metadata", jobID)
+	}
+	now := s.nowUTC()
+	pending := false
+	for index := range record.Outputs {
+		output := &record.Outputs[index]
+		switch output.Status {
+		case OutputReady:
+			response, createErr := s.Intake.Create(ctx, projectID, assets.GeneratedAssetIntakeRequest{
+				ProviderJobID: record.Job.ID,
+				Output:        output.Ref,
+				Provenance: assets.GenerationProvenance{
+					Capability:            imageOperation,
+					ProviderCode:          record.ProviderCode,
+					ModelAlias:            record.ModelAlias,
+					ModelVersion:          record.ModelVersion,
+					PromptRef:             nil,
+					SourceAssetRefs:       []contract.AssetVersionRef{},
+					ProjectContextVersion: record.ProjectContextVersion,
+					GeneratedAt:           now,
+				},
+			}, contract.IdempotencyKey(fmt.Sprintf("provider-job-%s-output-%s", record.Job.ID, output.Ref.OutputID)))
+			if createErr != nil {
+				return record.Job, nil, createErr
+			}
+			output.IntakeID = response.ID
+			applyIntakeResponse(output, response)
+		case OutputIngesting:
+			response, getErr := s.Intake.Get(ctx, projectID, output.IntakeID)
+			if getErr != nil {
+				return record.Job, nil, getErr
+			}
+			applyIntakeResponse(output, response)
+		}
+		if output.Status == OutputReady || output.Status == OutputIngesting {
+			pending = true
+		}
+	}
+	if pending {
+		record.Job.ProviderStatus = contract.ProviderJobIngesting
+		record.Job.ExecutionStatus = contract.JobRunning
+		record.Job.Progress = 80
+		record.Job.UpdatedAt = now
+		updated, updateErr := s.Store.Update(ctx, record)
+		if updateErr != nil {
+			return contract.ProviderJob{}, nil, updateErr
+		}
+		deferUntil := now.Add(5 * time.Second)
+		return updated.Job, &deferUntil, nil
+	}
+	finalizeImageJob(&record.Job, record.Outputs, now)
+	updated, updateErr := s.Store.Update(ctx, record)
+	if updateErr != nil {
+		return contract.ProviderJob{}, nil, updateErr
+	}
+	return updated.Job, nil, nil
+}
+
+func applyIntakeResponse(output *OutputRecord, response assets.GeneratedAssetIntakeResponse) {
+	switch response.Status {
+	case assets.GeneratedIntakeQueued, assets.GeneratedIntakeRunning:
+		output.Status = OutputIngesting
+	case assets.GeneratedIntakeSucceeded:
+		output.Status = OutputSucceeded
+		output.ProjectAssetRef = response.ProjectAssetRef
+		output.Error = nil
+	case assets.GeneratedIntakeFailed:
+		output.Status = OutputFailed
+		output.Error = response.Error
+	}
+}
+
+func finalizeImageJob(job *contract.ProviderJob, outputs []OutputRecord, now time.Time) {
+	refs := make([]contract.ProjectAssetRef, 0, len(outputs))
+	var firstError *contract.JobError
+	for _, output := range outputs {
+		if output.Status == OutputSucceeded && output.ProjectAssetRef != nil {
+			refs = append(refs, *output.ProjectAssetRef)
+		}
+		if firstError == nil && output.Error != nil {
+			problem := *output.Error
+			firstError = &problem
+		}
+	}
+	job.ProjectAssetRefs = refs
+	job.Progress = 100
+	job.UpdatedAt = now
+	switch {
+	case len(refs) == len(outputs) && len(outputs) > 0:
+		job.ExecutionStatus = contract.JobSucceeded
+		job.ProviderStatus = contract.ProviderJobSucceeded
+		job.Error = nil
+	case len(refs) > 0:
+		job.ExecutionStatus = contract.JobSucceeded
+		job.ProviderStatus = contract.ProviderJobPartiallySucceeded
+		job.Error = firstError
+	default:
+		job.ExecutionStatus = contract.JobFailed
+		job.ProviderStatus = contract.ProviderJobFailed
+		if firstError == nil {
+			firstError = &contract.JobError{Code: contract.ErrorAssetIntakeFailed, Message: "No generated output became a durable project asset", Retryable: false}
+		}
+		job.Error = firstError
+	}
+}
+
+func isProviderTerminal(status contract.ProviderJobStatus) bool {
+	switch status {
+	case contract.ProviderJobSucceeded, contract.ProviderJobPartiallySucceeded, contract.ProviderJobFailed, contract.ProviderJobCancelled, contract.ProviderJobExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s Service) nowUTC() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func validSHA256(value string) bool {

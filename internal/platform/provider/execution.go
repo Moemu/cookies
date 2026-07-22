@@ -1,0 +1,150 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
+)
+
+const providerPollDelay = 5 * time.Second
+
+// ExecuteImageJob advances one durable image job by one external operation.
+// It is safe for retrying workers: the same idempotency key is presented to
+// Submit, and every observed transition is persisted before returning.
+func (s Service) ExecuteImageJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, *time.Time, error) {
+	if s.Store == nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job store is required")
+	}
+	record, err := s.Store.Get(ctx, organizationID, projectID, jobID)
+	if err != nil {
+		return contract.ProviderJob{}, nil, err
+	}
+	if isProviderTerminal(record.Job.ProviderStatus) {
+		return record.Job, nil, nil
+	}
+
+	switch record.Job.ProviderStatus {
+	case contract.ProviderJobSubmitted:
+		return s.submitImageJob(ctx, record)
+	case contract.ProviderJobRunning:
+		return s.pollImageJob(ctx, record)
+	case contract.ProviderJobOutputsReady, contract.ProviderJobIngesting:
+		return s.ProcessImageJob(ctx, organizationID, projectID, jobID)
+	default:
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s has unsupported status %q", jobID, record.Job.ProviderStatus)
+	}
+}
+
+func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract.ProviderJob, *time.Time, error) {
+	if s.ImageAdapter == nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("image provider adapter is required")
+	}
+	request := ImageGenerationRequest{
+		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input,
+	}
+	if err := request.Validate(); err != nil {
+		return contract.ProviderJob{}, nil, err
+	}
+	submission, err := s.ImageAdapter.Submit(ctx, request)
+	if err != nil {
+		return record.Job, nil, err
+	}
+	if err := submission.Validate(); err != nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("image provider submission: %w", err)
+	}
+	now := s.nowUTC()
+	record.ProviderCode = submission.ProviderCode
+	record.ModelVersion = submission.ModelVersion
+	record.ExternalTaskID = submission.ExternalTaskID
+	record.Job.ExecutionStatus = contract.JobRunning
+	record.Job.ProviderStatus = contract.ProviderJobRunning
+	record.Job.Progress = 20
+	record.Job.UpdatedAt = now
+	updated, err := s.Store.Update(ctx, record)
+	if err != nil {
+		return contract.ProviderJob{}, nil, err
+	}
+	return updated.Job, deferAt(now), nil
+}
+
+func (s Service) pollImageJob(ctx context.Context, record JobRecord) (contract.ProviderJob, *time.Time, error) {
+	if s.ImageAdapter == nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("image provider adapter is required")
+	}
+	reference := ImageTaskReference{
+		ProviderCode: record.ProviderCode, ModelAlias: record.ModelAlias, ModelVersion: record.ModelVersion, ExternalTaskID: record.ExternalTaskID,
+	}
+	if err := reference.Validate(); err != nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("poll image provider job: %w", err)
+	}
+	result, err := s.ImageAdapter.Poll(ctx, reference)
+	if err != nil {
+		return record.Job, nil, err
+	}
+	if err := result.Validate(); err != nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("image provider poll result: %w", err)
+	}
+	now := s.nowUTC()
+	switch result.Status {
+	case ImageTaskRunning:
+		record.Job.ExecutionStatus = contract.JobRunning
+		record.Job.ProviderStatus = contract.ProviderJobRunning
+		record.Job.Progress = result.Progress
+		record.Job.UpdatedAt = now
+		updated, updateErr := s.Store.Update(ctx, record)
+		if updateErr != nil {
+			return contract.ProviderJob{}, nil, updateErr
+		}
+		return updated.Job, deferAt(now), nil
+	case ImageTaskSucceeded:
+		outputs, outputErr := normalizeReadyOutputs(record, result.Outputs)
+		if outputErr != nil {
+			return contract.ProviderJob{}, nil, outputErr
+		}
+		record.Outputs = outputs
+		record.Job.ExecutionStatus = contract.JobRunning
+		record.Job.ProviderStatus = contract.ProviderJobOutputsReady
+		record.Job.Progress = 70
+		record.Job.UpdatedAt = now
+		if _, updateErr := s.Store.Update(ctx, record); updateErr != nil {
+			return contract.ProviderJob{}, nil, updateErr
+		}
+		return s.ProcessImageJob(ctx, record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	case ImageTaskFailed:
+		record.Job.ExecutionStatus = contract.JobFailed
+		record.Job.ProviderStatus = contract.ProviderJobFailed
+		record.Job.Progress = 100
+		record.Job.Error = result.Error
+		record.Job.UpdatedAt = now
+		updated, updateErr := s.Store.Update(ctx, record)
+		if updateErr != nil {
+			return contract.ProviderJob{}, nil, updateErr
+		}
+		return updated.Job, nil, nil
+	default:
+		return contract.ProviderJob{}, nil, fmt.Errorf("image task status is invalid")
+	}
+}
+
+func normalizeReadyOutputs(record JobRecord, refs []contract.ProviderOutputRef) ([]OutputRecord, error) {
+	seen := make(map[string]struct{}, len(refs))
+	outputs := make([]OutputRecord, 0, len(refs))
+	for _, ref := range refs {
+		if ref.ProviderJobID != record.Job.ID || ref.ProviderCode != record.ProviderCode {
+			return nil, fmt.Errorf("image output does not belong to provider job %s", record.Job.ID)
+		}
+		if _, exists := seen[ref.OutputID]; exists {
+			return nil, fmt.Errorf("image provider returned duplicate output ID %q", ref.OutputID)
+		}
+		seen[ref.OutputID] = struct{}{}
+		outputs = append(outputs, OutputRecord{Ref: ref, Status: OutputReady})
+	}
+	return outputs, nil
+}
+
+func deferAt(now time.Time) *time.Time {
+	deferred := now.Add(providerPollDelay)
+	return &deferred
+}

@@ -1,0 +1,21 @@
+CREATE TABLE provider_job_outputs (
+  provider_job_id VARCHAR(96) NOT NULL,
+  output_id VARCHAR(128) NOT NULL,
+  provider_code VARCHAR(64) NOT NULL,
+  retrieval_expires_at DATETIME(6) NOT NULL,
+  declared_mime_type VARCHAR(255) NOT NULL,
+  declared_size_bytes BIGINT NOT NULL,
+  declared_sha256 CHAR(64) NULL,
+  output_status VARCHAR(16) NOT NULL,
+  intake_id VARCHAR(96) NULL,
+  asset_id VARCHAR(96) NULL,
+  asset_version BIGINT NULL,
+  error_code VARCHAR(128) NULL,
+  error_message VARCHAR(1024) NULL,
+  retryable BOOLEAN NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (provider_job_id, output_id),
+  KEY idx_provider_job_outputs_intake (intake_id),
+  CONSTRAINT fk_provider_job_outputs_job FOREIGN KEY (provider_job_id) REFERENCES provider_jobs(id)
+);

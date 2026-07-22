@@ -81,3 +81,23 @@ func (s *memoryStore) Create(_ context.Context, record JobRecord) (JobRecord, bo
 	s.records = append(s.records, record)
 	return record, false, nil
 }
+
+func (s *memoryStore) Get(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (JobRecord, error) {
+	for _, record := range s.records {
+		if record.Job.OrganizationID == organizationID && record.Job.ProjectID == projectID && record.Job.ID == jobID {
+			return record, nil
+		}
+	}
+	return JobRecord{}, ErrJobNotFound
+}
+
+func (s *memoryStore) Update(_ context.Context, record JobRecord) (JobRecord, error) {
+	for index, existing := range s.records {
+		if existing.Job.ID == record.Job.ID {
+			record.Job.Version++
+			s.records[index] = record
+			return record, nil
+		}
+	}
+	return JobRecord{}, ErrJobNotFound
+}
