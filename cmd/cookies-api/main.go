@@ -15,11 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/database"
 	"github.com/shikanon/cookies/internal/platform/httpserver"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/project"
 )
 
 func main() {
@@ -28,22 +30,42 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	resolver, err := buildIdentityResolver(cfg)
-	if err != nil {
-		log.Fatalf("invalid identity configuration: %v", err)
-	}
 	db, err := database.Open(context.Background(), cfg.MySQL)
 	if err != nil {
 		log.Fatalf("open MySQL: %v", err)
 	}
 	defer db.Close()
+	identityStore := identity.MySQLStore{DB: db}
+	projectStore := project.MySQLStore{DB: db}
+	resolver, actor, err := buildIdentityResolver(cfg, identityStore)
+	if err != nil {
+		log.Fatalf("invalid identity configuration: %v", err)
+	}
+	if actor != nil {
+		if err := identityStore.EnsureLocalActor(context.Background(), *actor); err != nil {
+			log.Fatalf("seed local identity: %v", err)
+		}
+		if err := projectStore.EnsureLocalProject(context.Background(), *actor, contract.ProjectID(cfg.LocalIdentity.ProjectID)); err != nil {
+			log.Fatalf("seed local project: %v", err)
+		}
+	}
+	blobs, err := buildBlobStore(cfg)
+	if err != nil {
+		log.Fatalf("configure object storage: %v", err)
+	}
+	scanner := buildScanner(cfg)
+	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
+	assetRepository := assets.MySQLRepository{DB: db}
+	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
+	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpserver.NewWithDependencies(httpserver.Dependencies{
 			Resolver:          resolver,
-			ProjectAuthorizer: buildProjectAuthorizer(cfg),
+			ProjectAuthorizer: projectStore,
 			Readiness:         database.Readiness{DB: db},
+			Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -69,16 +91,9 @@ func main() {
 	}
 }
 
-func buildProjectAuthorizer(cfg config.Config) identity.ProjectAuthorizer {
-	if cfg.LocalIdentity != nil {
-		return identity.StaticProjectAuthorizer{ProjectID: contract.ProjectID(cfg.LocalIdentity.ProjectID)}
-	}
-	return identity.RejectingProjectAuthorizer{}
-}
-
-func buildIdentityResolver(cfg config.Config) (identity.Resolver, error) {
+func buildIdentityResolver(cfg config.Config, validator identity.ActorValidator) (identity.Resolver, *contract.ActorContext, error) {
 	if cfg.LocalIdentity == nil {
-		return identity.RejectingResolver{}, nil
+		return identity.RejectingResolver{}, nil, nil
 	}
 
 	principalKind := contract.PrincipalKind(cfg.LocalIdentity.PrincipalKind)
@@ -90,5 +105,23 @@ func buildIdentityResolver(cfg config.Config) (identity.Resolver, error) {
 		},
 		Scopes: contract.ScopesFromStrings(cfg.LocalIdentity.Scopes),
 	}
-	return identity.NewStaticResolver(actor)
+	static, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		return nil, nil, err
+	}
+	return identity.ValidatingResolver{Delegate: static, Validator: validator}, &actor, nil
+}
+
+func buildBlobStore(cfg config.Config) (assets.BlobStore, error) {
+	if cfg.ObjectStorage.Provider == "memory" {
+		return assets.NewMemoryBlobStore(), nil
+	}
+	return assets.NewTOSBlobStore(assets.TOSConfig{Endpoint: cfg.ObjectStorage.Endpoint, Region: cfg.ObjectStorage.Region, AccessKey: cfg.ObjectStorage.AccessKey, SecretKey: cfg.ObjectStorage.SecretKey, SecurityToken: cfg.ObjectStorage.SecurityToken})
+}
+
+func buildScanner(cfg config.Config) assets.ContentScanner {
+	if cfg.Scanner.Mode == "clamav" {
+		return assets.ClamAVScanner{Address: cfg.Scanner.Address}
+	}
+	return assets.NoopScanner{}
 }

@@ -30,7 +30,25 @@ type Config struct {
 	Environment   Environment
 	HTTPAddr      string
 	MySQL         MySQL
+	ObjectStorage ObjectStorage
+	Scanner       Scanner
 	LocalIdentity *LocalIdentity
+}
+
+type ObjectStorage struct {
+	Provider         string
+	Endpoint         string
+	Region           string
+	AccessKey        string
+	SecretKey        string
+	SecurityToken    string
+	QuarantineBucket string
+	AssetsBucket     string
+}
+
+type Scanner struct {
+	Mode    string
+	Address string
 }
 
 // MySQL contains only connection-pool configuration. No business module owns
@@ -55,6 +73,15 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MaxOpenConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_OPEN_CONNS", 10),
 			MaxIdleConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_IDLE_CONNS", 5),
 		},
+		ObjectStorage: ObjectStorage{
+			Provider: valueOr(lookup, "COOKIES_BLOB_PROVIDER", "memory"),
+			Endpoint: valueOr(lookup, "COOKIES_TOS_ENDPOINT", ""), Region: valueOr(lookup, "COOKIES_TOS_REGION", ""),
+			AccessKey: valueOr(lookup, "COOKIES_TOS_ACCESS_KEY", ""), SecretKey: valueOr(lookup, "COOKIES_TOS_SECRET_KEY", ""),
+			SecurityToken:    valueOr(lookup, "COOKIES_TOS_SECURITY_TOKEN", ""),
+			QuarantineBucket: valueOr(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "cookies-quarantine"),
+			AssetsBucket:     valueOr(lookup, "COOKIES_TOS_ASSETS_BUCKET", "cookies-assets"),
+		},
+		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
 	}
 
 	identityValues := map[string]string{
@@ -95,6 +122,29 @@ func (c Config) Validate() error {
 	if c.MySQL.MaxOpenConns < 1 || c.MySQL.MaxIdleConns < 0 || c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
 		return fmt.Errorf("MySQL connection pool limits are invalid")
 	}
+	if c.ObjectStorage.Provider != "memory" && c.ObjectStorage.Provider != "tos" {
+		return fmt.Errorf("COOKIES_BLOB_PROVIDER must be memory or tos")
+	}
+	if strings.TrimSpace(c.ObjectStorage.QuarantineBucket) == "" || strings.TrimSpace(c.ObjectStorage.AssetsBucket) == "" || c.ObjectStorage.QuarantineBucket == c.ObjectStorage.AssetsBucket {
+		return fmt.Errorf("object storage requires distinct quarantine and assets buckets")
+	}
+	if c.ObjectStorage.Provider == "tos" && (c.ObjectStorage.Endpoint == "" || c.ObjectStorage.Region == "" || c.ObjectStorage.AccessKey == "" || c.ObjectStorage.SecretKey == "") {
+		return fmt.Errorf("TOS storage requires endpoint, region, access key, and secret key")
+	}
+	if c.Scanner.Mode != "noop" && c.Scanner.Mode != "clamav" {
+		return fmt.Errorf("COOKIES_SCANNER_MODE must be noop or clamav")
+	}
+	if c.Scanner.Mode == "clamav" && c.Scanner.Address == "" {
+		return fmt.Errorf("ClamAV scanner requires COOKIES_CLAMAV_ADDRESS")
+	}
+	if c.Environment == EnvironmentProduction {
+		if c.ObjectStorage.Provider != "tos" {
+			return fmt.Errorf("production requires TOS object storage")
+		}
+		if c.Scanner.Mode != "clamav" {
+			return fmt.Errorf("production requires ClamAV content scanning")
+		}
+	}
 	if c.LocalIdentity == nil {
 		return nil
 	}
@@ -103,8 +153,8 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.LocalIdentity.OrganizationID) == "" ||
 		strings.TrimSpace(c.LocalIdentity.PrincipalKind) == "" ||
-		strings.TrimSpace(c.LocalIdentity.PrincipalID) == "" {
-		return fmt.Errorf("local identity requires organization, principal kind, and principal ID")
+		strings.TrimSpace(c.LocalIdentity.PrincipalID) == "" || strings.TrimSpace(c.LocalIdentity.ProjectID) == "" {
+		return fmt.Errorf("local identity requires organization, principal kind, principal ID, and project ID")
 	}
 	return nil
 }

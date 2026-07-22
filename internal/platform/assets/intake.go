@@ -46,6 +46,38 @@ const (
 	GeneratedIntakeFailed    GeneratedIntakeStatus = "failed"
 )
 
+type GeneratedIntake struct {
+	ID              string                      `json:"id"`
+	OrganizationID  contract.OrganizationID     `json:"organization_id"`
+	ProjectID       contract.ProjectID          `json:"project_id"`
+	ProviderJobID   string                      `json:"provider_job_id"`
+	OutputID        string                      `json:"output_id"`
+	ProviderCode    string                      `json:"provider_code"`
+	Status          GeneratedIntakeStatus       `json:"status"`
+	Request         GeneratedAssetIntakeRequest `json:"-"`
+	IdempotencyKey  contract.IdempotencyKey     `json:"-"`
+	RequestHash     string                      `json:"-"`
+	TargetAssetID   contract.AssetID            `json:"-"`
+	TargetBlobID    string                      `json:"-"`
+	ProjectAssetRef *contract.ProjectAssetRef   `json:"project_asset_ref"`
+	Error           *contract.JobError          `json:"error"`
+	AttemptCount    int                         `json:"attempt_count"`
+	MaxAttempts     int                         `json:"max_attempts"`
+	AvailableAt     time.Time                   `json:"-"`
+	LockOwner       string                      `json:"-"`
+	RequestID       string                      `json:"-"`
+	TraceID         string                      `json:"-"`
+	CreatedAt       time.Time                   `json:"created_at"`
+	UpdatedAt       time.Time                   `json:"updated_at"`
+}
+
+func (i GeneratedIntake) Response() GeneratedAssetIntakeResponse {
+	return GeneratedAssetIntakeResponse{
+		ID: i.ID, ProviderJobID: i.ProviderJobID, OutputID: i.OutputID, Status: i.Status,
+		ProjectAssetRef: i.ProjectAssetRef, Error: i.Error,
+	}
+}
+
 // GeneratedAssetIntakeResponse is returned by both the asynchronous create
 // and query endpoints. ProjectAssetRef remains nil until all visibility gates
 // for TOS, AssetVersion, and ProjectAssetRef have passed.

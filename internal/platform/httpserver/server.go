@@ -9,18 +9,25 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/project"
 )
 
 type Server struct {
 	resolver          identity.Resolver
 	projectAuthorizer identity.ProjectAuthorizer
 	readiness         ReadinessChecker
+	identities        CurrentIdentityReader
+	projects          ProjectManager
+	uploads           AssetUploadManager
+	intakes           GeneratedIntakeManager
 	mux               *http.ServeMux
 	newID             func() (string, error)
 }
@@ -33,6 +40,31 @@ type Dependencies struct {
 	Resolver          identity.Resolver
 	ProjectAuthorizer identity.ProjectAuthorizer
 	Readiness         ReadinessChecker
+	Identities        CurrentIdentityReader
+	Projects          ProjectManager
+	Uploads           AssetUploadManager
+	Intakes           GeneratedIntakeManager
+}
+
+type CurrentIdentityReader interface {
+	GetCurrent(context.Context, contract.ActorContext) (identity.CurrentIdentity, error)
+}
+type ProjectManager interface {
+	CreateBrand(context.Context, contract.ActorContext, string) (project.Brand, error)
+	CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error)
+	GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
+	ListProjects(context.Context, contract.ActorContext) ([]project.Project, error)
+}
+type AssetUploadManager interface {
+	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.CreateUploadRequest) (assets.CreateUploadResponse, error)
+	PutContent(context.Context, contract.ActorContext, contract.ProjectID, string, io.Reader, int64) error
+	Finalize(context.Context, contract.RequestContext, contract.ProjectID, string) (assets.UploadSession, error)
+	List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]assets.ProjectAsset, error)
+	Preview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (assets.SignedRequest, error)
+}
+type GeneratedIntakeManager interface {
+	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.GeneratedAssetIntakeRequest) (assets.GeneratedIntake, error)
+	Get(context.Context, contract.ActorContext, contract.ProjectID, string) (assets.GeneratedIntake, error)
 }
 
 // New retains the bootstrap construction path for focused HTTP tests. The
@@ -48,12 +80,23 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	if dependencies.ProjectAuthorizer == nil {
 		dependencies.ProjectAuthorizer = identity.RejectingProjectAuthorizer{}
 	}
-	server := &Server{resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer, readiness: dependencies.Readiness, newID: newRequestID}
+	server := &Server{resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer, readiness: dependencies.Readiness, identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads, intakes: dependencies.Intakes, newID: newRequestID}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
 	server.mux.HandleFunc("GET /readyz", server.ready)
 	server.mux.Handle("GET /platform/v1/context", server.requireAuthentication(http.HandlerFunc(server.requestContext)))
+	server.mux.Handle("GET /platform/v1/me", server.requireAuthentication(http.HandlerFunc(server.currentIdentity)))
+	server.mux.Handle("POST /platform/v1/brands", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createBrand))))
+	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
+	server.mux.Handle("GET /platform/v1/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProjects))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/uploads", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.createUpload))))
+	server.mux.Handle("PUT /platform/v1/projects/{project_id}/assets/uploads/{upload_id}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.putUpload))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/uploads/{upload_action}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.finalizeUpload))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.listAssets))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/preview", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.previewAsset))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/generated-intakes", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.createGeneratedIntake))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }
@@ -150,6 +193,17 @@ func (s *Server) requireProject(next http.Handler) http.Handler {
 	}))
 }
 
+func (s *Server) requireScope(scope contract.Scope, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestContext, ok := contract.RequestContextFrom(request.Context())
+		if !ok || !requestContext.Actor.HasScope(scope) {
+			writeProblem(writer, http.StatusForbidden, contract.Error{Code: contract.ErrorScopeRequired, Message: "The required permission scope is missing.", RequestID: requestIDFrom(request.Context()), Retryable: false})
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
+}
+
 func (s *Server) requestContext(writer http.ResponseWriter, request *http.Request) {
 	requestContext, _ := contract.RequestContextFrom(request.Context())
 	writeJSON(writer, http.StatusOK, requestContext)
@@ -157,7 +211,16 @@ func (s *Server) requestContext(writer http.ResponseWriter, request *http.Reques
 
 func (s *Server) projectContext(writer http.ResponseWriter, request *http.Request) {
 	requestContext, _ := contract.RequestContextFrom(request.Context())
-	writeJSON(writer, http.StatusOK, map[string]any{"request_context": requestContext, "project_id": request.PathValue("project_id")})
+	if s.projects == nil {
+		writeJSON(writer, http.StatusOK, map[string]any{"request_context": requestContext, "project_id": request.PathValue("project_id")})
+		return
+	}
+	value, err := s.projects.GetContext(request.Context(), requestContext.Actor, contract.ProjectID(request.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) notFound(writer http.ResponseWriter, request *http.Request) {

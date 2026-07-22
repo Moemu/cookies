@@ -52,6 +52,21 @@ func TestFromLookupRejectsInvalidMySQLPool(t *testing.T) {
 	}
 }
 
+func TestProductionRequiresTOSAndMalwareScanning(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_ENV": "production"}))
+	if err == nil {
+		t.Fatal("expected insecure production storage defaults to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{"COOKIES_ENV": "production", "COOKIES_BLOB_PROVIDER": "tos", "COOKIES_TOS_ENDPOINT": "tos.example.com", "COOKIES_TOS_REGION": "cn-test", "COOKIES_TOS_ACCESS_KEY": "key", "COOKIES_TOS_SECRET_KEY": "secret", "COOKIES_SCANNER_MODE": "clamav", "COOKIES_CLAMAV_ADDRESS": "127.0.0.1:3310"}))
+	if err != nil {
+		t.Fatalf("secure production config rejected: %v", err)
+	}
+	if config.ObjectStorage.Provider != "tos" || config.Scanner.Mode != "clamav" {
+		t.Fatalf("unexpected config: %#v", config)
+	}
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

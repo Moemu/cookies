@@ -40,17 +40,162 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [request_context, project_id]
-                properties:
-                  request_context:
-                    $ref: '#/components/schemas/RequestContext'
-                  project_id:
-                    type: string
+                $ref: '#/components/schemas/ProjectContext'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/me:
+    get:
+      operationId: getCurrentIdentity
+      summary: Return the current user, organization, and membership resolved from trusted identity.
+      responses:
+        '200':
+          description: Current identity and organization membership.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentIdentity'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /platform/v1/brands:
+    post:
+      operationId: createBrand
+      summary: Create a brand in the caller's organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 255}
+              additionalProperties: false
+      responses:
+        '201':
+          description: Brand created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Brand'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+  /platform/v1/projects:
+    get:
+      operationId: listProjects
+      summary: List projects visible to the current principal.
+      responses:
+        '200':
+          description: Project list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Project'}}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+    post:
+      operationId: createProject
+      summary: Create a draft or brand-bound active project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateProjectRequest'}
+      responses:
+        '201':
+          description: Project created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+  /platform/v1/projects/{project_id}/assets/uploads:
+    post:
+      operationId: createAssetUpload
+      summary: Create an image upload session and a short-lived signed TOS PUT.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateUploadRequest'}
+      responses:
+        '201':
+          description: Upload session created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreateUploadResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/assets/uploads/{upload_id}:
+    put:
+      operationId: proxyAssetUpload
+      summary: Local-development/fallback upload proxy; production clients use the signed PUT.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/UploadID'
+      requestBody:
+        required: true
+        content:
+          image/png: {schema: {type: string, contentEncoding: binary}}
+          image/jpeg: {schema: {type: string, contentEncoding: binary}}
+      responses:
+        '204': {description: Upload stored in quarantine.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/assets/uploads/{upload_id}:finalize:
+    post:
+      operationId: finalizeAssetUpload
+      summary: Validate, scan, persist, and attach an uploaded image to the project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/UploadID'
+      responses:
+        '200':
+          description: Upload finalized.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadSession'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/assets:
+    get:
+      operationId: listProjectAssets
+      summary: List immutable asset versions attached to the project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Project asset list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ProjectAsset'}}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/preview:
+    get:
+      operationId: previewAssetVersion
+      summary: Re-authorize and return a short-lived signed preview request.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: asset_id, in: path, required: true, schema: {type: string}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200':
+          description: Private no-store preview request.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SignedRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /platform/v1/projects/{project_id}/model/jobs:
     post:
       operationId: createModelJob
@@ -130,7 +275,7 @@ paths:
         provider-job-{provider_job_id}-output-{output_id}.
       parameters:
         - $ref: '#/components/parameters/ProjectID'
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -195,6 +340,16 @@ components:
         minLength: 1
         maxLength: 255
         pattern: '^[A-Za-z0-9_-]+$'
+    OptionalIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Defaults to provider-job-{provider_job_id}-output-{output_id} for generated intake.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: '^[A-Za-z0-9_-]+$'
     JobID:
       name: job_id
       in: path
@@ -204,6 +359,13 @@ components:
         minLength: 1
     IntakeID:
       name: intake_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    UploadID:
+      name: upload_id
       in: path
       required: true
       schema:
@@ -613,6 +775,138 @@ components:
         asset_version:
           $ref: '#/components/schemas/AssetVersionRef'
       additionalProperties: false
+    CurrentIdentity:
+      type: object
+      required: [actor, organization, user, membership]
+      properties:
+        actor: {$ref: '#/components/schemas/ActorContext'}
+        organization: {$ref: '#/components/schemas/Organization'}
+        user:
+          oneOf: [{$ref: '#/components/schemas/User'}, {type: 'null'}]
+        membership:
+          oneOf: [{$ref: '#/components/schemas/OrganizationMembership'}, {type: 'null'}]
+      additionalProperties: false
+    Organization:
+      type: object
+      required: [id, name, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        status: {type: string, enum: [active, suspended, archived]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    User:
+      type: object
+      required: [id, display_name, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        display_name: {type: string}
+        status: {type: string, enum: [active, suspended, archived]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    OrganizationMembership:
+      type: object
+      required: [organization_id, user_id, role, status, created_at, updated_at]
+      properties:
+        organization_id: {type: string}
+        user_id: {type: string}
+        role: {type: string}
+        status: {type: string, enum: [active, suspended, removed]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    Brand:
+      type: object
+      required: [id, organization_id, name, status]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        name: {type: string}
+        status: {type: string, enum: [active, archived]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateProjectRequest:
+      type: object
+      required: [name, product_ids, activate]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 255}
+        primary_brand_id: {type: [string, 'null']}
+        product_ids: {type: array, uniqueItems: true, items: {type: string}}
+        activate: {type: boolean}
+      additionalProperties: false
+    Project:
+      type: object
+      required: [id, organization_id, name, status, primary_brand_id, project_context_version]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        name: {type: string}
+        status: {type: string, enum: [draft, active, archived]}
+        primary_brand_id: {type: [string, 'null']}
+        brand_guideline_version_id: {type: string}
+        project_context_version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateUploadRequest:
+      type: object
+      required: [filename, declared_mime_type, declared_size_bytes]
+      properties:
+        filename: {type: string, minLength: 1, maxLength: 512}
+        declared_mime_type: {type: string, enum: [image/jpeg, image/png]}
+        declared_size_bytes: {type: integer, minimum: 1, maximum: 20971520}
+        declared_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
+      additionalProperties: false
+    SignedRequest:
+      type: object
+      required: [url, method, headers, expires_at]
+      properties:
+        url: {type: string}
+        method: {type: string, enum: [GET, PUT]}
+        headers: {type: object, additionalProperties: {type: string}}
+        expires_at: {type: string, format: date-time}
+      additionalProperties: false
+    UploadSession:
+      type: object
+      required: [id, organization_id, project_id, principal, status, filename, declared_mime_type, declared_size_bytes, project_context_version, project_asset_ref, expires_at, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        principal: {type: object}
+        status: {type: string, enum: [created, uploaded, processing, succeeded, failed, expired]}
+        filename: {type: string}
+        declared_mime_type: {type: string}
+        declared_size_bytes: {type: integer}
+        declared_sha256: {type: [string, 'null']}
+        project_context_version: {type: integer}
+        project_asset_ref:
+          oneOf: [{$ref: '#/components/schemas/ProjectAssetRef'}, {type: 'null'}]
+        error_code: {type: string}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateUploadResponse:
+      type: object
+      required: [session, upload]
+      properties:
+        session: {$ref: '#/components/schemas/UploadSession'}
+        upload:
+          oneOf: [{$ref: '#/components/schemas/SignedRequest'}, {type: 'null'}]
+      additionalProperties: false
+    ProjectAsset:
+      type: object
+      required: [ref, asset, version, created_at]
+      properties:
+        ref: {$ref: '#/components/schemas/ProjectAssetRef'}
+        asset: {type: object}
+        version: {type: object}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
     Problem:
       type: object
       required: [error]
@@ -643,6 +937,12 @@ components:
                 - DEPENDENCY_UNAVAILABLE
                 - IDENTITY_UNAVAILABLE
                 - IDENTITY_CONTEXT_INVALID
+                - INVALID_REQUEST
+                - INVALID_STATE
+                - BRAND_NOT_FOUND
+                - PRODUCT_NOT_FOUND
+                - SERVICE_UNAVAILABLE
+                - PROJECT_CONTEXT_STALE
             message:
               type: string
             request_id:
