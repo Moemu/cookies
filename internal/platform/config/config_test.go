@@ -88,6 +88,43 @@ func TestProductionRequiresTOSAndMalwareScanning(t *testing.T) {
 	}
 }
 
+func TestArkImageAdapterIsExplicitAndLocalOnly(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_IMAGE_ADAPTER": "ark_image"}))
+	if err == nil {
+		t.Fatal("expected Ark configuration without credentials to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "local", "COOKIES_PROVIDER_IMAGE_ADAPTER": "ark_image",
+		"COOKIES_ARK_IMAGE_API_KEY": "test-key", "COOKIES_ARK_IMAGE_MODEL": "seedream-test",
+	}))
+	if err != nil || config.Provider.ImageAdapter != "ark_image" {
+		t.Fatalf("valid local Ark configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+	_, err = FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory", "COOKIES_PROVIDER_IMAGE_ADAPTER": "ark_image",
+		"COOKIES_ARK_IMAGE_API_KEY": "test-key", "COOKIES_ARK_IMAGE_MODEL": "seedream-test",
+	}))
+	if err == nil {
+		t.Fatal("expected Ark adapter outside local to be rejected")
+	}
+}
+
+func TestOpenAIImageAdapterRequiresCompleteLocalGatewayConfiguration(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_IMAGE_ADAPTER": "openai_image"}))
+	if err == nil {
+		t.Fatal("expected incomplete OpenAI-compatible image configuration to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_PROVIDER_IMAGE_ADAPTER": "openai_image", "COOKIES_OPENAI_IMAGE_API_KEY": "test-key",
+		"COOKIES_OPENAI_IMAGE_MODEL": "gpt-image-2", "COOKIES_OPENAI_IMAGE_BASE_URL": "http://gateway.example",
+	}))
+	if err != nil || config.Provider.ImageAdapter != "openai_image" {
+		t.Fatalf("valid local OpenAI-compatible configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

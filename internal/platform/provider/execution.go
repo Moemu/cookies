@@ -89,13 +89,30 @@ func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract
 	record.ProviderCode = submission.ProviderCode
 	record.ModelVersion = submission.ModelVersion
 	record.ExternalTaskID = submission.ExternalTaskID
-	record.Job.ExecutionStatus = contract.JobRunning
-	record.Job.ProviderStatus = contract.ProviderJobRunning
-	record.Job.Progress = 20
+	switch submission.Status {
+	case ImageSubmissionAccepted:
+		record.Job.ExecutionStatus = contract.JobRunning
+		record.Job.ProviderStatus = contract.ProviderJobRunning
+		record.Job.Progress = 20
+	case ImageSubmissionCompleted:
+		outputs, outputErr := normalizeReadyOutputs(record, submission.Outputs)
+		if outputErr != nil {
+			return contract.ProviderJob{}, nil, outputErr
+		}
+		record.Outputs = outputs
+		record.Job.ExecutionStatus = contract.JobRunning
+		record.Job.ProviderStatus = contract.ProviderJobOutputsReady
+		record.Job.Progress = 70
+	default:
+		return contract.ProviderJob{}, nil, fmt.Errorf("image submission status is invalid")
+	}
 	record.Job.UpdatedAt = now
 	updated, err := s.Store.Update(ctx, record)
 	if err != nil {
 		return contract.ProviderJob{}, nil, err
+	}
+	if submission.Status == ImageSubmissionCompleted {
+		return s.ProcessImageJob(ctx, updated.Job.OrganizationID, updated.Job.ProjectID, updated.Job.ID)
 	}
 	return updated.Job, deferAt(now), nil
 }

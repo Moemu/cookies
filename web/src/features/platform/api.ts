@@ -1,5 +1,5 @@
 import { apiRequest } from '../../shared/api/client'
-import type { CurrentIdentity, Project, ProjectContext, WorkspaceBootstrap } from './types'
+import type { CurrentIdentity, Project, ProjectContext, ProviderJob, WorkspaceBootstrap } from './types'
 
 export async function getWorkspaceBootstrap(signal?: AbortSignal): Promise<WorkspaceBootstrap> {
   const [identity, projectList] = await Promise.all([
@@ -11,4 +11,16 @@ export async function getWorkspaceBootstrap(signal?: AbortSignal): Promise<Works
 
 export function getProjectContext(projectId: string, signal?: AbortSignal) {
   return apiRequest<ProjectContext>(`/platform/v1/projects/${encodeURIComponent(projectId)}/context`, { signal })
+}
+
+export function createImageJob(projectId: string, projectContextVersion: number, input: { prompt: string, width: number, height: number }) {
+  return apiRequest<ProviderJob>(`/platform/v1/projects/${encodeURIComponent(projectId)}/model/jobs`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': `web-image-${crypto.randomUUID()}` },
+    body: JSON.stringify({ capability: 'image.generate', model_alias: 'cookies.image.standard', project_context_version: projectContextVersion, input }),
+  })
+}
+
+export function getProviderJob(projectId: string, jobId: string, signal?: AbortSignal) {
+  return apiRequest<ProviderJob>(`/platform/v1/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`, { signal })
 }

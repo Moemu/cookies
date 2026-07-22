@@ -7,7 +7,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -70,14 +72,19 @@ func main() {
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	if cfg.Environment == config.EnvironmentLocal {
-		adapter := provider.NewFakeImageAdapter(nil)
+		adapter, err := buildImageAdapter(cfg, db)
+		if err != nil {
+			log.Fatalf("configure Provider image adapter: %v", err)
+		}
 		runtimeStore := jobruntime.MySQLStore{DB: db}
+		outputHandles := provider.MySQLOutputHandleStore{DB: db}
 		providerService := provider.Service{
-			Store:        provider.MySQLStore{DB: db},
-			Scheduler:    provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
-			ImageAdapter: adapter,
-			Intake:       provider.AssetsIntakeClient{API: intakeService},
-			NewID:        func() (string, error) { return ids.New("providerjob") },
+			Store:         provider.MySQLStore{DB: db},
+			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
+			ImageAdapter:  adapter,
+			Intake:        provider.AssetsIntakeClient{API: intakeService},
+			OutputHandles: outputHandles,
+			NewID:         func() (string, error) { return ids.New("providerjob") },
 		}
 		dependencies.ProviderJobs = providerService
 		providerRunner := &jobruntime.RecoveryRunner{
@@ -91,7 +98,11 @@ func main() {
 			return providerRunner.RunOnce(ctx)
 		})
 		if actor != nil {
-			intakeWorker := assets.GeneratedIntakeWorker{Repository: assetRepository, Projects: projectService, Fetcher: adapter, Upload: *uploadService, Actor: *actor}
+			fetcher, ok := adapter.(assets.GeneratedOutputFetcher)
+			if !ok {
+				log.Fatalf("configured Provider image adapter does not implement generated output fetching")
+			}
+			intakeWorker := assets.GeneratedIntakeWorker{Repository: assetRepository, Projects: projectService, Fetcher: fetcher, Upload: *uploadService, Actor: *actor}
 			startWorker(workerContext, "generated-intake", func(ctx context.Context) (bool, error) {
 				return intakeWorker.ProcessOnce(ctx, "generated-intake")
 			})
@@ -123,6 +134,19 @@ func main() {
 	log.Printf("cookies platform API listening on %s (%s)", cfg.HTTPAddr, cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server stopped unexpectedly: %v", err)
+	}
+}
+
+func buildImageAdapter(cfg config.Config, db *sql.DB) (provider.ImageProviderAdapter, error) {
+	switch cfg.Provider.ImageAdapter {
+	case "fake":
+		return provider.NewFakeImageAdapter(nil), nil
+	case "ark_image":
+		return provider.NewArkImageAdapter(provider.ArkImageConfig{APIKey: cfg.Provider.ArkImage.APIKey, Model: cfg.Provider.ArkImage.Model, BaseURL: cfg.Provider.ArkImage.BaseURL}, provider.MySQLOutputHandleStore{DB: db})
+	case "openai_image":
+		return provider.NewOpenAIImageAdapter(provider.OpenAIImageConfig{APIKey: cfg.Provider.OpenAIImage.APIKey, Model: cfg.Provider.OpenAIImage.Model, BaseURL: cfg.Provider.OpenAIImage.BaseURL}, provider.MySQLOutputHandleStore{DB: db})
+	default:
+		return nil, fmt.Errorf("unsupported Provider image adapter %q", cfg.Provider.ImageAdapter)
 	}
 }
 

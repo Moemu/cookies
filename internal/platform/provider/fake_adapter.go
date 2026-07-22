@@ -55,7 +55,7 @@ func (a *FakeImageAdapter) Submit(_ context.Context, request ImageGenerationRequ
 			output: fakeImagePNG, expiresAt: a.now().UTC().Add(15 * time.Minute),
 		}
 	}
-	return ImageSubmission{ProviderCode: fakeProviderCode, ModelVersion: fakeImageModelVersion, ExternalTaskID: externalTaskID}, nil
+	return ImageSubmission{Status: ImageSubmissionAccepted, ProviderCode: fakeProviderCode, ModelVersion: fakeImageModelVersion, ExternalTaskID: externalTaskID}, nil
 }
 
 func (a *FakeImageAdapter) Poll(_ context.Context, reference ImageTaskReference) (ImageTaskResult, error) {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -111,6 +112,13 @@ func RuntimeHandler(service Service) jobruntime.Handler {
 		}
 		_, deferredUntil, err := service.ExecuteImageJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID)
 		if err != nil {
+			var providerError ExecutionError
+			if errors.As(err, &providerError) && !providerError.JobError.Retryable {
+				if _, failErr := service.FailImageJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID, providerError.JobError); failErr != nil {
+					return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_STATE_UPDATE_FAILED", Message: "Provider job could not record its terminal failure", Retryable: true}}
+				}
+				return jobruntime.Result{}, jobruntime.ExecutionError{JobError: providerError.JobError}
+			}
 			if claim.Job.AttemptCount >= claim.Job.MaxAttempts {
 				return exhaustedProviderExecution(service, ctx, claim, payload.ProviderJobID)
 			}
@@ -124,6 +132,47 @@ func RuntimeHandler(service Service) jobruntime.Handler {
 		}
 		return jobruntime.Result{}, nil
 	}
+}
+
+// FailImageJob records a non-retryable provider outcome without waiting for
+// the generic runtime's attempt budget. This prevents resubmitting a request
+// whose upstream outcome is unknown.
+func (s Service) FailImageJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string, problem contract.JobError) (contract.ProviderJob, error) {
+	if s.Store == nil {
+		return contract.ProviderJob{}, fmt.Errorf("provider job store is required")
+	}
+	if strings.TrimSpace(problem.Code) == "" {
+		return contract.ProviderJob{}, fmt.Errorf("provider failure code is required")
+	}
+	record, err := s.Store.Get(ctx, organizationID, projectID, jobID)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	if isProviderTerminal(record.Job.ProviderStatus) {
+		return record.Job, nil
+	}
+	now := s.nowUTC()
+	if len(record.Outputs) == 0 {
+		record.Job.ExecutionStatus = contract.JobFailed
+		record.Job.ProviderStatus = contract.ProviderJobFailed
+		record.Job.Progress = 100
+		record.Job.Error = &problem
+		record.Job.UpdatedAt = now
+	} else {
+		for index := range record.Outputs {
+			if record.Outputs[index].Status == OutputReady || record.Outputs[index].Status == OutputIngesting {
+				errCopy := problem
+				record.Outputs[index].Status = OutputFailed
+				record.Outputs[index].Error = &errCopy
+			}
+		}
+		finalizeImageJob(&record.Job, record.Outputs, now)
+	}
+	updated, err := s.Store.Update(ctx, record)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	return updated.Job, nil
 }
 
 func exhaustedProviderExecution(service Service, ctx context.Context, claim jobruntime.Claim, providerJobID string) (jobruntime.Result, error) {

@@ -16,7 +16,7 @@ func TestServiceExecutesImageJobFromSubmitThroughAssetIntake(t *testing.T) {
 	record := executableImageJobRecord(now)
 	store := &processingStore{record: record}
 	adapter := &scriptedImageAdapter{
-		submission: ImageSubmission{ProviderCode: "fake", ModelVersion: "fake-image-v1", ExternalTaskID: "fake-task-1"},
+		submission: ImageSubmission{Status: ImageSubmissionAccepted, ProviderCode: "fake", ModelVersion: "fake-image-v1", ExternalTaskID: "fake-task-1"},
 		polls: []ImageTaskResult{
 			{Status: ImageTaskRunning, Progress: 50},
 			{Status: ImageTaskSucceeded, Outputs: []contract.ProviderOutputRef{{
@@ -53,6 +53,27 @@ func TestServiceExecutesImageJobFromSubmitThroughAssetIntake(t *testing.T) {
 	}
 	if adapter.pollCalls != 2 || intake.request.Output.OutputID != "output_1" {
 		t.Fatalf("expected one ready output to reach Assets: polls=%d intake=%+v", adapter.pollCalls, intake.request)
+	}
+}
+
+func TestServiceHandsSynchronousSubmissionToAssetsWithoutPolling(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 4, 30, 0, 0, time.UTC)
+	record := executableImageJobRecord(now)
+	store := &processingStore{record: record}
+	adapter := &scriptedImageAdapter{submission: ImageSubmission{Status: ImageSubmissionCompleted, ProviderCode: "ark", ModelVersion: "seedream-test", Outputs: []contract.ProviderOutputRef{{
+		ProviderCode: "ark", ProviderJobID: record.Job.ID, OutputID: "output_1", RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "image/png", DeclaredSizeBytes: 1024,
+	}}}}
+	version := int64(1)
+	intake := &fakeIntakeClient{response: assets.GeneratedAssetIntakeResponse{ID: "intake_1", ProviderJobID: record.Job.ID, OutputID: "output_1", Status: assets.GeneratedIntakeSucceeded, ProjectAssetRef: &contract.ProjectAssetRef{ProjectID: record.Job.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: "asset_1", Version: version}}}}
+	service := Service{Store: store, ImageAdapter: adapter, Intake: intake, Now: func() time.Time { return now }}
+
+	job, deferredUntil, err := service.ExecuteImageJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if err != nil || deferredUntil != nil || job.ProviderStatus != contract.ProviderJobSucceeded {
+		t.Fatalf("synchronous ExecuteImageJob() = (%+v, deferred=%v, err=%v)", job, deferredUntil, err)
+	}
+	if adapter.submitCalls != 1 || adapter.pollCalls != 0 || intake.request.Output.OutputID != "output_1" {
+		t.Fatalf("synchronous submission did not take the direct intake path: submit=%d poll=%d intake=%+v", adapter.submitCalls, adapter.pollCalls, intake.request)
 	}
 }
 

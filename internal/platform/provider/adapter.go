@@ -39,21 +39,58 @@ func (r ImageGenerationRequest) Validate() error {
 	return r.Input.Validate()
 }
 
+// ImageSubmissionStatus distinguishes upstream asynchronous acceptance from a
+// synchronous model response. The public Platform API stays asynchronous in
+// both cases: a completed submission still has to pass through Assets intake.
+type ImageSubmissionStatus string
+
+const (
+	ImageSubmissionAccepted  ImageSubmissionStatus = "accepted"
+	ImageSubmissionCompleted ImageSubmissionStatus = "completed"
+)
+
 // ImageSubmission is the durable acknowledgment from a Provider after a
-// request was accepted. ProviderCode and ModelVersion are system-resolved,
-// never accepted from the public API request.
+// request was accepted or completed. ProviderCode and ModelVersion are
+// system-resolved, never accepted from the public API request.
 type ImageSubmission struct {
+	Status         ImageSubmissionStatus
 	ProviderCode   string
 	ModelVersion   string
 	ExternalTaskID string
+	Outputs        []contract.ProviderOutputRef
 }
 
 func (s ImageSubmission) Validate() error {
-	if strings.TrimSpace(s.ProviderCode) == "" || strings.TrimSpace(s.ModelVersion) == "" || strings.TrimSpace(s.ExternalTaskID) == "" {
-		return fmt.Errorf("provider code, model version, and external task ID are required")
+	if strings.TrimSpace(s.ProviderCode) == "" || strings.TrimSpace(s.ModelVersion) == "" {
+		return fmt.Errorf("provider code and model version are required")
+	}
+	switch s.Status {
+	case ImageSubmissionAccepted:
+		if strings.TrimSpace(s.ExternalTaskID) == "" || len(s.Outputs) != 0 {
+			return fmt.Errorf("accepted image submission requires an external task ID and no outputs")
+		}
+	case ImageSubmissionCompleted:
+		if strings.TrimSpace(s.ExternalTaskID) != "" || len(s.Outputs) == 0 {
+			return fmt.Errorf("completed image submission requires outputs and no external task ID")
+		}
+		for index, output := range s.Outputs {
+			if err := output.Validate(); err != nil {
+				return fmt.Errorf("invalid image output at index %d: %w", index, err)
+			}
+		}
+	default:
+		return fmt.Errorf("image submission status is invalid")
 	}
 	return nil
 }
+
+// ExecutionError tells the shared runtime whether a provider operation can be
+// retried. In particular, an unknown submission outcome is terminal: Ark's
+// image endpoint does not provide a task lookup or client idempotency key that
+// lets us safely issue the request again.
+type ExecutionError struct{ JobError contract.JobError }
+
+func (e ExecutionError) Error() string { return e.JobError.Message }
 
 type ImageTaskReference struct {
 	ProviderCode   string

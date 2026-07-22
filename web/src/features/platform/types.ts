@@ -54,3 +54,20 @@ export type WorkspaceBootstrap = {
   identity: CurrentIdentity
   projects: Project[]
 }
+
+export type ProviderJob = {
+  id: string
+  kind: string
+  organization_id: string
+  project_id: string
+  execution_status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  provider_status: 'submitted' | 'running' | 'outputs_ready' | 'ingesting' | 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | 'expired'
+  progress: number
+  project_asset_refs: Array<{ project_id: string, asset_version: { asset_id: string, version: number } }>
+  error: null | { code: string, message: string, retryable: boolean }
+  attempt_count: number
+  max_attempts: number
+  version: number
+  created_at: string
+  updated_at: string
+}

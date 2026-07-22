@@ -35,6 +35,7 @@ type Config struct {
 	MySQL         MySQL
 	ObjectStorage ObjectStorage
 	Scanner       Scanner
+	Provider      Provider
 	LocalIdentity *LocalIdentity
 }
 
@@ -52,6 +53,26 @@ type ObjectStorage struct {
 type Scanner struct {
 	Mode    string
 	Address string
+}
+
+// Provider contains only local composition choices. Credentials are read from
+// the process environment (or ignored local .env), never from project data.
+type Provider struct {
+	ImageAdapter string
+	ArkImage     ArkImage
+	OpenAIImage  OpenAIImage
+}
+
+type ArkImage struct {
+	APIKey  string
+	Model   string
+	BaseURL string
+}
+
+type OpenAIImage struct {
+	APIKey  string
+	Model   string
+	BaseURL string
 }
 
 // MySQL contains only connection-pool configuration. No business module owns
@@ -150,6 +171,19 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			AssetsBucket:     valueOr(lookup, "COOKIES_TOS_ASSETS_BUCKET", "cookies-assets"),
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
+		Provider: Provider{
+			ImageAdapter: valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
+			ArkImage: ArkImage{
+				APIKey:  valueOr(lookup, "COOKIES_ARK_IMAGE_API_KEY", ""),
+				Model:   valueOr(lookup, "COOKIES_ARK_IMAGE_MODEL", ""),
+				BaseURL: valueOr(lookup, "COOKIES_ARK_IMAGE_BASE_URL", ""),
+			},
+			OpenAIImage: OpenAIImage{
+				APIKey:  valueOr(lookup, "COOKIES_OPENAI_IMAGE_API_KEY", ""),
+				Model:   valueOr(lookup, "COOKIES_OPENAI_IMAGE_MODEL", ""),
+				BaseURL: valueOr(lookup, "COOKIES_OPENAI_IMAGE_BASE_URL", ""),
+			},
+		},
 	}
 
 	identityValues := map[string]string{
@@ -204,6 +238,15 @@ func (c Config) Validate() error {
 	}
 	if c.Scanner.Mode == "clamav" && c.Scanner.Address == "" {
 		return fmt.Errorf("ClamAV scanner requires COOKIES_CLAMAV_ADDRESS")
+	}
+	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" {
+		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, or openai_image")
+	}
+	if c.Provider.ImageAdapter == "ark_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkImage.APIKey) == "" || strings.TrimSpace(c.Provider.ArkImage.Model) == "") {
+		return fmt.Errorf("ark_image is local-only and requires COOKIES_ARK_IMAGE_API_KEY and COOKIES_ARK_IMAGE_MODEL")
+	}
+	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
+		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
 	}
 	if c.Environment == EnvironmentProduction {
 		if c.ObjectStorage.Provider != "tos" {

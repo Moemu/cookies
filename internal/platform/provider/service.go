@@ -144,6 +144,7 @@ type Service struct {
 	VisionAdapter VisionProviderAdapter
 	VisionSources VisionSourceResolver
 	Intake        GeneratedIntakeClient
+	OutputHandles OutputHandleStore
 	NewID         func() (string, error)
 	Now           func() time.Time
 }
@@ -308,6 +309,15 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 	updated, updateErr := s.Store.Update(ctx, record)
 	if updateErr != nil {
 		return contract.ProviderJob{}, nil, updateErr
+	}
+	// Intake has made these bytes durable in Assets. Cache cleanup is best
+	// effort: expiry remains the recovery boundary if the cleanup query fails.
+	if s.OutputHandles != nil {
+		for _, output := range record.Outputs {
+			if output.Status == OutputSucceeded {
+				_ = s.OutputHandles.Delete(ctx, record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID, output.Ref.OutputID)
+			}
+		}
 	}
 	return updated.Job, nil, nil
 }

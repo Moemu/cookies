@@ -88,6 +88,28 @@ func TestRuntimeHandlerFinalizesProviderJobWhenRecoveryIsExhausted(t *testing.T)
 	}
 }
 
+func TestRuntimeHandlerDoesNotRetryUnknownSubmissionOutcome(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 7, 45, 0, 0, time.UTC)
+	record := executableImageJobRecord(now)
+	store := &processingStore{record: record}
+	service := Service{Store: store, ImageAdapter: unknownSubmissionAdapter{}, Now: func() time.Time { return now }}
+	payload, err := json.Marshal(struct {
+		ProviderJobID string `json:"provider_job_id"`
+	}{ProviderJobID: record.Job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = RuntimeHandler(service)(context.Background(), jobruntime.Claim{Job: contract.Job{ID: "execution_job_1", Kind: imageExecutionJobKind, OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID, Status: contract.JobRunning, Cancellable: false, AttemptCount: 1, MaxAttempts: 100, Version: 1, CreatedAt: now, UpdatedAt: now}, Payload: payload, LockOwner: "worker_1"})
+	var executionError jobruntime.ExecutionError
+	if !errors.As(err, &executionError) || executionError.JobError.Code != "MODEL_SUBMISSION_UNKNOWN" {
+		t.Fatalf("handler error = %v, want terminal unknown submission error", err)
+	}
+	if store.record.Job.ProviderStatus != contract.ProviderJobFailed || store.record.Job.Error == nil || store.record.Job.Error.Code != "MODEL_SUBMISSION_UNKNOWN" {
+		t.Fatalf("ProviderJob was not terminally failed: %+v", store.record.Job)
+	}
+}
+
 func providerJobForScheduler(now time.Time) contract.ProviderJob {
 	return contract.ProviderJob{
 		ID: "provider_job_1", Kind: imageJobKind, OrganizationID: "org_1", ProjectID: "project_1",
@@ -99,6 +121,16 @@ func providerJobForScheduler(now time.Time) contract.ProviderJob {
 type schedulerStore struct{ request jobruntime.CreateRequest }
 
 type failingImageAdapter struct{}
+
+type unknownSubmissionAdapter struct{}
+
+func (unknownSubmissionAdapter) Submit(context.Context, ImageGenerationRequest) (ImageSubmission, error) {
+	return ImageSubmission{}, ExecutionError{JobError: contract.JobError{Code: "MODEL_SUBMISSION_UNKNOWN", Message: "unknown", Retryable: false}}
+}
+
+func (unknownSubmissionAdapter) Poll(context.Context, ImageTaskReference) (ImageTaskResult, error) {
+	return ImageTaskResult{}, nil
+}
 
 func (failingImageAdapter) Submit(context.Context, ImageGenerationRequest) (ImageSubmission, error) {
 	return ImageSubmission{}, errors.New("temporary provider outage")

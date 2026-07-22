@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
+import { ProviderJobsPage } from '../features/provider/ProviderJobsPage'
 import { getWorkspaceBootstrap } from '../features/platform/api'
 import type { CurrentIdentity, Project } from '../features/platform/types'
 import { Icon } from './Icon'
@@ -95,7 +96,7 @@ function ModulePlaceholder({ label, description }: { label: string; description:
   return <section className="placeholder-page"><div className="empty-state"><div className="module-mark" aria-hidden="true"><span /><span /><span /><span /></div><h1>{label}工作区</h1><p>{description}</p><p className="empty-state__hint">共享 Shell 已就绪，模块通过真实 URL 独立挂载。</p></div></section>
 }
 
-function ProviderJobsPage() {
+export function LegacyProviderJobsPlaceholder() {
   const projectId = routeProjectId(useLocation().pathname)
   return <section className="placeholder-page"><div className="empty-state"><h1>Provider Jobs</h1><p>Project: {projectId}</p><p className="empty-state__hint">Provider 模块将在此路由挂载生成请求与任务状态。</p></div></section>
 }
