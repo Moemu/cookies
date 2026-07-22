@@ -33,3 +33,10 @@ go.work.sum
 
 # macOS Finder metadata
 .DS_Store
+
+# Frontend dependencies and build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
