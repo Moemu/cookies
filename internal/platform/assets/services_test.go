@@ -153,7 +153,7 @@ type fakeFetcher struct {
 	err      error
 }
 
-func (f fakeFetcher) Open(context.Context, contract.ProviderOutputRef) (io.ReadCloser, contract.OutputMetadata, error) {
+func (f fakeFetcher) Open(context.Context, contract.ProjectRef, contract.ProviderOutputRef) (io.ReadCloser, contract.OutputMetadata, error) {
 	return io.NopCloser(bytes.NewReader(f.data)), f.metadata, f.err
 }
 

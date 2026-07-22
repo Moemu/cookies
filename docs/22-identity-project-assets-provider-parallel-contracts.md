@@ -96,7 +96,7 @@ Gate 2 一次 Intake 只处理一个成功 Provider 输出：
 }
 ```
 
-Assets 通过注入的 Provider Output Fetcher 读取该不透明引用，并重新计算实际 MIME、大小与 SHA-256。Provider 调用 Generated Intake 的 Create/Get 以及 Fetcher 的 `Open` 都必须同时接收受信的 `ProjectRef` 与 `ProviderOutputRef`；Provider 的读取实现必须校验组织、项目、ProviderJob 与 output 归属，不能只凭输出 ID 或请求上下文推断项目范围。
+Assets 通过注入的 Provider Output Fetcher 读取该不透明引用，并重新计算实际 MIME、大小与 SHA-256。Provider 调用 Generated Intake 的 Create/Get 以及 Fetcher 的 `Open` 都必须同时接收受信的 `ProjectRef` 与 `ProviderOutputRef`；Create/Get 还传递原始任务主体，Assets 必须重新授权 Project。Provider 的读取实现必须校验组织、项目、ProviderJob 与 output 归属，不能只凭输出 ID 或请求上下文推断项目范围。
 
 默认幂等键：
 

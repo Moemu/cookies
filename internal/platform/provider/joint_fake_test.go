@@ -45,7 +45,7 @@ type fetchingGeneratedIntake struct {
 	createCalls int
 }
 
-func (i *fetchingGeneratedIntake) Create(ctx context.Context, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, _ contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
+func (i *fetchingGeneratedIntake) Create(ctx context.Context, _ contract.ActorContext, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, _ contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
 	i.createCalls++
 	i.project = project
 	if err := request.Validate(); err != nil {
@@ -66,7 +66,7 @@ func (i *fetchingGeneratedIntake) Create(ctx context.Context, project contract.P
 	}, nil
 }
 
-func (i *fetchingGeneratedIntake) Get(context.Context, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
+func (i *fetchingGeneratedIntake) Get(context.Context, contract.ActorContext, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
 	return assets.GeneratedAssetIntakeResponse{}, fmt.Errorf("fake intake is synchronous")
 }
 

@@ -16,7 +16,7 @@ func TestServiceCreatesQueuedImageProviderJob(t *testing.T) {
 	service := Service{
 		Store:     store,
 		Scheduler: scheduler,
-		NewID:     func() string { return "provider_job_1" },
+		NewID:     func() (string, error) { return "provider_job_1", nil },
 		Now:       func() time.Time { return now },
 	}
 	brandID := contract.BrandID("brand_1")
@@ -57,7 +57,7 @@ func TestServiceCreatesQueuedImageProviderJob(t *testing.T) {
 
 func TestServiceRejectsImageJobForDraftProject(t *testing.T) {
 	t.Parallel()
-	service := Service{Store: &memoryStore{}, NewID: func() string { return "provider_job_1" }}
+	service := Service{Store: &memoryStore{}, NewID: func() (string, error) { return "provider_job_1", nil }}
 	_, _, err := service.CreateImageJob(context.Background(), CreateImageJobRequest{
 		Actor: contract.ActorContext{
 			OrganizationID: "org_1",

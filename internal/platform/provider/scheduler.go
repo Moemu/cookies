@@ -15,6 +15,17 @@ import (
 
 const imageExecutionJobKind = "provider.image.execute"
 
+// NewRuntimeWorker returns the shared worker configuration required for
+// Provider image jobs. The composition root owns its lifecycle and worker ID.
+func NewRuntimeWorker(store jobruntime.Store, service Service) jobruntime.Worker {
+	return jobruntime.Worker{
+		Store: store,
+		Handlers: map[string]jobruntime.Handler{
+			imageExecutionJobKind: RuntimeHandler(service),
+		},
+	}
+}
+
 // ExecutionScheduler is the only Provider seam to the shared durable worker
 // runtime. It schedules a ProviderJob by opaque ID; it never exposes input
 // prompts to the generic job payload.
@@ -27,7 +38,7 @@ type ExecutionScheduler interface {
 // before enqueue completed recoverable without duplicating work.
 type JobRuntimeScheduler struct {
 	Store jobruntime.Store
-	NewID func() string
+	NewID func() (string, error)
 	Now   func() time.Time
 }
 
@@ -50,9 +61,13 @@ func (s JobRuntimeScheduler) Schedule(ctx context.Context, providerJob contract.
 		return err
 	}
 	digest := sha256.Sum256([]byte(providerJob.ID))
+	executionJobID, err := s.NewID()
+	if err != nil {
+		return fmt.Errorf("generate provider execution job ID: %w", err)
+	}
 	_, _, err = s.Store.Enqueue(ctx, jobruntime.CreateRequest{
 		Job: contract.Job{
-			ID:             s.NewID(),
+			ID:             executionJobID,
 			Kind:           imageExecutionJobKind,
 			OrganizationID: providerJob.OrganizationID,
 			ProjectID:      providerJob.ProjectID,

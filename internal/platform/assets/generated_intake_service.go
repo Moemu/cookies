@@ -134,15 +134,20 @@ func (w GeneratedIntakeWorker) ProcessOnce(ctx context.Context, workerID string)
 		failure := contract.JobError{Code: "TENANT_SCOPE_MISMATCH", Message: "worker is not authorized for intake organization", Retryable: false}
 		return true, w.Repository.FailIntake(ctx, intake, failure, now)
 	}
-	if _, err := w.Projects.RequireActiveContext(ctx, w.Actor, intake.ProjectID); err != nil {
+	projectContext, err := w.Projects.RequireActiveContext(ctx, w.Actor, intake.ProjectID)
+	if err != nil {
 		failure := contract.JobError{Code: "PROJECT_NOT_ACTIVE", Message: "project is not active or authorized", Retryable: false}
+		return true, w.Repository.FailIntake(ctx, intake, failure, now)
+	}
+	if projectContext.ProjectContextVersion != intake.Request.Provenance.ProjectContextVersion {
+		failure := contract.JobError{Code: "PROJECT_CONTEXT_STALE", Message: "project context changed after generated intake was accepted", Retryable: false}
 		return true, w.Repository.FailIntake(ctx, intake, failure, now)
 	}
 	if !intake.Request.Output.RetrievalExpiresAt.After(now) {
 		failure := contract.JobError{Code: "PROVIDER_OUTPUT_EXPIRED", Message: "provider output retrieval handle has expired", Retryable: false}
 		return true, w.Repository.FailIntake(ctx, intake, failure, now)
 	}
-	commit, failure := w.fetchAndIngest(ctx, intake)
+	commit, failure := w.fetchAndIngest(ctx, intake, projectContext)
 	if failure != nil {
 		if failure.Retryable && intake.AttemptCount < intake.MaxAttempts {
 			return true, w.Repository.RetryIntake(ctx, intake, *failure, now.Add(retryDelay(intake.AttemptCount)))
@@ -159,9 +164,9 @@ func (w GeneratedIntakeWorker) ProcessOnce(ctx context.Context, workerID string)
 	return true, nil
 }
 
-func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake GeneratedIntake) (AssetCommit, *contract.JobError) {
+func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake GeneratedIntake, projectContext contract.ProjectContext) (AssetCommit, *contract.JobError) {
 	fetchContext, cancelFetch := context.WithDeadline(ctx, intake.Request.Output.RetrievalExpiresAt)
-	reader, metadata, err := w.Fetcher.Open(fetchContext, intake.Request.Output)
+	reader, metadata, err := w.Fetcher.Open(fetchContext, contract.ProjectRef{OrganizationID: intake.OrganizationID, ProjectID: intake.ProjectID, ProjectContextVersion: projectContext.ProjectContextVersion}, intake.Request.Output)
 	if err != nil {
 		cancelFetch()
 		failure := classifyFetchError(err)

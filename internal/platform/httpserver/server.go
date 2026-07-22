@@ -4,16 +4,13 @@
 package httpserver
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -295,8 +292,13 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "IDEMPOTENCY_KEY_INVALID", Message: "A valid Idempotency-Key header is required", RequestID: requestContext.RequestID, Retryable: false})
 		return
 	}
+	requestHash, err := contract.CanonicalJSONHash(body)
+	if err != nil {
+		writeProblem(writer, http.StatusInternalServerError, contract.Error{Code: "REQUEST_CANONICALIZATION_FAILED", Message: "Provider request cannot be processed", RequestID: requestContext.RequestID, Retryable: true})
+		return
+	}
 	job, _, err := s.providerJobs.CreateImageJob(request.Context(), provider.CreateImageJobRequest{
-		Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: canonicalImageJobHash(body),
+		Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: requestHash,
 		ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Input: body.Input,
 	})
 	if errors.Is(err, provider.ErrIdempotencyConflict) {
@@ -326,34 +328,6 @@ func (s *Server) getProviderJob(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeJSON(writer, http.StatusOK, job)
-}
-
-// canonicalImageJobHash is an RFC 8785-compatible serialization for the
-// deliberately narrow image-only request shape: strings and integral values
-// only, with object keys emitted in lexicographic order and HTML escaping off.
-func canonicalImageJobHash(body imageJobCreateBody) string {
-	parts := []string{
-		`"capability":` + canonicalJSONString(body.Capability),
-		`"input":{` + `"height":` + strconv.Itoa(body.Input.Height) + `,"prompt":` + canonicalJSONString(body.Input.Prompt) + `,"width":` + strconv.Itoa(body.Input.Width) + `}`,
-		`"model_alias":` + canonicalJSONString(body.ModelAlias),
-		`"project_context_version":` + strconv.FormatInt(body.ProjectContextVersion, 10),
-	}
-	if body.SourceSystem != "" {
-		parts = append(parts, `"source_system":`+canonicalJSONString(body.SourceSystem))
-	}
-	if body.SourceTaskID != "" {
-		parts = append(parts, `"source_task_id":`+canonicalJSONString(body.SourceTaskID))
-	}
-	digest := sha256.Sum256([]byte("{" + strings.Join(parts, ",") + "}"))
-	return hex.EncodeToString(digest[:])
-}
-
-func canonicalJSONString(value string) string {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	_ = encoder.Encode(value)
-	return strings.TrimSuffix(buffer.String(), "\n")
 }
 
 func (s *Server) notFound(writer http.ResponseWriter, request *http.Request) {

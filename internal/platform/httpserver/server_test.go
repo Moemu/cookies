@@ -12,6 +12,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -171,7 +172,7 @@ func TestCreateImageJobUsesTrustedActorAndResolvedProjectContext(t *testing.T) {
 	server := NewWithDependencies(Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
-		ProjectContexts: staticProjectContexts{context: contract.ProjectContext{
+		Projects: staticProjectManager{context: contract.ProjectContext{
 			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
 		}},
 		ProviderJobs: jobs,
@@ -212,7 +213,7 @@ func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
 	server := NewWithDependencies(Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
-		ProjectContexts: staticProjectContexts{context: contract.ProjectContext{
+		Projects: staticProjectManager{context: contract.ProjectContext{
 			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
 		}},
 		ProviderJobs: jobs,
@@ -229,10 +230,22 @@ func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
 	}
 }
 
-type staticProjectContexts struct{ context contract.ProjectContext }
+type staticProjectManager struct{ context contract.ProjectContext }
 
-func (s staticProjectContexts) ResolveProject(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
+func (s staticProjectManager) GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
 	return s.context, nil
+}
+
+func (staticProjectManager) CreateBrand(context.Context, contract.ActorContext, string) (project.Brand, error) {
+	return project.Brand{}, nil
+}
+
+func (staticProjectManager) CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error) {
+	return project.Project{}, nil
+}
+
+func (staticProjectManager) ListProjects(context.Context, contract.ActorContext) ([]project.Project, error) {
+	return nil, nil
 }
 
 type providerJobStub struct {

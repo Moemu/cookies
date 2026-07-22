@@ -158,14 +158,14 @@ type fakeIntakeClient struct {
 	response assets.GeneratedAssetIntakeResponse
 }
 
-func (c *fakeIntakeClient) Create(_ context.Context, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *fakeIntakeClient) Create(_ context.Context, _ contract.ActorContext, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
 	c.request = request
 	c.key = string(key)
 	c.project = project
 	return c.response, nil
 }
 
-func (c *fakeIntakeClient) Get(context.Context, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *fakeIntakeClient) Get(context.Context, contract.ActorContext, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
 	return c.response, nil
 }
 
@@ -176,12 +176,12 @@ type scriptedIntakeClient struct {
 	getCalls    int
 }
 
-func (c *scriptedIntakeClient) Create(context.Context, contract.ProjectRef, assets.GeneratedAssetIntakeRequest, contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *scriptedIntakeClient) Create(context.Context, contract.ActorContext, contract.ProjectRef, assets.GeneratedAssetIntakeRequest, contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
 	c.createCalls++
 	return c.create, nil
 }
 
-func (c *scriptedIntakeClient) Get(context.Context, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *scriptedIntakeClient) Get(context.Context, contract.ActorContext, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
 	c.getCalls++
 	return c.get, nil
 }

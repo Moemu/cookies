@@ -21,7 +21,10 @@ import (
 	"github.com/shikanon/cookies/internal/platform/database"
 	"github.com/shikanon/cookies/internal/platform/httpserver"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/ids"
+	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 func main() {
@@ -58,15 +61,39 @@ func main() {
 	assetRepository := assets.MySQLRepository{DB: db}
 	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
+	dependencies := httpserver.Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: projectStore,
+		Readiness:         database.Readiness{DB: db},
+		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService,
+	}
+	workerContext, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
+	if cfg.Environment == config.EnvironmentLocal {
+		adapter := provider.NewFakeImageAdapter(nil)
+		runtimeStore := jobruntime.MySQLStore{DB: db}
+		providerService := provider.Service{
+			Store:        provider.MySQLStore{DB: db},
+			Scheduler:    provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
+			ImageAdapter: adapter,
+			Intake:       provider.AssetsIntakeClient{API: intakeService},
+			NewID:        func() (string, error) { return ids.New("providerjob") },
+		}
+		dependencies.ProviderJobs = providerService
+		startWorker(workerContext, "provider-runtime", func(ctx context.Context) (bool, error) {
+			return provider.NewRuntimeWorker(runtimeStore, providerService).RunOnce(ctx, "provider-runtime")
+		})
+		if actor != nil {
+			intakeWorker := assets.GeneratedIntakeWorker{Repository: assetRepository, Projects: projectService, Fetcher: adapter, Upload: *uploadService, Actor: *actor}
+			startWorker(workerContext, "generated-intake", func(ctx context.Context) (bool, error) {
+				return intakeWorker.ProcessOnce(ctx, "generated-intake")
+			})
+		}
+	}
 
 	server := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: httpserver.NewWithDependencies(httpserver.Dependencies{
-			Resolver:          resolver,
-			ProjectAuthorizer: projectStore,
-			Readiness:         database.Readiness{DB: db},
-			Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService,
-		}),
+		Addr:              cfg.HTTPAddr,
+		Handler:           httpserver.NewWithDependencies(dependencies),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -78,6 +105,7 @@ func main() {
 
 	go func() {
 		<-stop
+		stopWorkers()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownContext); err != nil {
@@ -89,6 +117,28 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server stopped unexpectedly: %v", err)
 	}
+}
+
+func startWorker(ctx context.Context, name string, runOnce func(context.Context) (bool, error)) {
+	go func() {
+		for {
+			if err := ctx.Err(); err != nil {
+				return
+			}
+			processed, err := runOnce(ctx)
+			if err != nil {
+				log.Printf("%s worker error: %v", name, err)
+			}
+			if processed && err == nil {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}()
 }
 
 func buildIdentityResolver(cfg config.Config, validator identity.ActorValidator) (identity.Resolver, *contract.ActorContext, error) {

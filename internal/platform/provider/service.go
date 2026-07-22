@@ -131,8 +131,8 @@ type JobStore interface {
 // capability. Its types remain owned by Assets; Provider never receives a
 // database handle or object-storage URL from this interface.
 type GeneratedIntakeClient interface {
-	Create(ctx context.Context, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error)
-	Get(ctx context.Context, project contract.ProjectRef, intakeID string) (assets.GeneratedAssetIntakeResponse, error)
+	Create(ctx context.Context, actor contract.ActorContext, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error)
+	Get(ctx context.Context, actor contract.ActorContext, project contract.ProjectRef, intakeID string) (assets.GeneratedAssetIntakeResponse, error)
 }
 
 // Service is the small application seam used by transport and workers.
@@ -144,7 +144,7 @@ type Service struct {
 	VisionAdapter VisionProviderAdapter
 	VisionSources VisionSourceResolver
 	Intake        GeneratedIntakeClient
-	NewID         func() string
+	NewID         func() (string, error)
 	Now           func() time.Time
 }
 
@@ -165,9 +165,13 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 	if s.Now != nil {
 		now = s.Now
 	}
+	providerJobID, err := s.NewID()
+	if err != nil {
+		return contract.ProviderJob{}, false, fmt.Errorf("generate provider job ID: %w", err)
+	}
 	createdAt := now().UTC()
 	job := contract.ProviderJob{
-		ID:               s.NewID(),
+		ID:               providerJobID,
 		Kind:             imageJobKind,
 		OrganizationID:   request.Actor.OrganizationID,
 		ProjectID:        request.Project.ProjectID,
@@ -242,13 +246,17 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 	if err := projectRef.Validate(); err != nil {
 		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s has invalid project context: %w", jobID, err)
 	}
+	actor := contract.ActorContext{OrganizationID: record.Job.OrganizationID, Principal: record.Principal, Scopes: []contract.Scope{}}
+	if err := actor.Validate(); err != nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s has invalid task principal: %w", jobID, err)
+	}
 	now := s.nowUTC()
 	pending := false
 	for index := range record.Outputs {
 		output := &record.Outputs[index]
 		switch output.Status {
 		case OutputReady:
-			response, createErr := s.Intake.Create(ctx, projectRef, assets.GeneratedAssetIntakeRequest{
+			response, createErr := s.Intake.Create(ctx, actor, projectRef, assets.GeneratedAssetIntakeRequest{
 				ProviderJobID: record.Job.ID,
 				Output:        output.Ref,
 				Provenance: assets.GenerationProvenance{
@@ -271,7 +279,7 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 			output.IntakeID = response.ID
 			applyIntakeResponse(output, response)
 		case OutputIngesting:
-			response, getErr := s.Intake.Get(ctx, projectRef, output.IntakeID)
+			response, getErr := s.Intake.Get(ctx, actor, projectRef, output.IntakeID)
 			if getErr != nil {
 				return record.Job, nil, getErr
 			}

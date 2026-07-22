@@ -15,7 +15,7 @@ func TestJobRuntimeSchedulerEnqueuesOpaqueProviderJobReference(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 7, 0, 0, 0, time.UTC)
 	store := &schedulerStore{}
-	scheduler := JobRuntimeScheduler{Store: store, NewID: func() string { return "execution_job_1" }, Now: func() time.Time { return now }}
+	scheduler := JobRuntimeScheduler{Store: store, NewID: func() (string, error) { return "execution_job_1", nil }, Now: func() time.Time { return now }}
 	job := providerJobForScheduler(now)
 
 	if err := scheduler.Schedule(context.Background(), job); err != nil {
