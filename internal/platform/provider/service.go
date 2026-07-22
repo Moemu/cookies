@@ -131,8 +131,8 @@ type JobStore interface {
 // capability. Its types remain owned by Assets; Provider never receives a
 // database handle or object-storage URL from this interface.
 type GeneratedIntakeClient interface {
-	Create(ctx context.Context, projectID contract.ProjectID, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error)
-	Get(ctx context.Context, projectID contract.ProjectID, intakeID string) (assets.GeneratedAssetIntakeResponse, error)
+	Create(ctx context.Context, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error)
+	Get(ctx context.Context, project contract.ProjectRef, intakeID string) (assets.GeneratedAssetIntakeResponse, error)
 }
 
 // Service is the small application seam used by transport and workers.
@@ -238,13 +238,17 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 	if strings.TrimSpace(record.ProviderCode) == "" || strings.TrimSpace(record.ModelVersion) == "" {
 		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s is missing resolved provider model metadata", jobID)
 	}
+	projectRef := contract.ProjectRef{OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID, ProjectContextVersion: record.ProjectContextVersion}
+	if err := projectRef.Validate(); err != nil {
+		return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s has invalid project context: %w", jobID, err)
+	}
 	now := s.nowUTC()
 	pending := false
 	for index := range record.Outputs {
 		output := &record.Outputs[index]
 		switch output.Status {
 		case OutputReady:
-			response, createErr := s.Intake.Create(ctx, projectID, assets.GeneratedAssetIntakeRequest{
+			response, createErr := s.Intake.Create(ctx, projectRef, assets.GeneratedAssetIntakeRequest{
 				ProviderJobID: record.Job.ID,
 				Output:        output.Ref,
 				Provenance: assets.GenerationProvenance{
@@ -267,7 +271,7 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 			output.IntakeID = response.ID
 			applyIntakeResponse(output, response)
 		case OutputIngesting:
-			response, getErr := s.Intake.Get(ctx, projectID, output.IntakeID)
+			response, getErr := s.Intake.Get(ctx, projectRef, output.IntakeID)
 			if getErr != nil {
 				return record.Job, nil, getErr
 			}

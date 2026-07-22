@@ -59,8 +59,8 @@ func TestServiceCompletesImageJobOnlyAfterIntakeReturnsProjectAsset(t *testing.T
 	if updated.ProviderStatus != contract.ProviderJobSucceeded || updated.ExecutionStatus != contract.JobSucceeded || len(updated.ProjectAssetRefs) != 1 {
 		t.Fatalf("unexpected completed job: %+v", updated)
 	}
-	if intake.key != "provider-job-provider_job_1-output-output_1" || intake.request.Output.OutputID != "output_1" {
-		t.Fatalf("unexpected intake call: key=%q request=%+v", intake.key, intake.request)
+	if intake.key != "provider-job-provider_job_1-output-output_1" || intake.request.Output.OutputID != "output_1" || intake.project.OrganizationID != "org_1" || intake.project.ProjectID != "project_1" || intake.project.ProjectContextVersion != 7 {
+		t.Fatalf("unexpected intake call: key=%q project=%+v request=%+v", intake.key, intake.project, intake.request)
 	}
 }
 
@@ -154,16 +154,18 @@ func (s *processingStore) Update(_ context.Context, record JobRecord) (JobRecord
 type fakeIntakeClient struct {
 	request  assets.GeneratedAssetIntakeRequest
 	key      string
+	project  contract.ProjectRef
 	response assets.GeneratedAssetIntakeResponse
 }
 
-func (c *fakeIntakeClient) Create(_ context.Context, _ contract.ProjectID, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *fakeIntakeClient) Create(_ context.Context, project contract.ProjectRef, request assets.GeneratedAssetIntakeRequest, key contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
 	c.request = request
 	c.key = string(key)
+	c.project = project
 	return c.response, nil
 }
 
-func (c *fakeIntakeClient) Get(context.Context, contract.ProjectID, string) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *fakeIntakeClient) Get(context.Context, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
 	return c.response, nil
 }
 
@@ -174,12 +176,12 @@ type scriptedIntakeClient struct {
 	getCalls    int
 }
 
-func (c *scriptedIntakeClient) Create(context.Context, contract.ProjectID, assets.GeneratedAssetIntakeRequest, contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *scriptedIntakeClient) Create(context.Context, contract.ProjectRef, assets.GeneratedAssetIntakeRequest, contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
 	c.createCalls++
 	return c.create, nil
 }
 
-func (c *scriptedIntakeClient) Get(context.Context, contract.ProjectID, string) (assets.GeneratedAssetIntakeResponse, error) {
+func (c *scriptedIntakeClient) Get(context.Context, contract.ProjectRef, string) (assets.GeneratedAssetIntakeResponse, error) {
 	c.getCalls++
 	return c.get, nil
 }
