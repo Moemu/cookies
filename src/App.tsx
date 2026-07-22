@@ -18,12 +18,12 @@ export default function App() {
   }, [route.projectId, selectProject])
 
   const changeSystem = (next: SystemKey) => navigate(projectPath(currentProject.id, next))
-  const openProject = (projectId: string, next: SystemKey = 'strategy', navId = 'home') => {
+  const openProject = (projectId: string, next: SystemKey = 'strategy', navId = 'home', objectId?: string, view?: string) => {
     selectProject(projectId)
-    navigate(projectPath(projectId, next, navId))
+    navigate(projectPath(projectId, next, navId, objectId, view))
   }
 
   return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings/models')} onSystemChange={changeSystem} onProjectChange={openProject} onNavChange={id => navigate(projectPath(currentProject.id, system.key, id))}>
-    {route.isModelSettings ? <ModelSettingsPage/> : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject}/> : navItem.id === 'home' ? <DashboardPage system={system} onSystemChange={changeSystem}/> : <ModulePage key={`${system.key}-${navItem.id}`} system={system} item={navItem}/>}
+    {route.isModelSettings ? <ModelSettingsPage/> : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject}/> : navItem.id === 'home' ? <DashboardPage system={system} onSystemChange={changeSystem} onOpenProject={openProject}/> : <ModulePage key={`${system.key}-${navItem.id}`} system={system} item={navItem} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>}
   </Shell>
 }
