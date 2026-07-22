@@ -145,6 +145,46 @@ func normalizeReadyOutputs(record JobRecord, refs []contract.ProviderOutputRef) 
 	return outputs, nil
 }
 
+// FailImageJobAfterExecutionExhausted moves the public ProviderJob to a
+// terminal state when its shared runtime has exhausted recovery attempts.
+// Any already-ingested output is retained, so the final state can truthfully
+// be partially_succeeded rather than discarding durable project assets.
+func (s Service) FailImageJobAfterExecutionExhausted(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, error) {
+	if s.Store == nil {
+		return contract.ProviderJob{}, fmt.Errorf("provider job store is required")
+	}
+	record, err := s.Store.Get(ctx, organizationID, projectID, jobID)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	if isProviderTerminal(record.Job.ProviderStatus) {
+		return record.Job, nil
+	}
+	now := s.nowUTC()
+	problem := &contract.JobError{Code: "PROVIDER_EXECUTION_EXHAUSTED", Message: "Provider job exceeded its recovery attempt limit", Retryable: false}
+	if len(record.Outputs) == 0 {
+		record.Job.ExecutionStatus = contract.JobFailed
+		record.Job.ProviderStatus = contract.ProviderJobFailed
+		record.Job.Progress = 100
+		record.Job.Error = problem
+		record.Job.UpdatedAt = now
+	} else {
+		for index := range record.Outputs {
+			if record.Outputs[index].Status == OutputReady || record.Outputs[index].Status == OutputIngesting {
+				errCopy := *problem
+				record.Outputs[index].Status = OutputFailed
+				record.Outputs[index].Error = &errCopy
+			}
+		}
+		finalizeImageJob(&record.Job, record.Outputs, now)
+	}
+	updated, err := s.Store.Update(ctx, record)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	return updated.Job, nil
+}
+
 func deferAt(now time.Time) *time.Time {
 	deferred := now.Add(providerPollDelay)
 	return &deferred

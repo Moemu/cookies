@@ -87,11 +87,24 @@ func RuntimeHandler(service Service) jobruntime.Handler {
 		}
 		_, deferredUntil, err := service.ExecuteImageJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID)
 		if err != nil {
+			if claim.Job.AttemptCount >= claim.Job.MaxAttempts {
+				return exhaustedProviderExecution(service, ctx, claim, payload.ProviderJobID)
+			}
 			return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: time.Now().UTC().Add(providerPollDelay)}
 		}
 		if deferredUntil != nil {
+			if claim.Job.AttemptCount >= claim.Job.MaxAttempts {
+				return exhaustedProviderExecution(service, ctx, claim, payload.ProviderJobID)
+			}
 			return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: *deferredUntil}
 		}
 		return jobruntime.Result{}, nil
 	}
+}
+
+func exhaustedProviderExecution(service Service, ctx context.Context, claim jobruntime.Claim, providerJobID string) (jobruntime.Result, error) {
+	if _, err := service.FailImageJobAfterExecutionExhausted(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, providerJobID); err != nil {
+		return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_STATE_UPDATE_FAILED", Message: "Provider job could not be finalized after execution exhaustion", Retryable: true}}
+	}
+	return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_EXECUTION_EXHAUSTED", Message: "Provider job exceeded its recovery attempt limit", Retryable: false}}
 }

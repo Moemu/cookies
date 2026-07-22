@@ -49,6 +49,29 @@ func TestWorkerReschedulesDeferredJob(t *testing.T) {
 	}
 }
 
+func TestWorkerFailsDeferredJobAtAttemptLimit(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 1, 5, 0, 0, time.UTC)
+	store := &memoryStore{claim: Claim{Job: contract.Job{ID: "job_3", Kind: "provider.image.execute", OrganizationID: "org_1", Status: contract.JobRunning, CreatedAt: now, UpdatedAt: now, Cancellable: false, AttemptCount: 3, MaxAttempts: 3, Version: 4}, LockOwner: "worker_1"}}
+	worker := Worker{
+		Store: store,
+		Handlers: map[string]Handler{
+			"provider.image.execute": func(context.Context, Claim) (Result, error) {
+				return Result{}, DeferredError{AvailableAt: now.Add(30 * time.Second)}
+			},
+		},
+		Now: func() time.Time { return now },
+	}
+
+	processed, err := worker.RunOnce(context.Background(), "worker_1")
+	if err != nil || !processed || !store.failed || store.rescheduled {
+		t.Fatalf("RunOnce() processed=%v failed=%v rescheduled=%v err=%v", processed, store.failed, store.rescheduled, err)
+	}
+	if store.problem.Code != "JOB_ATTEMPT_LIMIT_EXCEEDED" || store.problem.Retryable {
+		t.Fatalf("failure problem = %+v", store.problem)
+	}
+}
+
 type memoryStore struct {
 	claim       Claim
 	claimed     bool
@@ -56,6 +79,7 @@ type memoryStore struct {
 	failed      bool
 	rescheduled bool
 	availableAt time.Time
+	problem     contract.JobError
 }
 
 func (s *memoryStore) Enqueue(context.Context, CreateRequest) (contract.Job, bool, error) {
@@ -72,8 +96,9 @@ func (s *memoryStore) Succeed(context.Context, Claim, Result, time.Time) error {
 	s.succeeded = true
 	return nil
 }
-func (s *memoryStore) Fail(context.Context, Claim, contract.JobError, time.Time) error {
+func (s *memoryStore) Fail(_ context.Context, _ Claim, problem contract.JobError, _ time.Time) error {
 	s.failed = true
+	s.problem = problem
 	return nil
 }
 func (s *memoryStore) Reschedule(_ context.Context, _ Claim, availableAt time.Time, _ time.Time) error {

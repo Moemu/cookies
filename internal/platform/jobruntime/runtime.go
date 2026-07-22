@@ -114,6 +114,9 @@ func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 		if availableAt.IsZero() || !availableAt.After(w.Now().UTC()) {
 			return true, w.Store.Fail(ctx, claim, contract.JobError{Code: "JOB_DEFER_INVALID", Message: "Job deferral time must be in the future", Retryable: false}, w.Now().UTC())
 		}
+		if claim.Job.AttemptCount >= claim.Job.MaxAttempts {
+			return true, w.Store.Fail(ctx, claim, contract.JobError{Code: "JOB_ATTEMPT_LIMIT_EXCEEDED", Message: "Job reached its maximum execution attempts", Retryable: false}, w.Now().UTC())
+		}
 		return true, w.Store.Reschedule(ctx, claim, availableAt, w.Now().UTC())
 	}
 	var executionError ExecutionError

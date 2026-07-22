@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -35,6 +36,32 @@ func TestJobRuntimeSchedulerEnqueuesOpaqueProviderJobReference(t *testing.T) {
 	}
 }
 
+func TestRuntimeHandlerFinalizesProviderJobWhenRecoveryIsExhausted(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 7, 30, 0, 0, time.UTC)
+	record := executableImageJobRecord(now)
+	store := &processingStore{record: record}
+	service := Service{Store: store, ImageAdapter: failingImageAdapter{}, Now: func() time.Time { return now }}
+	handler := RuntimeHandler(service)
+	payload, err := json.Marshal(struct {
+		ProviderJobID string `json:"provider_job_id"`
+	}{ProviderJobID: record.Job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = handler(context.Background(), jobruntime.Claim{Job: contract.Job{
+		ID: "execution_job_1", Kind: imageExecutionJobKind, OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
+		Status: contract.JobRunning, Cancellable: false, AttemptCount: 100, MaxAttempts: 100, Version: 2, CreatedAt: now, UpdatedAt: now,
+	}, Payload: payload, LockOwner: "worker_1"})
+	var executionError jobruntime.ExecutionError
+	if !errors.As(err, &executionError) || executionError.JobError.Code != "PROVIDER_EXECUTION_EXHAUSTED" {
+		t.Fatalf("handler error = %v, want exhausted execution error", err)
+	}
+	if store.record.Job.ExecutionStatus != contract.JobFailed || store.record.Job.ProviderStatus != contract.ProviderJobFailed || store.record.Job.Error == nil || store.record.Job.Error.Code != "PROVIDER_EXECUTION_EXHAUSTED" {
+		t.Fatalf("ProviderJob was not finalized: %+v", store.record.Job)
+	}
+}
+
 func providerJobForScheduler(now time.Time) contract.ProviderJob {
 	return contract.ProviderJob{
 		ID: "provider_job_1", Kind: imageJobKind, OrganizationID: "org_1", ProjectID: "project_1",
@@ -44,6 +71,16 @@ func providerJobForScheduler(now time.Time) contract.ProviderJob {
 }
 
 type schedulerStore struct{ request jobruntime.CreateRequest }
+
+type failingImageAdapter struct{}
+
+func (failingImageAdapter) Submit(context.Context, ImageGenerationRequest) (ImageSubmission, error) {
+	return ImageSubmission{}, errors.New("temporary provider outage")
+}
+
+func (failingImageAdapter) Poll(context.Context, ImageTaskReference) (ImageTaskResult, error) {
+	return ImageTaskResult{}, errors.New("temporary provider outage")
+}
 
 func (s *schedulerStore) Enqueue(_ context.Context, request jobruntime.CreateRequest) (contract.Job, bool, error) {
 	s.request = request
