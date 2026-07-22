@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
-import { ArrowRight, Check, ChevronDown, CircleCheck, ClipboardCheck, Download, ExternalLink, FileText, Film, Image, Music2, Play, RotateCcw, Save, Scissors, Send, ShieldCheck, Sparkles, Subtitles, ThumbsDown, ThumbsUp, Upload, Video, Volume2, WandSparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Download, ExternalLink, FileText, Film, Image, Music2, Play, RotateCcw, Save, Scissors, Send, ShieldCheck, Sparkles, Subtitles, ThumbsDown, ThumbsUp, Upload, Video, Volume2, WandSparkles } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
+import { useModelConfig } from '../context/ModelConfigContext'
+import { commerceHookTemplates, hookStoryboard } from '../data/commerceHooks'
 import { projectEvidence } from '../data/projects'
 import type { ArtifactKey, DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
@@ -44,7 +46,7 @@ const brandSteps = [
 
 export function VideoCreationPage({ state, activeView, onOpenTask }: { state: DataState, activeView: string, onOpenTask: (id: string) => void }) {
   const { currentProject, updateArtifact } = useProject()
-  const [selected, setSelected] = useState('viral-remake')
+  const [selected, setSelected] = useState('pre-roll')
   const [notice, setNotice] = useState('')
   const category = activeView === '品牌广告' ? 'brand' : activeView === '素材剪辑' ? 'editing' : 'performance'
   const activeMode = performanceModes.find(item => item.id === selected) ?? performanceModes[0]
@@ -58,13 +60,69 @@ export function VideoCreationPage({ state, activeView, onOpenTask }: { state: Da
   const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '沿着 Brief、剧本、资产、广告生成和剪辑的固定路径推进，所有产物均保留来源与确认记录。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={create}><section className="video-creation-workspace">
     <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p></div>{category !== 'editing' ? <button className="primary-button" onClick={create}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
-    {category === 'performance' ? <div className="performance-workflow">
-      <aside className="performance-mode-list"><span className="section-label">四种生成类型</span>{performanceModes.map((mode, index) => <button key={mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => setSelected(mode.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{mode.label}</b><small>{mode.detail}</small></div></button>)}</aside>
+    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => setSelected(mode.id)}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace onNotice={setNotice}/> : <div className="performance-workflow">
+      <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
       <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
-      <aside className="video-job-rail"><span className="section-label">创建前检查</span><h3>任务将继承</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
-    </div> : category === 'brand' ? <div className="brand-workflow"><div className="brand-brief-card"><span className="section-label">品牌广告 · 生产主线</span><h3>{currentProject.artifacts.strategy.version} 已批准</h3><p>{currentProject.artifacts.strategy.summary}</p><div><Sparkles size={17}/><span>所有生成资产、剧本与剪辑版本都保留 Brief 来源与人工确认记录。</span></div></div><ol>{brandSteps.map(([id, title, detail], index) => <li key={id}><span>{id}</span><div><b>{title}</b><p>{detail}</p></div>{index < brandSteps.length - 1 ? <ArrowRight size={16}/> : <WandSparkles size={17}/>}</li>)}</ol></div> : <VideoEditingWorkspace onNotice={setNotice} onCreate={create}/>}
+      <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
+    </div>}</> : category === 'brand' ? <div className="brand-workflow"><div className="brand-brief-card"><span className="section-label">品牌广告 · 生产主线</span><h3>{currentProject.artifacts.strategy.version} 已批准</h3><p>{currentProject.artifacts.strategy.summary}</p><div><Sparkles size={17}/><span>所有生成资产、剧本与剪辑版本都保留 Brief 来源与人工确认记录。</span></div></div><ol>{brandSteps.map(([id, title, detail], index) => <li key={id}><span>{id}</span><div><b>{title}</b><p>{detail}</p></div>{index < brandSteps.length - 1 ? <ArrowRight size={16}/> : <WandSparkles size={17}/>}</li>)}</ol></div> : <VideoEditingWorkspace onNotice={setNotice} onCreate={create}/>} 
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </section></StateBoundary>
+}
+
+function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
+  const { currentProject, updateArtifact } = useProject()
+  const { providers } = useModelConfig()
+  const [selectedId, setSelectedId] = useState(commerceHookTemplates[0].id)
+  const [fidelity, setFidelity] = useState(commerceHookTemplates[0].fidelity)
+  const [camera, setCamera] = useState(commerceHookTemplates[0].camera)
+  const [motion, setMotion] = useState(commerceHookTemplates[0].motion)
+  const [result, setResult] = useState(commerceHookTemplates[0].result)
+  const [previewing, setPreviewing] = useState(false)
+  const selected = commerceHookTemplates.find(item => item.id === selectedId) ?? commerceHookTemplates[0]
+  const configuredProvider = providers.find(provider => provider.status === '已配置')
+
+  useEffect(() => {
+    setFidelity(selected.fidelity)
+    setCamera(selected.camera)
+    setMotion(selected.motion)
+    setResult(selected.result)
+    setPreviewing(false)
+  }, [selected])
+
+  const prompt = `${fidelity} ${camera} ${motion} ${selected.environment} ${result} ${selected.guardrails}`
+  const save = () => {
+    updateArtifact('creative', { status: '制作中', sourceVersion: `策略 ${currentProject.artifacts.strategy.version}`, summary: `广告前贴 · ${selected.name} · ${selected.frameStrategy}` })
+    onNotice(`「${selected.name}」已保存为广告前贴策略草稿，并保留来源版本。`)
+  }
+  const copyPrompt = async () => {
+    try { await navigator.clipboard.writeText(prompt); onNotice('完整视频提示词已复制。') }
+    catch { onNotice('提示词已准备好，请从右侧字段中复制。') }
+  }
+  return <div className="commerce-hook-workspace">
+    <aside className="hook-template-rail">
+      <div className="hook-rail-heading"><span className="section-label">场景策略库</span><b>电商前贴 / 钩子</b><small>学习资料 revision 399</small></div>
+      {commerceHookTemplates.map((template, index) => <button key={template.id} className={selectedId === template.id ? 'active' : ''} onClick={() => setSelectedId(template.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{template.name}</b><small>{template.category} · {template.duration}</small></div></button>)}
+      <a href="https://bytedance.larkoffice.com/wiki/H5uQwNji9iYH0TkNXaxcvFhUn2c" target="_blank" rel="noreferrer"><ExternalLink size={13}/>查看学习来源</a>
+    </aside>
+    <section className="hook-canvas">
+      <div className="hook-canvas-toolbar"><div><span className="source-chip">{selected.frameStrategy}</span><b>{selected.name}</b></div><button onClick={copyPrompt}><ClipboardCheck size={14}/>复制提示词</button></div>
+      <div className="hook-preview-stage">
+        <div className="hook-phone-frame"><img src={selected.image} alt={`${selected.name}${selected.imageLabel}`}/><div className="hook-preview-shade"/><span className="hook-frame-label">{selected.imageLabel}</span><div className="hook-preview-copy"><small>ECOMMERCE HOOK · 9:16</small><b>{selected.hook}</b><span>{selected.duration} · 静音可理解</span></div><button aria-label={previewing ? '暂停钩子预览' : '播放钩子预览'} onClick={() => setPreviewing(value => !value)}><Play size={17} fill="currentColor"/></button></div>
+        <div className="hook-proof"><span className="section-label">策略依据</span><h3>先建立信息缺口，再完成一次清晰变化。</h3><p>一个主动作、一个结果状态、一个稳定的商品定格。环境只提供辅助运动。</p><div>{selected.tags.map(tag => <span key={tag}>{tag}</span>)}</div></div>
+      </div>
+      <div className="hook-storyboard">{hookStoryboard.map((step, index) => <div key={step.time}><span>{step.time}</span><i/><b>{String(index + 1).padStart(2, '0')} · {step.name}</b><small>{step.detail}</small></div>)}</div>
+    </section>
+    <aside className="hook-inspector">
+      <div className="surface-toolbar"><h3>提示词构建器</h3><span>Mock</span></div>
+      <label>商品保真约束<textarea value={fidelity} onChange={event => setFidelity(event.target.value)}/></label>
+      <label>镜头与光影<textarea value={camera} onChange={event => setCamera(event.target.value)}/></label>
+      <label>唯一主动作<textarea value={motion} onChange={event => setMotion(event.target.value)}/></label>
+      <label>结果与停留<textarea value={result} onChange={event => setResult(event.target.value)}/></label>
+      <div className="hook-guardrail"><ShieldCheck size={15}/><span><b>自动附加生成护栏</b><small>{selected.guardrails}</small></span></div>
+      {configuredProvider ? <div className="hook-model"><CircleCheck size={15}/><span><b>{configuredProvider.name}</b><small>{configuredProvider.defaultModel}</small></span></div> : <div className="hook-model missing"><CircleAlert size={15}/><span><b>尚未配置模型</b><small>请在全局“模型与密钥”页面配置后生成。</small></span></div>}
+      <div className="hook-actions"><button className="secondary-button" onClick={save}><Save size={14}/>保存策略</button><button className="primary-button" disabled={!configuredProvider} onClick={() => onNotice(`${selected.name}的 3 镜头分镜已进入生成队列。`)}><WandSparkles size={14}/>生成分镜</button></div>
+    </aside>
+  </div>
 }
 
 function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: string) => void, onCreate: () => void }) {
