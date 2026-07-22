@@ -4,6 +4,7 @@ import { systems, quickActions } from '../data/navigation'
 import { activity, chartPoints, deliveryActions, deliveryDiagnostics, evidence, manhuaMethods, manhuaMix, workItems } from '../data/mock'
 import { unifiedRecords } from '../data/projects'
 import { useProject } from '../context/ProjectContext'
+import { useModelConfig } from '../context/ModelConfigContext'
 import type { DataState, NavItem, SystemDefinition, SystemKey } from '../types'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage } from './SpecializedPages'
@@ -176,13 +177,15 @@ function DeliveryStrategySurface() {
 }
 
 function EditorSurface({ item, activeView }: { item: NavItem; activeView: string }) {
+  const { providers } = useModelConfig()
   const [selected, setSelected] = useState(1)
   const [description, setDescription] = useState('高速主轴切削金属零件的微距镜头，冷白光，真实工业质感。')
   const [notice, setNotice] = useState('')
+  const configuredProvider = providers.find(provider => provider.status === '已配置')
   return <div className="editor-layout">
     <aside className="asset-rail"><div className="surface-toolbar"><h3>结构与素材</h3><button aria-label="新增镜头"><Plus size={15}/></button></div>{['开场：精度的瞬间', '产品与制造过程', '真实应用场景', '品牌主张与 CTA'].map((label, i) => <button className={i === selected ? 'asset-row active' : 'asset-row'} onClick={() => setSelected(i)} key={label}><span>{String(i + 1).padStart(2, '0')}</span><b>{label}</b><small>{i === 1 ? '00:06–00:18' : `${i * 8 + 1} 秒`}</small></button>)}</aside>
     <section className="canvas-area"><div className="canvas-toolbar"><span>{item.label} · v1.2</span><div><button>50%</button><button><Download size={15}/>导出预览</button></div></div><div className="media-canvas"><div className="precision-art"><img src="/assets/white-precision-cnc.png" alt="高精度 CNC 设备加工金属零件"/><div className="art-copy"><small>WHITE PRECISION</small><h2>看得见的精度，<br/>兑现你的创新。</h2><p>±0.01mm · 98%+ 准时交付</p></div></div></div><div className="timeline"><div className="time-ruler">00:00 <span>00:06</span><span>00:12</span><span>00:18</span><span>00:24</span><span>00:30</span></div>{['画面', '字幕', '音乐'].map((track, index) => <div className="track" key={track}><b>{track}</b><span className={`clip clip-${index + 1}`}>{index === 0 ? '精密加工 · 06–18s' : index === 1 ? '品牌主张' : 'Precision Theme.wav'}</span></div>)}</div></section>
-    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">cookies.video-pro v2<ChevronDown size={14}/></button></div><button className="primary-button full" onClick={() => setNotice(`镜头 ${selected + 1} 已进入生成队列`)}>生成选中镜头</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · ${configuredProvider.defaultModel}` : '尚未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请先前往全局“模型与密钥”页面完成配置。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider} onClick={() => setNotice(`镜头 ${selected + 1} 已进入生成队列`)}>生成选中镜头</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div>
 }
 
