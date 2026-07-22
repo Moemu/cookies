@@ -100,6 +100,67 @@ func (s MySQLStore) Fail(ctx context.Context, claim Claim, problem contract.JobE
 	return s.transition(ctx, claim, contract.JobFailed, &problem, nil, nil, nil, now)
 }
 
+// Reschedule releases a running claim for a later attempt. It deliberately
+// keeps the attempt count: an execution attempt already happened and retry
+// policy belongs to the domain handler that selected the next time.
+func (s MySQLStore) Reschedule(ctx context.Context, claim Claim, availableAt time.Time, now time.Time) error {
+	if availableAt.IsZero() || !availableAt.After(now) {
+		return fmt.Errorf("reschedule time must be after now")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
+		SET status = 'queued', available_at = ?, lock_owner = NULL, locked_at = NULL,
+			version = version + 1, updated_at = ?
+		WHERE id = ? AND status = 'running' AND lock_owner = ?`, availableAt, now, claim.Job.ID, claim.LockOwner)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("job %s is no longer owned by worker %s", claim.Job.ID, claim.LockOwner)
+	}
+	return nil
+}
+
+// ReclaimExpired returns abandoned running jobs to the queue. A job whose
+// claim already consumed its last permitted attempt becomes terminal instead
+// of being retried forever.
+func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDuration time.Duration) (LeaseRecovery, error) {
+	if s.DB == nil {
+		return LeaseRecovery{}, fmt.Errorf("MySQL database is required")
+	}
+	if leaseDuration <= 0 {
+		return LeaseRecovery{}, fmt.Errorf("lease duration must be positive")
+	}
+	deadline := now.Add(-leaseDuration)
+	failed, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
+		SET status = 'failed', error_code = 'JOB_LEASE_EXPIRED',
+			error_message = 'Job worker lease expired after maximum attempts', retryable = FALSE,
+			lock_owner = NULL, locked_at = NULL, version = version + 1, updated_at = ?
+		WHERE status = 'running' AND locked_at <= ? AND attempt_count >= max_attempts`, now, deadline)
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	rescheduled, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
+		SET status = 'queued', available_at = ?, lock_owner = NULL, locked_at = NULL,
+			version = version + 1, updated_at = ?
+		WHERE status = 'running' AND locked_at <= ? AND attempt_count < max_attempts`, now, now, deadline)
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	failedCount, err := failed.RowsAffected()
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	rescheduledCount, err := rescheduled.RowsAffected()
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	return LeaseRecovery{Rescheduled: rescheduledCount, Failed: failedCount}, nil
+}
+
 func (s MySQLStore) transition(ctx context.Context, claim Claim, status contract.JobStatus, problem *contract.JobError, resultType, resultID, resultVersion any, now time.Time) error {
 	var code, message any
 	var retryable any

@@ -49,11 +49,25 @@ type Claim struct {
 
 type Result struct{ Ref *contract.ResourceRef }
 
+// LeaseRecovery reports how many abandoned executions became available again
+// and how many exhausted their attempt budget while abandoned.
+type LeaseRecovery struct {
+	Rescheduled int64
+	Failed      int64
+}
+
+// LeaseRecoverer is deliberately separate from Store because recovery is a
+// scheduler concern, not something every request-time store caller needs.
+type LeaseRecoverer interface {
+	ReclaimExpired(ctx context.Context, now time.Time, leaseDuration time.Duration) (LeaseRecovery, error)
+}
+
 type Store interface {
 	Enqueue(ctx context.Context, request CreateRequest) (job contract.Job, duplicate bool, err error)
 	Claim(ctx context.Context, workerID string, now time.Time) (Claim, bool, error)
 	Succeed(ctx context.Context, claim Claim, result Result, now time.Time) error
 	Fail(ctx context.Context, claim Claim, problem contract.JobError, now time.Time) error
+	Reschedule(ctx context.Context, claim Claim, availableAt time.Time, now time.Time) error
 }
 
 type Handler func(ctx context.Context, claim Claim) (Result, error)
@@ -61,6 +75,13 @@ type Handler func(ctx context.Context, claim Claim) (Result, error)
 type ExecutionError struct{ JobError contract.JobError }
 
 func (e ExecutionError) Error() string { return e.JobError.Code }
+
+// DeferredError asks the runtime to release a claimed job and make it
+// available again later. Domain handlers use it for polling and other
+// recoverable waits without incorrectly recording a terminal failure.
+type DeferredError struct{ AvailableAt time.Time }
+
+func (e DeferredError) Error() string { return "job execution deferred" }
 
 type Worker struct {
 	Store    Store
@@ -86,6 +107,14 @@ func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 	result, err := handler(ctx, claim)
 	if err == nil {
 		return true, w.Store.Succeed(ctx, claim, result, w.Now().UTC())
+	}
+	var deferred DeferredError
+	if errors.As(err, &deferred) {
+		availableAt := deferred.AvailableAt.UTC()
+		if availableAt.IsZero() || !availableAt.After(w.Now().UTC()) {
+			return true, w.Store.Fail(ctx, claim, contract.JobError{Code: "JOB_DEFER_INVALID", Message: "Job deferral time must be in the future", Retryable: false}, w.Now().UTC())
+		}
+		return true, w.Store.Reschedule(ctx, claim, availableAt, w.Now().UTC())
 	}
 	var executionError ExecutionError
 	if errors.As(err, &executionError) {

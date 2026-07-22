@@ -72,3 +72,64 @@ func TestMySQLStoreLifecycleIntegration(t *testing.T) {
 		t.Fatalf("unexpected persisted job: status=%q type=%q id=%q version=%d", status, resultType, resultID, resultVersion)
 	}
 }
+
+func TestMySQLStoreReclaimsExpiredLease(t *testing.T) {
+	dsn := os.Getenv("COOKIES_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("COOKIES_TEST_MYSQL_DSN is not configured")
+	}
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatalf("open MySQL: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatalf("ping MySQL: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	jobID := "job_reclaim_" + strings.ReplaceAll(now.Format("20060102150405.000000"), ".", "")
+	request := CreateRequest{
+		Job: contract.Job{
+			ID:             jobID,
+			Kind:           "provider.generate_image",
+			OrganizationID: "org_integration",
+			ProjectID:      "project_integration",
+			Status:         contract.JobQueued,
+			Cancellable:    true,
+			Version:        1,
+			MaxAttempts:    2,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		Payload:        []byte(`{"prompt":"integration test"}`),
+		IdempotencyKey: contract.IdempotencyKey("reclaim-" + string(jobID)),
+		RequestHash:    strings.Repeat("b", 64),
+	}
+	store := MySQLStore{DB: db}
+	if _, _, err := store.Enqueue(t.Context(), request); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM platform_jobs WHERE id = ?", jobID)
+	})
+
+	claim, found, err := store.Claim(t.Context(), "expired-worker", now.Add(time.Second))
+	if err != nil || !found || claim.Job.ID != jobID {
+		t.Fatalf("claim = (%+v, found=%t, err=%v)", claim, found, err)
+	}
+
+	recovery, err := store.ReclaimExpired(t.Context(), now.Add(2*time.Minute), time.Minute)
+	if err != nil || recovery.Rescheduled != 1 || recovery.Failed != 0 {
+		t.Fatalf("reclaim = (%+v, err=%v)", recovery, err)
+	}
+
+	var status string
+	if err := db.QueryRowContext(t.Context(), "SELECT status FROM platform_jobs WHERE id = ?", jobID).Scan(&status); err != nil {
+		t.Fatalf("read recovered job: %v", err)
+	}
+	if status != string(contract.JobQueued) {
+		t.Fatalf("status after reclaim = %q, want %q", status, contract.JobQueued)
+	}
+}
