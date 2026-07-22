@@ -41,7 +41,7 @@ func TestServiceCreatesQueuedImageProviderJob(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("CreateImageJob() duplicate=%v err=%v", duplicate, err)
 	}
-	if job.ID != "provider_job_1" || job.Kind != "provider.image.generate" || job.ExecutionStatus != contract.JobQueued || job.ProviderStatus != contract.ProviderJobSubmitted {
+	if job.ID != "provider_job_1" || job.Kind != "provider.image.generate" || job.ExecutionStatus != contract.JobQueued || job.ProviderStatus != contract.ProviderJobSubmitted || job.MaxAttempts != imageExecutionMaxAttempts {
 		t.Fatalf("unexpected job: %+v", job)
 	}
 	if job.ProjectID != "project_1" || job.OrganizationID != "org_1" || job.ProjectAssetRefs == nil {

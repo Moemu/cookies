@@ -49,11 +49,12 @@ type Claim struct {
 
 type Result struct{ Ref *contract.ResourceRef }
 
-// LeaseRecovery reports how many abandoned executions became available again
-// and how many exhausted their attempt budget while abandoned.
+// LeaseRecovery reports how many abandoned executions became available again.
+// An expired lease is requeued even at its attempt limit so its domain handler
+// can persist any corresponding public state before the generic worker marks
+// the job terminal.
 type LeaseRecovery struct {
 	Rescheduled int64
-	Failed      int64
 }
 
 // LeaseRecoverer is deliberately separate from Store because recovery is a

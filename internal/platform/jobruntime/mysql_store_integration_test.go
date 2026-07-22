@@ -99,7 +99,7 @@ func TestMySQLStoreReclaimsExpiredLease(t *testing.T) {
 			Status:         contract.JobQueued,
 			Cancellable:    true,
 			Version:        1,
-			MaxAttempts:    2,
+			MaxAttempts:    1,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
@@ -121,7 +121,7 @@ func TestMySQLStoreReclaimsExpiredLease(t *testing.T) {
 	}
 
 	recovery, err := store.ReclaimExpired(t.Context(), now.Add(2*time.Minute), time.Minute)
-	if err != nil || recovery.Rescheduled != 1 || recovery.Failed != 0 {
+	if err != nil || recovery.Rescheduled != 1 {
 		t.Fatalf("reclaim = (%+v, err=%v)", recovery, err)
 	}
 

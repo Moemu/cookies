@@ -180,7 +180,7 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		Progress:         0,
 		ProjectAssetRefs: []contract.ProjectAssetRef{},
 		AttemptCount:     0,
-		MaxAttempts:      3,
+		MaxAttempts:      imageExecutionMaxAttempts,
 		Version:          1,
 		CreatedAt:        createdAt,
 		UpdatedAt:        createdAt,

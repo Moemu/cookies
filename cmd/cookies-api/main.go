@@ -80,8 +80,15 @@ func main() {
 			NewID:        func() (string, error) { return ids.New("providerjob") },
 		}
 		dependencies.ProviderJobs = providerService
+		providerRunner := &jobruntime.RecoveryRunner{
+			Worker:           provider.NewRuntimeWorker(runtimeStore, providerService),
+			Recoverer:        runtimeStore,
+			WorkerID:         "provider-runtime",
+			LeaseDuration:    time.Minute,
+			RecoveryInterval: 30 * time.Second,
+		}
 		startWorker(workerContext, "provider-runtime", func(ctx context.Context) (bool, error) {
-			return provider.NewRuntimeWorker(runtimeStore, providerService).RunOnce(ctx, "provider-runtime")
+			return providerRunner.RunOnce(ctx)
 		})
 		if actor != nil {
 			intakeWorker := assets.GeneratedIntakeWorker{Repository: assetRepository, Projects: projectService, Fetcher: adapter, Upload: *uploadService, Actor: *actor}

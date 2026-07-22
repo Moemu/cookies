@@ -10,6 +10,36 @@ import (
 
 const providerPollDelay = 5 * time.Second
 
+// RecordImageExecutionAttempt mirrors the shared execution attempt budget onto
+// the public ProviderJob. The generic job remains the lease owner; this method
+// makes the provider-facing state truthful for users and operators.
+func (s Service) RecordImageExecutionAttempt(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string, attemptCount, maxAttempts int) (contract.ProviderJob, error) {
+	if s.Store == nil {
+		return contract.ProviderJob{}, fmt.Errorf("provider job store is required")
+	}
+	if attemptCount < 1 || maxAttempts < 1 || attemptCount > maxAttempts {
+		return contract.ProviderJob{}, fmt.Errorf("provider execution attempts are invalid")
+	}
+	record, err := s.Store.Get(ctx, organizationID, projectID, jobID)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	if isProviderTerminal(record.Job.ProviderStatus) {
+		return record.Job, nil
+	}
+	if record.Job.AttemptCount == attemptCount && record.Job.MaxAttempts == maxAttempts {
+		return record.Job, nil
+	}
+	record.Job.AttemptCount = attemptCount
+	record.Job.MaxAttempts = maxAttempts
+	record.Job.UpdatedAt = s.nowUTC()
+	updated, err := s.Store.Update(ctx, record)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	return updated.Job, nil
+}
+
 // ExecuteImageJob advances one durable image job by one external operation.
 // It is safe for retrying workers: the same idempotency key is presented to
 // Submit, and every observed transition is persisted before returning.

@@ -21,7 +21,7 @@ func TestJobRuntimeSchedulerEnqueuesOpaqueProviderJobReference(t *testing.T) {
 	if err := scheduler.Schedule(context.Background(), job); err != nil {
 		t.Fatalf("Schedule() error = %v", err)
 	}
-	if store.request.Job.ID != "execution_job_1" || store.request.Job.Kind != imageExecutionJobKind || store.request.Job.ProjectID != job.ProjectID {
+	if store.request.Job.ID != "execution_job_1" || store.request.Job.Kind != imageExecutionJobKind || store.request.Job.ProjectID != job.ProjectID || store.request.Job.MaxAttempts != job.MaxAttempts {
 		t.Fatalf("unexpected runtime job: %+v", store.request.Job)
 	}
 	if store.request.IdempotencyKey != "provider-execution-provider_job_1" {
@@ -33,6 +33,32 @@ func TestJobRuntimeSchedulerEnqueuesOpaqueProviderJobReference(t *testing.T) {
 	}
 	if len(payload) != 1 || payload["provider_job_id"] != "provider_job_1" {
 		t.Fatalf("runtime payload leaks provider input or has wrong value: %s", store.request.Payload)
+	}
+}
+
+func TestRuntimeHandlerMirrorsExecutionAttemptsToProviderJob(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 7, 15, 0, 0, time.UTC)
+	record := executableImageJobRecord(now)
+	store := &processingStore{record: record}
+	service := Service{Store: store, ImageAdapter: failingImageAdapter{}, Now: func() time.Time { return now }}
+	payload, err := json.Marshal(struct {
+		ProviderJobID string `json:"provider_job_id"`
+	}{ProviderJobID: record.Job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = RuntimeHandler(service)(context.Background(), jobruntime.Claim{Job: contract.Job{
+		ID: "execution_job_1", Kind: imageExecutionJobKind, OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
+		Status: contract.JobRunning, Cancellable: false, AttemptCount: 2, MaxAttempts: 100, Version: 2, CreatedAt: now, UpdatedAt: now,
+	}, Payload: payload, LockOwner: "worker_1"})
+	var deferred jobruntime.DeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("handler error = %v, want deferred execution", err)
+	}
+	if store.record.Job.AttemptCount != 2 || store.record.Job.MaxAttempts != 100 {
+		t.Fatalf("ProviderJob execution attempts were not mirrored: %+v", store.record.Job)
 	}
 }
 

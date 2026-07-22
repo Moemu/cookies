@@ -13,7 +13,10 @@ import (
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 )
 
-const imageExecutionJobKind = "provider.image.execute"
+const (
+	imageExecutionJobKind     = "provider.image.execute"
+	imageExecutionMaxAttempts = 100
+)
 
 // NewRuntimeWorker returns the shared worker configuration required for
 // Provider image jobs. The composition root owns its lifecycle and worker ID.
@@ -74,7 +77,7 @@ func (s JobRuntimeScheduler) Schedule(ctx context.Context, providerJob contract.
 			Status:         contract.JobQueued,
 			Progress:       0,
 			Cancellable:    false,
-			MaxAttempts:    100,
+			MaxAttempts:    providerJob.MaxAttempts,
 			Version:        1,
 			CreatedAt:      createdAt,
 			UpdatedAt:      createdAt,
@@ -99,6 +102,12 @@ func RuntimeHandler(service Service) jobruntime.Handler {
 		}
 		if err := json.Unmarshal(claim.Payload, &payload); err != nil || strings.TrimSpace(payload.ProviderJobID) == "" {
 			return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_JOB_PAYLOAD_INVALID", Message: "Provider execution payload is invalid", Retryable: false}}
+		}
+		if _, err := service.RecordImageExecutionAttempt(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID, claim.Job.AttemptCount, claim.Job.MaxAttempts); err != nil {
+			return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_ATTEMPT_RECORD_FAILED", Message: "Could not record the provider execution attempt", Retryable: true}}
+		}
+		if claim.Job.AttemptCount >= claim.Job.MaxAttempts {
+			return exhaustedProviderExecution(service, ctx, claim, payload.ProviderJobID)
 		}
 		_, deferredUntil, err := service.ExecuteImageJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID)
 		if err != nil {

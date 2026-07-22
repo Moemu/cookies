@@ -124,9 +124,10 @@ func (s MySQLStore) Reschedule(ctx context.Context, claim Claim, availableAt tim
 	return nil
 }
 
-// ReclaimExpired returns abandoned running jobs to the queue. A job whose
-// claim already consumed its last permitted attempt becomes terminal instead
-// of being retried forever.
+// ReclaimExpired returns abandoned running jobs to the queue. It does not mark
+// a job terminal at recovery time: the domain handler must get one final
+// chance to synchronize its public state before Worker applies the attempt
+// policy to a deferred or failed execution.
 func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDuration time.Duration) (LeaseRecovery, error) {
 	if s.DB == nil {
 		return LeaseRecovery{}, fmt.Errorf("MySQL database is required")
@@ -135,22 +136,10 @@ func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDura
 		return LeaseRecovery{}, fmt.Errorf("lease duration must be positive")
 	}
 	deadline := now.Add(-leaseDuration)
-	failed, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
-		SET status = 'failed', error_code = 'JOB_LEASE_EXPIRED',
-			error_message = 'Job worker lease expired after maximum attempts', retryable = FALSE,
-			lock_owner = NULL, locked_at = NULL, version = version + 1, updated_at = ?
-		WHERE status = 'running' AND locked_at <= ? AND attempt_count >= max_attempts`, now, deadline)
-	if err != nil {
-		return LeaseRecovery{}, err
-	}
 	rescheduled, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
 		SET status = 'queued', available_at = ?, lock_owner = NULL, locked_at = NULL,
 			version = version + 1, updated_at = ?
-		WHERE status = 'running' AND locked_at <= ? AND attempt_count < max_attempts`, now, now, deadline)
-	if err != nil {
-		return LeaseRecovery{}, err
-	}
-	failedCount, err := failed.RowsAffected()
+		WHERE status = 'running' AND locked_at <= ?`, now, now, deadline)
 	if err != nil {
 		return LeaseRecovery{}, err
 	}
@@ -158,7 +147,7 @@ func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDura
 	if err != nil {
 		return LeaseRecovery{}, err
 	}
-	return LeaseRecovery{Rescheduled: rescheduledCount, Failed: failedCount}, nil
+	return LeaseRecovery{Rescheduled: rescheduledCount}, nil
 }
 
 func (s MySQLStore) transition(ctx context.Context, claim Claim, status contract.JobStatus, problem *contract.JobError, resultType, resultID, resultVersion any, now time.Time) error {
