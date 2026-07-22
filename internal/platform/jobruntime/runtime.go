@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 var ErrIdempotencyConflict = errors.New("idempotency key was reused with a different request")

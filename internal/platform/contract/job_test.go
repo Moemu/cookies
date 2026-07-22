@@ -33,10 +33,9 @@ func TestJobLifecycleDoesNotReopenTerminalJobs(t *testing.T) {
 	}
 }
 
-func TestJobLifecycleSupportsPartialSuccessAndExpiry(t *testing.T) {
+func TestJobLifecycleRejectsProviderDomainStatuses(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
-	version := int64(1)
 	job := Job{
 		ID:             "job_1",
 		Kind:           "provider.image.generate",
@@ -50,37 +49,13 @@ func TestJobLifecycleSupportsPartialSuccessAndExpiry(t *testing.T) {
 		Version:        2,
 	}
 
-	if !job.CanTransitionTo(JobPartiallySucceeded) || !job.CanTransitionTo(JobExpired) {
-		t.Fatal("running job must support partial success and expiry")
+	if !job.CanTransitionTo(JobSucceeded) || !job.CanTransitionTo(JobFailed) || !job.CanTransitionTo(JobCancelled) {
+		t.Fatal("running job must support only public terminal execution states")
 	}
 
-	job.Status = JobPartiallySucceeded
-	job.ResultRefs = []ResourceRef{{Type: "provider_output", ID: "output_1", Version: &version}}
-	job.Error = &JobError{Code: "MODEL_OUTPUT_PARTIAL", Message: "one output failed", Retryable: true}
-	if err := job.Validate(); err != nil {
-		t.Fatalf("Validate() partial job error = %v", err)
-	}
-	if job.CanTransitionTo(JobRunning) {
-		t.Fatal("partially succeeded job must be terminal")
-	}
-}
-
-func TestPartiallySucceededJobRequiresResultAndSummaryError(t *testing.T) {
-	t.Parallel()
-	now := time.Now().UTC()
-	job := Job{
-		ID:             "job_1",
-		Kind:           "provider.image.generate",
-		OrganizationID: "org_1",
-		ProjectID:      "project_1",
-		Status:         JobPartiallySucceeded,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		MaxAttempts:    1,
-		Version:        1,
-	}
+	job.Status = JobStatus("outputs_ready")
 	if err := job.Validate(); err == nil {
-		t.Fatal("expected partial job without result and error to be rejected")
+		t.Fatal("provider domain status must not be accepted as Job.status")
 	}
 }
 

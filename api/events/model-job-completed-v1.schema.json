@@ -1,14 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kuangyngtao/cookies-integration-mvp/api/events/model-job-completed-v1.schema.json",
+  "$id": "https://github.com/shikanon/cookies/api/events/model-job-completed-v1.schema.json",
   "title": "model.job.completed.v1",
+  "description": "Published only after every referenced asset is durable and visible through Assets.",
   "allOf": [
     { "$ref": "./event-envelope.schema.json" },
     {
       "type": "object",
+      "required": ["event_type", "producer", "project_id", "subject", "data"],
       "properties": {
         "event_type": { "const": "model.job.completed.v1" },
         "producer": { "const": "provider" },
+        "project_id": { "type": "string", "minLength": 1 },
         "subject": {
           "type": "object",
           "required": ["type", "id", "version"],
@@ -21,50 +24,33 @@
         },
         "data": {
           "type": "object",
-          "required": ["status", "capability", "result_refs"],
+          "required": ["status", "capability", "project_asset_refs"],
           "properties": {
-            "status": {
-              "enum": ["succeeded", "partially_succeeded", "failed", "cancelled", "expired"]
-            },
+            "status": { "enum": ["succeeded", "partially_succeeded"] },
             "capability": { "type": "string", "minLength": 1 },
-            "result_refs": {
+            "project_asset_refs": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
-                "required": ["type", "id"],
+                "required": ["project_id", "asset_version"],
                 "properties": {
-                  "type": { "type": "string", "minLength": 1 },
-                  "id": { "type": "string", "minLength": 1 },
-                  "version": { "type": "integer", "minimum": 1 }
+                  "project_id": { "type": "string", "minLength": 1 },
+                  "asset_version": {
+                    "type": "object",
+                    "required": ["asset_id", "version"],
+                    "properties": {
+                      "asset_id": { "type": "string", "minLength": 1 },
+                      "version": { "type": "integer", "minimum": 1 }
+                    },
+                    "additionalProperties": false
+                  }
                 },
                 "additionalProperties": false
               }
-            },
-            "error_code": { "type": "string", "minLength": 1 }
-          },
-          "additionalProperties": false,
-          "allOf": [
-            {
-              "if": {
-                "properties": {
-                  "status": { "enum": ["failed", "partially_succeeded"] }
-                }
-              },
-              "then": { "required": ["error_code"] }
-            },
-            {
-              "if": {
-                "properties": {
-                  "status": { "const": "partially_succeeded" }
-                }
-              },
-              "then": {
-                "properties": {
-                  "result_refs": { "type": "array", "minItems": 1 }
-                }
-              }
             }
-          ]
+          },
+          "additionalProperties": false
         }
       }
     }

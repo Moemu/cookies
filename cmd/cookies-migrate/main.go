@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/config"
-	"github.com/Cecillia803/cookies/internal/platform/database"
-	"github.com/Cecillia803/cookies/internal/platform/migration"
+	"github.com/shikanon/cookies/internal/platform/config"
+	"github.com/shikanon/cookies/internal/platform/database"
+	"github.com/shikanon/cookies/internal/platform/migration"
 )
 
 func main() {

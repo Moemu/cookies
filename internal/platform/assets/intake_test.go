@@ -4,70 +4,68 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-func TestGeneratedAssetIntakeValidatesMultiOutputRequest(t *testing.T) {
+func TestGeneratedAssetIntakeValidatesSingleOpaqueOutput(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
 	request := GeneratedAssetIntakeRequest{
 		ProviderJobID: "job_1",
-		Outputs: []GeneratedOutput{
-			{
-				OutputID:       "output_1",
-				TemporaryURI:   "https://provider.example/output/1",
-				TemporaryUntil: now.Add(time.Hour),
-				MediaType:      "image/png",
-				SizeBytes:      1024,
-				SHA256:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			},
-			{
-				OutputID:       "output_2",
-				TemporaryURI:   "provider://volcengine/task/output-2",
-				TemporaryUntil: now.Add(time.Hour),
-				MediaType:      "image/png",
-				SizeBytes:      2048,
-				SHA256:         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-			},
+		Output: contract.ProviderOutputRef{
+			ProviderCode:       "volcengine",
+			ProviderJobID:      "job_1",
+			OutputID:           "output_1",
+			RetrievalExpiresAt: now.Add(2 * time.Hour),
+			DeclaredMIMEType:   "image/png",
+			DeclaredSizeBytes:  1024,
 		},
 		Provenance: GenerationProvenance{
-			Capability:   "image.generate",
-			ProviderCode: "volcengine",
-			ModelAlias:   "cookies.image.standard",
-			ModelVersion: "image-v1",
-			GeneratedAt:  now,
+			Capability:            "image.generate",
+			ProviderCode:          "volcengine",
+			ModelAlias:            "cookies.image.standard",
+			ModelVersion:          "image-v1",
+			SourceAssetRefs:       []contract.AssetVersionRef{},
+			ProjectContextVersion: 7,
+			GeneratedAt:           now,
 		},
 	}
 	if err := request.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
 
-	request.Outputs[1].OutputID = "output_1"
+	request.Output.ProviderJobID = "job_2"
 	if err := request.Validate(); err == nil {
-		t.Fatal("expected duplicate output IDs to be rejected")
+		t.Fatal("expected mismatched provider job IDs to be rejected")
 	}
 }
 
-func TestGeneratedAssetIntakeRejectsUnsafeOrUnverifiableOutput(t *testing.T) {
+func TestProviderOutputAllowsMissingDeclaredChecksum(t *testing.T) {
 	t.Parallel()
-	output := GeneratedOutput{
-		OutputID:       "output_1",
-		TemporaryURI:   "http://untrusted.example/output",
-		TemporaryUntil: time.Now().UTC().Add(time.Hour),
-		MediaType:      "image/png",
-		SizeBytes:      10,
-		SHA256:         "not-a-digest",
+	output := contract.ProviderOutputRef{
+		ProviderCode:       "volcengine",
+		ProviderJobID:      "job_1",
+		OutputID:           "output_1",
+		RetrievalExpiresAt: time.Now().UTC().Add(2 * time.Hour),
+		DeclaredMIMEType:   "image/png",
+		DeclaredSizeBytes:  10,
+		DeclaredSHA256:     nil,
 	}
-	if err := output.Validate(); err == nil {
-		t.Fatal("expected unsafe output to be rejected")
+	if err := output.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 
-func TestGeneratedAssetIntakeResponseRequiresProjectAssets(t *testing.T) {
+func TestGeneratedAssetIntakeResponseTracksOneProjectAsset(t *testing.T) {
 	t.Parallel()
-	response := GeneratedAssetIntakeResponse{Assets: []contract.ProjectAssetRef{
-		{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "asset_1", Version: 1}},
-	}}
+	projectAsset := contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "asset_1", Version: 1}}
+	response := GeneratedAssetIntakeResponse{
+		ID:              "intake_1",
+		ProviderJobID:   "job_1",
+		OutputID:        "output_1",
+		Status:          GeneratedIntakeSucceeded,
+		ProjectAssetRef: &projectAsset,
+	}
 	if err := response.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}

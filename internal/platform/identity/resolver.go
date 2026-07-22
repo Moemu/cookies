@@ -8,7 +8,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 var ErrUnauthenticated = errors.New("request is not authenticated")
@@ -35,6 +35,9 @@ type StaticResolver struct {
 }
 
 func NewStaticResolver(actor contract.ActorContext) (StaticResolver, error) {
+	if actor.Scopes == nil {
+		actor.Scopes = []contract.Scope{}
+	}
 	if err := actor.Validate(); err != nil {
 		return StaticResolver{}, err
 	}
@@ -53,10 +56,12 @@ func (RejectingProjectAuthorizer) AuthorizeProject(context.Context, contract.Act
 
 // StaticProjectAuthorizer is local-development-only support. Production is
 // expected to receive an authorizer backed by the Project module.
-type StaticProjectAuthorizer struct{}
+type StaticProjectAuthorizer struct {
+	ProjectID contract.ProjectID
+}
 
-func (StaticProjectAuthorizer) AuthorizeProject(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) error {
-	if actor.ProjectID != "" && actor.ProjectID == projectID {
+func (a StaticProjectAuthorizer) AuthorizeProject(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) error {
+	if actor.Validate() == nil && a.ProjectID != "" && a.ProjectID == projectID {
 		return nil
 	}
 	return ErrProjectAccessDenied

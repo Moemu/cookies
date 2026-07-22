@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/config"
-	"github.com/Cecillia803/cookies/internal/platform/contract"
-	"github.com/Cecillia803/cookies/internal/platform/database"
-	"github.com/Cecillia803/cookies/internal/platform/httpserver"
-	"github.com/Cecillia803/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/config"
+	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/database"
+	"github.com/shikanon/cookies/internal/platform/httpserver"
+	"github.com/shikanon/cookies/internal/platform/identity"
 )
 
 func main() {
@@ -71,7 +71,7 @@ func main() {
 
 func buildProjectAuthorizer(cfg config.Config) identity.ProjectAuthorizer {
 	if cfg.LocalIdentity != nil {
-		return identity.StaticProjectAuthorizer{}
+		return identity.StaticProjectAuthorizer{ProjectID: contract.ProjectID(cfg.LocalIdentity.ProjectID)}
 	}
 	return identity.RejectingProjectAuthorizer{}
 }
@@ -88,8 +88,7 @@ func buildIdentityResolver(cfg config.Config) (identity.Resolver, error) {
 			Kind: principalKind,
 			ID:   cfg.LocalIdentity.PrincipalID,
 		},
-		ProjectID: contract.ProjectID(cfg.LocalIdentity.ProjectID),
-		Scopes:    contract.ScopesFromStrings(cfg.LocalIdentity.Scopes),
+		Scopes: contract.ScopesFromStrings(cfg.LocalIdentity.Scopes),
 	}
 	return identity.NewStaticResolver(actor)
 }

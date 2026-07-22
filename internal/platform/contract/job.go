@@ -9,13 +9,11 @@ import (
 type JobStatus string
 
 const (
-	JobQueued             JobStatus = "queued"
-	JobRunning            JobStatus = "running"
-	JobSucceeded          JobStatus = "succeeded"
-	JobPartiallySucceeded JobStatus = "partially_succeeded"
-	JobFailed             JobStatus = "failed"
-	JobCancelled          JobStatus = "cancelled"
-	JobExpired            JobStatus = "expired"
+	JobQueued    JobStatus = "queued"
+	JobRunning   JobStatus = "running"
+	JobSucceeded JobStatus = "succeeded"
+	JobFailed    JobStatus = "failed"
+	JobCancelled JobStatus = "cancelled"
 )
 
 type JobError struct {
@@ -88,23 +86,15 @@ func (j Job) Validate() error {
 	if j.Status == JobFailed && (j.Error == nil || strings.TrimSpace(j.Error.Code) == "") {
 		return fmt.Errorf("failed job requires a stable error code")
 	}
-	if j.Status == JobPartiallySucceeded {
-		if j.ResultRef == nil && len(j.ResultRefs) == 0 {
-			return fmt.Errorf("partially succeeded job requires at least one result reference")
-		}
-		if j.Error == nil || strings.TrimSpace(j.Error.Code) == "" {
-			return fmt.Errorf("partially succeeded job requires a stable summary error code")
-		}
-	}
 	return nil
 }
 
 func (j Job) CanTransitionTo(next JobStatus) bool {
 	switch j.Status {
 	case JobQueued:
-		return next == JobRunning || next == JobCancelled || next == JobExpired
+		return next == JobRunning || next == JobCancelled
 	case JobRunning:
-		return next == JobSucceeded || next == JobPartiallySucceeded || next == JobFailed || next == JobCancelled || next == JobExpired
+		return next == JobSucceeded || next == JobFailed || next == JobCancelled
 	default:
 		return false
 	}
@@ -112,7 +102,7 @@ func (j Job) CanTransitionTo(next JobStatus) bool {
 
 func (s JobStatus) valid() bool {
 	switch s {
-	case JobQueued, JobRunning, JobSucceeded, JobPartiallySucceeded, JobFailed, JobCancelled, JobExpired:
+	case JobQueued, JobRunning, JobSucceeded, JobFailed, JobCancelled:
 		return true
 	default:
 		return false

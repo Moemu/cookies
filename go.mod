@@ -1,4 +1,4 @@
-module github.com/Cecillia803/cookies
+module github.com/shikanon/cookies
 
 go 1.26
 

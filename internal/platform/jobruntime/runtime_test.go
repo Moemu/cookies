@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 func TestWorkerClaimsAndCompletesAJob(t *testing.T) {

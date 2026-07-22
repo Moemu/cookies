@@ -1,19 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kuangyngtao/cookies-integration-mvp/api/events/asset-ready-v1.schema.json",
+  "$id": "https://github.com/shikanon/cookies/api/events/asset-ready-v1.schema.json",
   "title": "asset.ready.v1",
   "allOf": [
     { "$ref": "./event-envelope.schema.json" },
     {
       "type": "object",
+      "required": ["event_type", "producer", "project_id", "subject", "data"],
       "properties": {
         "event_type": { "const": "asset.ready.v1" },
         "producer": { "const": "assets" },
+        "project_id": { "type": "string", "minLength": 1 },
         "subject": {
           "type": "object",
           "required": ["type", "id", "version"],
           "properties": {
-            "type": { "const": "asset" },
+            "type": { "const": "asset_version" },
             "id": { "type": "string", "minLength": 1 },
             "version": { "type": "integer", "minimum": 1 }
           },
@@ -21,19 +23,21 @@
         },
         "data": {
           "type": "object",
-          "required": ["media_type", "source_kind"],
+          "required": ["asset_kind", "mime_type", "size_bytes", "source_type"],
           "properties": {
-            "media_type": { "type": "string", "minLength": 1 },
-            "source_kind": { "enum": ["upload", "generated", "imported", "captured"] },
-            "provider_job_id": { "type": "string", "minLength": 1 }
+            "asset_kind": { "enum": ["image", "video", "audio", "document", "text"] },
+            "mime_type": { "type": "string", "minLength": 1 },
+            "size_bytes": { "type": "integer", "minimum": 1 },
+            "source_type": { "enum": ["upload", "provider_generated", "imported", "captured"] },
+            "provider_job_id": { "type": "string", "minLength": 1 },
+            "output_id": { "type": "string", "minLength": 1 }
           },
           "additionalProperties": false,
           "if": {
-            "properties": {
-              "source_kind": { "const": "generated" }
-            }
+            "properties": { "source_type": { "const": "provider_generated" } },
+            "required": ["source_type"]
           },
-          "then": { "required": ["provider_job_id"] }
+          "then": { "required": ["provider_job_id", "output_id"] }
         }
       }
     }

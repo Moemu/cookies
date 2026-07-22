@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/config"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/shikanon/cookies/internal/platform/config"
 )
 
 func Open(ctx context.Context, cfg config.MySQL) (*sql.DB, error) {

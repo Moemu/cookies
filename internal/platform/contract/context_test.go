@@ -2,7 +2,9 @@ package contract
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +17,21 @@ func TestRequestContextRequiresTenantAndPrincipal(t *testing.T) {
 	}
 }
 
+func TestActorContextJSONNeverCarriesProjectID(t *testing.T) {
+	t.Parallel()
+	payload, err := json.Marshal(ActorContext{
+		OrganizationID: "org_1",
+		Principal:      Principal{Kind: PrincipalUser, ID: "usr_1"},
+		Scopes:         []Scope{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "project_id") {
+		t.Fatalf("ActorContext leaked project scope: %s", payload)
+	}
+}
+
 func TestRequestContextRoundTripsThroughContext(t *testing.T) {
 	t.Parallel()
 
@@ -24,7 +41,6 @@ func TestRequestContextRoundTripsThroughContext(t *testing.T) {
 		Actor: ActorContext{
 			OrganizationID: "org_1",
 			Principal:      Principal{Kind: PrincipalUser, ID: "usr_1"},
-			ProjectID:      "project_1",
 			Scopes:         []Scope{"strategy.brief.read"},
 		},
 	}

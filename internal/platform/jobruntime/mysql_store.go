@@ -10,7 +10,7 @@ import (
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 type MySQLStore struct{ DB *sql.DB }

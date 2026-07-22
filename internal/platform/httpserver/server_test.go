@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
-	"github.com/Cecillia803/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/identity"
 )
 
 func TestHealthDoesNotRequireIdentity(t *testing.T) {
@@ -49,11 +49,11 @@ func TestContextFailsClosedWithoutTrustedIdentity(t *testing.T) {
 
 func TestProjectProbeUsesSharedAuthenticationAndAuthorization(t *testing.T) {
 	t.Parallel()
-	resolver, err := identity.NewStaticResolver(contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, ProjectID: "project_1"})
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{}})
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}})
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/context", nil))
 	if response.Code != http.StatusOK {
@@ -72,7 +72,6 @@ func TestContextReturnsTrustedTenantAndTrace(t *testing.T) {
 	resolver, err := identity.NewStaticResolver(contract.ActorContext{
 		OrganizationID: "org_1",
 		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
-		ProjectID:      "project_1",
 		Scopes:         []contract.Scope{"strategy.brief.read"},
 	})
 	if err != nil {

@@ -7,8 +7,8 @@ info:
     identifier: Apache-2.0
   description: >-
     Shared, business-agnostic platform APIs. Vertical systems publish their own
-    contracts under /api/{system}/v1. Organization and project scope are
-    resolved from trusted identity rather than caller-supplied tenant fields.
+    contracts under /api/{system}/v1. Organization scope is resolved from
+    trusted identity. Project scope comes from the path and is re-authorized.
 servers:
   - url: /
     description: Current cookies platform host
@@ -28,7 +28,7 @@ paths:
                 $ref: '#/components/schemas/RequestContext'
         '401':
           $ref: '#/components/responses/Unauthenticated'
-  /platform/v1/projects/{projectID}/context:
+  /platform/v1/projects/{project_id}/context:
     get:
       operationId: getProjectContext
       summary: Verify project access and return the scoped request context.
@@ -51,11 +51,12 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/ProjectAccessDenied'
-  /platform/v1/model/jobs:
+  /platform/v1/projects/{project_id}/model/jobs:
     post:
       operationId: createModelJob
       summary: Create an asynchronous capability-based model job.
       parameters:
+        - $ref: '#/components/parameters/ProjectID'
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
@@ -69,13 +70,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Job'
+                $ref: '#/components/schemas/ProviderJob'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
-  /platform/v1/model/jobs/{job_id}:
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/model/jobs/{job_id}:
     parameters:
+      - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/JobID'
     get:
       operationId: getModelJob
@@ -86,13 +90,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Job'
+                $ref: '#/components/schemas/ProviderJob'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
-  /platform/v1/model/jobs/{job_id}:cancel:
+  /platform/v1/projects/{project_id}/model/jobs/{job_id}:cancel:
     parameters:
+      - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/JobID'
     post:
       operationId: cancelModelJob
@@ -105,23 +110,26 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Job'
+                $ref: '#/components/schemas/ProviderJob'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-  /platform/v1/assets/generated-intakes:
+  /platform/v1/projects/{project_id}/assets/generated-intakes:
     post:
-      operationId: admitGeneratedAssets
-      summary: Admit verified provider outputs into the project asset library.
+      operationId: createGeneratedAssetIntake
+      summary: Start admission of one provider output into the project asset library.
       description: >-
         This is the only route by which provider outputs become durable project
-        assets. The implementation must fetch temporary URIs through an
-        allow-listed provider adapter, verify size and SHA-256, scan the bytes,
-        and persist them before returning ProjectAssetRefs.
+        assets. Assets resolves the opaque ProviderOutputRef through an injected
+        provider adapter, verifies actual size, MIME and SHA-256, scans the
+        bytes, and persists them asynchronously. The request hash is SHA-256 of
+        the RFC 8785 JCS canonical request body. The default idempotency key is
+        provider-job-{provider_job_id}-output-{output_id}.
       parameters:
+        - $ref: '#/components/parameters/ProjectID'
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
@@ -130,8 +138,13 @@ paths:
             schema:
               $ref: '#/components/schemas/GeneratedAssetIntakeRequest'
       responses:
-        '201':
-          description: All supplied outputs were admitted as durable assets.
+        '202':
+          description: The single-output intake was accepted for asynchronous processing.
+          headers:
+            Location:
+              description: Project-scoped URL of the generated intake.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -140,12 +153,34 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
         '409':
           $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IntakeID'
+    get:
+      operationId: getGeneratedAssetIntake
+      summary: Return the current state of a single-output generated intake.
+      responses:
+        '200':
+          description: Current generated intake state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedAssetIntakeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   parameters:
     ProjectID:
-      name: projectID
+      name: project_id
       in: path
       required: true
       schema:
@@ -162,6 +197,13 @@ components:
         pattern: '^[A-Za-z0-9_-]+$'
     JobID:
       name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    IntakeID:
+      name: intake_id
       in: path
       required: true
       schema:
@@ -220,8 +262,6 @@ components:
       properties:
         organization_id:
           type: string
-        project_id:
-          type: string
         principal:
           type: object
           required: [kind, id]
@@ -237,7 +277,7 @@ components:
             type: string
     ModelJobCreateRequest:
       type: object
-      required: [capability, input]
+      required: [capability, input, project_context_version]
       properties:
         capability:
           type: string
@@ -248,6 +288,9 @@ components:
         input:
           type: object
           additionalProperties: true
+        project_context_version:
+          type: integer
+          minimum: 1
         constraints:
           type: object
           additionalProperties: true
@@ -285,10 +328,8 @@ components:
             - queued
             - running
             - succeeded
-            - partially_succeeded
             - failed
             - cancelled
-            - expired
         progress:
           type: integer
           minimum: 0
@@ -321,6 +362,70 @@ components:
           type: integer
           minimum: 1
       additionalProperties: false
+    ProviderJob:
+      type: object
+      required:
+        - id
+        - kind
+        - organization_id
+        - project_id
+        - execution_status
+        - provider_status
+        - progress
+        - project_asset_refs
+        - error
+        - attempt_count
+        - max_attempts
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          minLength: 1
+        kind:
+          type: string
+          minLength: 1
+        organization_id:
+          type: string
+          minLength: 1
+        project_id:
+          type: string
+          minLength: 1
+        execution_status:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        provider_status:
+          type: string
+          enum: [submitted, running, outputs_ready, ingesting, succeeded, partially_succeeded, failed, cancelled, expired]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        project_asset_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectAssetRef'
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/JobError'
+            - type: 'null'
+        attempt_count:
+          type: integer
+          minimum: 0
+        max_attempts:
+          type: integer
+          minimum: 1
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
     JobError:
       type: object
       required: [code, message, retryable]
@@ -346,46 +451,46 @@ components:
       additionalProperties: false
     GeneratedAssetIntakeRequest:
       type: object
-      required: [provider_job_id, outputs, provenance]
+      required: [provider_job_id, output, provenance]
       properties:
         provider_job_id:
           type: string
           minLength: 1
-        outputs:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/components/schemas/GeneratedOutput'
+        output:
+          $ref: '#/components/schemas/ProviderOutputRef'
         provenance:
           $ref: '#/components/schemas/GenerationProvenance'
       additionalProperties: false
-    GeneratedOutput:
+    ProviderOutputRef:
       type: object
       required:
+        - provider_code
+        - provider_job_id
         - output_id
-        - temporary_uri
-        - temporary_until
-        - media_type
-        - size_bytes
-        - sha256
+        - retrieval_expires_at
+        - declared_mime_type
+        - declared_size_bytes
       properties:
+        provider_code:
+          type: string
+          minLength: 1
+        provider_job_id:
+          type: string
+          minLength: 1
         output_id:
           type: string
           minLength: 1
-        temporary_uri:
-          type: string
-          pattern: '^(https|provider)://'
-        temporary_until:
+        retrieval_expires_at:
           type: string
           format: date-time
-        media_type:
+        declared_mime_type:
           type: string
           minLength: 1
-        size_bytes:
+        declared_size_bytes:
           type: integer
           minimum: 1
-        sha256:
-          type: string
+        declared_sha256:
+          type: [string, 'null']
           pattern: '^[0-9a-f]{64}$'
       additionalProperties: false
     GenerationProvenance:
@@ -395,6 +500,8 @@ components:
         - provider_code
         - model_alias
         - model_version
+        - source_asset_refs
+        - project_context_version
         - generated_at
       properties:
         capability:
@@ -406,24 +513,84 @@ components:
         model_version:
           type: string
         prompt_ref:
-          $ref: '#/components/schemas/ResourceRef'
+          oneOf:
+            - $ref: '#/components/schemas/ResourceRef'
+            - type: 'null'
         source_asset_refs:
           type: array
           items:
             $ref: '#/components/schemas/AssetVersionRef'
+        project_context_version:
+          type: integer
+          minimum: 1
         generated_at:
           type: string
           format: date-time
       additionalProperties: false
     GeneratedAssetIntakeResponse:
       type: object
-      required: [assets]
+      required: [id, provider_job_id, output_id, status, project_asset_ref, error]
       properties:
-        assets:
+        id:
+          type: string
+          minLength: 1
+        provider_job_id:
+          type: string
+          minLength: 1
+        output_id:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        project_asset_ref:
+          oneOf:
+            - $ref: '#/components/schemas/ProjectAssetRef'
+            - type: 'null'
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/JobError'
+            - type: 'null'
+      additionalProperties: false
+    ProjectRef:
+      type: object
+      required: [organization_id, project_id, project_context_version]
+      properties:
+        organization_id:
+          type: string
+          minLength: 1
+        project_id:
+          type: string
+          minLength: 1
+        project_context_version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    ProjectContext:
+      type: object
+      required: [organization_id, project_id, brand_id, product_ids, project_context_version]
+      properties:
+        organization_id:
+          type: string
+          minLength: 1
+        project_id:
+          type: string
+          minLength: 1
+        brand_id:
+          type: [string, 'null']
+          minLength: 1
+        product_ids:
           type: array
-          minItems: 1
+          uniqueItems: true
           items:
-            $ref: '#/components/schemas/ProjectAssetRef'
+            type: string
+            minLength: 1
+        brand_guideline_version_id:
+          type: string
+          minLength: 1
+        project_context_version:
+          type: integer
+          minimum: 1
       additionalProperties: false
     AssetVersionRef:
       type: object
@@ -456,6 +623,26 @@ components:
           properties:
             code:
               type: string
+              enum:
+                - UNAUTHENTICATED
+                - ORGANIZATION_ACCESS_DENIED
+                - PROJECT_ACCESS_DENIED
+                - PROJECT_NOT_ACTIVE
+                - SCOPE_REQUIRED
+                - IDEMPOTENCY_CONFLICT
+                - PROVIDER_JOB_NOT_READY
+                - PROVIDER_OUTPUT_EXPIRED
+                - PROVIDER_OUTPUT_UNAVAILABLE
+                - OUTPUT_METADATA_MISMATCH
+                - ASSET_CHECKSUM_MISMATCH
+                - ASSET_QUARANTINED
+                - ASSET_INTAKE_FAILED
+                - ASSET_NOT_READY
+                - RESOURCE_NOT_FOUND
+                - INTERNAL
+                - DEPENDENCY_UNAVAILABLE
+                - IDENTITY_UNAVAILABLE
+                - IDENTITY_CONTEXT_INVALID
             message:
               type: string
             request_id:

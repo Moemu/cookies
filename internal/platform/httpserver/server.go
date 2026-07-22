@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Cecillia803/cookies/internal/platform/contract"
-	"github.com/Cecillia803/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/identity"
 )
 
 type Server struct {
@@ -53,7 +53,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.HandleFunc("GET /healthz", server.health)
 	server.mux.HandleFunc("GET /readyz", server.ready)
 	server.mux.Handle("GET /platform/v1/context", server.requireAuthentication(http.HandlerFunc(server.requestContext)))
-	server.mux.Handle("GET /platform/v1/projects/{projectID}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }
@@ -141,7 +141,7 @@ func (s *Server) requireAuthentication(next http.Handler) http.Handler {
 func (s *Server) requireProject(next http.Handler) http.Handler {
 	return s.requireAuthentication(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requestContext, ok := contract.RequestContextFrom(request.Context())
-		projectID := contract.ProjectID(request.PathValue("projectID"))
+		projectID := contract.ProjectID(request.PathValue("project_id"))
 		if !ok || projectID == "" || s.projectAuthorizer.AuthorizeProject(request.Context(), requestContext.Actor, projectID) != nil {
 			writeProblem(writer, http.StatusForbidden, contract.Error{Code: "PROJECT_ACCESS_DENIED", Message: "当前身份无权访问该项目", RequestID: requestContext.RequestID, Retryable: false})
 			return
@@ -157,7 +157,7 @@ func (s *Server) requestContext(writer http.ResponseWriter, request *http.Reques
 
 func (s *Server) projectContext(writer http.ResponseWriter, request *http.Request) {
 	requestContext, _ := contract.RequestContextFrom(request.Context())
-	writeJSON(writer, http.StatusOK, map[string]any{"request_context": requestContext, "project_id": request.PathValue("projectID")})
+	writeJSON(writer, http.StatusOK, map[string]any{"request_context": requestContext, "project_id": request.PathValue("project_id")})
 }
 
 func (s *Server) notFound(writer http.ResponseWriter, request *http.Request) {

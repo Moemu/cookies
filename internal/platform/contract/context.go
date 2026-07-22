@@ -28,7 +28,6 @@ type Principal struct {
 type ActorContext struct {
 	OrganizationID OrganizationID `json:"organization_id"`
 	Principal      Principal      `json:"principal"`
-	ProjectID      ProjectID      `json:"project_id,omitempty"`
 	Scopes         []Scope        `json:"scopes"`
 }
 
