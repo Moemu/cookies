@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 四大业务系统共用的非业务基础平台 |
-| 文档版本 | v0.5 |
+| 文档版本 | v0.6 |
 | 文档状态 | 草案 |
 | 技术方向 | Golang 平台服务、React 全局壳层、Codex/Skills/Computer Use 运行时 |
 
@@ -129,10 +129,12 @@ cookies 自有业务、Codex Skills、ORAG 和后台任务的模型调用统一�
 
 ### 7.3 核心接口
 
-- `POST /platform/v1/model/invocations`：发起同步或流式模型调用。
-- `POST /platform/v1/model/jobs`：发起图片、视频、音频或 3D 异步生成任务。
-- `GET /platform/v1/model/jobs/{id}`：查询状态、产物、用量、成本和错误。
+- `POST /platform/v1/projects/{project_id}/model/invocations`：发起同步或流式模型调用。
+- `POST /platform/v1/projects/{project_id}/model/jobs`：发起图片、视频、音频或 3D 异步生成任务。
+- `GET /platform/v1/projects/{project_id}/model/jobs/{job_id}`：查询状态、产物、用量、成本和错误。
 - `GET /platform/v1/model/capabilities`：查询当前组织可用能力与限制。
+
+通用执行 Job 只表示排队和执行状态；ProviderJob 另行表示 `submitted`、`outputs_ready`、`ingesting`、`partially_succeeded` 与 `expired` 等模型生成领域阶段。ProviderJob 只有在产物已经由 Assets 形成稳定 `ProjectAssetRef` 后才可成功。
 
 模型 API 的错误、幂等、并发与异步资源遵循 [API 与领域事件契约](./13-api-event-contracts.md)。
 
@@ -332,3 +334,4 @@ MVP 可部署为模块化单体，但包、数据库 Schema、迁移、API 和�
 | v0.3 | 2026-07-20 | 将模型调用统一到 Provider Gateway，默认火山引擎并覆盖 LLM、VLM、图片、视频、音频和 3D |
 | v0.4 | 2026-07-20 | 补充项目品牌域、Agent/Computer Use、媒体与数据平台、API 事件及工程安全基线 |
 | v0.5 | 2026-07-21 | 将 Project 升级为跨四系统上下文根，增加 ProjectResourceIndex 和强制 project_id 边界 |
+| v0.6 | 2026-07-22 | 将模型任务路由收口为 Project-scoped，并明确通用执行 Job 与 ProviderJob 领域状态分离 |

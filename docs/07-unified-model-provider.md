@@ -6,7 +6,7 @@
 | 默认 Provider | 火山引擎 |
 | 默认 Go SDK | [`github.com/volcengine/volcengine-go-sdk/service/arkruntime`](https://github.com/volcengine/volcengine-go-sdk/tree/master/service/arkruntime) |
 | 覆盖能力 | LLM、VLM、图片、视频、音频、3D；内部补充 Embedding、Rerank |
-| 文档版本 | v0.3 |
+| 文档版本 | v0.4 |
 | 文档状态 | 实现基线 |
 
 ## 1. 定位与原则
@@ -150,10 +150,10 @@ flowchart LR
 
 ### 5.2 核心 API
 
-- `POST /platform/v1/model/invocations`：发起同步或流式模型调用。
-- `POST /platform/v1/model/jobs`：发起异步生成任务。
-- `GET /platform/v1/model/jobs/{id}`：查询阶段、进度、产物、用量和标准化错误。
-- `POST /platform/v1/model/jobs/{id}:cancel`：请求取消未完成任务。
+- `POST /platform/v1/projects/{project_id}/model/invocations`：发起同步或流式模型调用。
+- `POST /platform/v1/projects/{project_id}/model/jobs`：发起异步生成任务。
+- `GET /platform/v1/projects/{project_id}/model/jobs/{job_id}`：查询阶段、进度、产物、用量和标准化错误。
+- `POST /platform/v1/projects/{project_id}/model/jobs/{job_id}:cancel`：请求取消未完成任务。
 - `GET /platform/v1/model/capabilities`：查询当前组织可用能力与限制。
 - `GET /platform/v1/model/models`：查询逻辑模型别名；默认不暴露凭据。
 - `GET /platform/v1/model/usage`：按组织、系统、项目、能力和模型聚合用量。
@@ -162,11 +162,15 @@ flowchart LR
 
 ### 5.3 Job 状态
 
-公共 Job 状态为：
+通用执行 Job 状态为：
 
-`queued → running → succeeded | partially_succeeded | failed | cancelled | expired`
+`queued → running → succeeded | failed | cancelled`
 
-`submitted` 是 Provider Adapter 可记录的内部执行阶段，不进入共享 `contract.Job` 状态枚举。多产物通过 `result_refs` 返回；`partially_succeeded` 必须同时包含至少一个成功引用和稳定的汇总错误码。Bootstrap 契约的单值 `result_ref` 仅为兼容保留，新实现不得继续依赖。
+ProviderJob 在通用执行状态之外拥有模型生成领域状态：
+
+`submitted → running → outputs_ready → ingesting → succeeded | partially_succeeded | failed | cancelled | expired`
+
+`submitted`、`outputs_ready`、`ingesting`、`partially_succeeded` 与 `expired` 不进入共享 `contract.Job` 状态枚举。ProviderJob 通过 `project_asset_refs` 返回已正式入库的产物；`partially_succeeded` 必须至少包含一个稳定 `ProjectAssetRef` 和稳定的汇总错误码。Provider 不得在仅取得厂商临时 URL 时宣告成功。
 
 - Provider 外部任务 ID 只保存在平台数据和诊断视图，不作为业务主键。
 - 查询外部状态采用指数退避和抖动；支持官方回调时仍需签名校验与对账轮询。
@@ -269,3 +273,4 @@ ORAG 若暂不支持远程 Provider Gateway，需要在 ORAG 上游实现 `Cooki
 | v0.1 | 2026-07-20 | 建立统一模型 Provider，默认火山引擎，覆盖 LLM、VLM、图片、视频、音频、3D 与 RAG 内部能力 |
 | v0.2 | 2026-07-20 | 接入媒体资产和 API/事件统一契约，明确生成产物的转存与稳定引用 |
 | v0.3 | 2026-07-21 | 收口公共 Job 状态、多产物引用和 Provider 内部提交阶段语义 |
+| v0.4 | 2026-07-22 | 统一为 Project-scoped 模型任务路由，并以双状态 ProviderJob 替代公共 Job 承载生成领域阶段 |
