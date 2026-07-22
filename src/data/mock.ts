@@ -1,16 +1,16 @@
 export const workItems = [
-  { name: '春季新品上市', type: '策略工作区', owner: 'Amelia Meng', status: '待评审', progress: 72, updated: '12 分钟前' },
-  { name: '精密制造品牌片', type: '创意任务', owner: 'Lin Wei', status: '生成中', progress: 58, updated: '31 分钟前' },
-  { name: 'Q2 素材疲劳研究', type: '分析任务', owner: 'Sofia Chen', status: '需处理', progress: 83, updated: '1 小时前' },
-  { name: '线索增长计划 06', type: '投放计划', owner: 'Noah Xu', status: '执行中', progress: 46, updated: '2 小时前' },
-  { name: '华东行业受众研究', type: '研究任务', owner: 'Amelia Meng', status: '已完成', progress: 100, updated: '昨天' },
+  { name: '春季新品上市', type: '策略工作区', owner: 'Amelia Meng', status: '待评审', progress: 82, updated: '2026-07-22 16:30' },
+  { name: '精密制造品牌片', type: '创意任务', owner: 'Lin Wei', status: '生成中', progress: 68, updated: '2026-07-22 13:48' },
+  { name: '证据前置实验分析', type: '分析任务', owner: 'Sofia Chen', status: '需处理', progress: 86, updated: '2026-07-22 15:06' },
+  { name: '销售线索增长计划 06', type: '投放计划', owner: 'Noah Xu', status: '待审批', progress: 82, updated: '2026-07-22 16:30' },
+  { name: '华东行业受众研究', type: '研究任务', owner: 'Amelia Meng', status: '已完成', progress: 100, updated: '2026-07-21 18:40' },
 ]
 
 export const evidence = [
-  { id: '01', title: '行业报告：精密制造市场洞察 2025', source: '艾瑞咨询', confidence: '高', date: '2025-04-28' },
-  { id: '02', title: 'B2B 采购行为调研 2025', source: '项目研究库', confidence: '中', date: '2025-05-06' },
-  { id: '03', title: '竞品网站与信息分析', source: '网页研究任务', confidence: '高', date: '2025-05-11' },
-  { id: '04', title: '客户访谈摘要（10 份）', source: '飞书文档', confidence: '中', date: '2025-05-12' },
+  { id: '01', title: '精密制造行业受众研究', source: '项目研究库', confidence: '高', date: '2026-07-20' },
+  { id: '02', title: '白域精工近 90 天素材表现', source: '广告数据 Connector', confidence: '高', date: '2026-07-22' },
+  { id: '03', title: '证据前置创意实验结论', source: '洞察与经验', confidence: '中', date: '2026-07-22' },
+  { id: '04', title: '采购与研发负责人访谈（10 份）', source: '飞书文档', confidence: '中', date: '2026-07-19' },
 ]
 
 export const activity = [
@@ -21,14 +21,6 @@ export const activity = [
 ]
 
 export const chartPoints = [32, 39, 36, 49, 54, 51, 63, 67, 72, 78, 75, 86]
-
-export const records = [
-  ['WP-2406-18', '春季新品上市', '等待人工确认', 'Amelia Meng', '12 分钟前'],
-  ['CR-2406-42', '精密制造品牌片', '生成中 · 6/10', 'Lin Wei', '31 分钟前'],
-  ['INS-2406-08', 'Q2 素材疲劳研究', '需处理 · 2 项', 'Sofia Chen', '1 小时前'],
-  ['PLAN-2406-03', '线索增长计划 06', '执行中', 'Noah Xu', '2 小时前'],
-  ['BRF-2406-11', '华东行业受众研究', '已完成', 'Amelia Meng', '昨天'],
-]
 
 export const manhuaMix = [
   { name: '动态漫与仿真人', supply: 14, spend: 38.13, signal: '优先补充验证' },
