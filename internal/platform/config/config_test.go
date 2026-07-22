@@ -36,6 +36,9 @@ func TestFromLookupBuildsExplicitLocalIdentity(t *testing.T) {
 	if config.HTTPAddr != "127.0.0.1:8081" || config.LocalIdentity == nil {
 		t.Fatalf("unexpected config: %#v", config)
 	}
+	if config.ObjectStorage.Provider != "filesystem" || config.ObjectStorage.FilesystemRoot != ".data/blobs" {
+		t.Fatalf("unexpected local object storage: %#v", config.ObjectStorage)
+	}
 	if got, want := len(config.LocalIdentity.Scopes), 2; got != want {
 		t.Fatalf("scope count = %d, want %d", got, want)
 	}

@@ -42,8 +42,15 @@ func validateObjectTarget(bucket, key string) error {
 	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
 		return fmt.Errorf("bucket and object key are required")
 	}
-	if len(bucket) > 255 || len(key) > 1024 || strings.Contains(key, "..") || strings.HasPrefix(key, "/") || strings.Contains(key, "\\") {
+	if len(bucket) > 255 || bucket == "." || bucket == ".." || strings.ContainsAny(bucket, "/\\") ||
+		len(key) > 1024 || strings.Contains(key, "..") || strings.HasPrefix(key, "/") || strings.Contains(key, "\\") {
 		return fmt.Errorf("object target is invalid")
+	}
+	for _, character := range bucket {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.') {
+			return fmt.Errorf("bucket contains unsupported characters")
+		}
 	}
 	for _, character := range key {
 		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||

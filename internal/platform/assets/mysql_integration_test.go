@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -103,6 +104,19 @@ func TestMySQLAssetGate2(t *testing.T) {
 	}
 	if len(items) != 2 {
 		t.Fatalf("asset count=%d, want 2", len(items))
+	}
+	if err := uploads.Remove(ctx, actor, projectID, completed.ProjectAssetRef.AssetVersion); err != nil {
+		t.Fatalf("remove uploaded asset: %v", err)
+	}
+	items, err = uploads.List(ctx, actor, projectID, 10)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("asset count after remove=%d err=%v, want 1", len(items), err)
+	}
+	if _, err := uploads.Preview(ctx, actor, projectID, completed.ProjectAssetRef.AssetVersion); !errors.Is(err, assets.ErrNotFound) {
+		t.Fatalf("preview removed asset error=%v, want ErrNotFound", err)
+	}
+	if err := uploads.Remove(ctx, actor, projectID, completed.ProjectAssetRef.AssetVersion); err != nil {
+		t.Fatalf("idempotent remove: %v", err)
 	}
 	other := actor
 	other.OrganizationID = contract.OrganizationID("org_other_" + suffix)

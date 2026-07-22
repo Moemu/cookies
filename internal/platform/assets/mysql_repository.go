@@ -384,6 +384,16 @@ func (r MySQLRepository) ListProjectAssets(ctx context.Context, org contract.Org
 	return result, rows.Err()
 }
 
+func (r MySQLRepository) RemoveProjectAsset(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, ref contract.AssetVersionRef) error {
+	if _, err := r.db(); err != nil {
+		return err
+	}
+	_, err := r.DB.ExecContext(ctx, `UPDATE project_assets SET status='removed'
+		WHERE organization_id=? AND project_id=? AND asset_id=? AND asset_version=? AND status<>'removed'`,
+		org, project, ref.AssetID, ref.Version)
+	return err
+}
+
 const uploadSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, status, original_filename, declared_mime_type, declared_size_bytes, declared_sha256, quarantine_provider, quarantine_bucket, quarantine_object_key, idempotency_key, request_hash, project_context_version, target_asset_id, target_blob_id, request_id, trace_id, asset_id, asset_version, error_code, expires_at, created_at, updated_at FROM upload_sessions`
 const intakeSelect = `SELECT id, organization_id, project_id, provider_job_id, output_id, provider_code, status, request_payload, idempotency_key, request_hash, target_asset_id, target_blob_id, asset_id, asset_version, error_code, error_message, retryable, attempt_count, max_attempts, available_at, lock_owner, request_id, trace_id, created_at, updated_at FROM generated_intakes`
 const projectAssetSelect = `SELECT pa.project_id, pa.created_at, a.id, a.organization_id, a.asset_kind, a.status, a.owner_system, a.latest_version, a.created_at, a.updated_at, av.version, av.status, av.source_type, av.mime_type, av.size_bytes, av.sha256, av.width_pixels, av.height_pixels, av.provider_job_id, av.provider_output_id, av.project_context_version, av.created_at, b.storage_provider, b.bucket_name, b.object_key, b.storage_version_id, b.etag FROM project_assets pa JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version JOIN asset_blobs b ON b.id=av.blob_id`

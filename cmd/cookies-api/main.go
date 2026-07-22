@@ -113,10 +113,16 @@ func buildIdentityResolver(cfg config.Config, validator identity.ActorValidator)
 }
 
 func buildBlobStore(cfg config.Config) (assets.BlobStore, error) {
-	if cfg.ObjectStorage.Provider == "memory" {
+	switch cfg.ObjectStorage.Provider {
+	case "memory":
 		return assets.NewMemoryBlobStore(), nil
+	case "filesystem":
+		return assets.NewFilesystemBlobStore(cfg.ObjectStorage.FilesystemRoot)
+	case "tos":
+		return assets.NewTOSBlobStore(assets.TOSConfig{Endpoint: cfg.ObjectStorage.Endpoint, Region: cfg.ObjectStorage.Region, AccessKey: cfg.ObjectStorage.AccessKey, SecretKey: cfg.ObjectStorage.SecretKey, SecurityToken: cfg.ObjectStorage.SecurityToken})
+	default:
+		return nil, errors.New("unsupported object storage provider")
 	}
-	return assets.NewTOSBlobStore(assets.TOSConfig{Endpoint: cfg.ObjectStorage.Endpoint, Region: cfg.ObjectStorage.Region, AccessKey: cfg.ObjectStorage.AccessKey, SecretKey: cfg.ObjectStorage.SecretKey, SecurityToken: cfg.ObjectStorage.SecurityToken})
 }
 
 func buildScanner(cfg config.Config) assets.ContentScanner {

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Link, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
+import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
 import { getWorkspaceBootstrap } from '../features/platform/api'
 import type { CurrentIdentity, Project } from '../features/platform/types'
+import { NewProjectDialog } from '../features/projects/NewProjectDialog'
 import { Icon } from './Icon'
 import { adminModule, shellModules } from './modules'
 
@@ -14,10 +16,12 @@ function routeProjectId(pathname: string) {
 
 export function Workspace() {
   const location = useLocation()
+  const navigate = useNavigate()
   const projectId = routeProjectId(location.pathname)
   const moduleKey = location.pathname.startsWith('/projects/') ? 'creative' : location.pathname.split('/')[1]
   const activeModule = modules.find(({ key }) => key === moduleKey) ?? shellModules[0]
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [identity, setIdentity] = useState<CurrentIdentity | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [bootstrapError, setBootstrapError] = useState('')
@@ -35,9 +39,6 @@ export function Workspace() {
   }, [])
 
   const currentProject = projects.find((project) => project.id === projectId) ?? projects[0]
-  const projectOptions: Array<Pick<Project, 'id' | 'name' | 'status'>> = projects.length > 0
-    ? projects
-    : [{ id: 'project_demo', name: '示例项目', status: 'active' }]
   const displayName = identity?.user?.display_name || identity?.actor.principal.id || '本地用户'
   const initial = displayName.slice(0, 1).toUpperCase()
 
@@ -63,13 +64,21 @@ export function Workspace() {
               <span className="project-folder" aria-hidden="true" /><span>{currentProject?.name || '选择项目'}</span><span className="chevron" aria-hidden="true">⌄</span>
             </button>
             {projectMenuOpen ? <div className="project-menu" role="menu">
-              {projectOptions.map((project) => (
+              {projects.map((project) => (
                 <Link key={project.id} onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${project.id}/assets`}>
                   <span>{project.name}</span><small>{project.status === 'active' ? '活跃项目' : project.status === 'draft' ? '草稿项目' : '已归档'}</small>
                 </Link>
               ))}
+              {projects.length === 0 ? <p className="project-menu__empty">还没有项目</p> : null}
               <div className="project-menu__divider" />
-              <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject?.id || 'project_demo'}/provider-jobs`}>Provider Jobs</Link>
+              <button className="project-menu__create" onClick={() => {
+                setProjectMenuOpen(false)
+                setProjectDialogOpen(true)
+              }} role="menuitem" type="button">
+                <svg aria-hidden="true" fill="none" height="18" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" viewBox="0 0 24 24" width="18"><path d="M12 5v14M5 12h14" /></svg>
+                <span>新建项目</span>
+              </button>
+              {currentProject ? <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/provider-jobs`}>Provider Jobs</Link> : null}
             </div> : null}
           </div>
           <div className="identity-summary" title={identity?.organization.name || ''}>
@@ -81,12 +90,22 @@ export function Workspace() {
         {bootstrapError ? <div className="workspace-alert" role="status">身份与项目列表暂不可用：{bootstrapError}</div> : null}
         <main className="workspace" aria-live="polite">
           <Routes>
-            <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage />} />
+            <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
+            <Route path="/admin" element={<IdentityOrganizationPage identity={identity} projects={projects} />} />
             <Route path="*" element={<ModulePlaceholder label={activeModule.label} description={activeModule.description} />} />
           </Routes>
         </main>
       </div>
+      <NewProjectDialog
+        onClose={() => setProjectDialogOpen(false)}
+        onCreated={(project) => {
+          setProjects((current) => [...current, project])
+          setProjectDialogOpen(false)
+          navigate(`/projects/${project.id}/assets`)
+        }}
+        open={projectDialogOpen}
+      />
     </div>
   )
 }

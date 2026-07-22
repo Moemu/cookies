@@ -207,6 +207,9 @@ func (s UploadService) Preview(ctx context.Context, actor contract.ActorContext,
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return SignedRequest{}, err
 	}
+	if err := ref.Validate(); err != nil {
+		return SignedRequest{}, err
+	}
 	asset, err := s.Repository.GetProjectAsset(ctx, actor.OrganizationID, projectID, ref)
 	if err != nil {
 		return SignedRequest{}, err
@@ -215,6 +218,45 @@ func (s UploadService) Preview(ctx context.Context, actor contract.ActorContext,
 		return SignedRequest{}, ErrAssetNotReady
 	}
 	return s.Blobs.SignGet(ctx, asset.Version.Blob, s.previewTTL())
+}
+
+// OpenPreview re-authorizes the project relationship before streaming local
+// content. It is used only when the configured blob store cannot issue an
+// externally reachable signed URL.
+func (s UploadService) OpenPreview(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, ObjectInfo, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	asset, err := s.Repository.GetProjectAsset(ctx, actor.OrganizationID, projectID, ref)
+	if err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	if asset.Version.Status != AssetReady {
+		return nil, ObjectInfo{}, ErrAssetNotReady
+	}
+	reader, info, err := s.Blobs.Open(ctx, asset.Version.Blob)
+	if err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	if info.SizeBytes != asset.Version.SizeBytes {
+		reader.Close()
+		return nil, ObjectInfo{}, ErrOutputMetadataMismatch
+	}
+	info.MIMEType = asset.Version.MIMEType
+	return reader, info, nil
+}
+
+func (s UploadService) Remove(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) error {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return err
+	}
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	return s.Repository.RemoveProjectAsset(ctx, actor.OrganizationID, projectID, ref)
 }
 
 func (s UploadService) ingestStoredObject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, assetID contract.AssetID, blobID string, projectContextVersion int64, source contract.AssetSourceType, sourceLocation ObjectLocation, providerJobID, providerOutputID, traceID string) (AssetCommit, error) {

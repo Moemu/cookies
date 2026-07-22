@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -205,8 +206,63 @@ func (s *Server) previewAsset(w http.ResponseWriter, r *http.Request) {
 		s.writeServiceError(w, r, err)
 		return
 	}
+	if value.URL == "" {
+		value.URL = fmt.Sprintf("/platform/v1/projects/%s/assets/%s/versions/%d/content",
+			url.PathEscape(r.PathValue("project_id")), url.PathEscape(r.PathValue("asset_id")), version)
+	}
 	writerHeaderNoStore(w)
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) assetContent(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	version, err := strconv.ParseInt(r.PathValue("version"), 10, 64)
+	if err != nil || version < 1 {
+		s.badRequest(w, r, fmt.Errorf("version must be positive"))
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	reader, info, err := s.uploads.OpenPreview(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), contract.AssetVersionRef{
+		AssetID: contract.AssetID(r.PathValue("asset_id")),
+		Version: version,
+	})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	defer reader.Close()
+
+	writerHeaderNoStore(w)
+	w.Header().Set("Content-Type", info.MIMEType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.SizeBytes, 10))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, reader)
+}
+
+func (s *Server) removeAsset(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	version, err := strconv.ParseInt(r.PathValue("version"), 10, 64)
+	if err != nil || version < 1 {
+		s.badRequest(w, r, fmt.Errorf("version must be positive"))
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	err = s.uploads.Remove(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), contract.AssetVersionRef{
+		AssetID: contract.AssetID(r.PathValue("asset_id")),
+		Version: version,
+	})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) createGeneratedIntake(w http.ResponseWriter, r *http.Request) {

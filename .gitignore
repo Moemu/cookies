@@ -33,6 +33,9 @@ web/dist/
 web/.vite/
 *.tsbuildinfo
 
+# Local persistent object storage
+.data/
+
 # Editor/IDE
 # .idea/
 # .vscode/
