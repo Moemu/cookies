@@ -27,7 +27,9 @@ func TestMySQLStoreUsesProviderIdempotencyScope(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	store := MySQLStore{DB: db}
-	record := testJobRecord(now, "provider_job_store_1")
+	testID := strings.ReplaceAll(now.Format("20060102150405.000000"), ".", "")
+	record := testJobRecord(now, "provider_job_store_"+testID)
+	record.IdempotencyKey = contract.IdempotencyKey("provider-store-" + testID)
 	created, duplicate, err := store.Create(t.Context(), record)
 	if err != nil || duplicate || created.Job.ID != record.Job.ID {
 		t.Fatalf("Create() = (%+v, duplicate=%v, err=%v)", created, duplicate, err)

@@ -1,11 +1,14 @@
-// Package config owns process configuration validation. Configuration values
-// are injected through the environment; secrets are intentionally not read
-// from files in this bootstrap.
+// Package config owns process configuration validation. Configuration comes
+// from the process environment; local development may use an ignored .env as
+// a fallback, while deployed environments never read that file.
 package config
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -60,7 +63,72 @@ type MySQL struct {
 }
 
 func Load() (Config, error) {
-	return FromLookup(os.LookupEnv)
+	values, err := localDotEnvValues()
+	if err != nil {
+		return Config{}, err
+	}
+	return FromLookup(func(key string) (string, bool) {
+		if value, ok := os.LookupEnv(key); ok {
+			return value, true
+		}
+		value, ok := values[key]
+		return value, ok
+	})
+}
+
+// localDotEnvValues provides the local `Copy-Item .env.example .env` workflow
+// without ever overriding process environment variables. A process configured
+// as staging or production deliberately ignores the working-directory .env so
+// deployed configuration remains environment/config-center only.
+func localDotEnvValues() (map[string]string, error) {
+	if environment, ok := os.LookupEnv("COOKIES_ENV"); ok && Environment(environment) != EnvironmentLocal {
+		return map[string]string{}, nil
+	}
+	file, err := os.Open(filepath.Clean(".env"))
+	if os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open local .env: %w", err)
+	}
+	defer file.Close()
+	values, err := parseDotEnv(file)
+	if err != nil {
+		return nil, fmt.Errorf("parse local .env: %w", err)
+	}
+	return values, nil
+}
+
+// parseDotEnv supports the constrained dotenv syntax used by .env.example:
+// comments, optional `export`, KEY=VALUE, and single- or double-quoted
+// values. It intentionally does not expand variables, preventing unexpected
+// interpolation of credentials during local startup.
+func parseDotEnv(reader io.Reader) (map[string]string, error) {
+	values := make(map[string]string)
+	scanner := bufio.NewScanner(reader)
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		key, value, found := strings.Cut(line, "=")
+		key = strings.TrimSpace(key)
+		if !found || key == "" {
+			return nil, fmt.Errorf("line %d must use KEY=VALUE", lineNumber)
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+			value = value[1 : len(value)-1]
+		}
+		values[key] = value
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return values, nil
 }
 
 func FromLookup(lookup func(string) (string, bool)) (Config, error) {

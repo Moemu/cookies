@@ -1,6 +1,27 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseDotEnvAcceptsLocalDevelopmentValues(t *testing.T) {
+	t.Parallel()
+	values, err := parseDotEnv(strings.NewReader("# local only\nCOOKIES_MYSQL_DSN='cookies:pass@tcp(127.0.0.1:3307)/cookies?parseTime=true'\nexport COOKIES_HTTP_ADDR=:8080\n"))
+	if err != nil {
+		t.Fatalf("parseDotEnv() error = %v", err)
+	}
+	if values["COOKIES_MYSQL_DSN"] != "cookies:pass@tcp(127.0.0.1:3307)/cookies?parseTime=true" || values["COOKIES_HTTP_ADDR"] != ":8080" {
+		t.Fatalf("unexpected dotenv values: %#v", values)
+	}
+}
+
+func TestParseDotEnvRejectsMalformedLine(t *testing.T) {
+	t.Parallel()
+	if _, err := parseDotEnv(strings.NewReader("COOKIES_ENV\n")); err == nil {
+		t.Fatal("parseDotEnv() error = nil, want malformed line rejection")
+	}
+}
 
 func TestFromLookupRejectsLocalIdentityOutsideLocal(t *testing.T) {
 	t.Parallel()
