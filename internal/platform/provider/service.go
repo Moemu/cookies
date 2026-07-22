@@ -137,12 +137,15 @@ type GeneratedIntakeClient interface {
 
 // Service is the small application seam used by transport and workers.
 type Service struct {
-	Store        JobStore
-	Scheduler    ExecutionScheduler
-	ImageAdapter ImageProviderAdapter
-	Intake       GeneratedIntakeClient
-	NewID        func() string
-	Now          func() time.Time
+	Store         JobStore
+	Scheduler     ExecutionScheduler
+	ImageAdapter  ImageProviderAdapter
+	TextAdapter   TextProviderAdapter
+	VisionAdapter VisionProviderAdapter
+	VisionSources VisionSourceResolver
+	Intake        GeneratedIntakeClient
+	NewID         func() string
+	Now           func() time.Time
 }
 
 func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobRequest) (contract.ProviderJob, bool, error) {

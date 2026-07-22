@@ -1,0 +1,29 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+const fakeTextModelVersion = "fake-text-v1"
+const fakeVisionModelVersion = "fake-vision-v1"
+
+// FakeSyncAdapter supports consumer-contract tests and local wiring. It is
+// deterministic, never calls a network, and never exposes a vendor-shaped
+// response.
+type FakeSyncAdapter struct{}
+
+func (FakeSyncAdapter) GenerateText(_ context.Context, request TextAdapterRequest) (SynchronousResult, error) {
+	if strings.TrimSpace(request.ModelAlias) == "" || len(request.Messages) == 0 {
+		return SynchronousResult{}, fmt.Errorf("fake text request is invalid")
+	}
+	return SynchronousResult{ProviderCode: fakeProviderCode, ModelVersion: fakeTextModelVersion, Text: "Fake text response"}, nil
+}
+
+func (FakeSyncAdapter) UnderstandVision(_ context.Context, request VisionAdapterRequest) (SynchronousResult, error) {
+	if strings.TrimSpace(request.ModelAlias) == "" || len(request.Input.SourceAssets) == 0 || len(request.Sources) != len(request.Input.SourceAssets) {
+		return SynchronousResult{}, fmt.Errorf("fake vision request is invalid")
+	}
+	return SynchronousResult{ProviderCode: fakeProviderCode, ModelVersion: fakeVisionModelVersion, Text: "Fake vision analysis"}, nil
+}

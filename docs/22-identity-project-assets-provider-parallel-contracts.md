@@ -71,7 +71,9 @@ Provider 对外响应同时返回 `execution_status` 与 `provider_status`。仅
 
 ### 当前 Gate 3 的可承诺 API
 
-当前联合闭环只公开 `POST /platform/v1/projects/{project_id}/model/jobs`（`image.generate`）和对应 `GET` 查询。文本、VLM 与其他能力在各自的输入/输出契约评审后再加入，不以宽泛的 `input` 透传占位。
+当前联合闭环只公开 `POST /platform/v1/projects/{project_id}/model/jobs`（`image.generate`）和对应 `GET` 查询。文本与 VLM 已在 Provider 应用层具有明确类型契约和 Fake：文本使用消息数组，VLM 使用同项目的 `ProjectAssetRef`。它们在补齐同步调用的持久化幂等、审计/用量计量后再开放 HTTP，不以宽泛的 `input` 透传占位。
+
+VLM 的真实适配器不得读取 Assets 数据库或存储位置。它通过由 Assets 在组合根注入的 `VisionSourceResolver` 取得已授权、短生命周期的媒体流；该流包含 `ProjectAssetRef` 和 MIME，不包含 bucket、object key、签名 URL 或凭据。Fake VLM 可以使用受控测试流，但不替代这项授权检查。
 
 取消状态仍保留在 ProviderJob 领域模型中，但在持久化取消幂等键、厂商取消适配器及运行中任务补偿策略完成前，`POST ...:cancel` 不作为公开 API。这样不会向调用方承诺一个响应丢失后可能重复扣费或无法对账的取消操作。
 
