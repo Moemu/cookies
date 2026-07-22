@@ -21,6 +21,8 @@ type ImageProviderAdapter interface {
 // invoke an image model. It deliberately contains neither a database handle
 // nor an Asset storage location.
 type ImageGenerationRequest struct {
+	OrganizationID contract.OrganizationID
+	ProjectID      contract.ProjectID
 	ProviderJobID  string
 	ModelAlias     string
 	IdempotencyKey contract.IdempotencyKey
@@ -28,8 +30,8 @@ type ImageGenerationRequest struct {
 }
 
 func (r ImageGenerationRequest) Validate() error {
-	if strings.TrimSpace(r.ProviderJobID) == "" || strings.TrimSpace(r.ModelAlias) == "" {
-		return fmt.Errorf("provider job ID and model alias are required")
+	if strings.TrimSpace(string(r.OrganizationID)) == "" || strings.TrimSpace(string(r.ProjectID)) == "" || strings.TrimSpace(r.ProviderJobID) == "" || strings.TrimSpace(r.ModelAlias) == "" {
+		return fmt.Errorf("organization ID, project ID, provider job ID, and model alias are required")
 	}
 	if err := r.IdempotencyKey.Validate(); err != nil {
 		return err

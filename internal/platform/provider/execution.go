@@ -42,6 +42,7 @@ func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract
 		return contract.ProviderJob{}, nil, fmt.Errorf("image provider adapter is required")
 	}
 	request := ImageGenerationRequest{
+		OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
 		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input,
 	}
 	if err := request.Validate(); err != nil {

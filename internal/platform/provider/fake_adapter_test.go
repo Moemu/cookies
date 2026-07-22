@@ -2,8 +2,12 @@ package provider
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/assets"
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 func TestFakeImageAdapterReturnsOpaqueOutputAfterPolling(t *testing.T) {
@@ -11,7 +15,7 @@ func TestFakeImageAdapterReturnsOpaqueOutputAfterPolling(t *testing.T) {
 	now := time.Date(2026, time.July, 22, 6, 0, 0, 0, time.UTC)
 	adapter := NewFakeImageAdapter(func() time.Time { return now })
 	submission, err := adapter.Submit(context.Background(), ImageGenerationRequest{
-		ProviderJobID: "provider_job_1", ModelAlias: "cookies.image.standard", IdempotencyKey: "fake-image-1",
+		OrganizationID: "org_1", ProjectID: "project_1", ProviderJobID: "provider_job_1", ModelAlias: "cookies.image.standard", IdempotencyKey: "fake-image-1",
 		Input: ImageGenerationInput{Prompt: "launch poster", Width: 1024, Height: 1024},
 	})
 	if err != nil {
@@ -32,5 +36,18 @@ func TestFakeImageAdapterReturnsOpaqueOutputAfterPolling(t *testing.T) {
 	}
 	if err := output.Validate(); err != nil {
 		t.Fatalf("fake output Validate() = %v", err)
+	}
+	var fetcher assets.GeneratedOutputFetcher = adapter
+	stream, metadata, err := fetcher.Open(context.Background(), contract.ProjectRef{OrganizationID: "org_1", ProjectID: "project_1", ProjectContextVersion: 1}, output)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	contents, readErr := io.ReadAll(stream)
+	closeErr := stream.Close()
+	if readErr != nil || closeErr != nil || metadata.SizeBytes != int64(len(contents)) || metadata.MIMEType != "image/png" {
+		t.Fatalf("invalid fake output stream: bytes=%d metadata=%+v read=%v close=%v", len(contents), metadata, readErr, closeErr)
+	}
+	if _, _, err := fetcher.Open(context.Background(), contract.ProjectRef{OrganizationID: "org_1", ProjectID: "other_project", ProjectContextVersion: 1}, output); err == nil {
+		t.Fatal("Open() cross-project error = nil, want rejection")
 	}
 }

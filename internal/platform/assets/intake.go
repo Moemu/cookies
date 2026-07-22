@@ -14,7 +14,7 @@ import (
 // Provider adapter. Implementations must authorize organization, project, job,
 // and output ownership before returning bytes.
 type GeneratedOutputFetcher interface {
-	Open(context.Context, contract.ProviderOutputRef) (io.ReadCloser, contract.OutputMetadata, error)
+	Open(context.Context, contract.ProjectRef, contract.ProviderOutputRef) (io.ReadCloser, contract.OutputMetadata, error)
 }
 
 // GeneratedAssetIntakeRequest admits exactly one successful provider output.
