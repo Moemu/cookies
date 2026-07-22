@@ -7,6 +7,8 @@ export interface AppRoute {
   projectId?: string
   systemKey: SystemKey
   navId: string
+  objectId?: string
+  view?: string
 }
 
 const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'delivery'])
@@ -16,11 +18,12 @@ export function parseRoute(pathname = window.location.pathname): AppRoute {
   if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isModelSettings: true, systemKey: 'strategy', navId: 'home' }
   if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isModelSettings: false, systemKey: 'strategy', navId: 'home' }
   const systemKey = systemKeys.has(parts[2] as SystemKey) ? parts[2] as SystemKey : 'strategy'
-  return { isHome: false, isModelSettings: false, projectId: parts[1], systemKey, navId: parts[3] || 'home' }
+  return { isHome: false, isModelSettings: false, projectId: parts[1], systemKey, navId: parts[3] || 'home', objectId: parts[4], view: new URLSearchParams(window.location.search).get('view') ?? undefined }
 }
 
-export function projectPath(projectId: string, systemKey: SystemKey, navId = 'home') {
-  return `/projects/${projectId}/${systemKey}/${navId}`
+export function projectPath(projectId: string, systemKey: SystemKey, navId = 'home', objectId?: string, view?: string) {
+  const path = `/projects/${projectId}/${systemKey}/${navId}${objectId ? `/${objectId}` : ''}`
+  return view ? `${path}?view=${encodeURIComponent(view)}` : path
 }
 
 export function useAppRoute() {

@@ -31,7 +31,7 @@ export const systems: SystemDefinition[] = [
       { id: 'home', label: '创意工作台', icon: LayoutDashboard, group: '工作', layout: 'dashboard', description: '聚合生产进度、异常、待评审、交付和用量。', views: ['我的任务', '生产进度', '待评审', '最近交付', '用量与质量'] },
       { id: 'tasks', label: '创意任务', icon: ListChecks, group: '工作', layout: 'table', description: '串联策略来源、制作、变体、检查、评审与交付。', views: ['全部', '进行中', '等待输入', '生成中', '待评审', '已完成', '失败', '归档'] },
       { id: 'image-text', label: '图文创作', icon: GalleryHorizontalEnd, group: '创作', layout: 'editor', description: '完成文案、封面、图组、排版、素材和渠道检查。', views: ['小红书', '公众号', '草稿箱', '图文版本'] },
-      { id: 'video', label: '视频创作', icon: Video, group: '创作', layout: 'editor', description: '覆盖品牌广告、效果广告和多轨素材剪辑。', views: ['品牌广告制作', '效果广告制作', '素材剪辑', '视频草稿', '视频版本'] },
+      { id: 'video', label: '视频创作', icon: Video, group: '创作', layout: 'editor', description: '效果广告、品牌广告与素材剪辑三类稳定工作区。', views: ['效果广告', '品牌广告', '素材剪辑'] },
       { id: 'production', label: '制作中心', icon: Aperture, group: '创作', layout: 'operations', description: '管理图片、视频、音频生成与渲染队列。', views: ['图片生成', '视频生成', '音频生成', '渲染队列', '源素材', '失败任务'] },
       { id: 'reviews', label: '评审中心', icon: BadgeCheck, group: '协作与输出', layout: 'workspace', description: '完成品牌、事实、版权、合规与逐帧评审。', views: ['待我评审', '我发起的', '评论与提及', '退回记录', '已完成'] },
       { id: 'deliveries', label: '交付中心', icon: PackageCheck, group: '协作与输出', layout: 'table', description: '生成稳定发布包、投放包和授权清单。', views: ['待交付', '发布包', '投放包', '下载记录', '停用版本'] },

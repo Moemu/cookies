@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
 import { activity, chartPoints, deliveryActions, deliveryDiagnostics, evidence, manhuaMethods, manhuaMix, workItems } from '../data/mock'
@@ -7,8 +7,10 @@ import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { DataState, NavItem, SystemDefinition, SystemKey } from '../types'
 import { TrendChart } from './Icons'
-import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage } from './SpecializedPages'
+import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
+
+type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 
 function Status({ value }: { value: string }) {
   const kind = value.includes('完成') || value.includes('通过') ? 'success' : value.includes('失败') || value.includes('需处理') ? 'danger' : value.includes('生成') || value.includes('执行') ? 'info' : 'warning'
@@ -80,7 +82,7 @@ function PageHeader({ system, item, activeView, onViewChange, onPrimaryAction, b
   </>
 }
 
-export function DashboardPage({ system, onSystemChange }: { system: SystemDefinition; onSystemChange: (key: SystemKey) => void }) {
+export function DashboardPage({ system, onSystemChange, onOpenProject }: { system: SystemDefinition; onSystemChange: (key: SystemKey) => void; onOpenProject: OpenProject }) {
   const { currentProject } = useProject()
   const [notice, setNotice] = useState('')
   const systemIndex = systems.findIndex(s => s.key === system.key)
@@ -94,11 +96,11 @@ export function DashboardPage({ system, onSystemChange }: { system: SystemDefini
     <section className="focus-band">
       <div className="focus-number">01</div>
       <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{currentProject.stage}已推进至 {currentProject.progress}%，下一步需要确认关键决策与证据边界。</p><div className="focus-meta"><Status value={currentItem.status} /><span>负责人 {currentItem.owner}</span><span>更新于 {currentProject.updatedAt}</span></div></div>
-      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${currentProject.progress * 3.6}deg`} as CSSProperties}><span>{currentProject.progress}<small>%</small></span></div><button className="text-button">继续工作<ArrowRight size={15} /></button></div>
+      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${currentProject.progress * 3.6}deg`} as CSSProperties}><span>{currentProject.progress}<small>%</small></span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'knowledge' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
     </section>
     <div className="dashboard-grid">
       <section className="open-section workstream">
-        <div className="section-header"><div><span className="section-label">跨系统进度</span><h2>{currentProject.name}</h2></div><button className="secondary-button">查看项目总览</button></div>
+        <div className="section-header"><div><span className="section-label">跨系统进度</span><h2>{currentProject.name}</h2></div><button className="secondary-button" onClick={() => onOpenProject(currentProject.id, 'strategy', 'workspaces')}>查看项目总览</button></div>
         <ArtifactFlow compact/>
         <div className="work-list">
           {workItems.slice(0, 4).map(item => <div className="work-row" key={item.name}><div className="work-name"><b>{item.name}</b><small>{item.type} · {item.owner}</small></div><div className="inline-progress"><span style={{width: `${item.progress}%`}} /></div><strong>{item.progress}%</strong><Status value={item.status} /><button aria-label="更多操作"><MoreHorizontal size={17} /></button></div>)}
@@ -107,9 +109,9 @@ export function DashboardPage({ system, onSystemChange }: { system: SystemDefini
       <aside className="attention-rail">
         <div className="section-header"><div><span className="section-label">你的队列</span><h2>3 项待处理</h2></div></div>
         <div className="queue-list">
-          <button><span className="queue-icon warning"><Clock3 size={16} /></span><span><b>确认品牌核心信息</b><small>策略 · 今天 12:00 前</small></span><ArrowRight size={15} /></button>
-          <button><span className="queue-icon danger"><CircleAlert size={16} /></span><span><b>处理素材映射异常</b><small>洞察 · 影响 12 个素材</small></span><ArrowRight size={15} /></button>
-          <button><span className="queue-icon info"><Bot size={16} /></span><span><b>审批投放 ChangeSet</b><small>投放 · 预计 ¥8,600</small></span><ArrowRight size={15} /></button>
+          <button onClick={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', 'STR-2607-08')}><span className="queue-icon warning"><Clock3 size={16} /></span><span><b>确认品牌核心信息</b><small>策略 · 今天 12:00 前</small></span><ArrowRight size={15} /></button>
+          <button onClick={() => onOpenProject(currentProject.id, 'insight', 'assets', 'EV-2607-24')}><span className="queue-icon danger"><CircleAlert size={16} /></span><span><b>处理素材映射异常</b><small>洞察 · 影响 12 个素材</small></span><ArrowRight size={15} /></button>
+          <button onClick={() => onOpenProject(currentProject.id, 'delivery', 'approvals', 'CS-2607-018')}><span className="queue-icon info"><Bot size={16} /></span><span><b>审批投放 ChangeSet</b><small>投放 · 预计 ¥8,600</small></span><ArrowRight size={15} /></button>
         </div>
         <div className="quick-actions"><span className="section-label">快速开始</span>{quickActions.map(action => <button key={action.label} onClick={() => onSystemChange(action.system)}><span><b>{action.label}</b><small>{action.detail}</small></span><ArrowRight size={15} /></button>)}</div>
       </aside>
@@ -189,7 +191,7 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
   </div>
 }
 
-function TableSurface({ item, activeView }: { item: NavItem; activeView: string }) {
+function TableSurface({ item, activeView, onOpenRecord }: { item: NavItem; activeView: string; onOpenRecord: (id: string) => void }) {
   const [search, setSearch] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [showOwner, setShowOwner] = useState(true)
@@ -198,7 +200,7 @@ function TableSurface({ item, activeView }: { item: NavItem; activeView: string 
   const filtered = useMemo(() => unifiedRecords.filter(record => `${record.id} ${record.name} ${record.kind} ${record.status}`.toLowerCase().includes(search.toLowerCase()) && (!attentionOnly || ['待审批', '待确认'].includes(record.status))), [search, attentionOnly])
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const rows = filtered.slice(page * pageSize, page * pageSize + pageSize)
-  return <section className="table-surface"><div className="table-toolbar"><div className="search-field"><Search size={16}/><input aria-label="搜索列表" value={search} onChange={event => { setSearch(event.target.value); setPage(0) }} placeholder={`搜索${item.label}`}/></div><button className={attentionOnly ? 'secondary-button active-filter' : 'secondary-button'} onClick={() => { setAttentionOnly(value => !value); setPage(0) }} aria-pressed={attentionOnly}><Filter size={15}/>待处理</button><button className="secondary-button" onClick={() => setShowOwner(value => !value)} aria-pressed={showOwner}><SlidersHorizontal size={15}/>{showOwner ? '隐藏负责人' : '显示负责人'}</button><span className="table-count">{activeView} · 共 {filtered.length} 条</span></div><table><thead><tr><th>编号</th><th>名称</th><th>类型</th><th>状态</th>{showOwner ? <th>负责人</th> : null}<th>最后更新</th><th aria-label="操作"/></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td className="code">{row.id}</td><td><b>{row.name}</b><small>春季新品上市</small></td><td>{row.kind}</td><td><Status value={row.status}/></td>{showOwner ? <td>{row.owner}</td> : null}<td>{row.updatedAt}</td><td><button aria-label={`${row.name}更多操作`}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{!rows.length ? <div className="table-empty">没有匹配记录，请调整搜索或筛选条件。</div> : null}<div className="table-footer"><span>第 {page + 1} / {pageCount} 页</span><div><button disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>上一页</button><button disabled={page >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>下一页</button></div></div></section>
+  return <section className="table-surface"><div className="table-toolbar"><div className="search-field"><Search size={16}/><input aria-label="搜索列表" value={search} onChange={event => { setSearch(event.target.value); setPage(0) }} placeholder={`搜索${item.label}`}/></div><button className={attentionOnly ? 'secondary-button active-filter' : 'secondary-button'} onClick={() => { setAttentionOnly(value => !value); setPage(0) }} aria-pressed={attentionOnly}><Filter size={15}/>待处理</button><button className="secondary-button" onClick={() => setShowOwner(value => !value)} aria-pressed={showOwner}><SlidersHorizontal size={15}/>{showOwner ? '隐藏负责人' : '显示负责人'}</button><span className="table-count">{activeView} · 共 {filtered.length} 条</span></div><table><thead><tr><th>编号</th><th>名称</th><th>类型</th><th>状态</th>{showOwner ? <th>负责人</th> : null}<th>最后更新</th><th aria-label="操作"/></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td className="code">{row.id}</td><td><button className="table-object-link" onClick={() => onOpenRecord(row.id)}><b>{row.name}</b><small>春季新品上市</small></button></td><td>{row.kind}</td><td><Status value={row.status}/></td>{showOwner ? <td>{row.owner}</td> : null}<td>{row.updatedAt}</td><td><button aria-label={`${row.name}更多操作`} onClick={() => onOpenRecord(row.id)}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{!rows.length ? <div className="table-empty">没有匹配记录，请调整搜索或筛选条件。</div> : null}<div className="table-footer"><span>第 {page + 1} / {pageCount} 页</span><div><button disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>上一页</button><button disabled={page >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>下一页</button></div></div></section>
 }
 
 function OperationsSurface({ item }: { item: NavItem }) {
@@ -211,34 +213,47 @@ function SettingsSurface() {
   return <div className="settings-layout"><aside className="settings-index">{['基础配置', '流程与状态', '通知规则', '权限边界', '导出与命名'].map(v => <button className={section === v ? 'active' : ''} onClick={() => setSection(v)} key={v}>{v}</button>)}</aside><section className="settings-form"><div><h2>{section}</h2><p>这些配置适用于当前组织和全部新建项目。</p></div>{[['默认项目时区', 'Asia/Shanghai'], ['默认货币', '人民币（CNY）'], ['数据保留期', '365 天'], ['自动保存', autoSave ? '开启' : '关闭']].map(([label, value], i) => <div className="setting-row" key={label}><div><b>{label}</b><small>{i === 3 ? '编辑内容后每 30 秒保存一个草稿版本。' : '用于新对象和报表的默认值。'}</small></div>{i === 3 ? <button className={autoSave ? 'switch active' : 'switch'} onClick={() => setAutoSave(value => !value)} aria-label={autoSave ? '关闭自动保存' : '开启自动保存'} aria-pressed={autoSave}><span/></button> : <button className="select-field">{value}<ChevronDown size={14}/></button>}</div>)}</section></div>
 }
 
-export function ModulePage({ system, item }: { system: SystemDefinition; item: NavItem }) {
-  const [activeView, setActiveView] = useState(item.views[0])
+function ObjectDetail({ system, item, objectId, onOpenProject }: { system: SystemDefinition; item: NavItem; objectId: string; onOpenProject: OpenProject }) {
+  const { currentProject } = useProject()
+  const record = unifiedRecords.find(value => value.id === objectId)
+  const name = record?.name ?? `${item.label}草稿 ${objectId}`
+  const next = system.key === 'strategy' ? ['creative', 'tasks', 'CR-2607-42', '基于此策略创建创意任务'] as const : system.key === 'creative' ? ['creative', 'reviews', 'CR-2607-42', '提交评审'] as const : system.key === 'insight' ? ['strategy', 'workspaces', 'STR-2607-08', '将洞察应用到策略'] as const : ['delivery', 'execution', objectId, '进入执行中心'] as const
+  return <aside className="object-detail" aria-label={`${name}详情`}><div><span className="section-label">Mock 对象详情</span><h2>{name}</h2><p>{record ? `${record.kind} · ${record.status} · ${record.owner}` : `当前 Project：${currentProject.name}`}</p></div><div className="detail-kv"><span>对象 ID</span><b>{objectId}</b></div><div className="detail-kv"><span>来源版本</span><b>{currentProject.artifacts.strategy.version} → {currentProject.artifacts.creative.version}</b></div><button className="primary-button full" onClick={() => onOpenProject(currentProject.id, next[0], next[1], next[2])}>{next[3]}<ArrowRight size={15}/></button><button className="secondary-button full" onClick={() => onOpenProject(currentProject.id, system.key, item.id)}>返回{item.label}列表</button></aside>
+}
+
+export function ModulePage({ system, item, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
+  const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const { currentProject, addChangeSet } = useProject()
 
+  useEffect(() => { if (routeView && item.views.includes(routeView)) setActiveView(routeView) }, [item.views, routeView])
+
   const primaryAction = () => {
     setBusy(true)
     if (system.key === 'delivery' && item.id === 'optimization') {
       const change = addChangeSet()
-      setNotice(`${change.id} 已创建，可进入审批中心继续处理。`)
+      setNotice(`${change.id} 已创建，已进入审批中心继续处理。`)
+      onOpenProject(currentProject.id, 'delivery', 'approvals', change.id)
     } else if (item.layout === 'settings') {
       setNotice(`${system.label}配置已保存为新版本。`)
     } else {
-      setNotice(`${item.label}草稿已创建，编号 ${item.id.toUpperCase()}-${String(Date.now()).slice(-4)}。`)
+      const id = `${item.id.toUpperCase()}-${String(Date.now()).slice(-4)}`
+      setNotice(`${item.label}草稿已创建，已打开对象详情。`)
+      onOpenProject(currentProject.id, system.key, item.id, id, activeView)
     }
     window.setTimeout(() => setBusy(false), 350)
   }
 
   let surface
-  const specialized = system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState}/> : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/> : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/> : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/> : null
+  const specialized = system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState}/> : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/> : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/> : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/> : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/> : null
   if (specialized) surface = specialized
   else {
     const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
-    const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView}/> : item.layout === 'settings' ? <SettingsSurface/> : <OperationsSurface item={item}/>
+    const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : item.layout === 'settings' ? <SettingsSurface/> : <OperationsSurface item={item}/>
     surface = <StateBoundary state={dataState} onRetry={() => setDataState('ready')} onCreate={primaryAction}>{genericSurface}</StateBoundary>
   }
 
-  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={setActiveView} onPrimaryAction={primaryAction} busy={busy}/><StatePreview value={dataState} onChange={setDataState}/>{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className="page-surface">{surface}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>产物链路：5/5</span><span>更新时间：{currentProject.updatedAt}</span><span>预算：¥{currentProject.budget.toLocaleString('zh-CN')}</span><strong>状态：已同步</strong></footer></div>
+  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={primaryAction} busy={busy}/><StatePreview value={dataState} onChange={setDataState}/>{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={objectId ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{objectId ? <ObjectDetail system={system} item={item} objectId={objectId} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>产物链路：5/5</span><span>更新时间：{currentProject.updatedAt}</span><span>预算：¥{currentProject.budget.toLocaleString('zh-CN')}</span><strong>状态：已同步</strong></footer></div>
 }

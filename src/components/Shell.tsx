@@ -14,7 +14,7 @@ interface ShellProps {
   onHome: () => void
   onModelSettings: () => void
   onSystemChange: (key: SystemKey) => void
-  onProjectChange: (id: string, system?: SystemKey, navId?: string) => void
+  onProjectChange: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
   onNavChange: (id: string) => void
   children: ReactNode
 }
@@ -32,7 +32,7 @@ export function Shell({ system, activeNav, isHome, isGlobalSettings, onHome, onM
     if (!query) return []
     return projects.flatMap(project => [
       { id: `${project.id}-project`, projectId: project.id, title: project.name, meta: `${project.brand} · Project`, system: 'strategy' as const, navId: 'home' },
-      ...Object.values(project.artifacts).map(artifact => ({ id: `${project.id}-${artifact.key}`, projectId: project.id, title: `${artifact.label} ${artifact.version}`, meta: `${project.name} · ${artifact.status}`, system: artifact.key === 'creative' ? 'creative' as const : artifact.key === 'insight' ? 'insight' as const : artifact.key === 'delivery' ? 'delivery' as const : 'strategy' as const, navId: artifact.key === 'brief' ? 'briefs' : artifact.key === 'strategy' ? 'strategies' : artifact.key === 'creative' ? 'tasks' : artifact.key === 'insight' ? 'knowledge' : 'plans' })),
+      ...Object.values(project.artifacts).map(artifact => ({ id: `${project.id}-${artifact.key}`, projectId: project.id, objectId: artifact.key, title: `${artifact.label} ${artifact.version}`, meta: `${project.name} · ${artifact.status}`, system: artifact.key === 'creative' ? 'creative' as const : artifact.key === 'insight' ? 'insight' as const : artifact.key === 'delivery' ? 'delivery' as const : 'strategy' as const, navId: artifact.key === 'brief' ? 'briefs' : artifact.key === 'strategy' ? 'strategies' : artifact.key === 'creative' ? 'tasks' : artifact.key === 'insight' ? 'knowledge' : 'plans' })),
     ]).filter(item => `${item.title} ${item.meta}`.toLowerCase().includes(query)).slice(0, 6)
   }, [projects, search])
 
@@ -58,7 +58,7 @@ export function Shell({ system, activeNav, isHome, isGlobalSettings, onHome, onM
       <div className={searchOpen ? 'global-search expanded' : 'global-search'}>
         <Search size={16}/><input aria-label="全局搜索" placeholder="搜索项目、内容或数据" value={search} onChange={event => setSearch(event.target.value)} onFocus={() => setSearchOpen(true)}/>
         {searchOpen ? <button aria-label="关闭搜索" onClick={() => { setSearchOpen(false); setSearch('') }}><X size={15}/></button> : <kbd>/</kbd>}
-        {searchOpen && search ? <div className="search-results" role="listbox" aria-label="全局搜索结果">{searchResults.length ? searchResults.map(result => <button key={result.id} role="option" onClick={() => { onProjectChange(result.projectId, result.system, result.navId); setSearch(''); setSearchOpen(false) }}><b>{result.title}</b><small>{result.meta}</small></button>) : <div className="search-empty">没有匹配结果</div>}</div> : null}
+        {searchOpen && search ? <div className="search-results" role="listbox" aria-label="全局搜索结果">{searchResults.length ? searchResults.map(result => <button key={result.id} role="option" onClick={() => { onProjectChange(result.projectId, result.system, result.navId, 'objectId' in result ? result.objectId : undefined); setSearch(''); setSearchOpen(false) }}><b>{result.title}</b><small>{result.meta}</small></button>) : <div className="search-empty">没有匹配结果</div>}</div> : null}
       </div>
       <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button><button className="avatar" aria-label="个人菜单">AM</button>
     </header>
