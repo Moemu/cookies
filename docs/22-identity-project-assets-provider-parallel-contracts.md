@@ -69,6 +69,12 @@ submitted → running → outputs_ready → ingesting
 
 Provider 对外响应同时返回 `execution_status` 与 `provider_status`。仅获得厂商临时 URL 时只能是 `outputs_ready`；Assets 摄取异步处理中为 `ingesting`；只有所有可交付输出已获得稳定 ProjectAssetRef 时才是 `succeeded`。部分厂商输出或摄取失败但仍有正式资产时是 `partially_succeeded`。
 
+### 当前 Gate 3 的可承诺 API
+
+当前联合闭环只公开 `POST /platform/v1/projects/{project_id}/model/jobs`（`image.generate`）和对应 `GET` 查询。文本、VLM 与其他能力在各自的输入/输出契约评审后再加入，不以宽泛的 `input` 透传占位。
+
+取消状态仍保留在 ProviderJob 领域模型中，但在持久化取消幂等键、厂商取消适配器及运行中任务补偿策略完成前，`POST ...:cancel` 不作为公开 API。这样不会向调用方承诺一个响应丢失后可能重复扣费或无法对账的取消操作。
+
 ## 4. 单输出 Generated Intake
 
 Gate 2 一次 Intake 只处理一个成功 Provider 输出：

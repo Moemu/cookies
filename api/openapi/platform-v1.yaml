@@ -199,7 +199,7 @@ paths:
   /platform/v1/projects/{project_id}/model/jobs:
     post:
       operationId: createModelJob
-      summary: Create an asynchronous capability-based model job.
+      summary: Create an asynchronous image-generation model job.
       parameters:
         - $ref: '#/components/parameters/ProjectID'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -240,28 +240,6 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
-  /platform/v1/projects/{project_id}/model/jobs/{job_id}:cancel:
-    parameters:
-      - $ref: '#/components/parameters/ProjectID'
-      - $ref: '#/components/parameters/JobID'
-    post:
-      operationId: cancelModelJob
-      summary: Request cancellation of a non-terminal model job.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: Updated model job state.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProviderJob'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
   /platform/v1/projects/{project_id}/assets/generated-intakes:
     post:
       operationId: createGeneratedAssetIntake
@@ -443,16 +421,16 @@ components:
       properties:
         capability:
           type: string
-          examples: [image.generate]
+          enum: [image.generate]
         model_alias:
           type: string
           examples: [cookies.image.standard]
         input:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/ImageGenerationInput'
         project_context_version:
           type: integer
           minimum: 1
+          description: Must equal the currently authorized ProjectContext version.
         constraints:
           type: object
           additionalProperties: true
@@ -460,6 +438,21 @@ components:
           type: string
         source_task_id:
           type: string
+      additionalProperties: false
+    ImageGenerationInput:
+      type: object
+      required: [prompt, width, height]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          writeOnly: true
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
       additionalProperties: false
     Job:
       type: object

@@ -12,10 +12,12 @@ func TestServiceCreatesQueuedImageProviderJob(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 2, 0, 0, 0, time.UTC)
 	store := &memoryStore{}
+	scheduler := &recordingScheduler{}
 	service := Service{
-		Store: store,
-		NewID: func() string { return "provider_job_1" },
-		Now:   func() time.Time { return now },
+		Store:     store,
+		Scheduler: scheduler,
+		NewID:     func() string { return "provider_job_1" },
+		Now:       func() time.Time { return now },
 	}
 	brandID := contract.BrandID("brand_1")
 	job, duplicate, err := service.CreateImageJob(context.Background(), CreateImageJobRequest{
@@ -44,6 +46,9 @@ func TestServiceCreatesQueuedImageProviderJob(t *testing.T) {
 	}
 	if job.ProjectID != "project_1" || job.OrganizationID != "org_1" || job.ProjectAssetRefs == nil {
 		t.Fatalf("unexpected public job state: %+v", job)
+	}
+	if scheduler.calls != 1 || scheduler.job.ID != job.ID {
+		t.Fatalf("expected job execution to be scheduled: %+v", scheduler)
 	}
 	if len(store.records) != 1 || store.records[0].ProjectContextVersion != 7 || store.records[0].Input.Prompt != "生成一张新品海报" {
 		t.Fatalf("unexpected stored record: %+v", store.records)
@@ -76,6 +81,17 @@ func TestServiceRejectsImageJobForDraftProject(t *testing.T) {
 }
 
 type memoryStore struct{ records []JobRecord }
+
+type recordingScheduler struct {
+	calls int
+	job   contract.ProviderJob
+}
+
+func (s *recordingScheduler) Schedule(_ context.Context, job contract.ProviderJob) error {
+	s.calls++
+	s.job = job
+	return nil
+}
 
 func (s *memoryStore) Create(_ context.Context, record JobRecord) (JobRecord, bool, error) {
 	s.records = append(s.records, record)

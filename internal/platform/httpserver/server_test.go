@@ -12,6 +12,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 func TestHealthDoesNotRequireIdentity(t *testing.T) {
@@ -152,5 +153,109 @@ func TestInvalidClientRequestIDIsNotReflected(t *testing.T) {
 
 	if got := response.Header().Get("X-Request-ID"); got == "bad\r\nvalue" || got == "" {
 		t.Fatalf("unexpected request ID response header: %q", got)
+	}
+}
+
+func TestCreateImageJobUsesTrustedActorAndResolvedProjectContext(t *testing.T) {
+	t.Parallel()
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{provider.ScopeJobCreate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		ProjectContexts: staticProjectContexts{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+		ProviderJobs: jobs,
+	})
+	request := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/model/jobs", bytes.NewBufferString(`{
+		"capability":"image.generate",
+		"model_alias":"cookies.image.standard",
+		"input":{"prompt":"launch poster","width":1024,"height":1024},
+		"project_context_version":7
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "create-image-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if jobs.request.Actor.OrganizationID != "org_1" || jobs.request.Project.ProjectContextVersion != 7 || jobs.request.Input.Prompt != "launch poster" {
+		t.Fatalf("unexpected Provider request: %+v", jobs.request)
+	}
+	if jobs.request.RequestHash == "" || jobs.request.IdempotencyKey != "create-image-1" {
+		t.Fatalf("request hash or idempotency key missing: %+v", jobs.request)
+	}
+}
+
+func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
+	t.Parallel()
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{
+		OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{provider.ScopeJobCreate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		ProjectContexts: staticProjectContexts{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+		ProviderJobs: jobs,
+	})
+	request := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/model/jobs", bytes.NewBufferString(`{"capability":"image.generate","model_alias":"cookies.image.standard","input":{"prompt":"launch poster","width":1024,"height":1024},"project_context_version":6}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "create-image-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict || jobs.createCalls != 0 {
+		t.Fatalf("status = %d create_calls=%d body=%s", response.Code, jobs.createCalls, response.Body.String())
+	}
+}
+
+type staticProjectContexts struct{ context contract.ProjectContext }
+
+func (s staticProjectContexts) ResolveProject(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
+	return s.context, nil
+}
+
+type providerJobStub struct {
+	job         contract.ProviderJob
+	request     provider.CreateImageJobRequest
+	createCalls int
+}
+
+func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {
+	s.createCalls++
+	s.request = request
+	return s.job, false, nil
+}
+
+func (s *providerJobStub) GetJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (contract.ProviderJob, error) {
+	return s.job, nil
+}
+
+func providerJobForHTTPTest() contract.ProviderJob {
+	now := time.Date(2026, time.July, 22, 5, 0, 0, 0, time.UTC)
+	return contract.ProviderJob{
+		ID: "provider_job_1", Kind: "provider.image.generate", OrganizationID: "org_1", ProjectID: "project_1",
+		ExecutionStatus: contract.JobQueued, ProviderStatus: contract.ProviderJobSubmitted, ProjectAssetRefs: []contract.ProjectAssetRef{},
+		MaxAttempts: 3, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 }

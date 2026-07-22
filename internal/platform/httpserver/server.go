@@ -4,13 +4,16 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,11 +21,13 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 type Server struct {
 	resolver          identity.Resolver
 	projectAuthorizer identity.ProjectAuthorizer
+	providerJobs      ProviderJobs
 	readiness         ReadinessChecker
 	identities        CurrentIdentityReader
 	projects          ProjectManager
@@ -39,6 +44,7 @@ type ReadinessChecker interface {
 type Dependencies struct {
 	Resolver          identity.Resolver
 	ProjectAuthorizer identity.ProjectAuthorizer
+	ProviderJobs      ProviderJobs
 	Readiness         ReadinessChecker
 	Identities        CurrentIdentityReader
 	Projects          ProjectManager
@@ -67,6 +73,13 @@ type GeneratedIntakeManager interface {
 	Get(context.Context, contract.ActorContext, contract.ProjectID, string) (assets.GeneratedIntake, error)
 }
 
+// ProviderJobs keeps the shared HTTP server dependent on Provider's public
+// application seam, rather than its SQL store or vendor adapters.
+type ProviderJobs interface {
+	CreateImageJob(context.Context, provider.CreateImageJobRequest) (contract.ProviderJob, bool, error)
+	GetJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (contract.ProviderJob, error)
+}
+
 // New retains the bootstrap construction path for focused HTTP tests. The
 // application uses NewWithDependencies so readiness and project checks are real.
 func New(resolver identity.Resolver) *Server {
@@ -80,7 +93,12 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	if dependencies.ProjectAuthorizer == nil {
 		dependencies.ProjectAuthorizer = identity.RejectingProjectAuthorizer{}
 	}
-	server := &Server{resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer, readiness: dependencies.Readiness, identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads, intakes: dependencies.Intakes, newID: newRequestID}
+	server := &Server{
+		resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer,
+		providerJobs: dependencies.ProviderJobs, readiness: dependencies.Readiness,
+		identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads,
+		intakes: dependencies.Intakes, newID: newRequestID,
+	}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
 	server.mux.HandleFunc("GET /readyz", server.ready)
@@ -97,6 +115,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/preview", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.previewAsset))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/generated-intakes", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.createGeneratedIntake))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/model/jobs", server.requireProject(http.HandlerFunc(server.createImageJob)))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/model/jobs/{job_id}", server.requireProject(http.HandlerFunc(server.getProviderJob)))
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }
@@ -221,6 +241,119 @@ func (s *Server) projectContext(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeJSON(writer, http.StatusOK, value)
+}
+
+type imageJobCreateBody struct {
+	Capability            string                        `json:"capability"`
+	ModelAlias            string                        `json:"model_alias"`
+	Input                 provider.ImageGenerationInput `json:"input"`
+	ProjectContextVersion int64                         `json:"project_context_version"`
+	SourceSystem          string                        `json:"source_system"`
+	SourceTaskID          string                        `json:"source_task_id"`
+}
+
+func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
+	if s.providerJobs == nil || s.projects == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	var body imageJobCreateBody
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid image job object", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid image job object", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if body.Capability != "image.generate" || body.Input.Validate() != nil || strings.TrimSpace(body.ModelAlias) == "" || body.ProjectContextVersion < 1 {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Only a valid image.generate request is supported", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if !requestContext.Actor.HasScope(provider.ScopeJobCreate) {
+		writeProblem(writer, http.StatusForbidden, contract.Error{Code: "PERMISSION_DENIED", Message: "Provider job creation is not permitted", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	project, err := s.projects.GetContext(request.Context(), requestContext.Actor, contract.ProjectID(request.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(writer, request, err)
+		return
+	}
+	if err := project.ValidateBrandBound(); err != nil || project.OrganizationID != requestContext.Actor.OrganizationID || project.ProjectID != contract.ProjectID(request.PathValue("project_id")) {
+		writeProblem(writer, http.StatusConflict, contract.Error{Code: "PROJECT_NOT_ACTIVE", Message: "Project must be active and brand-bound for model generation", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if body.ProjectContextVersion != project.ProjectContextVersion {
+		writeProblem(writer, http.StatusConflict, contract.Error{Code: "PROJECT_CONTEXT_STALE", Message: "Project context version is stale", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	key := contract.IdempotencyKey(request.Header.Get("Idempotency-Key"))
+	if err := key.Validate(); err != nil {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "IDEMPOTENCY_KEY_INVALID", Message: "A valid Idempotency-Key header is required", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	job, _, err := s.providerJobs.CreateImageJob(request.Context(), provider.CreateImageJobRequest{
+		Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: canonicalImageJobHash(body),
+		ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Input: body.Input,
+	})
+	if errors.Is(err, provider.ErrIdempotencyConflict) {
+		writeProblem(writer, http.StatusConflict, contract.Error{Code: "IDEMPOTENCY_CONFLICT", Message: "Idempotency key was reused for a different request", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if err != nil {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Provider job request is invalid", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, job)
+}
+
+func (s *Server) getProviderJob(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
+	if s.providerJobs == nil {
+		writeProblem(writer, http.StatusServiceUnavailable, contract.Error{Code: "DEPENDENCY_UNAVAILABLE", Message: "Provider service is not configured", RequestID: requestContext.RequestID, Retryable: true})
+		return
+	}
+	job, err := s.providerJobs.GetJob(request.Context(), requestContext.Actor.OrganizationID, contract.ProjectID(request.PathValue("project_id")), request.PathValue("job_id"))
+	if errors.Is(err, provider.ErrJobNotFound) {
+		writeProblem(writer, http.StatusNotFound, contract.Error{Code: "RESOURCE_NOT_FOUND", Message: "Provider job was not found", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, contract.Error{Code: "DEPENDENCY_UNAVAILABLE", Message: "Provider service is unavailable", RequestID: requestContext.RequestID, Retryable: true})
+		return
+	}
+	writeJSON(writer, http.StatusOK, job)
+}
+
+// canonicalImageJobHash is an RFC 8785-compatible serialization for the
+// deliberately narrow image-only request shape: strings and integral values
+// only, with object keys emitted in lexicographic order and HTML escaping off.
+func canonicalImageJobHash(body imageJobCreateBody) string {
+	parts := []string{
+		`"capability":` + canonicalJSONString(body.Capability),
+		`"input":{` + `"height":` + strconv.Itoa(body.Input.Height) + `,"prompt":` + canonicalJSONString(body.Input.Prompt) + `,"width":` + strconv.Itoa(body.Input.Width) + `}`,
+		`"model_alias":` + canonicalJSONString(body.ModelAlias),
+		`"project_context_version":` + strconv.FormatInt(body.ProjectContextVersion, 10),
+	}
+	if body.SourceSystem != "" {
+		parts = append(parts, `"source_system":`+canonicalJSONString(body.SourceSystem))
+	}
+	if body.SourceTaskID != "" {
+		parts = append(parts, `"source_task_id":`+canonicalJSONString(body.SourceTaskID))
+	}
+	digest := sha256.Sum256([]byte("{" + strings.Join(parts, ",") + "}"))
+	return hex.EncodeToString(digest[:])
+}
+
+func canonicalJSONString(value string) string {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(value)
+	return strings.TrimSuffix(buffer.String(), "\n")
 }
 
 func (s *Server) notFound(writer http.ResponseWriter, request *http.Request) {

@@ -138,6 +138,7 @@ type GeneratedIntakeClient interface {
 // Service is the small application seam used by transport and workers.
 type Service struct {
 	Store        JobStore
+	Scheduler    ExecutionScheduler
 	ImageAdapter ImageProviderAdapter
 	Intake       GeneratedIntakeClient
 	NewID        func() string
@@ -153,6 +154,9 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 	}
 	if err := request.Validate(); err != nil {
 		return contract.ProviderJob{}, false, err
+	}
+	if s.Scheduler == nil {
+		return contract.ProviderJob{}, false, fmt.Errorf("provider execution scheduler is required")
 	}
 	now := time.Now
 	if s.Now != nil {
@@ -192,7 +196,23 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 	if err != nil {
 		return contract.ProviderJob{}, false, err
 	}
+	if err := s.Scheduler.Schedule(ctx, stored.Job); err != nil {
+		return stored.Job, duplicate, fmt.Errorf("schedule provider job execution: %w", err)
+	}
 	return stored.Job, duplicate, nil
+}
+
+// GetJob returns the public state of a Provider-owned job after its
+// organization and project scope have already been authorized by transport.
+func (s Service) GetJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, error) {
+	if s.Store == nil {
+		return contract.ProviderJob{}, fmt.Errorf("provider job store is required")
+	}
+	record, err := s.Store.Get(ctx, organizationID, projectID, jobID)
+	if err != nil {
+		return contract.ProviderJob{}, err
+	}
+	return record.Job, nil
 }
 
 // ProcessImageJob advances only the Assets handoff portion of a ProviderJob.
