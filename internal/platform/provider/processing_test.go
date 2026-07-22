@@ -64,6 +64,74 @@ func TestServiceCompletesImageJobOnlyAfterIntakeReturnsProjectAsset(t *testing.T
 	}
 }
 
+func TestServiceDefersUntilGeneratedIntakeCompletes(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 3, 30, 0, 0, time.UTC)
+	record := readyOutputJobRecord(now)
+	store := &processingStore{record: record}
+	version := int64(1)
+	intake := &scriptedIntakeClient{
+		create: assets.GeneratedAssetIntakeResponse{ID: "intake_1", ProviderJobID: record.Job.ID, OutputID: "output_1", Status: assets.GeneratedIntakeQueued},
+		get: assets.GeneratedAssetIntakeResponse{
+			ID: "intake_1", ProviderJobID: record.Job.ID, OutputID: "output_1", Status: assets.GeneratedIntakeSucceeded,
+			ProjectAssetRef: &contract.ProjectAssetRef{ProjectID: record.Job.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: "asset_1", Version: version}},
+		},
+	}
+	service := Service{Store: store, Intake: intake, Now: func() time.Time { return now }}
+
+	job, deferredUntil, err := service.ProcessImageJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if err != nil || deferredUntil == nil || job.ProviderStatus != contract.ProviderJobIngesting {
+		t.Fatalf("pending intake ProcessImageJob() = (%+v, deferred=%v, err=%v)", job, deferredUntil, err)
+	}
+	job, deferredUntil, err = service.ProcessImageJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if err != nil || deferredUntil != nil || job.ProviderStatus != contract.ProviderJobSucceeded || len(job.ProjectAssetRefs) != 1 {
+		t.Fatalf("completed intake ProcessImageJob() = (%+v, deferred=%v, err=%v)", job, deferredUntil, err)
+	}
+	if intake.createCalls != 1 || intake.getCalls != 1 {
+		t.Fatalf("expected create then get exactly once: %+v", intake)
+	}
+}
+
+func TestServiceFailsImageJobWhenEveryIntakeFails(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 22, 3, 45, 0, 0, time.UTC)
+	record := readyOutputJobRecord(now)
+	store := &processingStore{record: record}
+	intake := &fakeIntakeClient{response: assets.GeneratedAssetIntakeResponse{
+		ID: "intake_1", ProviderJobID: record.Job.ID, OutputID: "output_1", Status: assets.GeneratedIntakeFailed,
+		Error: &contract.JobError{Code: contract.ErrorAssetIntakeFailed, Message: "scan rejected output", Retryable: false},
+	}}
+	service := Service{Store: store, Intake: intake, Now: func() time.Time { return now }}
+
+	job, deferredUntil, err := service.ProcessImageJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if err != nil || deferredUntil != nil || job.ProviderStatus != contract.ProviderJobFailed || job.ExecutionStatus != contract.JobFailed || job.Error == nil {
+		t.Fatalf("failed intake ProcessImageJob() = (%+v, deferred=%v, err=%v)", job, deferredUntil, err)
+	}
+}
+
+func readyOutputJobRecord(now time.Time) JobRecord {
+	return JobRecord{
+		Job: contract.ProviderJob{
+			ID: "provider_job_1", Kind: imageJobKind, OrganizationID: "org_1", ProjectID: "project_1",
+			ExecutionStatus: contract.JobRunning, ProviderStatus: contract.ProviderJobOutputsReady, Progress: 70,
+			ProjectAssetRefs: []contract.ProjectAssetRef{}, MaxAttempts: 3, Version: 2, CreatedAt: now, UpdatedAt: now,
+		},
+		Principal:             contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Operation:             imageOperation,
+		IdempotencyKey:        "create-image-1",
+		RequestHash:           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ProjectContextVersion: 7,
+		ModelAlias:            "cookies.image.standard",
+		ProviderCode:          "fake",
+		ModelVersion:          "fake-image-v1",
+		Input:                 ImageGenerationInput{Prompt: "launch poster", Width: 1024, Height: 1024},
+		Outputs: []OutputRecord{{
+			Ref:    contract.ProviderOutputRef{ProviderCode: "fake", ProviderJobID: "provider_job_1", OutputID: "output_1", RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "image/png", DeclaredSizeBytes: 1024},
+			Status: OutputReady,
+		}},
+	}
+}
+
 type processingStore struct{ record JobRecord }
 
 func (s *processingStore) Create(context.Context, JobRecord) (JobRecord, bool, error) {
@@ -97,4 +165,21 @@ func (c *fakeIntakeClient) Create(_ context.Context, _ contract.ProjectID, reque
 
 func (c *fakeIntakeClient) Get(context.Context, contract.ProjectID, string) (assets.GeneratedAssetIntakeResponse, error) {
 	return c.response, nil
+}
+
+type scriptedIntakeClient struct {
+	create      assets.GeneratedAssetIntakeResponse
+	get         assets.GeneratedAssetIntakeResponse
+	createCalls int
+	getCalls    int
+}
+
+func (c *scriptedIntakeClient) Create(context.Context, contract.ProjectID, assets.GeneratedAssetIntakeRequest, contract.IdempotencyKey) (assets.GeneratedAssetIntakeResponse, error) {
+	c.createCalls++
+	return c.create, nil
+}
+
+func (c *scriptedIntakeClient) Get(context.Context, contract.ProjectID, string) (assets.GeneratedAssetIntakeResponse, error) {
+	c.getCalls++
+	return c.get, nil
 }

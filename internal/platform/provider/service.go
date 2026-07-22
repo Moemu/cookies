@@ -258,12 +258,18 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 			if createErr != nil {
 				return record.Job, nil, createErr
 			}
+			if responseErr := validateIntakeResponse(response, record.Job.ID, output.Ref.OutputID, projectID); responseErr != nil {
+				return record.Job, nil, responseErr
+			}
 			output.IntakeID = response.ID
 			applyIntakeResponse(output, response)
 		case OutputIngesting:
 			response, getErr := s.Intake.Get(ctx, projectID, output.IntakeID)
 			if getErr != nil {
 				return record.Job, nil, getErr
+			}
+			if responseErr := validateIntakeResponse(response, record.Job.ID, output.Ref.OutputID, projectID); responseErr != nil {
+				return record.Job, nil, responseErr
 			}
 			applyIntakeResponse(output, response)
 		}
@@ -289,6 +295,19 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 		return contract.ProviderJob{}, nil, updateErr
 	}
 	return updated.Job, nil, nil
+}
+
+func validateIntakeResponse(response assets.GeneratedAssetIntakeResponse, providerJobID, outputID string, projectID contract.ProjectID) error {
+	if err := response.Validate(); err != nil {
+		return fmt.Errorf("invalid generated intake response: %w", err)
+	}
+	if response.ProviderJobID != providerJobID || response.OutputID != outputID {
+		return fmt.Errorf("generated intake response belongs to another provider output")
+	}
+	if response.ProjectAssetRef != nil && response.ProjectAssetRef.ProjectID != projectID {
+		return fmt.Errorf("generated intake response belongs to another project")
+	}
+	return nil
 }
 
 func applyIntakeResponse(output *OutputRecord, response assets.GeneratedAssetIntakeResponse) {
