@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 const fakeTextModelVersion = "fake-text-v1"
@@ -19,6 +21,16 @@ func (FakeSyncAdapter) GenerateText(_ context.Context, request TextAdapterReques
 		return SynchronousResult{}, fmt.Errorf("fake text request is invalid")
 	}
 	return SynchronousResult{ProviderCode: fakeProviderCode, ModelVersion: fakeTextModelVersion, Text: "Fake text response"}, nil
+}
+
+func (FakeSyncAdapter) InspectTextRoute(_ context.Context, _ contract.OrganizationID, modelAlias string) (TextRouteInspection, error) {
+	if strings.TrimSpace(modelAlias) == "" {
+		return TextRouteInspection{}, fmt.Errorf("fake text model alias is required")
+	}
+	return TextRouteInspection{
+		ModelAlias: modelAlias, UpstreamModel: fakeTextModelVersion,
+		RouteRevisionID: "fake-route-v1", ResponseMode: TextResponsePromptJSON, Ready: true,
+	}, nil
 }
 
 func (FakeSyncAdapter) UnderstandVision(_ context.Context, request VisionAdapterRequest) (SynchronousResult, error) {

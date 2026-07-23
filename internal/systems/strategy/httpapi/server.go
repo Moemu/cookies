@@ -48,7 +48,9 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions", server.listBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/generation-readiness", server.getGenerationReadiness)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}", server.getStrategy)
+	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/generation-metadata", server.getGenerationMetadata)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions", server.listStrategyRevisions)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions/{revision}", server.getStrategyRevision)
 	mux.HandleFunc("PATCH /api/strategy/v1/strategy-drafts/{strategy_id}", server.patchStrategy)
@@ -103,6 +105,20 @@ func (s *Server) listWorkspaces(writer http.ResponseWriter, request *http.Reques
 
 func (s *Server) getWorkspace(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetWorkspaceDetail(request.Context(), mustActor(request), request.PathValue("workspace_id"))
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getGenerationReadiness(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetGenerationReadiness(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getGenerationMetadata(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetGenerationMetadata(
+		request.Context(), mustActor(request), request.PathValue("strategy_id"),
+	)
 	writeResult(writer, value, err)
 }
 
@@ -651,6 +667,8 @@ func writeError(writer http.ResponseWriter, err error) {
 		status, code, message, retryable = 403, "SCOPE_REQUIRED", "缺少所需的 Strategy 权限", false
 	case errors.Is(err, strategy.ErrFeatureDisabled):
 		status, code, message, retryable = 403, "FEATURE_DISABLED", "Strategy feature is disabled", false
+	case errors.Is(err, strategy.ErrGenerationUnavailable):
+		status, code, message, retryable = 503, "GENERATION_PROVIDER_UNAVAILABLE", "真实策略生成服务尚未就绪", true
 	case errors.Is(err, strategy.ErrProjectAccessDenied):
 		status, code, message, retryable = 403, "PROJECT_ACCESS_DENIED", "当前身份无权访问该项目", false
 	case errors.Is(err, strategy.ErrNotFound):

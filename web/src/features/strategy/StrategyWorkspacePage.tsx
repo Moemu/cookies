@@ -8,6 +8,8 @@ import {
   createConversation,
   createStrategy,
   getBriefDraft,
+  getGenerationMetadata,
+  getGenerationReadiness,
   getReview,
   getStrategy,
   getWorkspace,
@@ -16,12 +18,13 @@ import {
   listStrategyPackages,
   patchBriefField,
   patchStrategySection,
+  reviseStrategy,
   sendMessage,
   submitStrategy,
 } from './api'
 import { useConversationStream } from './conversation/useConversationStream'
 import { createCreativeIntakeFromStrategy, listCreativeIntakes } from '../creative/api'
-import type { BriefDraft, BriefVersion, Message, PackageVersion, Review, StrategyDraft, WorkspaceDetail } from './types'
+import type { BriefDraft, BriefVersion, GenerationMetadata, GenerationReadiness, Message, PackageVersion, Review, StrategyDraft, WorkspaceDetail } from './types'
 import './strategy.css'
 
 export function StrategyWorkspacePage({ project }: { project?: Project }) {
@@ -34,6 +37,8 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
   const [draft, setDraft] = useState<StrategyDraft | null>(null)
   const [review, setReview] = useState<Review | null>(null)
   const [published, setPublished] = useState<PackageVersion | null>(null)
+  const [readiness, setReadiness] = useState<GenerationReadiness | null>(null)
+  const [generationMetadata, setGenerationMetadata] = useState<GenerationMetadata | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
   const approveMutationKey = useRef('')
@@ -53,15 +58,18 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
     setReview(null)
     setPublished(null)
     setBriefVersion(null)
+    setGenerationMetadata(null)
     const task = workspace.current_task
     const conversation = workspace.current_conversation
-    const [messageResult, briefResult, packageResult] = await Promise.all([
+    const [messageResult, briefResult, packageResult, readinessResult] = await Promise.all([
       conversation ? listMessages(conversation.id, signal) : Promise.resolve({ items: [] }),
       task ? getBriefDraft(task.id, signal) : Promise.resolve(null),
       listStrategyPackages(projectId, signal),
+      getGenerationReadiness(projectId, signal),
     ])
     setMessages(messageResult.items)
     setBrief(briefResult)
+    setReadiness(readinessResult)
     if (task && briefResult?.status === 'confirmed') {
       const versions = await listBriefVersions(task.brief_id, signal)
       setBriefVersion(versions.items[0] ?? null)
@@ -69,6 +77,9 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
     if (task?.current_strategy_id) {
       const currentDraft = await getStrategy(task.current_strategy_id, signal)
       setDraft(currentDraft)
+      if (currentDraft.current_revision > 0) {
+        setGenerationMetadata(await getGenerationMetadata(currentDraft.id, signal))
+      }
       const packageVersion = packageResult.items
         .filter((item) => item.status === 'published' && item.snapshot.strategy_id === currentDraft.id)
         .sort((left, right) => right.version - left.version)[0]
@@ -181,7 +192,9 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
             busy={busy !== ''}
             canGenerate={briefVersion !== null}
             draft={draft}
+            generationMetadata={generationMetadata}
             packageVersion={published}
+            readiness={readiness}
             review={review}
             onApprove={() => draft && review && run('approve', async () => {
               if (!approveMutationKey.current) approveMutationKey.current = createMutationKey()
@@ -219,6 +232,16 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
               setDraft(await patchStrategySection(draft, section, value))
               setReview(null)
             })}
+            onRevise={async (instruction) => {
+              if (!draft) return false
+              let revised = false
+              await run('revise', async () => {
+                await reviseStrategy(draft, instruction)
+                setDraft({ ...draft, status: 'generating', version: draft.version + 1 })
+                revised = true
+              })
+              return revised
+            }}
             onSubmit={() => draft && run('submit', async () => {
               const created = await submitStrategy(draft)
               setReview(created)
@@ -305,29 +328,37 @@ function BriefField({ field, state, busy, onSave }: {
   </div>
 }
 
-function StrategyPane({ draft, review, packageVersion, busy, canGenerate, onGenerate, onPatch, onSubmit, onApprove, onCreateCreative }: {
+function StrategyPane({ draft, review, packageVersion, readiness, generationMetadata, busy, canGenerate, onGenerate, onPatch, onRevise, onSubmit, onApprove, onCreateCreative }: {
   draft: StrategyDraft | null
   review: Review | null
   packageVersion: PackageVersion | null
+  readiness: GenerationReadiness | null
+  generationMetadata: GenerationMetadata | null
   busy: boolean
   canGenerate: boolean
   onGenerate: () => void
   onPatch: (section: string, value: unknown) => void
+  onRevise: (instruction: string) => Promise<boolean>
   onSubmit: () => void
   onApprove: () => void
   onCreateCreative: () => void
 }) {
-  if (!draft) return <article className="strategy-panel strategy-document"><header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div></header><div className="panel-empty"><p>确认 Brief 后，基于固定版本生成策略。</p><button className="button button--primary" disabled={busy || !canGenerate} onClick={onGenerate} type="button">生成策略</button></div></article>
+  const readinessText = readiness?.generation_mode === 'provider'
+    ? readiness.ready ? `真实模型 · ${readiness.upstream_model || readiness.model_alias}` : '真实模型尚未就绪'
+    : '演示模板'
+  if (!draft) return <article className="strategy-panel strategy-document"><header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div><span className={`generation-mode generation-mode--${readiness?.generation_mode || 'unknown'}`}>{readinessText}</span></header><div className="panel-empty"><p>确认 Brief 后，基于固定版本生成策略。</p>{readiness && !readiness.ready ? <p className="generation-warning">{generationReadinessMessage(readiness.reason_code)}</p> : null}<button className="button button--primary" disabled={busy || !canGenerate || readiness?.ready === false} onClick={onGenerate} type="button">生成策略</button></div></article>
   if (draft.status === 'generating' || !draft.revision) return <article className="strategy-panel strategy-document"><header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div></header><div className="panel-empty"><span className="strategy-spinner" /><p>正在生成结构化策略，刷新或断线不会丢失任务。</p></div></article>
   const document = draft.revision.document
   return <article className="strategy-panel strategy-document">
-    <header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div><span className="revision-chip">Revision {draft.current_revision}</span></header>
+    <header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div><div className="strategy-generation-badges"><span className="revision-chip">Revision {draft.current_revision}</span><span className={`generation-mode generation-mode--${generationMetadata?.generation_mode || 'unknown'}`}>{generationMetadata?.generation_mode === 'provider' ? generationMetadata.model_version : generationMetadata?.generation_mode === 'fake_template' ? 'Fake 模板' : '演示模板'}</span></div></header>
+    {generationMetadata ? <div className="generation-proof"><span>Prompt {generationMetadata.prompt_version || 'unknown'}</span><span>规则检查 {generationMetadata.quality_report?.score ?? '—'}</span><span>校验 {generationMetadata.validation_attempts} 次</span>{generationMetadata.usage ? <span>{generationMetadata.usage.total_tokens} tokens</span> : null}</div> : null}
     <EditableStrategyField disabled={busy || draft.status === 'approved'} label="目标" onSave={(value) => onPatch('objective', value)} value={document.objective} />
     <section><h3>核心受众</h3><p>{document.audience.primary}</p></section>
     <EditableStrategyField disabled={busy || draft.status === 'approved'} label="核心主张" onSave={(value) => onPatch('proposition', value)} value={document.proposition} />
     <section><h3>渠道策略</h3>{document.channel_strategy.map((channel) => <div className="channel-card" key={channel.platform}><strong>{channel.platform === 'xiaohongshu' ? '小红书' : channel.platform}</strong><p>{channel.role}</p><small>{channel.formats.join(' · ')}</small></div>)}</section>
     <section><h3>创意建议</h3><ul>{document.creative_recommendations.map((item) => <li key={item}>{item}</li>)}</ul></section>
     {document.assumptions_and_gaps.length ? <section className="gap-section"><h3>假设与缺口</h3><ul>{document.assumptions_and_gaps.map((item) => <li key={item}>{item}</li>)}</ul></section> : null}
+    <StrategyRevisionForm disabled={busy || draft.status === 'approved'} mode={generationMetadata?.generation_mode || 'deterministic'} onSubmit={onRevise} />
     <footer className="strategy-review-actions">
       {packageVersion ? <div className="published-proof"><strong>策略包 v{packageVersion.version} 已发布</strong><code>{packageVersion.content_hash}</code><button className="button button--primary" disabled={busy || !packageVersion.snapshot.readiness.creative_ready} onClick={onCreateCreative} type="button">创建创意输入</button>{!packageVersion.snapshot.readiness.creative_ready ? <small>该策略包尚未满足创意输入条件。</small> : null}</div> : review?.status === 'open' ? <>
         <div><strong>评审候选已冻结</strong><small>{review.candidate_content_hash}</small></div>
@@ -335,6 +366,23 @@ function StrategyPane({ draft, review, packageVersion, busy, canGenerate, onGene
       </> : <button className="button button--primary" disabled={busy || draft.status === 'approved'} onClick={onSubmit} type="button">提交评审</button>}
     </footer>
   </article>
+}
+
+function StrategyRevisionForm({ disabled, mode, onSubmit }: {
+  disabled: boolean
+  mode: GenerationMetadata['generation_mode']
+  onSubmit: (instruction: string) => Promise<boolean>
+}) {
+  const [instruction, setInstruction] = useState('')
+  const providerEnabled = mode === 'provider'
+  return <section className="strategy-revision-form">
+    <h3>{providerEnabled ? 'AI 定向修订' : '定向修订'}</h3>
+    {!providerEnabled ? <p className="generation-warning">当前是演示模板；接入真实文本 Provider 后才会启用 AI 定向修订。</p> : null}
+    <textarea disabled={!providerEnabled} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：把创意建议改得更适合 B2B 技术决策者，其他章节保持不变。" rows={3} value={instruction} />
+    <button className="button" disabled={disabled || !providerEnabled || !instruction.trim()} onClick={async () => {
+      if (await onSubmit(instruction.trim())) setInstruction('')
+    }} type="button">生成新 Revision</button>
+  </section>
 }
 
 function EditableStrategyField({ label, value, disabled, onSave }: { label: string; value: string; disabled: boolean; onSave: (value: string) => void }) {
@@ -349,6 +397,19 @@ function sourceLabel(source: string) {
   if (source === 'conversation_message') return '来自对话'
   if (source === 'user_edit') return '用户编辑'
   return source
+}
+
+function generationReadinessMessage(reason?: string) {
+  switch (reason) {
+    case 'PROVIDER_CREDENTIAL_UNAVAILABLE':
+      return '真实 Provider 的凭证不可用，请先完成凭证配置。'
+    case 'MODEL_ROUTE_NOT_FOUND':
+      return '未找到 cookies.text.standard 的可用模型路由。'
+    case 'MODEL_ROUTE_POLICY_INVALID':
+      return '模型路由策略不符合 Strategy 生成要求，请检查响应模式、令牌数和温度。'
+    default:
+      return '真实 Provider 当前不可用，请检查模型路由和凭证配置。'
+  }
 }
 
 function statusLabel(status: string) {

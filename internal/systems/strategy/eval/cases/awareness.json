@@ -1,0 +1,8 @@
+{
+  "id": "awareness-consumer-launch",
+  "objective": "新品认知",
+  "audience": "年轻职场人",
+  "proposition": "通勤更轻松",
+  "channels": ["xiaohongshu"],
+  "expected_signals": ["认知记忆点", "有效阅读", "搜索意向"]
+}

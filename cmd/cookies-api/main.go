@@ -91,9 +91,18 @@ func main() {
 		}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Agents: agentStore, Text: textProvider,
-			TextModelAlias: "cookies.text.standard", DisableApproval: !cfg.Strategy.ApproveEnabled,
+			TextModelAlias: cfg.Strategy.TextModelAlias, PromptVersion: cfg.Strategy.PromptVersion,
+			CriticEnabled: cfg.Strategy.CriticEnabled, DisableApproval: !cfg.Strategy.ApproveEnabled,
 			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
 		}
+		generationMode := "deterministic"
+		if cfg.Strategy.RealProviderEnabled {
+			generationMode = "provider"
+		}
+		log.Printf(
+			"Strategy generation configured: mode=%s model_alias=%s prompt_version=%s critic_enabled=%t",
+			generationMode, cfg.Strategy.TextModelAlias, cfg.Strategy.PromptVersion, cfg.Strategy.CriticEnabled,
+		)
 		// This adapter is the only Strategy-to-Creative connection. It reads an
 		// immutable, authorized Strategy package and leaves Creative to persist
 		// its own Intake only after a user explicitly invokes the endpoint.

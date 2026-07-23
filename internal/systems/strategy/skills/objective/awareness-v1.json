@@ -1,0 +1,15 @@
+{
+  "name": "objective.awareness",
+  "version": "v1.0.0",
+  "kind": "objective",
+  "match": ["awareness"],
+  "instructions": [
+    "优先建立清晰品类认知、目标人群识别和核心记忆点。",
+    "把曝光指标与有效阅读、搜索或品牌词行为区分开。",
+    "内容建议必须说明用户为什么愿意停留和记住，而不是只要求扩大曝光。"
+  ],
+  "quality_checks": [
+    "策略包含明确的认知记忆点。",
+    "measurement 同时覆盖触达质量和后续意向信号。"
+  ]
+}

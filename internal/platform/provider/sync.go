@@ -150,6 +150,7 @@ type SynchronousResult struct {
 	Text             string
 	StructuredOutput json.RawMessage
 	Usage            *TokenUsage
+	RouteSnapshot    *GatewayRouteSnapshot
 }
 
 type TokenUsage struct {
@@ -185,12 +186,34 @@ func (r SynchronousResult) Validate() error {
 }
 
 type SynchronousResponse struct {
-	ProviderCode     string          `json:"provider_code"`
-	ModelAlias       string          `json:"model_alias"`
-	ModelVersion     string          `json:"model_version"`
-	Text             string          `json:"text"`
-	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
-	Usage            *TokenUsage     `json:"usage,omitempty"`
+	ProviderCode     string           `json:"provider_code"`
+	ModelAlias       string           `json:"model_alias"`
+	ModelVersion     string           `json:"model_version"`
+	Text             string           `json:"text"`
+	StructuredOutput json.RawMessage  `json:"structured_output,omitempty"`
+	Usage            *TokenUsage      `json:"usage,omitempty"`
+	RouteRevisionID  string           `json:"route_revision_id,omitempty"`
+	ResponseMode     TextResponseMode `json:"response_mode,omitempty"`
+}
+
+type TextRouteInspection struct {
+	ModelAlias      string           `json:"model_alias"`
+	UpstreamModel   string           `json:"upstream_model"`
+	RouteRevisionID string           `json:"route_revision_id"`
+	ResponseMode    TextResponseMode `json:"response_mode"`
+	Ready           bool             `json:"ready"`
+}
+
+type TextRouteInspector interface {
+	InspectTextRoute(context.Context, contract.OrganizationID, string) (TextRouteInspection, error)
+}
+
+func (s Service) InspectTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (TextRouteInspection, error) {
+	inspector, ok := s.TextAdapter.(TextRouteInspector)
+	if !ok {
+		return TextRouteInspection{}, fmt.Errorf("text provider does not expose route inspection")
+	}
+	return inspector.InspectTextRoute(ctx, organizationID, modelAlias)
 }
 
 func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) (SynchronousResponse, error) {
@@ -207,7 +230,12 @@ func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) 
 	if err := result.Validate(); err != nil {
 		return SynchronousResponse{}, fmt.Errorf("text provider response: %w", err)
 	}
-	return SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}, nil
+	response := SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}
+	if result.RouteSnapshot != nil {
+		response.RouteRevisionID = result.RouteSnapshot.RouteRevisionID
+		response.ResponseMode = result.RouteSnapshot.TextResponseMode
+	}
+	return response, nil
 }
 
 func (s Service) UnderstandVision(ctx context.Context, request VisionUnderstandRequest) (SynchronousResponse, error) {

@@ -38,6 +38,14 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONList'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/generation-readiness:
+    get:
+      operationId: getStrategyGenerationReadiness
+      summary: Preflight the configured Strategy text route without invoking a model.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/workspaces/{workspace_id}:
     get:
       operationId: getStrategyWorkspace
@@ -243,6 +251,14 @@ paths:
       parameters: [{$ref: '#/components/parameters/StrategyID'}]
       responses:
         '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-drafts/{strategy_id}/generation-metadata:
+    get:
+      operationId: getStrategyGenerationMetadata
+      summary: Read safe model, Prompt, Skill, token, and quality metadata for the latest revision.
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/strategy-drafts/{strategy_id}/revisions/{revision}:
     get:

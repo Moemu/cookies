@@ -110,6 +110,35 @@ export type StrategyDraft = {
   revision?: DraftRevision
 }
 
+export type GenerationReadiness = {
+  ready: boolean
+  generation_mode: 'deterministic' | 'provider'
+  model_alias?: string
+  upstream_model?: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  prompt_version: string
+  reason_code?: string
+}
+
+export type GenerationMetadata = {
+  generation_mode: 'deterministic' | 'fake_template' | 'provider'
+  provider_code?: string
+  model_alias?: string
+  model_version?: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  prompt_version?: string
+  skill_versions: Record<string, string>
+  skill_snapshot_hashes: Record<string, string>
+  generation_context_hash?: string
+  output_hash?: string
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
+  latency_ms?: number
+  validation_attempts: number
+  quality_report?: { passed: boolean; score: number; errors: string[]; warnings: string[] }
+}
+
 export type Review = {
   id: string
   strategy_id: string

@@ -13,7 +13,10 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
-		value.Strategy.PackageToCreativeEnabled || len(value.Strategy.OrganizationAllowlist) != 0 {
+		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
+		value.Strategy.TextModelAlias != "cookies.text.standard" ||
+		value.Strategy.PromptVersion != "strategy.generate.v2" ||
+		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
 	}
 }
@@ -31,6 +34,14 @@ func TestStrategyRolloutRejectsInvalidBoolean(t *testing.T) {
 	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_APPROVE_ENABLED": "tru"}))
 	if err == nil {
 		t.Fatal("expected an invalid approval flag to fail closed")
+	}
+}
+
+func TestStrategyCriticRequiresRealProvider(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_CRITIC_ENABLED": "true"}))
+	if err == nil {
+		t.Fatal("expected Strategy critic without a real provider to be rejected")
 	}
 }
 

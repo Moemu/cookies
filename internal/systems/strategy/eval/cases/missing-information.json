@@ -1,0 +1,10 @@
+{
+  "id": "insufficient-evidence-boundary",
+  "scenario": "产品效果证据不足",
+  "objective": "建立初步产品认知",
+  "audience": "首次接触该品类的潜在用户",
+  "proposition": "提供更清晰的任务流程",
+  "channels": ["xiaohongshu"],
+  "missing_fields": ["product.evidence", "competitors", "measurement.primary_kpi"],
+  "expected_signals": ["证据待补充", "不得承诺效果", "核心指标待确认"]
+}
