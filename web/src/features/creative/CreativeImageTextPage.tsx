@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { createCoverImageJob, createCreativeIntake, createCreativeTask, getCreativeTask, listCreativeIntakes, listCreativeTasks } from './api'
-import type { CreativeIntakeInput, CreativeTask, CreativeTaskDetail } from './types'
+import type { CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail } from './types'
 import type { ProviderJob } from '../platform/types'
 
 const emptyInput: CreativeIntakeInput = {
@@ -15,6 +15,7 @@ function values(value: string) {
 export function CreativeImageTextPage() {
   const { projectId = '' } = useParams()
   const [input, setInput] = useState<CreativeIntakeInput>(emptyInput)
+  const [intakes, setIntakes] = useState<CreativeIntake[]>([])
   const [tasks, setTasks] = useState<CreativeTask[]>([])
   const [selected, setSelected] = useState<CreativeTaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -32,8 +33,9 @@ export function CreativeImageTextPage() {
   const load = useCallback(async (signal?: AbortSignal) => {
     setError('')
     try {
-      const [taskResponse] = await Promise.all([listCreativeTasks(projectId, signal), listCreativeIntakes(projectId, signal)])
+      const [taskResponse, intakeResponse] = await Promise.all([listCreativeTasks(projectId, signal), listCreativeIntakes(projectId, signal)])
       setTasks(taskResponse.items)
+      setIntakes(intakeResponse.items)
       if (taskResponse.items.length > 0) await selectTask(taskResponse.items[0].id, signal)
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
@@ -57,6 +59,7 @@ export function CreativeImageTextPage() {
     setSubmitting(true); setError(''); setMessage('')
     try {
       const intake = await createCreativeIntake(projectId, input)
+	  setIntakes((current) => [intake, ...current])
       if (intake.status === 'needs_clarification') {
         setMessage(`输入已保存，还需要补充：${intake.missing_fields.join('、')}。`)
         return
@@ -67,6 +70,19 @@ export function CreativeImageTextPage() {
       setMessage('已创建小红书图文任务，并生成可编辑的图文初稿。')
       setInput(emptyInput)
     } catch (caught) { setError(caught instanceof Error ? caught.message : '无法创建创意任务。')
+    } finally { setSubmitting(false) }
+  }
+
+  async function createTaskFromIntake(intake: CreativeIntake) {
+    if (submitting) return
+    setSubmitting(true); setError(''); setMessage('')
+    try {
+      const task = await createCreativeTask(projectId, intake.id)
+      setTasks((current) => current.some((item) => item.id === task.id) ? current : [task, ...current])
+      await selectTask(task.id)
+      setMessage('已从策略交接的创意输入创建图文任务，并生成可编辑初稿。')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '无法从创意输入创建任务。')
     } finally { setSubmitting(false) }
   }
 
@@ -101,7 +117,13 @@ export function CreativeImageTextPage() {
       </form>
 
       <aside className="creative-task-list" aria-label="创意任务列表">
-        <div className="creative-panel__heading"><div><span>02 · 任务</span><h2>图文初稿</h2></div><small>{tasks.length} 项</small></div>
+        <div className="creative-panel__heading"><div><span>02 · 策略接入与任务</span><h2>图文初稿</h2></div><small>{tasks.length} 项</small></div>
+        {intakes.length > 0 ? <div className="creative-intake-items">
+          {intakes.map((intake) => <article className="creative-intake-item" key={intake.id}>
+            <div><strong>{intake.source === 'strategy_package' ? '策略包已接入' : '创意输入已保存'}</strong><small>{intake.status === 'ready' ? '已就绪，可创建图文任务' : `待补充：${intake.missing_fields.join('、')}`}</small></div>
+            {intake.status === 'ready' ? <button className="button button--secondary" disabled={submitting} onClick={() => void createTaskFromIntake(intake)} type="button">创建图文任务</button> : null}
+          </article>)}
+        </div> : null}
         {loading ? <p className="creative-empty">正在加载任务…</p> : tasks.length === 0 ? <p className="creative-empty">还没有图文任务。完成左侧输入后，会在这里出现一份可编辑的初稿。</p> : <div className="creative-task-items">{tasks.map((task) => <button className={selected?.task.id === task.id ? 'creative-task-item creative-task-item--selected' : 'creative-task-item'} key={task.id} onClick={() => void selectTask(task.id)} type="button"><span>{task.direction.concept || '未命名方向'}</span><small>{task.channel === 'xiaohongshu' ? '小红书图文' : task.channel} · {task.status === 'draft' ? '初稿' : task.status}</small></button>)}</div>}
       </aside>
     </div>
