@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { approveStrategy, patchBriefField, sendMessage } from './api'
+import { approveStrategy, listStrategyPackages, patchBriefField, sendMessage } from './api'
 import type { BriefDraft, Review, StrategyDraft } from './types'
 
 const draft: BriefDraft = {
@@ -71,5 +71,12 @@ describe('Strategy API client', () => {
     )
     const [, init] = fetchMock.mock.calls[0]
     expect(new Headers(init?.headers).get('Idempotency-Key')).toBe('strategy-web-stable-retry')
+  })
+
+  it('reads published packages by project so a revisited workspace can recover its next step', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await listStrategyPackages('project_1')
+    expect(fetchMock).toHaveBeenCalledWith('/api/strategy/v1/projects/project_1/strategy-packages', expect.anything())
   })
 })

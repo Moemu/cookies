@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiProblem } from '../../shared/api/client'
 import { getProjectContext } from '../platform/api'
 import type { Project, ProjectContext } from '../platform/types'
@@ -46,7 +46,7 @@ function removeErrorMessage(error: unknown) {
   return '素材删除失败，请稍后重试。'
 }
 
-function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, view }: { asset: ProjectAsset; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; view: ViewMode }) {
+function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, projectId, view }: { asset: ProjectAsset; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; projectId: string; view: ViewMode }) {
   const dimensions = asset.version.width_pixels && asset.version.height_pixels
     ? `${asset.version.width_pixels} × ${asset.version.height_pixels}`
     : '尺寸未记录'
@@ -63,6 +63,7 @@ function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, view }: { 
       <h3 title={asset.asset.id}>{assetLabel(asset)}</h3>
       <div className="asset-source"><span className={`source-dot source-dot--${asset.version.source_type}`} />{sourceLabels[asset.version.source_type]}</div>
       <div className="asset-facts"><span>{dimensions}</span><span>{formatBytes(asset.version.size_bytes)}</span></div>
+      {asset.version.provider_job_id ? <Link className="asset-provider-link" to={`/projects/${encodeURIComponent(projectId)}/provider-jobs?job=${encodeURIComponent(asset.version.provider_job_id)}`}>查看 Provider 作业</Link> : null}
       <div className="asset-footer"><span className={`asset-status asset-status--${asset.asset.status}`}><i />{statusLabels[asset.asset.status]}</span><time dateTime={asset.created_at}>{formatDate(asset.created_at)}</time></div>
     </div>
   </article>
@@ -70,6 +71,8 @@ function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, view }: { 
 
 export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' | 'status'> }) {
   const { projectId = '' } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const providerJobFilter = searchParams.get('provider_job_id')?.trim() ?? ''
   const [assets, setAssets] = useState<ProjectAsset[]>([])
   const [context, setContext] = useState<ProjectContext | null>(null)
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
@@ -131,11 +134,12 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
   useEffect(() => () => ownedObjectUrls.current.forEach((url) => URL.revokeObjectURL(url)), [])
 
   const filteredAssets = useMemo(() => assets.filter((asset) => {
+    if (providerJobFilter && asset.version.provider_job_id !== providerJobFilter) return false
     if (source !== 'all' && asset.version.source_type !== source) return false
     if (status !== 'all' && asset.asset.status !== status) return false
     if (!deferredQuery) return true
     return `${asset.asset.id} ${asset.version.mime_type} ${sourceLabels[asset.version.source_type]}`.toLowerCase().includes(deferredQuery)
-  }), [assets, deferredQuery, source, status])
+  }), [assets, deferredQuery, providerJobFilter, source, status])
   const readyCount = assets.filter((asset) => asset.asset.status === 'ready').length
   const generatedCount = assets.filter((asset) => asset.version.source_type === 'provider_generated').length
   const projectCanAcceptAssets = project?.status === 'draft' ? false : context ? Boolean(context.brand_id) : true
@@ -216,6 +220,8 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
 
     {!projectCanAcceptAssets ? <div className="context-warning" role="status"><strong>该项目尚未启用素材写入</strong><span>需要先绑定有效品牌并激活项目。</span></div> : null}
 
+    {providerJobFilter ? <div className="asset-lineage-filter"><div><strong>正在查看指定 Provider 作业的入库素材</strong><code>{providerJobFilter}</code></div><button className="text-button" onClick={() => setSearchParams({})} type="button">查看全部素材</button></div> : null}
+
     <div className="asset-toolbar">
       <label className="search-control"><AssetIcon name="search" /><span className="sr-only">搜索素材</span><input onChange={(event) => setQuery(event.target.value)} placeholder="搜索资产 ID 或类型" value={query} /></label>
       <label className="select-control"><span className="sr-only">素材来源</span><select onChange={(event) => setSource(event.target.value as 'all' | AssetSource)} value={source}><option value="all">全部来源</option><option value="upload">用户上传</option><option value="provider_generated">Provider 生成</option><option value="imported">导入</option><option value="captured">采集</option></select></label>
@@ -243,7 +249,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
       {filteredAssets.map((asset) => <AssetCard asset={asset} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
         setRemoveError('')
         setAssetToRemove(asset)
-      }} previewUnavailable={unavailablePreviewIds.has(asset.asset.id)} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} view={view} />)}
+      }} previewUnavailable={unavailablePreviewIds.has(asset.asset.id)} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} projectId={projectId} view={view} />)}
     </div> : null}
 
     {assets.length > 0 ? <footer className="library-count">显示 {filteredAssets.length} / {assets.length} 条素材</footer> : null}

@@ -121,6 +121,10 @@ export function getReview(reviewId: string, signal?: AbortSignal) {
   return apiRequest<Review>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}`, { signal })
 }
 
+export function listStrategyPackages(projectId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: PackageVersion[] }>(`${root}/projects/${encodeURIComponent(projectId)}/strategy-packages`, { signal })
+}
+
 export function approveStrategy(draft: StrategyDraft, review: Review, mutationKey?: string) {
   return apiRequest<PackageVersion>(`${root}/strategy-drafts/${encodeURIComponent(draft.id)}:approve`, {
     method: 'POST',

@@ -124,6 +124,8 @@ export type PackageVersion = {
   content_hash: string
   status: 'published' | 'superseded' | 'archived'
   snapshot: {
+    strategy_id: string
+    strategy_revision: number
     readiness: {
       creative_ready: boolean
       delivery_ready: boolean

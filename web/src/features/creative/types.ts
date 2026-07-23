@@ -14,13 +14,22 @@ export type CreativeIntakeInput = {
   prohibited_claims: string[]
 }
 
+export type CreativeIntakeRequest = Omit<CreativeIntakeInput, 'source'> & {
+  source: CreativeIntake['source']
+  strategy_package?: {
+    package_id: string
+    package_version: number
+    expected_content_hash: string
+  }
+}
+
 export type CreativeIntake = {
   id: string
   organization_id: string
   project_id: string
   source: 'manual' | 'strategy_package' | 'uploaded_document' | 'conversation'
   status: CreativeIntakeStatus
-  request: CreativeIntakeInput
+  request: CreativeIntakeRequest
   missing_fields: string[]
   warnings: string[]
   confirmed_by?: string

@@ -13,13 +13,14 @@ import {
   getWorkspace,
   listBriefVersions,
   listMessages,
+  listStrategyPackages,
   patchBriefField,
   patchStrategySection,
   sendMessage,
   submitStrategy,
 } from './api'
 import { useConversationStream } from './conversation/useConversationStream'
-import { createCreativeIntakeFromStrategy } from '../creative/api'
+import { createCreativeIntakeFromStrategy, listCreativeIntakes } from '../creative/api'
 import type { BriefDraft, BriefVersion, Message, PackageVersion, Review, StrategyDraft, WorkspaceDetail } from './types'
 import './strategy.css'
 
@@ -54,9 +55,10 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
     setBriefVersion(null)
     const task = workspace.current_task
     const conversation = workspace.current_conversation
-    const [messageResult, briefResult] = await Promise.all([
+    const [messageResult, briefResult, packageResult] = await Promise.all([
       conversation ? listMessages(conversation.id, signal) : Promise.resolve({ items: [] }),
       task ? getBriefDraft(task.id, signal) : Promise.resolve(null),
+      listStrategyPackages(projectId, signal),
     ])
     setMessages(messageResult.items)
     setBrief(briefResult)
@@ -67,6 +69,10 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
     if (task?.current_strategy_id) {
       const currentDraft = await getStrategy(task.current_strategy_id, signal)
       setDraft(currentDraft)
+      const packageVersion = packageResult.items
+        .filter((item) => item.status === 'published' && item.snapshot.strategy_id === currentDraft.id)
+        .sort((left, right) => right.version - left.version)[0]
+      setPublished(packageVersion ?? null)
       if (currentDraft.current_review_id) {
         setReview(await getReview(currentDraft.current_review_id, signal))
       }
@@ -186,7 +192,23 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
               setDraft({ ...current, status: 'approved' })
             })}
             onCreateCreative={() => published && run('creative', async () => {
-              await createCreativeIntakeFromStrategy(projectId, published.package_id, published.version, published.content_hash)
+              const intakes = await listCreativeIntakes(projectId)
+              const alreadyHandedOff = intakes.items.some((intake) => {
+                const strategyPackage = intake.request.strategy_package
+                return intake.source === 'strategy_package'
+                  && strategyPackage?.package_id === published.package_id
+                  && strategyPackage.package_version === published.version
+                  && strategyPackage.expected_content_hash === published.content_hash
+              })
+
+              if (!alreadyHandedOff) {
+                await createCreativeIntakeFromStrategy(
+                  projectId,
+                  published.package_id,
+                  published.version,
+                  published.content_hash,
+                )
+              }
               navigate(`/projects/${projectId}/creative`)
             })}
             onGenerate={() => briefVersion && run('generate', async () => {
