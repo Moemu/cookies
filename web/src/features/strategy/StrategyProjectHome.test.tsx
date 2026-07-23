@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { StrategyProjectHome } from './StrategyProjectHome'
+import { StrategyLanding, StrategyProjectHome } from './StrategyProjectHome'
 
 const project = {
   id: 'project_1',
@@ -30,5 +30,14 @@ describe('Strategy project home', () => {
       'href',
       '/strategy/projects/project_1/workspaces/workspace_1/conversation',
     )
+  })
+
+  it('uses the shell-selected project at the Strategy root route', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    render(<MemoryRouter><StrategyLanding project={project} /></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: /新品项目.*策略/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /创建并开始/ })).toBeInTheDocument()
   })
 })

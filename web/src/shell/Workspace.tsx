@@ -97,7 +97,7 @@ export function Workspace() {
         {bootstrapError ? <div className="workspace-alert" role="status">身份与项目列表暂不可用：{bootstrapError}</div> : null}
         <main className="workspace" aria-live="polite">
           <Routes>
-            <Route path="/strategy" element={<StrategyLanding />} />
+            <Route path="/strategy" element={<StrategyLanding project={currentProject} />} />
             <Route path="/strategy/projects/:projectId" element={<StrategyProjectHome project={currentProject} />} />
             <Route path="/strategy/projects/:projectId/workspaces/:workspaceId/*" element={<StrategyWorkspacePage project={currentProject} />} />
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />

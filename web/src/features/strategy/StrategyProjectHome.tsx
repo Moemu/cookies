@@ -50,6 +50,9 @@ export function StrategyProjectHome({ project }: { project?: Project }) {
     </form>}
   </section>
 }
-export function StrategyLanding() {
+// The shell already resolves the active project. Keeping this entry route
+// project-aware prevents /strategy from stranding users on a static empty page.
+export function StrategyLanding({ project }: { project?: Project }) {
+  if (project) return <StrategyProjectHome project={project} />
   return <section className="strategy-empty"><span className="eyebrow">STRATEGY</span><h1>策略工作区</h1><p>从顶部选择项目，开始广告需求梳理。</p></section>
 }
