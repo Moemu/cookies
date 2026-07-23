@@ -97,6 +97,7 @@ type Worker struct {
 	Handlers          map[string]Handler
 	Now               func() time.Time
 	LeaseRenewer      LeaseRenewer
+	Canceller         ClaimCanceller
 	HeartbeatInterval time.Duration
 }
 
@@ -117,6 +118,15 @@ func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 	}
 	result, err := w.runHandler(ctx, claim, handler)
 	if err == nil {
+		if w.Canceller != nil {
+			cancelled, checkErr := w.Canceller.IsCancelRequested(ctx, claim.Job.OrganizationID, claim.Job.ID)
+			if checkErr != nil {
+				return true, checkErr
+			}
+			if cancelled {
+				return true, w.Canceller.CancelClaim(ctx, claim, w.Now().UTC())
+			}
+		}
 		return true, w.Store.Succeed(ctx, claim, result, w.Now().UTC())
 	}
 	if errors.Is(err, ErrLeaseLost) {

@@ -6,6 +6,34 @@ import (
 	"testing"
 )
 
+func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
+	t.Parallel()
+	value, err := FromLookup(mapLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
+		value.Strategy.PackageToCreativeEnabled || len(value.Strategy.OrganizationAllowlist) != 0 {
+		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
+	}
+}
+
+func TestStrategyRolloutRejectsUnavailableCreativeIntegration(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED": "true"}))
+	if err == nil {
+		t.Fatal("expected unavailable Strategy-to-Creative integration to be rejected")
+	}
+}
+
+func TestStrategyRolloutRejectsInvalidBoolean(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_APPROVE_ENABLED": "tru"}))
+	if err == nil {
+		t.Fatal("expected an invalid approval flag to fail closed")
+	}
+}
+
 func TestAdapterGatewayRequiresExternalMasterKeyAndSupportsProduction(t *testing.T) {
 	t.Parallel()
 	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_IMAGE_ADAPTER": "adapter_gateway"}))

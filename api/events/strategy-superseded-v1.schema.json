@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/events/strategy-superseded-v1.schema.json",
+  "title": "strategy.superseded.v1",
+  "allOf": [
+    {"$ref": "./event-envelope.schema.json"},
+    {
+      "type": "object",
+      "required": ["event_type", "producer", "project_id", "subject", "data"],
+      "properties": {
+        "event_type": {"const": "strategy.superseded.v1"},
+        "producer": {"const": "strategy"},
+        "project_id": {"type": "string", "minLength": 1},
+        "subject": {
+          "type": "object",
+          "required": ["type", "id", "version"],
+          "properties": {
+            "type": {"const": "strategy_package"},
+            "id": {"type": "string", "minLength": 1},
+            "version": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "data": {
+          "type": "object",
+          "required": ["superseded_version", "replacement_version"],
+          "properties": {
+            "superseded_version": {"type": "integer", "minimum": 1},
+            "replacement_version": {"type": "integer", "minimum": 2}
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

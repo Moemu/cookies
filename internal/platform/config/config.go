@@ -38,6 +38,7 @@ type Config struct {
 	ObjectStorage ObjectStorage
 	Scanner       Scanner
 	Provider      Provider
+	Strategy      Strategy
 	LocalIdentity *LocalIdentity
 }
 
@@ -58,10 +59,22 @@ type Scanner struct {
 	Address string
 }
 
+// Strategy controls gradual rollout independently from the Creative system.
+// Package-to-Creative remains off until the explicit Creative intake workflow
+// is composed; approval never creates a Creative task implicitly.
+type Strategy struct {
+	Enabled                  bool
+	RealProviderEnabled      bool
+	ApproveEnabled           bool
+	PackageToCreativeEnabled bool
+	OrganizationAllowlist    []string
+}
+
 // Provider contains only local composition choices. Credentials are read from
 // the process environment (or ignored local .env), never from project data.
 type Provider struct {
 	ImageAdapter      string
+	TextAdapter       string
 	MasterKey         string
 	MasterKeyVersion  string
 	OutputBucket      string
@@ -161,6 +174,22 @@ func parseDotEnv(reader io.Reader) (map[string]string, error) {
 
 func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	environment := Environment(valueOr(lookup, "COOKIES_ENV", string(EnvironmentLocal)))
+	strategyEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
+	strategyRealProviderEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	strategyApproveEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_APPROVE_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
+	strategyPackageToCreativeEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
@@ -179,8 +208,16 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			AssetsBucket:     valueOr(lookup, "COOKIES_TOS_ASSETS_BUCKET", "cookies-assets"),
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
+		Strategy: Strategy{
+			Enabled:                  strategyEnabled,
+			RealProviderEnabled:      strategyRealProviderEnabled,
+			ApproveEnabled:           strategyApproveEnabled,
+			PackageToCreativeEnabled: strategyPackageToCreativeEnabled,
+			OrganizationAllowlist:    splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
+		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
+			TextAdapter:       valueOr(lookup, "COOKIES_PROVIDER_TEXT_ADAPTER", "fake"),
 			MasterKey:         valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY", ""),
 			MasterKeyVersion:  valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY_VERSION", "v1"),
 			OutputBucket:      valueOr(lookup, "COOKIES_PROVIDER_OUTPUT_BUCKET", "cookies-provider-output"),
@@ -257,16 +294,25 @@ func (c Config) Validate() error {
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")
 	}
+	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "adapter_gateway" {
+		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake or adapter_gateway")
+	}
+	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" {
+		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires COOKIES_PROVIDER_TEXT_ADAPTER=adapter_gateway")
+	}
+	if c.Strategy.PackageToCreativeEnabled {
+		return fmt.Errorf("COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED is unavailable until explicit Creative intake is composed")
+	}
 	if c.Provider.ImageAdapter == "ark_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkImage.APIKey) == "" || strings.TrimSpace(c.Provider.ArkImage.Model) == "") {
 		return fmt.Errorf("ark_image is local-only and requires COOKIES_ARK_IMAGE_API_KEY and COOKIES_ARK_IMAGE_MODEL")
 	}
 	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
 		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
 	}
-	if c.Provider.ImageAdapter == "adapter_gateway" && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
+	if (c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway") && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
 		return fmt.Errorf("adapter_gateway requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")
 	}
-	if c.Provider.ImageAdapter == "adapter_gateway" {
+	if c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway" {
 		key, err := base64.StdEncoding.DecodeString(c.Provider.MasterKey)
 		if err != nil || len(key) != 32 {
 			return fmt.Errorf("COOKIES_PROVIDER_MASTER_KEY must be base64-encoded 32 bytes")
@@ -352,4 +398,16 @@ func boolValueOr(lookup func(string) (string, bool), key string, fallback bool) 
 		return fallback
 	}
 	return parsed
+}
+
+func strictBoolValueOr(lookup func(string) (string, bool), key string, fallback bool) (bool, error) {
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", key)
+	}
+	return parsed, nil
 }

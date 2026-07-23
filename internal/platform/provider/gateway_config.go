@@ -17,10 +17,10 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-// ImageRouteSnapshot is copied onto a job when it is created. Later route
+// GatewayRouteSnapshot is copied onto an invocation when it is created. Later route
 // edits therefore cannot silently change the endpoint, model, or credential
-// used by an already accepted job.
-type ImageRouteSnapshot struct {
+// used by an already accepted image job or text skill run.
+type GatewayRouteSnapshot struct {
 	RouteID              string `json:"route_id"`
 	RouteRevisionID      string `json:"route_revision_id"`
 	ConnectionID         string `json:"connection_id"`
@@ -33,11 +33,11 @@ type ImageRouteSnapshot struct {
 	MaxResponseBytes     int64  `json:"max_response_bytes"`
 }
 
-func (s ImageRouteSnapshot) Validate() error {
+func (s GatewayRouteSnapshot) Validate() error {
 	return s.ValidateWithPolicy(false)
 }
 
-func (s ImageRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
+func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
 	if strings.TrimSpace(s.RouteID) == "" || strings.TrimSpace(s.RouteRevisionID) == "" ||
 		strings.TrimSpace(s.ConnectionID) == "" || strings.TrimSpace(s.ConnectionRevisionID) == "" ||
 		strings.TrimSpace(s.UpstreamModel) == "" || strings.TrimSpace(s.CredentialID) == "" ||
@@ -65,6 +65,14 @@ type ImageRouteResolver interface {
 	ResolveImageRoute(context.Context, contract.OrganizationID, string) (ImageRouteSnapshot, error)
 }
 
+type TextRouteResolver interface {
+	ResolveTextRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
+}
+
+// ImageRouteSnapshot is retained as a source-compatible alias for the
+// existing durable ProviderJob JSON contract.
+type ImageRouteSnapshot = GatewayRouteSnapshot
+
 type GatewayCredentialResolver interface {
 	ResolveGatewayCredential(context.Context, string, int64) (string, error)
 }
@@ -78,6 +86,14 @@ type MySQLGatewayConfigStore struct {
 }
 
 func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (ImageRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "image.generate", modelAlias)
+}
+
+func (s MySQLGatewayConfigStore) ResolveTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias)
+}
+
+func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationID contract.OrganizationID, capability, modelAlias string) (ImageRouteSnapshot, error) {
 	if s.DB == nil {
 		return ImageRouteSnapshot{}, fmt.Errorf("MySQL database is required")
 	}
@@ -90,20 +106,20 @@ func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organiza
 		JOIN provider_connections c ON c.id = rr.connection_id AND c.status = 'enabled' AND c.connection_type = 'adapter_gateway'
 		JOIN provider_connection_revisions cr ON cr.id = rr.connection_revision_id AND cr.connection_id = c.id
 		JOIN provider_credentials pc ON pc.connection_id = c.id AND pc.status = 'active'
-		WHERE r.capability = 'image.generate' AND r.model_alias = ? AND r.status = 'enabled'
+		WHERE r.capability = ? AND r.model_alias = ? AND r.status = 'enabled'
 			AND (r.organization_id = ? OR r.organization_id IS NULL)
 			AND pc.active_from <= UTC_TIMESTAMP(6)
 			AND (pc.active_until IS NULL OR pc.active_until > UTC_TIMESTAMP(6))
 		ORDER BY (r.organization_id IS NOT NULL) DESC, pc.credential_version DESC
 		LIMIT 1`,
-		modelAlias, organizationID,
+		capability, modelAlias, organizationID,
 	).Scan(
 		&snapshot.RouteID, &snapshot.RouteRevisionID, &snapshot.ConnectionID, &snapshot.ConnectionRevisionID,
 		&snapshot.BaseURL, &snapshot.UpstreamModel, &snapshot.CredentialID, &snapshot.CredentialVersion,
 		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ImageRouteSnapshot{}, fmt.Errorf("no enabled adapter gateway route for model alias %q", modelAlias)
+		return ImageRouteSnapshot{}, fmt.Errorf("no enabled adapter gateway %s route for model alias %q", capability, modelAlias)
 	}
 	if err != nil {
 		return ImageRouteSnapshot{}, err
@@ -202,6 +218,6 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-func routeDeadline(snapshot ImageRouteSnapshot, now time.Time) time.Time {
+func routeDeadline(snapshot GatewayRouteSnapshot, now time.Time) time.Time {
 	return now.Add(time.Duration(snapshot.TimeoutSeconds) * time.Second)
 }

@@ -47,6 +47,15 @@ type Dependencies struct {
 	Projects          ProjectManager
 	Uploads           AssetUploadManager
 	Intakes           GeneratedIntakeManager
+	// AuthenticatedDomainMounts allow vertical systems to share the platform
+	// listener and identity context without making this package import them.
+	// Mount handlers remain responsible for project authorization and scopes.
+	AuthenticatedDomainMounts []DomainMount
+}
+
+type DomainMount struct {
+	Pattern string
+	Handler http.Handler
 }
 
 type CurrentIdentityReader interface {
@@ -118,6 +127,12 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/model/jobs", server.requireProject(http.HandlerFunc(server.createImageJob)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/model/jobs/{job_id}", server.requireProject(http.HandlerFunc(server.getProviderJob)))
+	for _, mount := range dependencies.AuthenticatedDomainMounts {
+		if strings.TrimSpace(mount.Pattern) == "" || mount.Handler == nil {
+			continue
+		}
+		server.mux.Handle(mount.Pattern, server.requireAuthentication(mount.Handler))
+	}
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }

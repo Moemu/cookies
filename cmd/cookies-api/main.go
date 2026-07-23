@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -27,6 +28,8 @@ import (
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	strategysystem "github.com/shikanon/cookies/internal/systems/strategy"
+	strategyhttp "github.com/shikanon/cookies/internal/systems/strategy/httpapi"
 )
 
 func main() {
@@ -71,12 +74,38 @@ func main() {
 	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
+	runtimeStore := jobruntime.MySQLStore{DB: db}
+	agentStore := agent.MySQLStore{DB: db}
+	runtimeHandlers := map[string]jobruntime.Handler{}
+	if cfg.Strategy.Enabled {
+		var textProvider *provider.Service
+		if cfg.Strategy.RealProviderEnabled {
+			textAdapter, err := buildTextAdapter(cfg, db)
+			if err != nil {
+				log.Fatalf("configure Provider text adapter: %v", err)
+			}
+			textProvider = &provider.Service{TextAdapter: textAdapter}
+		}
+		strategyService := strategysystem.Service{
+			DB: db, Projects: projectService, Agents: agentStore, Text: textProvider,
+			TextModelAlias: "cookies.text.standard", DisableApproval: !cfg.Strategy.ApproveEnabled,
+			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+		}
+		strategyAPI := strategyhttp.New(strategyService, agentStore, runtimeStore)
+		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
+			httpserver.DomainMount{Pattern: "/api/strategy/v1/", Handler: strategyAPI})
+		strategyHandler := agent.RuntimeHandler(agentStore, strategyService.HandleAgentTask, runtimeStore)
+		runtimeHandlers[strategysystem.AgentKindBriefExtract] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindDraftGenerate] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindDraftRevise] = strategyHandler
+		agentDispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
+		startWorker(workerContext, "agent-dispatch", agentDispatcher.RunOnce)
+	}
 	if cfg.Environment == config.EnvironmentLocal || cfg.Provider.ImageAdapter == "adapter_gateway" {
 		adapter, outputHandles, err := buildImageAdapter(cfg, db, blobs)
 		if err != nil {
 			log.Fatalf("configure Provider image adapter: %v", err)
 		}
-		runtimeStore := jobruntime.MySQLStore{DB: db}
 		providerService := provider.Service{
 			Store:         provider.MySQLStore{DB: db, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP},
 			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
@@ -93,16 +122,9 @@ func main() {
 			providerService.Routes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
 		}
 		dependencies.ProviderJobs = providerService
-		providerRunner := &jobruntime.RecoveryRunner{
-			Worker:           provider.NewRuntimeWorker(runtimeStore, providerService),
-			Recoverer:        runtimeStore,
-			WorkerID:         "provider-runtime",
-			LeaseDuration:    time.Minute,
-			RecoveryInterval: 30 * time.Second,
+		for kind, handler := range provider.NewRuntimeWorker(runtimeStore, providerService).Handlers {
+			runtimeHandlers[kind] = handler
 		}
-		startWorker(workerContext, "provider-runtime", func(ctx context.Context) (bool, error) {
-			return providerRunner.RunOnce(ctx)
-		})
 		if actor != nil {
 			fetcher, ok := adapter.(assets.GeneratedOutputFetcher)
 			if !ok {
@@ -114,6 +136,15 @@ func main() {
 			})
 		}
 	}
+	sharedWorker := jobruntime.Worker{
+		Store: runtimeStore, Handlers: runtimeHandlers, LeaseRenewer: runtimeStore,
+		Canceller: runtimeStore, HeartbeatInterval: 15 * time.Second,
+	}
+	runtimeRunner := &jobruntime.RecoveryRunner{
+		Worker: sharedWorker, Recoverer: runtimeStore, WorkerID: "shared-runtime",
+		LeaseDuration: time.Minute, RecoveryInterval: 30 * time.Second,
+	}
+	startWorker(workerContext, "shared-runtime", runtimeRunner.RunOnce)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -168,6 +199,33 @@ func buildImageAdapter(cfg config.Config, db *sql.DB, blobs assets.BlobStore) (p
 	default:
 		return nil, nil, fmt.Errorf("unsupported Provider image adapter %q", cfg.Provider.ImageAdapter)
 	}
+}
+
+func buildTextAdapter(cfg config.Config, db *sql.DB) (provider.TextProviderAdapter, error) {
+	switch cfg.Provider.TextAdapter {
+	case "fake":
+		return provider.FakeSyncAdapter{}, nil
+	case "adapter_gateway":
+		cipher, err := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if err != nil {
+			return nil, err
+		}
+		store := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
+		return provider.NewAdapterGatewayTextAdapter(store, store, cfg.Provider.AllowInsecureHTTP)
+	default:
+		return nil, fmt.Errorf("unsupported Provider text adapter %q", cfg.Provider.TextAdapter)
+	}
+}
+
+func strategyOrganizationAllowlist(values []string) map[contract.OrganizationID]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[contract.OrganizationID]struct{}, len(values))
+	for _, value := range values {
+		result[contract.OrganizationID(value)] = struct{}{}
+	}
+	return result
 }
 
 func startWorker(ctx context.Context, name string, runOnce func(context.Context) (bool, error)) {

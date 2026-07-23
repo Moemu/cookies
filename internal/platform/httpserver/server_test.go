@@ -32,6 +32,51 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedDomainMountReceivesTrustedRequestContext(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{"strategy.read"},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mount := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestContext, ok := contract.RequestContextFrom(request.Context())
+		if !ok || requestContext.Actor.OrganizationID != actor.OrganizationID || requestContext.RequestID == "" {
+			t.Fatal("domain mount did not receive trusted request context")
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver,
+		AuthenticatedDomainMounts: []DomainMount{{
+			Pattern: "/api/strategy/v1/",
+			Handler: mount,
+		}},
+	})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/strategy/v1/workspaces/workspace_1", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	denied := NewWithDependencies(Dependencies{
+		Resolver: identity.RejectingResolver{},
+		AuthenticatedDomainMounts: []DomainMount{{
+			Pattern: "/api/strategy/v1/",
+			Handler: mount,
+		}},
+	})
+	unauthenticated := httptest.NewRecorder()
+	denied.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/strategy/v1/workspaces/workspace_1", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d", unauthenticated.Code)
+	}
+}
+
 func TestGeneratedIntakeRouteRequiresScopeAndReturnsLocation(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.write"}}
