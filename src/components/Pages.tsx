@@ -9,6 +9,7 @@ import { useModelConfig } from '../context/ModelConfigContext'
 import type { DataState, NavItem, SystemDefinition, SystemKey } from '../types'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
+import { AdDataInsightPage, AssetExperiencePage } from './CoreFlowPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
@@ -435,7 +436,16 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   }
 
   let surface
-  const specialized = system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState}/> : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/> : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/> : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/> : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/> : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/> : null
+  const specialized = system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState}/>
+    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
+    : system.key === 'insight' && item.id === 'performance' ? <AdDataInsightPage state={dataState}/>
+    : system.key === 'insight' && item.id === 'assets' ? <AssetExperiencePage state={dataState} mode="assets"/>
+    : system.key === 'insight' && item.id === 'knowledge' ? <AssetExperiencePage state={dataState} mode="knowledge"/>
+    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/>
+    : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
+    : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
+    : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
+    : null
   if (specialized) surface = specialized
   else {
     const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>

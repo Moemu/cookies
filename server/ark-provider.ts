@@ -7,6 +7,8 @@ export const ARK_MODELS = Object.freeze({
   embedding: "doubao-embedding-vision-251215",
 });
 
+const PROVIDER_TIMEOUT_MS = 15_000;
+
 export type MediaGenerationKind = "image" | "video";
 export type ProviderMediaStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
 
@@ -74,6 +76,7 @@ export function createArkProvider(
     try {
       response = await fetchImpl(`${config.baseUrl}${path}`, {
         method,
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
