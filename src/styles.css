@@ -337,8 +337,8 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
   .approval-workspace { grid-template-columns: 200px minmax(470px, 1fr) 220px; }
 }
 
-@media (max-width: 1279px) {
-  html::before { content: "cookies 当前仅支持宽度不低于 1280px 的桌面浏览器"; position: fixed; z-index: 999; inset: 0; display: grid; place-items: center; background: var(--canvas); color: var(--ink); font-size: 16px; }
+@media (max-width: 799px) {
+  html::before { content: "cookies 当前仅支持宽度不低于 800px 的浏览器"; position: fixed; z-index: 999; inset: 0; display: grid; place-items: center; background: var(--canvas); color: var(--ink); font-size: 16px; }
   #root { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
