@@ -6,7 +6,7 @@
 
 `cookies` is an open-source product foundation for advertising teams. It connects strategy, creative production, asset intelligence, and governed delivery in one traceable workflow—while keeping people in control of consequential actions.
 
-> **Project status:** pre-release. This repository currently contains the product, design, and architecture foundation; the application implementation and public demo are not yet available.
+> **Project status:** local MVP available. The repository includes a runnable, investor-demo workflow; it is not a production advertising-delivery platform.
 
 ## Why cookies
 
@@ -43,22 +43,69 @@ flowchart LR
 
 The four systems own their domain models and release independently. They share project context and exchange versioned artifacts through stable APIs and domain events; they do not share business tables or state machines. Read the [project overview](./docs/00-project-overview.md) and [shared foundation specification](./docs/05-shared-foundation.md) for the full design.
 
+## Local MVP
+
+The local MVP persists one demo project and demonstrates this controlled path:
+
+1. Open the seeded investor-demo project.
+2. Review the confirmed Brief and strategy context.
+3. Review the AI-labelled creative asset and generation boundary.
+4. Run delivery preflight, approve with the demo role, and execute a local simulation.
+5. Review server-persisted audit evidence and optionally roll back the simulation.
+
+All delivery operations are **local simulations**. This MVP never connects to or writes to a real advertising platform.
+
 ## Quick start
 
-The application is not implemented in this repository yet. Until the first runnable release, the useful starting point is the specification and its pinned knowledge-base dependency:
+Prerequisites: Node.js 20 or later and npm. Clone the repository, then install dependencies:
 
 ```bash
 git clone --recurse-submodules https://github.com/shikanon/cookies.git
 cd cookies
+npm install
+cp .env.example .env
 ```
 
-If you already cloned the repository:
+Start the API in one terminal:
 
 ```bash
-git submodule update --init --recursive
+set -a
+source .env
+set +a
+npm run server
 ```
 
-Then begin with the [documentation index](./docs/README.md), the [M0 decisions and engineering gates](./docs/16-document-gap-closure.md), and the [ORAG integration guide](./docs/06-orag-integration.md). A runnable quick start will replace this section when the first application release is published.
+Start the Vite frontend in a second terminal, then open the printed `http://127.0.0.1:5173` URL:
+
+```bash
+npm run dev
+```
+
+The server stores local demo state in ignored `data/mvp-store.json`. To reset the demo, stop the server and remove that file; the next `npm run server` recreates the seeded project.
+
+## Ark configuration
+
+Copy `.env.example` to `.env`, set the value locally, then load it in the shell that starts `npm run server`:
+
+```bash
+# Set ARK_API_KEY in .env locally, then:
+set -a && source .env && set +a
+npm run server
+```
+
+`ARK_API_KEY` is optional for browsing the seeded walkthrough, reviewing preflight, approving the demo ChangeSet, and reading audit events. When it is absent, the app exposes a clear server-derived `not_configured` status and disables new AI generation; it never asks for, stores, masks, or returns a browser API key. Do not commit `.env` or real credentials.
+
+The server maps text, image, video, and embedding capability to the documented Ark model catalog in `server/ark-provider.ts`. `ARK_BASE_URL` is optional and defaults to the Ark HTTPS endpoint.
+
+## Verification
+
+Run the local quality gates before changing the MVP:
+
+```bash
+npm run check:server
+npm run test:server
+npm run build
+```
 
 ## Documentation
 

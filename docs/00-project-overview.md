@@ -253,7 +253,7 @@ MVP 可采用模块化单体部署，但逻辑上是**四个垂直系统 + 一�
 - Agent 控制层：创建 Codex Task、组装最小上下文、选择允许的 Skills/工具、接收事件流、持久化产物和恢复任务。
 - Skill 注册层：管理 Skill 版本、触发说明、Schema、依赖、发布状态和评测；需求、渠道创意、素材分析和平台投放均以 Skill 扩展。
 - Computer Use 协调层：管理目标应用/站点白名单、人工接管、关键动作确认、截图/页面证据和运行超时。
-- 数据层：MySQL 保存业务和运行数据；对象存储保存素材与截图；Redis/消息队列在后续阶段处理事件、并发和长任务。
+- 数据层：PostgreSQL 保存业务和运行数据；对象存储保存素材与截图；Redis/消息队列处理事件、并发和长任务。
 - Provider Gateway：cookies 自有业务、Codex Skills、ORAG 和后台任务的模型调用统一由此进入；默认火山引擎，处理 LLM、VLM、图片、视频、音频、3D、Embedding/Rerank 的路由、长任务、成本、内容安全和评测。
 - 知识网关：对四个系统暴露 `/platform/v1/knowledge/*`，内部调用 `third_party/orag` 构建的 ORAG API；cookies 不访问 ORAG 内部包、PostgreSQL 或 Qdrant。
 

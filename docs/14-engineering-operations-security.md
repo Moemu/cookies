@@ -10,7 +10,7 @@
 
 - 后端：Golang 模块化单体起步，四系统和共享基座保持包、Schema、迁移、API 与事件边界。
 - 前端：React + TypeScript，全局 Shell、四系统和 Design System 分层。
-- 业务数据：MySQL；缓存/短期协调：Redis；异步任务/事件使用可靠消息设施。MVP 暂不接入 Redis。
+- 业务数据：PostgreSQL；缓存/短期协调：Redis；异步任务/事件使用可靠消息设施。
 - 二进制：对象存储；知识：ORAG + PostgreSQL + Qdrant。
 - 模型：统一 Provider Gateway，默认火山引擎。
 
