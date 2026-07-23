@@ -1,7 +1,8 @@
 param(
-    [string]$CsvPath = "C:\Users\Admin\Desktop\zz_model_provider_202607231201.csv",
+    [string]$CsvPath = "",
     [string]$AdapterProviderName = "artsapi (gpt-image-2)",
-    [string]$ListenAddress = "127.0.0.1:18080"
+    [string]$ListenAddress = "127.0.0.1:18080",
+    [switch]$UseLocalOpenAIEnv
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,19 +34,38 @@ function New-HTTPClient {
     return $client
 }
 
+function Read-DotEnvValue([string]$path, [string]$key) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Local .env file was not found: $path"
+    }
+    $line = Get-Content -LiteralPath $path |
+        Where-Object { $_ -match "^\s*$([regex]::Escape($key))\s*=" } |
+        Select-Object -First 1
+    if ($null -eq $line) {
+        return ""
+    }
+    $value = ($line -split "=", 2)[1].Trim()
+    return $value.Trim('"').Trim("'")
+}
+
 Push-Location $repoRoot
 try {
-    if (-not (Test-Path -LiteralPath $CsvPath)) {
-        throw "Provider CSV was not found: $CsvPath"
+    if ($UseLocalOpenAIEnv) {
+        $providerRow = [PSCustomObject]@{
+            api_key = Read-DotEnvValue (Join-Path $repoRoot ".env") "COOKIES_OPENAI_IMAGE_API_KEY"
+            base_url = Read-DotEnvValue (Join-Path $repoRoot ".env") "COOKIES_OPENAI_IMAGE_BASE_URL"
+        }
     }
-    $providerRow = Import-Csv -LiteralPath $CsvPath |
-        Where-Object { $_.name -eq $AdapterProviderName } |
-        Select-Object -First 1
-    if (-not $providerRow -or [string]::IsNullOrWhiteSpace($providerRow.api_key)) {
-        throw "Adapter provider row or API key is missing"
+    else {
+        if ([string]::IsNullOrWhiteSpace($CsvPath) -or -not (Test-Path -LiteralPath $CsvPath)) {
+            throw "Provider CSV was not found: $CsvPath"
+        }
+        $providerRow = Import-Csv -LiteralPath $CsvPath |
+            Where-Object { $_.name -eq $AdapterProviderName } |
+            Select-Object -First 1
     }
-    if ([string]::IsNullOrWhiteSpace($providerRow.base_url)) {
-        throw "Adapter base URL is missing"
+    if (-not $providerRow -or [string]::IsNullOrWhiteSpace($providerRow.api_key) -or [string]::IsNullOrWhiteSpace($providerRow.base_url)) {
+        throw "Adapter provider token or base URL is missing"
     }
 
     & docker compose up -d mysql | Out-Null
@@ -63,9 +83,10 @@ try {
     }
 
     $env:COOKIES_ENV = "local"
-    # This workstation also runs a Windows MySQL on 127.0.0.1:3306. Docker
-    # Desktop exposes the compose MySQL through its IPv6/WSL relay.
-    $env:COOKIES_MYSQL_DSN = "cookies:cookies_local_development_only@tcp([::1]:3306)/cookies?parseTime=true&multiStatements=true"
+    # The verification writes its temporary route directly through docker exec,
+    # so migrations and the test API must use the same compose MySQL instance.
+    $env:COOKIES_MYSQL_DSN = "cookies:cookies_local_development_only@tcp(127.0.0.1:3307)/cookies?parseTime=true&multiStatements=true"
+    $env:GOTOOLCHAIN = "local"
     & go run ./cmd/cookies-migrate | Out-Null
     Assert-LastExitCode "database migration failed"
 

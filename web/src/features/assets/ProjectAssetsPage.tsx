@@ -55,7 +55,7 @@ function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, projectId,
     : <div className="asset-thumbnail__fallback" title={previewUnavailable ? '\u539f\u59cb\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20' : undefined}><AssetIcon name="image" size={30} /><span>{asset.version.mime_type.replace('image/', '').toUpperCase()}</span>{previewUnavailable ? <small>{'\u9884\u89c8\u4e0d\u53ef\u7528'}</small> : null}</div>
 
   return <article className={view === 'list' ? 'asset-card asset-card--list' : 'asset-card'}>
-    <button aria-label={`删除 ${assetLabel(asset)}`} className="asset-card__remove" onClick={onRemove} title="从项目中删除" type="button"><AssetIcon name="delete" size={17} /></button>
+    <button aria-label={`删除 ${assetLabel(asset)}`} className="asset-card__remove" onClick={onRemove} title="从项目中删除" type="button"><AssetIcon name="delete" size={16} /><span>删除</span></button>
     {previewUrl
       ? <a className="asset-thumbnail" href={previewUrl} rel="noreferrer" target="_blank" title="在新窗口查看预览">{content}</a>
       : <div className="asset-thumbnail">{content}</div>}

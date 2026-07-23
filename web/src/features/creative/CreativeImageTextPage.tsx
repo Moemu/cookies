@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { listProjectAssets } from '../assets/api'
+import { listProjectAssets, removeProjectAsset } from '../assets/api'
+import { RemoveAssetDialog } from '../assets/RemoveAssetDialog'
 import type { ProjectAsset } from '../assets/types'
 import { getProviderJob } from '../platform/api'
 import type { ProviderJob } from '../platform/types'
@@ -57,6 +58,9 @@ export function CreativeImageTextPage() {
   const [providerJobs, setProviderJobs] = useState<Record<string, ProviderJob>>({})
   const [productionAssets, setProductionAssets] = useState<ProjectAsset[]>([])
   const [manualOpen, setManualOpen] = useState(false)
+  const [assetToRemove, setAssetToRemove] = useState<ProjectAsset | null>(null)
+  const [removingAsset, setRemovingAsset] = useState(false)
+  const [removeError, setRemoveError] = useState('')
 
   const selectTask = useCallback(async (taskId: string, signal?: AbortSignal) => {
     const detail = await getCreativeTask(projectId, taskId, signal)
@@ -164,6 +168,22 @@ export function CreativeImageTextPage() {
     } finally { setGenerating(false) }
   }
 
+  async function removeCreativeAsset() {
+    if (!assetToRemove || removingAsset) return
+    setRemovingAsset(true)
+    setRemoveError('')
+    try {
+      await removeProjectAsset(projectId, assetToRemove.asset.id, assetToRemove.version.version)
+      setProductionAssets((current) => current.filter((asset) => asset.asset.id !== assetToRemove.asset.id || asset.version.version !== assetToRemove.version.version))
+      setAssetToRemove(null)
+      setMessage('素材已从当前项目中移除；原始文件、版本与 Provider 溯源记录仍会保留。')
+    } catch (caught) {
+      setRemoveError(caught instanceof Error ? caught.message : '素材删除失败，请稍后重试。')
+    } finally {
+      setRemovingAsset(false)
+    }
+  }
+
   const showManualForm = strategyIntakes.length === 0 || manualOpen
   const currentProductionAssets = productionAssets.filter((asset) => productionJobKey.split(',').includes(asset.version.provider_job_id ?? ''))
 
@@ -210,12 +230,14 @@ export function CreativeImageTextPage() {
       <div className="creative-draft__grid"><article className="creative-copy"><h3>标题候选</h3><ol>{selected.draft.title_candidates.map((title) => <li key={title}>{title}</li>)}</ol><h3>正文</h3><p>{selected.draft.body}</p><div className="creative-topics">{selected.draft.topics.map((topic) => <span key={topic}>{topic}</span>)}</div></article><article className="creative-cover"><div className="creative-cover__canvas"><span>封面文字</span><strong>{selected.draft.cover_copy}</strong><small>{selected.task.direction.tone.join(' · ') || '小红书图文'}</small></div><h3>图组结构</h3><ol className="creative-image-plan">{selected.draft.image_plan.map((item) => <li key={item.order}><b>{item.order}</b><div><strong>{item.purpose}</strong><span>{item.visual_brief}</span></div></li>)}</ol></article></div>
       {selected.production_jobs.length > 0 ? <section className="creative-production"><span>封面生产状态</span>{selected.production_jobs.map((production) => {
         const job = providerJobs[production.provider_job_id]
-        const assetCount = currentProductionAssets.filter((asset) => asset.version.provider_job_id === production.provider_job_id).length
-        return <article key={production.provider_job_id}><div><strong>{job ? providerStatusLabels[job.provider_status] : '正在读取状态'}</strong><code>{production.provider_job_id}</code><small>{job && !terminalProviderStatuses.has(job.provider_status) ? `进度 ${job.progress}% · 正在自动刷新` : assetCount ? `${assetCount} 个素材已入库` : '尚未入库'}</small></div><div className="creative-production__actions"><Link className="text-button" to={`/projects/${encodeURIComponent(projectId)}/provider-jobs?job=${encodeURIComponent(production.provider_job_id)}`}>查看 Provider</Link><Link className="text-button" to={`/projects/${encodeURIComponent(projectId)}/assets?provider_job_id=${encodeURIComponent(production.provider_job_id)}`}>查看素材</Link></div></article>
+        const jobAssets = currentProductionAssets.filter((asset) => asset.version.provider_job_id === production.provider_job_id)
+        const assetCount = jobAssets.length
+        return <section className="creative-production__job" key={production.provider_job_id}><article><div><strong>{job ? providerStatusLabels[job.provider_status] : '正在读取状态'}</strong><code>{production.provider_job_id}</code><small>{job && !terminalProviderStatuses.has(job.provider_status) ? `进度 ${job.progress}% · 正在自动刷新` : assetCount ? `${assetCount} 个素材已入库` : '尚未入库'}</small></div><div className="creative-production__actions"><Link className="text-button" to={`/projects/${encodeURIComponent(projectId)}/provider-jobs?job=${encodeURIComponent(production.provider_job_id)}`}>查看 Provider</Link><Link className="text-button" to={`/projects/${encodeURIComponent(projectId)}/assets?provider_job_id=${encodeURIComponent(production.provider_job_id)}`}>查看素材</Link></div></article>{jobAssets.length > 0 ? <div className="creative-production__assets" aria-label="已入库创意素材">{jobAssets.map((asset) => <div key={`${asset.asset.id}:${asset.version.version}`}><div><strong>已入库素材</strong><small>{asset.asset.id} · v{asset.version.version} · {asset.version.mime_type}</small></div><button className="text-button text-button--danger" onClick={() => { setRemoveError(''); setAssetToRemove(asset) }} type="button">从项目中删除</button></div>)}</div> : null}</section>
       })}</section> : null}
     </section> : null}
     {latestJob ? <div className="success-note creative-message"><span>✓</span><p>Provider Job：<code>{latestJob.id}</code>，当前状态：{providerStatusLabels[latestJob.provider_status]}。</p></div> : null}
     {message ? <div className="success-note creative-message"><span>✓</span><p>{message}</p></div> : null}
     {error ? <div className="library-error" role="alert"><div><strong>创意操作失败</strong><span>{error}</span></div><button className="text-button" onClick={() => setError('')} type="button">关闭</button></div> : null}
+    <RemoveAssetDialog asset={assetToRemove} busy={removingAsset} error={removeError} onClose={() => { if (!removingAsset) { setAssetToRemove(null); setRemoveError('') } }} onConfirm={() => void removeCreativeAsset()} />
   </section>
 }

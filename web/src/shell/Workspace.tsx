@@ -20,6 +20,13 @@ function routeProjectId(pathname: string) {
     || ''
 }
 
+function destinationForProject(pathname: string, projectId: string) {
+  if (pathname.startsWith('/strategy/')) return `/strategy/projects/${projectId}`
+  if (pathname.includes('/provider-jobs')) return `/projects/${projectId}/provider-jobs`
+  if (pathname.includes('/creative')) return `/projects/${projectId}/creative`
+  return `/projects/${projectId}/assets`
+}
+
 export function Workspace() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -45,6 +52,7 @@ export function Workspace() {
   }, [])
 
   const currentProject = projects.find((project) => project.id === projectId) ?? projects[0]
+  const currentProjectId = projectId || currentProject?.id || ''
   const displayName = identity?.user?.display_name || identity?.actor.principal.id || '本地用户'
   const initial = displayName.slice(0, 1).toUpperCase()
 
@@ -69,13 +77,26 @@ export function Workspace() {
             <button aria-expanded={projectMenuOpen} className="project-trigger" onClick={() => setProjectMenuOpen((open) => !open)} type="button">
               <span className="project-folder" aria-hidden="true" /><span>{currentProject?.name || '选择项目'}</span><span className="chevron" aria-hidden="true">⌄</span>
             </button>
-            {projectMenuOpen ? <div className="project-menu" role="menu">
-              {projects.map((project) => (
-                <Link key={project.id} onClick={() => setProjectMenuOpen(false)} role="menuitem" to={activeModule.key === 'strategy' ? `/strategy/projects/${project.id}` : `/projects/${project.id}/assets`}>
-                  <span>{project.name}</span><small>{project.status === 'active' ? '活跃项目' : project.status === 'draft' ? '草稿项目' : '已归档'}</small>
-                </Link>
-              ))}
+            {projectMenuOpen ? <div aria-label="项目与工作区导航" className="project-menu" role="menu">
+              <div className="project-menu__section-label"><span>切换项目</span><small>{projects.length} 个项目</small></div>
+              <div className="project-menu__projects">
+                {projects.map((project) => (
+                  <Link className={project.id === currentProjectId ? 'project-menu__project project-menu__project--current' : 'project-menu__project'} key={project.id} onClick={() => setProjectMenuOpen(false)} role="menuitem" to={destinationForProject(location.pathname, project.id)}>
+                    <span>{project.name}</span><small>{project.id === currentProjectId ? '当前项目' : project.status === 'active' ? '活跃项目' : project.status === 'draft' ? '草稿项目' : '已归档'}</small>
+                  </Link>
+                ))}
+              </div>
               {projects.length === 0 ? <p className="project-menu__empty">还没有项目</p> : null}
+              {currentProject ? <>
+                <div className="project-menu__divider" />
+                <div className="project-menu__section-label"><span>当前项目 · {currentProject.name}</span><small>工作区</small></div>
+                <div className="project-menu__workspace-links">
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/strategy/projects/${currentProjectId}`}><span>策略工作区</span><small>Brief 与策略包</small></Link>
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/creative`}><span>创意创作</span><small>图文任务与初稿</small></Link>
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/assets`}><span>项目素材库</span><small>上传与已入库素材</small></Link>
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/provider-jobs`}><span>Provider 任务</span><small>生成、状态与入库</small></Link>
+                </div>
+              </> : null}
               <div className="project-menu__divider" />
               <button className="project-menu__create" onClick={() => {
                 setProjectMenuOpen(false)
@@ -84,8 +105,6 @@ export function Workspace() {
                 <svg aria-hidden="true" fill="none" height="18" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" viewBox="0 0 24 24" width="18"><path d="M12 5v14M5 12h14" /></svg>
                 <span>新建项目</span>
               </button>
-              {currentProject ? <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/provider-jobs`}>Provider Jobs</Link> : null}
-              {currentProject ? <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/creative`}>图文创作</Link> : null}
             </div> : null}
           </div>
           <div className="identity-summary" title={identity?.organization.name || ''}>
