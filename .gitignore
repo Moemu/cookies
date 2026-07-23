@@ -27,8 +27,17 @@ go.work.sum
 # env file
 .env
 
+# Node / Vite frontend artifacts
+node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+
+# Local persistent object storage
+.data/
+
 # Local MVP backend persistence
-data/
+/data/
 
 # Editor/IDE
 # .idea/

@@ -1,0 +1,92 @@
+name: Platform CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Check Go formatting
+        run: test -z "$(gofmt -l $(find cmd internal -name '*.go' -type f))"
+
+      - name: Validate event schema JSON
+        run: |
+          for schema in api/events/*.json; do
+            python3 -m json.tool "$schema" > /dev/null
+          done
+
+      - name: Run static analysis
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -race ./...
+
+      - name: Build platform API
+        run: go build ./cmd/cookies-api
+
+      - name: Build migration command
+        run: go build ./cmd/cookies-migrate
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci --prefix web
+
+      - name: Check web shell
+        run: npm run check --prefix web
+
+      - name: Validate API contracts
+        run: npm run contract:check --prefix web
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: cookies
+          MYSQL_USER: cookies
+          MYSQL_PASSWORD: cookies_local_development_only
+          MYSQL_ROOT_PASSWORD: root_local_development_only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ucookies -pcookies_local_development_only --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Apply migrations to an empty MySQL database
+        env:
+          COOKIES_ENV: test
+          COOKIES_MYSQL_DSN: cookies:cookies_local_development_only@tcp(127.0.0.1:3306)/cookies?parseTime=true&multiStatements=true
+        run: go run ./cmd/cookies-migrate
+
+      - name: Verify the durable Job lifecycle
+        env:
+          COOKIES_TEST_MYSQL_DSN: cookies:cookies_local_development_only@tcp(127.0.0.1:3306)/cookies?parseTime=true&multiStatements=true
+        run: go test ./internal/platform/jobruntime -run TestMySQLStoreLifecycleIntegration -count=1
