@@ -18,8 +18,8 @@ func TestAssetsIntakeClientPassesTaskPrincipalAndTrustedProjectScope(t *testing.
 	project := contract.ProjectRef{OrganizationID: "org_1", ProjectID: "project_1", ProjectContextVersion: 7}
 	request := assets.GeneratedAssetIntakeRequest{
 		ProviderJobID: "provider_job_1",
-		Output: contract.ProviderOutputRef{ProviderCode: "fake", ProviderJobID: "provider_job_1", OutputID: "output_1", RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "image/png", DeclaredSizeBytes: 100},
-		Provenance: assets.GenerationProvenance{Capability: imageOperation, ProviderCode: "fake", ModelAlias: "cookies.image.standard", ModelVersion: "fake-image-v1", SourceAssetRefs: []contract.AssetVersionRef{}, ProjectContextVersion: 7, GeneratedAt: now},
+		Output:        contract.ProviderOutputRef{ProviderCode: "fake", ProviderJobID: "provider_job_1", OutputID: "output_1", RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "image/png", DeclaredSizeBytes: 100},
+		Provenance:    assets.GenerationProvenance{Capability: imageOperation, ProviderCode: "fake", ModelAlias: "cookies.image.standard", ModelVersion: "fake-image-v1", SourceAssetRefs: []contract.AssetVersionRef{}, ProjectContextVersion: 7, GeneratedAt: now},
 	}
 
 	response, err := client.Create(context.Background(), actor, project, request, "provider-job-provider_job_1-output-output_1")
