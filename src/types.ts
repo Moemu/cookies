@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 export type SystemKey = 'strategy' | 'creative' | 'insight' | 'delivery'
 export type DataState = 'ready' | 'loading' | 'empty' | 'error' | 'forbidden'
 export type ArtifactKey = 'brief' | 'strategy' | 'creative' | 'insight' | 'delivery'
-export type ArtifactStatus = '草稿' | '待确认' | '已确认' | '制作中' | '待审批' | '执行中'
+export type ArtifactStatus = '草稿' | '待确认' | '已确认' | '排队中' | '制作中' | '已完成' | '生成失败' | '已取消' | '待审批' | '执行中'
 
 export interface NavItem {
   id: string
@@ -25,6 +25,7 @@ export interface SystemDefinition {
 }
 
 export interface ProjectArtifact {
+  id?: string
   key: ArtifactKey
   label: string
   version: string
@@ -38,7 +39,7 @@ export interface ProjectArtifact {
 export interface ChangeSetRecord {
   id: string
   title: string
-  status: '草稿' | '待审批' | '已批准' | '已拒绝' | '已执行' | '已回滚'
+  status: '草稿' | '待审批' | '已批准' | '已拒绝' | '执行中' | '已执行' | '已回滚'
   risk: '低' | '中' | '高'
   budgetImpact: number
   createdAt: string

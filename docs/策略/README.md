@@ -11,6 +11,7 @@
 | [03 广告剪辑包装策略](./03-广告剪辑包装策略.md) | 如何用字幕、声音、转场、调色和贴纸提升可读性 | 创意创作、评审中心 |
 | [04 商品与素材投放策略](./04-商品与素材投放策略.md) | 如何治理商品与素材组合，减少重复投放和素材疲劳 | 智能投放、素材洞察 |
 | [05 素材全链路策略](./05-素材全链路策略.md) | 如何把洞察、创作、投放、复盘串成持续学习闭环 | 四系统共享 Project |
+| [06 电商广告前贴与钩子视频生成策略](./06-电商广告前贴与钩子视频生成策略.md) | 如何用首尾帧、单一主动作与商品保真约束生成电商钩子 | 创意创作、素材洞察 |
 
 ## 证据分级
 
@@ -26,5 +27,6 @@
 - [漫剧素材分析](https://bytedance.larkoffice.com/wiki/Omr6wJI8Qi3KWUkaanacFjwlnqT?from=from_copylink)
 - [广告剪辑包装技巧](https://bytedance.larkoffice.com/wiki/BxrIwFC5qicnMckD29Yc1HycnKf)
 - [素材投放策略](https://bytedance.larkoffice.com/wiki/JRqNw1YZWiu2q2kfLJicBn6Xndf?from=from_copylink)
+- [广告电商创意素材场景与提示词指南（前贴与钩子）](https://bytedance.larkoffice.com/wiki/H5uQwNji9iYH0TkNXaxcvFhUn2c?from=from_copylink)
 
 最后学习日期：2026-07-22。
