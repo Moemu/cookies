@@ -5,6 +5,8 @@ import {
   type Artifact,
   type ArtifactKind,
   type ArtifactStatus,
+  type BusinessTask,
+  type BusinessTaskType,
   assertChangeSetTransition,
   assertGenerationJobTransition,
   type AuditEvent,
@@ -36,6 +38,16 @@ export interface CreateArtifactInput {
   actor?: string;
 }
 
+export interface CreateBusinessTaskInput {
+  projectId: string;
+  type: BusinessTaskType;
+  name: string;
+  objective: string;
+  sourceTaskIds?: string[];
+  sourceArtifactIds?: string[];
+  actor?: string;
+}
+
 export interface CreateGenerationJobInput {
   projectId: string;
   artifactKind: ArtifactKind;
@@ -61,7 +73,20 @@ export class FileRepository {
   static async open(filePath: string): Promise<FileRepository> {
     try {
       const content = await readFile(filePath, "utf8");
-      return new FileRepository(filePath, JSON.parse(content) as StoreData);
+      const parsed = JSON.parse(content) as Partial<StoreData>;
+      return new FileRepository(filePath, {
+        ...emptyStore(),
+        ...parsed,
+        projects: parsed.projects ?? [],
+        businessTasks: (parsed.businessTasks ?? []).map((task) => ({
+          ...task,
+          sourceTaskIds: task.sourceTaskIds ?? [],
+        })),
+        artifacts: parsed.artifacts ?? [],
+        generationJobs: parsed.generationJobs ?? [],
+        changeSets: parsed.changeSets ?? [],
+        auditEvents: parsed.auditEvents ?? [],
+      });
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         const repository = new FileRepository(filePath, emptyStore());
@@ -104,10 +129,68 @@ export class FileRepository {
   ): Promise<Project> {
     const project = this.requireProject(id);
     await this.mutate(() => {
-      Object.assign(project, withoutActor(input), touch(project));
+      Object.assign(project, withoutUndefined(withoutActor(input)), touch(project));
       this.addAudit(id, input.actor, "project.updated", "project", id, { version: project.version });
     });
     return project;
+  }
+
+  async listBusinessTasks(projectId?: string): Promise<BusinessTask[]> {
+    return this.store.businessTasks.filter((task) => !projectId || task.projectId === projectId);
+  }
+
+  async getBusinessTask(id: string): Promise<BusinessTask | undefined> {
+    return this.store.businessTasks.find((task) => task.id === id);
+  }
+
+  async createBusinessTask(input: CreateBusinessTaskInput): Promise<BusinessTask> {
+    this.requireProject(input.projectId);
+    const sourceTaskIds = input.sourceTaskIds ?? [];
+    const sourceArtifactIds = input.sourceArtifactIds ?? [];
+    this.requireProjectTasks(input.projectId, sourceTaskIds);
+    this.requireProjectArtifacts(input.projectId, sourceArtifactIds);
+    const now = new Date().toISOString();
+    const task: BusinessTask = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      type: input.type,
+      name: input.name,
+      objective: input.objective,
+      status: "draft",
+      sourceTaskIds,
+      sourceArtifactIds,
+      outputArtifactIds: [],
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.mutate(() => {
+      this.store.businessTasks.push(task);
+      this.addAudit(task.projectId, input.actor, "business_task.created", "business_task", task.id, {
+        type: task.type,
+        sourceTaskIds: task.sourceTaskIds,
+        sourceArtifactIds: task.sourceArtifactIds,
+      });
+    });
+    return task;
+  }
+
+  async updateBusinessTask(
+    id: string,
+    input: Partial<Pick<BusinessTask, "name" | "objective" | "status" | "sourceTaskIds" | "sourceArtifactIds" | "outputArtifactIds">> & { actor?: string },
+  ): Promise<BusinessTask> {
+    const task = this.requireBusinessTask(id);
+    if (input.sourceTaskIds) this.requireProjectTasks(task.projectId, input.sourceTaskIds);
+    if (input.sourceArtifactIds) this.requireProjectArtifacts(task.projectId, input.sourceArtifactIds);
+    if (input.outputArtifactIds) this.requireProjectArtifacts(task.projectId, input.outputArtifactIds);
+    await this.mutate(() => {
+      Object.assign(task, withoutUndefined(withoutActor(input)), touch(task));
+      this.addAudit(task.projectId, input.actor, "business_task.updated", "business_task", task.id, {
+        status: task.status,
+        version: task.version,
+      });
+    });
+    return task;
   }
 
   async listArtifacts(projectId?: string): Promise<Artifact[]> {
@@ -145,7 +228,7 @@ export class FileRepository {
   ): Promise<Artifact> {
     const artifact = this.requireArtifact(id);
     await this.mutate(() => {
-      Object.assign(artifact, withoutActor(input), touch(artifact));
+      Object.assign(artifact, withoutUndefined(withoutActor(input)), touch(artifact));
       this.addAudit(artifact.projectId, input.actor, "artifact.updated", "artifact", artifact.id, {
         version: artifact.version,
       });
@@ -372,6 +455,36 @@ export class FileRepository {
     return job;
   }
 
+  private requireBusinessTask(id: string): BusinessTask {
+    const task = this.store.businessTasks.find((item) => item.id === id);
+    if (!task) throw new DomainError("NOT_FOUND", `Business task ${id} was not found`);
+    return task;
+  }
+
+  private requireProjectArtifacts(projectId: string, artifactIds: string[]): void {
+    const invalid = artifactIds.find((id) => !this.store.artifacts.some(
+      (artifact) => artifact.id === id && artifact.projectId === projectId,
+    ));
+    if (invalid) {
+      throw new DomainError("VALIDATION_ERROR", "Task artifacts must belong to the same project", [{
+        field: "sourceArtifactIds",
+        message: `Artifact ${invalid} does not belong to project ${projectId}`,
+      }]);
+    }
+  }
+
+  private requireProjectTasks(projectId: string, taskIds: string[]): void {
+    const invalid = taskIds.find((id) => !this.store.businessTasks.some(
+      (task) => task.id === id && task.projectId === projectId,
+    ));
+    if (invalid) {
+      throw new DomainError("VALIDATION_ERROR", "Linked tasks must belong to the same project", [{
+        field: "sourceTaskIds",
+        message: `Task ${invalid} does not belong to project ${projectId}`,
+      }]);
+    }
+  }
+
   private requireArtifact(id: string): Artifact {
     const artifact = this.store.artifacts.find((item) => item.id === id);
     if (!artifact) throw new DomainError("NOT_FOUND", `Artifact ${id} was not found`);
@@ -464,4 +577,10 @@ function touch(entity: { version: number; updatedAt: string }): Pick<Project, "v
 function withoutActor<T extends { actor?: string }>(input: T): Omit<T, "actor"> {
   const { actor: _actor, ...values } = input;
   return values;
+}
+
+function withoutUndefined<T extends object>(input: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
 }

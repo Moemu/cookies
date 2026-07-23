@@ -330,6 +330,102 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/strategy/v1/projects/{project_id}/proposals:
+    post:
+      operationId: createStrategyProposal
+      summary: Create a project-scoped Volcad proposal input.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProposalInput'}
+      responses:
+        '201':
+          description: Proposal persisted.
+          content: {application/json: {schema: {$ref: '#/components/schemas/StrategyProposal'}}}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /api/strategy/v1/projects/{project_id}/proposals/{proposal_id}/generate:
+    post:
+      operationId: generateProposalStrategy
+      summary: Generate a structured strategy through the configured server-side text provider.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: proposal_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '201':
+          description: Generated strategy awaiting explicit approval.
+          content: {application/json: {schema: {$ref: '#/components/schemas/StrategyOutput'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/strategy/v1/projects/{project_id}/strategies/{strategy_id}/approve:
+    post:
+      operationId: approveProposalStrategy
+      summary: Explicitly approve a generated strategy for creative planning.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: strategy_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Approved strategy.
+          content: {application/json: {schema: {$ref: '#/components/schemas/StrategyOutput'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/plans:
+    post:
+      operationId: createCreativePlan
+      summary: Derive an image or video prompt plan from an approved strategy.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCreativePlanRequest'}
+      responses:
+        '201':
+          description: Creative plan persisted.
+          content: {application/json: {schema: {$ref: '#/components/schemas/CreativePlan'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/plans/{plan_id}:
+    get:
+      operationId: getCreativePlan
+      summary: Return a project-scoped creative plan without provider handles or storage URLs.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: plan_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Creative plan.
+          content: {application/json: {schema: {$ref: '#/components/schemas/CreativePlan'}}}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/plans/{plan_id}/image-jobs:
+    post:
+      operationId: createCreativeImageJob
+      summary: Submit an existing image plan through the Provider job boundary.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: plan_id, in: path, required: true, schema: {type: string}}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCreativeImageJobRequest'}
+      responses:
+        '202':
+          description: Provider job accepted; final assets enter generated intake.
+          content: {application/json: {schema: {$ref: '#/components/schemas/ProviderJob'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
 components:
   parameters:
     ProjectID:
@@ -416,6 +512,78 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ProposalInput:
+      type: object
+      required: [brand, product, compliance, directions]
+      properties:
+        brand: {type: string, minLength: 1}
+        product: {type: string, minLength: 1}
+        audience: {type: string}
+        platform: {type: string}
+        budget: {type: string}
+        timeline: {type: string}
+        description: {type: string}
+        compliance: {type: array, items: {type: string}}
+        directions: {type: array, items: {type: string}}
+      additionalProperties: false
+    StrategyProposal:
+      type: object
+      required: [id, organization_id, project_id, input, template_version, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        input: {$ref: '#/components/schemas/ProposalInput'}
+        template_version: {type: string}
+        status: {type: string, enum: [draft, generated, approved]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    StrategyOutput:
+      type: object
+      required: [id, proposal_id, organization_id, project_id, content, model_alias, model_version, provider_code, approved_at, created_at]
+      properties:
+        id: {type: string}
+        proposal_id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        content: {type: object, additionalProperties: true}
+        model_alias: {type: string}
+        model_version: {type: string}
+        provider_code: {type: string}
+        approved_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateCreativePlanRequest:
+      type: object
+      required: [strategy_output_id, media_type, variant, model_alias]
+      properties:
+        strategy_output_id: {type: string}
+        media_type: {type: string, enum: [image, video]}
+        variant: {type: integer, minimum: 1}
+        model_alias: {type: string}
+      additionalProperties: false
+    CreativePlan:
+      type: object
+      required: [id, organization_id, project_id, strategy_output_id, media_type, variant, prompt, model_alias, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        strategy_output_id: {type: string}
+        media_type: {type: string, enum: [image, video]}
+        variant: {type: integer, minimum: 1}
+        prompt: {type: string, writeOnly: true}
+        model_alias: {type: string}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateCreativeImageJobRequest:
+      type: object
+      required: [width, height]
+      properties:
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+      additionalProperties: false
     RequestContext:
       type: object
       required: [request_id, trace_id, actor]

@@ -27,6 +27,8 @@ import (
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/creative"
+	"github.com/shikanon/cookies/internal/systems/strategy"
 )
 
 func main() {
@@ -71,22 +73,57 @@ func main() {
 	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
+	rootMux := http.NewServeMux()
 	if cfg.Environment == config.EnvironmentLocal {
-		adapter, err := buildImageAdapter(cfg, db)
+		imageAdapter, err := buildImageAdapter(cfg, db)
 		if err != nil {
 			log.Fatalf("configure Provider image adapter: %v", err)
+		}
+		textAdapter, err := buildTextAdapter(cfg)
+		if err != nil {
+			log.Fatalf("configure Provider text adapter: %v", err)
 		}
 		runtimeStore := jobruntime.MySQLStore{DB: db}
 		outputHandles := provider.MySQLOutputHandleStore{DB: db}
 		providerService := provider.Service{
 			Store:         provider.MySQLStore{DB: db},
 			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
-			ImageAdapter:  adapter,
+			ImageAdapter:  imageAdapter,
+			TextAdapter:   textAdapter,
 			Intake:        provider.AssetsIntakeClient{API: intakeService},
 			OutputHandles: outputHandles,
 			NewID:         func() (string, error) { return ids.New("providerjob") },
 		}
 		dependencies.ProviderJobs = providerService
+		strategyService := strategy.Service{Store: strategy.MySQLStore{DB: db}, Text: providerService}
+		creativeService := creative.Service{Store: creative.MySQLStore{DB: db}, Strategies: strategyService, Jobs: providerService}
+		rootMux.Handle("/api/strategy/v1/", strategy.NewHTTPHandler(strategy.HTTPDependencies{
+			Service: strategyService, Resolver: resolver, Authorizer: projectStore, Projects: projectService,
+		}))
+		rootMux.Handle("/api/creative/v1/", creative.NewHTTPHandler(creative.HTTPDependencies{
+			Service: creativeService, Resolver: resolver, Authorizer: projectStore, Projects: projectService,
+		}))
+		if actor != nil {
+			projectContext, contextErr := projectService.GetContext(context.Background(), *actor, contract.ProjectID(cfg.LocalIdentity.ProjectID))
+			if contextErr != nil {
+				log.Fatalf("load local project context for strategy seed: %v", contextErr)
+			}
+			_, _, _, seedErr := strategy.SeedPolarisFresh(context.Background(), strategyService, *actor, projectContext, func(ctx context.Context, strategyID string) error {
+				_, err := creativeService.CreatePlan(ctx, *actor, projectContext, creative.CreatePlanRequest{
+					StrategyOutputID: strategyID, MediaType: creative.MediaImage, Variant: 1, ModelAlias: "cookies.image.standard",
+				})
+				if err != nil {
+					return err
+				}
+				_, err = creativeService.CreatePlan(ctx, *actor, projectContext, creative.CreatePlanRequest{
+					StrategyOutputID: strategyID, MediaType: creative.MediaVideo, Variant: 1, ModelAlias: "cookies.video.standard",
+				})
+				return err
+			})
+			if seedErr != nil {
+				log.Fatalf("seed Polaris Fresh workflow: %v", seedErr)
+			}
+		}
 		providerRunner := &jobruntime.RecoveryRunner{
 			Worker:           provider.NewRuntimeWorker(runtimeStore, providerService),
 			Recoverer:        runtimeStore,
@@ -98,7 +135,7 @@ func main() {
 			return providerRunner.RunOnce(ctx)
 		})
 		if actor != nil {
-			fetcher, ok := adapter.(assets.GeneratedOutputFetcher)
+			fetcher, ok := imageAdapter.(assets.GeneratedOutputFetcher)
 			if !ok {
 				log.Fatalf("configured Provider image adapter does not implement generated output fetching")
 			}
@@ -108,10 +145,11 @@ func main() {
 			})
 		}
 	}
+	rootMux.Handle("/", httpserver.NewWithDependencies(dependencies))
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.NewWithDependencies(dependencies),
+		Handler:           rootMux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -147,6 +185,21 @@ func buildImageAdapter(cfg config.Config, db *sql.DB) (provider.ImageProviderAda
 		return provider.NewOpenAIImageAdapter(provider.OpenAIImageConfig{APIKey: cfg.Provider.OpenAIImage.APIKey, Model: cfg.Provider.OpenAIImage.Model, BaseURL: cfg.Provider.OpenAIImage.BaseURL}, provider.MySQLOutputHandleStore{DB: db})
 	default:
 		return nil, fmt.Errorf("unsupported Provider image adapter %q", cfg.Provider.ImageAdapter)
+	}
+}
+
+func buildTextAdapter(cfg config.Config) (provider.TextProviderAdapter, error) {
+	switch cfg.Provider.TextAdapter {
+	case "fake":
+		return provider.FakeSyncAdapter{}, nil
+	case "ark_text":
+		return provider.NewArkTextAdapter(provider.ArkTextConfig{
+			APIKey:  cfg.Provider.ArkText.APIKey,
+			Model:   cfg.Provider.ArkText.Model,
+			BaseURL: cfg.Provider.ArkText.BaseURL,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported Provider text adapter %q", cfg.Provider.TextAdapter)
 	}
 }
 

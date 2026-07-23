@@ -24,11 +24,42 @@ export type ChangeSetStatus = (typeof CHANGE_SET_STATUSES)[number];
 export type ArtifactKind = "brief" | "image" | "video" | "document";
 export type ArtifactStatus = "draft" | "ready" | "archived";
 
+export const BUSINESS_TASK_TYPES = [
+  "strategy",
+  "creative",
+  "video",
+  "brand_video",
+  "short_drama_preroll",
+  "game_preroll",
+  "commerce_preroll",
+  "viral_remake",
+  "video_edit",
+] as const;
+export type BusinessTaskType = (typeof BUSINESS_TASK_TYPES)[number];
+
+export const BUSINESS_TASK_STATUSES = ["draft", "in_progress", "ready", "completed", "failed"] as const;
+export type BusinessTaskStatus = (typeof BUSINESS_TASK_STATUSES)[number];
+
 export interface Project {
   id: string;
   name: string;
   brand: string;
   objective: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BusinessTask {
+  id: string;
+  projectId: string;
+  type: BusinessTaskType;
+  name: string;
+  objective: string;
+  status: BusinessTaskStatus;
+  sourceTaskIds: string[];
+  sourceArtifactIds: string[];
+  outputArtifactIds: string[];
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -113,7 +144,7 @@ export interface AuditEvent {
   projectId: string;
   actor: string;
   action: string;
-  entityType: "project" | "artifact" | "generation_job" | "change_set";
+  entityType: "project" | "business_task" | "artifact" | "generation_job" | "change_set";
   entityId: string;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -121,6 +152,7 @@ export interface AuditEvent {
 
 export interface StoreData {
   projects: Project[];
+  businessTasks: BusinessTask[];
   artifacts: Artifact[];
   generationJobs: GenerationJob[];
   changeSets: ChangeSet[];
@@ -129,6 +161,7 @@ export interface StoreData {
 
 export const emptyStore = (): StoreData => ({
   projects: [],
+  businessTasks: [],
   artifacts: [],
   generationJobs: [],
   changeSets: [],
@@ -181,6 +214,14 @@ export function assertChangeSetTransition(current: ChangeSetStatus, next: Change
 
 export function isArtifactKind(value: unknown): value is ArtifactKind {
   return value === "brief" || value === "image" || value === "video" || value === "document";
+}
+
+export function isBusinessTaskType(value: unknown): value is BusinessTaskType {
+  return typeof value === "string" && BUSINESS_TASK_TYPES.includes(value as BusinessTaskType);
+}
+
+export function isBusinessTaskStatus(value: unknown): value is BusinessTaskStatus {
+  return typeof value === "string" && BUSINESS_TASK_STATUSES.includes(value as BusinessTaskStatus);
 }
 
 export function isGenerationJobStatus(value: unknown): value is GenerationJobStatus {

@@ -50,6 +50,32 @@ export interface ChangeSetRecord {
   version: number
 }
 
+export type BusinessTaskType =
+  | 'strategy'
+  | 'creative'
+  | 'video'
+  | 'brand_video'
+  | 'short_drama_preroll'
+  | 'game_preroll'
+  | 'commerce_preroll'
+  | 'viral_remake'
+  | 'video_edit'
+
+export interface BusinessTaskRecord {
+  id: string
+  projectId: string
+  type: BusinessTaskType
+  name: string
+  objective: string
+  status: 'draft' | 'in_progress' | 'ready' | 'completed' | 'failed'
+  sourceTaskIds: string[]
+  sourceArtifactIds: string[]
+  outputArtifactIds: string[]
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ProjectRecord {
   id: string
   code: string
@@ -65,5 +91,7 @@ export interface ProjectRecord {
   currency: 'CNY'
   timezone: 'Asia/Shanghai'
   artifacts: Record<ArtifactKey, ProjectArtifact>
+  tasks: BusinessTaskRecord[]
   changeSets: ChangeSetRecord[]
+  knowledgeCount: number
 }

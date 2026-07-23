@@ -5,6 +5,8 @@
 > 关联规范：[DESIGN.md](../DESIGN.md)<br>
 > 关联文档：[项目总纲](./00-project-overview.md)、[共享基座](./05-shared-foundation.md)
 
+> **2026-07-23 决策更新**：Project 工作台调整为 Home 层唯一总工作台，路由为 `/projects/:projectId/home`；Project 管理路由为 `/projects/:projectId/manage`。四个业务模块不再拥有独立工作台或作战台。本文中仍出现的“策略工作台、创意工作台、洞察工作台、投放作战台”属于历史架构描述，整改目标与实施顺序以 [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md) 为准。
+
 各 L1 子板块的功能边界、必要性、业务价值、MVP 优先级和推荐展示形式见 [四大模块子板块分析](./20-module-submodule-analysis.md)。本文件负责导航层级与路由，分析文档负责产品取舍与页面形态。
 
 ## 1. 目标
@@ -44,7 +46,7 @@ L0 始终位于页面顶部，高度 56px，由共享基座维护，不属于任
 
 #### Project 作为跨系统上下文
 
-Project 是 L0 的全局业务上下文，而不是第五个业务系统。项目切换器除搜索、最近项目和新建外，必须提供“查看项目总览”，进入 `/projects/:project_id/overview`。
+Project 是 L0 的全局业务上下文，而不是第五个业务系统。项目切换器除搜索、最近项目和新建外，必须提供“查看项目工作台”和“管理当前项目”，分别进入 `/projects/:projectId/home` 与 `/projects/:projectId/manage`。
 
 - 项目总览以纵向闭环轨道连接需求与策略、创意、投放、洞察及下一轮，显示各系统最新权威对象的摘要、待办、风险和深链，不复制模块编辑器。
 - `/projects/:project_id/artifacts` 展示版本化产物关系，`/projects/:project_id/activity` 展示跨系统活动；成员与设置仍由共享基座维护。
@@ -258,36 +260,37 @@ L3 只在具体对象、产物或编辑器内部出现，使用局部标签、�
 
 ## 5. 广告素材经验与数据分析
 
-路由前缀：`/insights/*`
+Project 内路由前缀：`/projects/:projectId/insight/*`
 
 ### 5.1 一级导航分组
 
 | 分组 | L1 一级导航 |
 | --- | --- |
-| 工作 | 洞察工作台 |
-| 数据与分析 | 数据接入、分析素材库、内容分析、效果分析、实验中心 |
-| 经验与输出 | 洞察与经验、报告中心 |
+| 工作 | 投前洞察、投后分析 |
+| 素材与分析 | 分析素材库、内容分析、实验中心 |
+| 经验与输出 | 经验库、报告中心 |
+| 数据 | 数据接入 |
 | 治理 | 数据质量、能力运营、系统设置 |
 
 ### 5.2 完整导航树
 
 | L1 一级导航 | L2 集合页或流程 | L3 对象内部视图 | 路由 |
 | --- | --- | --- | --- |
-| 洞察工作台 | 数据概况、待处理、最近洞察、疲劳预警、经验使用 | 无 | `/insights/home` |
-| 数据接入 | 数据源、导入任务、素材映射、字段映射、同步记录 | 配置、字段、映射、同步历史、错误记录 | `/insights/data-sources/*` |
-| 分析素材库 | 全部素材、待匹配、待提取、特征库、版本关系 | 概览、预览、内容特征、效果数据、版本、血缘 | `/insights/assets/*` |
-| 内容分析 | 小红书、公众号、品牌广告、数字人、广告前贴、爆款复刻、单素材拆解 | 结构、文本、视觉、音频、节奏、品牌、转化与合规 | `/insights/content/*` |
-| 效果分析 | 指标总览、素材对比、Cohort、趋势、疲劳、异常 | 趋势、分群、驱动因素、置信度、数据来源 | `/insights/performance/*` |
-| 实验中心 | 实验列表、A/B 变体、变量矩阵、样本检查、实验结论 | 设计、样本、指标、结果、归因、结论 | `/insights/experiments/*` |
-| 洞察与经验 | 待确认、已确认、待复审、已失效、引用记录 | 结论、证据、适用条件、反例、版本、引用 | `/insights/experiences/*` |
-| 报告中心 | 任务复盘、周期报告、自定义报告、导出记录 | 章节、数据来源、协作、版本、导出 | `/insights/reports/*` |
-| 数据质量 | 数据新鲜度、缺失、异常、口径、对账、修复队列 | 影响范围、根因、处理记录、重跑结果 | `/insights/data-quality/*` |
-| 能力运营 | 特征体系、指标字典、分析 Skills、评测集、质量看板 | 定义、版本、依赖、评测、运行记录 | `/insights/operations/*` |
-| 系统设置 | 样本门槛、观察窗口、通知、确认权限、报告模板 | 无 | `/insights/settings/*` |
+| 投前洞察 | 策略证据、创意建议、历史模式、风险与反例、引用记录 | 证据、适用边界、Brief 引用、CreativeTask 引用 | `/projects/:projectId/insight/prelaunch` |
+| 投后分析 | 指标总览、素材对比、Cohort、趋势、疲劳、异常 | 趋势、分群、驱动因素、置信度、数据来源 | `/projects/:projectId/insight/performance` |
+| 数据接入 | 数据源、导入任务、素材映射、字段映射、同步记录 | 配置、字段、映射、同步历史、错误记录 | `/projects/:projectId/insight/data-sources/*` |
+| 分析素材库 | 全部素材、待匹配、待提取、特征库、版本关系 | 概览、预览、内容特征、效果数据、版本、血缘 | `/projects/:projectId/insight/assets/*` |
+| 内容分析 | 小红书、公众号、品牌广告、数字人、广告前贴、爆款复刻、单素材拆解 | 结构、文本、视觉、音频、节奏、品牌、转化与合规 | `/projects/:projectId/insight/content/*` |
+| 实验中心 | 实验列表、A/B 变体、变量矩阵、样本检查、实验结论 | 设计、样本、指标、结果、归因、结论 | `/projects/:projectId/insight/experiments/*` |
+| 经验库 | 待确认、已确认、待复审、已失效、引用记录 | 结论、证据、适用条件、反例、版本、引用 | `/projects/:projectId/insight/experiences/*` |
+| 报告中心 | 任务复盘、周期报告、自定义报告、导出记录 | 章节、数据来源、协作、版本、导出 | `/projects/:projectId/insight/reports/*` |
+| 数据质量 | 数据新鲜度、缺失、异常、口径、对账、修复队列 | 影响范围、根因、处理记录、重跑结果 | `/projects/:projectId/insight/data-quality/*` |
+| 能力运营 | 特征体系、指标字典、分析 Skills、评测集、质量看板 | 定义、版本、依赖、评测、运行记录 | `/projects/:projectId/insight/operations/*` |
+| 系统设置 | 样本门槛、观察窗口、通知、确认权限、报告模板 | 无 | `/projects/:projectId/insight/settings/*` |
 
 ### 5.3 素材与分析项目详情
 
-打开 `/insights/assets/:assetId/*` 或 `/insights/projects/:analysisId/*` 后，L2 为：
+打开 `/projects/:projectId/insight/assets/:assetId/*` 或 `/projects/:projectId/insight/analysis-runs/:analysisId/*` 后，L2 为：
 
 `概览 → 内容拆解 → 效果趋势 → 对比组 → 实验 → 洞察 → 经验引用 → 数据与方法`
 
@@ -417,7 +420,7 @@ L3 只在具体对象、产物或编辑器内部出现，使用局部标签、�
 /strategy/workspaces/sw_1024/brief?tab=sources
 /creative/video/performance
 /creative/tasks/cr_2048/content?tab=timeline
-/insights/assets/as_4096/performance?tab=audience
+/projects/prj_1001/insight/assets/as_4096/performance?tab=audience
 /delivery/plans/dp_8192/execution?tab=evidence
 ```
 

@@ -113,6 +113,129 @@ func TestArkImageAdapterIsExplicitAndLocalOnly(t *testing.T) {
 	}
 }
 
+func TestFromLookupUsesObjectStorageCompatibilityNamesForTOS(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_BLOB_PROVIDER":            "tos",
+		"OBJECT_STORAGE_ENDPOINT":          "tos.compat.example",
+		"OBJECT_STORAGE_REGION":            "cn-test",
+		"OBJECT_STORAGE_ACCESS_KEY":        "test-access-key",
+		"OBJECT_STORAGE_SECRET_KEY":        "test-secret-key",
+		"OBJECT_STORAGE_SECURITY_TOKEN":    "test-security-token",
+		"OBJECT_STORAGE_QUARANTINE_BUCKET": "compat-quarantine",
+		"OBJECT_STORAGE_ASSETS_BUCKET":     "compat-assets",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.Endpoint, "tos.compat.example"; got != want {
+		t.Fatalf("Endpoint = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.Region, "cn-test"; got != want {
+		t.Fatalf("Region = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AccessKey, "test-access-key"; got != want {
+		t.Fatalf("AccessKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.SecretKey, "test-secret-key"; got != want {
+		t.Fatalf("SecretKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.SecurityToken, "test-security-token"; got != want {
+		t.Fatalf("SecurityToken = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.QuarantineBucket, "compat-quarantine"; got != want {
+		t.Fatalf("QuarantineBucket = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "compat-assets"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func TestFromLookupUsesLegacyObjectStorageNamesForTOS(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"OBJECT_STORAGE_PROVIDER":          "tos",
+		"OBJECT_STORAGE_ENDPOINT":          "tos.compat.example",
+		"OBJECT_STORAGE_REGION":            "cn-test",
+		"OBJECT_STORAGE_ACCESS_KEY_ID":     "test-access-key",
+		"OBJECT_STORAGE_ACCESS_KEY_SECRET": "test-secret-key",
+		"OBJECT_STORAGE_BUCKET_NAME":       "compat-assets",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.Provider, "tos"; got != want {
+		t.Fatalf("Provider = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AccessKey, "test-access-key"; got != want {
+		t.Fatalf("AccessKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.SecretKey, "test-secret-key"; got != want {
+		t.Fatalf("SecretKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "compat-assets"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func TestFromLookupPrefersCookiesTOSConfiguration(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_BLOB_PROVIDER":            "tos",
+		"COOKIES_TOS_ENDPOINT":             "tos.cookies.example",
+		"COOKIES_TOS_REGION":               "cn-cookies",
+		"COOKIES_TOS_ACCESS_KEY":           "cookies-access-key",
+		"COOKIES_TOS_SECRET_KEY":           "cookies-secret-key",
+		"COOKIES_TOS_QUARANTINE_BUCKET":    "cookies-quarantine",
+		"COOKIES_TOS_ASSETS_BUCKET":        "cookies-assets",
+		"OBJECT_STORAGE_ENDPOINT":          "tos.compat.example",
+		"OBJECT_STORAGE_REGION":            "cn-compat",
+		"OBJECT_STORAGE_ACCESS_KEY":        "compat-access-key",
+		"OBJECT_STORAGE_SECRET_KEY":        "compat-secret-key",
+		"OBJECT_STORAGE_QUARANTINE_BUCKET": "compat-quarantine",
+		"OBJECT_STORAGE_ASSETS_BUCKET":     "compat-assets",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.Endpoint, "tos.cookies.example"; got != want {
+		t.Fatalf("Endpoint = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AccessKey, "cookies-access-key"; got != want {
+		t.Fatalf("AccessKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "cookies-assets"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func TestArkTextAdapterIsExplicitAndLocalOnly(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_TEXT_ADAPTER": "ark_text"}))
+	if err == nil {
+		t.Fatal("expected Ark text configuration without credentials to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV":                   "local",
+		"COOKIES_PROVIDER_TEXT_ADAPTER": "ark_text",
+		"COOKIES_ARK_TEXT_API_KEY":      "test-key",
+		"COOKIES_ARK_TEXT_MODEL":        "doubao-test",
+	}))
+	if err != nil || config.Provider.TextAdapter != "ark_text" || config.Provider.ArkText.Model != "doubao-test" {
+		t.Fatalf("valid local Ark text configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+	_, err = FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV":                   "staging",
+		"COOKIES_BLOB_PROVIDER":         "memory",
+		"COOKIES_PROVIDER_TEXT_ADAPTER": "ark_text",
+		"COOKIES_ARK_TEXT_API_KEY":      "test-key",
+		"COOKIES_ARK_TEXT_MODEL":        "doubao-test",
+	}))
+	if err == nil {
+		t.Fatal("expected Ark text adapter outside local to be rejected")
+	}
+}
+
 func TestOpenAIImageAdapterRequiresCompleteLocalGatewayConfiguration(t *testing.T) {
 	t.Parallel()
 	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_IMAGE_ADAPTER": "openai_image"}))
