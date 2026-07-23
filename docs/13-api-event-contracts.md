@@ -3,8 +3,8 @@
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 四个业务系统与共享基座共同遵循的接口和事件标准 |
-| 文档版本 | v0.3 |
-| 文档状态 | 实现基线 |
+| 文档版本 | v0.2 |
+| 文档状态 | 草案 |
 
 ## 1. 命名空间
 
@@ -113,8 +113,6 @@ SSE：
 
 每个事件需要单独维护 JSON Schema、示例、数据分级、Owner、消费者、兼容策略和最长延迟目标。
 
-首批平台事件的 Owner、消费者和 JSON Schema 见 [`api/events`](../api/events/README.md)。`model.job.completed.v1` 只发布终态和资源引用，不携带厂商临时 URL；`asset.ready.v1` 以正式 Asset ID/Version 为主题。
-
 除 Project 创建前的组织级事件外，四系统业务事件必须携带非空 `project_id`。ProjectResourceIndex 可以消费事件生成跨系统关系和状态摘要，但不得成为模块对象的写入入口或权威状态源。
 
 ## 9. Webhook
@@ -147,4 +145,3 @@ SSE：
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 统一 API 命名、错误、幂等、并发、异步任务和领域事件治理 |
 | v0.2 | 2026-07-21 | 增加 Project Scope、跨项目复用、project_id 不可变和资源索引事件约束 |
-| v0.3 | 2026-07-21 | 发布首批 Provider/Assets OpenAPI 与版本化事件 Schema，实现契约 Owner/消费者落档 |

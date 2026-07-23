@@ -6,9 +6,7 @@
 
 `cookies` 是面向广告团队的开源产品底座。它将需求与策略、创意创作、素材洞察和受控投放连接为可追溯的工作闭环，并确保人在所有重要决策中保持掌控。
 
-> **项目状态：预发布。** 当前仓库主要包含产品、设计和架构底座；应用代码和公开 Demo 尚未发布。下方图片是概念探索，不是已上线界面。
-
-![cookies 策略工作台概念图](./docs/assets/module-concepts/01-strategy-workbench.png)
+> **项目状态：本地 MVP 可运行。** 仓库包含可复演的投资人路演主路径，但不是生产级广告投放平台。
 
 ## 核心能力
 
@@ -41,22 +39,69 @@ flowchart LR
 
 四个业务系统分别拥有领域模型和发布节奏，通过 Project 上下文、稳定 API 与领域事件传递版本化产物，不共享业务表或状态机。详见[项目总纲](./docs/00-project-overview.md)与[共享基座规格](./docs/05-shared-foundation.md)。
 
+## 本地 MVP
+
+本地 MVP 会持久化一个预置路演项目，可按以下路径演示：
+
+1. 打开预置的投资人路演项目。
+2. 查看已确认的 Brief 和策略上下文。
+3. 查看带 AI 标识的创意产物及其生成边界。
+4. 运行投放预检，以演示角色审批并执行本地模拟。
+5. 查看服务端保存的审计证据，并可模拟回滚。
+
+所有投放动作都是**本地模拟**。MVP 不会连接或写入任何真实广告平台。
+
 ## 快速开始
 
-首个可运行版本尚未发布。目前可以克隆项目、初始化固定版本的知识库依赖，并从规格文档开始了解或参与项目：
+前置条件：Node.js 20 或更高版本，以及 npm。克隆后安装依赖：
 
 ```bash
 git clone --recurse-submodules https://github.com/shikanon/cookies.git
 cd cookies
+npm install
+cp .env.example .env
 ```
 
-已有本地副本时运行：
+在第一个终端启动 API：
 
 ```bash
-git submodule update --init --recursive
+set -a
+source .env
+set +a
+npm run server
 ```
 
-接着阅读[文档索引](./docs/README.md)、[M0 决策与研发门禁](./docs/16-document-gap-closure.md)及 [ORAG 集成说明](./docs/06-orag-integration.md)。应用发布后，本节会替换为一键运行说明。
+在第二个终端启动 Vite 前端，然后打开命令输出的 `http://127.0.0.1:5173`：
+
+```bash
+npm run dev
+```
+
+服务端将本地演示状态保存到已忽略的 `data/mvp-store.json`。如需重置，停止服务后删除该文件；下次运行 `npm run server` 会重新创建预置项目。
+
+## 方舟配置
+
+将 `.env.example` 复制为 `.env` 后，在本地填写变量，并在启动 `npm run server` 的终端加载它：
+
+```bash
+# 在 .env 本地填写 ARK_API_KEY 后执行：
+set -a && source .env && set +a
+npm run server
+```
+
+浏览预置项目、运行预检、审批演示 ChangeSet 和查看审计记录时，`ARK_API_KEY` 不是必需项。未配置时，应用会展示由服务端提供的 `not_configured` 状态，并禁用新的 AI 生成；浏览器不会要求输入、保存、掩码展示或接收 API Key。不要提交 `.env` 或任何真实凭据。
+
+服务端在 `server/ark-provider.ts` 中将文本、图片、视频与向量能力映射到指定方舟模型目录。`ARK_BASE_URL` 可选，未设置时使用默认方舟 HTTPS 地址。
+
+## 验证
+
+修改 MVP 后运行以下本地质量门禁：
+
+```bash
+npm run check:server
+npm run test:server
+npm run build
+```
 
 ## 参与社区
 

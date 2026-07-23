@@ -36,9 +36,19 @@ web/.vite/
 # Local persistent object storage
 .data/
 
+# Local MVP backend persistence
+/data/
+
 # Editor/IDE
 # .idea/
 # .vscode/
 
 # macOS Finder metadata
 .DS_Store
+
+# Frontend dependencies and build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
