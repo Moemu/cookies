@@ -5,7 +5,7 @@ import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, hookStoryboard } from '../data/commerceHooks'
 import { projectEvidence } from '../data/projects'
 import { api, type ApiGenerationJob } from '../data/api'
-import type { ArtifactKey, DataState } from '../types'
+import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
 
@@ -65,7 +65,7 @@ export function ImageTextCreationPage({ state }: { state: DataState }) {
   const generateImage = async () => {
     const prompt = `${headline}。${channel}，工业制造品牌图文主视觉，产品精度证据，品牌安全区清晰，中文排版。`
     if (!confirmedBriefId) {
-      setNotice('请先在策略工作台确认 Brief，再生成当前主视觉。')
+      setNotice('请先在需求中心确认 Brief，再生成当前主视觉。')
       return
     }
     try {
@@ -79,7 +79,7 @@ export function ImageTextCreationPage({ state }: { state: DataState }) {
   return <StateBoundary state={state} onRetry={() => setNotice('已重新加载')} onCreate={() => setNotice('已创建空白画板')}><div className="image-editor-specialized">
     <aside className="creative-structure"><div className="surface-toolbar"><h3>图文结构</h3><button aria-label="新增图文页面"><Image size={16}/></button></div>{pages.map((page, index) => <button key={page} className={selected === index ? 'creative-page active' : 'creative-page'} onClick={() => setSelected(index)}><span>{String(index + 1).padStart(2, '0')}</span><b>{page}</b><small>{index === 0 ? '主视觉' : index === 3 ? 'CTA' : '内容页'}</small></button>)}<div className="version-block"><span>来源</span><b>{currentProject.artifacts.strategy.version}</b><small>{currentProject.artifacts.strategy.summary}</small></div></aside>
     <section className="image-canvas-workspace"><div className="canvas-toolbar light"><span>{currentProject.name} · 图文 v1.{version}</span><div><button onClick={() => setNotice('预览链接已生成')}><ExternalLink size={14}/>预览</button><button onClick={() => setNotice('PNG 导出任务已创建')}><Download size={14}/>导出</button></div></div><div className="portrait-stage"><div className="social-poster"><img src="/assets/white-precision-cnc.png" alt="CNC 设备加工高精度金属零件"/><div className="poster-copy"><small>WHITE PRECISION</small><h2>{headline}</h2><p>±0.01mm 精度 · 98%+ 准时交付</p></div><span className="poster-index">0{selected + 1} / 04</span></div></div><div className="page-strip">{pages.map((page, index) => <button key={page} className={selected === index ? 'active' : ''} onClick={() => setSelected(index)}><span>{index + 1}</span>{page}</button>)}</div></section>
-    <aside className="creative-inspector"><div className="surface-toolbar"><h3>页面属性</h3><span className="status success"><span/>品牌检查通过</span></div><label>渠道与画幅<select value={channel} onChange={event => setChannel(event.target.value)}><option>小红书 4:5</option><option>公众号 16:9</option><option>信息流 1:1</option></select></label><label>主标题<textarea value={headline} onChange={event => setHeadline(event.target.value)} maxLength={24}/><small>{headline.length} / 24 字</small></label><div className="check-list"><span><Check size={14}/>安全区未遮挡</span><span><Check size={14}/>核心信息有证据</span><span><Check size={14}/>品牌用语一致</span></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置 ARK_API_KEY，无法发起图片生成。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在策略工作台确认 Brief，系统才会允许生成图片。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generateImage()}><WandSparkles size={15}/>{job && ['queued', 'running'].includes(job.status) ? '图片生成中…' : '生成当前主视觉'}</button><button className="secondary-button full" onClick={save}><Save size={15}/>保存新版本</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <aside className="creative-inspector"><div className="surface-toolbar"><h3>页面属性</h3><span className="status success"><span/>品牌检查通过</span></div><label>渠道与画幅<select value={channel} onChange={event => setChannel(event.target.value)}><option>小红书 4:5</option><option>公众号 16:9</option><option>信息流 1:1</option></select></label><label>主标题<textarea value={headline} onChange={event => setHeadline(event.target.value)} maxLength={24}/><small>{headline.length} / 24 字</small></label><div className="check-list"><span><Check size={14}/>安全区未遮挡</span><span><Check size={14}/>核心信息有证据</span><span><Check size={14}/>品牌用语一致</span></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置 ARK_API_KEY，无法发起图片生成。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成图片。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generateImage()}><WandSparkles size={15}/>{job && ['queued', 'running'].includes(job.status) ? '图片生成中…' : '生成当前主视觉'}</button><button className="secondary-button full" onClick={save}><Save size={15}/>保存新版本</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div></StateBoundary>
 }
 
@@ -116,7 +116,7 @@ const brandSteps = [
 ]
 
 export function VideoCreationPage({ state, activeView, onOpenTask }: { state: DataState, activeView: string, onOpenTask: (id: string) => void }) {
-  const { currentProject, updateArtifact } = useProject()
+  const { currentProject, createTask } = useProject()
   const [selected, setSelected] = useState('short-drama')
   const [notice, setNotice] = useState('')
   const [brandGenerated, setBrandGenerated] = useState(false)
@@ -125,10 +125,20 @@ export function VideoCreationPage({ state, activeView, onOpenTask }: { state: Da
   const activeMode = performanceModes.find(item => item.id === selected) ?? performanceModes[0]
   const create = async () => {
     const name = category === 'performance' ? activeMode.label : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
+    const type: BusinessTaskType = category === 'brand' ? 'brand_video'
+      : category === 'editing' ? 'video_edit'
+      : activeMode.id === 'short-drama' ? 'short_drama_preroll'
+      : activeMode.id === 'game' ? 'game_preroll'
+      : activeMode.id === 'pre-roll' ? 'commerce_preroll'
+      : 'viral_remake'
     try {
-      await updateArtifact('creative', { status: '制作中', sourceVersion: `策略 ${currentProject.artifacts.strategy.version}`, summary: `${name}任务已从已批准策略创建` })
-      setNotice(`${name}创作任务已创建；已保留策略、来源与版本链。`)
-      onOpenTask(`${category === 'editing' ? 'ED' : 'CR'}-2607-${String(Date.now()).slice(-4)}`)
+      const task = await createTask({
+        type,
+        name: `${currentProject.name} · ${name}`,
+        objective: `${currentProject.goal}；继承策略 ${currentProject.artifacts.strategy.version} 与品牌约束。`,
+      })
+      setNotice(`${name}创作任务已写入服务端；已保留 Project、策略、来源与版本链。`)
+      onOpenTask(task.id)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '创建创作任务失败，请重试。')
     }
@@ -240,7 +250,7 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
   }
   const generate = async () => {
     if (!confirmedBriefId) {
-      onNotice('请先在策略工作台确认 Brief，再生成视频分镜。')
+      onNotice('请先在需求中心确认 Brief，再生成视频分镜。')
       return
     }
     try {
@@ -273,7 +283,7 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
       <label>结果与停留<textarea value={result} onChange={event => setResult(event.target.value)}/></label>
       <div className="hook-guardrail"><ShieldCheck size={15}/><span><b>自动附加生成护栏</b><small>{selected.guardrails}</small></span></div>
       {configuredProvider ? <div className="hook-model"><CircleCheck size={15}/><span><b>{configuredProvider.name}</b><small>服务端媒体模型目录</small></span></div> : <div className="hook-model missing"><CircleAlert size={15}/><span><b>尚未配置模型</b><small>请在服务端配置 ARK_API_KEY 后重新检查能力。</small></span></div>}
-      {!confirmedBriefId ? <div className="hook-model missing"><CircleAlert size={15}/><span><b>缺少已确认 Brief</b><small>请先在策略工作台确认 Brief，再发起视频生成。</small></span></div> : null}
+      {!confirmedBriefId ? <div className="hook-model missing"><CircleAlert size={15}/><span><b>缺少已确认 Brief</b><small>请先在需求中心确认 Brief，再发起视频生成。</small></span></div> : null}
       <div className="hook-actions"><button className="secondary-button" onClick={() => void save()}><Save size={14}/>保存策略</button><button className="primary-button" disabled={!configuredProvider || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}><WandSparkles size={14}/>{job && ['queued', 'running'].includes(job.status) ? '生成中…' : '生成分镜'}</button></div>
       {job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}
     </aside>

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, type ApiArtifact, type ApiGenerationJob, type ApiProject } from '../data/api'
-import type { ArtifactKey, ArtifactStatus, ChangeSetRecord, ProjectArtifact, ProjectRecord } from '../types'
+import { api, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiProject } from '../data/api'
+import type { ArtifactKey, ArtifactStatus, BusinessTaskRecord, ChangeSetRecord, ProjectArtifact, ProjectRecord } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { presentCreativeStatus } from '../lib/media-status'
 
@@ -12,6 +12,9 @@ interface ProjectContextValue {
   reloadProjects: () => Promise<void>
   selectProject: (id: string) => void
   createProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => Promise<ProjectRecord>
+  updateProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => Promise<void>
+  createTask: (input: { type: ApiBusinessTaskType; name: string; objective: string }) => Promise<BusinessTaskRecord>
+  updateTask: (id: string, patch: Partial<Pick<BusinessTaskRecord, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>) => Promise<BusinessTaskRecord>
   advanceArtifact: (key: ArtifactKey, status: ProjectRecord['artifacts'][ArtifactKey]['status']) => Promise<void>
   updateArtifact: (key: ArtifactKey, patch: Partial<ProjectRecord['artifacts'][ArtifactKey]>) => Promise<void>
   addChangeSet: (budgetLimit?: number) => Promise<DeliveryChangeSet>
@@ -35,12 +38,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       const apiProjects = await api.listProjects()
       const nextProjects = await Promise.all(apiProjects.map(async project => {
-        const [artifacts, jobs, changeSets] = await Promise.all([
+        const [artifacts, jobs, tasks, changeSets] = await Promise.all([
           api.listArtifacts(project.id),
           api.listJobs(project.id),
+          api.listTasks(project.id),
           deliveryApi.listChangeSets(project.id),
         ])
-        return toProjectRecord(project, artifacts, jobs, changeSets)
+        return toProjectRecord(project, artifacts, jobs, tasks, changeSets)
       }))
       setProjects(nextProjects)
       setCurrentProjectId(current => nextProjects.some(project => project.id === current) ? current : nextProjects[0]?.id ?? '')
@@ -62,6 +66,43 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setCurrentProjectId(created.id)
     return created
   }, [])
+
+  const updateProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => {
+    const project = projects.find(candidate => candidate.id === currentProjectId)
+    if (!project) throw new Error('请先选择已保存的 Project。')
+    await api.updateProject(project.id, { name: input.name, brand: input.brand, objective: input.goal })
+    await reloadProjects()
+  }, [currentProjectId, projects, reloadProjects])
+
+  const createTask = useCallback(async (input: { type: ApiBusinessTaskType; name: string; objective: string }) => {
+    const project = projects.find(candidate => candidate.id === currentProjectId)
+    if (!project) throw new Error('请先选择已保存的 Project。')
+    const artifacts = await api.listArtifacts(project.id)
+    const insightReference = artifacts
+      .filter(artifact => artifact.status === 'ready' && (
+        artifact.content.startsWith('[prelaunch-insight]')
+        || artifact.content.startsWith('[knowledge]')
+      ))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+    const sourceArtifactIds = taskSourceArtifactIds(project, input.type, insightReference?.id)
+    const task = await api.createTask({
+      projectId: project.id,
+      ...input,
+      sourceTaskIds: taskSourceTaskIds(project, input.type),
+      sourceArtifactIds,
+    })
+    await reloadProjects()
+    return task
+  }, [currentProjectId, projects, reloadProjects])
+
+  const updateTask = useCallback(async (
+    id: string,
+    patch: Partial<Pick<BusinessTaskRecord, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>,
+  ) => {
+    const task = await api.updateTask(id, patch)
+    await reloadProjects()
+    return task
+  }, [reloadProjects])
 
   const updateArtifact = useCallback(async (key: ArtifactKey, patch: Partial<ProjectRecord['artifacts'][ArtifactKey]>) => {
     const project = projects.find(candidate => candidate.id === currentProjectId)
@@ -114,12 +155,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     await reloadProjects()
     return changeSet
   }, [reloadProjects])
-  const value = useMemo(() => ({ projects, currentProject, isLoading, error, reloadProjects, selectProject, createProject, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet }), [projects, currentProject, isLoading, error, reloadProjects, selectProject, createProject, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet])
+  const value = useMemo(() => ({ projects, currentProject, isLoading, error, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet }), [projects, currentProject, isLoading, error, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet])
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
 }
 
-function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], changeSets: DeliveryChangeSet[] = []): ProjectRecord {
-  const brief = latestArtifact(artifacts, 'brief')
+function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], tasks: ApiBusinessTask[] = [], changeSets: DeliveryChangeSet[] = []): ProjectRecord {
+  const brief = latestArtifact(artifacts.filter(artifact => artifact.status === 'ready'), 'brief')
+    ?? latestArtifact(artifacts, 'brief')
   const latestMediaJob = latestMediaGenerationJob(jobs)
   const media = latestMediaJob?.artifactId
     ? artifacts.find(artifact => artifact.id === latestMediaJob.artifactId)
@@ -147,7 +189,9 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
       insight: toArtifactRecord('insight', latestDocument(documents, 'insight'), project.updatedAt),
       delivery: toArtifactRecord('delivery', latestDocument(documents, 'delivery'), project.updatedAt),
     },
+    tasks,
     changeSets: changeSets.map(toChangeSetRecord),
+    knowledgeCount: documents.filter(artifact => artifact.content.startsWith('[knowledge]')).length,
   }
 }
 
@@ -155,7 +199,26 @@ const emptyProject: ProjectRecord = {
   id: '', code: '—', name: '尚未连接到服务端', brand: '—', product: '—', goal: '请启动本地 MVP API 后重试。',
   stage: '等待恢复', progress: 0, status: '进行中', updatedAt: '—', budget: 0, currency: 'CNY', timezone: 'Asia/Shanghai',
   artifacts: Object.fromEntries((['brief', 'strategy', 'creative', 'insight', 'delivery'] as ArtifactKey[]).map(key => [key, toArtifactRecord(key, undefined, '')])) as ProjectRecord['artifacts'],
+  tasks: [],
   changeSets: [],
+  knowledgeCount: 0,
+}
+
+function taskSourceArtifactIds(project: ProjectRecord, type: ApiBusinessTaskType, insightReferenceId?: string): string[] {
+  const briefId = project.artifacts.brief.id
+  const strategyId = project.artifacts.strategy.id
+  const creativeId = project.artifacts.creative.id
+  if (type === 'strategy') return [briefId, insightReferenceId].filter((id): id is string => Boolean(id))
+  if (type === 'video_edit') return [briefId, strategyId, creativeId, insightReferenceId].filter((id): id is string => Boolean(id))
+  return [briefId, strategyId, insightReferenceId].filter((id): id is string => Boolean(id))
+}
+
+function taskSourceTaskIds(project: ProjectRecord, type: ApiBusinessTaskType): string[] {
+  if (type === 'strategy') return []
+  const latestStrategy = project.tasks.filter(task => task.type === 'strategy').at(-1)
+  if (type === 'creative') return [latestStrategy?.id].filter((id): id is string => Boolean(id))
+  const latestCreative = project.tasks.filter(task => task.type === 'creative').at(-1)
+  return [latestStrategy?.id, latestCreative?.id].filter((id): id is string => Boolean(id))
 }
 
 function toArtifactRecord(key: ArtifactKey, artifact: ApiArtifact | undefined, fallbackTime: string): ProjectArtifact {

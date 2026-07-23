@@ -2,8 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from "node:path";
 import {
   isArtifactKind,
+  isBusinessTaskStatus,
+  isBusinessTaskType,
   isGenerationJobStatus,
   type ArtifactStatus,
+  type BusinessTaskStatus,
 } from "./domain.js";
 import { createArkProvider, loadArkConfig, publicCapabilities } from "./ark-provider.js";
 import { seedDemoProject } from "./demo.js";
@@ -76,6 +79,10 @@ async function route(
   }
   if (resource === "artifacts") {
     await artifactsRoute(method, id, request, response, repository, url.searchParams.get("projectId"));
+    return;
+  }
+  if (resource === "tasks") {
+    await businessTasksRoute(method, id, request, response, repository, url.searchParams.get("projectId"));
     return;
   }
   if (resource === "generation-jobs") {
@@ -256,6 +263,52 @@ async function jobsRoute(
     return sendJson(response, 200, await repository.transitionGenerationJob(id, status, {
       diagnostic: optionalString(body, "diagnostic"),
       artifactId: optionalString(body, "artifactId"),
+      actor: optionalString(body, "actor"),
+    }));
+  }
+  throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
+}
+
+async function businessTasksRoute(
+  method: string,
+  id: string | undefined,
+  request: IncomingMessage,
+  response: ServerResponse,
+  repository: FileRepository,
+  projectId: string | null,
+): Promise<void> {
+  if (!id && method === "GET") {
+    return sendJson(response, 200, await repository.listBusinessTasks(projectId ?? undefined));
+  }
+  if (!id && method === "POST") {
+    const body = await readBody(request);
+    const type = body.type;
+    if (!isBusinessTaskType(type)) invalidField("type", "Must be a supported business task type");
+    return sendJson(response, 201, await repository.createBusinessTask({
+      projectId: requiredString(body, "projectId"),
+      type,
+      name: requiredString(body, "name"),
+      objective: requiredString(body, "objective"),
+      sourceTaskIds: optionalStringArray(body, "sourceTaskIds"),
+      sourceArtifactIds: optionalStringArray(body, "sourceArtifactIds"),
+      actor: optionalString(body, "actor"),
+    }));
+  }
+  if (id && method === "GET") return sendFound(response, await repository.getBusinessTask(id));
+  if (id && method === "PATCH") {
+    const body = await readBody(request);
+    requireAny(body, ["name", "objective", "status", "sourceTaskIds", "sourceArtifactIds", "outputArtifactIds"]);
+    const status = body.status;
+    if (status !== undefined && !isBusinessTaskStatus(status)) {
+      invalidField("status", "Must be a supported business task status");
+    }
+    return sendJson(response, 200, await repository.updateBusinessTask(id, {
+      name: optionalString(body, "name"),
+      objective: optionalString(body, "objective"),
+      status: status as BusinessTaskStatus | undefined,
+      sourceTaskIds: optionalStringArray(body, "sourceTaskIds"),
+      sourceArtifactIds: optionalStringArray(body, "sourceArtifactIds"),
+      outputArtifactIds: optionalStringArray(body, "outputArtifactIds"),
       actor: optionalString(body, "actor"),
     }));
   }

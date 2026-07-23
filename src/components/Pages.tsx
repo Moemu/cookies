@@ -6,28 +6,48 @@ import { unifiedRecords } from '../data/projects'
 import { api, type ApiArtifact, type ApiAuditEvent } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
-import type { DataState, NavItem, SystemDefinition, SystemKey } from '../types'
+import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, SystemDefinition, SystemKey } from '../types'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
-import { AdDataInsightPage, AssetExperiencePage } from './CoreFlowPages'
+import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
+import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 
-const demoSteps: Array<{ label: string; detail: string; system: SystemKey; navId: string }> = [
-  { label: '需求与策略', detail: '查看已确认 Brief 与策略依据', system: 'strategy', navId: 'workspaces' },
-  { label: '创意产物', detail: '查看预置 AI 创意与生成边界', system: 'creative', navId: 'image-text' },
-  { label: '投放预检', detail: '检查素材与预算输入', system: 'delivery', navId: 'plans' },
-  { label: '人工审批', detail: '批准后执行本地模拟', system: 'delivery', navId: 'approvals' },
-  { label: '审计记录', detail: '回看服务端保存的证据', system: 'delivery', navId: 'evidence' },
-]
+const dashboardJourneys: Record<SystemKey, Array<{ label: string; detail: string; navId: string }>> = {
+  strategy: [
+    { label: '需求完整度', detail: '补齐目标、受众、边界和成功指标', navId: 'briefs' },
+    { label: '策略任务', detail: '从 Brief 创建可追溯的策略任务', navId: 'tasks' },
+    { label: '研究证据', detail: '组织受众、竞品与行业依据', navId: 'research' },
+    { label: '策略评审', detail: '确认策略版本并交给创意生产', navId: 'reviews' },
+  ],
+  creative: [
+    { label: '创意任务', detail: '继承已批准策略和渠道交付规格', navId: 'tasks' },
+    { label: '图文创作', detail: '组织文案、版式、品牌和渠道检查', navId: 'image-text' },
+    { label: '视频创作', detail: '品牌、效果广告与视频包装', navId: 'video' },
+    { label: '生产与评审', detail: '跟踪生成、失败恢复和交付版本', navId: 'production' },
+  ],
+  insight: [
+    { label: '投前洞察', detail: '为 Brief、策略与创意引用证据', navId: 'prelaunch' },
+    { label: '投后分析', detail: '查看消耗、CTR、转化与素材驱动因素', navId: 'performance' },
+    { label: '素材管理', detail: '统一管理视频、图片与授权来源', navId: 'assets' },
+    { label: '经验沉淀', detail: '把验证结论转成可复用策略证据', navId: 'knowledge' },
+  ],
+  delivery: [
+    { label: '投放计划', detail: '选择创意组合、预算和排期', navId: 'plans' },
+    { label: '策略优化', detail: '把洞察转成受控 ChangeSet', navId: 'optimization' },
+    { label: '审批中心', detail: '完成预检、审批和权限控制', navId: 'approvals' },
+    { label: '执行与回滚', detail: '保留执行证据和回滚能力', navId: 'execution' },
+  ],
+}
 
 function Status({ value }: { value: string }) {
   const kind = value.includes('完成') || value.includes('通过') ? 'success' : value.includes('失败') || value.includes('需处理') ? 'danger' : value.includes('生成') || value.includes('执行') ? 'info' : 'warning'
   return <span className={`status ${kind}`}><span />{value}</span>
 }
 
-export function HomePage({ onSystemChange, onOpenProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string) => void }) {
+export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string) => void; onManageProject: (id: string) => void }) {
   const { projects, createProject: createProjectRecord, error: projectError, isLoading } = useProject()
   const [creating, setCreating] = useState(false)
   const [filter, setFilter] = useState<'进行中' | '已完成' | '全部'>('进行中')
@@ -43,7 +63,7 @@ export function HomePage({ onSystemChange, onOpenProject }: { onSystemChange: (k
       setName('')
       setGoal('')
       setCreating(false)
-      onOpenProject(project.id, 'strategy', 'workspaces')
+      onManageProject(project.id)
     } catch {
       // The provider surfaces the connection failure through the shared project state.
     }
@@ -65,15 +85,15 @@ export function HomePage({ onSystemChange, onOpenProject }: { onSystemChange: (k
     </form>}
     <div className="home-grid">
       <section className="projects-section">
-        <div className="section-header"><div><span className="section-label">项目</span><h2>最近 Project</h2></div><div className="project-filters">{(['进行中', '已完成', '全部'] as const).map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} aria-pressed={filter === item}>{item}</button>)}</div></div>
+        <div className="section-header"><div><span className="section-label">项目</span><h2>项目管理</h2></div><div className="project-filters">{(['进行中', '已完成', '全部'] as const).map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} aria-pressed={filter === item}>{item}</button>)}</div></div>
         <div className="project-list">
-          {visibleProjects.map((project, index) => <button className="project-row" key={project.id} onClick={() => onOpenProject(project.id)}>
-            <span className="project-order">{String(index + 1).padStart(2, '0')}</span>
-            <span className="project-primary"><b>{project.name}</b><small>{project.brand} · {project.goal}</small></span>
-            <span className="project-stage"><small>当前阶段</small><b>{project.stage}</b></span>
-            <span className="project-progress"><i><em style={{width: `${project.progress}%`}}/></i><b>{project.progress}%</b></span>
-            <span className="project-updated">{project.updatedAt.slice(5)}</span><ArrowRight size={16}/>
-          </button>)}
+          {visibleProjects.map((project, index) => <div className="project-row-shell" key={project.id}><button className="project-row" onClick={() => onOpenProject(project.id)}>
+              <span className="project-order">{String(index + 1).padStart(2, '0')}</span>
+              <span className="project-primary"><b>{project.name}</b><small>{project.brand} · {project.goal}</small></span>
+              <span className="project-stage"><small>当前阶段</small><b>{project.stage}</b></span>
+              <span className="project-progress"><i><em style={{width: `${project.progress}%`}}/></i><b>{project.progress}%</b></span>
+              <span className="project-updated">{project.updatedAt.slice(5)}</span><ArrowRight size={16}/>
+            </button><button className="project-manage-button" onClick={() => onManageProject(project.id)}>管理</button></div>)}
           {!visibleProjects.length ? <div className="project-empty">{isLoading ? '正在恢复 Project…' : '当前筛选下没有 Project'}</div> : null}
         </div>
       </section>
@@ -85,15 +105,15 @@ export function HomePage({ onSystemChange, onOpenProject }: { onSystemChange: (k
   </div>
 }
 
-function PageHeader({ system, item, activeView, onViewChange, onPrimaryAction, busy }: { system: SystemDefinition; item: NavItem; activeView: string; onViewChange: (v: string) => void; onPrimaryAction: () => void; busy: boolean }) {
+function PageHeader({ system, item, activeView, onViewChange, onPrimaryAction, busy, actionLabel }: { system: SystemDefinition; item: NavItem; activeView: string; onViewChange: (v: string) => void; onPrimaryAction: () => void; busy: boolean; actionLabel?: string }) {
   return <>
     <div className="page-header">
       <div><div className="breadcrumb">{system.label} <span>/</span> {item.label}</div><h1>{item.label}</h1><p>{item.description}</p></div>
-      <button className="primary-button" onClick={onPrimaryAction} disabled={busy}>{busy ? '正在保存…' : <><Plus size={16} />{item.layout === 'settings' ? '保存配置' : `新建${item.label.replace('中心', '').replace('工作台', '任务')}`}</>}</button>
+      {actionLabel ? <button className="primary-button" onClick={onPrimaryAction} disabled={busy}>{busy ? '正在保存…' : <><Plus size={16} />{actionLabel}</>}</button> : <span className="page-context-label">Project 数据自动关联 · 无需重复建任务</span>}
     </div>
-    <div className="tabs" role="tablist" aria-label={`${item.label}视图`}>
-      {item.views.map(view => <button key={view} role="tab" aria-selected={view === activeView} className={view === activeView ? 'tab active' : 'tab'} onClick={() => onViewChange(view)}>{view}{view.includes('待') && <em>{view === '待我评审' ? 3 : 2}</em>}</button>)}
-    </div>
+    {item.views.length > 1 ? <div className="tabs" role="tablist" aria-label={`${item.label}视图`}>
+      {item.views.map(view => <button key={view} role="tab" aria-selected={view === activeView} className={view === activeView ? 'tab active' : 'tab'} onClick={() => onViewChange(view)}>{view}</button>)}
+    </div> : null}
   </>
 }
 
@@ -101,17 +121,29 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
   const { currentProject } = useProject()
   const { configuredCount } = useModelConfig()
   const [notice, setNotice] = useState('')
+  const [taskDomain, setTaskDomain] = useState<'strategy' | 'creative' | null>(null)
   const systemIndex = systems.findIndex(s => s.key === system.key)
   const currentItem = workItems[systemIndex]
+  const journey = dashboardJourneys[system.key]
+  const dashboardAction = system.key === 'strategy' ? '新建策略任务' : system.key === 'creative' ? '新建创意任务' : system.key === 'insight' ? '查看广告数据' : '配置投放计划'
+  const runDashboardAction = () => {
+    if (system.key === 'strategy' || system.key === 'creative') setTaskDomain(system.key)
+    else onOpenProject(currentProject.id, system.key, system.key === 'insight' ? 'performance' : 'plans')
+  }
+  const taskCreated = (task: BusinessTaskRecord) => {
+    setTaskDomain(null)
+    setNotice(`${task.name} 已写入服务端并关联当前 Project`)
+    onOpenProject(currentProject.id, system.key, 'tasks', task.id)
+  }
   return <div className="page-frame dashboard-page">
     <div className="dashboard-intro">
       <div><div className="eyeline">2026 年 7 月 22 日，星期三</div><h1>早上好，Amelia</h1><p>{system.statement} 这里优先呈现需要你判断的工作。</p></div>
-      <button className="primary-button" onClick={() => setNotice(`${system.shortLabel}任务草稿已创建`)}><Plus size={16} />新建{system.shortLabel}任务</button>
+      <button className="primary-button" onClick={runDashboardAction}><Plus size={16} />{dashboardAction}</button>
     </div>
     {notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}
-    <section className="demo-guide" aria-label="路演主路径">
-      <div className="demo-guide-heading"><div><span className="section-label">INVESTOR DEMO</span><h2>五步讲清真实 MVP 闭环</h2><p>预置项目由服务端持久化；每一步都可打开并继续讲解。</p></div><span className="source-chip">本地模拟</span></div>
-      <div className="demo-step-list">{demoSteps.map((step, index) => <button key={step.label} onClick={() => onOpenProject(currentProject.id, step.system, step.navId)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{step.label}</b><small>{step.detail}</small></div><ArrowRight size={15}/></button>)}</div>
+    <section className={`demo-guide system-${system.key}`} aria-label={`${system.label}业务路径`}>
+      <div className="demo-guide-heading"><div><span className="section-label">{system.shortLabel.toUpperCase()} WORKFLOW</span><h2>{system.label}的独立工作路径</h2><p>{system.statement} 所有页面都读取当前 Project 的同一条业务链路。</p></div><span className="source-chip">{currentProject.code}</span></div>
+      <div className="demo-step-list">{journey.map((step, index) => <button key={step.label} onClick={() => onOpenProject(currentProject.id, system.key, step.navId)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{step.label}</b><small>{step.detail}</small></div><ArrowRight size={15}/></button>)}</div>
       {configuredCount === 0 ? <div className="demo-provider-notice" role="status"><CircleAlert size={15}/><span>未配置方舟 Provider：可完整讲解预置项目、预检、审批与审计；AI 生成按钮会保持禁用，不会使用或展示浏览器端密钥。</span></div> : null}
     </section>
     <section className="focus-band">
@@ -137,6 +169,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
         <div className="quick-actions"><span className="section-label">快速开始</span>{quickActions.map(action => <button key={action.label} onClick={() => onSystemChange(action.system)}><span><b>{action.label}</b><small>{action.detail}</small></span><ArrowRight size={15} /></button>)}</div>
       </aside>
     </div>
+    {taskDomain ? <TaskCreateDialog domain={taskDomain} onClose={() => setTaskDomain(null)} onCreated={taskCreated}/> : null}
   </div>
 }
 
@@ -305,7 +338,7 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
 
   const generate = async () => {
     if (!confirmedBriefId) {
-      setNotice('请先在策略工作台确认 Brief，再发起图片或视频生成。')
+      setNotice('请先在需求中心确认 Brief，再发起图片或视频生成。')
       return
     }
     try {
@@ -330,7 +363,7 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
   return <div className="editor-layout">
     <aside className="asset-rail"><div className="surface-toolbar"><h3>结构与素材</h3><button aria-label="新增镜头"><Plus size={15}/></button></div>{['开场：精度的瞬间', '产品与制造过程', '真实应用场景', '品牌主张与 CTA'].map((label, i) => <button className={i === selected ? 'asset-row active' : 'asset-row'} onClick={() => setSelected(i)} key={label}><span>{String(i + 1).padStart(2, '0')}</span><b>{label}</b><small>{i === 1 ? '00:06–00:18' : `${i * 8 + 1} 秒`}</small></button>)}</aside>
     <section className="canvas-area"><div className="canvas-toolbar"><span>{item.label} · v1.2</span><div><button>50%</button><button><Download size={15}/>导出预览</button></div></div><div className="media-canvas"><div className="precision-art"><img src="/assets/white-precision-cnc.png" alt="高精度 CNC 设备加工金属零件"/><div className="art-copy"><small>WHITE PRECISION</small><h2>看得见的精度，<br/>兑现你的创新。</h2><p>±0.01mm · 98%+ 准时交付</p></div></div></div><div className="timeline"><div className="time-ruler">00:00 <span>00:06</span><span>00:12</span><span>00:18</span><span>00:24</span><span>00:30</span></div>{['画面', '字幕', '音乐'].map((track, index) => <div className="track" key={track}><b>{track}</b><span className={`clip clip-${index + 1}`}>{index === 0 ? '精密加工 · 06–18s' : index === 1 ? '品牌主张' : 'Precision Theme.wav'}</span></div>)}</div></section>
-    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · 服务端模型目录` : '服务端未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请在服务端设置 ARK_API_KEY 后重新检查能力。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在策略工作台确认 Brief，系统才会允许生成媒体。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}>{job && ['queued', 'running'].includes(job.status) ? '正在生成…' : `生成选中${mediaKind === 'image' ? '图片' : '视频'}`}</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}{['queued', 'running'].includes(job.status) ? <button onClick={() => void cancel()}>取消</button> : job.status === 'failed' || job.status === 'cancelled' ? <button onClick={() => void generate()}>重试</button> : null}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · 服务端模型目录` : '服务端未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请在服务端设置 ARK_API_KEY 后重新检查能力。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成媒体。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}>{job && ['queued', 'running'].includes(job.status) ? '正在生成…' : `生成选中${mediaKind === 'image' ? '图片' : '视频'}`}</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}{['queued', 'running'].includes(job.status) ? <button onClick={() => void cancel()}>取消</button> : job.status === 'failed' || job.status === 'cancelled' ? <button onClick={() => void generate()}>重试</button> : null}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div>
 }
 
@@ -410,11 +443,20 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   const [dataState, setDataState] = useState<DataState>('ready')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [taskDialog, setTaskDialog] = useState<{ domain: 'strategy' | 'creative'; initialType?: BusinessTaskType } | null>(null)
   const { currentProject, addChangeSet } = useProject()
 
   useEffect(() => { if (routeView && item.views.includes(routeView)) setActiveView(routeView) }, [item.views, routeView])
 
   const primaryAction = async () => {
+    if (system.key === 'strategy' && item.id === 'tasks') {
+      setTaskDialog({ domain: 'strategy', initialType: 'strategy' })
+      return
+    }
+    if (system.key === 'creative' && item.id === 'tasks') {
+      setTaskDialog({ domain: 'creative', initialType: 'creative' })
+      return
+    }
     setBusy(true)
     try {
       if (system.key === 'delivery' && item.id === 'optimization') {
@@ -423,10 +465,6 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
         onOpenProject(currentProject.id, 'delivery', 'approvals', change.id)
       } else if (item.layout === 'settings') {
         setNotice(`${system.label}配置已保存为新版本。`)
-      } else {
-        const id = `${item.id.toUpperCase()}-${String(Date.now()).slice(-4)}`
-        setNotice(`${item.label}草稿已创建，已打开对象详情。`)
-        onOpenProject(currentProject.id, system.key, item.id, id, activeView)
       }
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '保存失败，请在服务恢复后重试。')
@@ -436,9 +474,13 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   }
 
   let surface
-  const specialized = system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState}/>
+  const taskDomain = system.key === 'strategy' || system.key === 'creative' ? system.key : null
+  const taskCenter = item.id === 'tasks' && taskDomain !== null
+  const specialized = taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })}/>
+    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
-    : system.key === 'insight' && item.id === 'performance' ? <AdDataInsightPage state={dataState}/>
+    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetExperiencePage state={dataState} mode="assets"/>
     : system.key === 'insight' && item.id === 'knowledge' ? <AssetExperiencePage state={dataState} mode="knowledge"/>
     : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/>
@@ -453,5 +495,16 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     surface = <StateBoundary state={dataState} onRetry={() => setDataState('ready')} onCreate={primaryAction}>{genericSurface}</StateBoundary>
   }
 
-  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy}/><StatePreview value={dataState} onChange={setDataState}/>{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={objectId ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{objectId ? <ObjectDetail system={system} item={item} objectId={objectId} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>产物链路：5/5</span><span>更新时间：{currentProject.updatedAt}</span><span>预算：¥{currentProject.budget.toLocaleString('zh-CN')}</span><strong>状态：已同步</strong></footer></div>
+  const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'
+    : system.key === 'creative' && item.id === 'tasks' ? '新建创意任务'
+    : system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet'
+    : item.layout === 'settings' ? '保存配置'
+    : undefined
+  const taskCreated = (task: BusinessTaskRecord) => {
+    setTaskDialog(null)
+    setNotice(`${task.name} 已写入服务端并关联当前 Project`)
+    onOpenProject(currentProject.id, system.key, 'tasks', task.id)
+  }
+
+  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={objectId && !taskCenter ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{objectId && !taskCenter ? <ObjectDetail system={system} item={item} objectId={objectId} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>业务任务：{currentProject.tasks.length}</span><span>更新时间：{currentProject.updatedAt}</span><span>预算：¥{currentProject.budget.toLocaleString('zh-CN')}</span><strong>状态：已同步</strong></footer>{taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }
