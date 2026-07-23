@@ -5,9 +5,10 @@ export default defineConfig({
   plugins: [react()],
 	server: {
 		host: '127.0.0.1',
-		proxy: {
-			'/platform': 'http://127.0.0.1:8080',
-		},
+	proxy: {
+		'/platform': 'http://127.0.0.1:8080',
+		'/api': 'http://127.0.0.1:8080',
+	},
 	},
   test: {
     environment: 'jsdom',

@@ -13,6 +13,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
 const maxJSONBody = 1 << 20
@@ -367,6 +368,14 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusUnprocessableEntity, contract.ErrorAssetIntakeFailed, "Only JPEG and PNG assets within the size limit are supported.", false
 	case errors.Is(err, assets.ErrProjectContextStale):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_CONTEXT_STALE", "The requested project context version is stale.", false
+	case errors.Is(err, creative.ErrNotFound):
+		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "The scoped Creative resource does not exist.", false
+	case errors.Is(err, creative.ErrIdempotencyConflict):
+		status, code, message, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, "The idempotency key conflicts with an earlier Creative request.", false
+	case errors.Is(err, creative.ErrIntakeNotReady):
+		status, code, message, retryable = http.StatusConflict, "INTAKE_NEEDS_CLARIFICATION", "The Creative intake needs the missing fields before a task can be created.", false
+	case errors.Is(err, creative.ErrProviderJobConflict):
+		status, code, message, retryable = http.StatusConflict, "PRODUCTION_JOB_CONFLICT", "A different cover production job already exists for this task.", false
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
 	case errors.Is(err, project.ErrBrandNotFound):

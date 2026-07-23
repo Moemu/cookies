@@ -3,6 +3,7 @@ import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
 import { ProviderJobsPage } from '../features/provider/ProviderJobsPage'
 import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
+import { CreativeImageTextPage } from '../features/creative/CreativeImageTextPage'
 import { getWorkspaceBootstrap } from '../features/platform/api'
 import type { CurrentIdentity, Project } from '../features/platform/types'
 import { NewProjectDialog } from '../features/projects/NewProjectDialog'
@@ -49,7 +50,7 @@ export function Workspace() {
         <Link className="wordmark" to="/strategy" aria-label="cookies 首页">cookies</Link>
         <nav className="module-nav" aria-label="业务系统">
           {shellModules.map((module) => (
-            <Link className={module.key === activeModule.key ? 'nav-item nav-item--active' : 'nav-item'} key={module.key} to={`/${module.key}`}>
+            <Link className={module.key === activeModule.key ? 'nav-item nav-item--active' : 'nav-item'} key={module.key} to={module.key === 'creative' && currentProject ? `/projects/${currentProject.id}/creative` : `/${module.key}`}>
               <Icon name={module.icon} /><span>{module.label}</span>
             </Link>
           ))}
@@ -80,6 +81,7 @@ export function Workspace() {
                 <span>新建项目</span>
               </button>
               {currentProject ? <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/provider-jobs`}>Provider Jobs</Link> : null}
+              {currentProject ? <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/creative`}>图文创作</Link> : null}
             </div> : null}
           </div>
           <div className="identity-summary" title={identity?.organization.name || ''}>
@@ -93,6 +95,7 @@ export function Workspace() {
           <Routes>
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
+            <Route path="/projects/:projectId/creative" element={<CreativeImageTextPage />} />
             <Route path="/admin" element={<IdentityOrganizationPage identity={identity} projects={projects} />} />
             <Route path="*" element={<ModulePlaceholder label={activeModule.label} description={activeModule.description} />} />
           </Routes>

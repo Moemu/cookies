@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-intake-v1.schema.json",
+  "title": "CreativeIntakeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "organization_id", "project_id", "source", "status", "request", "missing_fields", "warnings", "version", "created_at", "updated_at"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "source": {"enum": ["manual", "strategy_package", "uploaded_document", "conversation"]},
+    "status": {"enum": ["draft", "needs_clarification", "ready", "superseded"]},
+    "request": {"$ref": "#/$defs/manualRequest"},
+    "missing_fields": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "confirmed_by": {"type": "string"},
+    "version": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "manualRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "channel", "objective", "audience", "core_message", "call_to_action", "concept", "tone", "visual_keywords", "mandatory_elements", "prohibited_claims"],
+      "properties": {
+        "source": {"const": "manual"},
+        "channel": {"const": "xiaohongshu"},
+        "objective": {"type": "string", "maxLength": 500},
+        "audience": {"type": "string", "maxLength": 500},
+        "core_message": {"type": "string", "maxLength": 1000},
+        "call_to_action": {"type": "string", "maxLength": 300},
+        "concept": {"type": "string", "maxLength": 500},
+        "tone": {"$ref": "#/$defs/stringList"},
+        "visual_keywords": {"$ref": "#/$defs/stringList"},
+        "mandatory_elements": {"$ref": "#/$defs/stringList"},
+        "prohibited_claims": {"$ref": "#/$defs/stringList"}
+      }
+    },
+    "stringList": {"type": "array", "items": {"type": "string"}}
+  }
+}

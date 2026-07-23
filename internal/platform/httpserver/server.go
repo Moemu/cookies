@@ -19,6 +19,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
 type Server struct {
@@ -30,6 +31,7 @@ type Server struct {
 	projects          ProjectManager
 	uploads           AssetUploadManager
 	intakes           GeneratedIntakeManager
+	creative          CreativeManager
 	mux               *http.ServeMux
 	newID             func() (string, error)
 }
@@ -47,6 +49,7 @@ type Dependencies struct {
 	Projects          ProjectManager
 	Uploads           AssetUploadManager
 	Intakes           GeneratedIntakeManager
+	Creative          CreativeManager
 }
 
 type CurrentIdentityReader interface {
@@ -70,6 +73,17 @@ type AssetUploadManager interface {
 type GeneratedIntakeManager interface {
 	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.GeneratedAssetIntakeRequest) (assets.GeneratedIntake, error)
 	Get(context.Context, contract.ActorContext, contract.ProjectID, string) (assets.GeneratedIntake, error)
+}
+
+// CreativeManager is the public application seam from the shared HTTP host to
+// the Creative bounded context. It keeps the host unaware of Creative SQL.
+type CreativeManager interface {
+	CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error)
+	ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error)
+	CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeTask, error)
+	ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error)
+	GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error)
+	RegisterCoverImageJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) error
 }
 
 // ProviderJobs keeps the shared HTTP server dependent on Provider's public
@@ -97,6 +111,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 		providerJobs: dependencies.ProviderJobs, readiness: dependencies.Readiness,
 		identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads,
 		intakes: dependencies.Intakes, newID: newRequestID,
+		creative: dependencies.Creative,
 	}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
@@ -118,6 +133,12 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/model/jobs", server.requireProject(http.HandlerFunc(server.createImageJob)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/model/jobs/{job_id}", server.requireProject(http.HandlerFunc(server.getProviderJob)))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-intakes", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeIntakes))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-intakes", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeIntake))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-intakes/{intake_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeTask))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeTasks))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getCreativeTask))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeCoverImageJob))))
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }

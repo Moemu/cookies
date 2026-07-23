@@ -15,6 +15,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
 func TestHealthDoesNotRequireIdentity(t *testing.T) {
@@ -331,6 +332,41 @@ func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
 	}
 }
 
+func TestCreativeCoverJobKeepsCreativeTaskLineage(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	creativeManager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task:  creative.CreativeTask{ID: "creative_task_1", OrganizationID: "org_1", ProjectID: "project_1", Direction: creative.CreativeDirection{Tone: []string{"克制"}}},
+		Draft: creative.ImageTextDraft{CoverCopy: "从容开始", ImagePlan: []creative.ImagePlanItem{{Order: 1, VisualBrief: "晨光中的咖啡桌"}}},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: creativeManager, ProviderJobs: jobs,
+		Projects: staticProjectManager{context: contract.ProjectContext{OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7}},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_1:cover-image-job", bytes.NewBufferString(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "creative-cover-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if jobs.request.SourceSystem != "creative" || jobs.request.SourceTaskID != "creative_task_1" {
+		t.Fatalf("Provider source=%q task=%q", jobs.request.SourceSystem, jobs.request.SourceTaskID)
+	}
+	if creativeManager.registeredProviderJobID != "provider_job_1" {
+		t.Fatalf("registered provider job=%q", creativeManager.registeredProviderJobID)
+	}
+}
+
 type staticProjectManager struct{ context contract.ProjectContext }
 
 func (s staticProjectManager) GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
@@ -353,6 +389,31 @@ type providerJobStub struct {
 	job         contract.ProviderJob
 	request     provider.CreateImageJobRequest
 	createCalls int
+}
+
+type creativeManagerStub struct {
+	detail                  creative.TaskDetail
+	registeredProviderJobID string
+}
+
+func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
+	return creative.CreativeIntake{}, nil
+}
+func (s *creativeManagerStub) ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error) {
+	return nil, nil
+}
+func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeTask, error) {
+	return creative.CreativeTask{}, nil
+}
+func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
+	return nil, nil
+}
+func (s *creativeManagerStub) GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RegisterCoverImageJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) error {
+	s.registeredProviderJobID = providerJobID
+	return nil
 }
 
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {

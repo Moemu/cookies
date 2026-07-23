@@ -1,0 +1,108 @@
+openapi: 3.1.0
+info:
+  title: cookies Creative API
+  version: 0.1.0
+  license:
+    name: Apache License 2.0
+    identifier: Apache-2.0
+  description: >-
+    The Creative vertical owns CreativeIntakes, CreativeTasks and content
+    drafts. Organization scope comes from trusted identity and project scope is
+    re-authorized from the path.
+servers:
+  - url: /
+security:
+  - cookiesAuth: []
+paths:
+  /api/creative/v1/projects/{project_id}/creative-intakes:
+    get:
+      operationId: listCreativeIntakes
+      summary: List CreativeIntakes available in the scoped Project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {description: Scoped CreativeIntakes.}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createCreativeIntake
+      summary: Create a normalized manual CreativeIntake.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCreativeIntakeRequest'}
+      responses:
+        '201': {description: CreativeIntake created.}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-task:
+    post:
+      operationId: createCreativeTask
+      summary: Create an image and text CreativeTask from a ready Intake.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '201': {description: Image and text CreativeTask created with an initial draft.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks:
+    get:
+      operationId: listCreativeTasks
+      summary: List CreativeTasks in the scoped Project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {description: Scoped CreativeTasks.}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:
+    get:
+      operationId: getCreativeTask
+      summary: Get a CreativeTask with its content draft and production lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: "Task, source Intake, draft and production lineage."}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:cover-image-job:
+    post:
+      operationId: createCreativeCoverImageJob
+      summary: Create a Provider cover-image job for a CreativeTask.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                model_alias: {type: string, minLength: 1, maxLength: 255}
+      responses:
+        '202': {description: Provider image job created with creative task lineage.}
+        '409': {$ref: '#/components/responses/Conflict'}
+components:
+  securitySchemes:
+    cookiesAuth: {type: http, scheme: bearer}
+  parameters:
+    ProjectID: {name: project_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    IntakeID: {name: intake_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    TaskID: {name: task_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 255}}
+  schemas:
+    CreateCreativeIntakeRequest:
+      type: object
+      additionalProperties: false
+      required: [source, channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+      properties:
+        source: {const: manual}
+        channel: {const: xiaohongshu}
+        objective: {type: string, maxLength: 500}
+        audience: {type: string, maxLength: 500}
+        core_message: {type: string, maxLength: 1000}
+        call_to_action: {type: string, maxLength: 300}
+        concept: {type: string, maxLength: 500}
+        tone: {type: array, items: {type: string}}
+        visual_keywords: {type: array, items: {type: string}}
+        mandatory_elements: {type: array, items: {type: string}}
+        prohibited_claims: {type: array, items: {type: string}}
+  responses:
+    InvalidRequest: {description: The request violates the Creative API contract.}
+    Conflict: {description: "The resource state, scope, or idempotency key conflicts with the request."}
+    NotFound: {description: The scoped resource does not exist.}
+    ProjectAccessDenied: {description: The caller cannot access this Project.}
