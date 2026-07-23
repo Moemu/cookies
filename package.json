@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "server": "tsx server/index.ts",
     "test:server": "tsx --test server/*.test.* server/test/*.test.*",
+    "test:media-status": "tsx --test server/test/media-status.test.ts",
     "check:server": "tsc --noEmit -p server/tsconfig.json"
   },
   "dependencies": {

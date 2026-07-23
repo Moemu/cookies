@@ -1,5 +1,6 @@
 export type ErrorCode =
   | "VALIDATION_ERROR"
+  | "FORBIDDEN"
   | "NOT_FOUND"
   | "INVALID_STATE_TRANSITION"
   | "METHOD_NOT_ALLOWED"
@@ -10,6 +11,7 @@ export type ErrorCode =
   | "PROVIDER_UNAVAILABLE"
   | "PROVIDER_REQUEST_FAILED"
   | "PROVIDER_INVALID_RESPONSE"
+  | "BRIEF_NOT_CONFIRMED"
   | "INTERNAL_ERROR";
 
 export interface ErrorDetail {
@@ -36,10 +38,13 @@ export function errorStatus(code: ErrorCode): number {
   switch (code) {
     case "VALIDATION_ERROR":
     case "INVALID_JSON":
+    case "BRIEF_NOT_CONFIRMED":
       return 400;
     case "NOT_FOUND":
     case "ROUTE_NOT_FOUND":
       return 404;
+    case "FORBIDDEN":
+      return 403;
     case "INVALID_STATE_TRANSITION":
       return 409;
     case "METHOD_NOT_ALLOWED":

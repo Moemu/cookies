@@ -50,6 +50,7 @@ export interface GenerationJob {
   id: string;
   projectId: string;
   artifactKind: ArtifactKind;
+  briefArtifactId?: string;
   status: GenerationJobStatus;
   model?: string;
   providerTaskId?: string;
@@ -67,9 +68,44 @@ export interface ChangeSet {
   status: ChangeSetStatus;
   artifactIds: string[];
   budgetLimit?: number;
+  preflight?: PreflightResult;
+  execution?: SimulationExecution;
+  rollback?: SimulationRollback;
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PreflightCheck {
+  code: "confirmed_brief" | "ready_creative" | "budget_boundary";
+  passed: boolean;
+  message: string;
+  repair: string;
+}
+
+export interface PreflightResult {
+  passed: boolean;
+  checks: PreflightCheck[];
+  checkedAt: string;
+}
+
+export interface SimulationEvidence {
+  step: "validate_input" | "apply_simulation" | "verify_result";
+  status: "completed";
+  message: string;
+  recordedAt: string;
+}
+
+export interface SimulationExecution {
+  simulated: true;
+  evidence: SimulationEvidence[];
+  executedAt: string;
+}
+
+export interface SimulationRollback {
+  simulated: true;
+  reason: string;
+  rolledBackAt: string;
 }
 
 export interface AuditEvent {

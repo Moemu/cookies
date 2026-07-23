@@ -8,6 +8,13 @@ export const ARK_MODELS = Object.freeze({
 });
 
 export type MediaGenerationKind = "image" | "video";
+export type ProviderMediaStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+
+export interface ProviderMediaTask {
+  status: ProviderMediaStatus;
+  assetUrl?: string;
+  diagnostic?: string;
+}
 
 export interface ArkConfig {
   readonly apiKey: string;
@@ -21,6 +28,7 @@ export interface ArkProvider {
   ensureConfigured(): void;
   generateText(prompt: string): Promise<string>;
   createMedia(kind: MediaGenerationKind, prompt: string): Promise<{ providerTaskId?: string; assetUrl?: string }>;
+  getMediaTask(providerTaskId: string): Promise<ProviderMediaTask>;
   cancelMedia(providerTaskId: string): Promise<void>;
 }
 
@@ -56,17 +64,21 @@ export function createArkProvider(
   config: ArkConfig,
   fetchImpl: typeof fetch = fetch,
 ): ArkProvider {
-  async function request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async function request(
+    path: string,
+    body?: Record<string, unknown>,
+    method = "POST",
+  ): Promise<Record<string, unknown>> {
     ensureConfigured();
     let response: Response;
     try {
       response = await fetchImpl(`${config.baseUrl}${path}`, {
-        method: "POST",
+        method,
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
       throw new DomainError("PROVIDER_UNAVAILABLE", "Model provider is temporarily unavailable");
@@ -115,6 +127,21 @@ export function createArkProvider(
       }
       return { providerTaskId, assetUrl };
     },
+    async getMediaTask(providerTaskId) {
+      const payload = await request(
+        `/contents/generations/tasks/${encodeURIComponent(providerTaskId)}`,
+        undefined,
+        "GET",
+      );
+      const data = isRecord(payload.data) ? payload.data : Array.isArray(payload.data) && isRecord(payload.data[0]) ? payload.data[0] : {};
+      const rawStatus = stringValue(payload.status) ?? stringValue(payload.state) ?? stringValue(data.status) ?? stringValue(data.state);
+      const status = normalizeMediaStatus(rawStatus);
+      const assetUrl = stringValue(payload.url) ?? stringValue(data.url) ?? stringValue(data.output_url);
+      const payloadError = isRecord(payload.error) ? payload.error : {};
+      const dataError = isRecord(data.error) ? data.error : {};
+      const diagnostic = stringValue(payloadError.message) ?? stringValue(dataError.message);
+      return { status, assetUrl, diagnostic };
+    },
     async cancelMedia(providerTaskId) {
       await request(`/contents/generations/tasks/${encodeURIComponent(providerTaskId)}/cancel`, {});
     },
@@ -127,4 +154,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function normalizeMediaStatus(value: string | undefined): ProviderMediaStatus {
+  switch (value?.toLowerCase()) {
+    case "queued":
+    case "pending":
+    case "created":
+      return "queued";
+    case "running":
+    case "processing":
+    case "in_progress":
+      return "running";
+    case "succeeded":
+    case "success":
+    case "completed":
+      return "succeeded";
+    case "failed":
+    case "error":
+      return "failed";
+    case "cancelled":
+    case "canceled":
+      return "cancelled";
+    default:
+      return "unknown";
+  }
 }

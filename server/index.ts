@@ -2,11 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from "node:path";
 import {
   isArtifactKind,
-  isChangeSetStatus,
   isGenerationJobStatus,
   type ArtifactStatus,
 } from "./domain.js";
 import { createArkProvider, loadArkConfig, publicCapabilities } from "./ark-provider.js";
+import { seedDemoProject } from "./demo.js";
 import { DomainError, errorStatus, isDomainError } from "./errors.js";
 import { createGenerationService, type GenerationService } from "./generation-service.js";
 import { FileRepository } from "./repository.js";
@@ -17,6 +17,12 @@ const artifactStatuses: readonly ArtifactStatus[] = ["draft", "ready", "archived
 export interface AppOptions {
   repository: FileRepository;
   generationService?: GenerationService;
+}
+
+export async function openSeededRepository(filePath: string): Promise<FileRepository> {
+  const repository = await FileRepository.open(filePath);
+  await seedDemoProject(repository);
+  return repository;
 }
 
 export function createApp({ repository, generationService }: AppOptions): Server {
@@ -38,7 +44,7 @@ async function route(
   generationService: GenerationService,
   capabilities: () => Record<string, unknown>,
 ): Promise<void> {
-  setCorsHeaders(response);
+  setCorsHeaders(request, response);
   if (request.method === "OPTIONS") {
     response.writeHead(204).end();
     return;
@@ -77,10 +83,37 @@ async function route(
       const body = await readBody(request);
       return sendJson(response, 200, await generationService.cancelMedia(id, optionalString(body, "actor")));
     }
+    if (id && method === "GET") {
+      return sendJson(response, 200, await generationService.syncMedia(id));
+    }
     await jobsRoute(method, id, request, response, repository, url.searchParams.get("projectId"));
     return;
   }
   if (resource === "change-sets") {
+    if (id && action === "preflight" && method === "POST") {
+      const body = await readBody(request);
+      return sendJson(response, 200, await repository.preflightChangeSet(id, optionalString(body, "actor")));
+    }
+    if (id && action === "approve" && method === "POST") {
+      const body = await readBody(request);
+      return sendJson(response, 200, await repository.approveChangeSet(
+        id,
+        requiredString(body, "actor"),
+        requiredString(body, "role"),
+      ));
+    }
+    if (id && action === "execute" && method === "POST") {
+      const body = await readBody(request);
+      return sendJson(response, 200, await repository.executeChangeSetSimulation(id, optionalString(body, "actor")));
+    }
+    if (id && action === "rollback" && method === "POST") {
+      const body = await readBody(request);
+      return sendJson(response, 200, await repository.rollbackChangeSetSimulation(
+        id,
+        requiredString(body, "reason"),
+        optionalString(body, "actor"),
+      ));
+    }
     await changeSetsRoute(method, id, request, response, repository, url.searchParams.get("projectId"));
     return;
   }
@@ -112,7 +145,11 @@ async function generationRoute(
   }
   const kind = body.kind;
   if (kind !== "image" && kind !== "video") invalidField("kind", "Must be image or video");
-  return sendJson(response, 202, await generationService.createMedia({ ...input, kind }));
+  return sendJson(response, 202, await generationService.createMedia({
+    ...input,
+    kind,
+    briefId: requiredString(body, "briefId"),
+  }));
 }
 
 async function projectsRoute(
@@ -250,11 +287,6 @@ async function changeSetsRoute(
     }));
   }
   if (id && method === "GET") return sendFound(response, await repository.getChangeSet(id));
-  if (id && method === "PATCH") {
-    const body = await readBody(request);
-    if (!isChangeSetStatus(body.status)) invalidField("status", "Must be a change set status");
-    return sendJson(response, 200, await repository.transitionChangeSet(id, body.status, optionalString(body, "actor")));
-  }
   throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
 }
 
@@ -345,8 +377,12 @@ function sendFound<T>(response: ServerResponse, entity: T | undefined): void {
   sendJson(response, 200, entity);
 }
 
-function setCorsHeaders(response: ServerResponse): void {
-  response.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:5173");
+function setCorsHeaders(request: IncomingMessage, response: ServerResponse): void {
+  const origin = request.headers.origin;
+  if (origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+  }
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
@@ -371,7 +407,7 @@ function sendError(response: ServerResponse, error: unknown): void {
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
   const port = Number(process.env.PORT ?? 8787);
-  const repository = await FileRepository.open(resolve(process.cwd(), "data/mvp-store.json"));
+  const repository = await openSeededRepository(resolve(process.cwd(), "data/mvp-store.json"));
   createApp({ repository }).listen(port, "127.0.0.1", () => {
     console.log(`MVP API listening on http://127.0.0.1:${port}`);
   });

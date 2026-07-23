@@ -9,11 +9,13 @@ import {
   assertGenerationJobTransition,
   type AuditEvent,
   type ChangeSet,
-  type ChangeSetStatus,
   emptyStore,
   type GenerationJob,
   type GenerationJobStatus,
+  type PreflightCheck,
+  type PreflightResult,
   type Project,
+  type SimulationEvidence,
   type StoreData,
 } from "./domain.js";
 import { DomainError } from "./errors.js";
@@ -37,6 +39,7 @@ export interface CreateArtifactInput {
 export interface CreateGenerationJobInput {
   projectId: string;
   artifactKind: ArtifactKind;
+  briefArtifactId?: string;
   model?: string;
   actor?: string;
 }
@@ -165,6 +168,7 @@ export class FileRepository {
       id: randomUUID(),
       projectId: input.projectId,
       artifactKind: input.artifactKind,
+      briefArtifactId: input.briefArtifactId,
       status: "queued",
       model: input.model,
       version: 1,
@@ -209,6 +213,21 @@ export class FileRepository {
     return job;
   }
 
+  async updateGenerationJobDiagnostic(
+    id: string,
+    diagnostic: string | undefined,
+    actor?: string,
+  ): Promise<GenerationJob> {
+    const job = this.requireGenerationJob(id);
+    await this.mutate(() => {
+      Object.assign(job, { diagnostic }, touch(job));
+      this.addAudit(job.projectId, actor, "generation_job.sync_recorded", "generation_job", job.id, {
+        diagnostic,
+      });
+    });
+    return job;
+  }
+
   async listChangeSets(projectId?: string): Promise<ChangeSet[]> {
     return this.store.changeSets.filter((changeSet) => !projectId || changeSet.projectId === projectId);
   }
@@ -238,19 +257,82 @@ export class FileRepository {
     return changeSet;
   }
 
-  async transitionChangeSet(
-    id: string,
-    status: ChangeSetStatus,
-    actor?: string,
-  ): Promise<ChangeSet> {
+  async preflightChangeSet(id: string, actor?: string): Promise<ChangeSet> {
     const changeSet = this.requireChangeSet(id);
-    assertChangeSetTransition(changeSet.status, status);
-    const previousStatus = changeSet.status;
+    if (changeSet.status !== "draft") {
+      throw new DomainError("INVALID_STATE_TRANSITION", `Cannot preflight change set from ${changeSet.status}`);
+    }
+    const preflight = this.evaluatePreflight(changeSet);
+    const nextStatus = preflight.passed ? "preflight_passed" : "preflight_failed";
     await this.mutate(() => {
-      Object.assign(changeSet, { status }, touch(changeSet));
-      this.addAudit(changeSet.projectId, actor, "change_set.status_changed", "change_set", changeSet.id, {
-        from: previousStatus,
-        to: status,
+      Object.assign(changeSet, { status: nextStatus, preflight }, touch(changeSet));
+      this.addAudit(changeSet.projectId, actor, "change_set.preflight_completed", "change_set", changeSet.id, {
+        passed: preflight.passed,
+        checks: preflight.checks.map((check) => ({ code: check.code, passed: check.passed })),
+      });
+    });
+    return changeSet;
+  }
+
+  async approveChangeSet(id: string, actor: string, role: string): Promise<ChangeSet> {
+    if (role !== "demo-approver") {
+      throw new DomainError("FORBIDDEN", "Only a demo approver can approve a change set");
+    }
+    const changeSet = this.requireChangeSet(id);
+    assertChangeSetTransition(changeSet.status, "approved");
+    const preflight = this.requireCurrentPreflight(changeSet, "approve");
+    await this.mutate(() => {
+      Object.assign(changeSet, { status: "approved" }, touch(changeSet));
+      this.addAudit(changeSet.projectId, actor, "change_set.approved", "change_set", changeSet.id, {
+        simulated: true,
+        role,
+        preflightCheckedAt: preflight.checkedAt,
+      });
+    });
+    return changeSet;
+  }
+
+  async executeChangeSetSimulation(id: string, actor?: string): Promise<ChangeSet> {
+    const changeSet = this.requireChangeSet(id);
+    assertChangeSetTransition(changeSet.status, "executing");
+    this.requireCurrentPreflight(changeSet, "execute");
+    const executedAt = new Date().toISOString();
+    const evidence: SimulationEvidence[] = [
+      { step: "validate_input", status: "completed", message: "已复核预检通过的输入和预算边界。", recordedAt: executedAt },
+      { step: "apply_simulation", status: "completed", message: "已在本地模拟环境应用变更；未写入真实广告平台。", recordedAt: executedAt },
+      { step: "verify_result", status: "completed", message: "已验证模拟结果，可随时执行回滚。", recordedAt: executedAt },
+    ];
+    await this.mutate(() => {
+      Object.assign(changeSet, { status: "executing" }, touch(changeSet));
+      this.addAudit(changeSet.projectId, actor, "change_set.simulation_started", "change_set", changeSet.id, { simulated: true });
+      Object.assign(changeSet, {
+        status: "executed",
+        execution: { simulated: true, evidence, executedAt },
+      }, touch(changeSet));
+      this.addAudit(changeSet.projectId, actor, "change_set.simulation_completed", "change_set", changeSet.id, {
+        simulated: true,
+        evidenceCount: evidence.length,
+      });
+    });
+    return changeSet;
+  }
+
+  async rollbackChangeSetSimulation(id: string, reason: string, actor?: string): Promise<ChangeSet> {
+    const changeSet = this.requireChangeSet(id);
+    assertChangeSetTransition(changeSet.status, "rolled_back");
+    const rolledBackAt = new Date().toISOString();
+    await this.mutate(() => {
+      this.addAudit(changeSet.projectId, actor, "change_set.rollback_started", "change_set", changeSet.id, {
+        simulated: true,
+        reason,
+      });
+      Object.assign(changeSet, {
+        status: "rolled_back",
+        rollback: { simulated: true, reason, rolledBackAt },
+      }, touch(changeSet));
+      this.addAudit(changeSet.projectId, actor, "change_set.rolled_back", "change_set", changeSet.id, {
+        simulated: true,
+        reason,
       });
     });
     return changeSet;
@@ -258,6 +340,20 @@ export class FileRepository {
 
   async listAuditEvents(projectId?: string): Promise<AuditEvent[]> {
     return this.store.auditEvents.filter((event) => !projectId || event.projectId === projectId);
+  }
+
+  async recordAuditEvent(
+    projectId: string,
+    action: string,
+    entityType: AuditEvent["entityType"],
+    entityId: string,
+    actor?: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    this.requireProject(projectId);
+    await this.mutate(() => {
+      this.addAudit(projectId, actor, action, entityType, entityId, metadata);
+    });
   }
 
   async getAuditEvent(id: string): Promise<AuditEvent | undefined> {
@@ -286,6 +382,46 @@ export class FileRepository {
     const changeSet = this.store.changeSets.find((item) => item.id === id);
     if (!changeSet) throw new DomainError("NOT_FOUND", `Change set ${id} was not found`);
     return changeSet;
+  }
+
+  private evaluatePreflight(changeSet: ChangeSet): PreflightResult {
+    const artifacts = changeSet.artifactIds
+      .map((artifactId) => this.store.artifacts.find((artifact) => artifact.id === artifactId))
+      .filter((artifact): artifact is Artifact => artifact !== undefined && artifact.projectId === changeSet.projectId);
+    const checks: PreflightCheck[] = [
+      {
+        code: "confirmed_brief",
+        passed: artifacts.some((artifact) => artifact.kind === "brief" && artifact.status === "ready"),
+        message: "ChangeSet 包含已确认的 Brief",
+        repair: "请关联状态为 ready 的 Brief 后重新预检。",
+      },
+      {
+        code: "ready_creative",
+        passed: artifacts.some(
+          (artifact) => (artifact.kind === "image" || artifact.kind === "video") && artifact.status === "ready",
+        ),
+        message: "ChangeSet 包含已确认的图片或视频创意",
+        repair: "请关联状态为 ready 的图片或视频创意后重新预检。",
+      },
+      {
+        code: "budget_boundary",
+        passed: typeof changeSet.budgetLimit === "number" && changeSet.budgetLimit > 0,
+        message: "ChangeSet 设置了正数预算边界",
+        repair: "请设置大于 0 的 budgetLimit 后重新预检。",
+      },
+    ];
+    return { passed: checks.every((check) => check.passed), checks, checkedAt: new Date().toISOString() };
+  }
+
+  private requireCurrentPreflight(changeSet: ChangeSet, action: "approve" | "execute"): PreflightResult {
+    const preflight = this.evaluatePreflight(changeSet);
+    if (!preflight.passed) {
+      throw new DomainError(
+        "INVALID_STATE_TRANSITION",
+        `Cannot ${action} change set because server preflight checks no longer pass`,
+      );
+    }
+    return preflight;
   }
 
   private addAudit(
