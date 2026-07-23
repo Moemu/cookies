@@ -13,10 +13,10 @@ vet:
 	go vet ./...
 
 fmt:
-	gofmt -w $$(go list -f '{{.Dir}}' ./... | xargs -n1 find -name '*.go' -type f)
+	gofmt -w $$(go list -f '{{.Dir}}' ./... | xargs -n1 -I{} find {} -name '*.go' -type f)
 
 check:
-	@files="$$(gofmt -l $$(go list -f '{{.Dir}}' ./... | xargs -n1 find -name '*.go' -type f))"; test -z "$$files" || (echo "Unformatted Go files:"; echo "$$files"; exit 1)
+	@files="$$(gofmt -l $$(go list -f '{{.Dir}}' ./... | xargs -n1 -I{} find {} -name '*.go' -type f))"; test -z "$$files" || (echo "Unformatted Go files:"; echo "$$files"; exit 1)
 	go vet ./...
 	go test ./...
 	npm run check --prefix web

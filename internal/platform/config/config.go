@@ -60,11 +60,19 @@ type Scanner struct {
 // the process environment (or ignored local .env), never from project data.
 type Provider struct {
 	ImageAdapter string
+	TextAdapter  string
 	ArkImage     ArkImage
+	ArkText      ArkText
 	OpenAIImage  OpenAIImage
 }
 
 type ArkImage struct {
+	APIKey  string
+	Model   string
+	BaseURL string
+}
+
+type ArkText struct {
 	APIKey  string
 	Model   string
 	BaseURL string
@@ -164,21 +172,29 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MaxIdleConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_IDLE_CONNS", 5),
 		},
 		ObjectStorage: ObjectStorage{
-			Provider:       valueOr(lookup, "COOKIES_BLOB_PROVIDER", "filesystem"),
-			FilesystemRoot: valueOr(lookup, "COOKIES_FILESYSTEM_BLOB_ROOT", ".data/blobs"),
-			Endpoint:       valueOr(lookup, "COOKIES_TOS_ENDPOINT", ""), Region: valueOr(lookup, "COOKIES_TOS_REGION", ""),
-			AccessKey: valueOr(lookup, "COOKIES_TOS_ACCESS_KEY", ""), SecretKey: valueOr(lookup, "COOKIES_TOS_SECRET_KEY", ""),
-			SecurityToken:    valueOr(lookup, "COOKIES_TOS_SECURITY_TOKEN", ""),
-			QuarantineBucket: valueOr(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "cookies-quarantine"),
-			AssetsBucket:     valueOr(lookup, "COOKIES_TOS_ASSETS_BUCKET", "cookies-assets"),
+			Provider:         valueOrCompatibility(lookup, "COOKIES_BLOB_PROVIDER", "OBJECT_STORAGE_PROVIDER", "filesystem"),
+			FilesystemRoot:   valueOr(lookup, "COOKIES_FILESYSTEM_BLOB_ROOT", ".data/blobs"),
+			Endpoint:         valueOrCompatibility(lookup, "COOKIES_TOS_ENDPOINT", "OBJECT_STORAGE_ENDPOINT", ""),
+			Region:           valueOrCompatibility(lookup, "COOKIES_TOS_REGION", "OBJECT_STORAGE_REGION", ""),
+			AccessKey:        valueOrCompatibility(lookup, "COOKIES_TOS_ACCESS_KEY", "OBJECT_STORAGE_ACCESS_KEY", "OBJECT_STORAGE_ACCESS_KEY_ID", ""),
+			SecretKey:        valueOrCompatibility(lookup, "COOKIES_TOS_SECRET_KEY", "OBJECT_STORAGE_SECRET_KEY", "OBJECT_STORAGE_ACCESS_KEY_SECRET", ""),
+			SecurityToken:    valueOrCompatibility(lookup, "COOKIES_TOS_SECURITY_TOKEN", "OBJECT_STORAGE_SECURITY_TOKEN", ""),
+			QuarantineBucket: valueOrCompatibility(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "OBJECT_STORAGE_QUARANTINE_BUCKET", "cookies-quarantine"),
+			AssetsBucket:     valueOrCompatibility(lookup, "COOKIES_TOS_ASSETS_BUCKET", "OBJECT_STORAGE_ASSETS_BUCKET", "OBJECT_STORAGE_BUCKET_NAME", "cookies-assets"),
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
 		Provider: Provider{
 			ImageAdapter: valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
+			TextAdapter:  valueOr(lookup, "COOKIES_PROVIDER_TEXT_ADAPTER", "fake"),
 			ArkImage: ArkImage{
 				APIKey:  valueOr(lookup, "COOKIES_ARK_IMAGE_API_KEY", ""),
 				Model:   valueOr(lookup, "COOKIES_ARK_IMAGE_MODEL", ""),
 				BaseURL: valueOr(lookup, "COOKIES_ARK_IMAGE_BASE_URL", ""),
+			},
+			ArkText: ArkText{
+				APIKey:  valueOr(lookup, "COOKIES_ARK_TEXT_API_KEY", ""),
+				Model:   valueOr(lookup, "COOKIES_ARK_TEXT_MODEL", ""),
+				BaseURL: valueOr(lookup, "COOKIES_ARK_TEXT_BASE_URL", ""),
 			},
 			OpenAIImage: OpenAIImage{
 				APIKey:  valueOr(lookup, "COOKIES_OPENAI_IMAGE_API_KEY", ""),
@@ -253,6 +269,12 @@ func (c Config) Validate() error {
 	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
 		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
 	}
+	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "ark_text" {
+		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake or ark_text")
+	}
+	if c.Provider.TextAdapter == "ark_text" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkText.APIKey) == "" || strings.TrimSpace(c.Provider.ArkText.Model) == "") {
+		return fmt.Errorf("ark_text is local-only and requires COOKIES_ARK_TEXT_API_KEY and COOKIES_ARK_TEXT_MODEL")
+	}
 	if c.Environment == EnvironmentProduction {
 		if c.ObjectStorage.Provider != "tos" {
 			return fmt.Errorf("production requires TOS object storage")
@@ -280,6 +302,20 @@ func valueOr(lookup func(string) (string, bool), key, fallback string) string {
 		return strings.TrimSpace(value)
 	}
 	return fallback
+}
+
+// valueOrCompatibility lets deployments migrate from generic object-storage
+// names without changing the existing COOKIES_TOS_* configuration contract.
+func valueOrCompatibility(lookup func(string) (string, bool), key string, compatibilityKeys ...string) string {
+	if value, ok := lookup(key); ok {
+		return strings.TrimSpace(value)
+	}
+	for _, compatibilityKey := range compatibilityKeys[:len(compatibilityKeys)-1] {
+		if value, ok := lookup(compatibilityKey); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return compatibilityKeys[len(compatibilityKeys)-1]
 }
 
 func anyValue(values map[string]string) bool {

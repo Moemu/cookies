@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
+import { CreativeWorkspacePage } from '../features/creative/CreativeWorkspacePage'
 import { ProviderJobsPage } from '../features/provider/ProviderJobsPage'
 import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
 import { getWorkspaceBootstrap } from '../features/platform/api'
 import type { CurrentIdentity, Project } from '../features/platform/types'
 import { NewProjectDialog } from '../features/projects/NewProjectDialog'
+import { StrategyWorkspacePage } from '../features/strategy/StrategyWorkspacePage'
 import { Icon } from './Icon'
 import { adminModule, shellModules } from './modules'
 
@@ -49,7 +51,7 @@ export function Workspace() {
         <Link className="wordmark" to="/strategy" aria-label="cookies 首页">cookies</Link>
         <nav className="module-nav" aria-label="业务系统">
           {shellModules.map((module) => (
-            <Link className={module.key === activeModule.key ? 'nav-item nav-item--active' : 'nav-item'} key={module.key} to={`/${module.key}`}>
+            <Link className={module.key === activeModule.key ? 'nav-item nav-item--active' : 'nav-item'} key={module.key} to={currentProject && (module.key === 'strategy' || module.key === 'creative') ? `/projects/${currentProject.id}/${module.key}` : `/${module.key}`}>
               <Icon name={module.icon} /><span>{module.label}</span>
             </Link>
           ))}
@@ -79,7 +81,11 @@ export function Workspace() {
                 <svg aria-hidden="true" fill="none" height="18" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" viewBox="0 0 24 24" width="18"><path d="M12 5v14M5 12h14" /></svg>
                 <span>新建项目</span>
               </button>
-              {currentProject ? <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/provider-jobs`}>Provider Jobs</Link> : null}
+              {currentProject ? <>
+                <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProject.id}/strategy`}>项目策略</Link>
+                <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProject.id}/creative`}>项目创意</Link>
+                <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${projectId || currentProject.id}/provider-jobs`}>Provider Jobs</Link>
+              </> : null}
             </div> : null}
           </div>
           <div className="identity-summary" title={identity?.organization.name || ''}>
@@ -92,6 +98,8 @@ export function Workspace() {
         <main className="workspace" aria-live="polite">
           <Routes>
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
+            <Route path="/projects/:projectId/strategy" element={<StrategyWorkspacePage />} />
+            <Route path="/projects/:projectId/creative" element={<CreativeWorkspacePage />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
             <Route path="/admin" element={<IdentityOrganizationPage identity={identity} projects={projects} />} />
             <Route path="*" element={<ModulePlaceholder label={activeModule.label} description={activeModule.description} />} />
