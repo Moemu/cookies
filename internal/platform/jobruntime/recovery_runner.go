@@ -52,5 +52,17 @@ func (r *RecoveryRunner) RunOnce(ctx context.Context) (bool, error) {
 		}
 		r.lastRecovery = current
 	}
-	return r.Worker.RunOnce(ctx, r.WorkerID)
+	worker := r.Worker
+	if worker.LeaseRenewer == nil {
+		if renewer, ok := r.Recoverer.(LeaseRenewer); ok {
+			worker.LeaseRenewer = renewer
+		}
+	}
+	if worker.LeaseRenewer != nil && worker.HeartbeatInterval <= 0 {
+		worker.HeartbeatInterval = r.LeaseDuration / 3
+		if worker.HeartbeatInterval <= 0 {
+			worker.HeartbeatInterval = time.Second
+		}
+	}
+	return worker.RunOnce(ctx, r.WorkerID)
 }

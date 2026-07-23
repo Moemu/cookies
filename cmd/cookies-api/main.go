@@ -71,20 +71,26 @@ func main() {
 	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
-	if cfg.Environment == config.EnvironmentLocal {
-		adapter, err := buildImageAdapter(cfg, db)
+	if cfg.Environment == config.EnvironmentLocal || cfg.Provider.ImageAdapter == "adapter_gateway" {
+		adapter, outputHandles, err := buildImageAdapter(cfg, db, blobs)
 		if err != nil {
 			log.Fatalf("configure Provider image adapter: %v", err)
 		}
 		runtimeStore := jobruntime.MySQLStore{DB: db}
-		outputHandles := provider.MySQLOutputHandleStore{DB: db}
 		providerService := provider.Service{
-			Store:         provider.MySQLStore{DB: db},
+			Store:         provider.MySQLStore{DB: db, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP},
 			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
 			ImageAdapter:  adapter,
 			Intake:        provider.AssetsIntakeClient{API: intakeService},
 			OutputHandles: outputHandles,
 			NewID:         func() (string, error) { return ids.New("providerjob") },
+		}
+		if cfg.Provider.ImageAdapter == "adapter_gateway" {
+			cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+			if cipherErr != nil {
+				log.Fatalf("configure Provider credential encryption: %v", cipherErr)
+			}
+			providerService.Routes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
 		}
 		dependencies.ProviderJobs = providerService
 		providerRunner := &jobruntime.RecoveryRunner{
@@ -137,16 +143,30 @@ func main() {
 	}
 }
 
-func buildImageAdapter(cfg config.Config, db *sql.DB) (provider.ImageProviderAdapter, error) {
+func buildImageAdapter(cfg config.Config, db *sql.DB, blobs assets.BlobStore) (provider.ImageProviderAdapter, provider.OutputHandleStore, error) {
+	var handles provider.OutputHandleStore = provider.MySQLOutputHandleStore{DB: db}
+	if cfg.Provider.ImageAdapter == "adapter_gateway" && cfg.Environment != config.EnvironmentLocal {
+		handles = provider.ObjectOutputHandleStore{DB: db, Blobs: blobs, Bucket: cfg.Provider.OutputBucket}
+	}
 	switch cfg.Provider.ImageAdapter {
 	case "fake":
-		return provider.NewFakeImageAdapter(nil), nil
+		return provider.NewFakeImageAdapter(nil), handles, nil
 	case "ark_image":
-		return provider.NewArkImageAdapter(provider.ArkImageConfig{APIKey: cfg.Provider.ArkImage.APIKey, Model: cfg.Provider.ArkImage.Model, BaseURL: cfg.Provider.ArkImage.BaseURL}, provider.MySQLOutputHandleStore{DB: db})
+		adapter, err := provider.NewArkImageAdapter(provider.ArkImageConfig{APIKey: cfg.Provider.ArkImage.APIKey, Model: cfg.Provider.ArkImage.Model, BaseURL: cfg.Provider.ArkImage.BaseURL}, handles)
+		return adapter, handles, err
 	case "openai_image":
-		return provider.NewOpenAIImageAdapter(provider.OpenAIImageConfig{APIKey: cfg.Provider.OpenAIImage.APIKey, Model: cfg.Provider.OpenAIImage.Model, BaseURL: cfg.Provider.OpenAIImage.BaseURL}, provider.MySQLOutputHandleStore{DB: db})
+		adapter, err := provider.NewOpenAIImageAdapter(provider.OpenAIImageConfig{APIKey: cfg.Provider.OpenAIImage.APIKey, Model: cfg.Provider.OpenAIImage.Model, BaseURL: cfg.Provider.OpenAIImage.BaseURL}, handles)
+		return adapter, handles, err
+	case "adapter_gateway":
+		cipher, err := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if err != nil {
+			return nil, nil, err
+		}
+		configStore := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
+		adapter, err := provider.NewAdapterGatewayImageAdapterWithPolicy(configStore, handles, cfg.Provider.AllowInsecureHTTP)
+		return adapter, handles, err
 	default:
-		return nil, fmt.Errorf("unsupported Provider image adapter %q", cfg.Provider.ImageAdapter)
+		return nil, nil, fmt.Errorf("unsupported Provider image adapter %q", cfg.Provider.ImageAdapter)
 	}
 }
 

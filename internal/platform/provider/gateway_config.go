@@ -1,0 +1,207 @@
+package provider
+
+import (
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"database/sql"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
+)
+
+// ImageRouteSnapshot is copied onto a job when it is created. Later route
+// edits therefore cannot silently change the endpoint, model, or credential
+// used by an already accepted job.
+type ImageRouteSnapshot struct {
+	RouteID              string `json:"route_id"`
+	RouteRevisionID      string `json:"route_revision_id"`
+	ConnectionID         string `json:"connection_id"`
+	ConnectionRevisionID string `json:"connection_revision_id"`
+	BaseURL              string `json:"base_url"`
+	UpstreamModel        string `json:"upstream_model"`
+	CredentialID         string `json:"credential_id"`
+	CredentialVersion    int64  `json:"credential_version"`
+	TimeoutSeconds       int    `json:"timeout_seconds"`
+	MaxResponseBytes     int64  `json:"max_response_bytes"`
+}
+
+func (s ImageRouteSnapshot) Validate() error {
+	return s.ValidateWithPolicy(false)
+}
+
+func (s ImageRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
+	if strings.TrimSpace(s.RouteID) == "" || strings.TrimSpace(s.RouteRevisionID) == "" ||
+		strings.TrimSpace(s.ConnectionID) == "" || strings.TrimSpace(s.ConnectionRevisionID) == "" ||
+		strings.TrimSpace(s.UpstreamModel) == "" || strings.TrimSpace(s.CredentialID) == "" ||
+		s.CredentialVersion < 1 {
+		return fmt.Errorf("image route snapshot is incomplete")
+	}
+	parsed, err := url.Parse(s.BaseURL)
+	validScheme := parsed.Scheme == "https" || (allowInsecureHTTP && parsed.Scheme == "http")
+	if err != nil || !validScheme || parsed.Host == "" || parsed.User != nil {
+		return fmt.Errorf("adapter gateway base URL must use HTTPS (or explicitly allowed local HTTP) and contain no user info")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("adapter gateway base URL cannot contain a query or fragment")
+	}
+	if s.TimeoutSeconds < 1 || s.TimeoutSeconds > 600 {
+		return fmt.Errorf("adapter gateway timeout must be between 1 and 600 seconds")
+	}
+	if s.MaxResponseBytes < 1 || s.MaxResponseBytes > 100<<20 {
+		return fmt.Errorf("adapter gateway response limit must be between 1 byte and 100 MiB")
+	}
+	return nil
+}
+
+type ImageRouteResolver interface {
+	ResolveImageRoute(context.Context, contract.OrganizationID, string) (ImageRouteSnapshot, error)
+}
+
+type GatewayCredentialResolver interface {
+	ResolveGatewayCredential(context.Context, string, int64) (string, error)
+}
+
+// MySQLGatewayConfigStore resolves only enabled, immutable revisions. The
+// active credential version is captured in the returned job snapshot.
+type MySQLGatewayConfigStore struct {
+	DB                *sql.DB
+	Cipher            CredentialCipher
+	AllowInsecureHTTP bool
+}
+
+func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (ImageRouteSnapshot, error) {
+	if s.DB == nil {
+		return ImageRouteSnapshot{}, fmt.Errorf("MySQL database is required")
+	}
+	var snapshot ImageRouteSnapshot
+	err := s.DB.QueryRowContext(ctx, `SELECT
+			r.id, rr.id, c.id, cr.id, cr.base_url, rr.upstream_model,
+			pc.id, pc.credential_version, cr.timeout_seconds, cr.max_response_bytes
+		FROM provider_model_routes r
+		JOIN provider_model_route_revisions rr ON rr.id = r.current_revision_id AND rr.route_id = r.id
+		JOIN provider_connections c ON c.id = rr.connection_id AND c.status = 'enabled' AND c.connection_type = 'adapter_gateway'
+		JOIN provider_connection_revisions cr ON cr.id = rr.connection_revision_id AND cr.connection_id = c.id
+		JOIN provider_credentials pc ON pc.connection_id = c.id AND pc.status = 'active'
+		WHERE r.capability = 'image.generate' AND r.model_alias = ? AND r.status = 'enabled'
+			AND (r.organization_id = ? OR r.organization_id IS NULL)
+			AND pc.active_from <= UTC_TIMESTAMP(6)
+			AND (pc.active_until IS NULL OR pc.active_until > UTC_TIMESTAMP(6))
+		ORDER BY (r.organization_id IS NOT NULL) DESC, pc.credential_version DESC
+		LIMIT 1`,
+		modelAlias, organizationID,
+	).Scan(
+		&snapshot.RouteID, &snapshot.RouteRevisionID, &snapshot.ConnectionID, &snapshot.ConnectionRevisionID,
+		&snapshot.BaseURL, &snapshot.UpstreamModel, &snapshot.CredentialID, &snapshot.CredentialVersion,
+		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ImageRouteSnapshot{}, fmt.Errorf("no enabled adapter gateway route for model alias %q", modelAlias)
+	}
+	if err != nil {
+		return ImageRouteSnapshot{}, err
+	}
+	if err := snapshot.ValidateWithPolicy(s.AllowInsecureHTTP); err != nil {
+		return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q: %w", modelAlias, err)
+	}
+	return snapshot, nil
+}
+
+func (s MySQLGatewayConfigStore) ResolveGatewayCredential(ctx context.Context, credentialID string, version int64) (string, error) {
+	if s.DB == nil || s.Cipher == nil {
+		return "", fmt.Errorf("MySQL database and credential cipher are required")
+	}
+	var ciphertext, nonce []byte
+	var keyVersion string
+	err := s.DB.QueryRowContext(ctx, `SELECT ciphertext, nonce, key_version
+		FROM provider_credentials
+		WHERE id = ? AND credential_version = ? AND status IN ('active', 'retired')`,
+		credentialID, version,
+	).Scan(&ciphertext, &nonce, &keyVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("adapter gateway credential version is unavailable")
+	}
+	if err != nil {
+		return "", err
+	}
+	plaintext, err := s.Cipher.Decrypt(ciphertext, nonce, keyVersion)
+	if err != nil {
+		return "", fmt.Errorf("decrypt adapter gateway credential: %w", err)
+	}
+	token := strings.TrimSpace(string(plaintext))
+	if token == "" {
+		return "", fmt.Errorf("adapter gateway credential is empty")
+	}
+	return token, nil
+}
+
+type CredentialCipher interface {
+	Encrypt([]byte) (ciphertext, nonce []byte, keyVersion string, err error)
+	Decrypt(ciphertext, nonce []byte, keyVersion string) ([]byte, error)
+}
+
+// AESGCMCredentialCipher keeps the master key outside MySQL. The database
+// contains only authenticated ciphertext, a random nonce, and a key version.
+type AESGCMCredentialCipher struct {
+	key        []byte
+	keyVersion string
+}
+
+func NewAESGCMCredentialCipher(base64Key, keyVersion string) (*AESGCMCredentialCipher, error) {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(base64Key))
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("provider master key must be base64-encoded 32 bytes")
+	}
+	if strings.TrimSpace(keyVersion) == "" {
+		return nil, fmt.Errorf("provider master key version is required")
+	}
+	return &AESGCMCredentialCipher{key: key, keyVersion: strings.TrimSpace(keyVersion)}, nil
+}
+
+func (c *AESGCMCredentialCipher) Encrypt(plaintext []byte) ([]byte, []byte, string, error) {
+	if c == nil || len(c.key) != 32 || len(plaintext) == 0 {
+		return nil, nil, "", fmt.Errorf("credential cipher and plaintext are required")
+	}
+	aead, err := newGCM(c.key)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, nil, "", err
+	}
+	return aead.Seal(nil, nonce, plaintext, []byte(c.keyVersion)), nonce, c.keyVersion, nil
+}
+
+func (c *AESGCMCredentialCipher) Decrypt(ciphertext, nonce []byte, keyVersion string) ([]byte, error) {
+	if c == nil || keyVersion != c.keyVersion {
+		return nil, fmt.Errorf("provider master key version %q is unavailable", keyVersion)
+	}
+	aead, err := newGCM(c.key)
+	if err != nil {
+		return nil, err
+	}
+	if len(nonce) != aead.NonceSize() {
+		return nil, fmt.Errorf("credential nonce has an invalid length")
+	}
+	return aead.Open(nil, nonce, ciphertext, []byte(keyVersion))
+}
+
+func newGCM(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+func routeDeadline(snapshot ImageRouteSnapshot, now time.Time) time.Time {
+	return now.Add(time.Duration(snapshot.TimeoutSeconds) * time.Second)
+}

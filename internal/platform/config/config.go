@@ -5,10 +5,12 @@ package config
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -59,9 +61,13 @@ type Scanner struct {
 // Provider contains only local composition choices. Credentials are read from
 // the process environment (or ignored local .env), never from project data.
 type Provider struct {
-	ImageAdapter string
-	ArkImage     ArkImage
-	OpenAIImage  OpenAIImage
+	ImageAdapter      string
+	MasterKey         string
+	MasterKeyVersion  string
+	OutputBucket      string
+	AllowInsecureHTTP bool
+	ArkImage          ArkImage
+	OpenAIImage       OpenAIImage
 }
 
 type ArkImage struct {
@@ -174,7 +180,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
 		Provider: Provider{
-			ImageAdapter: valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
+			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
+			MasterKey:         valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY", ""),
+			MasterKeyVersion:  valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY_VERSION", "v1"),
+			OutputBucket:      valueOr(lookup, "COOKIES_PROVIDER_OUTPUT_BUCKET", "cookies-provider-output"),
+			AllowInsecureHTTP: boolValueOr(lookup, "COOKIES_PROVIDER_ALLOW_INSECURE_HTTP", false),
 			ArkImage: ArkImage{
 				APIKey:  valueOr(lookup, "COOKIES_ARK_IMAGE_API_KEY", ""),
 				Model:   valueOr(lookup, "COOKIES_ARK_IMAGE_MODEL", ""),
@@ -244,14 +254,29 @@ func (c Config) Validate() error {
 	if c.Scanner.Mode == "clamav" && c.Scanner.Address == "" {
 		return fmt.Errorf("ClamAV scanner requires COOKIES_CLAMAV_ADDRESS")
 	}
-	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" {
-		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, or openai_image")
+	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
+		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")
 	}
 	if c.Provider.ImageAdapter == "ark_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkImage.APIKey) == "" || strings.TrimSpace(c.Provider.ArkImage.Model) == "") {
 		return fmt.Errorf("ark_image is local-only and requires COOKIES_ARK_IMAGE_API_KEY and COOKIES_ARK_IMAGE_MODEL")
 	}
 	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
 		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
+	}
+	if c.Provider.ImageAdapter == "adapter_gateway" && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
+		return fmt.Errorf("adapter_gateway requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")
+	}
+	if c.Provider.ImageAdapter == "adapter_gateway" {
+		key, err := base64.StdEncoding.DecodeString(c.Provider.MasterKey)
+		if err != nil || len(key) != 32 {
+			return fmt.Errorf("COOKIES_PROVIDER_MASTER_KEY must be base64-encoded 32 bytes")
+		}
+		if strings.TrimSpace(c.Provider.OutputBucket) == "" || c.Provider.OutputBucket == c.ObjectStorage.AssetsBucket || c.Provider.OutputBucket == c.ObjectStorage.QuarantineBucket {
+			return fmt.Errorf("adapter_gateway requires a distinct COOKIES_PROVIDER_OUTPUT_BUCKET")
+		}
+		if c.Provider.AllowInsecureHTTP && c.Environment != EnvironmentLocal {
+			return fmt.Errorf("COOKIES_PROVIDER_ALLOW_INSECURE_HTTP is permitted only when COOKIES_ENV=local")
+		}
 	}
 	if c.Environment == EnvironmentProduction {
 		if c.ObjectStorage.Provider != "tos" {
@@ -315,4 +340,16 @@ func intValueOr(lookup func(string) (string, bool), key string, fallback int) in
 		return -1
 	}
 	return result
+}
+
+func boolValueOr(lookup func(string) (string, bool), key string, fallback bool) bool {
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
