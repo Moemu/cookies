@@ -124,6 +124,27 @@ func (s MySQLStore) Reschedule(ctx context.Context, claim Claim, availableAt tim
 	return nil
 }
 
+// RenewLease moves only locked_at. It deliberately leaves the generic job
+// version unchanged because domain handlers may hold a claim for minutes.
+func (s MySQLStore) RenewLease(ctx context.Context, claim Claim, now time.Time) error {
+	if s.DB == nil || claim.Job.ID == "" || claim.LockOwner == "" {
+		return fmt.Errorf("MySQL database, job ID, and lock owner are required")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs SET locked_at = ?
+		WHERE id = ? AND status = 'running' AND lock_owner = ?`, now.UTC(), claim.Job.ID, claim.LockOwner)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("job %s is no longer owned by worker %s", claim.Job.ID, claim.LockOwner)
+	}
+	return nil
+}
+
 // ReclaimExpired returns abandoned running jobs to the queue. It does not mark
 // a job terminal at recovery time: the domain handler must get one final
 // chance to synchronize its public state before Worker applies the attempt

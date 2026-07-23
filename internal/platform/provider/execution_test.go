@@ -2,12 +2,37 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+func TestGatewaySubmissionIsFencedBeforeHTTPAndNeverRetriedWhenUnknown(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 23, 3, 0, 0, 0, time.UTC)
+	record := executableImageJobRecord(now)
+	record.Route = testGatewayRoute()
+	record.SubmissionState = SubmissionNotStarted
+	store := &processingStore{record: record}
+	adapter := &scriptedImageAdapter{submitErr: ExecutionError{JobError: contract.JobError{Code: "MODEL_SUBMISSION_UNKNOWN", Message: "unknown", Retryable: false}}}
+	service := Service{Store: store, ImageAdapter: adapter, Now: func() time.Time { return now }}
+
+	_, _, err := service.ExecuteImageJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	var executionError ExecutionError
+	if !errors.As(err, &executionError) || adapter.submitCalls != 1 {
+		t.Fatalf("first ExecuteImageJob() calls=%d err=%v", adapter.submitCalls, err)
+	}
+	if store.record.SubmissionState != SubmissionUnknown || store.record.SubmittedAt == nil || store.record.ExecutionDeadlineAt == nil {
+		t.Fatalf("submission fence was not persisted: %+v", store.record)
+	}
+	_, _, err = service.ExecuteImageJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if !errors.As(err, &executionError) || adapter.submitCalls != 1 {
+		t.Fatalf("second ExecuteImageJob() retried submission: calls=%d err=%v", adapter.submitCalls, err)
+	}
+}
 
 func TestServiceExecutesImageJobFromSubmitThroughAssetIntake(t *testing.T) {
 	t.Parallel()
@@ -107,11 +132,12 @@ type scriptedImageAdapter struct {
 	polls       []ImageTaskResult
 	submitCalls int
 	pollCalls   int
+	submitErr   error
 }
 
 func (a *scriptedImageAdapter) Submit(context.Context, ImageGenerationRequest) (ImageSubmission, error) {
 	a.submitCalls++
-	return a.submission, nil
+	return a.submission, a.submitErr
 }
 
 func (a *scriptedImageAdapter) Poll(context.Context, ImageTaskReference) (ImageTaskResult, error) {

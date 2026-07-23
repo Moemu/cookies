@@ -73,19 +73,65 @@ func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract
 	}
 	request := ImageGenerationRequest{
 		OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
-		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input,
+		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input, Route: record.Route,
 	}
 	if err := request.Validate(); err != nil {
 		return contract.ProviderJob{}, nil, err
 	}
+	if record.Route != nil {
+		switch record.SubmissionState {
+		case SubmissionInFlight, SubmissionUnknown:
+			return record.Job, nil, ExecutionError{JobError: contract.JobError{
+				Code: "MODEL_SUBMISSION_UNKNOWN", Message: "Adapter gateway submission may already have been accepted and will not be retried automatically", Retryable: false,
+			}}
+		case SubmissionCompleted:
+			return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s has a completed submission but remains submitted", record.Job.ID)
+		case "", SubmissionNotStarted:
+			if preparer, ok := s.ImageAdapter.(ImageSubmissionPreparer); ok {
+				if err := preparer.Prepare(ctx, request); err != nil {
+					return record.Job, nil, err
+				}
+			}
+			now := s.nowUTC()
+			deadline := routeDeadline(*record.Route, now)
+			record.SubmissionState = SubmissionInFlight
+			record.SubmittedAt = &now
+			record.ExecutionDeadlineAt = &deadline
+			record.Job.ExecutionStatus = contract.JobRunning
+			record.Job.UpdatedAt = now
+			updated, updateErr := s.Store.Update(ctx, record)
+			if updateErr != nil {
+				return contract.ProviderJob{}, nil, updateErr
+			}
+			record = updated
+		default:
+			return contract.ProviderJob{}, nil, fmt.Errorf("provider job %s has invalid submission state %q", record.Job.ID, record.SubmissionState)
+		}
+	}
 	submission, err := s.ImageAdapter.Submit(ctx, request)
 	if err != nil {
+		if record.Route != nil {
+			now := s.nowUTC()
+			record.SubmissionState = SubmissionUnknown
+			record.ResponseReceivedAt = &now
+			record.Job.UpdatedAt = now
+			if _, updateErr := s.Store.Update(context.WithoutCancel(ctx), record); updateErr != nil {
+				return record.Job, nil, fmt.Errorf("persist unknown adapter gateway submission: %w", updateErr)
+			}
+		}
 		return record.Job, nil, err
 	}
 	if err := submission.Validate(); err != nil {
 		return contract.ProviderJob{}, nil, fmt.Errorf("image provider submission: %w", err)
 	}
 	now := s.nowUTC()
+	if record.Route != nil {
+		record.SubmissionState = SubmissionCompleted
+		record.ResponseReceivedAt = &now
+		record.AdapterRequestID = submission.AdapterRequestID
+		record.ActualProvider = submission.ActualProvider
+		record.ActualModel = submission.ActualModel
+	}
 	record.ProviderCode = submission.ProviderCode
 	record.ModelVersion = submission.ModelVersion
 	record.ExternalTaskID = submission.ExternalTaskID

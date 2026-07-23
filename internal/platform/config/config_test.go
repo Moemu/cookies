@@ -1,9 +1,51 @@
 package config
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
+
+func TestAdapterGatewayRequiresExternalMasterKeyAndSupportsProduction(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_IMAGE_ADAPTER": "adapter_gateway"}))
+	if err == nil {
+		t.Fatal("expected adapter gateway without a master key to be rejected")
+	}
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "production", "COOKIES_BLOB_PROVIDER": "tos",
+		"COOKIES_TOS_ENDPOINT": "tos.example.com", "COOKIES_TOS_REGION": "cn-test",
+		"COOKIES_TOS_ACCESS_KEY": "key", "COOKIES_TOS_SECRET_KEY": "secret",
+		"COOKIES_SCANNER_MODE": "clamav", "COOKIES_CLAMAV_ADDRESS": "127.0.0.1:3310",
+		"COOKIES_PROVIDER_IMAGE_ADAPTER": "adapter_gateway",
+		"COOKIES_PROVIDER_MASTER_KEY":    key, "COOKIES_PROVIDER_MASTER_KEY_VERSION": "kms-v1",
+	}))
+	if err != nil || config.Provider.ImageAdapter != "adapter_gateway" {
+		t.Fatalf("valid production adapter gateway config rejected: config=%#v err=%v", config.Provider, err)
+	}
+}
+
+func TestAdapterGatewayAllowsInsecureHTTPOnlyForLocalIntegration(t *testing.T) {
+	t.Parallel()
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	local, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "local", "COOKIES_PROVIDER_IMAGE_ADAPTER": "adapter_gateway",
+		"COOKIES_PROVIDER_MASTER_KEY":          key,
+		"COOKIES_PROVIDER_ALLOW_INSECURE_HTTP": "true",
+	}))
+	if err != nil || !local.Provider.AllowInsecureHTTP {
+		t.Fatalf("local insecure HTTP config rejected: config=%#v err=%v", local.Provider, err)
+	}
+	_, err = FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "staging", "COOKIES_PROVIDER_IMAGE_ADAPTER": "adapter_gateway",
+		"COOKIES_PROVIDER_MASTER_KEY":          key,
+		"COOKIES_PROVIDER_ALLOW_INSECURE_HTTP": "true",
+	}))
+	if err == nil {
+		t.Fatal("staging accepted local-only insecure HTTP setting")
+	}
+}
 
 func TestParseDotEnvAcceptsLocalDevelopmentValues(t *testing.T) {
 	t.Parallel()

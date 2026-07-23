@@ -2,11 +2,65 @@ package jobruntime
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+func TestWorkerDoesNotTransitionJobAfterLeaseRenewalFails(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 23, 3, 45, 0, 0, time.UTC)
+	store := &memoryStore{claim: Claim{Job: contract.Job{ID: "job_lost", Kind: "slow", OrganizationID: "org_1", Status: contract.JobRunning, CreatedAt: now, UpdatedAt: now, Cancellable: true, AttemptCount: 1, MaxAttempts: 2, Version: 2}, LockOwner: "worker_1"}}
+	worker := Worker{
+		Store: store, LeaseRenewer: leaseRenewerFunc(func(context.Context, Claim, time.Time) error {
+			return fmt.Errorf("database unavailable")
+		}), HeartbeatInterval: time.Millisecond,
+		Handlers: map[string]Handler{"slow": func(ctx context.Context, _ Claim) (Result, error) {
+			<-ctx.Done()
+			return Result{}, ctx.Err()
+		}},
+		Now: func() time.Time { return now },
+	}
+	processed, err := worker.RunOnce(context.Background(), "worker_1")
+	if !processed || !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("RunOnce() processed=%v err=%v", processed, err)
+	}
+	if store.failed || store.succeeded || store.rescheduled {
+		t.Fatalf("lost lease caused a state transition: %+v", store)
+	}
+}
+
+func TestWorkerRenewsLeaseWhileHandlerRuns(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 23, 3, 30, 0, 0, time.UTC)
+	store := &memoryStore{claim: Claim{Job: contract.Job{ID: "job_heartbeat", Kind: "slow", OrganizationID: "org_1", Status: contract.JobRunning, CreatedAt: now, UpdatedAt: now, Cancellable: true, AttemptCount: 1, MaxAttempts: 2, Version: 2}, LockOwner: "worker_1"}}
+	var renewals atomic.Int32
+	worker := Worker{
+		Store: store, LeaseRenewer: leaseRenewerFunc(func(context.Context, Claim, time.Time) error {
+			renewals.Add(1)
+			return nil
+		}), HeartbeatInterval: 5 * time.Millisecond,
+		Handlers: map[string]Handler{"slow": func(context.Context, Claim) (Result, error) {
+			time.Sleep(25 * time.Millisecond)
+			return Result{}, nil
+		}},
+		Now: func() time.Time { return now },
+	}
+	processed, err := worker.RunOnce(context.Background(), "worker_1")
+	if err != nil || !processed || !store.succeeded || renewals.Load() < 2 {
+		t.Fatalf("RunOnce() processed=%v succeeded=%v renewals=%d err=%v", processed, store.succeeded, renewals.Load(), err)
+	}
+}
+
+type leaseRenewerFunc func(context.Context, Claim, time.Time) error
+
+func (f leaseRenewerFunc) RenewLease(ctx context.Context, claim Claim, now time.Time) error {
+	return f(ctx, claim, now)
+}
 
 func TestWorkerClaimsAndCompletesAJob(t *testing.T) {
 	t.Parallel()

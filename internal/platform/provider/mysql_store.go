@@ -17,13 +17,16 @@ var ErrIdempotencyConflict = errors.New("provider idempotency key was reused wit
 
 // MySQLStore persists only Provider-owned data. Assets records and object
 // storage details never appear in this repository.
-type MySQLStore struct{ DB *sql.DB }
+type MySQLStore struct {
+	DB                *sql.DB
+	AllowInsecureHTTP bool
+}
 
 func (s MySQLStore) Create(ctx context.Context, record JobRecord) (JobRecord, bool, error) {
 	if s.DB == nil {
 		return JobRecord{}, false, fmt.Errorf("MySQL database is required")
 	}
-	if err := validateRecord(record); err != nil {
+	if err := validateRecord(record, s.AllowInsecureHTTP); err != nil {
 		return JobRecord{}, false, err
 	}
 	payload, err := json.Marshal(record.Input)
@@ -31,16 +34,28 @@ func (s MySQLStore) Create(ctx context.Context, record JobRecord) (JobRecord, bo
 		return JobRecord{}, false, fmt.Errorf("encode provider input: %w", err)
 	}
 	job := record.Job
+	routeSnapshot, err := marshalRouteSnapshot(record.Route, s.AllowInsecureHTTP)
+	if err != nil {
+		return JobRecord{}, false, err
+	}
+	submissionState := record.SubmissionState
+	if submissionState == "" {
+		submissionState = SubmissionNotStarted
+	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO provider_jobs (
 		id, organization_id, project_id, principal_kind, principal_id, operation_name,
-		idempotency_key, request_hash, kind, model_alias, source_system, source_task_id,
+		idempotency_key, request_hash, kind, model_alias, route_snapshot, source_system, source_task_id,
 		project_context_version, execution_status, provider_status, progress, provider_code, model_version, external_task_id, input_payload,
+		submission_state, adapter_request_id, actual_provider, actual_model, execution_deadline_at, submitted_at, response_received_at,
 		attempt_count, max_attempts, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?,
+		?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.OrganizationID, job.ProjectID, record.Principal.Kind, record.Principal.ID, record.Operation,
-		record.IdempotencyKey, record.RequestHash, job.Kind, record.ModelAlias, record.SourceSystem, record.SourceTaskID,
+		record.IdempotencyKey, record.RequestHash, job.Kind, record.ModelAlias, routeSnapshot, record.SourceSystem, record.SourceTaskID,
 		record.ProjectContextVersion, job.ExecutionStatus, job.ProviderStatus, job.Progress,
 		record.ProviderCode, record.ModelVersion, record.ExternalTaskID, payload,
+		submissionState, record.AdapterRequestID, record.ActualProvider, record.ActualModel,
+		record.ExecutionDeadlineAt, record.SubmittedAt, record.ResponseReceivedAt,
 		job.AttemptCount, job.MaxAttempts, job.Version, job.CreatedAt, job.UpdatedAt)
 	if err == nil {
 		return record, false, nil
@@ -51,7 +66,7 @@ func (s MySQLStore) Create(ctx context.Context, record JobRecord) (JobRecord, bo
 	}
 	existing, getErr := s.getByIdempotency(ctx, record)
 	if getErr != nil {
-		return JobRecord{}, false, err
+		return JobRecord{}, false, fmt.Errorf("load existing provider idempotency record: %w", getErr)
 	}
 	if existing.RequestHash != record.RequestHash {
 		return JobRecord{}, false, ErrIdempotencyConflict
@@ -65,8 +80,9 @@ func (s MySQLStore) Get(ctx context.Context, organizationID contract.Organizatio
 	}
 	row := s.DB.QueryRowContext(ctx, `SELECT
 		id, organization_id, project_id, principal_kind, principal_id, operation_name,
-		idempotency_key, request_hash, kind, model_alias, source_system, source_task_id,
+		idempotency_key, request_hash, kind, model_alias, route_snapshot, source_system, source_task_id,
 		project_context_version, execution_status, provider_status, progress, provider_code, model_version, external_task_id, input_payload,
+		submission_state, adapter_request_id, actual_provider, actual_model, execution_deadline_at, submitted_at, response_received_at,
 		error_code, error_message, retryable, attempt_count, max_attempts, version, created_at, updated_at
 		FROM provider_jobs WHERE id = ? AND organization_id = ? AND project_id = ?`, jobID, organizationID, projectID)
 	record, err := scanRecord(row)
@@ -89,7 +105,7 @@ func (s MySQLStore) Update(ctx context.Context, record JobRecord) (JobRecord, er
 	if s.DB == nil {
 		return JobRecord{}, fmt.Errorf("MySQL database is required")
 	}
-	if err := validateRecord(record); err != nil {
+	if err := validateRecord(record, s.AllowInsecureHTTP); err != nil {
 		return JobRecord{}, err
 	}
 	payload, err := json.Marshal(record.Input)
@@ -103,21 +119,33 @@ func (s MySQLStore) Update(ctx context.Context, record JobRecord) (JobRecord, er
 		errorMessage = record.Job.Error.Message
 		retryable = record.Job.Error.Retryable
 	}
+	routeSnapshot, err := marshalRouteSnapshot(record.Route, s.AllowInsecureHTTP)
+	if err != nil {
+		return JobRecord{}, err
+	}
+	submissionState := record.SubmissionState
+	if submissionState == "" {
+		submissionState = SubmissionNotStarted
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return JobRecord{}, err
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE provider_jobs SET
-		model_alias = ?, source_system = NULLIF(?, ''), source_task_id = NULLIF(?, ''),
+		model_alias = ?, route_snapshot = ?, source_system = NULLIF(?, ''), source_task_id = NULLIF(?, ''),
 		project_context_version = ?, execution_status = ?, provider_status = ?, progress = ?,
 		provider_code = NULLIF(?, ''), model_version = NULLIF(?, ''), external_task_id = NULLIF(?, ''),
-		input_payload = ?, error_code = ?, error_message = ?, retryable = ?, attempt_count = ?,
+		input_payload = ?, submission_state = ?, adapter_request_id = NULLIF(?, ''),
+		actual_provider = NULLIF(?, ''), actual_model = NULLIF(?, ''), execution_deadline_at = ?,
+		submitted_at = ?, response_received_at = ?, error_code = ?, error_message = ?, retryable = ?, attempt_count = ?,
 		max_attempts = ?, version = version + 1, updated_at = ?
 		WHERE id = ? AND organization_id = ? AND project_id = ? AND version = ?`,
-		record.ModelAlias, record.SourceSystem, record.SourceTaskID, record.ProjectContextVersion,
+		record.ModelAlias, routeSnapshot, record.SourceSystem, record.SourceTaskID, record.ProjectContextVersion,
 		record.Job.ExecutionStatus, record.Job.ProviderStatus, record.Job.Progress,
 		record.ProviderCode, record.ModelVersion, record.ExternalTaskID, payload,
+		submissionState, record.AdapterRequestID, record.ActualProvider, record.ActualModel,
+		record.ExecutionDeadlineAt, record.SubmittedAt, record.ResponseReceivedAt,
 		errorCode, errorMessage, retryable, record.Job.AttemptCount, record.Job.MaxAttempts, record.Job.UpdatedAt,
 		record.Job.ID, record.Job.OrganizationID, record.Job.ProjectID, record.Job.Version)
 	if err != nil {
@@ -145,8 +173,9 @@ func (s MySQLStore) Update(ctx context.Context, record JobRecord) (JobRecord, er
 func (s MySQLStore) getByIdempotency(ctx context.Context, record JobRecord) (JobRecord, error) {
 	row := s.DB.QueryRowContext(ctx, `SELECT
 		id, organization_id, project_id, principal_kind, principal_id, operation_name,
-		idempotency_key, request_hash, kind, model_alias, source_system, source_task_id,
+		idempotency_key, request_hash, kind, model_alias, route_snapshot, source_system, source_task_id,
 		project_context_version, execution_status, provider_status, progress, provider_code, model_version, external_task_id, input_payload,
+		submission_state, adapter_request_id, actual_provider, actual_model, execution_deadline_at, submitted_at, response_received_at,
 		error_code, error_message, retryable, attempt_count, max_attempts, version, created_at, updated_at
 		FROM provider_jobs
 		WHERE organization_id = ? AND project_id = ? AND principal_kind = ? AND principal_id = ?
@@ -254,13 +283,15 @@ type rowScanner interface{ Scan(...any) error }
 func scanRecord(row rowScanner) (JobRecord, error) {
 	var record JobRecord
 	var input json.RawMessage
-	var sourceSystem, sourceTaskID, providerCode, modelVersion, externalTaskID, errorCode, errorMessage sql.NullString
+	var sourceSystem, sourceTaskID, routeSnapshot, providerCode, modelVersion, externalTaskID, adapterRequestID, actualProvider, actualModel, errorCode, errorMessage sql.NullString
+	var executionDeadlineAt, submittedAt, responseReceivedAt sql.NullTime
 	var retryable sql.NullBool
 	err := row.Scan(
 		&record.Job.ID, &record.Job.OrganizationID, &record.Job.ProjectID, &record.Principal.Kind, &record.Principal.ID, &record.Operation,
-		&record.IdempotencyKey, &record.RequestHash, &record.Job.Kind, &record.ModelAlias, &sourceSystem, &sourceTaskID,
+		&record.IdempotencyKey, &record.RequestHash, &record.Job.Kind, &record.ModelAlias, &routeSnapshot, &sourceSystem, &sourceTaskID,
 		&record.ProjectContextVersion, &record.Job.ExecutionStatus, &record.Job.ProviderStatus, &record.Job.Progress,
 		&providerCode, &modelVersion, &externalTaskID, &input,
+		&record.SubmissionState, &adapterRequestID, &actualProvider, &actualModel, &executionDeadlineAt, &submittedAt, &responseReceivedAt,
 		&errorCode, &errorMessage, &retryable, &record.Job.AttemptCount, &record.Job.MaxAttempts, &record.Job.Version,
 		&record.Job.CreatedAt, &record.Job.UpdatedAt,
 	)
@@ -272,6 +303,28 @@ func scanRecord(row rowScanner) (JobRecord, error) {
 	record.ProviderCode = providerCode.String
 	record.ModelVersion = modelVersion.String
 	record.ExternalTaskID = externalTaskID.String
+	record.AdapterRequestID = adapterRequestID.String
+	record.ActualProvider = actualProvider.String
+	record.ActualModel = actualModel.String
+	if executionDeadlineAt.Valid {
+		value := executionDeadlineAt.Time
+		record.ExecutionDeadlineAt = &value
+	}
+	if submittedAt.Valid {
+		value := submittedAt.Time
+		record.SubmittedAt = &value
+	}
+	if responseReceivedAt.Valid {
+		value := responseReceivedAt.Time
+		record.ResponseReceivedAt = &value
+	}
+	if routeSnapshot.Valid && routeSnapshot.String != "" && routeSnapshot.String != "null" {
+		var snapshot ImageRouteSnapshot
+		if err := json.Unmarshal([]byte(routeSnapshot.String), &snapshot); err != nil {
+			return JobRecord{}, fmt.Errorf("decode provider route snapshot: %w", err)
+		}
+		record.Route = &snapshot
+	}
 	record.Job.ProjectAssetRefs = []contract.ProjectAssetRef{}
 	if errorCode.Valid {
 		record.Job.Error = &contract.JobError{Code: errorCode.String, Message: errorMessage.String, Retryable: retryable.Bool}
@@ -282,7 +335,7 @@ func scanRecord(row rowScanner) (JobRecord, error) {
 	return record, nil
 }
 
-func validateRecord(record JobRecord) error {
+func validateRecord(record JobRecord, allowInsecureHTTP bool) error {
 	if err := record.Job.Validate(); err != nil {
 		return err
 	}
@@ -307,12 +360,36 @@ func validateRecord(record JobRecord) error {
 	if err := record.Input.Validate(); err != nil {
 		return err
 	}
+	if record.Route != nil {
+		if err := record.Route.ValidateWithPolicy(allowInsecureHTTP); err != nil {
+			return err
+		}
+		switch record.SubmissionState {
+		case SubmissionNotStarted, SubmissionInFlight, SubmissionCompleted, SubmissionUnknown:
+		default:
+			return fmt.Errorf("provider submission state is invalid")
+		}
+	}
 	for _, output := range record.Outputs {
 		if err := validateOutput(record.Job.ID, output); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func marshalRouteSnapshot(snapshot *ImageRouteSnapshot, allowInsecureHTTP bool) (any, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	if err := snapshot.ValidateWithPolicy(allowInsecureHTTP); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("encode provider route snapshot: %w", err)
+	}
+	return encoded, nil
 }
 
 func validateOutput(jobID string, output OutputRecord) error {

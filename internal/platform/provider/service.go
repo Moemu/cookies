@@ -100,7 +100,24 @@ type JobRecord struct {
 	ModelVersion          string
 	ExternalTaskID        string
 	Outputs               []OutputRecord
+	Route                 *ImageRouteSnapshot
+	SubmissionState       SubmissionState
+	AdapterRequestID      string
+	ActualProvider        string
+	ActualModel           string
+	ExecutionDeadlineAt   *time.Time
+	SubmittedAt           *time.Time
+	ResponseReceivedAt    *time.Time
 }
+
+type SubmissionState string
+
+const (
+	SubmissionNotStarted SubmissionState = "not_started"
+	SubmissionInFlight   SubmissionState = "in_flight"
+	SubmissionCompleted  SubmissionState = "completed"
+	SubmissionUnknown    SubmissionState = "unknown"
+)
 
 type OutputStatus string
 
@@ -145,6 +162,7 @@ type Service struct {
 	VisionSources VisionSourceResolver
 	Intake        GeneratedIntakeClient
 	OutputHandles OutputHandleStore
+	Routes        ImageRouteResolver
 	NewID         func() (string, error)
 	Now           func() time.Time
 }
@@ -171,6 +189,17 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		return contract.ProviderJob{}, false, fmt.Errorf("generate provider job ID: %w", err)
 	}
 	createdAt := now().UTC()
+	var route *ImageRouteSnapshot
+	if s.Routes != nil {
+		resolved, resolveErr := s.Routes.ResolveImageRoute(ctx, request.Actor.OrganizationID, request.ModelAlias)
+		if resolveErr != nil {
+			return contract.ProviderJob{}, false, fmt.Errorf("resolve provider image route: %w", resolveErr)
+		}
+		if request.Input.Width != 1024 || request.Input.Height != 1024 {
+			return contract.ProviderJob{}, false, fmt.Errorf("adapter gateway M1 supports only 1024x1024 images")
+		}
+		route = &resolved
+	}
 	job := contract.ProviderJob{
 		ID:               providerJobID,
 		Kind:             imageJobKind,
@@ -200,6 +229,8 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		SourceSystem:          request.SourceSystem,
 		SourceTaskID:          request.SourceTaskID,
 		Input:                 request.Input,
+		Route:                 route,
+		SubmissionState:       SubmissionNotStarted,
 	})
 	if err != nil {
 		return contract.ProviderJob{}, false, err
