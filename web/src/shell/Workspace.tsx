@@ -7,13 +7,17 @@ import { CreativeImageTextPage } from '../features/creative/CreativeImageTextPag
 import { getWorkspaceBootstrap } from '../features/platform/api'
 import type { CurrentIdentity, Project } from '../features/platform/types'
 import { NewProjectDialog } from '../features/projects/NewProjectDialog'
+import { StrategyLanding, StrategyProjectHome } from '../features/strategy/StrategyProjectHome'
+import { StrategyWorkspacePage } from '../features/strategy/StrategyWorkspacePage'
 import { Icon } from './Icon'
 import { adminModule, shellModules } from './modules'
 
 const modules = [...shellModules, adminModule]
 
 function routeProjectId(pathname: string) {
-  return pathname.match(/^\/projects\/([^/]+)/)?.[1] || ''
+  return pathname.match(/^\/projects\/([^/]+)/)?.[1]
+    || pathname.match(/^\/strategy\/projects\/([^/]+)/)?.[1]
+    || ''
 }
 
 export function Workspace() {
@@ -67,7 +71,7 @@ export function Workspace() {
             </button>
             {projectMenuOpen ? <div className="project-menu" role="menu">
               {projects.map((project) => (
-                <Link key={project.id} onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${project.id}/assets`}>
+                <Link key={project.id} onClick={() => setProjectMenuOpen(false)} role="menuitem" to={activeModule.key === 'strategy' ? `/strategy/projects/${project.id}` : `/projects/${project.id}/assets`}>
                   <span>{project.name}</span><small>{project.status === 'active' ? '活跃项目' : project.status === 'draft' ? '草稿项目' : '已归档'}</small>
                 </Link>
               ))}
@@ -93,6 +97,9 @@ export function Workspace() {
         {bootstrapError ? <div className="workspace-alert" role="status">身份与项目列表暂不可用：{bootstrapError}</div> : null}
         <main className="workspace" aria-live="polite">
           <Routes>
+            <Route path="/strategy" element={<StrategyLanding />} />
+            <Route path="/strategy/projects/:projectId" element={<StrategyProjectHome project={currentProject} />} />
+            <Route path="/strategy/projects/:projectId/workspaces/:workspaceId/*" element={<StrategyWorkspacePage project={currentProject} />} />
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
             <Route path="/projects/:projectId/creative" element={<CreativeImageTextPage />} />

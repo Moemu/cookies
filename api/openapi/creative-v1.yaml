@@ -24,7 +24,7 @@ paths:
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createCreativeIntake
-      summary: Create a normalized manual CreativeIntake.
+      summary: Create a normalized manual CreativeIntake or explicitly start one from an immutable Strategy package.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
         required: true
@@ -90,7 +90,15 @@ components:
       additionalProperties: false
       required: [source, channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
       properties:
-        source: {const: manual}
+        source: {enum: [manual, strategy_package]}
+        strategy_package:
+          type: object
+          additionalProperties: false
+          required: [package_id, package_version, expected_content_hash]
+          properties:
+            package_id: {type: string, minLength: 1}
+            package_version: {type: integer, minimum: 1}
+            expected_content_hash: {type: string, minLength: 1}
         channel: {const: xiaohongshu}
         objective: {type: string, maxLength: 500}
         audience: {type: string, maxLength: 500}

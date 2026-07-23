@@ -1,0 +1,20 @@
+{
+  "contract_version": "strategy-brief-patch/v1",
+  "base_version": 7,
+  "operations": [
+    {
+      "op": "set",
+      "field_path": "audience.primary",
+      "value": "制造企业研发负责人",
+      "source": {
+        "type": "conversation_message",
+        "id": "msg_01",
+        "locator": "text:0-10"
+      },
+      "confidence": "high",
+      "confirmation": "unconfirmed"
+    }
+  ],
+  "questions": [],
+  "warnings": []
+}

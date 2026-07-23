@@ -50,26 +50,57 @@ const (
 )
 
 type CreateIntakeRequest struct {
-	Source         IntakeSource    `json:"source"`
-	Channel        CreativeChannel `json:"channel"`
-	Objective      string          `json:"objective"`
-	Audience       string          `json:"audience"`
-	CoreMessage    string          `json:"core_message"`
-	CallToAction   string          `json:"call_to_action"`
-	Concept        string          `json:"concept"`
-	Tone           []string        `json:"tone"`
-	VisualKeywords []string        `json:"visual_keywords"`
-	Mandatory      []string        `json:"mandatory_elements"`
-	Prohibited     []string        `json:"prohibited_claims"`
+	Source IntakeSource `json:"source"`
+	// StrategyPackage is supplied only for the explicit, user-triggered handoff
+	// from an immutable Strategy package. The server reads and validates that
+	// package; callers never submit its content as trusted Creative input.
+	StrategyPackage *StrategyPackageReference `json:"strategy_package,omitempty"`
+	Channel         CreativeChannel           `json:"channel"`
+	Objective       string                    `json:"objective"`
+	Audience        string                    `json:"audience"`
+	CoreMessage     string                    `json:"core_message"`
+	CallToAction    string                    `json:"call_to_action"`
+	Concept         string                    `json:"concept"`
+	Tone            []string                  `json:"tone"`
+	VisualKeywords  []string                  `json:"visual_keywords"`
+	Mandatory       []string                  `json:"mandatory_elements"`
+	Prohibited      []string                  `json:"prohibited_claims"`
+}
+
+type StrategyPackageReference struct {
+	PackageID           string `json:"package_id"`
+	PackageVersion      int64  `json:"package_version"`
+	ExpectedContentHash string `json:"expected_content_hash"`
+}
+
+func (r StrategyPackageReference) Validate() error {
+	if strings.TrimSpace(r.PackageID) == "" || r.PackageVersion < 1 || strings.TrimSpace(r.ExpectedContentHash) == "" {
+		return fmt.Errorf("strategy_package package_id, package_version, and expected_content_hash are required")
+	}
+	return nil
 }
 
 func (r CreateIntakeRequest) Validate() error {
 	if r.Source == "" {
 		return fmt.Errorf("source is required")
 	}
-	if r.Source != IntakeSourceManual {
-		return fmt.Errorf("only manual intake is enabled in Creative M1")
+	switch r.Source {
+	case IntakeSourceManual:
+		if r.StrategyPackage != nil {
+			return fmt.Errorf("manual intake must not include strategy_package")
+		}
+	case IntakeSourceStrategyPackage:
+		if r.StrategyPackage == nil {
+			return fmt.Errorf("strategy_package is required for a strategy intake")
+		}
+		return r.StrategyPackage.Validate()
+	default:
+		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
+	return r.validateContent()
+}
+
+func (r CreateIntakeRequest) validateContent() error {
 	if r.Channel != ChannelXiaohongshu {
 		return fmt.Errorf("Creative M1 supports the xiaohongshu channel")
 	}

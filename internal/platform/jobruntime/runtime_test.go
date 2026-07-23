@@ -79,6 +79,26 @@ func TestWorkerClaimsAndCompletesAJob(t *testing.T) {
 	}
 }
 
+func TestWorkerHonorsCancellationRequestedDuringHandler(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 23, 9, 0, 0, 0, time.UTC)
+	store := &memoryStore{
+		claim:           Claim{Job: contract.Job{ID: "job_cancel", Kind: "strategy.generate", OrganizationID: "org_1", Status: contract.JobRunning, CreatedAt: now, UpdatedAt: now, Cancellable: true, AttemptCount: 1, MaxAttempts: 2, Version: 2}, LockOwner: "worker_1"},
+		cancelRequested: true,
+	}
+	worker := Worker{
+		Store: store, Canceller: store,
+		Handlers: map[string]Handler{
+			"strategy.generate": func(context.Context, Claim) (Result, error) { return Result{}, nil },
+		},
+		Now: func() time.Time { return now },
+	}
+	processed, err := worker.RunOnce(context.Background(), "worker_1")
+	if err != nil || !processed || !store.cancelled || store.succeeded {
+		t.Fatalf("processed=%v cancelled=%v succeeded=%v err=%v", processed, store.cancelled, store.succeeded, err)
+	}
+}
+
 func TestWorkerReschedulesDeferredJob(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 1, 0, 0, 0, time.UTC)
@@ -127,13 +147,15 @@ func TestWorkerFailsDeferredJobAtAttemptLimit(t *testing.T) {
 }
 
 type memoryStore struct {
-	claim       Claim
-	claimed     bool
-	succeeded   bool
-	failed      bool
-	rescheduled bool
-	availableAt time.Time
-	problem     contract.JobError
+	claim           Claim
+	claimed         bool
+	succeeded       bool
+	failed          bool
+	rescheduled     bool
+	availableAt     time.Time
+	problem         contract.JobError
+	cancelRequested bool
+	cancelled       bool
 }
 
 func (s *memoryStore) Enqueue(context.Context, CreateRequest) (contract.Job, bool, error) {
@@ -158,5 +180,12 @@ func (s *memoryStore) Fail(_ context.Context, _ Claim, problem contract.JobError
 func (s *memoryStore) Reschedule(_ context.Context, _ Claim, availableAt time.Time, _ time.Time) error {
 	s.rescheduled = true
 	s.availableAt = availableAt
+	return nil
+}
+func (s *memoryStore) IsCancelRequested(context.Context, contract.OrganizationID, string) (bool, error) {
+	return s.cancelRequested, nil
+}
+func (s *memoryStore) CancelClaim(context.Context, Claim, time.Time) error {
+	s.cancelled = true
 	return nil
 }

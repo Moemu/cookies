@@ -11,7 +11,7 @@
     "project_id": {"type": "string", "minLength": 1},
     "source": {"enum": ["manual", "strategy_package", "uploaded_document", "conversation"]},
     "status": {"enum": ["draft", "needs_clarification", "ready", "superseded"]},
-    "request": {"$ref": "#/$defs/manualRequest"},
+    "request": {"$ref": "#/$defs/intakeRequest"},
     "missing_fields": {"type": "array", "items": {"type": "string"}},
     "warnings": {"type": "array", "items": {"type": "string"}},
     "confirmed_by": {"type": "string"},
@@ -20,12 +20,22 @@
     "updated_at": {"type": "string", "format": "date-time"}
   },
   "$defs": {
-    "manualRequest": {
+    "intakeRequest": {
       "type": "object",
       "additionalProperties": false,
       "required": ["source", "channel", "objective", "audience", "core_message", "call_to_action", "concept", "tone", "visual_keywords", "mandatory_elements", "prohibited_claims"],
       "properties": {
-        "source": {"const": "manual"},
+        "source": {"enum": ["manual", "strategy_package"]},
+        "strategy_package": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["package_id", "package_version", "expected_content_hash"],
+          "properties": {
+            "package_id": {"type": "string", "minLength": 1},
+            "package_version": {"type": "integer", "minimum": 1},
+            "expected_content_hash": {"type": "string", "minLength": 1}
+          }
+        },
         "channel": {"const": "xiaohongshu"},
         "objective": {"type": "string", "maxLength": 500},
         "audience": {"type": "string", "maxLength": 500},

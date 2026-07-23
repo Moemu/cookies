@@ -55,6 +55,43 @@ func TestManualReadyIntakeCreatesImageTextTaskAndDraft(t *testing.T) {
 	}
 }
 
+func TestApprovedStrategyPackageCreatesReadyCreativeIntake(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{
+		PackageID: "package_1", PackageVersion: 2, ContentHash: "sha256:package", CreativeReady: true,
+		Objective: "建立新品认知", Audience: "关注生活方式的上班族", CoreMessage: "一杯咖啡也可以成为从容开始的仪式",
+		Concept: "温暖晨光中的咖啡桌", Tone: []string{"自然"}, VisualKeywords: []string{"晨光"}, Mandatory: []string{}, Prohibited: []string{},
+	}}
+	rc := testRequestContext()
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "creative-intake-strategy", CreateIntakeRequest{
+		Source: IntakeSourceStrategyPackage, StrategyPackage: &StrategyPackageReference{PackageID: "package_1", PackageVersion: 2, ExpectedContentHash: "sha256:package"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.Source != IntakeSourceStrategyPackage || intake.Status != IntakeReady || intake.Request.Objective == "" {
+		t.Fatalf("intake = %#v", intake)
+	}
+	if _, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID); err != nil {
+		t.Fatalf("strategy intake did not create Creative task: %v", err)
+	}
+}
+
+func TestStrategyPackageWithoutCreativeReadinessNeedsClarification(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{CreativeReady: false, Objective: "目标", Audience: "受众", CoreMessage: "主张", Concept: "概念", Tone: []string{}, VisualKeywords: []string{}, Mandatory: []string{}, Prohibited: []string{}}}
+	rc := testRequestContext()
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "creative-intake-not-ready", CreateIntakeRequest{Source: IntakeSourceStrategyPackage, StrategyPackage: &StrategyPackageReference{PackageID: "package_2", PackageVersion: 1, ExpectedContentHash: "hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.Status != IntakeNeedsClarification || len(intake.MissingFields) != 1 || intake.MissingFields[0] != "strategy_package.creative_ready" {
+		t.Fatalf("intake = %#v", intake)
+	}
+}
+
 func TestIntakeIdempotencyDoesNotCreateAnotherIntake(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -110,6 +147,21 @@ func testService() Service {
 }
 
 type testProjects struct{}
+
+type strategyPackageReader struct {
+	snapshot StrategyPackageSnapshot
+}
+
+func (r strategyPackageReader) ReadForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, reference StrategyPackageReference) (StrategyPackageSnapshot, error) {
+	value := r.snapshot
+	if value.PackageID == "" {
+		value.PackageID, value.PackageVersion, value.ContentHash = reference.PackageID, reference.PackageVersion, reference.ExpectedContentHash
+	}
+	if value.ContentHash != reference.ExpectedContentHash {
+		return StrategyPackageSnapshot{}, fmt.Errorf("hash mismatch")
+	}
+	return value, nil
+}
 
 func (testProjects) RequireActiveContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
 	brand := contract.BrandID("brand_1")

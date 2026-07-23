@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -58,7 +59,7 @@ func (s MySQLStore) Claim(ctx context.Context, workerID string, now time.Time) (
 	}
 	defer tx.Rollback()
 	row := tx.QueryRowContext(ctx, `SELECT id, kind, organization_id, project_id, status, progress, payload, cancellable, version, attempt_count, max_attempts, created_at, updated_at
-		FROM platform_jobs WHERE status = 'queued' AND available_at <= ? ORDER BY available_at, created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, now)
+		FROM platform_jobs WHERE status = 'queued' AND cancel_requested_at IS NULL AND available_at <= ? ORDER BY available_at, created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, now)
 	job, payload, err := scanJob(row)
 	if err == sql.ErrNoRows {
 		return Claim{}, false, nil
@@ -141,6 +142,126 @@ func (s MySQLStore) RenewLease(ctx context.Context, claim Claim, now time.Time) 
 	}
 	if changed != 1 {
 		return fmt.Errorf("job %s is no longer owned by worker %s", claim.Job.ID, claim.LockOwner)
+	}
+	return nil
+}
+
+func (s MySQLStore) Get(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.Job, error) {
+	if s.DB == nil || organizationID == "" || jobID == "" {
+		return contract.Job{}, fmt.Errorf("MySQL database, organization ID, and job ID are required")
+	}
+	row := s.DB.QueryRowContext(ctx, `SELECT id, kind, organization_id, project_id, status, progress,
+		cancellable, version, attempt_count, max_attempts, created_at, updated_at,
+		result_type, result_id, result_version, error_code, error_message, retryable
+		FROM platform_jobs WHERE organization_id = ? AND project_id = ? AND id = ?`, organizationID, projectID, jobID)
+	var job contract.Job
+	var storedProjectID sql.NullString
+	var resultType, resultID sql.NullString
+	var resultVersion sql.NullInt64
+	var errorCode, errorMessage sql.NullString
+	var retryable sql.NullBool
+	if err := row.Scan(&job.ID, &job.Kind, &job.OrganizationID, &storedProjectID, &job.Status, &job.Progress,
+		&job.Cancellable, &job.Version, &job.AttemptCount, &job.MaxAttempts, &job.CreatedAt, &job.UpdatedAt,
+		&resultType, &resultID, &resultVersion, &errorCode, &errorMessage, &retryable); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.Job{}, ErrJobNotFound
+		}
+		return contract.Job{}, err
+	}
+	job.ProjectID = contract.ProjectID(storedProjectID.String)
+	if resultType.Valid && resultID.Valid {
+		ref := contract.ResourceRef{Type: resultType.String, ID: resultID.String}
+		if resultVersion.Valid {
+			ref.Version = &resultVersion.Int64
+		}
+		job.ResultRef = &ref
+	}
+	if errorCode.Valid {
+		job.Error = &contract.JobError{Code: errorCode.String, Message: errorMessage.String, Retryable: retryable.Bool}
+	}
+	return job, nil
+}
+
+func (s MySQLStore) UpdateProgress(ctx context.Context, claim Claim, progress int, message string, now time.Time) error {
+	if err := validateProgress(progress, message); err != nil {
+		return err
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
+		SET progress = ?, progress_message = NULLIF(?, ''), version = version + 1, updated_at = ?
+		WHERE organization_id = ? AND id = ? AND status = 'running' AND lock_owner = ?`,
+		progress, strings.TrimSpace(message), now.UTC(), claim.Job.OrganizationID, claim.Job.ID, claim.LockOwner)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrLeaseLost
+	}
+	return nil
+}
+
+func (s MySQLStore) RequestCancel(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string, expectedVersion int64, now time.Time) (contract.Job, error) {
+	if s.DB == nil || organizationID == "" || projectID == "" || jobID == "" || expectedVersion < 1 {
+		return contract.Job{}, fmt.Errorf("valid cancellation scope, job ID, and expected version are required")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs SET
+		status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,
+		cancel_requested_at = ?,
+		version = version + 1, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ?
+		  AND cancellable = TRUE AND status IN ('queued', 'running')`,
+		now.UTC(), now.UTC(), organizationID, projectID, jobID, expectedVersion)
+	if err != nil {
+		return contract.Job{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return contract.Job{}, err
+	}
+	if changed != 1 {
+		existing, getErr := s.Get(ctx, organizationID, projectID, jobID)
+		if errors.Is(getErr, ErrJobNotFound) {
+			return contract.Job{}, ErrJobNotFound
+		}
+		if getErr != nil {
+			return contract.Job{}, getErr
+		}
+		if !existing.Cancellable || (existing.Status != contract.JobQueued && existing.Status != contract.JobRunning) {
+			return contract.Job{}, ErrJobNotCancellable
+		}
+		return contract.Job{}, ErrJobVersionConflict
+	}
+	return s.Get(ctx, organizationID, projectID, jobID)
+}
+
+func (s MySQLStore) IsCancelRequested(ctx context.Context, organizationID contract.OrganizationID, jobID string) (bool, error) {
+	var requested bool
+	err := s.DB.QueryRowContext(ctx, `SELECT cancel_requested_at IS NOT NULL
+		FROM platform_jobs WHERE organization_id = ? AND id = ?`, organizationID, jobID).Scan(&requested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrJobNotFound
+	}
+	return requested, err
+}
+
+func (s MySQLStore) CancelClaim(ctx context.Context, claim Claim, now time.Time) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs SET status = 'cancelled',
+		lock_owner = NULL, locked_at = NULL, version = version + 1, updated_at = ?
+		WHERE organization_id = ? AND id = ? AND status = 'running' AND lock_owner = ?
+		  AND cancel_requested_at IS NOT NULL`,
+		now.UTC(), claim.Job.OrganizationID, claim.Job.ID, claim.LockOwner)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrLeaseLost
 	}
 	return nil
 }

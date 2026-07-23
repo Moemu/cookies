@@ -18,6 +18,20 @@ export function createCreativeIntake(projectId: string, input: CreativeIntakeInp
   })
 }
 
+// The browser sends only the immutable package identity and hash. Creative
+// reads the authorized package server-side, preventing a client from changing
+// strategy content or organization scope during the handoff.
+export function createCreativeIntakeFromStrategy(projectId: string, packageId: string, packageVersion: number, expectedContentHash: string) {
+  return apiRequest<CreativeIntake>(`${base(projectId)}/creative-intakes`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': `creative-from-strategy-${crypto.randomUUID()}` },
+    body: JSON.stringify({
+      source: 'strategy_package',
+      strategy_package: { package_id: packageId, package_version: packageVersion, expected_content_hash: expectedContentHash },
+    }),
+  })
+}
+
 export function createCreativeTask(projectId: string, intakeId: string) {
   return apiRequest<CreativeTask>(`${base(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-task`, { method: 'POST' })
 }

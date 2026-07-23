@@ -1,0 +1,11 @@
+{
+  "contract_version": "strategy-brief-version/v1",
+  "campaign": {"objective": "提升新品在研发负责人人群中的认知"},
+  "audience": {"primary": "制造企业研发负责人"},
+  "proposition": "用可验证的效率提升缩短研发周期",
+  "channels": ["xiaohongshu"],
+  "budget": {"total": "CNY 100000"},
+  "schedule": {"window": "2026-08-01/2026-08-31"},
+  "constraints": ["不得使用无法证实的效果承诺"],
+  "measurement": {"primary_kpi": "有效线索数"}
+}

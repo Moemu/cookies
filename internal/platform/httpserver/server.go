@@ -50,6 +50,15 @@ type Dependencies struct {
 	Uploads           AssetUploadManager
 	Intakes           GeneratedIntakeManager
 	Creative          CreativeManager
+	// AuthenticatedDomainMounts allow vertical systems to share the platform
+	// listener and identity context without making this package import them.
+	// Mount handlers remain responsible for project authorization and scopes.
+	AuthenticatedDomainMounts []DomainMount
+}
+
+type DomainMount struct {
+	Pattern string
+	Handler http.Handler
 }
 
 type CurrentIdentityReader interface {
@@ -139,6 +148,12 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeTasks))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getCreativeTask))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeCoverImageJob))))
+	for _, mount := range dependencies.AuthenticatedDomainMounts {
+		if strings.TrimSpace(mount.Pattern) == "" || mount.Handler == nil {
+			continue
+		}
+		server.mux.Handle(mount.Pattern, server.requireAuthentication(mount.Handler))
+	}
 	server.mux.HandleFunc("/", server.notFound)
 	return server
 }

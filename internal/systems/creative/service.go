@@ -14,11 +14,34 @@ type ActiveProjectResolver interface {
 	RequireActiveContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 }
 
+// StrategyPackageReader is Creative's sole dependency on Strategy. Its
+// implementation is composed at process startup and must return an immutable,
+// authorization-checked package snapshot rather than exposing Strategy tables.
+type StrategyPackageReader interface {
+	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, StrategyPackageReference) (StrategyPackageSnapshot, error)
+}
+
+type StrategyPackageSnapshot struct {
+	PackageID      string
+	PackageVersion int64
+	ContentHash    string
+	CreativeReady  bool
+	Objective      string
+	Audience       string
+	CoreMessage    string
+	Concept        string
+	Tone           []string
+	VisualKeywords []string
+	Mandatory      []string
+	Prohibited     []string
+}
+
 type Service struct {
-	Repository Repository
-	Projects   ActiveProjectResolver
-	NewID      ids.Generator
-	Now        func() time.Time
+	Repository       Repository
+	Projects         ActiveProjectResolver
+	StrategyPackages StrategyPackageReader
+	NewID            ids.Generator
+	Now              func() time.Time
 }
 
 func (s Service) CreateIntake(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, key contract.IdempotencyKey, request CreateIntakeRequest) (CreativeIntake, error) {
@@ -44,6 +67,21 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	if project.OrganizationID != requestContext.Actor.OrganizationID || project.ProjectID != projectID {
 		return CreativeIntake{}, fmt.Errorf("resolved project context does not match request scope")
 	}
+	strategyReady := true
+	if request.Source == IntakeSourceStrategyPackage {
+		if s.StrategyPackages == nil {
+			return CreativeIntake{}, fmt.Errorf("strategy package intake is unavailable")
+		}
+		snapshot, readErr := s.StrategyPackages.ReadForCreative(ctx, requestContext.Actor, projectID, *request.StrategyPackage)
+		if readErr != nil {
+			return CreativeIntake{}, readErr
+		}
+		request = resolvedStrategyPackageRequest(request.StrategyPackage, snapshot)
+		if err := request.validateContent(); err != nil {
+			return CreativeIntake{}, err
+		}
+		strategyReady = snapshot.CreativeReady
+	}
 	hash, err := contract.CanonicalJSONHash(request)
 	if err != nil {
 		return CreativeIntake{}, fmt.Errorf("canonicalize creative intake: %w", err)
@@ -59,6 +97,10 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	if len(missing) > 0 {
 		status, confirmedBy = IntakeNeedsClarification, ""
 	}
+	if !strategyReady {
+		status, confirmedBy = IntakeNeedsClarification, ""
+		missing = append(missing, "strategy_package.creative_ready")
+	}
 	value := CreativeIntake{
 		ID: intakeID, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, Source: request.Source, Status: status,
 		Request: request, MissingFields: missing, Warnings: []string{}, ConfirmedBy: confirmedBy, Principal: requestContext.Actor.Principal,
@@ -66,6 +108,20 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	}
 	stored, _, err := s.Repository.CreateIntake(ctx, value)
 	return stored, err
+}
+
+func resolvedStrategyPackageRequest(reference *StrategyPackageReference, snapshot StrategyPackageSnapshot) CreateIntakeRequest {
+	concept := strings.TrimSpace(snapshot.Concept)
+	if concept == "" {
+		concept = strings.TrimSpace(snapshot.CoreMessage)
+	}
+	return CreateIntakeRequest{
+		Source: IntakeSourceStrategyPackage, StrategyPackage: reference, Channel: ChannelXiaohongshu,
+		Objective: snapshot.Objective, Audience: snapshot.Audience, CoreMessage: snapshot.CoreMessage,
+		CallToAction: "了解更多并收藏这份内容", Concept: concept,
+		Tone: append([]string{}, snapshot.Tone...), VisualKeywords: append([]string{}, snapshot.VisualKeywords...),
+		Mandatory: append([]string{}, snapshot.Mandatory...), Prohibited: append([]string{}, snapshot.Prohibited...),
+	}
 }
 
 func (s Service) ListIntakes(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]CreativeIntake, error) {

@@ -21,10 +21,6 @@ func (s *Server) createCreativeIntake(w http.ResponseWriter, r *http.Request) {
 		s.badRequest(w, r, err)
 		return
 	}
-	if err := body.Validate(); err != nil {
-		s.badRequest(w, r, err)
-		return
-	}
 	key, ok := idempotencyKey(w, r)
 	if !ok {
 		return

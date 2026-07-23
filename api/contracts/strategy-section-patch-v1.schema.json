@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-section-patch-v1.schema.json",
+  "title": "strategy-section-patch/v1",
+  "type": "object",
+  "required": ["expected_version", "base_revision", "section", "value"],
+  "properties": {
+    "expected_version": {"type": "integer", "minimum": 1},
+    "base_revision": {"type": "integer", "minimum": 1},
+    "section": {
+      "enum": [
+        "objective",
+        "proposition",
+        "creative_recommendations",
+        "constraints",
+        "measurement",
+        "assumptions_and_gaps"
+      ]
+    },
+    "value": {}
+  },
+  "additionalProperties": false
+}
