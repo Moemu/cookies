@@ -516,6 +516,10 @@ func (s *creativeManagerStub) RegisterCoverImageJob(_ context.Context, _ contrac
 	s.registeredProviderJobID = providerJobID
 	return nil
 }
+func (s *creativeManagerStub) RegisterImagePlanJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, _ int, providerJobID string) error {
+	s.registeredProviderJobID = providerJobID
+	return nil
+}
 func (s *creativeManagerStub) FreezeVersion(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, taskID string, _ creative.FreezeVersionRequest, key contract.IdempotencyKey) (creative.CreativeVersion, bool, error) {
 	s.freezeKey = key
 	s.freezeTaskID = taskID
@@ -525,6 +529,18 @@ func (s *creativeManagerStub) ReviseDraft(_ context.Context, _ contract.ActorCon
 	s.reviseTaskID = taskID
 	s.reviseRequest = request
 	return s.revisedDraft, nil
+}
+func (s *creativeManagerStub) BindImageAsset(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BindImageAssetRequest) (creative.ImageTextDraft, error) {
+	return s.revisedDraft, nil
+}
+func (s *creativeManagerStub) CheckVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error) {
+	return s.frozenVersion, nil
+}
+func (s *creativeManagerStub) ApproveVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error) {
+	return s.frozenVersion, nil
+}
+func (s *creativeManagerStub) DeliverVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativePackage, error) {
+	return creative.CreativePackage{}, nil
 }
 
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {

@@ -102,6 +102,32 @@ paths:
       responses:
         '202': {description: Provider image job created with creative task lineage.}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:image-job:
+    post:
+      operationId: createCreativeImagePlanJob
+      summary: Create one Provider job for one planned Xiaohongshu image; retries do not recreate the whole image group.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateImageJobRequest'}
+      responses:
+        '202': {description: Provider image job created with Creative image-plan lineage.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:bind-image-asset:
+    post:
+      operationId: bindCreativeImageAsset
+      summary: Bind one ready Asset version in the same Project to one planned image, creating the next Draft revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BindImageAssetRequest'}
+      responses:
+        '200': {description: Next ImageTextDraft revision with the AssetVersionRef bound.}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:freeze-version:
     post:
       operationId: freezeCreativeVersion
@@ -115,6 +141,24 @@ paths:
       responses:
         '201': {description: Immutable CreativeVersion created.}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-versions/{version_id}:check:
+    post:
+      operationId: checkCreativeVersion
+      summary: Record deterministic Phase-1 delivery checks for a frozen CreativeVersion.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/VersionID'}]
+      responses: {'200': {description: Checked CreativeVersion.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/creative-versions/{version_id}:approve:
+    post:
+      operationId: approveCreativeVersion
+      summary: Approve a passing checked CreativeVersion and emit its approval event.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/VersionID'}]
+      responses: {'200': {description: Approved CreativeVersion.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/creative-versions/{version_id}:deliver:
+    post:
+      operationId: deliverCreativeVersion
+      summary: Create the stable CreativePackage for Delivery and Insights from an approved version.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/VersionID'}]
+      responses: {'200': {description: Stable CreativePackage created or replayed.}, '409': {$ref: '#/components/responses/Conflict'}}
 components:
   securitySchemes:
     cookiesAuth: {type: http, scheme: bearer}
@@ -122,6 +166,7 @@ components:
     ProjectID: {name: project_id, in: path, required: true, schema: {type: string, minLength: 1}}
     IntakeID: {name: intake_id, in: path, required: true, schema: {type: string, minLength: 1}}
     TaskID: {name: task_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    VersionID: {name: version_id, in: path, required: true, schema: {type: string, minLength: 1}}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 255}}
   schemas:
     CreateCreativeIntakeRequest:
@@ -164,6 +209,27 @@ components:
       required: [draft_version]
       properties:
         draft_version: {type: integer, minimum: 1}
+    CreateImageJobRequest:
+      type: object
+      additionalProperties: false
+      required: [image_plan_order]
+      properties:
+        image_plan_order: {type: integer, minimum: 1, maximum: 12}
+        model_alias: {type: string, minLength: 1, maxLength: 128}
+    BindImageAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_draft_version, image_plan_order, asset_ref]
+      properties:
+        expected_draft_version: {type: integer, minimum: 1}
+        image_plan_order: {type: integer, minimum: 1, maximum: 12}
+        asset_ref:
+          type: object
+          additionalProperties: false
+          required: [asset_id, version]
+          properties:
+            asset_id: {type: string, minLength: 1}
+            version: {type: integer, minimum: 1}
     ReviseCreativeDraftRequest:
       type: object
       additionalProperties: false
@@ -188,6 +254,13 @@ components:
         purpose: {type: string, minLength: 1}
         visual_brief: {type: string, minLength: 1}
         caption: {type: string, minLength: 1}
+        asset_ref:
+          type: object
+          additionalProperties: false
+          required: [asset_id, version]
+          properties:
+            asset_id: {type: string, minLength: 1}
+            version: {type: integer, minimum: 1}
   responses:
     InvalidRequest: {description: The request violates the Creative API contract.}
     Conflict: {description: "The resource state, scope, or idempotency key conflicts with the request."}

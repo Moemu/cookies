@@ -70,7 +70,7 @@ export type ImageTextDraft = {
   body: string
   topics: string[]
   cover_copy: string
-  image_plan: Array<{ order: number, purpose: string, visual_brief: string, caption: string }>
+  image_plan: Array<{ order: number, purpose: string, visual_brief: string, caption: string, asset_ref?: { asset_id: string, version: number } }>
   created_at: string
 }
 
@@ -95,11 +95,24 @@ export type CreativeVersion = {
   content_hash: string
   created_by: string
   created_at: string
+  check?: { passed: boolean, blockers: string[], warnings: string[], checked_by: string, checked_at: string }
+  approval?: { approved_by: string, approved_at: string }
+}
+
+export type CreativePackage = {
+  id: string
+  organization_id: string
+  project_id: string
+  creative_version_id: string
+  content_hash: string
+  snapshot: ImageTextDraft
+  created_by: string
+  created_at: string
 }
 
 export type CreativeTaskDetail = {
   task: CreativeTask
   intake: CreativeIntake
   draft: ImageTextDraft
-  production_jobs: Array<{ task_id: string, kind: 'cover_image', provider_job_id: string, created_at: string }>
+  production_jobs: Array<{ task_id: string, kind: string, provider_job_id: string, created_at: string }>
 }

@@ -159,18 +159,24 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 		s.freezeCreativeVersion(w, r, strings.TrimSuffix(action, ":freeze-version"))
 		return
 	}
-	if !strings.HasSuffix(action, ":cover-image-job") || s.providerJobs == nil || s.projects == nil {
+	if strings.HasSuffix(action, ":bind-image-asset") {
+		s.bindCreativeImageAsset(w, r, strings.TrimSuffix(action, ":bind-image-asset"))
+		return
+	}
+	if (!strings.HasSuffix(action, ":cover-image-job") && !strings.HasSuffix(action, ":image-job")) || s.providerJobs == nil || s.projects == nil {
 		s.notFound(w, r)
 		return
 	}
-	taskID := strings.TrimSuffix(action, ":cover-image-job")
+	legacyCover := strings.HasSuffix(action, ":cover-image-job")
+	taskID := strings.TrimSuffix(action, ":image-job")
+	if legacyCover {
+		taskID = strings.TrimSuffix(action, ":cover-image-job")
+	}
 	if taskID == "" {
 		s.notFound(w, r)
 		return
 	}
-	var body struct {
-		ModelAlias string `json:"model_alias"`
-	}
+	var body creative.CreateImageJobRequest
 	if err := decodeJSON(w, r, &body); err != nil {
 		s.badRequest(w, r, err)
 		return
@@ -178,6 +184,13 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 	modelAlias := strings.TrimSpace(body.ModelAlias)
 	if modelAlias == "" {
 		modelAlias = "cookies.image.standard"
+	}
+	if legacyCover {
+		body.ImagePlanOrder = 1
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
 	}
 	key, ok := idempotencyKey(w, r)
 	if !ok {
@@ -199,13 +212,18 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 		s.writeServiceError(w, r, fmt.Errorf("creative cover requires active brand-bound project"))
 		return
 	}
-	prompt := coverPrompt(detail)
+	if body.ImagePlanOrder > len(detail.Draft.ImagePlan) {
+		s.badRequest(w, r, fmt.Errorf("image_plan_order does not exist in the current draft"))
+		return
+	}
+	prompt := imagePlanPrompt(detail, body.ImagePlanOrder)
 	requestBody := struct {
 		TaskID                string `json:"task_id"`
 		ModelAlias            string `json:"model_alias"`
 		Prompt                string `json:"prompt"`
 		ProjectContextVersion int64  `json:"project_context_version"`
-	}{TaskID: taskID, ModelAlias: modelAlias, Prompt: prompt, ProjectContextVersion: project.ProjectContextVersion}
+		ImagePlanOrder        int    `json:"image_plan_order"`
+	}{TaskID: taskID, ModelAlias: modelAlias, Prompt: prompt, ProjectContextVersion: project.ProjectContextVersion, ImagePlanOrder: body.ImagePlanOrder}
 	hash, err := contract.CanonicalJSONHash(requestBody)
 	if err != nil {
 		s.writeServiceError(w, r, err)
@@ -220,11 +238,37 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 		s.writeServiceError(w, r, err)
 		return
 	}
-	if err := s.creative.RegisterCoverImageJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+	if err := s.creative.RegisterImagePlanJob(r.Context(), rc.Actor, projectID, taskID, body.ImagePlanOrder, job.ID); err != nil {
 		s.writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) bindCreativeImageAsset(w http.ResponseWriter, r *http.Request, taskID string) {
+	if taskID == "" || s.uploads == nil {
+		s.notFound(w, r)
+		return
+	}
+	var body creative.BindImageAssetRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	// Preview reuses the Asset boundary's authorization and ready-state check;
+	// the URL is discarded because Creative retains only an immutable ref.
+	if _, err := s.uploads.Preview(r.Context(), rc.Actor, projectID, body.AssetRef); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	value, err := s.creative.BindImageAsset(r.Context(), rc.Actor, projectID, taskID, body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) freezeCreativeVersion(w http.ResponseWriter, r *http.Request, taskID string) {
@@ -260,6 +304,45 @@ func coverPrompt(detail creative.TaskDetail) string {
 		brief = detail.Draft.ImagePlan[0].VisualBrief
 	}
 	return strings.TrimSpace(fmt.Sprintf("%s。小红书封面，%s。封面文字区域：%s。", brief, strings.Join(detail.Task.Direction.Tone, "、"), detail.Draft.CoverCopy))
+}
+
+func imagePlanPrompt(detail creative.TaskDetail, imagePlanOrder int) string {
+	brief := ""
+	caption := detail.Draft.CoverCopy
+	if imagePlanOrder >= 1 && imagePlanOrder <= len(detail.Draft.ImagePlan) {
+		item := detail.Draft.ImagePlan[imagePlanOrder-1]
+		brief = item.VisualBrief
+		caption = item.Caption
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s. Xiaohongshu image %d of %d. Tone: %s. Caption area: %s.", brief, imagePlanOrder, len(detail.Draft.ImagePlan), strings.Join(detail.Task.Direction.Tone, ", "), caption))
+}
+
+func (s *Server) transitionCreativeVersion(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	action := r.PathValue("version_action")
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var value any
+	var err error
+	switch {
+	case strings.HasSuffix(action, ":check"):
+		value, err = s.creative.CheckVersion(r.Context(), rc.Actor, projectID, strings.TrimSuffix(action, ":check"))
+	case strings.HasSuffix(action, ":approve"):
+		value, err = s.creative.ApproveVersion(r.Context(), rc.Actor, projectID, strings.TrimSuffix(action, ":approve"))
+	case strings.HasSuffix(action, ":deliver"):
+		value, err = s.creative.DeliverVersion(r.Context(), rc.Actor, projectID, strings.TrimSuffix(action, ":deliver"))
+	default:
+		s.notFound(w, r)
+		return
+	}
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func queryLimit(r *http.Request) int {

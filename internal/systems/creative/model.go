@@ -236,6 +236,39 @@ type ReviseDraftRequest struct {
 	ImagePlan       []ImagePlanItem `json:"image_plan"`
 }
 
+// BindImageAssetRequest binds an already-ready project asset to one planned
+// image. The Asset context owns the asset itself; Creative retains only the
+// immutable asset-version reference in its next Draft revision.
+type BindImageAssetRequest struct {
+	ExpectedDraftVersion int64                    `json:"expected_draft_version"`
+	ImagePlanOrder       int                      `json:"image_plan_order"`
+	AssetRef             contract.AssetVersionRef `json:"asset_ref"`
+}
+
+func (r BindImageAssetRequest) Validate() error {
+	if r.ExpectedDraftVersion < 1 || r.ImagePlanOrder < 1 || r.ImagePlanOrder > 12 {
+		return fmt.Errorf("expected_draft_version and image_plan_order are invalid")
+	}
+	return r.AssetRef.Validate()
+}
+
+// CreateImageJobRequest is deliberately scoped to an image-plan position.
+// A retry for one failed image never recreates the other images in the group.
+type CreateImageJobRequest struct {
+	ImagePlanOrder int    `json:"image_plan_order"`
+	ModelAlias     string `json:"model_alias"`
+}
+
+func (r CreateImageJobRequest) Validate() error {
+	if r.ImagePlanOrder < 1 || r.ImagePlanOrder > 12 {
+		return fmt.Errorf("image_plan_order must be between 1 and 12")
+	}
+	if len(r.ModelAlias) > 128 {
+		return fmt.Errorf("model_alias is too long")
+	}
+	return nil
+}
+
 func (r ReviseDraftRequest) Validate() error {
 	if r.ExpectedVersion < 1 {
 		return fmt.Errorf("expected_version must be positive")
@@ -265,6 +298,11 @@ func (r ReviseDraftRequest) Validate() error {
 	for index, item := range r.ImagePlan {
 		if item.Order != index+1 || strings.TrimSpace(item.Purpose) == "" || strings.TrimSpace(item.VisualBrief) == "" || strings.TrimSpace(item.Caption) == "" {
 			return fmt.Errorf("image_plan must have ordered, complete items")
+		}
+		if item.AssetRef != nil {
+			if err := item.AssetRef.Validate(); err != nil {
+				return fmt.Errorf("image_plan asset_ref: %w", err)
+			}
 		}
 	}
 	return nil
@@ -309,8 +347,38 @@ type CreativeVersion struct {
 	ContentHash    contract.ContentHash    `json:"content_hash"`
 	CreatedBy      string                  `json:"created_by"`
 	CreatedAt      time.Time               `json:"created_at"`
+	Check          *CreativeCheck          `json:"check,omitempty"`
+	Approval       *CreativeApproval       `json:"approval,omitempty"`
 	IdempotencyKey contract.IdempotencyKey `json:"-"`
 	RequestHash    string                  `json:"-"`
+}
+
+// CreativeCheck is an auditable, deterministic Phase-1 gate. It records why
+// a frozen snapshot cannot proceed rather than silently changing its content.
+type CreativeCheck struct {
+	Passed    bool      `json:"passed"`
+	Blockers  []string  `json:"blockers"`
+	Warnings  []string  `json:"warnings"`
+	CheckedBy string    `json:"checked_by"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+type CreativeApproval struct {
+	ApprovedBy string    `json:"approved_by"`
+	ApprovedAt time.Time `json:"approved_at"`
+}
+
+// CreativePackage is the stable output consumed by Delivery and Insights. It
+// references one approved immutable CreativeVersion and never a mutable task.
+type CreativePackage struct {
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	CreativeVersionID string                  `json:"creative_version_id"`
+	ContentHash       contract.ContentHash    `json:"content_hash"`
+	Snapshot          ImageTextDraft          `json:"snapshot"`
+	CreatedBy         string                  `json:"created_by"`
+	CreatedAt         time.Time               `json:"created_at"`
 }
 
 func (v CreativeVersion) Validate() error {
@@ -328,10 +396,11 @@ func (v CreativeVersion) Validate() error {
 }
 
 type ImagePlanItem struct {
-	Order       int    `json:"order"`
-	Purpose     string `json:"purpose"`
-	VisualBrief string `json:"visual_brief"`
-	Caption     string `json:"caption"`
+	Order       int                       `json:"order"`
+	Purpose     string                    `json:"purpose"`
+	VisualBrief string                    `json:"visual_brief"`
+	Caption     string                    `json:"caption"`
+	AssetRef    *contract.AssetVersionRef `json:"asset_ref,omitempty"`
 }
 
 type ProductionJob struct {

@@ -110,8 +110,13 @@ type CreativeManager interface {
 	GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error)
 	ArchiveTask(context.Context, contract.ActorContext, contract.ProjectID, string) error
 	ReviseDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReviseDraftRequest) (creative.ImageTextDraft, error)
+	BindImageAsset(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BindImageAssetRequest) (creative.ImageTextDraft, error)
 	RegisterCoverImageJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) error
+	RegisterImagePlanJob(context.Context, contract.ActorContext, contract.ProjectID, string, int, string) error
 	FreezeVersion(context.Context, contract.RequestContext, contract.ProjectID, string, creative.FreezeVersionRequest, contract.IdempotencyKey) (creative.CreativeVersion, bool, error)
+	CheckVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error)
+	ApproveVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error)
+	DeliverVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativePackage, error)
 }
 
 // ProviderJobs keeps the shared HTTP server dependent on Provider's public
@@ -174,6 +179,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("DELETE /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.archiveCreativeTask))))
 	server.mux.Handle("PATCH /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.reviseCreativeDraft))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeCoverImageJob))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-versions/{version_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.transitionCreativeVersion))))
 	for _, mount := range dependencies.AuthenticatedDomainMounts {
 		if strings.TrimSpace(mount.Pattern) == "" || mount.Handler == nil {
 			continue

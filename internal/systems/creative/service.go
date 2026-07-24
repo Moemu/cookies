@@ -248,7 +248,48 @@ func (s Service) ReviseDraft(ctx context.Context, actor contract.ActorContext, p
 	return s.Repository.ReviseDraft(ctx, actor.OrganizationID, projectID, taskID, request.ExpectedVersion, draft)
 }
 
+// BindImageAsset advances the editable draft after the HTTP composition layer
+// has verified that ref is a ready asset in the same project. Creative stores
+// only the reference so Assets remains the source of truth for media bytes.
+func (s Service) BindImageAsset(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, request BindImageAssetRequest) (ImageTextDraft, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return ImageTextDraft{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return ImageTextDraft{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return ImageTextDraft{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ImageTextDraft{}, err
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return ImageTextDraft{}, err
+	}
+	if detail.Task.Status == TaskArchived || detail.Draft.Version != request.ExpectedDraftVersion {
+		if detail.Task.Status == TaskArchived {
+			return ImageTextDraft{}, ErrInvalidState
+		}
+		return ImageTextDraft{}, ErrVersionConflict
+	}
+	if request.ImagePlanOrder > len(detail.Draft.ImagePlan) {
+		return ImageTextDraft{}, fmt.Errorf("image_plan_order does not exist in this draft")
+	}
+	updated := detail.Draft
+	updated.Version++
+	updated.CreatedAt = s.now()
+	ref := request.AssetRef
+	updated.ImagePlan[request.ImagePlanOrder-1].AssetRef = &ref
+	return s.Repository.ReviseDraft(ctx, actor.OrganizationID, projectID, taskID, request.ExpectedDraftVersion, updated)
+}
+
 func (s Service) RegisterCoverImageJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID, providerJobID string) error {
+	return s.RegisterImagePlanJob(ctx, actor, projectID, taskID, 1, providerJobID)
+}
+
+func (s Service) RegisterImagePlanJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, imagePlanOrder int, providerJobID string) error {
 	if s.Repository == nil || s.Projects == nil {
 		return fmt.Errorf("creative dependencies are incomplete")
 	}
@@ -258,13 +299,17 @@ func (s Service) RegisterCoverImageJob(ctx context.Context, actor contract.Actor
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return err
 	}
-	if strings.TrimSpace(providerJobID) == "" {
+	if imagePlanOrder < 1 || imagePlanOrder > 12 || strings.TrimSpace(providerJobID) == "" {
 		return fmt.Errorf("provider job ID is required")
 	}
-	if _, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID); err != nil {
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
 		return err
 	}
-	return s.Repository.RegisterProductionJob(ctx, actor.OrganizationID, projectID, taskID, ProductionJob{TaskID: taskID, Kind: "cover_image", ProviderJobID: providerJobID, CreatedAt: s.now()})
+	if detail.Task.Status == TaskArchived || imagePlanOrder > len(detail.Draft.ImagePlan) {
+		return ErrInvalidState
+	}
+	return s.Repository.RegisterProductionJob(ctx, actor.OrganizationID, projectID, taskID, ProductionJob{TaskID: taskID, Kind: imagePlanJobKind(imagePlanOrder, providerJobID), ProviderJobID: providerJobID, CreatedAt: s.now()})
 }
 
 // FreezeVersion creates the stable Creative-owned artifact consumed by later
@@ -325,6 +370,109 @@ func (s Service) FreezeVersion(ctx context.Context, requestContext contract.Requ
 		return CreativeVersion{}, false, err
 	}
 	return s.Repository.CreateVersion(ctx, value)
+}
+
+// CheckVersion validates a frozen version without changing it. The Phase-1
+// rules intentionally cover only delivery blockers that are deterministic:
+// every planned image must have a project Asset reference, prohibited claims
+// must not appear in copy, and every mandatory element must be represented.
+func (s Service) CheckVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativeVersion, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeVersion{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeVersion{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeVersion{}, err
+	}
+	version, err := s.Repository.GetVersion(ctx, actor.OrganizationID, projectID, versionID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if version.Status != CreativeVersionCreated && version.Status != CreativeVersionChecked {
+		return CreativeVersion{}, ErrInvalidState
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, version.TaskID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	check := evaluateVersion(version, detail.Intake, actor.Principal.ID, s.now())
+	return s.Repository.RecordVersionCheck(ctx, actor.OrganizationID, projectID, versionID, check)
+}
+
+func (s Service) ApproveVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativeVersion, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeVersion{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeVersion{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeVersion{}, err
+	}
+	version, err := s.Repository.GetVersion(ctx, actor.OrganizationID, projectID, versionID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if version.Status != CreativeVersionChecked || version.Check == nil || !version.Check.Passed {
+		return CreativeVersion{}, ErrInvalidState
+	}
+	return s.Repository.ApproveVersion(ctx, actor.OrganizationID, projectID, versionID, CreativeApproval{ApprovedBy: actor.Principal.ID, ApprovedAt: s.now()})
+}
+
+func (s Service) DeliverVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativePackage, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativePackage{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativePackage{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativePackage{}, err
+	}
+	version, err := s.Repository.GetVersion(ctx, actor.OrganizationID, projectID, versionID)
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	if version.Status != CreativeVersionApproved {
+		return CreativePackage{}, ErrInvalidState
+	}
+	id, err := s.idGenerator()("creativepackage")
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	value := CreativePackage{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, CreativeVersionID: version.ID, ContentHash: version.ContentHash, Snapshot: version.Snapshot, CreatedBy: actor.Principal.ID, CreatedAt: s.now()}
+	return s.Repository.CreatePackage(ctx, value)
+}
+
+// Provider jobs are immutable attempts. Including the Provider job identity
+// permits retrying only a failed image-plan position while preserving every
+// prior attempt for audit and avoiding a shared mutable "latest job" field.
+func imagePlanJobKind(order int, providerJobID string) string {
+	return fmt.Sprintf("image_plan_%d_job_%s", order, providerJobID)
+}
+
+func evaluateVersion(version CreativeVersion, intake CreativeIntake, actorID string, now time.Time) CreativeCheck {
+	blockers := make([]string, 0)
+	warnings := make([]string, 0)
+	for _, item := range version.Snapshot.ImagePlan {
+		if item.AssetRef == nil {
+			blockers = append(blockers, fmt.Sprintf("image_plan[%d] has no bound project asset", item.Order))
+		}
+	}
+	copyText := strings.ToLower(strings.Join(append(append([]string{}, version.Snapshot.TitleCandidates...), version.Snapshot.Body, version.Snapshot.CoverCopy, strings.Join(version.Snapshot.Topics, " ")), " "))
+	for _, prohibited := range intake.Request.Prohibited {
+		if needle := strings.ToLower(strings.TrimSpace(prohibited)); needle != "" && strings.Contains(copyText, needle) {
+			blockers = append(blockers, fmt.Sprintf("prohibited claim appears in copy: %s", prohibited))
+		}
+	}
+	for _, mandatory := range intake.Request.Mandatory {
+		if needle := strings.ToLower(strings.TrimSpace(mandatory)); needle != "" && !strings.Contains(copyText, needle) {
+			warnings = append(warnings, fmt.Sprintf("mandatory element is not found in text: %s", mandatory))
+		}
+	}
+	return CreativeCheck{Passed: len(blockers) == 0, Blockers: blockers, Warnings: warnings, CheckedBy: actorID, CheckedAt: now}
 }
 
 func (s Service) now() time.Time {

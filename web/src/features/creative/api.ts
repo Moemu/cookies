@@ -1,6 +1,6 @@
 import { apiRequest } from '../../shared/api/client'
 import type { ProviderJob } from '../platform/types'
-import type { CreateCreativeTaskInput, CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail, CreativeVersion, ReviseDraftInput, ImageTextDraft } from './types'
+import type { CreateCreativeTaskInput, CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail, CreativeVersion, CreativePackage, ReviseDraftInput, ImageTextDraft } from './types'
 
 function base(projectId: string) {
   return `/api/creative/v1/projects/${encodeURIComponent(projectId)}`
@@ -68,4 +68,31 @@ export function createCoverImageJob(projectId: string, taskId: string) {
     headers: { 'Idempotency-Key': `creative-cover-${crypto.randomUUID()}` },
     body: JSON.stringify({}),
   })
+}
+
+export function createImagePlanJob(projectId: string, taskId: string, imagePlanOrder: number) {
+  return apiRequest<ProviderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:image-job`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': `creative-image-${imagePlanOrder}-${crypto.randomUUID()}` },
+    body: JSON.stringify({ image_plan_order: imagePlanOrder }),
+  })
+}
+
+export function bindCreativeImageAsset(projectId: string, taskId: string, expectedDraftVersion: number, imagePlanOrder: number, assetId: string, assetVersion: number) {
+  return apiRequest<ImageTextDraft>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:bind-image-asset`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_draft_version: expectedDraftVersion, image_plan_order: imagePlanOrder, asset_ref: { asset_id: assetId, version: assetVersion } }),
+  })
+}
+
+export function checkCreativeVersion(projectId: string, versionId: string) {
+  return apiRequest<CreativeVersion>(`${base(projectId)}/creative-versions/${encodeURIComponent(versionId)}:check`, { method: 'POST' })
+}
+
+export function approveCreativeVersion(projectId: string, versionId: string) {
+  return apiRequest<CreativeVersion>(`${base(projectId)}/creative-versions/${encodeURIComponent(versionId)}:approve`, { method: 'POST' })
+}
+
+export function deliverCreativeVersion(projectId: string, versionId: string) {
+  return apiRequest<CreativePackage>(`${base(projectId)}/creative-versions/${encodeURIComponent(versionId)}:deliver`, { method: 'POST' })
 }

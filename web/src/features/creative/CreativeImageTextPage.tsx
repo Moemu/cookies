@@ -5,8 +5,8 @@ import { RemoveAssetDialog } from '../assets/RemoveAssetDialog'
 import type { ProjectAsset } from '../assets/types'
 import { getProviderJob } from '../platform/api'
 import type { ProviderJob } from '../platform/types'
-import { archiveCreativeTask, createCoverImageJob, createCreativeIntake, createCreativeTask, freezeCreativeVersion, getCreativeTask, listCreativeIntakes, listCreativeTasks, reviseCreativeDraft } from './api'
-import type { CreateCreativeTaskInput, CreativeContentType, CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail, CreativeVersion, ImageTextDraft, ReviseDraftInput } from './types'
+import { approveCreativeVersion, archiveCreativeTask, bindCreativeImageAsset, checkCreativeVersion, createImagePlanJob, createCreativeIntake, createCreativeTask, deliverCreativeVersion, freezeCreativeVersion, getCreativeTask, listCreativeIntakes, listCreativeTasks, reviseCreativeDraft } from './api'
+import type { CreateCreativeTaskInput, CreativeContentType, CreativeIntake, CreativeIntakeInput, CreativePackage, CreativeTask, CreativeTaskDetail, CreativeVersion, ImageTextDraft, ReviseDraftInput } from './types'
 
 const emptyInput: CreativeIntakeInput = {
   source: 'manual', channel: 'xiaohongshu', objective: '', audience: '', core_message: '', call_to_action: '', concept: '', tone: [], visual_keywords: [], mandatory_elements: [], prohibited_claims: [],
@@ -105,6 +105,8 @@ export function CreativeImageTextPage() {
   const [savingDraft, setSavingDraft] = useState(false)
   const [freezingVersion, setFreezingVersion] = useState(false)
   const [frozenVersion, setFrozenVersion] = useState<CreativeVersion | null>(null)
+  const [transitioningVersion, setTransitioningVersion] = useState(false)
+  const [creativePackage, setCreativePackage] = useState<CreativePackage | null>(null)
   const [intakeForTask, setIntakeForTask] = useState<CreativeIntake | null>(null)
   const [archivePending, setArchivePending] = useState(false)
   const [archiveConfirm, setArchiveConfirm] = useState(false)
@@ -220,11 +222,11 @@ export function CreativeImageTextPage() {
     } finally { setSubmitting(false) }
   }
 
-  async function generateCover() {
+  async function generateImage(imagePlanOrder: number) {
     if (!selected || generating) return
     setGenerating(true); setError(''); setMessage('')
     try {
-      const job = await createCoverImageJob(projectId, selected.task.id)
+      const job = await createImagePlanJob(projectId, selected.task.id, imagePlanOrder)
       setLatestJob(job)
       setProviderJobs((current) => ({ ...current, [job.id]: job }))
       await selectTask(selected.task.id)
@@ -232,6 +234,18 @@ export function CreativeImageTextPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '无法创建封面生成任务。')
     } finally { setGenerating(false) }
+  }
+
+  async function bindImageAsset(imagePlanOrder: number, asset: ProjectAsset) {
+    if (!selected || savingDraft) return
+    setSavingDraft(true); setError(''); setMessage('')
+    try {
+      await bindCreativeImageAsset(projectId, selected.task.id, selected.draft.version, imagePlanOrder, asset.asset.id, asset.version.version)
+      await selectTask(selected.task.id)
+      setMessage(`素材已绑定到第 ${imagePlanOrder} 张图，并创建新的草稿版本。`)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '素材绑定失败。')
+    } finally { setSavingDraft(false) }
   }
 
   async function saveDraft(input: ReviseDraftInput) {
@@ -257,6 +271,28 @@ export function CreativeImageTextPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '无法冻结创意版本。')
     } finally { setFreezingVersion(false) }
+  }
+
+  async function transitionVersion(action: 'check' | 'approve' | 'deliver') {
+    if (!frozenVersion || transitioningVersion) return
+    setTransitioningVersion(true); setError(''); setMessage('')
+    try {
+      if (action === 'check') {
+        const version = await checkCreativeVersion(projectId, frozenVersion.id)
+        setFrozenVersion(version)
+        setMessage(version.check?.passed ? '版本检查通过，可以批准。' : `版本检查发现 ${version.check?.blockers.length ?? 0} 个阻塞项。`)
+      } else if (action === 'approve') {
+        const version = await approveCreativeVersion(projectId, frozenVersion.id)
+        setFrozenVersion(version)
+        setMessage('版本已批准，并写入 creative.approved.v1 事件。')
+      } else {
+        const value = await deliverCreativeVersion(projectId, frozenVersion.id)
+        setCreativePackage(value)
+        setMessage('交付包已创建，并写入 creative.delivered.v1 事件。')
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Creative 版本流转失败。')
+    } finally { setTransitioningVersion(false) }
   }
 
   async function archiveSelectedTask() {
@@ -339,17 +375,22 @@ export function CreativeImageTextPage() {
     {intakeForTask ? <TaskDirectionForm busy={submitting} intake={intakeForTask} onCancel={() => setIntakeForTask(null)} onCreate={(direction) => void createTaskFromIntake(intakeForTask, direction)} /> : null}
 
     {selected ? <section className="creative-draft" aria-label="图文内容初稿">
-      <div className="creative-draft__top"><div><span>{taskTypeLabels[selected.task.direction.content_type] ?? '图文创作'} · 内容初稿 v{selected.draft.version}</span><h2>{selected.task.direction.focus || selected.task.direction.concept || '小红书图文方向'}</h2><p>{selected.intake.request.objective} · 面向 {selected.task.direction.audience || selected.intake.request.audience}</p></div><div className="creative-draft__actions"><button className="button button--secondary" disabled={savingDraft || freezingVersion} onClick={() => setEditingDraft(true)} type="button">编辑草稿</button><button className="button button--secondary" disabled={generating} onClick={() => void generateCover()} type="button">{generating ? '正在提交封面…' : '生成封面图片'}</button><button className="button button--primary" disabled={freezingVersion || editingDraft} onClick={() => void freezeCurrentDraft()} type="button">{freezingVersion ? '正在冻结…' : '冻结为创意版本'}</button><button className="text-button text-button--danger" disabled={archivePending} onClick={() => setArchiveConfirm(true)} type="button">归档图文任务</button></div></div>
+      <div className="creative-draft__top"><div><span>{taskTypeLabels[selected.task.direction.content_type] ?? '图文创作'} · 内容初稿 v{selected.draft.version}</span><h2>{selected.task.direction.focus || selected.task.direction.concept || '小红书图文方向'}</h2><p>{selected.intake.request.objective} · 面向 {selected.task.direction.audience || selected.intake.request.audience}</p></div><div className="creative-draft__actions"><button className="button button--secondary" disabled={savingDraft || freezingVersion} onClick={() => setEditingDraft(true)} type="button">编辑草稿</button><button className="button button--secondary" disabled={generating} onClick={() => void generateImage(1)} type="button">{generating ? '正在提交图片…' : '生成第 1 张图'}</button><button className="button button--primary" disabled={freezingVersion || editingDraft} onClick={() => void freezeCurrentDraft()} type="button">{freezingVersion ? '正在冻结…' : '冻结为创意版本'}</button><button className="text-button text-button--danger" disabled={archivePending} onClick={() => setArchiveConfirm(true)} type="button">归档图文任务</button></div></div>
       <div className="creative-lineage" aria-label="当前任务链路">
         <div><span>创意输入</span><strong>{selected.intake.source === 'strategy_package' ? '来自策略包' : '手工输入'}</strong><small>{selected.intake.request.strategy_package ? `${selected.intake.request.strategy_package.package_id} · v${selected.intake.request.strategy_package.package_version}` : `Intake · ${selected.intake.id}`}</small></div>
         <div><span>图文任务</span><strong>当前初稿</strong><small>{selected.task.id}</small></div>
         <div><span>Provider 作业</span><strong>{selected.production_jobs.length ? `${selected.production_jobs.length} 个生产任务` : '尚未提交'}</strong><small>{selected.production_jobs.length ? '可查看执行和入库状态' : '点击“生成封面图片”开始'}</small></div>
         <div><span>项目素材</span><strong>{currentProductionAssets.length ? `${currentProductionAssets.length} 个已入库` : '等待生成结果'}</strong><small>素材由 Provider 校验入库</small></div>
       </div>
-      <div className="creative-draft__grid"><article className="creative-copy"><h3>标题候选</h3><ol>{selected.draft.title_candidates.map((title) => <li key={title}>{title}</li>)}</ol><h3>正文</h3><p>{selected.draft.body}</p><div className="creative-topics">{selected.draft.topics.map((topic) => <span key={topic}>{topic}</span>)}</div></article><article className="creative-cover"><div className="creative-cover__canvas"><span>封面文字</span><strong>{selected.draft.cover_copy}</strong><small>{selected.task.direction.tone.join(' · ') || '小红书图文'}</small></div><h3>图组结构</h3><ol className="creative-image-plan">{selected.draft.image_plan.map((item) => <li key={item.order}><b>{item.order}</b><div><strong>{item.purpose}</strong><span>{item.visual_brief}</span></div></li>)}</ol></article></div>
+      <div className="creative-draft__grid"><article className="creative-copy"><h3>标题候选</h3><ol>{selected.draft.title_candidates.map((title) => <li key={title}>{title}</li>)}</ol><h3>正文</h3><p>{selected.draft.body}</p><div className="creative-topics">{selected.draft.topics.map((topic) => <span key={topic}>{topic}</span>)}</div></article><article className="creative-cover"><div className="creative-cover__canvas"><span>封面文字</span><strong>{selected.draft.cover_copy}</strong><small>{selected.task.direction.tone.join(' · ') || '小红书图文'}</small></div><h3>图组结构</h3><ol className="creative-image-plan">{selected.draft.image_plan.map((item) => {
+        const production = [...selected.production_jobs].reverse().find((job) => job.kind.startsWith(`image_plan_${item.order}_job_`) || (item.order === 1 && job.kind === 'cover_image'))
+        const generatedAssets = production ? currentProductionAssets.filter((asset) => asset.version.provider_job_id === production.provider_job_id) : []
+        return <li key={item.order}><b>{item.order}</b><div><strong>{item.purpose}</strong><span>{item.visual_brief}</span><small>{item.asset_ref ? `已绑定素材 ${item.asset_ref.asset_id} · v${item.asset_ref.version}` : '尚未绑定项目素材'}</small><div className="creative-image-plan__actions"><button className="text-button" disabled={generating} onClick={() => void generateImage(item.order)} type="button">生成此图</button>{generatedAssets.map((asset) => <button className="text-button" disabled={savingDraft} key={`${asset.asset.id}:${asset.version.version}`} onClick={() => void bindImageAsset(item.order, asset)} type="button">绑定已入库素材</button>)}</div></div></li>
+      })}</ol></article></div>
       {editingDraft ? <DraftEditor key={`${selected.task.id}:${selected.draft.version}`} busy={savingDraft} draft={selected.draft} onCancel={() => setEditingDraft(false)} onSave={(input) => void saveDraft(input)} /> : null}
       {archiveConfirm ? <section className="creative-archive-confirm" aria-label="归档图文任务确认"><div><strong>归档这篇图文任务？</strong><p>{selected.production_jobs.length > 0 ? '任务已关联模型作业。归档只会从当前工作队列移除它，不会删除草稿、创意版本、模型作业或项目素材。' : '任务会从当前工作队列移除；已有草稿仍会保留，方便后续追溯。'}</p></div><div><button className="button button--secondary" disabled={archivePending} onClick={() => setArchiveConfirm(false)} type="button">取消</button><button className="button button--danger" disabled={archivePending} onClick={() => void archiveSelectedTask()} type="button">{archivePending ? '正在归档…' : '确认归档'}</button></div></section> : null}
-      {frozenVersion?.creative_task_id === selected.task.id ? <div className="creative-version-note"><strong>已冻结 CreativeVersion v{frozenVersion.version}</strong><code>{frozenVersion.id}</code><span>内容哈希 {frozenVersion.content_hash}</span></div> : null}
+      {frozenVersion?.creative_task_id === selected.task.id ? <div className="creative-version-note"><strong>已冻结 CreativeVersion v{frozenVersion.version}</strong><code>{frozenVersion.id}</code><span>内容哈希 {frozenVersion.content_hash}</span><div className="creative-version-note__actions"><button className="text-button" disabled={transitioningVersion || frozenVersion.status === 'approved'} onClick={() => void transitionVersion('check')} type="button">检查版本</button><button className="text-button" disabled={transitioningVersion || frozenVersion.status !== 'checked' || !frozenVersion.check?.passed} onClick={() => void transitionVersion('approve')} type="button">批准版本</button><button className="text-button" disabled={transitioningVersion || frozenVersion.status !== 'approved'} onClick={() => void transitionVersion('deliver')} type="button">创建交付包</button></div>{frozenVersion.check ? <small>{frozenVersion.check.passed ? '检查通过' : `检查阻塞：${frozenVersion.check.blockers.join('；')}`}</small> : null}</div> : null}
+      {creativePackage && frozenVersion && creativePackage.creative_version_id === frozenVersion.id ? <div className="success-note creative-message"><span>✓</span><p>CreativePackage：<code>{creativePackage.id}</code></p></div> : null}
       {selected.production_jobs.length > 0 ? <section className="creative-production"><span>封面生产状态</span>{selected.production_jobs.map((production) => {
         const job = providerJobs[production.provider_job_id]
         const jobAssets = currentProductionAssets.filter((asset) => asset.version.provider_job_id === production.provider_job_id)

@@ -3,7 +3,10 @@ package creative
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 func TestFreezeVersionCreatesImmutableSnapshotFromCurrentDraft(t *testing.T) {
@@ -75,5 +78,58 @@ func TestReviseDraftCreatesNextRevisionAndRejectsStaleWrite(t *testing.T) {
 	}
 	if _, err := service.ReviseDraft(context.Background(), rc.Actor, "project_1", task.ID, ReviseDraftRequest{ExpectedVersion: 1, TitleCandidates: updated.TitleCandidates, Body: updated.Body, Topics: updated.Topics, CoverCopy: updated.CoverCopy, ImagePlan: updated.ImagePlan}); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("stale revision error=%v, want %v", err, ErrVersionConflict)
+	}
+}
+
+func TestImageGroupCanBeBoundCheckedApprovedAndDelivered(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	rc := testRequestContext()
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "creative-phase1-intake", validManualRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), rc.Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for order := range detail.Draft.ImagePlan {
+		detail.Draft, err = service.BindImageAsset(context.Background(), rc.Actor, "project_1", task.ID, BindImageAssetRequest{
+			ExpectedDraftVersion: detail.Draft.Version,
+			ImagePlanOrder:       order + 1,
+			AssetRef:             contract.AssetVersionRef{AssetID: contract.AssetID(fmt.Sprintf("asset_%d", order+1)), Version: 1},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	version, _, err := service.FreezeVersion(context.Background(), rc, "project_1", task.ID, FreezeVersionRequest{DraftVersion: detail.Draft.Version}, "creative-phase1-freeze")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked, err := service.CheckVersion(context.Background(), rc.Actor, "project_1", version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked.Status != CreativeVersionChecked || checked.Check == nil || !checked.Check.Passed {
+		t.Fatalf("checked version = %#v", checked)
+	}
+	approved, err := service.ApproveVersion(context.Background(), rc.Actor, "project_1", version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Status != CreativeVersionApproved || approved.Approval == nil {
+		t.Fatalf("approved version = %#v", approved)
+	}
+	pkg, err := service.DeliverVersion(context.Background(), rc.Actor, "project_1", version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.CreativeVersionID != version.ID || len(pkg.Snapshot.ImagePlan) != 4 || pkg.Snapshot.ImagePlan[0].AssetRef == nil {
+		t.Fatalf("package = %#v", pkg)
 	}
 }

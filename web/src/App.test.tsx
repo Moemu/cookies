@@ -72,6 +72,22 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('link', { name: '管理' }))
     expect(await screen.findByRole('heading', { name: '组织与访问' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '洞察' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '投放' })).not.toBeInTheDocument()
+  })
+
+  it('exposes the current identity through a user menu and read-only profile', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '打开 本地用户 的用户菜单' }))
+    expect(screen.getByRole('menuitem', { name: '个人资料' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '安全摘要' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '偏好设置' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '个人资料' }))
+    expect(await screen.findByRole('heading', { name: '个人资料' })).toBeInTheDocument()
+    expect(screen.getAllByText('本地用户')).toHaveLength(2)
+    expect(screen.getByText('本地组织')).toBeInTheDocument()
   })
 
   it('loads the real project asset library and opens a validated upload flow', async () => {

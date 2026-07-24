@@ -28,4 +28,8 @@ type Repository interface {
 	ReviseDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ImageTextDraft) (ImageTextDraft, error)
 	RegisterProductionJob(context.Context, contract.OrganizationID, contract.ProjectID, string, ProductionJob) error
 	CreateVersion(context.Context, CreativeVersion) (CreativeVersion, bool, error)
+	GetVersion(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeVersion, error)
+	RecordVersionCheck(context.Context, contract.OrganizationID, contract.ProjectID, string, CreativeCheck) (CreativeVersion, error)
+	ApproveVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, CreativeApproval) (CreativeVersion, error)
+	CreatePackage(context.Context, CreativePackage) (CreativePackage, error)
 }

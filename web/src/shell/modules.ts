@@ -1,10 +1,12 @@
-export type ModuleKey = 'strategy' | 'creative' | 'insights' | 'delivery' | 'admin'
+import type { IconName } from './Icon'
+
+export type ModuleKey = 'strategy' | 'creative' | 'admin'
 
 export type ShellModule = {
   key: ModuleKey
   label: string
   description: string
-  icon: 'target' | 'pen' | 'chart' | 'send' | 'settings'
+  icon: IconName
 }
 
 export const shellModules: readonly ShellModule[] = [

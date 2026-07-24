@@ -311,11 +311,124 @@ func (r MySQLRepository) CreateVersion(ctx context.Context, value CreativeVersio
 	return existing, false, nil
 }
 
+func (r MySQLRepository) GetVersion(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, versionID string) (CreativeVersion, error) {
+	if r.DB == nil {
+		return CreativeVersion{}, fmt.Errorf("creative MySQL database is required")
+	}
+	value, err := scanCreativeVersion(r.DB.QueryRowContext(ctx, creativeVersionSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`, organizationID, projectID, versionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreativeVersion{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) RecordVersionCheck(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, versionID string, check CreativeCheck) (CreativeVersion, error) {
+	payload, err := json.Marshal(check)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_versions SET status = ?, check_payload = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND status IN (?, ?)`, CreativeVersionChecked, payload, organizationID, projectID, versionID, CreativeVersionCreated, CreativeVersionChecked)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if affected == 0 {
+		if _, getErr := r.GetVersion(ctx, organizationID, projectID, versionID); getErr != nil {
+			return CreativeVersion{}, getErr
+		}
+		return CreativeVersion{}, ErrInvalidState
+	}
+	return r.GetVersion(ctx, organizationID, projectID, versionID)
+}
+
+func (r MySQLRepository) ApproveVersion(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, versionID string, approval CreativeApproval) (CreativeVersion, error) {
+	payload, err := json.Marshal(approval)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	defer tx.Rollback()
+	var version CreativeVersion
+	version, err = scanCreativeVersion(tx.QueryRowContext(ctx, creativeVersionSelect+` WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`, organizationID, projectID, versionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreativeVersion{}, ErrNotFound
+	}
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if version.Status != CreativeVersionChecked || version.Check == nil || !version.Check.Passed {
+		return CreativeVersion{}, ErrInvalidState
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE creative_versions SET status = ?, approval_payload = ? WHERE organization_id = ? AND project_id = ? AND id = ?`, CreativeVersionApproved, payload, organizationID, projectID, versionID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	eventPayload, err := json.Marshal(map[string]any{"creative_version_id": versionID, "content_hash": version.ContentHash})
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO event_outbox (event_id, organization_id, project_id, event_type, subject_type, subject_id, subject_version, payload, available_at, created_at)
+		VALUES (?, ?, ?, 'creative.approved.v1', 'creative_version', ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE event_id = event_id`, "creative-approved-"+versionID, organizationID, projectID, versionID, version.Version, eventPayload, approval.ApprovedAt, approval.ApprovedAt)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CreativeVersion{}, err
+	}
+	return r.GetVersion(ctx, organizationID, projectID, versionID)
+}
+
+func (r MySQLRepository) CreatePackage(ctx context.Context, value CreativePackage) (CreativePackage, error) {
+	snapshot, err := json.Marshal(value.Snapshot)
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO creative_packages (id, organization_id, project_id, creative_version_id, content_hash, snapshot_payload, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.CreativeVersionID, value.ContentHash, snapshot, value.CreatedBy, value.CreatedAt)
+	if err != nil {
+		var mysqlError *mysqlDriver.MySQLError
+		if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
+			packageValue, readErr := r.getPackageByVersion(ctx, value.OrganizationID, value.ProjectID, value.CreativeVersionID)
+			if readErr != nil {
+				return CreativePackage{}, readErr
+			}
+			return packageValue, nil
+		}
+		return CreativePackage{}, err
+	}
+	eventPayload, err := json.Marshal(map[string]any{"creative_package_id": value.ID, "creative_version_id": value.CreativeVersionID, "content_hash": value.ContentHash})
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO event_outbox (event_id, organization_id, project_id, event_type, subject_type, subject_id, subject_version, payload, available_at, created_at)
+		VALUES (?, ?, ?, 'creative.delivered.v1', 'creative_package', ?, 1, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE event_id = event_id`, "creative-delivered-"+value.ID, value.OrganizationID, value.ProjectID, value.ID, eventPayload, value.CreatedAt, value.CreatedAt)
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CreativePackage{}, err
+	}
+	return value, nil
+}
+
 const creativeIntakeSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 	request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash, version, created_at, updated_at FROM creative_intakes`
 const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, status, direction_payload, version, created_at, updated_at FROM creative_tasks`
 const creativeVersionSelect = `SELECT id, organization_id, project_id, task_id, version, draft_version, status,
-	snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at FROM creative_versions`
+	snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -356,14 +469,43 @@ func scanTask(row rowScanner) (CreativeTask, error) {
 
 func scanCreativeVersion(row rowScanner) (CreativeVersion, error) {
 	var value CreativeVersion
-	var snapshot []byte
+	var snapshot, check, approval []byte
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.TaskID, &value.Version, &value.DraftVersion,
-		&value.Status, &snapshot, &value.ContentHash, &value.CreatedBy, &value.IdempotencyKey, &value.RequestHash, &value.CreatedAt)
+		&value.Status, &snapshot, &value.ContentHash, &value.CreatedBy, &value.IdempotencyKey, &value.RequestHash, &value.CreatedAt, &check, &approval)
 	if err != nil {
 		return CreativeVersion{}, err
 	}
 	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
 		return CreativeVersion{}, fmt.Errorf("decode creative version snapshot: %w", err)
+	}
+	if len(check) > 0 {
+		value.Check = &CreativeCheck{}
+		if err := json.Unmarshal(check, value.Check); err != nil {
+			return CreativeVersion{}, fmt.Errorf("decode creative version check: %w", err)
+		}
+	}
+	if len(approval) > 0 {
+		value.Approval = &CreativeApproval{}
+		if err := json.Unmarshal(approval, value.Approval); err != nil {
+			return CreativeVersion{}, fmt.Errorf("decode creative version approval: %w", err)
+		}
+	}
+	return value, nil
+}
+
+func (r MySQLRepository) getPackageByVersion(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, creativeVersionID string) (CreativePackage, error) {
+	var value CreativePackage
+	var snapshot []byte
+	err := r.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id, creative_version_id, content_hash, snapshot_payload, created_by, created_at
+		FROM creative_packages WHERE organization_id = ? AND project_id = ? AND creative_version_id = ?`, organizationID, projectID, creativeVersionID).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativeVersionID, &value.ContentHash, &snapshot, &value.CreatedBy, &value.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreativePackage{}, ErrNotFound
+	}
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
+		return CreativePackage{}, err
 	}
 	return value, nil
 }

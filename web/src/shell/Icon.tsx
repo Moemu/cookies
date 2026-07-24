@@ -1,7 +1,7 @@
-import type { ShellModule } from './modules'
+export type IconName = 'target' | 'pen' | 'chart' | 'send' | 'settings'
 
 type IconProps = {
-  name: ShellModule['icon']
+  name: IconName
 }
 
 export function Icon({ name }: IconProps) {

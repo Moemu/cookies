@@ -12,8 +12,9 @@ import { StrategyWorkspacePage } from '../features/strategy/StrategyWorkspacePag
 import { StrategyReviewPage } from '../features/strategy/StrategyReviewPage'
 import { StrategyPackagePage } from '../features/strategy/StrategyPackagePage'
 import { Icon } from './Icon'
+import { AccountPage } from '../account/AccountPage'
 import { adminModule, shellModules } from './modules'
-import { logout } from '../auth/api'
+import { UserMenu } from './UserMenu'
 
 const modules = [...shellModules, adminModule]
 
@@ -63,9 +64,6 @@ export function Workspace() {
 
   const currentProject = projects.find((project) => project.id === projectId) ?? projects[0]
   const currentProjectId = projectId || currentProject?.id || ''
-  const displayName = identity?.user?.display_name || identity?.actor.principal.id || '本地用户'
-  const initial = displayName.slice(0, 1).toUpperCase()
-
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="系统导航">
@@ -117,14 +115,7 @@ export function Workspace() {
               </button>
             </div> : null}
           </div>
-          <div className="identity-summary" title={identity?.organization.name || ''}>
-            <span className="identity-summary__org">{identity?.organization.name || '本地组织'}</span>
-            <span className="avatar" aria-hidden="true">{initial}</span>
-            <span className="identity-summary__name">{displayName}</span>
-            <button className="identity-summary__logout" onClick={() => {
-              logout().finally(() => navigate('/login', { replace: true }))
-            }} type="button">退出</button>
-          </div>
+          <UserMenu identity={identity} />
         </header>
         {bootstrapError ? <div className="workspace-alert" role="status">身份与项目列表暂不可用：{bootstrapError}</div> : null}
         <main className="workspace" aria-live="polite">
@@ -141,6 +132,9 @@ export function Workspace() {
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
             <Route path="/projects/:projectId/creative/tasks" element={<CreativeImageTextPage />} />
             <Route path="/projects/:projectId/creative" element={<LegacyCreativeRedirect />} />
+            <Route path="/account/profile" element={<AccountPage identity={identity} view="profile" />} />
+            <Route path="/account/security" element={<AccountPage identity={identity} view="security" />} />
+            <Route path="/account/preferences" element={<AccountPage identity={identity} view="preferences" />} />
             <Route path="/admin" element={<IdentityOrganizationPage identity={identity} projects={projects} />} />
             <Route path="*" element={<ModulePlaceholder label={activeModule.label} description={activeModule.description} />} />
           </Routes>

@@ -183,6 +183,33 @@ func TestArchiveTaskHidesItFromActiveQueueButRetainsItsLineage(t *testing.T) {
 	}
 }
 
+func TestImagePlanRetriesRetainEachProviderAttempt(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	rc := testRequestContext()
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "creative-image-retry-intake", validManualRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RegisterImagePlanJob(context.Background(), rc.Actor, "project_1", task.ID, 2, "provider_job_first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RegisterImagePlanJob(context.Background(), rc.Actor, "project_1", task.ID, 2, "provider_job_retry"); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), rc.Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.ProductionJobs) != 2 || detail.ProductionJobs[0].Kind == detail.ProductionJobs[1].Kind {
+		t.Fatalf("production retries = %#v", detail.ProductionJobs)
+	}
+}
+
 func validManualRequest() CreateIntakeRequest {
 	return CreateIntakeRequest{
 		Source: IntakeSourceManual, Channel: ChannelXiaohongshu, Objective: "建立新品认知", Audience: "关注生活方式的年轻上班族", CoreMessage: "一杯咖啡，也可以成为从容开始的仪式", CallToAction: "收藏这份晨间灵感",
@@ -200,7 +227,7 @@ func testRequestContext() contract.RequestContext {
 
 func testService() Service {
 	sequence := 0
-	return Service{Repository: &memoryRepository{intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}, versions: map[string]CreativeVersion{}}, Projects: testProjects{}, Now: func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+	return Service{Repository: &memoryRepository{intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}, versions: map[string]CreativeVersion{}, packages: map[string]CreativePackage{}}, Projects: testProjects{}, Now: func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
 }
 
 type testProjects struct{}
@@ -229,6 +256,7 @@ type memoryRepository struct {
 	intakes  map[string]CreativeIntake
 	tasks    map[string]TaskDetail
 	versions map[string]CreativeVersion
+	packages map[string]CreativePackage
 }
 
 func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake) (CreativeIntake, bool, error) {
@@ -348,4 +376,47 @@ func (r *memoryRepository) CreateVersion(_ context.Context, value CreativeVersio
 	}
 	r.versions[value.ID] = value
 	return value, false, nil
+}
+
+func (r *memoryRepository) GetVersion(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string) (CreativeVersion, error) {
+	value, ok := r.versions[id]
+	if !ok {
+		return CreativeVersion{}, ErrNotFound
+	}
+	return value, nil
+}
+
+func (r *memoryRepository) RecordVersionCheck(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string, check CreativeCheck) (CreativeVersion, error) {
+	value, ok := r.versions[id]
+	if !ok {
+		return CreativeVersion{}, ErrNotFound
+	}
+	value.Status = CreativeVersionChecked
+	value.Check = &check
+	r.versions[id] = value
+	return value, nil
+}
+
+func (r *memoryRepository) ApproveVersion(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string, approval CreativeApproval) (CreativeVersion, error) {
+	value, ok := r.versions[id]
+	if !ok {
+		return CreativeVersion{}, ErrNotFound
+	}
+	if value.Status != CreativeVersionChecked || value.Check == nil || !value.Check.Passed {
+		return CreativeVersion{}, ErrInvalidState
+	}
+	value.Status = CreativeVersionApproved
+	value.Approval = &approval
+	r.versions[id] = value
+	return value, nil
+}
+
+func (r *memoryRepository) CreatePackage(_ context.Context, value CreativePackage) (CreativePackage, error) {
+	for _, existing := range r.packages {
+		if existing.CreativeVersionID == value.CreativeVersionID {
+			return existing, nil
+		}
+	}
+	r.packages[value.ID] = value
+	return value, nil
 }
