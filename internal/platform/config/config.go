@@ -83,10 +83,17 @@ type Provider struct {
 	OutputBucket      string
 	AllowInsecureHTTP bool
 	ArkImage          ArkImage
+	ArkText           ArkText
 	OpenAIImage       OpenAIImage
 }
 
 type ArkImage struct {
+	APIKey  string
+	Model   string
+	BaseURL string
+}
+
+type ArkText struct {
 	APIKey  string
 	Model   string
 	BaseURL string
@@ -206,13 +213,15 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MaxIdleConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_IDLE_CONNS", 5),
 		},
 		ObjectStorage: ObjectStorage{
-			Provider:       valueOr(lookup, "COOKIES_BLOB_PROVIDER", "filesystem"),
-			FilesystemRoot: valueOr(lookup, "COOKIES_FILESYSTEM_BLOB_ROOT", ".data/blobs"),
-			Endpoint:       valueOr(lookup, "COOKIES_TOS_ENDPOINT", ""), Region: valueOr(lookup, "COOKIES_TOS_REGION", ""),
-			AccessKey: valueOr(lookup, "COOKIES_TOS_ACCESS_KEY", ""), SecretKey: valueOr(lookup, "COOKIES_TOS_SECRET_KEY", ""),
-			SecurityToken:    valueOr(lookup, "COOKIES_TOS_SECURITY_TOKEN", ""),
-			QuarantineBucket: valueOr(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "cookies-quarantine"),
-			AssetsBucket:     valueOr(lookup, "COOKIES_TOS_ASSETS_BUCKET", "cookies-assets"),
+			Provider:         valueOrCompatibility(lookup, "COOKIES_BLOB_PROVIDER", "OBJECT_STORAGE_PROVIDER", "filesystem"),
+			FilesystemRoot:   valueOr(lookup, "COOKIES_FILESYSTEM_BLOB_ROOT", ".data/blobs"),
+			Endpoint:         valueOrCompatibility(lookup, "COOKIES_TOS_ENDPOINT", "OBJECT_STORAGE_ENDPOINT", ""),
+			Region:           valueOrCompatibility(lookup, "COOKIES_TOS_REGION", "OBJECT_STORAGE_REGION", ""),
+			AccessKey:        valueOrCompatibility(lookup, "COOKIES_TOS_ACCESS_KEY", "OBJECT_STORAGE_ACCESS_KEY", "OBJECT_STORAGE_ACCESS_KEY_ID", ""),
+			SecretKey:        valueOrCompatibility(lookup, "COOKIES_TOS_SECRET_KEY", "OBJECT_STORAGE_SECRET_KEY", "OBJECT_STORAGE_ACCESS_KEY_SECRET", ""),
+			SecurityToken:    valueOrCompatibility(lookup, "COOKIES_TOS_SECURITY_TOKEN", "OBJECT_STORAGE_SECURITY_TOKEN", ""),
+			QuarantineBucket: valueOrCompatibility(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "OBJECT_STORAGE_QUARANTINE_BUCKET", "cookies-quarantine"),
+			AssetsBucket:     valueOrCompatibility(lookup, "COOKIES_TOS_ASSETS_BUCKET", "OBJECT_STORAGE_ASSETS_BUCKET", "OBJECT_STORAGE_BUCKET_NAME", "cookies-assets"),
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
 		Strategy: Strategy{
@@ -236,6 +245,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 				APIKey:  valueOr(lookup, "COOKIES_ARK_IMAGE_API_KEY", ""),
 				Model:   valueOr(lookup, "COOKIES_ARK_IMAGE_MODEL", ""),
 				BaseURL: valueOr(lookup, "COOKIES_ARK_IMAGE_BASE_URL", ""),
+			},
+			ArkText: ArkText{
+				APIKey:  valueOr(lookup, "COOKIES_ARK_TEXT_API_KEY", ""),
+				Model:   valueOr(lookup, "COOKIES_ARK_TEXT_MODEL", ""),
+				BaseURL: valueOr(lookup, "COOKIES_ARK_TEXT_BASE_URL", ""),
 			},
 			OpenAIImage: OpenAIImage{
 				APIKey:  valueOr(lookup, "COOKIES_OPENAI_IMAGE_API_KEY", ""),
@@ -304,11 +318,11 @@ func (c Config) Validate() error {
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")
 	}
-	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "adapter_gateway" {
-		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake or adapter_gateway")
+	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
+		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake, adapter_gateway, or ark_text")
 	}
-	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" {
-		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires COOKIES_PROVIDER_TEXT_ADAPTER=adapter_gateway")
+	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
+		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires a real text adapter")
 	}
 	if strings.TrimSpace(c.Strategy.TextModelAlias) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_TEXT_MODEL_ALIAS must not be empty")
@@ -324,6 +338,9 @@ func (c Config) Validate() error {
 	}
 	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
 		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
+	}
+	if c.Provider.TextAdapter == "ark_text" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkText.APIKey) == "" || strings.TrimSpace(c.Provider.ArkText.Model) == "") {
+		return fmt.Errorf("ark_text is local-only and requires COOKIES_ARK_TEXT_API_KEY and COOKIES_ARK_TEXT_MODEL")
 	}
 	if (c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway") && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
 		return fmt.Errorf("adapter_gateway requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")
@@ -367,6 +384,18 @@ func valueOr(lookup func(string) (string, bool), key, fallback string) string {
 		return strings.TrimSpace(value)
 	}
 	return fallback
+}
+
+func valueOrCompatibility(lookup func(string) (string, bool), key string, compatibilityKeys ...string) string {
+	if value, ok := lookup(key); ok {
+		return strings.TrimSpace(value)
+	}
+	for _, compatibilityKey := range compatibilityKeys[:len(compatibilityKeys)-1] {
+		if value, ok := lookup(compatibilityKey); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return compatibilityKeys[len(compatibilityKeys)-1]
 }
 
 func anyValue(values map[string]string) bool {

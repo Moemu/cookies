@@ -34,12 +34,38 @@ export type ApiGenerationJob = {
   updatedAt: string
 }
 
+export type ApiBusinessTaskType =
+  | 'strategy'
+  | 'creative'
+  | 'video'
+  | 'brand_video'
+  | 'short_drama_preroll'
+  | 'game_preroll'
+  | 'commerce_preroll'
+  | 'viral_remake'
+  | 'video_edit'
+
+export type ApiBusinessTask = {
+  id: string
+  projectId: string
+  type: ApiBusinessTaskType
+  name: string
+  objective: string
+  status: 'draft' | 'in_progress' | 'ready' | 'completed' | 'failed'
+  sourceTaskIds: string[]
+  sourceArtifactIds: string[]
+  outputArtifactIds: string[]
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type ApiAuditEvent = {
   id: string
   projectId: string
   actor: string
   action: string
-  entityType: 'project' | 'artifact' | 'generation_job' | 'change_set'
+  entityType: 'project' | 'business_task' | 'artifact' | 'generation_job' | 'change_set'
   entityId: string
   metadata: Record<string, unknown>
   createdAt: string
@@ -81,8 +107,26 @@ export const api = {
   listProjects: () => request<ApiProject[]>('/projects'),
   createProject: (input: Pick<ApiProject, 'name' | 'brand' | 'objective'>) =>
     request<ApiProject>('/projects', 'POST', input),
+  updateProject: (id: string, input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective'>>) =>
+    request<ApiProject>(`/projects/${encodeURIComponent(id)}`, 'PATCH', input),
   listArtifacts: (projectId?: string) =>
     request<ApiArtifact[]>(`/artifacts${projectQuery(projectId)}`),
+  listTasks: (projectId?: string) =>
+    request<ApiBusinessTask[]>(`/tasks${projectQuery(projectId)}`),
+  getTask: (id: string) =>
+    request<ApiBusinessTask>(`/tasks/${encodeURIComponent(id)}`),
+  createTask: (input: {
+    projectId: string
+    type: ApiBusinessTaskType
+    name: string
+    objective: string
+    sourceTaskIds?: string[]
+    sourceArtifactIds?: string[]
+  }) => request<ApiBusinessTask>('/tasks', 'POST', input),
+  updateTask: (
+    id: string,
+    input: Partial<Pick<ApiBusinessTask, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>,
+  ) => request<ApiBusinessTask>(`/tasks/${encodeURIComponent(id)}`, 'PATCH', input),
   createArtifact: (input: {
     projectId: string
     kind: ApiArtifact['kind']

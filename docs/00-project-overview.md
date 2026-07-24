@@ -127,14 +127,16 @@ flowchart TB
 
   Strategy -->|"批准策略"| Creative
   Strategy -->|"批准策略"| Delivery
-  Creative -->|"批准创意"| Insights
+  Insights -->|"投前洞察：证据、经验、风险"| Strategy
+  Insights -->|"投前洞察：创意建议、反例"| Creative
+  Creative -->|"批准创意与素材特征"| Insights
   Creative -->|"创意包"| Delivery
-  Delivery -->|"效果数据"| Insights
-  Insights -->|"已确认经验"| Strategy
-  Insights -->|"已确认经验"| Creative
+  Delivery -->|"投放指标"| Insights
+  Insights -->|"投后分析与已确认经验"| Strategy
+  Insights -->|"投后分析与已确认经验"| Creative
 ```
 
-图中的业务箭头代表 API/领域事件，不代表数据库依赖；Project 虚线只表示共同上下文和只读资源索引，不表示拥有模块业务对象。
+图中的业务箭头代表 API/领域事件，不代表数据库依赖；Project 虚线只表示共同上下文和只读资源索引，不表示拥有模块业务对象。素材洞察不是生产流程末端：投前洞察在 Brief、策略和创意形成前提供证据，投后分析在投放后解释结果并沉淀经验，经验再回流下一轮投前决策。
 
 ### 5.5 关键领域事件
 
@@ -221,7 +223,7 @@ flowchart TB
 | --- | --- | --- |
 | 需求与策略 | `/strategy/*` | 工作台、策略工作区、需求中心、策略中心、研究洞察、评审、能力运营 |
 | 创意创作 | `/creative/*` | 工作台、图文创作、视频创作、创意任务、评审、交付、创意运营 |
-| 素材洞察 | `/insights/*` | 工作台、数据接入、分析素材库、内容/效果分析、实验、经验库、报告 |
+| 素材洞察 | `/projects/:projectId/insight/*` | 投前洞察、投后分析、分析素材库、内容分析、实验、经验库、报告 |
 | 智能投放 | `/delivery/*` | 作战台、账户环境、投放计划、执行中心、监控告警、优化、证据审计 |
 | 共享管理台 | `/admin/*` | 用户组织、Provider、知识库、Agent、Computer Use、工作流、安全、用量 |
 

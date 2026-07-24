@@ -3,6 +3,8 @@ import type { SystemKey } from '../types'
 
 export interface AppRoute {
   isHome: boolean
+  isProjectHome: boolean
+  isProjectManagement: boolean
   isModelSettings: boolean
   projectId?: string
   systemKey: SystemKey
@@ -13,15 +15,26 @@ export interface AppRoute {
 
 const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'delivery'])
 
-export function parseRoute(pathname = window.location.pathname): AppRoute {
-  const parts = pathname.split('/').filter(Boolean)
-  if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isModelSettings: true, systemKey: 'strategy', navId: 'home' }
-  if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isModelSettings: false, systemKey: 'strategy', navId: 'home' }
+export function parseRoute(location = `${window.location.pathname}${window.location.search}`): AppRoute {
+  const url = new URL(location, window.location.origin)
+  const parts = url.pathname.split('/').filter(Boolean)
+  if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, systemKey: 'strategy', navId: 'tasks' }
+  if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, systemKey: 'strategy', navId: 'tasks' }
+  if (!parts[2] || parts[2] === 'home') return { isHome: false, isProjectHome: true, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
+  if (parts[2] === 'manage') return { isHome: false, isProjectHome: false, isProjectManagement: true, isModelSettings: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
   const systemKey = systemKeys.has(parts[2] as SystemKey) ? parts[2] as SystemKey : 'strategy'
-  return { isHome: false, isModelSettings: false, projectId: parts[1], systemKey, navId: parts[3] || 'home', objectId: parts[4], view: new URLSearchParams(window.location.search).get('view') ?? undefined }
+  return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey, navId: parts[3] || 'tasks', objectId: parts[4], view: url.searchParams.get('view') ?? undefined }
 }
 
-export function projectPath(projectId: string, systemKey: SystemKey, navId = 'home', objectId?: string, view?: string) {
+export function projectHomePath(projectId: string) {
+  return `/projects/${projectId}/home`
+}
+
+export function projectManagePath(projectId: string) {
+  return `/projects/${projectId}/manage`
+}
+
+export function projectPath(projectId: string, systemKey: SystemKey, navId: string, objectId?: string, view?: string) {
   const path = `/projects/${projectId}/${systemKey}/${navId}${objectId ? `/${objectId}` : ''}`
   return view ? `${path}?view=${encodeURIComponent(view)}` : path
 }

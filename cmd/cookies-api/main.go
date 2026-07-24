@@ -230,6 +230,12 @@ func buildTextAdapter(cfg config.Config, db *sql.DB) (provider.TextProviderAdapt
 		}
 		store := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
 		return provider.NewAdapterGatewayTextAdapter(store, store, cfg.Provider.AllowInsecureHTTP)
+	case "ark_text":
+		return provider.NewArkTextAdapter(provider.ArkTextConfig{
+			APIKey:  cfg.Provider.ArkText.APIKey,
+			Model:   cfg.Provider.ArkText.Model,
+			BaseURL: cfg.Provider.ArkText.BaseURL,
+		})
 	default:
 		return nil, fmt.Errorf("unsupported Provider text adapter %q", cfg.Provider.TextAdapter)
 	}

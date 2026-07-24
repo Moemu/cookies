@@ -12,13 +12,15 @@ export const initialProjects: ProjectRecord[] = [
   {
     id: 'prj-2607-01', code: 'SP', name: '春季新品上市', brand: '白域精工', product: '高精度 CNC 加工零部件', goal: '新品上市与销售线索增长', stage: '投放审批', progress: 82, status: '进行中', updatedAt: '2026-07-22 16:30', budget: 1000000, currency: 'CNY', timezone: 'Asia/Shanghai',
     artifacts: structuredClone(artifacts),
+    tasks: [],
     changeSets: [{ id: 'CS-2607-018', title: '合并重复广告并补充 6 条新素材', status: '待审批', risk: '中', budgetImpact: 8600, createdAt: '2026-07-22 16:30', createdBy: 'Noah Xu', version: 3, evidenceIds: ['EV-021', 'EV-024', 'INS-014'], rollbackPlan: '恢复 PLAN-2607-06 v0.8，并重新启用原广告组。', changes: [{ field: '重复广告', before: '12 组', after: '保留 5 组有效组合' }, { field: '新素材覆盖', before: '18%', after: '30% 目标' }, { field: '探索预算', before: '¥0', after: '¥8,600' }] }],
+    knowledgeCount: 1,
   },
   {
-    id: 'prj-2607-02', code: 'HG', name: '华东行业增长计划', brand: '白域精工', product: '精密制造解决方案', goal: '重点行业客户拓展', stage: '素材洞察', progress: 64, status: '进行中', updatedAt: '2026-07-21 18:40', budget: 680000, currency: 'CNY', timezone: 'Asia/Shanghai', artifacts: structuredClone(artifacts), changeSets: [],
+    id: 'prj-2607-02', code: 'HG', name: '华东行业增长计划', brand: '白域精工', product: '精密制造解决方案', goal: '重点行业客户拓展', stage: '素材洞察', progress: 64, status: '进行中', updatedAt: '2026-07-21 18:40', budget: 680000, currency: 'CNY', timezone: 'Asia/Shanghai', artifacts: structuredClone(artifacts), tasks: [], changeSets: [], knowledgeCount: 0,
   },
   {
-    id: 'prj-2606-03', code: 'BU', name: '精密制造品牌升级', brand: '白域精工', product: '品牌整合传播', goal: '品牌认知与可信证据建设', stage: '已完成', progress: 100, status: '已完成', updatedAt: '2026-07-18 11:20', budget: 420000, currency: 'CNY', timezone: 'Asia/Shanghai', artifacts: structuredClone(artifacts), changeSets: [],
+    id: 'prj-2606-03', code: 'BU', name: '精密制造品牌升级', brand: '白域精工', product: '品牌整合传播', goal: '品牌认知与可信证据建设', stage: '已完成', progress: 100, status: '已完成', updatedAt: '2026-07-18 11:20', budget: 420000, currency: 'CNY', timezone: 'Asia/Shanghai', artifacts: structuredClone(artifacts), tasks: [], changeSets: [], knowledgeCount: 2,
   },
 ]
 
