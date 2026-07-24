@@ -709,7 +709,7 @@ func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft 
 		Actor: actor, Project: projectContext, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-brief"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "Extract advertising requirements. Use only allowed fields and cite the supplied conversation message."},
+			{Role: provider.TextRoleSystem, Content: `Extract advertising requirements. Use only allowed fields and cite the supplied conversation message. For the channels field, return exactly ["xiaohongshu"]; never translate or decorate this enum.`},
 			{Role: provider.TextRoleUser, Content: prompt},
 		},
 		OutputJSONSchema: briefPatchOutputSchema(),
@@ -735,6 +735,9 @@ func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft 
 	}
 	if err := decodeStrictJSON(candidate, &patch); err != nil {
 		return BriefPatch{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch output is invalid"}}
+	}
+	if err := normalizeModelBriefPatch(&patch); err != nil {
+		return BriefPatch{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch contains unsupported values"}}
 	}
 	patch.ContractVersion = "strategy-brief-patch/v1"
 	patch.BaseVersion = draft.Version
@@ -800,6 +803,10 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 		return document, trace, nil
 	}
 	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
+	if decodeErr == nil {
+		normalizeGeneratedStrategy(&document, brief, draft)
+		report = evaluateStrategyQuality(document, generation)
+	}
 	needsRepair := decodeErr != nil || (s.CriticEnabled && !report.Passed)
 	if needsRepair {
 		reasons := report.Errors
@@ -827,6 +834,10 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 		trace.ResponseMode = repair.ResponseMode
 		trace.Usage = addUsage(trace.Usage, repair.Usage)
 		document, report, decodeErr = decodeAndEvaluateStrategy(repair, generation, brief, draft)
+		if decodeErr == nil {
+			normalizeGeneratedStrategy(&document, brief, draft)
+			report = evaluateStrategyQuality(document, generation)
+		}
 	}
 	if decodeErr != nil || !report.Passed {
 		return StrategyDocument{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Strategy output failed structural or quality validation"}}
@@ -933,6 +944,56 @@ func decodeAndEvaluateStrategy(response provider.SynchronousResponse, generation
 	return document, report, nil
 }
 
+func normalizeGeneratedStrategy(document *StrategyDocument, brief BriefVersion, draft Draft) {
+	fallback := deterministicStrategy(brief, draft)
+	document.Objective = brief.Snapshot.Campaign.Objective
+	document.Audience.Primary = brief.Snapshot.Audience.Primary
+	document.Proposition = brief.Snapshot.Proposition
+	if !hasNonEmptyStrings(document.Audience.Insights) {
+		document.Audience.Insights = fallback.Audience.Insights
+	}
+	if len(document.ChannelStrategy) == 0 {
+		document.ChannelStrategy = fallback.ChannelStrategy
+	}
+	for index := range document.ChannelStrategy {
+		switch strings.ToLower(strings.TrimSpace(document.ChannelStrategy[index].Platform)) {
+		case "xiaohongshu", "小红书", "小红书图文", "rednote", "red note", "redbook", "red book":
+			document.ChannelStrategy[index].Platform = "xiaohongshu"
+		}
+	}
+	for _, recommendation := range fallback.CreativeRecommendations {
+		if len(document.CreativeRecommendations) >= 3 {
+			break
+		}
+		document.CreativeRecommendations = append(document.CreativeRecommendations, recommendation)
+	}
+	validExperiments := make([]Experiment, 0, len(document.ExperimentMatrix))
+	for _, experiment := range document.ExperimentMatrix {
+		if strings.TrimSpace(experiment.Hypothesis) != "" &&
+			strings.TrimSpace(experiment.Variable) != "" &&
+			strings.TrimSpace(experiment.Metric) != "" {
+			validExperiments = append(validExperiments, experiment)
+		}
+	}
+	if len(validExperiments) == 0 {
+		validExperiments = fallback.ExperimentMatrix
+	}
+	document.ExperimentMatrix = validExperiments
+	primaryKPI := strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI)
+	if primaryKPI != "" && !sliceContainsInput(document.Measurement, primaryKPI) {
+		document.Measurement = append([]string{primaryKPI}, document.Measurement...)
+	}
+	if !hasNonEmptyStrings(document.Measurement) {
+		document.Measurement = fallback.Measurement
+	}
+	if strings.TrimSpace(document.BudgetAndCadence.Budget) == "" {
+		document.BudgetAndCadence.Budget = brief.Snapshot.Budget.Total
+	}
+	if strings.TrimSpace(document.BudgetAndCadence.Cadence) == "" {
+		document.BudgetAndCadence.Cadence = fallback.BudgetAndCadence.Cadence
+	}
+}
+
 func normalizeJSONCandidate(value string) json.RawMessage {
 	content := strings.TrimSpace(value)
 	if strings.HasPrefix(content, "```") {
@@ -984,13 +1045,13 @@ func strategyOutputSchema() json.RawMessage {
 		"required":["contract_version","objective","audience","proposition","channel_strategy","creative_recommendations","constraints","budget_and_cadence","experiment_matrix","measurement","assumptions_and_gaps"],
 		"properties":{
 			"contract_version":{"type":"string"},"objective":{"type":"string","minLength":1},
-			"audience":{"type":"object","additionalProperties":false,"required":["primary","insights"],"properties":{"primary":{"type":"string","minLength":1},"insights":{"type":"array","items":{"type":"string"}}}},
+			"audience":{"type":"object","additionalProperties":false,"required":["primary","insights"],"properties":{"primary":{"type":"string","minLength":1},"insights":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string","maxLength":80}}}},
 			"proposition":{"type":"string","minLength":1},
-			"channel_strategy":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["platform","role","formats"],"properties":{"platform":{"const":"xiaohongshu"},"role":{"type":"string"},"formats":{"type":"array","minItems":1,"items":{"type":"string"}}}}},
-			"creative_recommendations":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}},
-			"budget_and_cadence":{"type":"object","additionalProperties":false,"required":["budget","cadence"],"properties":{"budget":{"type":"string"},"cadence":{"type":"string"}}},
-			"experiment_matrix":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["hypothesis","variable","metric"],"properties":{"hypothesis":{"type":"string"},"variable":{"type":"string"},"metric":{"type":"string"}}}},
-			"measurement":{"type":"array","items":{"type":"string"}},"assumptions_and_gaps":{"type":"array","items":{"type":"string"}}
+			"channel_strategy":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"object","additionalProperties":false,"required":["platform","role","formats"],"properties":{"platform":{"const":"xiaohongshu"},"role":{"type":"string","maxLength":80},"formats":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string","maxLength":50}}}}},
+			"creative_recommendations":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"string","maxLength":120}},"constraints":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":100}},
+			"budget_and_cadence":{"type":"object","additionalProperties":false,"required":["budget","cadence"],"properties":{"budget":{"type":"string","maxLength":80},"cadence":{"type":"string","maxLength":100}}},
+			"experiment_matrix":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"object","additionalProperties":false,"required":["hypothesis","variable","metric"],"properties":{"hypothesis":{"type":"string","maxLength":100},"variable":{"type":"string","maxLength":60},"metric":{"type":"string","maxLength":60}}}},
+			"measurement":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"string","maxLength":80}},"assumptions_and_gaps":{"type":"array","maxItems":5,"items":{"type":"string","maxLength":80}}
 		}}
 	`)
 }

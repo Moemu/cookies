@@ -95,3 +95,28 @@ func TestDeterministicBriefPatchSeparatesChineseLabeledFields(t *testing.T) {
 		t.Fatalf("extracted fields = %#v", values)
 	}
 }
+
+func TestNormalizeModelBriefPatchCanonicalizesXiaohongshuAliases(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"小红书", "小红书图文", "red note", "xiaohongshu"} {
+		patch := BriefPatch{Operations: []BriefPatchOperation{{
+			Op: "set", FieldPath: "channels", Value: mustJSON([]string{input}),
+		}}}
+		if err := normalizeModelBriefPatch(&patch); err != nil {
+			t.Fatalf("normalize %q: %v", input, err)
+		}
+		if got := string(patch.Operations[0].Value); got != `["xiaohongshu"]` {
+			t.Fatalf("normalize %q = %s", input, got)
+		}
+	}
+}
+
+func TestNormalizeModelBriefPatchRejectsUnsupportedChannels(t *testing.T) {
+	t.Parallel()
+	patch := BriefPatch{Operations: []BriefPatchOperation{{
+		Op: "set", FieldPath: "channels", Value: mustJSON([]string{"douyin"}),
+	}}}
+	if err := normalizeModelBriefPatch(&patch); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("error = %v, want invalid request", err)
+	}
+}

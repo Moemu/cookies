@@ -70,6 +70,35 @@ func ApplyBriefPatch(draft BriefDraft, patch BriefPatch, origin PatchOrigin, act
 	return draft, nil
 }
 
+func normalizeModelBriefPatch(patch *BriefPatch) error {
+	if patch == nil {
+		return fmt.Errorf("%w: brief patch is required", ErrInvalidRequest)
+	}
+	for index := range patch.Operations {
+		operation := &patch.Operations[index]
+		if operation.FieldPath != "channels" {
+			continue
+		}
+		var values []string
+		if err := json.Unmarshal(operation.Value, &values); err != nil || len(values) == 0 {
+			return fmt.Errorf("%w: channels must be a non-empty string array", ErrInvalidRequest)
+		}
+		normalized := make([]string, 0, len(values))
+		for _, value := range values {
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "xiaohongshu", "小红书", "小红书图文", "rednote", "red note", "redbook", "red book":
+				if len(normalized) == 0 {
+					normalized = append(normalized, "xiaohongshu")
+				}
+			default:
+				return fmt.Errorf("%w: first release supports only xiaohongshu", ErrInvalidRequest)
+			}
+		}
+		operation.Value = mustJSON(normalized)
+	}
+	return nil
+}
+
 func setBriefField(document *BriefDocument, path string, raw json.RawMessage) error {
 	switch path {
 	case "campaign.objective":

@@ -63,7 +63,23 @@ try {
         )
     }
 
-    $dockerDSN = "cookies:cookies_local_development_only@tcp([::1]:3306)/cookies?parseTime=true&multiStatements=true"
+    $mysqlPort = $env:COOKIES_MYSQL_PORT
+    if ([string]::IsNullOrWhiteSpace($mysqlPort)) {
+        $mysqlPort = [Environment]::GetEnvironmentVariable(
+            "COOKIES_MYSQL_PORT",
+            "User"
+        )
+    }
+    if ([string]::IsNullOrWhiteSpace($mysqlPort)) {
+        $mysqlPort = "3307"
+    }
+    $env:COOKIES_MYSQL_PORT = $mysqlPort
+    [Environment]::SetEnvironmentVariable(
+        "COOKIES_MYSQL_PORT",
+        $mysqlPort,
+        "User"
+    )
+    $dockerDSN = "cookies:cookies_local_development_only@tcp(127.0.0.1:$mysqlPort)/cookies?parseTime=true&multiStatements=true"
     [Environment]::SetEnvironmentVariable(
         "COOKIES_MYSQL_DSN",
         $dockerDSN,
@@ -92,7 +108,14 @@ try {
         "COOKIES_LOCAL_PRINCIPAL_KIND" = "user"
         "COOKIES_LOCAL_PRINCIPAL_ID" = "user_local"
         "COOKIES_LOCAL_PROJECT_ID" = "project_local"
-        "COOKIES_LOCAL_SCOPES" = "project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand"
+        "COOKIES_LOCAL_SCOPES" = "project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand,creative.read,creative.write,strategy.read,strategy.write,strategy.confirm,strategy.review,strategy.approve,strategy.package.read"
+        "COOKIES_STRATEGY_ENABLED" = "true"
+        "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" = "true"
+        "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" = "cookies.text.standard"
+        "COOKIES_STRATEGY_CRITIC_ENABLED" = "true"
+        "COOKIES_STRATEGY_APPROVE_ENABLED" = "true"
+        "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED" = "true"
+        "COOKIES_PROVIDER_TEXT_ADAPTER" = "adapter_gateway"
     }
     foreach ($setting in $localSettings.GetEnumerator()) {
         [Environment]::SetEnvironmentVariable(
@@ -142,7 +165,8 @@ UPDATE provider_model_routes SET current_revision_id=NULL
     'route_clawex_seedream_5',
     'route_clawex_enhance_image',
     'route_clawex_remove_background',
-    'route_cookies_image_standard'
+    'route_cookies_image_standard',
+    'route_cookies_text_standard'
   );
 DELETE FROM provider_model_route_revisions
   WHERE route_id IN (
@@ -155,7 +179,8 @@ DELETE FROM provider_model_route_revisions
     'route_clawex_seedream_5',
     'route_clawex_enhance_image',
     'route_clawex_remove_background',
-    'route_cookies_image_standard'
+    'route_cookies_image_standard',
+    'route_cookies_text_standard'
   );
 DELETE FROM provider_model_routes
   WHERE id IN (
@@ -168,7 +193,8 @@ DELETE FROM provider_model_routes
     'route_clawex_seedream_5',
     'route_clawex_enhance_image',
     'route_clawex_remove_background',
-    'route_cookies_image_standard'
+    'route_cookies_image_standard',
+    'route_cookies_text_standard'
   );
 DELETE FROM provider_credentials WHERE connection_id='connection_clawex_adapter';
 UPDATE provider_connections SET current_revision_id=NULL
@@ -294,12 +320,38 @@ INSERT INTO provider_credentials
             Model = "gpt-image-2"
             Endpoint = "/v1/images/generations"
             SourceProvider = "artsapi-gateway"
+        },
+        @{
+            ID = "route_cookies_text_standard"
+            Capability = "text.generate"
+            Alias = "cookies.text.standard"
+            Model = "doubao-seed-2-0-pro-260215"
+            Endpoint = "/v1/chat/completions"
+            SourceProvider = "ark"
+            TextResponseMode = "prompt_json"
+            MaxOutputTokens = 4096
+            Temperature = 0.3
+            ThinkingMode = "disabled"
         }
     )
 
     $routeSQL = New-Object Text.StringBuilder
     foreach ($route in $routes) {
         $revisionID = "$($route.ID)_r1"
+        $textConstraints = ""
+        if ($route.Capability -eq "text.generate") {
+            $responseMode = if ($route.TextResponseMode) { $route.TextResponseMode } else { "prompt_json" }
+            $maxOutputTokens = if ($route.MaxOutputTokens) { $route.MaxOutputTokens } else { 8000 }
+            $temperature = if ($null -ne $route.Temperature) { $route.Temperature } else { 0.3 }
+            $thinkingMode = if ($route.ThinkingMode) { $route.ThinkingMode } else { "" }
+            $thinkingConstraint = if ($thinkingMode) { "      ,'thinking_mode','$thinkingMode'" } else { "" }
+            $textConstraints = @"
+      ,'text_response_mode','$responseMode'
+      ,'max_output_tokens',$maxOutputTokens
+      ,'temperature',$temperature
+$thinkingConstraint
+"@
+        }
         [void]$routeSQL.AppendLine(@"
 INSERT INTO provider_model_routes
   (id,organization_id,capability,model_alias,current_revision_id,status)
@@ -319,6 +371,7 @@ INSERT INTO provider_model_route_revisions
       'endpoint','$($route.Endpoint)',
       'source_provider','$($route.SourceProvider)',
       'source','clawex_csv'
+      $textConstraints
     )
   );
 UPDATE provider_model_routes

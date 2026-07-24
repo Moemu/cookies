@@ -175,6 +175,32 @@ func TestAdapterGatewayTextUsesJSONObjectMode(t *testing.T) {
 	}
 }
 
+func TestAdapterGatewayTextForwardsThinkingMode(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		thinking, _ := body["thinking"].(map[string]any)
+		if thinking["type"] != "disabled" {
+			t.Fatalf("thinking = %#v", body["thinking"])
+		}
+		_, _ = writer.Write([]byte(`{"model":"text","choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.ThinkingMode = "disabled"
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	if _, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "model",
+		Messages: []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAdapterGatewayTextInspectionDoesNotInvokeModel(t *testing.T) {
 	t.Parallel()
 	snapshot := textRouteSnapshot("https://gateway.example")

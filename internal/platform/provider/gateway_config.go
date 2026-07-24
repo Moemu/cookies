@@ -44,6 +44,7 @@ type GatewayRouteSnapshot struct {
 	MaxOutputTokens      int              `json:"max_output_tokens,omitempty"`
 	Temperature          float64          `json:"temperature,omitempty"`
 	TemperatureSet       bool             `json:"-"`
+	ThinkingMode         string           `json:"thinking_mode,omitempty"`
 }
 
 func (s GatewayRouteSnapshot) Validate() error {
@@ -88,6 +89,11 @@ func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) err
 	}
 	if s.Temperature < 0 || s.Temperature > 2 {
 		return fmt.Errorf("adapter gateway temperature is invalid")
+	}
+	switch s.ThinkingMode {
+	case "", "auto", "enabled", "disabled":
+	default:
+		return fmt.Errorf("adapter gateway thinking mode is invalid")
 	}
 	return nil
 }
@@ -180,6 +186,7 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 		ResponseMode    TextResponseMode `json:"text_response_mode"`
 		MaxOutputTokens int              `json:"max_output_tokens"`
 		Temperature     *float64         `json:"temperature"`
+		ThinkingMode    string           `json:"thinking_mode"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &constraints); err != nil {
@@ -198,6 +205,7 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 		snapshot.Temperature = *constraints.Temperature
 		snapshot.TemperatureSet = true
 	}
+	snapshot.ThinkingMode = constraints.ThinkingMode
 	return nil
 }
 

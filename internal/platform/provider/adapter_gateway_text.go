@@ -78,6 +78,9 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 	if route.TemperatureSet {
 		body["temperature"] = route.Temperature
 	}
+	if route.ThinkingMode != "" {
+		body["thinking"] = map[string]string{"type": route.ThinkingMode}
+	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return SynchronousResult{}, err

@@ -1,9 +1,11 @@
 package strategy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	strategyskills "github.com/shikanon/cookies/internal/systems/strategy/skills"
 )
 
 func TestEvidenceFromBriefPreservesConfirmationBoundary(t *testing.T) {
@@ -79,6 +81,71 @@ func TestStrategyQualityRejectsConfirmedBriefDrift(t *testing.T) {
 	report := evaluateStrategyQuality(document, generation)
 	if report.Passed || len(report.Errors) < 3 {
 		t.Fatalf("quality report = %#v", report)
+	}
+}
+
+func TestNormalizeGeneratedStrategyRepairsCommonModelDriftLocally(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{
+		BriefID: "brief_1",
+		Version: 1,
+		Snapshot: BriefDocument{
+			Campaign:    BriefCampaign{Objective: "获取有效销售线索"},
+			Audience:    BriefAudience{Primary: "制造企业质量负责人"},
+			Proposition: "无需改造产线即可部署",
+			Channels:    []string{"xiaohongshu"},
+			Budget:      BriefBudget{Total: "30万元"},
+			Measurement: BriefMeasurement{PrimaryKPI: "40条有效销售线索"},
+		},
+	}
+	document := StrategyDocument{
+		ContractVersion: "strategy-draft/v1",
+		Objective:       "提升品牌影响力",
+		Audience:        StrategyAudience{Primary: "泛制造业人群"},
+		Proposition:     "智能检测",
+		ChannelStrategy: []ChannelStrategy{{
+			Platform: "小红书图文", Role: "决策辅助", Formats: []string{"图文"},
+		}},
+		CreativeRecommendations: []string{"展示真实产线场景"},
+		ExperimentMatrix: []Experiment{{
+			Hypothesis: "", Variable: "首图", Metric: "点击率",
+		}},
+		Lineage: StrategyLineage{
+			BriefID: "brief_1", BriefVersion: 1, ProjectContextVersion: 1,
+		},
+	}
+
+	normalizeGeneratedStrategy(&document, brief, Draft{ProjectContextVersion: 1})
+
+	if document.Objective != brief.Snapshot.Campaign.Objective ||
+		document.Audience.Primary != brief.Snapshot.Audience.Primary ||
+		document.Proposition != brief.Snapshot.Proposition {
+		t.Fatalf("confirmed fields were not anchored to brief: %#v", document)
+	}
+	if document.ChannelStrategy[0].Platform != "xiaohongshu" {
+		t.Fatalf("channel = %q", document.ChannelStrategy[0].Platform)
+	}
+	if len(document.Audience.Insights) == 0 || len(document.CreativeRecommendations) < 3 ||
+		len(document.ExperimentMatrix) == 0 || document.Measurement[0] != "40条有效销售线索" {
+		t.Fatalf("local repair incomplete: %#v", document)
+	}
+}
+
+func TestStrategyUserPromptOmitsDuplicatedConversationAndSkills(t *testing.T) {
+	t.Parallel()
+	prompt := strategyUserPrompt(GenerationContext{
+		ContractVersion: "strategy-generation-context/v2",
+		Project:         contract.ProjectContext{ProjectContextVersion: 3},
+		Evidence:        []EvidenceItem{{FieldPath: "campaign.objective", Value: "获取线索", Confirmed: true}},
+		Conversation:    []ConversationExcerpt{{Role: "user", Content: "不应重复进入策略提示词"}},
+		Skills:          []strategyskills.Snapshot{{Name: "不应重复的 Skill"}},
+		PromptVersion:   "strategy.generate.v2",
+	})
+	if strings.Contains(prompt, "不应重复进入策略提示词") || strings.Contains(prompt, "不应重复的 Skill") {
+		t.Fatalf("prompt still contains duplicated context: %s", prompt)
+	}
+	if !strings.Contains(prompt, "获取线索") || !strings.Contains(prompt, `"project_context_version":3`) {
+		t.Fatalf("prompt omitted required context: %s", prompt)
 	}
 }
 

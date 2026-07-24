@@ -19,14 +19,30 @@ func TestApplyTextRouteConstraintsReadsSamplingPolicy(t *testing.T) {
 	err := applyTextRouteConstraints(&snapshot, []byte(`{
 		"text_response_mode":"json_object",
 		"max_output_tokens":4096,
-		"temperature":0.4
+		"temperature":0.4,
+		"thinking_mode":"disabled"
 	}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.TextResponseMode != TextResponseJSONObject ||
-		snapshot.MaxOutputTokens != 4096 || snapshot.Temperature != 0.4 || !snapshot.TemperatureSet {
+		snapshot.MaxOutputTokens != 4096 || snapshot.Temperature != 0.4 || !snapshot.TemperatureSet ||
+		snapshot.ThinkingMode != "disabled" {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestGatewayRouteRejectsUnknownThinkingMode(t *testing.T) {
+	t.Parallel()
+	snapshot := GatewayRouteSnapshot{
+		RouteID: "route", RouteRevisionID: "revision", ConnectionID: "connection",
+		ConnectionRevisionID: "connection_revision", BaseURL: "https://gateway.example",
+		UpstreamModel: "model", CredentialID: "credential", CredentialVersion: 1,
+		TimeoutSeconds: 30, MaxResponseBytes: 1024, TextResponseMode: TextResponsePromptJSON,
+		ThinkingMode: "sometimes",
+	}
+	if err := snapshot.ValidateTextWithPolicy(false); err == nil {
+		t.Fatal("expected invalid thinking mode")
 	}
 }
 
