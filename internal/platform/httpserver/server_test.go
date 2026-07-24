@@ -412,6 +412,53 @@ func TestCreativeCoverJobKeepsCreativeTaskLineage(t *testing.T) {
 	}
 }
 
+func TestFreezeCreativeVersionUsesIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creativeManager := &creativeManagerStub{frozenVersion: creative.CreativeVersion{ID: "creative_version_1", OrganizationID: "org_1", ProjectID: "project_1", TaskID: "creative_task_1", Version: 1, DraftVersion: 1, Status: creative.CreativeVersionCreated}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: creativeManager})
+	request := httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_1:freeze-version", bytes.NewBufferString(`{"draft_version":1}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "creative-freeze-http-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if creativeManager.freezeKey != "creative-freeze-http-1" || creativeManager.freezeTaskID != "creative_task_1" {
+		t.Fatalf("freeze request was not forwarded: key=%q task=%q", creativeManager.freezeKey, creativeManager.freezeTaskID)
+	}
+}
+
+func TestReviseCreativeDraftUsesTaskActionAndExpectedVersion(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creativeManager := &creativeManagerStub{revisedDraft: creative.ImageTextDraft{TaskID: "creative_task_1", Version: 2}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: creativeManager})
+	request := httptest.NewRequest(http.MethodPatch, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_1:draft", bytes.NewBufferString(`{"expected_version":1,"title_candidates":["标题一","标题二","标题三"],"body":"正文","topics":[],"cover_copy":"封面标题","image_plan":[{"order":1,"purpose":"封面","visual_brief":"干净的产品图","caption":"封面标题"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if creativeManager.reviseTaskID != "creative_task_1" || creativeManager.reviseRequest.ExpectedVersion != 1 {
+		t.Fatalf("revision was not forwarded: task=%q request=%+v", creativeManager.reviseTaskID, creativeManager.reviseRequest)
+	}
+}
+
 type staticProjectManager struct{ context contract.ProjectContext }
 
 func (s staticProjectManager) GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
@@ -439,6 +486,12 @@ type providerJobStub struct {
 type creativeManagerStub struct {
 	detail                  creative.TaskDetail
 	registeredProviderJobID string
+	frozenVersion           creative.CreativeVersion
+	freezeKey               contract.IdempotencyKey
+	freezeTaskID            string
+	revisedDraft            creative.ImageTextDraft
+	reviseTaskID            string
+	reviseRequest           creative.ReviseDraftRequest
 }
 
 func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
@@ -447,7 +500,7 @@ func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestCont
 func (s *creativeManagerStub) ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error) {
 	return nil, nil
 }
-func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeTask, error) {
+func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateTaskRequest) (creative.CreativeTask, error) {
 	return creative.CreativeTask{}, nil
 }
 func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
@@ -456,9 +509,22 @@ func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, 
 func (s *creativeManagerStub) GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
+func (s *creativeManagerStub) ArchiveTask(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
+}
 func (s *creativeManagerStub) RegisterCoverImageJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) error {
 	s.registeredProviderJobID = providerJobID
 	return nil
+}
+func (s *creativeManagerStub) FreezeVersion(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, taskID string, _ creative.FreezeVersionRequest, key contract.IdempotencyKey) (creative.CreativeVersion, bool, error) {
+	s.freezeKey = key
+	s.freezeTaskID = taskID
+	return s.frozenVersion, false, nil
+}
+func (s *creativeManagerStub) ReviseDraft(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.ReviseDraftRequest) (creative.ImageTextDraft, error) {
+	s.reviseTaskID = taskID
+	s.reviseRequest = request
+	return s.revisedDraft, nil
 }
 
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {

@@ -89,10 +89,13 @@ type GeneratedIntakeManager interface {
 type CreativeManager interface {
 	CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error)
 	ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error)
-	CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeTask, error)
+	CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateTaskRequest) (creative.CreativeTask, error)
 	ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error)
 	GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error)
+	ArchiveTask(context.Context, contract.ActorContext, contract.ProjectID, string) error
+	ReviseDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReviseDraftRequest) (creative.ImageTextDraft, error)
 	RegisterCoverImageJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) error
+	FreezeVersion(context.Context, contract.RequestContext, contract.ProjectID, string, creative.FreezeVersionRequest, contract.IdempotencyKey) (creative.CreativeVersion, bool, error)
 }
 
 // ProviderJobs keeps the shared HTTP server dependent on Provider's public
@@ -147,6 +150,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-intakes/{intake_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeTask))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeTasks))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getCreativeTask))))
+	server.mux.Handle("DELETE /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.archiveCreativeTask))))
+	server.mux.Handle("PATCH /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.reviseCreativeDraft))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeCoverImageJob))))
 	for _, mount := range dependencies.AuthenticatedDomainMounts {
 		if strings.TrimSpace(mount.Pattern) == "" || mount.Handler == nil {

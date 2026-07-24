@@ -47,6 +47,9 @@ const (
 	TaskDraft      TaskStatus = "draft"
 	TaskInProgress TaskStatus = "in_progress"
 	TaskReady      TaskStatus = "ready_for_review"
+	// TaskArchived is a reversible-looking UI state backed by a retained record.
+	// It deliberately does not delete drafts, Provider lineage, or frozen versions.
+	TaskArchived TaskStatus = "archived"
 )
 
 type CreateIntakeRequest struct {
@@ -165,10 +168,48 @@ type CreativeTask struct {
 	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
+type CreativeContentType string
+
+const (
+	ContentTypeLifestyle             CreativeContentType = "lifestyle"
+	ContentTypeIngredientExplanation CreativeContentType = "ingredient_explanation"
+	ContentTypeUsageScenario         CreativeContentType = "usage_scenario"
+	ContentTypeListGuide             CreativeContentType = "list_guide"
+	ContentTypeComparison            CreativeContentType = "comparison"
+	ContentTypeCustom                CreativeContentType = "custom"
+)
+
+// CreateTaskRequest is the explicit second-stage brief that differentiates
+// several Creative tasks produced from one approved Strategy package.
+type CreateTaskRequest struct {
+	ContentType  CreativeContentType `json:"content_type"`
+	Focus        string              `json:"focus"`
+	Audience     string              `json:"audience,omitempty"`
+	CoreMessage  string              `json:"core_message,omitempty"`
+	CallToAction string              `json:"call_to_action,omitempty"`
+}
+
+func (r CreateTaskRequest) Validate() error {
+	switch r.ContentType {
+	case ContentTypeLifestyle, ContentTypeIngredientExplanation, ContentTypeUsageScenario, ContentTypeListGuide, ContentTypeComparison, ContentTypeCustom:
+	default:
+		return fmt.Errorf("unsupported Creative content_type %q", r.ContentType)
+	}
+	if len(strings.TrimSpace(r.Focus)) == 0 || len(r.Focus) > 300 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 {
+		return fmt.Errorf("creative task focus is required or task input exceeds its maximum length")
+	}
+	return nil
+}
+
 type CreativeDirection struct {
-	Concept        string   `json:"concept"`
-	Tone           []string `json:"tone"`
-	VisualKeywords []string `json:"visual_keywords"`
+	ContentType    CreativeContentType `json:"content_type"`
+	Focus          string              `json:"focus"`
+	Audience       string              `json:"audience"`
+	CoreMessage    string              `json:"core_message"`
+	CallToAction   string              `json:"call_to_action"`
+	Concept        string              `json:"concept"`
+	Tone           []string            `json:"tone"`
+	VisualKeywords []string            `json:"visual_keywords"`
 }
 
 type ImageTextDraft struct {
@@ -181,6 +222,109 @@ type ImageTextDraft struct {
 	CoverCopy       string          `json:"cover_copy"`
 	ImagePlan       []ImagePlanItem `json:"image_plan"`
 	CreatedAt       time.Time       `json:"created_at"`
+}
+
+// ReviseDraftRequest replaces the editable content of the current draft. The
+// expected version is an optimistic-lock boundary: a stale browser must reload
+// rather than silently overwriting someone else's Creative revision.
+type ReviseDraftRequest struct {
+	ExpectedVersion int64           `json:"expected_version"`
+	TitleCandidates []string        `json:"title_candidates"`
+	Body            string          `json:"body"`
+	Topics          []string        `json:"topics"`
+	CoverCopy       string          `json:"cover_copy"`
+	ImagePlan       []ImagePlanItem `json:"image_plan"`
+}
+
+func (r ReviseDraftRequest) Validate() error {
+	if r.ExpectedVersion < 1 {
+		return fmt.Errorf("expected_version must be positive")
+	}
+	if len(r.TitleCandidates) < 3 || len(r.TitleCandidates) > 8 {
+		return fmt.Errorf("title_candidates must contain between 3 and 8 candidates")
+	}
+	if len(strings.TrimSpace(r.Body)) == 0 || len(r.Body) > 5000 {
+		return fmt.Errorf("body is required and must not exceed 5000 characters")
+	}
+	if len(strings.TrimSpace(r.CoverCopy)) == 0 || len([]rune(r.CoverCopy)) > 30 {
+		return fmt.Errorf("cover_copy is required and must not exceed 30 characters")
+	}
+	if len(r.Topics) > 12 || len(r.ImagePlan) < 1 || len(r.ImagePlan) > 12 {
+		return fmt.Errorf("topics or image_plan is outside the supported range")
+	}
+	for _, title := range r.TitleCandidates {
+		if len(strings.TrimSpace(title)) == 0 || len([]rune(title)) > 80 {
+			return fmt.Errorf("title_candidates contains an invalid value")
+		}
+	}
+	for _, topic := range r.Topics {
+		if len(strings.TrimSpace(topic)) == 0 || len([]rune(topic)) > 80 {
+			return fmt.Errorf("topics contains an invalid value")
+		}
+	}
+	for index, item := range r.ImagePlan {
+		if item.Order != index+1 || strings.TrimSpace(item.Purpose) == "" || strings.TrimSpace(item.VisualBrief) == "" || strings.TrimSpace(item.Caption) == "" {
+			return fmt.Errorf("image_plan must have ordered, complete items")
+		}
+	}
+	return nil
+}
+
+func (r ReviseDraftRequest) Draft(taskID string, version int64, now time.Time) ImageTextDraft {
+	return ImageTextDraft{TaskID: taskID, Version: version, Status: "draft", TitleCandidates: append([]string{}, r.TitleCandidates...), Body: r.Body,
+		Topics: append([]string{}, r.Topics...), CoverCopy: r.CoverCopy, ImagePlan: append([]ImagePlanItem{}, r.ImagePlan...), CreatedAt: now}
+}
+
+// CreativeVersion is the immutable Creative-owned snapshot that downstream
+// systems may reference. A draft remains editable; a CreativeVersion never is.
+type CreativeVersionStatus string
+
+const (
+	CreativeVersionCreated    CreativeVersionStatus = "created"
+	CreativeVersionChecked    CreativeVersionStatus = "checked"
+	CreativeVersionApproved   CreativeVersionStatus = "approved"
+	CreativeVersionSuperseded CreativeVersionStatus = "superseded"
+)
+
+type FreezeVersionRequest struct {
+	DraftVersion int64 `json:"draft_version"`
+}
+
+func (r FreezeVersionRequest) Validate() error {
+	if r.DraftVersion < 1 {
+		return fmt.Errorf("draft_version must be positive")
+	}
+	return nil
+}
+
+type CreativeVersion struct {
+	ID             string                  `json:"id"`
+	OrganizationID contract.OrganizationID `json:"organization_id"`
+	ProjectID      contract.ProjectID      `json:"project_id"`
+	TaskID         string                  `json:"creative_task_id"`
+	Version        int64                   `json:"version"`
+	DraftVersion   int64                   `json:"draft_version"`
+	Status         CreativeVersionStatus   `json:"status"`
+	Snapshot       ImageTextDraft          `json:"snapshot"`
+	ContentHash    contract.ContentHash    `json:"content_hash"`
+	CreatedBy      string                  `json:"created_by"`
+	CreatedAt      time.Time               `json:"created_at"`
+	IdempotencyKey contract.IdempotencyKey `json:"-"`
+	RequestHash    string                  `json:"-"`
+}
+
+func (v CreativeVersion) Validate() error {
+	if strings.TrimSpace(v.ID) == "" || strings.TrimSpace(v.TaskID) == "" || v.Version < 1 || v.DraftVersion < 1 ||
+		v.OrganizationID == "" || v.ProjectID == "" || v.ContentHash.Validate() != nil || v.CreatedAt.IsZero() {
+		return fmt.Errorf("creative version is incomplete")
+	}
+	if v.Status != CreativeVersionCreated && v.Status != CreativeVersionChecked && v.Status != CreativeVersionApproved && v.Status != CreativeVersionSuperseded {
+		return fmt.Errorf("creative version status is invalid")
+	}
+	if v.Snapshot.TaskID != v.TaskID || v.Snapshot.Version != v.DraftVersion {
+		return fmt.Errorf("creative version snapshot does not match its draft reference")
+	}
+	return nil
 }
 
 type ImagePlanItem struct {

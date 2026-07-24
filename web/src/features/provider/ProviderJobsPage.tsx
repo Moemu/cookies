@@ -66,16 +66,20 @@ export function ProviderJobsPage() {
 
   return <section className="provider-page">
     <header className="page-header">
-      <div><h1>图像生成</h1><p>{requestedJobId ? '正在查看来自创意任务的 Provider 作业；状态和入库结果会自动刷新。' : '创建独立 Provider 作业；模型产物会经过校验和素材入库后，才出现在项目素材库中。'}</p></div>
+      <div><h1>模型作业（排障）</h1><p>{requestedJobId ? '这里核对模型调用、失败原因和入库结果；创作与素材查看请回到图文任务。' : '这里不是日常创作入口；请在图文任务中发起生图，在此查看模型调用和异常。'}</p></div>
       <Link className="button button--secondary" to={`/projects/${encodeURIComponent(projectId)}/assets`}>查看项目素材</Link>
     </header>
+    <div className="provider-purpose"><strong>为什么会有这个页面？</strong><span>它服务于模型调用的排障与审计：检查请求是否提交、模型是否完成、为何失败、产物是否已进入素材库。它不创建或编辑图文任务。</span></div>
     <div className="provider-layout">
+      <details className="provider-standalone">
+        <summary>独立生图验证（仅开发 / 排障使用）</summary>
       <form className="provider-form" onSubmit={(event) => { event.preventDefault(); void submit() }}>
         <label>提示词<textarea value={prompt} maxLength={4000} onChange={(event) => setPrompt(event.target.value)} placeholder="描述你希望生成的图片…" /></label>
         <label>画面尺寸<select value={size} onChange={(event) => setSize(event.target.value)}><option value="1024x1024">1024 × 1024</option><option value="1024x768">1024 × 768</option><option value="768x1024">768 × 1024</option><option value="1365x1024">1365 × 1024</option><option value="1024x1365">1024 × 1365</option></select></label>
         <button className="button button--primary" disabled={!prompt.trim() || submitting} type="submit">{submitting ? '正在提交…' : '创建独立生成任务'}</button>
         {requestedJobId ? <p className="provider-form__hint">独立任务不会替代当前关联作业。返回创意页可继续查看完整生产链路。</p> : null}
       </form>
+      </details>
       <aside className="provider-job" aria-live="polite">
         <h2>{requestedJobId ? '关联作业' : '当前任务'}</h2>
         {!job ? <p className="provider-job__empty">{requestedJobId ? '正在读取关联作业…' : '尚未创建任务。提交后会在这里持续显示 Provider 与素材入库状态。'}</p> : <>

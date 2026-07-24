@@ -45,11 +45,21 @@ export type CreativeTask = {
   intake_id: string
   format: 'image_text'
   channel: 'xiaohongshu'
-  status: 'draft' | 'in_progress' | 'ready_for_review'
-  direction: { concept: string, tone: string[], visual_keywords: string[] }
+  status: 'draft' | 'in_progress' | 'ready_for_review' | 'archived'
+  direction: { content_type: CreativeContentType, focus: string, audience: string, core_message: string, call_to_action: string, concept: string, tone: string[], visual_keywords: string[] }
   version: number
   created_at: string
   updated_at: string
+}
+
+export type CreativeContentType = 'lifestyle' | 'ingredient_explanation' | 'usage_scenario' | 'list_guide' | 'comparison' | 'custom'
+
+export type CreateCreativeTaskInput = {
+  content_type: CreativeContentType
+  focus: string
+  audience?: string
+  core_message?: string
+  call_to_action?: string
 }
 
 export type ImageTextDraft = {
@@ -61,6 +71,29 @@ export type ImageTextDraft = {
   topics: string[]
   cover_copy: string
   image_plan: Array<{ order: number, purpose: string, visual_brief: string, caption: string }>
+  created_at: string
+}
+
+export type ReviseDraftInput = {
+  expected_version: number
+  title_candidates: string[]
+  body: string
+  topics: string[]
+  cover_copy: string
+  image_plan: ImageTextDraft['image_plan']
+}
+
+export type CreativeVersion = {
+  id: string
+  organization_id: string
+  project_id: string
+  creative_task_id: string
+  version: number
+  draft_version: number
+  status: 'created' | 'checked' | 'approved' | 'superseded'
+  snapshot: ImageTextDraft
+  content_hash: string
+  created_by: string
   created_at: string
 }
 

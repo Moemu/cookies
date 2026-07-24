@@ -3,6 +3,7 @@ package creative
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
@@ -12,6 +13,8 @@ var (
 	ErrIdempotencyConflict = errors.New("creative idempotency key conflicts with an earlier request")
 	ErrIntakeNotReady      = errors.New("creative intake needs clarification before task creation")
 	ErrProviderJobConflict = errors.New("production job already registered with a different provider job")
+	ErrVersionConflict     = errors.New("creative resource version conflict")
+	ErrInvalidState        = errors.New("creative resource is not in a state that allows this action")
 )
 
 type Repository interface {
@@ -21,5 +24,8 @@ type Repository interface {
 	CreateTask(context.Context, CreativeTask, ImageTextDraft) (CreativeTask, error)
 	ListTasks(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativeTask, error)
 	GetTaskDetail(context.Context, contract.OrganizationID, contract.ProjectID, string) (TaskDetail, error)
+	ArchiveTask(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) error
+	ReviseDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ImageTextDraft) (ImageTextDraft, error)
 	RegisterProductionJob(context.Context, contract.OrganizationID, contract.ProjectID, string, ProductionJob) error
+	CreateVersion(context.Context, CreativeVersion) (CreativeVersion, bool, error)
 }

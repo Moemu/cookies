@@ -7,9 +7,12 @@
   object.
 - **CreativeTask**: A production unit created from a ready Intake. It owns the
   selected channel, production state, content drafts and production lineage.
-- **ImageTextDraft**: A versioned, reviewable content package for one image and
-  text task. It contains the post copy and the planned image sequence; it is
-  not a media asset.
+- **ImageTextDraft**: The editable working revision for one image-and-text
+  task. It contains the post copy and planned image sequence; it is not a
+  media asset or a cross-system hand-off.
+- **CreativeVersion**: An immutable Creative-owned snapshot frozen from one
+  Draft revision. Checks, review, approval, delivery and later systems refer
+  to this stable identity rather than to an editable Draft or a Provider job.
 - **ProductionJob**: A reference from a CreativeTask to a Provider job. It
   records production lineage and does not become the task's business state.
 - **CreativeDirection**: The user-selected expression of a message, including

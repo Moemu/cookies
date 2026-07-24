@@ -44,7 +44,7 @@ CREATE TABLE creative_tasks (
   CONSTRAINT fk_creative_tasks_intake FOREIGN KEY (organization_id, intake_id) REFERENCES creative_intakes(organization_id, id),
   CONSTRAINT chk_creative_tasks_format CHECK (creative_format IN ('image_text')),
   CONSTRAINT chk_creative_tasks_channel CHECK (channel IN ('xiaohongshu')),
-  CONSTRAINT chk_creative_tasks_status CHECK (status IN ('draft', 'in_progress', 'ready_for_review')),
+  CONSTRAINT chk_creative_tasks_status CHECK (status IN ('draft', 'in_progress', 'ready_for_review', 'archived')),
   CONSTRAINT chk_creative_tasks_version CHECK (version > 0)
 );
 

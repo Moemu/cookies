@@ -38,8 +38,13 @@ paths:
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-task:
     post:
       operationId: createCreativeTask
-      summary: Create an image and text CreativeTask from a ready Intake.
+      summary: Create one explicitly directed image-and-text CreativeTask from a ready Intake.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCreativeTaskRequest'}
       responses:
         '201': {description: Image and text CreativeTask created with an initial draft.}
         '409': {$ref: '#/components/responses/Conflict'}
@@ -59,6 +64,27 @@ paths:
       responses:
         '200': {description: "Task, source Intake, draft and production lineage."}
         '404': {$ref: '#/components/responses/NotFound'}
+    delete:
+      operationId: archiveCreativeTask
+      summary: Archive a CreativeTask from the active queue without deleting its draft, version, Provider or Asset lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '204': {description: CreativeTask archived.}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:draft:
+    patch:
+      operationId: reviseCreativeDraft
+      summary: Replace the editable draft contents and create its next revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviseCreativeDraftRequest'}
+      responses:
+        '200': {description: Next ImageTextDraft revision created.}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:cover-image-job:
     post:
       operationId: createCreativeCoverImageJob
@@ -75,6 +101,19 @@ paths:
                 model_alias: {type: string, minLength: 1, maxLength: 255}
       responses:
         '202': {description: Provider image job created with creative task lineage.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:freeze-version:
+    post:
+      operationId: freezeCreativeVersion
+      summary: Freeze one draft revision into an immutable CreativeVersion.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FreezeCreativeVersionRequest'}
+      responses:
+        '201': {description: Immutable CreativeVersion created.}
         '409': {$ref: '#/components/responses/Conflict'}
 components:
   securitySchemes:
@@ -109,6 +148,46 @@ components:
         visual_keywords: {type: array, items: {type: string}}
         mandatory_elements: {type: array, items: {type: string}}
         prohibited_claims: {type: array, items: {type: string}}
+    CreateCreativeTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [content_type, focus]
+      properties:
+        content_type: {enum: [lifestyle, ingredient_explanation, usage_scenario, list_guide, comparison, custom]}
+        focus: {type: string, minLength: 1, maxLength: 300}
+        audience: {type: string, maxLength: 500}
+        core_message: {type: string, maxLength: 1000}
+        call_to_action: {type: string, maxLength: 300}
+    FreezeCreativeVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [draft_version]
+      properties:
+        draft_version: {type: integer, minimum: 1}
+    ReviseCreativeDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, title_candidates, body, topics, cover_copy, image_plan]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        title_candidates: {type: array, minItems: 3, maxItems: 8, items: {type: string, minLength: 1, maxLength: 80}}
+        body: {type: string, minLength: 1, maxLength: 5000}
+        topics: {type: array, maxItems: 12, items: {type: string, minLength: 1, maxLength: 80}}
+        cover_copy: {type: string, minLength: 1, maxLength: 30}
+        image_plan:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: {$ref: '#/components/schemas/ImagePlanItem'}
+    ImagePlanItem:
+      type: object
+      additionalProperties: false
+      required: [order, purpose, visual_brief, caption]
+      properties:
+        order: {type: integer, minimum: 1}
+        purpose: {type: string, minLength: 1}
+        visual_brief: {type: string, minLength: 1}
+        caption: {type: string, minLength: 1}
   responses:
     InvalidRequest: {description: The request violates the Creative API contract.}
     Conflict: {description: "The resource state, scope, or idempotency key conflicts with the request."}

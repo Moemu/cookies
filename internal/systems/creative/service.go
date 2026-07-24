@@ -137,12 +137,15 @@ func (s Service) ListIntakes(ctx context.Context, actor contract.ActorContext, p
 	return s.Repository.ListIntakes(ctx, actor.OrganizationID, projectID, normalizedLimit(limit))
 }
 
-func (s Service) CreateTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string) (CreativeTask, error) {
+func (s Service) CreateTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateTaskRequest) (CreativeTask, error) {
 	if s.Repository == nil || s.Projects == nil {
 		return CreativeTask{}, fmt.Errorf("creative dependencies are incomplete")
 	}
 	if !actor.HasScope(ScopeWrite) {
 		return CreativeTask{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return CreativeTask{}, err
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return CreativeTask{}, err
@@ -159,14 +162,21 @@ func (s Service) CreateTask(ctx context.Context, actor contract.ActorContext, pr
 		return CreativeTask{}, err
 	}
 	now := s.now()
-	direction := CreativeDirection{Concept: strings.TrimSpace(intake.Request.Concept), Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...)}
+	direction := CreativeDirection{ContentType: request.ContentType, Focus: strings.TrimSpace(request.Focus), Audience: firstNonEmpty(request.Audience, intake.Request.Audience), CoreMessage: firstNonEmpty(request.CoreMessage, intake.Request.CoreMessage), CallToAction: firstNonEmpty(request.CallToAction, intake.Request.CallToAction), Concept: strings.TrimSpace(request.Focus), Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...)}
 	task := CreativeTask{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intake.ID, Format: FormatImageText, Channel: intake.Request.Channel, Status: TaskDraft, Direction: direction, Version: 1, CreatedAt: now, UpdatedAt: now}
-	draft := composeXiaohongshuDraft(task.ID, intake, now)
+	draft := composeXiaohongshuDraft(task.ID, intake, direction, now)
 	stored, err := s.Repository.CreateTask(ctx, task, draft)
 	if err != nil {
 		return CreativeTask{}, err
 	}
 	return stored, nil
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func (s Service) ListTasks(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]CreativeTask, error) {
@@ -195,6 +205,49 @@ func (s Service) GetTaskDetail(ctx context.Context, actor contract.ActorContext,
 	return s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
 }
 
+// ArchiveTask removes a task from the active Creative queue without deleting
+// its drafts, frozen versions, Provider jobs, or Asset lineage. Those records
+// are evidence used by downstream systems and must remain traceable.
+func (s Service) ArchiveTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string) error {
+	if s.Repository == nil || s.Projects == nil {
+		return fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return err
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return err
+	}
+	if detail.Task.Status == TaskArchived {
+		return ErrInvalidState
+	}
+	return s.Repository.ArchiveTask(ctx, actor.OrganizationID, projectID, taskID, s.now())
+}
+
+// ReviseDraft creates the next editable revision. It does not mutate an older
+// revision, so a previously frozen CreativeVersion continues to point at the
+// exact content that was reviewed.
+func (s Service) ReviseDraft(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, request ReviseDraftRequest) (ImageTextDraft, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return ImageTextDraft{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return ImageTextDraft{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return ImageTextDraft{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ImageTextDraft{}, err
+	}
+	draft := request.Draft(taskID, request.ExpectedVersion+1, s.now())
+	return s.Repository.ReviseDraft(ctx, actor.OrganizationID, projectID, taskID, request.ExpectedVersion, draft)
+}
+
 func (s Service) RegisterCoverImageJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID, providerJobID string) error {
 	if s.Repository == nil || s.Projects == nil {
 		return fmt.Errorf("creative dependencies are incomplete")
@@ -212,6 +265,66 @@ func (s Service) RegisterCoverImageJob(ctx context.Context, actor contract.Actor
 		return err
 	}
 	return s.Repository.RegisterProductionJob(ctx, actor.OrganizationID, projectID, taskID, ProductionJob{TaskID: taskID, Kind: "cover_image", ProviderJobID: providerJobID, CreatedAt: s.now()})
+}
+
+// FreezeVersion creates the stable Creative-owned artifact consumed by later
+// Delivery and Insights modules. It deliberately snapshots the current draft
+// instead of exposing a mutable task or a Provider job as a cross-system ref.
+func (s Service) FreezeVersion(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, taskID string, request FreezeVersionRequest, key contract.IdempotencyKey) (CreativeVersion, bool, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeVersion{}, false, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if err := requestContext.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if !requestContext.Actor.HasScope(ScopeWrite) {
+		return CreativeVersion{}, false, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := key.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if err := request.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, requestContext.Actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if detail.Draft.Version != request.DraftVersion {
+		return CreativeVersion{}, false, ErrVersionConflict
+	}
+	hashInput := struct {
+		TaskID       string          `json:"creative_task_id"`
+		DraftVersion int64           `json:"draft_version"`
+		Format       CreativeFormat  `json:"format"`
+		Channel      CreativeChannel `json:"channel"`
+		Snapshot     ImageTextDraft  `json:"snapshot"`
+	}{TaskID: detail.Task.ID, DraftVersion: detail.Draft.Version, Format: detail.Task.Format, Channel: detail.Task.Channel, Snapshot: detail.Draft}
+	contentHash, err := contract.NewContentHash(hashInput)
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	requestHash, err := contract.CanonicalJSONHash(request)
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	id, err := s.idGenerator()("creativeversion")
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	value := CreativeVersion{
+		ID: id, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, TaskID: taskID,
+		Version: detail.Draft.Version, DraftVersion: detail.Draft.Version, Status: CreativeVersionCreated,
+		Snapshot: detail.Draft, ContentHash: contentHash, CreatedBy: requestContext.Actor.Principal.ID,
+		CreatedAt: s.now(), IdempotencyKey: key, RequestHash: requestHash,
+	}
+	if err := value.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	return s.Repository.CreateVersion(ctx, value)
 }
 
 func (s Service) now() time.Time {
@@ -236,10 +349,10 @@ func normalizedLimit(limit int) int {
 	return limit
 }
 
-func composeXiaohongshuDraft(taskID string, intake CreativeIntake, now time.Time) ImageTextDraft {
+func composeXiaohongshuDraft(taskID string, intake CreativeIntake, direction CreativeDirection, now time.Time) ImageTextDraft {
 	r := intake.Request
-	message := strings.TrimSpace(r.CoreMessage)
-	concept := strings.TrimSpace(r.Concept)
+	message := strings.TrimSpace(direction.CoreMessage)
+	concept := strings.TrimSpace(direction.Concept)
 	if concept == "" {
 		concept = "把产品价值放进真实使用场景"
 	}

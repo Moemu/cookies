@@ -23,7 +23,7 @@ func TestManualIntakeNeedsClarificationBeforeCreatingTask(t *testing.T) {
 	if intake.Status != IntakeNeedsClarification || len(intake.MissingFields) != 3 {
 		t.Fatalf("intake = %#v", intake)
 	}
-	if _, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID); !errors.Is(err, ErrIntakeNotReady) {
+	if _, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest()); !errors.Is(err, ErrIntakeNotReady) {
 		t.Fatalf("error = %v, want %v", err, ErrIntakeNotReady)
 	}
 }
@@ -39,7 +39,7 @@ func TestManualReadyIntakeCreatesImageTextTaskAndDraft(t *testing.T) {
 	if intake.Status != IntakeReady || intake.ConfirmedBy != "usr_1" {
 		t.Fatalf("intake = %#v", intake)
 	}
-	task, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID)
+	task, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +73,27 @@ func TestApprovedStrategyPackageCreatesReadyCreativeIntake(t *testing.T) {
 	if intake.Source != IntakeSourceStrategyPackage || intake.Status != IntakeReady || intake.Request.Objective == "" {
 		t.Fatalf("intake = %#v", intake)
 	}
-	if _, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID); err != nil {
+	if _, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest()); err != nil {
 		t.Fatalf("strategy intake did not create Creative task: %v", err)
+	}
+}
+
+func TestCreateStrategyIntakeDeduplicatesTheSamePackageVersion(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{PackageID: "package_1", PackageVersion: 1, ContentHash: "hash", CreativeReady: true, Objective: "目标", Audience: "受众", CoreMessage: "主张", Concept: "概念", Tone: []string{}, VisualKeywords: []string{}, Mandatory: []string{}, Prohibited: []string{}}}
+	rc := testRequestContext()
+	request := CreateIntakeRequest{Source: IntakeSourceStrategyPackage, StrategyPackage: &StrategyPackageReference{PackageID: "package_1", PackageVersion: 1, ExpectedContentHash: "hash"}}
+	first, err := service.CreateIntake(context.Background(), rc, "project_1", "strategy-intake-first", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateIntake(context.Background(), rc, "project_1", "strategy-intake-second", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("same strategy package should return its existing Intake: first=%q second=%q", first.ID, second.ID)
 	}
 }
 
@@ -109,7 +128,7 @@ func TestIntakeIdempotencyDoesNotCreateAnotherIntake(t *testing.T) {
 	}
 }
 
-func TestTaskCreationReturnsTheExistingTaskForTheSameIntake(t *testing.T) {
+func TestTaskCreationAllowsSeveralDistinctDirectionsForTheSameIntake(t *testing.T) {
 	t.Parallel()
 	service := testService()
 	rc := testRequestContext()
@@ -117,16 +136,50 @@ func TestTaskCreationReturnsTheExistingTaskForTheSameIntake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID)
+	first, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID)
+	second, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, CreateTaskRequest{ContentType: ContentTypeIngredientExplanation, Focus: "成分解释"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ID != second.ID {
-		t.Fatalf("task IDs = %q and %q", first.ID, second.ID)
+	if first.ID == second.ID || first.Direction.ContentType == second.Direction.ContentType {
+		t.Fatalf("task directions were not created separately: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestArchiveTaskHidesItFromActiveQueueButRetainsItsLineage(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	rc := testRequestContext()
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "creative-intake-archive", validManualRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RegisterCoverImageJob(context.Background(), rc.Actor, "project_1", task.ID, "provider_job_1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ArchiveTask(context.Background(), rc.Actor, "project_1", task.ID); err != nil {
+		t.Fatal(err)
+	}
+	active, err := service.ListTasks(context.Background(), rc.Actor, "project_1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active tasks = %#v, want archived task omitted", active)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), rc.Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Task.Status != TaskArchived || len(detail.ProductionJobs) != 1 || detail.Draft.TaskID != task.ID {
+		t.Fatalf("archived detail should retain lineage: %#v", detail)
 	}
 }
 
@@ -137,13 +190,17 @@ func validManualRequest() CreateIntakeRequest {
 	}
 }
 
+func defaultTaskRequest() CreateTaskRequest {
+	return CreateTaskRequest{ContentType: ContentTypeLifestyle, Focus: "生活方式种草"}
+}
+
 func testRequestContext() contract.RequestContext {
 	return contract.RequestContext{RequestID: "req_1", TraceID: "trace_1", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{ScopeRead, ScopeWrite}}}
 }
 
 func testService() Service {
 	sequence := 0
-	return Service{Repository: &memoryRepository{intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}}, Projects: testProjects{}, Now: func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+	return Service{Repository: &memoryRepository{intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}, versions: map[string]CreativeVersion{}}, Projects: testProjects{}, Now: func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
 }
 
 type testProjects struct{}
@@ -169,8 +226,9 @@ func (testProjects) RequireActiveContext(_ context.Context, actor contract.Actor
 }
 
 type memoryRepository struct {
-	intakes map[string]CreativeIntake
-	tasks   map[string]TaskDetail
+	intakes  map[string]CreativeIntake
+	tasks    map[string]TaskDetail
+	versions map[string]CreativeVersion
 }
 
 func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake) (CreativeIntake, bool, error) {
@@ -181,9 +239,16 @@ func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake
 			}
 			return existing, true, nil
 		}
+		if intake.Source == IntakeSourceStrategyPackage && existing.Source == IntakeSourceStrategyPackage && sameStrategyPackage(existing.Request.StrategyPackage, intake.Request.StrategyPackage) {
+			return existing, true, nil
+		}
 	}
 	r.intakes[intake.ID] = intake
 	return intake, false, nil
+}
+
+func sameStrategyPackage(left, right *StrategyPackageReference) bool {
+	return left != nil && right != nil && left.PackageID == right.PackageID && left.PackageVersion == right.PackageVersion && left.ExpectedContentHash == right.ExpectedContentHash
 }
 func (r *memoryRepository) ListIntakes(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, _ int) ([]CreativeIntake, error) {
 	values := make([]CreativeIntake, 0, len(r.intakes))
@@ -201,17 +266,15 @@ func (r *memoryRepository) GetIntake(_ context.Context, _ contract.OrganizationI
 }
 
 func (r *memoryRepository) CreateTask(_ context.Context, task CreativeTask, draft ImageTextDraft) (CreativeTask, error) {
-	for _, existing := range r.tasks {
-		if existing.Task.IntakeID == task.IntakeID {
-			return existing.Task, nil
-		}
-	}
 	r.tasks[task.ID] = TaskDetail{Task: task, Intake: r.intakes[task.IntakeID], Draft: draft, ProductionJobs: []ProductionJob{}}
 	return task, nil
 }
 func (r *memoryRepository) ListTasks(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, _ int) ([]CreativeTask, error) {
 	values := make([]CreativeTask, 0, len(r.tasks))
 	for _, value := range r.tasks {
+		if value.Task.Status == TaskArchived {
+			continue
+		}
 		values = append(values, value.Task)
 	}
 	return values, nil
@@ -222,6 +285,33 @@ func (r *memoryRepository) GetTaskDetail(_ context.Context, _ contract.Organizat
 		return TaskDetail{}, ErrNotFound
 	}
 	return value, nil
+}
+func (r *memoryRepository) ArchiveTask(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, taskID string, now time.Time) error {
+	value, ok := r.tasks[taskID]
+	if !ok {
+		return ErrNotFound
+	}
+	if value.Task.Status == TaskArchived {
+		return ErrInvalidState
+	}
+	value.Task.Status = TaskArchived
+	value.Task.UpdatedAt = now
+	r.tasks[taskID] = value
+	return nil
+}
+func (r *memoryRepository) ReviseDraft(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, taskID string, expectedVersion int64, draft ImageTextDraft) (ImageTextDraft, error) {
+	value, ok := r.tasks[taskID]
+	if !ok {
+		return ImageTextDraft{}, ErrNotFound
+	}
+	if value.Draft.Version != expectedVersion || value.Task.Version != expectedVersion {
+		return ImageTextDraft{}, ErrVersionConflict
+	}
+	value.Draft = draft
+	value.Task.Version = draft.Version
+	value.Task.UpdatedAt = draft.CreatedAt
+	r.tasks[taskID] = value
+	return draft, nil
 }
 func (r *memoryRepository) RegisterProductionJob(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, taskID string, job ProductionJob) error {
 	value, ok := r.tasks[taskID]
@@ -239,4 +329,23 @@ func (r *memoryRepository) RegisterProductionJob(_ context.Context, _ contract.O
 	value.ProductionJobs = append(value.ProductionJobs, job)
 	r.tasks[taskID] = value
 	return nil
+}
+
+func (r *memoryRepository) CreateVersion(_ context.Context, value CreativeVersion) (CreativeVersion, bool, error) {
+	for _, existing := range r.versions {
+		if existing.ProjectID == value.ProjectID && existing.CreatedBy == value.CreatedBy && existing.IdempotencyKey == value.IdempotencyKey {
+			if existing.RequestHash != value.RequestHash {
+				return CreativeVersion{}, false, ErrIdempotencyConflict
+			}
+			return existing, true, nil
+		}
+		if existing.TaskID == value.TaskID && existing.Version == value.Version {
+			if !existing.ContentHash.Equal(value.ContentHash) {
+				return CreativeVersion{}, false, ErrVersionConflict
+			}
+			return existing, false, nil
+		}
+	}
+	r.versions[value.ID] = value
+	return value, false, nil
 }

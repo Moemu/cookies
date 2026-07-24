@@ -94,7 +94,7 @@ export function Workspace() {
                   <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/strategy/projects/${currentProjectId}`}><span>策略工作区</span><small>Brief 与策略包</small></Link>
                   <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/creative`}><span>创意创作</span><small>图文任务与初稿</small></Link>
                   <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/assets`}><span>项目素材库</span><small>上传与已入库素材</small></Link>
-                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/provider-jobs`}><span>Provider 任务</span><small>生成、状态与入库</small></Link>
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/provider-jobs`}><span>模型作业（排障）</span><small>调用、失败原因与入库核查</small></Link>
                 </div>
               </> : null}
               <div className="project-menu__divider" />

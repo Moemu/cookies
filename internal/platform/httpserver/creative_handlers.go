@@ -64,8 +64,13 @@ func (s *Server) createCreativeTask(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, r)
 		return
 	}
+	var body creative.CreateTaskRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
 	rc, _ := contract.RequestContextFrom(r.Context())
-	value, err := s.creative.CreateTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), intakeID)
+	value, err := s.creative.CreateTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), intakeID, body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -102,13 +107,59 @@ func (s *Server) getCreativeTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value)
 }
 
-func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Request) {
-	if s.creative == nil || s.providerJobs == nil || s.projects == nil {
+func (s *Server) archiveCreativeTask(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if err := s.creative.ArchiveTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id")); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) reviseCreativeDraft(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
 		s.notImplemented(w, r)
 		return
 	}
 	action := r.PathValue("task_action")
-	if !strings.HasSuffix(action, ":cover-image-job") {
+	if !strings.HasSuffix(action, ":draft") {
+		s.notFound(w, r)
+		return
+	}
+	taskID := strings.TrimSuffix(action, ":draft")
+	if taskID == "" {
+		s.notFound(w, r)
+		return
+	}
+	var body creative.ReviseDraftRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ReviseDraft(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), taskID, body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	action := r.PathValue("task_action")
+	if strings.HasSuffix(action, ":freeze-version") {
+		s.freezeCreativeVersion(w, r, strings.TrimSuffix(action, ":freeze-version"))
+		return
+	}
+	if !strings.HasSuffix(action, ":cover-image-job") || s.providerJobs == nil || s.projects == nil {
 		s.notFound(w, r)
 		return
 	}
@@ -174,6 +225,33 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) freezeCreativeVersion(w http.ResponseWriter, r *http.Request, taskID string) {
+	if taskID == "" {
+		s.notFound(w, r)
+		return
+	}
+	var body creative.FreezeVersionRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, duplicate, err := s.creative.FreezeVersion(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), taskID, body, key)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if duplicate {
+		w.Header().Set("Idempotent-Replay", "true")
+	}
+	w.Header().Set("Location", fmt.Sprintf("/api/creative/v1/projects/%s/creative-versions/%s/versions/%d", r.PathValue("project_id"), value.ID, value.Version))
+	writeJSON(w, http.StatusCreated, value)
 }
 
 func coverPrompt(detail creative.TaskDetail) string {
