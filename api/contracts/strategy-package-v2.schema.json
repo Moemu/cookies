@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-package-v2.schema.json",
+  "title": "strategy-package/v2",
+  "type": "object",
+  "required": ["contract_version", "package_id", "package_version", "organization_id", "project_id", "strategy_id", "strategy_revision", "brief", "strategy", "readiness", "approval"],
+  "properties": {
+    "contract_version": {"const": "strategy-package/v2"},
+    "package_id": {"type": "string", "minLength": 1},
+    "package_version": {"type": "integer", "minimum": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "strategy_id": {"type": "string", "minLength": 1},
+    "strategy_revision": {"type": "integer", "minimum": 1},
+    "brief": {"type": "object"},
+    "strategy": {"$ref": "./strategy-draft-v2.schema.json"},
+    "readiness": {
+      "type": "object",
+      "required": ["publish_blockers", "creative_ready", "delivery_ready", "insights_ready"],
+      "properties": {
+        "publish_blockers": {"type": "array", "items": {"type": "object"}},
+        "creative_ready": {"type": "boolean"},
+        "delivery_ready": {"type": "boolean"},
+        "insights_ready": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "required": ["review_id", "approved_by", "approved_at", "content_hash"],
+      "properties": {
+        "review_id": {"type": "string", "minLength": 1},
+        "approved_by": {"type": "string", "minLength": 1},
+        "approved_at": {"type": "string", "format": "date-time"},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -140,6 +140,34 @@ func (s Service) AddReviewComment(ctx context.Context, actor contract.ActorConte
 	return comment, err
 }
 
+func (s Service) ListReviewComments(ctx context.Context, actor contract.ActorContext, reviewID string) ([]ReviewComment, error) {
+	if err := requireScope(actor, ScopeRead); err != nil {
+		return nil, err
+	}
+	review, err := s.GetReview(ctx, actor, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, organization_id, project_id, review_id,
+		author_id, body, created_at FROM strategy_review_comments
+		WHERE organization_id = ? AND project_id = ? AND review_id = ? ORDER BY created_at ASC`,
+		actor.OrganizationID, review.ProjectID, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []ReviewComment{}
+	for rows.Next() {
+		var value ReviewComment
+		if err := rows.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ReviewID,
+			&value.AuthorID, &value.Body, &value.CreatedAt); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s Service) ReturnReview(ctx context.Context, actor contract.ActorContext, reviewID, reason string) (Review, error) {
 	if err := requireScope(actor, ScopeReview); err != nil {
 		return Review{}, err
@@ -258,6 +286,25 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return PackageVersion{}, false, err
 	}
+	var compliancePassed bool
+	var complianceHash contract.ContentHash
+	err = tx.QueryRowContext(ctx, `SELECT passed, candidate_content_hash
+		FROM strategy_compliance_reports WHERE organization_id = ? AND project_id = ?
+		AND strategy_id = ? AND strategy_revision = ?`,
+		actor.OrganizationID, draft.ProjectID, strategyID, revision.Revision).
+		Scan(&compliancePassed, &complianceHash)
+	if err == sql.ErrNoRows {
+		compliance := evaluateCompliance(revision.Document, brief, s.now())
+		compliancePassed = compliance.Passed
+		complianceHash = revision.ContentHash
+	} else if err != nil {
+		return PackageVersion{}, false, err
+	}
+	if !complianceHash.Equal(revision.ContentHash) || !compliancePassed {
+		return PackageVersion{}, false, BlockedError{Problems: []ValidationError{{
+			Field: "strategy.compliance", Reason: "策略合规检查存在阻断项或已过期",
+		}}}
+	}
 	readiness := calculateReadiness(brief, revision.Document)
 	if len(readiness.PublishBlockers) > 0 {
 		return PackageVersion{}, false, BlockedError{Problems: readiness.PublishBlockers}
@@ -278,8 +325,12 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	}
 	now := s.now()
 	versionNumber := latestVersion + 1
+	packageContractVersion := "strategy-package/v1"
+	if revision.Document.ContractVersion == "strategy-draft/v2" {
+		packageContractVersion = "strategy-package/v2"
+	}
 	snapshot := PackageSnapshot{
-		ContractVersion: "strategy-package/v1", PackageID: packageID, PackageVersion: versionNumber,
+		ContractVersion: packageContractVersion, PackageID: packageID, PackageVersion: versionNumber,
 		OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID, StrategyID: strategyID,
 		StrategyRevision: revision.Revision, Brief: brief, Strategy: revision.Document, Readiness: readiness,
 		Approval: PackageApproval{ReviewID: review.ID, ApprovedBy: actor.Principal.ID, ApprovedAt: now},
@@ -400,7 +451,14 @@ func calculateReadiness(brief BriefVersion, document StrategyDocument) Readiness
 	if err := document.Validate(); err != nil {
 		result.PublishBlockers = append(result.PublishBlockers, ValidationError{Field: "strategy", Reason: err.Error()})
 	}
-	result.CreativeReady = len(document.CreativeRecommendations) > 0 && len(document.ChannelStrategy) > 0
+	xiaohongshuReady := false
+	for _, channel := range document.ChannelStrategy {
+		if channel.Platform == "xiaohongshu" && len(channel.Formats) > 0 {
+			xiaohongshuReady = true
+			break
+		}
+	}
+	result.CreativeReady = len(document.CreativeRecommendations) > 0 && xiaohongshuReady
 	result.DeliveryReady = strings.TrimSpace(brief.Snapshot.Budget.Total) != "" && strings.TrimSpace(brief.Snapshot.Schedule.Window) != ""
 	result.InsightsReady = strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI) != ""
 	return result

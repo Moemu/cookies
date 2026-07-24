@@ -35,11 +35,19 @@ type Config struct {
 	Environment   Environment
 	HTTPAddr      string
 	MySQL         MySQL
+	Auth          Auth
 	ObjectStorage ObjectStorage
 	Scanner       Scanner
 	Provider      Provider
 	Strategy      Strategy
 	LocalIdentity *LocalIdentity
+}
+
+type Auth struct {
+	PasswordEnabled bool
+	Username        string
+	Password        string
+	SessionHours    int
 }
 
 type ObjectStorage struct {
@@ -64,6 +72,7 @@ type Scanner struct {
 // approval never creates a Creative task implicitly.
 type Strategy struct {
 	Enabled                  bool
+	V2Enabled                bool
 	RealProviderEnabled      bool
 	ApproveEnabled           bool
 	PackageToCreativeEnabled bool
@@ -204,13 +213,31 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	passwordAuthEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_PASSWORD_AUTH_ENABLED",
+		environment == EnvironmentLocal || environment == EnvironmentTest,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	strategyV2Enabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_V2_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
 		MySQL: MySQL{
-			DSN:          valueOr(lookup, "COOKIES_MYSQL_DSN", "cookies:cookies_local_development_only@tcp(127.0.0.1:3306)/cookies?parseTime=true&multiStatements=true"),
+			DSN:          valueOr(lookup, "COOKIES_MYSQL_DSN", "cookies:cookies_local_development_only@tcp(127.0.0.1:3307)/cookies?parseTime=true&multiStatements=true"),
 			MaxOpenConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_OPEN_CONNS", 10),
 			MaxIdleConns: intValueOr(lookup, "COOKIES_MYSQL_MAX_IDLE_CONNS", 5),
+		},
+		Auth: Auth{
+			PasswordEnabled: passwordAuthEnabled,
+			Username:        valueOr(lookup, "COOKIES_ADMIN_USERNAME", "Admin"),
+			Password:        valueOr(lookup, "COOKIES_ADMIN_PASSWORD", "123456"),
+			SessionHours:    intValueOr(lookup, "COOKIES_SESSION_HOURS", 8),
 		},
 		ObjectStorage: ObjectStorage{
 			Provider:         valueOrCompatibility(lookup, "COOKIES_BLOB_PROVIDER", "OBJECT_STORAGE_PROVIDER", "filesystem"),
@@ -226,6 +253,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
 		Strategy: Strategy{
 			Enabled:                  strategyEnabled,
+			V2Enabled:                strategyV2Enabled,
 			RealProviderEnabled:      strategyRealProviderEnabled,
 			ApproveEnabled:           strategyApproveEnabled,
 			PackageToCreativeEnabled: strategyPackageToCreativeEnabled,
@@ -296,6 +324,14 @@ func (c Config) Validate() error {
 	}
 	if c.MySQL.MaxOpenConns < 1 || c.MySQL.MaxIdleConns < 0 || c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
 		return fmt.Errorf("MySQL connection pool limits are invalid")
+	}
+	if c.Auth.PasswordEnabled && (strings.TrimSpace(c.Auth.Username) == "" ||
+		strings.TrimSpace(c.Auth.Password) == "" || c.Auth.SessionHours < 1 || c.Auth.SessionHours > 168) {
+		return fmt.Errorf("password authentication requires username, password, and session hours between 1 and 168")
+	}
+	if c.Auth.PasswordEnabled && c.Environment != EnvironmentLocal && c.Environment != EnvironmentTest &&
+		strings.EqualFold(strings.TrimSpace(c.Auth.Username), "Admin") && c.Auth.Password == "123456" {
+		return fmt.Errorf("default local administrator credentials are forbidden outside local and test")
 	}
 	if c.ObjectStorage.Provider != "memory" && c.ObjectStorage.Provider != "filesystem" && c.ObjectStorage.Provider != "tos" {
 		return fmt.Errorf("COOKIES_BLOB_PROVIDER must be memory, filesystem, or tos")

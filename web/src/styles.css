@@ -73,6 +73,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .project-menu__divider { height: 1px; margin: 5px 6px; background: var(--border); }
 .identity-summary { display: flex; align-items: center; gap: 9px; color: var(--text); font-size: 13px; font-weight: 600; }
 .identity-summary__org { margin-right: 4px; color: var(--muted); font-weight: 500; }
+.identity-summary__logout { border: 0; background: transparent; color: var(--muted); padding: 7px 4px; font-size: 12px; }
+.identity-summary__logout:hover { color: var(--danger); }
 .avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .workspace-alert { border-bottom: 1px solid #fecdca; background: #fffbfa; color: #b42318; padding: 9px 28px; font-size: 13px; }
 

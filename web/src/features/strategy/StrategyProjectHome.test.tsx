@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StrategyLanding, StrategyProjectHome } from './StrategyProjectHome'
 
@@ -28,16 +28,19 @@ describe('Strategy project home', () => {
     expect(await screen.findByRole('heading', { name: '主策略工作区' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /主策略工作区/ })).toHaveAttribute(
       'href',
-      '/strategy/projects/project_1/workspaces/workspace_1/conversation',
+      '/projects/project_1/strategy/workspaces/workspace_1/conversation',
     )
   })
 
-  it('uses the shell-selected project at the Strategy root route', async () => {
+  it('redirects the compatibility Strategy root to the canonical project route', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })))
-    render(<MemoryRouter><StrategyLanding project={project} /></MemoryRouter>)
-    expect(await screen.findByRole('heading', { name: /新品项目.*策略/ })).toBeInTheDocument()
+    render(<MemoryRouter initialEntries={['/strategy']}><Routes>
+      <Route element={<StrategyLanding project={project} />} path="/strategy" />
+      <Route element={<StrategyProjectHome project={project} />} path="/projects/:projectId/strategy/workspaces" />
+    </Routes></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: '新品项目 · 策略' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /创建并开始/ })).toBeInTheDocument()
   })
 })

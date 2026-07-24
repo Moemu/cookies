@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import type { Project } from '../platform/types'
 import { createWorkspace, listWorkspaces } from './api'
 import type { Workspace } from './types'
@@ -27,7 +27,7 @@ export function StrategyProjectHome({ project }: { project?: Project }) {
     <header><span className="eyebrow">STRATEGY</span><h1>{project.name} · 策略</h1><p>把自然语言需求沉淀为可确认、可评审、可交付给 Creative 的策略版本。</p></header>
     {error ? <div className="strategy-alert" role="alert">{error}</div> : null}
     {workspaces.length ? <div className="workspace-cards">
-      {workspaces.map((workspace) => <Link className="workspace-card" key={workspace.id} to={`/strategy/projects/${project.id}/workspaces/${workspace.id}/conversation`}>
+      {workspaces.map((workspace) => <Link className="workspace-card" key={workspace.id} to={`/projects/${project.id}/strategy/workspaces/${workspace.id}/conversation`}>
         <span>{workspace.is_primary ? '主工作区' : '工作区'}</span><h2>{workspace.name}</h2><p>继续需求梳理、Brief 确认与策略评审</p><strong>打开工作区 →</strong>
       </Link>)}
     </div> : <form className="create-workspace-card" onSubmit={async (event) => {
@@ -36,7 +36,7 @@ export function StrategyProjectHome({ project }: { project?: Project }) {
       setError('')
       try {
         const workspace = await createWorkspace(project.id, name)
-        navigate(`/strategy/projects/${project.id}/workspaces/${workspace.id}/conversation`)
+        navigate(`/projects/${project.id}/strategy/workspaces/${workspace.id}/conversation`)
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '创建失败')
       } finally {
@@ -53,6 +53,6 @@ export function StrategyProjectHome({ project }: { project?: Project }) {
 // The shell already resolves the active project. Keeping this entry route
 // project-aware prevents /strategy from stranding users on a static empty page.
 export function StrategyLanding({ project }: { project?: Project }) {
-  if (project) return <StrategyProjectHome project={project} />
+  if (project) return <Navigate replace to={`/projects/${project.id}/strategy/workspaces`} />
   return <section className="strategy-empty"><span className="eyebrow">STRATEGY</span><h1>策略工作区</h1><p>从顶部选择项目，开始广告需求梳理。</p></section>
 }

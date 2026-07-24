@@ -26,11 +26,21 @@ type ConversationExcerpt struct {
 	Content string `json:"content"`
 }
 
+type KnowledgeExcerpt struct {
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Title       string   `json:"title"`
+	Content     string   `json:"content"`
+	ContentHash string   `json:"content_hash"`
+	Citations   []string `json:"citations,omitempty"`
+}
+
 type GenerationContext struct {
 	ContractVersion string                    `json:"contract_version"`
 	Brief           BriefVersion              `json:"brief"`
 	Project         contract.ProjectContext   `json:"project"`
 	Evidence        []EvidenceItem            `json:"evidence"`
+	Documents       []KnowledgeExcerpt        `json:"documents"`
 	Conversation    []ConversationExcerpt     `json:"conversation_excerpt"`
 	Skills          []strategyskills.Snapshot `json:"skills"`
 	PromptVersion   string                    `json:"prompt_version"`
@@ -54,6 +64,10 @@ func (s Service) buildGenerationContext(ctx context.Context, task agent.Task, br
 	if err != nil {
 		return GenerationContext{}, err
 	}
+	documents, err := s.generationDocuments(ctx, actor, task.ProjectID, brief.Snapshot.ReferenceIDs)
+	if err != nil {
+		return GenerationContext{}, err
+	}
 	registry, err := strategyskills.DefaultRegistry()
 	if err != nil {
 		return GenerationContext{}, err
@@ -66,10 +80,47 @@ func (s Service) buildGenerationContext(ctx context.Context, task agent.Task, br
 		ContractVersion: "strategy-generation-context/v2",
 		Brief:           brief, Project: projectContext,
 		Evidence:      evidenceFromBrief(brief),
+		Documents:     documents,
 		Conversation:  conversation,
 		Skills:        registry.Select(brief.Snapshot.Channels, brief.Snapshot.Campaign.Objective),
 		PromptVersion: promptVersion,
 	}, nil
+}
+
+func (s Service) generationDocuments(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, referenceIDs []string) ([]KnowledgeExcerpt, error) {
+	if len(referenceIDs) == 0 {
+		return []KnowledgeExcerpt{}, nil
+	}
+	if s.Knowledge == nil {
+		return nil, fmt.Errorf("knowledge reader is required for referenced documents")
+	}
+	const maxReferenceRunes = 40_000
+	const maxTotalRunes = 120_000
+	result := make([]KnowledgeExcerpt, 0, len(referenceIDs))
+	total := 0
+	for _, id := range referenceIDs {
+		value, err := s.Knowledge.GetReference(ctx, actor, projectID, id)
+		if err != nil {
+			return nil, fmt.Errorf("resolve knowledge reference %q: %w", id, err)
+		}
+		content := []rune(strings.TrimSpace(value.Content))
+		if len(content) > maxReferenceRunes {
+			content = content[:maxReferenceRunes]
+		}
+		if total+len(content) > maxTotalRunes {
+			remaining := maxTotalRunes - total
+			if remaining <= 0 {
+				break
+			}
+			content = content[:remaining]
+		}
+		total += len(content)
+		result = append(result, KnowledgeExcerpt{
+			ID: value.ID, Kind: value.Kind, Title: value.Title, Content: string(content),
+			ContentHash: value.ContentHash, Citations: append([]string(nil), value.Citations...),
+		})
+	}
+	return result, nil
 }
 
 func (s Service) generationConversation(ctx context.Context, task agent.Task, conversationID string) ([]ConversationExcerpt, error) {
@@ -187,6 +238,12 @@ func strategySystemPrompt(generation GenerationContext) string {
 10. measurement 必须逐字包含 Brief 的 measurement.primary_kpi。
 11. 内容保持精炼：每个数组优先 3 项，单项不超过 80 个汉字。
 12. 返回一个符合 Schema 的 JSON 对象，不要输出 Markdown。`)
+	if generation.Brief.Snapshot.ContractVersion == "strategy-brief-version/v2" {
+		builder.WriteString(`
+13. 返回 strategy-draft/v2，并为 Brief 中每个平台生成且只生成一个 platform_plans 条目。
+14. 平台允许值仅为 xiaohongshu、douyin、taobao_tmall、wechat_ecosystem。
+15. 每个平台必须给出角色、内容支柱、形式、转化路径、节奏、主指标、创意和约束，不能只替换平台名称。`)
+	}
 	for _, skill := range generation.Skills {
 		builder.WriteString("\n\nSkill ")
 		builder.WriteString(skill.Name)
@@ -209,13 +266,17 @@ func strategySystemPrompt(generation GenerationContext) string {
 func strategyUserPrompt(generation GenerationContext) string {
 	input := struct {
 		ContractVersion string                  `json:"contract_version"`
+		Brief           BriefVersion            `json:"brief"`
 		Project         contract.ProjectContext `json:"project"`
 		Evidence        []EvidenceItem          `json:"evidence"`
+		Documents       []KnowledgeExcerpt      `json:"documents"`
 		PromptVersion   string                  `json:"prompt_version"`
 	}{
 		ContractVersion: generation.ContractVersion,
+		Brief:           generation.Brief,
 		Project:         generation.Project,
 		Evidence:        generation.Evidence,
+		Documents:       generation.Documents,
 		PromptVersion:   generation.PromptVersion,
 	}
 	encoded, _ := json.Marshal(input)
@@ -246,6 +307,9 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	}
 	if missingChannels(document.ChannelStrategy, brief.Channels) {
 		report.Errors = append(report.Errors, "channel strategy does not cover the confirmed Brief")
+	}
+	if document.ContractVersion == "strategy-draft/v2" && missingPlatformPlans(document.PlatformPlans, brief.Channels) {
+		report.Errors = append(report.Errors, "platform plans do not cover the confirmed Brief")
 	}
 	if !hasNonEmptyStrings(document.Audience.Insights) {
 		report.Errors = append(report.Errors, "audience.insights must not be empty")
@@ -312,6 +376,22 @@ func missingChannels(values []ChannelStrategy, expected []string) bool {
 	return false
 }
 
+func missingPlatformPlans(values []PlatformPlan, expected []string) bool {
+	for _, channel := range expected {
+		found := false
+		for _, value := range values {
+			if strings.EqualFold(strings.TrimSpace(value.Platform), strings.TrimSpace(channel)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
+}
+
 func hasNonEmptyStrings(values []string) bool {
 	if len(values) == 0 {
 		return false
@@ -362,6 +442,10 @@ func allowedRevisionSections(instruction string) []string {
 		{"experiment_matrix", []string{"实验", "测试", "experiment"}},
 		{"measurement", []string{"指标", "衡量", "measurement", "kpi"}},
 		{"assumptions_and_gaps", []string{"假设", "缺口", "gap", "assumption"}},
+		{"executive_summary", []string{"执行摘要", "summary"}},
+		{"cross_platform_role", []string{"跨平台", "协同", "cross-platform"}},
+		{"platform_plans", []string{"平台方案", "平台计划", "platform plan"}},
+		{"evidence_refs", []string{"证据", "引用", "evidence", "citation"}},
 	}
 	sections := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -415,6 +499,19 @@ func retainAllowedRevisionSections(before StrategyDocument, after *StrategyDocum
 	if _, ok := allowedSet["assumptions_and_gaps"]; !ok {
 		after.AssumptionsAndGaps = before.AssumptionsAndGaps
 	}
+	if _, ok := allowedSet["executive_summary"]; !ok {
+		after.ExecutiveSummary = before.ExecutiveSummary
+	}
+	if _, ok := allowedSet["cross_platform_role"]; !ok {
+		after.CrossPlatformRole = before.CrossPlatformRole
+	}
+	if _, ok := allowedSet["platform_plans"]; !ok {
+		after.PlatformPlans = before.PlatformPlans
+	}
+	if _, ok := allowedSet["evidence_refs"]; !ok {
+		after.EvidenceRefs = before.EvidenceRefs
+	}
+	after.Compliance = before.Compliance
 }
 
 func changedStrategySections(before, after StrategyDocument) []string {
@@ -433,6 +530,10 @@ func changedStrategySections(before, after StrategyDocument) []string {
 		{"experiment_matrix", before.ExperimentMatrix, after.ExperimentMatrix},
 		{"measurement", before.Measurement, after.Measurement},
 		{"assumptions_and_gaps", before.AssumptionsAndGaps, after.AssumptionsAndGaps},
+		{"executive_summary", before.ExecutiveSummary, after.ExecutiveSummary},
+		{"cross_platform_role", before.CrossPlatformRole, after.CrossPlatformRole},
+		{"platform_plans", before.PlatformPlans, after.PlatformPlans},
+		{"evidence_refs", before.EvidenceRefs, after.EvidenceRefs},
 	}
 	changed := []string{}
 	for _, value := range values {

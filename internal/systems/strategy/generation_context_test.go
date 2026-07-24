@@ -1,10 +1,12 @@
 package strategy
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	strategyskills "github.com/shikanon/cookies/internal/systems/strategy/skills"
 )
 
@@ -137,6 +139,7 @@ func TestStrategyUserPromptOmitsDuplicatedConversationAndSkills(t *testing.T) {
 		ContractVersion: "strategy-generation-context/v2",
 		Project:         contract.ProjectContext{ProjectContextVersion: 3},
 		Evidence:        []EvidenceItem{{FieldPath: "campaign.objective", Value: "获取线索", Confirmed: true}},
+		Documents:       []KnowledgeExcerpt{{ID: "doc_1", Kind: "document", Title: "产品资料.md", Content: "产品事实证据"}},
 		Conversation:    []ConversationExcerpt{{Role: "user", Content: "不应重复进入策略提示词"}},
 		Skills:          []strategyskills.Snapshot{{Name: "不应重复的 Skill"}},
 		PromptVersion:   "strategy.generate.v2",
@@ -147,6 +150,75 @@ func TestStrategyUserPromptOmitsDuplicatedConversationAndSkills(t *testing.T) {
 	if !strings.Contains(prompt, "获取线索") || !strings.Contains(prompt, `"project_context_version":3`) {
 		t.Fatalf("prompt omitted required context: %s", prompt)
 	}
+	if !strings.Contains(prompt, "产品事实证据") || !strings.Contains(prompt, `"id":"doc_1"`) {
+		t.Fatalf("prompt omitted referenced document: %s", prompt)
+	}
+}
+
+func TestGenerationDocumentsResolvesDocumentsAndResearchArtifacts(t *testing.T) {
+	t.Parallel()
+	service := Service{Knowledge: stubKnowledgeReader{values: map[string]knowledge.Reference{
+		"doc_1": {
+			ID: "doc_1", Kind: "document", Title: "产品资料.md",
+			Content: "产品能力说明", ContentHash: strings.Repeat("a", 64),
+		},
+		"artifact_1": {
+			ID: "artifact_1", Kind: "research_artifact", Title: "行业案例",
+			Content: "行业研究结论", ContentHash: strings.Repeat("b", 64),
+			Citations: []string{"https://example.test/source"},
+		},
+	}}}
+	values, err := service.generationDocuments(
+		context.Background(),
+		contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}},
+		"project_1",
+		[]string{"doc_1", "artifact_1"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0].Kind != "document" || values[1].Kind != "research_artifact" ||
+		len(values[1].Citations) != 1 {
+		t.Fatalf("knowledge excerpts = %#v", values)
+	}
+}
+
+func TestDeterministicStrategyBuildsDistinctPlansForEveryV2Platform(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{
+		BriefID: "brief_1", Version: 1,
+		Snapshot: BriefDocument{
+			ContractVersion: "strategy-brief-version/v2",
+			Campaign:        BriefCampaign{Objective: "新品成交"},
+			Audience:        BriefAudience{Primary: "品质消费人群"},
+			Proposition:     "可验证的产品效果",
+			Channels:        []string{"xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"},
+			Measurement:     BriefMeasurement{PrimaryKPI: "有效成交数"},
+		},
+	}
+	document := deterministicStrategy(brief, Draft{ProjectContextVersion: 3, SkillVersions: map[string]string{"strategy.strategy.generate": "v2.0.0"}})
+	if err := document.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if document.ContractVersion != "strategy-draft/v2" || len(document.PlatformPlans) != 4 {
+		t.Fatalf("strategy document = %#v", document)
+	}
+	roles := map[string]string{}
+	for _, plan := range document.PlatformPlans {
+		roles[plan.Platform] = plan.Role
+	}
+	if len(roles) != 4 || roles["xiaohongshu"] == roles["douyin"] ||
+		roles["douyin"] == roles["taobao_tmall"] || roles["taobao_tmall"] == roles["wechat_ecosystem"] {
+		t.Fatalf("platform roles are not distinct: %#v", roles)
+	}
+}
+
+type stubKnowledgeReader struct {
+	values map[string]knowledge.Reference
+}
+
+func (s stubKnowledgeReader) GetReference(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (knowledge.Reference, error) {
+	return s.values[id], nil
 }
 
 func TestRetainAllowedRevisionSections(t *testing.T) {

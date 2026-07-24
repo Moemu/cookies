@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
 import { ProviderJobsPage } from '../features/provider/ProviderJobsPage'
 import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
@@ -9,8 +9,11 @@ import type { CurrentIdentity, Project } from '../features/platform/types'
 import { NewProjectDialog } from '../features/projects/NewProjectDialog'
 import { StrategyLanding, StrategyProjectHome } from '../features/strategy/StrategyProjectHome'
 import { StrategyWorkspacePage } from '../features/strategy/StrategyWorkspacePage'
+import { StrategyReviewPage } from '../features/strategy/StrategyReviewPage'
+import { StrategyPackagePage } from '../features/strategy/StrategyPackagePage'
 import { Icon } from './Icon'
 import { adminModule, shellModules } from './modules'
+import { logout } from '../auth/api'
 
 const modules = [...shellModules, adminModule]
 
@@ -21,17 +24,24 @@ function routeProjectId(pathname: string) {
 }
 
 function destinationForProject(pathname: string, projectId: string) {
-  if (pathname.startsWith('/strategy/')) return `/strategy/projects/${projectId}`
+  if (pathname.includes('/strategy')) return `/projects/${projectId}/strategy/workspaces`
   if (pathname.includes('/provider-jobs')) return `/projects/${projectId}/provider-jobs`
-  if (pathname.includes('/creative')) return `/projects/${projectId}/creative`
+  if (pathname.includes('/creative')) return `/projects/${projectId}/creative/tasks`
   return `/projects/${projectId}/assets`
+}
+
+function activeModuleKey(pathname: string) {
+  if (pathname.includes('/strategy')) return 'strategy'
+  if (pathname.includes('/creative')) return 'creative'
+  if (pathname.startsWith('/admin')) return 'admin'
+  return 'strategy'
 }
 
 export function Workspace() {
   const location = useLocation()
   const navigate = useNavigate()
   const projectId = routeProjectId(location.pathname)
-  const moduleKey = location.pathname.startsWith('/projects/') ? 'creative' : location.pathname.split('/')[1]
+  const moduleKey = activeModuleKey(location.pathname)
   const activeModule = modules.find(({ key }) => key === moduleKey) ?? shellModules[0]
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
@@ -62,7 +72,7 @@ export function Workspace() {
         <Link className="wordmark" to="/strategy" aria-label="cookies 首页">cookies</Link>
         <nav className="module-nav" aria-label="业务系统">
           {shellModules.map((module) => (
-            <Link className={module.key === activeModule.key ? 'nav-item nav-item--active' : 'nav-item'} key={module.key} to={module.key === 'creative' && currentProject ? `/projects/${currentProject.id}/creative` : `/${module.key}`}>
+            <Link className={module.key === activeModule.key ? 'nav-item nav-item--active' : 'nav-item'} key={module.key} to={currentProject ? `/projects/${currentProject.id}/${module.key}${module.key === 'creative' ? '/tasks' : '/workspaces'}` : `/${module.key}`}>
               <Icon name={module.icon} /><span>{module.label}</span>
             </Link>
           ))}
@@ -91,8 +101,8 @@ export function Workspace() {
                 <div className="project-menu__divider" />
                 <div className="project-menu__section-label"><span>当前项目 · {currentProject.name}</span><small>工作区</small></div>
                 <div className="project-menu__workspace-links">
-                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/strategy/projects/${currentProjectId}`}><span>策略工作区</span><small>Brief 与策略包</small></Link>
-                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/creative`}><span>创意创作</span><small>图文任务与初稿</small></Link>
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/strategy/workspaces`}><span>策略工作区</span><small>Brief 与策略包</small></Link>
+                  <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/creative/tasks`}><span>创意创作</span><small>图文任务与初稿</small></Link>
                   <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/assets`}><span>项目素材库</span><small>上传与已入库素材</small></Link>
                   <Link onClick={() => setProjectMenuOpen(false)} role="menuitem" to={`/projects/${currentProjectId}/provider-jobs`}><span>模型作业（排障）</span><small>调用、失败原因与入库核查</small></Link>
                 </div>
@@ -111,17 +121,26 @@ export function Workspace() {
             <span className="identity-summary__org">{identity?.organization.name || '本地组织'}</span>
             <span className="avatar" aria-hidden="true">{initial}</span>
             <span className="identity-summary__name">{displayName}</span>
+            <button className="identity-summary__logout" onClick={() => {
+              logout().finally(() => navigate('/login', { replace: true }))
+            }} type="button">退出</button>
           </div>
         </header>
         {bootstrapError ? <div className="workspace-alert" role="status">身份与项目列表暂不可用：{bootstrapError}</div> : null}
         <main className="workspace" aria-live="polite">
           <Routes>
             <Route path="/strategy" element={<StrategyLanding project={currentProject} />} />
-            <Route path="/strategy/projects/:projectId" element={<StrategyProjectHome project={currentProject} />} />
-            <Route path="/strategy/projects/:projectId/workspaces/:workspaceId/*" element={<StrategyWorkspacePage project={currentProject} />} />
+            <Route path="/projects/:projectId/strategy" element={<ProjectStrategyRedirect />} />
+            <Route path="/projects/:projectId/strategy/workspaces" element={<StrategyProjectHome project={currentProject} />} />
+            <Route path="/projects/:projectId/strategy/workspaces/:workspaceId/:stage" element={<StrategyWorkspacePage project={currentProject} />} />
+            <Route path="/projects/:projectId/strategy/reviews/:reviewId" element={<StrategyReviewPage />} />
+            <Route path="/projects/:projectId/strategy/packages/:packageId" element={<StrategyPackagePage />} />
+            <Route path="/strategy/projects/:projectId" element={<LegacyStrategyRedirect />} />
+            <Route path="/strategy/projects/:projectId/workspaces/:workspaceId/*" element={<LegacyStrategyWorkspaceRedirect />} />
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
-            <Route path="/projects/:projectId/creative" element={<CreativeImageTextPage />} />
+            <Route path="/projects/:projectId/creative/tasks" element={<CreativeImageTextPage />} />
+            <Route path="/projects/:projectId/creative" element={<LegacyCreativeRedirect />} />
             <Route path="/admin" element={<IdentityOrganizationPage identity={identity} projects={projects} />} />
             <Route path="*" element={<ModulePlaceholder label={activeModule.label} description={activeModule.description} />} />
           </Routes>
@@ -138,6 +157,27 @@ export function Workspace() {
       />
     </div>
   )
+}
+
+function LegacyStrategyRedirect() {
+  const { projectId = '' } = useParams()
+  return <Navigate replace to={`/projects/${projectId}/strategy/workspaces`} />
+}
+
+function ProjectStrategyRedirect() {
+  const { projectId = '' } = useParams()
+  return <Navigate replace to={`/projects/${projectId}/strategy/workspaces`} />
+}
+
+function LegacyStrategyWorkspaceRedirect() {
+  const { projectId = '', workspaceId = '', '*': legacyStage = '' } = useParams()
+  const stage = ['conversation', 'brief', 'strategy'].includes(legacyStage) ? legacyStage : 'conversation'
+  return <Navigate replace to={`/projects/${projectId}/strategy/workspaces/${workspaceId}/${stage}`} />
+}
+
+function LegacyCreativeRedirect() {
+  const { projectId = '' } = useParams()
+  return <Navigate replace to={`/projects/${projectId}/creative/tasks`} />
 }
 
 function ModulePlaceholder({ label, description }: { label: string; description: string }) {

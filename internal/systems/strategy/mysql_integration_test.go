@@ -14,12 +14,14 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/eventoutbox"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/systems/creative"
 	"github.com/shikanon/cookies/internal/systems/strategy"
 )
 
@@ -48,6 +50,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		Scopes: []contract.Scope{
 			"project.read", "project.write", strategy.ScopeRead, strategy.ScopeWrite,
 			strategy.ScopeConfirm, strategy.ScopeReview, strategy.ScopeApprove, strategy.ScopePackageRead,
+			creative.ScopeWrite,
 		},
 	}
 	t.Cleanup(func() { cleanupStrategyIntegration(t, db, organizationID, userID) })
@@ -59,7 +62,8 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err := projectStore.EnsureLocalProject(ctx, actor, projectID); err != nil {
 		t.Fatal(err)
 	}
-	service := strategy.Service{DB: db, Projects: &project.Service{Store: projectStore, Authorizer: projectStore}, Agents: agent.MySQLStore{DB: db}}
+	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
+	service := strategy.Service{DB: db, Projects: projectService, Agents: agent.MySQLStore{DB: db}}
 
 	workspace, duplicate, err := service.CreateWorkspace(ctx, actor, contract.IdempotencyKey("workspace_"+suffix), projectID, "Integration Workspace")
 	if err != nil || duplicate {
@@ -192,6 +196,51 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	}
 	if !stored.ContentHash.Equal(published.ContentHash) || stored.Snapshot.StrategyRevision != 2 {
 		t.Fatalf("unexpected package: %#v", stored)
+	}
+	feedback, duplicate, err := service.CreateFeedback(
+		ctx, actor, projectID, contract.IdempotencyKey("feedback_"+suffix),
+		strategy.CreateFeedbackRequest{
+			TargetType: "strategy_package", TargetID: published.PackageID,
+			TargetVersion: published.Version, Rating: "useful", Comment: "策略结构可执行",
+		},
+	)
+	if err != nil || duplicate || feedback.TargetID != published.PackageID {
+		t.Fatalf("create feedback: feedback=%#v duplicate=%v err=%v", feedback, duplicate, err)
+	}
+	if _, _, err := service.CreateFeedback(
+		ctx, actor, projectID, contract.IdempotencyKey("feedback_invalid_"+suffix),
+		strategy.CreateFeedbackRequest{
+			TargetType: "strategy_package", TargetID: "missing_package",
+			TargetVersion: 1, Rating: "not_useful",
+		},
+	); !errors.Is(err, strategy.ErrInvalidRequest) {
+		t.Fatalf("invalid feedback target error = %v", err)
+	}
+	creativeService := creative.Service{
+		Repository: creative.MySQLRepository{DB: db},
+		Projects:   projectService,
+		StrategyPackages: strategycreative.Reader{
+			Service: service,
+		},
+	}
+	intake, err := creativeService.CreateIntake(
+		ctx,
+		contract.RequestContext{RequestID: "creative_request_" + suffix, TraceID: "creative_trace_" + suffix, Actor: actor},
+		projectID,
+		contract.IdempotencyKey("creative_intake_"+suffix),
+		creative.CreateIntakeRequest{
+			Source: creative.IntakeSourceStrategyPackage,
+			StrategyPackage: &creative.StrategyPackageReference{
+				PackageID:           published.PackageID,
+				PackageVersion:      published.Version,
+				ExpectedContentHash: string(published.ContentHash),
+			},
+		},
+	)
+	if err != nil || intake.Status != creative.IntakeReady ||
+		intake.Request.StrategyPackage == nil ||
+		intake.Request.StrategyPackage.PackageID != published.PackageID {
+		t.Fatalf("Strategy package handoff: intake=%#v err=%v", intake, err)
 	}
 	replayed, duplicate, err := service.ApproveStrategy(ctx, actor, contract.IdempotencyKey("approve_"+suffix), strategyDraft.ID, strategy.ApproveRequest{
 		ReviewID: review.ID, CandidateContentHash: review.CandidateContentHash, ExpectedVersion: strategyDraft.Version,
@@ -339,6 +388,10 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 	defer cancel()
 	statements := []string{
 		"DELETE FROM event_consumptions WHERE event_id IN (SELECT event_id FROM event_outbox WHERE organization_id=?)",
+		"DELETE FROM creative_intakes WHERE organization_id=?",
+		"DELETE FROM strategy_feedback WHERE organization_id=?",
+		"DELETE FROM strategy_compliance_reports WHERE organization_id=?",
+		"DELETE FROM strategy_conversation_memories WHERE organization_id=?",
 		"DELETE FROM strategy_review_comments WHERE organization_id=?",
 		"DELETE FROM strategy_package_versions WHERE organization_id=?",
 		"DELETE FROM strategy_packages WHERE organization_id=?",

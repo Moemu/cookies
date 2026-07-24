@@ -35,3 +35,30 @@ func TestRegistryDefaultsUnknownObjectiveToAwareness(t *testing.T) {
 		t.Fatalf("selected skills = %#v", values)
 	}
 }
+
+func TestRegistrySelectsEverySupportedPlatformSkill(t *testing.T) {
+	t.Parallel()
+	registry, err := DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := registry.Select(
+		[]string{"xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"},
+		"新品认知",
+	)
+	names := map[string]bool{}
+	for _, value := range values {
+		names[value.Name] = true
+	}
+	for _, expected := range []string{
+		"channel.xiaohongshu",
+		"channel.douyin",
+		"channel.taobao_tmall",
+		"channel.wechat_ecosystem",
+		"objective.awareness",
+	} {
+		if !names[expected] {
+			t.Fatalf("missing %s in selected skills: %#v", expected, names)
+		}
+	}
+}

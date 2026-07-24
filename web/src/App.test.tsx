@@ -63,15 +63,15 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
-  it('mounts independent module workspaces from the shared shell', () => {
+  it('mounts independent module workspaces from the shared shell', async () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: '策略工作区' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '示例项目 · 策略' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('link', { name: '创意' }))
-    expect(screen.getByRole('heading', { name: '创意工作区' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '小红书图文创作' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('link', { name: '管理' }))
-    expect(screen.getByRole('heading', { name: '组织与访问' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '组织与访问' })).toBeInTheDocument()
   })
 
   it('loads the real project asset library and opens a validated upload flow', async () => {

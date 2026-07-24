@@ -17,6 +17,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
@@ -32,6 +33,8 @@ type Server struct {
 	uploads           AssetUploadManager
 	intakes           GeneratedIntakeManager
 	creative          CreativeManager
+	sessions          SessionManager
+	knowledge         KnowledgeManager
 	mux               *http.ServeMux
 	newID             func() (string, error)
 }
@@ -50,6 +53,8 @@ type Dependencies struct {
 	Uploads           AssetUploadManager
 	Intakes           GeneratedIntakeManager
 	Creative          CreativeManager
+	Sessions          SessionManager
+	Knowledge         KnowledgeManager
 	// AuthenticatedDomainMounts allow vertical systems to share the platform
 	// listener and identity context without making this package import them.
 	// Mount handlers remain responsible for project authorization and scopes.
@@ -63,6 +68,12 @@ type DomainMount struct {
 
 type CurrentIdentityReader interface {
 	GetCurrent(context.Context, contract.ActorContext) (identity.CurrentIdentity, error)
+}
+type SessionManager interface {
+	Login(context.Context, string, string) (identity.LoginResult, error)
+	Logout(context.Context, string) error
+	Cookie(string, time.Time) *http.Cookie
+	ExpiredCookie() *http.Cookie
 }
 type ProjectManager interface {
 	CreateBrand(context.Context, contract.ActorContext, string) (project.Brand, error)
@@ -82,6 +93,11 @@ type AssetUploadManager interface {
 type GeneratedIntakeManager interface {
 	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.GeneratedAssetIntakeRequest) (assets.GeneratedIntake, error)
 	Get(context.Context, contract.ActorContext, contract.ProjectID, string) (assets.GeneratedIntake, error)
+}
+type KnowledgeManager interface {
+	CreateDocument(context.Context, contract.ActorContext, contract.ProjectID, string, string, io.Reader, int64) (knowledge.Document, error)
+	ListDocuments(context.Context, contract.ActorContext, contract.ProjectID) ([]knowledge.Document, error)
+	RunResearch(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ResearchRequest) (knowledge.ResearchRun, error)
 }
 
 // CreativeManager is the public application seam from the shared HTTP host to
@@ -123,11 +139,13 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 		providerJobs: dependencies.ProviderJobs, readiness: dependencies.Readiness,
 		identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads,
 		intakes: dependencies.Intakes, newID: newRequestID,
-		creative: dependencies.Creative,
+		creative: dependencies.Creative, sessions: dependencies.Sessions, knowledge: dependencies.Knowledge,
 	}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
 	server.mux.HandleFunc("GET /readyz", server.ready)
+	server.mux.HandleFunc("POST /platform/v1/auth/login", server.login)
+	server.mux.HandleFunc("POST /platform/v1/auth/logout", server.logout)
 	server.mux.Handle("GET /platform/v1/context", server.requireAuthentication(http.HandlerFunc(server.requestContext)))
 	server.mux.Handle("GET /platform/v1/me", server.requireAuthentication(http.HandlerFunc(server.currentIdentity)))
 	server.mux.Handle("POST /platform/v1/brands", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createBrand))))
@@ -143,6 +161,9 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("DELETE /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.removeAsset))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/generated-intakes", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.createGeneratedIntake))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.createKnowledgeDocument))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope("strategy.read", http.HandlerFunc(server.listKnowledgeDocuments))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/model/jobs", server.requireProject(http.HandlerFunc(server.createImageJob)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/model/jobs/{job_id}", server.requireProject(http.HandlerFunc(server.getProviderJob)))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-intakes", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeIntakes))))
@@ -161,6 +182,80 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	}
 	server.mux.HandleFunc("/", server.notFound)
 	return server
+}
+
+func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
+	if s.sessions == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.Username) == "" ||
+		body.Password == "" {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_REQUEST", Message: "请输入账号和密码",
+			RequestID: requestIDFrom(request.Context()), Retryable: false,
+		})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_REQUEST", Message: "登录请求格式无效",
+			RequestID: requestIDFrom(request.Context()), Retryable: false,
+		})
+		return
+	}
+	result, err := s.sessions.Login(request.Context(), body.Username, body.Password)
+	if err != nil {
+		status := http.StatusUnauthorized
+		code := "INVALID_CREDENTIALS"
+		if errors.Is(err, identity.ErrCredentialLocked) {
+			status, code = http.StatusTooManyRequests, "LOGIN_RATE_LIMITED"
+		}
+		if !errors.Is(err, identity.ErrInvalidCredentials) && !errors.Is(err, identity.ErrCredentialLocked) {
+			status, code = http.StatusServiceUnavailable, "IDENTITY_UNAVAILABLE"
+		}
+		writeProblem(writer, status, contract.Error{
+			Code: code, Message: "账号或密码错误，请稍后重试",
+			RequestID: requestIDFrom(request.Context()), Retryable: status >= 500,
+		})
+		return
+	}
+	http.SetCookie(writer, s.sessions.Cookie(result.Token, result.ExpiresAt))
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"actor": result.Actor, "expires_at": result.ExpiresAt,
+	})
+}
+
+func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
+	if s.sessions == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	if cookie, err := request.Cookie(identity.SessionCookieName); err == nil {
+		if len(cookie.Value) > 128 {
+			http.SetCookie(writer, s.sessions.ExpiredCookie())
+			writeProblem(writer, http.StatusBadRequest, contract.Error{
+				Code: "INVALID_SESSION_COOKIE", Message: "会话 Cookie 格式无效",
+				RequestID: requestIDFrom(request.Context()), Retryable: false,
+			})
+			return
+		}
+		if err := s.sessions.Logout(request.Context(), cookie.Value); err != nil {
+			writeProblem(writer, http.StatusServiceUnavailable, contract.Error{
+				Code: "IDENTITY_UNAVAILABLE", Message: "暂时无法退出，请稍后重试",
+				RequestID: requestIDFrom(request.Context()), Retryable: true,
+			})
+			return
+		}
+	}
+	http.SetCookie(writer, s.sessions.ExpiredCookie())
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -283,6 +378,112 @@ func (s *Server) projectContext(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
+	if s.knowledge == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	request.Body = http.MaxBytesReader(writer, request.Body, knowledge.MaxDocumentBytes+1024*1024)
+	if err := request.ParseMultipartForm(knowledge.MaxDocumentBytes); err != nil {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_DOCUMENT", Message: "文档上传格式无效或文件过大",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	file, header, err := request.FormFile("file")
+	if err != nil {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_DOCUMENT", Message: "必须提供名为 file 的 .md 或 .docx 文件",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	defer file.Close()
+	value, err := s.knowledge.CreateDocument(
+		request.Context(), requestContext.Actor, contract.ProjectID(request.PathValue("project_id")),
+		header.Filename, header.Header.Get("Content-Type"), file, header.Size,
+	)
+	if errors.Is(err, knowledge.ErrInvalidDocument) {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_DOCUMENT", Message: "仅支持有效的 .md 或 .docx，单个文件不超过 10MB",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	if err != nil {
+		s.writeServiceError(writer, request, err)
+		return
+	}
+	value.ExtractedText = ""
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listKnowledgeDocuments(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
+	if s.knowledge == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	values, err := s.knowledge.ListDocuments(
+		request.Context(), requestContext.Actor, contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		s.writeServiceError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) runKnowledgeResearch(writer http.ResponseWriter, request *http.Request) {
+	requestContext, _ := contract.RequestContextFrom(request.Context())
+	if s.knowledge == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	var body knowledge.ResearchRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 64*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_REQUEST", Message: "研究请求格式无效",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_REQUEST", Message: "研究请求只能包含一个 JSON 对象",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	value, err := s.knowledge.RunResearch(
+		request.Context(), requestContext.Actor, contract.ProjectID(request.PathValue("project_id")), body,
+	)
+	if errors.Is(err, knowledge.ErrExternalConfirmationRequired) {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code:      "EXTERNAL_CONFIRMATION_REQUIRED",
+			Message:   "每次联网搜索或 MCP 调用都必须由当前用户明确确认披露范围",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	if errors.Is(err, knowledge.ErrInvalidResearchRequest) {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{
+			Code: "INVALID_RESEARCH_REQUEST", Message: "研究请求或披露范围与实际发送内容不一致",
+			RequestID: requestContext.RequestID, Retryable: false,
+		})
+		return
+	}
+	if err != nil {
+		s.writeServiceError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, value)
 }
 
 type imageJobCreateBody struct {

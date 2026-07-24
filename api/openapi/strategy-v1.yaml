@@ -81,6 +81,14 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversations/{conversation_id}/memory:
+    get:
+      operationId: getStrategyConversationMemory
+      summary: Read the persisted summary and unresolved high-impact questions.
+      parameters: [{$ref: '#/components/parameters/ConversationID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/conversations/{conversation_id}/messages:
     get:
       operationId: listStrategyMessages
@@ -244,6 +252,14 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/agent-tasks/{agent_task_id}/skill-runs:
+    get:
+      operationId: listStrategySkillRuns
+      summary: List safe, user-visible Skill and compliance execution metadata.
+      parameters: [{$ref: '#/components/parameters/AgentTaskID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/strategy-drafts/{strategy_id}/revisions:
     get:
       operationId: listStrategyDraftRevisions
@@ -362,6 +378,13 @@ paths:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/strategy-reviews/{review_id}/comments:
+    get:
+      operationId: listStrategyReviewComments
+      summary: List append-only comments for a Strategy review.
+      parameters: [{$ref: '#/components/parameters/ReviewID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
     post:
       operationId: createStrategyReviewComment
       summary: Append a review comment.
@@ -387,6 +410,41 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONList'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/feedback:
+    get:
+      operationId: listStrategyFeedback
+      summary: List feedback for an exact Strategy revision or package version.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: target_type, in: query, required: true, schema: {enum: [strategy_revision, strategy_package]}}
+        - {name: target_id, in: query, required: true, schema: {type: string}}
+        - {name: target_version, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStrategyFeedback
+      summary: Append outcome feedback to an exact immutable Strategy target.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, target_version, rating, comment]
+              properties:
+                target_type: {enum: [strategy_revision, strategy_package]}
+                target_id: {type: string, minLength: 1}
+                target_version: {type: integer, minimum: 1}
+                rating: {enum: [useful, partly_useful, not_useful]}
+                comment: {type: string, maxLength: 2000}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}:
     get:
       operationId: getStrategyPackageVersion
@@ -400,7 +458,10 @@ paths:
           description: Immutable package snapshot.
           content:
             application/json:
-              schema: {$ref: '../contracts/strategy-package-v1.schema.json'}
+              schema:
+                oneOf:
+                  - {$ref: '../contracts/strategy-package-v1.schema.json'}
+                  - {$ref: '../contracts/strategy-package-v2.schema.json'}
         '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md:
     get:

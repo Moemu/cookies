@@ -71,7 +71,14 @@ try {
     Write-Output "Cookies local stack is ready:"
     Write-Output "  Frontend: http://127.0.0.1:5173"
     Write-Output "  Backend:  http://127.0.0.1:8080"
-    Write-Output "  MySQL:    Docker compose mysql"
+    $mysqlPort = [Environment]::GetEnvironmentVariable(
+        "COOKIES_MYSQL_PORT",
+        "User"
+    )
+    if ([string]::IsNullOrWhiteSpace($mysqlPort)) {
+        $mysqlPort = "3307"
+    }
+    Write-Output "  MySQL:    127.0.0.1:$mysqlPort (Docker)"
 }
 finally {
     Pop-Location

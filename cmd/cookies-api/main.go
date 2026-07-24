@@ -27,6 +27,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/ids"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
@@ -51,13 +52,47 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid identity configuration: %v", err)
 	}
+	seedProjectID := contract.ProjectID("")
+	if cfg.LocalIdentity != nil {
+		seedProjectID = contract.ProjectID(cfg.LocalIdentity.ProjectID)
+	}
+	if cfg.Auth.PasswordEnabled && actor == nil {
+		adminActor := contract.ActorContext{
+			OrganizationID: "org_admin",
+			Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_admin"},
+			Scopes: contract.ScopesFromStrings([]string{
+				"project.read", "project.write", "assets.read", "assets.write",
+				"provider.read", "provider.generate", "provider.text.generate",
+				"strategy.read", "strategy.write", "strategy.confirm", "strategy.review",
+				"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
+			}),
+		}
+		actor = &adminActor
+		seedProjectID = "project_admin"
+	}
 	if actor != nil {
 		if err := identityStore.EnsureLocalActor(context.Background(), *actor); err != nil {
 			log.Fatalf("seed local identity: %v", err)
 		}
-		if err := projectStore.EnsureLocalProject(context.Background(), *actor, contract.ProjectID(cfg.LocalIdentity.ProjectID)); err != nil {
+		if err := projectStore.EnsureLocalProject(context.Background(), *actor, seedProjectID); err != nil {
 			log.Fatalf("seed local project: %v", err)
 		}
+	}
+	var sessionService *identity.PasswordSessionService
+	if cfg.Auth.PasswordEnabled {
+		if actor == nil {
+			log.Fatal("password authentication requires a bootstrap actor")
+		}
+		value := &identity.PasswordSessionService{
+			DB: db, Validator: identityStore,
+			SessionTTL: time.Duration(cfg.Auth.SessionHours) * time.Hour,
+			Secure:     cfg.Environment != config.EnvironmentLocal && cfg.Environment != config.EnvironmentTest,
+		}
+		if err := value.EnsureBootstrapCredential(context.Background(), *actor, cfg.Auth.Username, cfg.Auth.Password); err != nil {
+			log.Fatalf("seed password credential: %v", err)
+		}
+		sessionService = value
+		resolver = value
 	}
 	blobs, err := buildBlobStore(cfg)
 	if err != nil {
@@ -69,11 +104,16 @@ func main() {
 	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 	creativeService := &creative.Service{Repository: creative.MySQLRepository{DB: db}, Projects: projectService}
+	knowledgeService := &knowledge.Service{
+		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
+		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
+	}
 	dependencies := httpserver.Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
+		Sessions: sessionService, Knowledge: knowledgeService,
 	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
@@ -90,9 +130,10 @@ func main() {
 			textProvider = &provider.Service{TextAdapter: textAdapter}
 		}
 		strategyService := strategysystem.Service{
-			DB: db, Projects: projectService, Agents: agentStore, Text: textProvider,
+			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, PromptVersion: cfg.Strategy.PromptVersion,
-			CriticEnabled: cfg.Strategy.CriticEnabled, DisableApproval: !cfg.Strategy.ApproveEnabled,
+			CriticEnabled: cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
+			DisableApproval:      !cfg.Strategy.ApproveEnabled,
 			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
 		}
 		generationMode := "deterministic"

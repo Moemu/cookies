@@ -14,6 +14,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -27,14 +28,20 @@ type ProjectReader interface {
 	GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 }
 
+type KnowledgeReader interface {
+	GetReference(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.Reference, error)
+}
+
 type Service struct {
 	DB                   *sql.DB
 	Projects             ProjectReader
+	Knowledge            KnowledgeReader
 	Agents               agent.TransactionalTaskWriter
 	Text                 *provider.Service
 	TextModelAlias       string
 	PromptVersion        string
 	CriticEnabled        bool
+	V2Enabled            bool
 	DisableApproval      bool
 	AllowedOrganizations map[contract.OrganizationID]struct{}
 	NewID                func(string) (string, error)
@@ -276,6 +283,9 @@ func (s Service) CreateConversation(ctx context.Context, actor contract.ActorCon
 	conversation := Conversation{ID: conversationID, OrganizationID: actor.OrganizationID, ProjectID: projectID, WorkspaceID: workspaceID, Status: "open", Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
 	task := Task{ID: taskID, OrganizationID: actor.OrganizationID, ProjectID: projectID, WorkspaceID: workspaceID, ConversationID: conversationID, BriefID: briefID, Status: "active", Version: 1, CreatedAt: now, UpdatedAt: now}
 	document := EmptyBriefDocument()
+	if s.V2Enabled {
+		document = EmptyBriefDocumentV2()
+	}
 	draft := BriefDraft{ID: draftID, OrganizationID: actor.OrganizationID, ProjectID: projectID, BriefID: briefID, Status: "open", Version: 1, Document: document, FieldStates: map[string]FieldState{}, Completeness: ComputeCompleteness(document, nil), UpdatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {

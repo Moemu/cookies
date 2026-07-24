@@ -19,6 +19,26 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
 	}
+	if !strings.Contains(value.MySQL.DSN, "127.0.0.1:3307") {
+		t.Fatalf("default MySQL DSN does not use the isolated local port: %q", value.MySQL.DSN)
+	}
+}
+
+func TestPasswordAuthenticationDefaultsToLocalOnly(t *testing.T) {
+	t.Parallel()
+	local, err := FromLookup(mapLookup(nil))
+	if err != nil || !local.Auth.PasswordEnabled {
+		t.Fatalf("local password authentication default = %#v, %v", local.Auth, err)
+	}
+	productionValues := secureProductionValues()
+	production, err := FromLookup(mapLookup(productionValues))
+	if err != nil || production.Auth.PasswordEnabled {
+		t.Fatalf("production password authentication default = %#v, %v", production.Auth, err)
+	}
+	productionValues["COOKIES_PASSWORD_AUTH_ENABLED"] = "true"
+	if _, err := FromLookup(mapLookup(productionValues)); err == nil {
+		t.Fatal("production accepted the local default administrator password")
+	}
 }
 
 func TestStrategyRolloutAllowsExplicitCreativeIntegration(t *testing.T) {
@@ -229,6 +249,19 @@ func TestFromLookupUsesObjectStorageCompatibilityNamesForTOS(t *testing.T) {
 	}
 	if got, want := config.ObjectStorage.AssetsBucket, "compat-assets"; got != want {
 		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func secureProductionValues() map[string]string {
+	return map[string]string{
+		"COOKIES_ENV":            "production",
+		"COOKIES_BLOB_PROVIDER":  "tos",
+		"COOKIES_TOS_ENDPOINT":   "tos.example.com",
+		"COOKIES_TOS_REGION":     "cn-test",
+		"COOKIES_TOS_ACCESS_KEY": "key",
+		"COOKIES_TOS_SECRET_KEY": "secret",
+		"COOKIES_SCANNER_MODE":   "clamav",
+		"COOKIES_CLAMAV_ADDRESS": "127.0.0.1:3310",
 	}
 }
 

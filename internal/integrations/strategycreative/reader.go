@@ -33,11 +33,30 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		concept = document.CreativeRecommendations[0]
 	}
 	mandatory := append([]string{}, document.Constraints...)
+	tone := []string{"清晰", "可信"}
+	prohibited := []string{}
+	if value.Snapshot.Brief.Snapshot.ContractVersion == "strategy-brief-version/v2" {
+		if len(value.Snapshot.Brief.Snapshot.Creative.Tone) > 0 {
+			tone = append([]string{}, value.Snapshot.Brief.Snapshot.Creative.Tone...)
+		}
+		mandatory = append(mandatory, value.Snapshot.Brief.Snapshot.Creative.MandatoryElements...)
+		prohibited = append(prohibited, value.Snapshot.Brief.Snapshot.Creative.ProhibitedClaims...)
+		for _, plan := range document.PlatformPlans {
+			if plan.Platform != "xiaohongshu" {
+				continue
+			}
+			if len(plan.CreativeIdeas) > 0 {
+				concept = plan.CreativeIdeas[0]
+			}
+			mandatory = append(mandatory, plan.Constraints...)
+			break
+		}
+	}
 	return creative.StrategyPackageSnapshot{
 		PackageID: value.PackageID, PackageVersion: value.Version, ContentHash: string(value.ContentHash),
 		CreativeReady: value.Snapshot.Readiness.CreativeReady,
 		Objective:     document.Objective, Audience: document.Audience.Primary, CoreMessage: document.Proposition,
-		Concept: concept, Tone: []string{"清晰", "可信"}, VisualKeywords: []string{"品牌主视觉", "真实使用场景"},
-		Mandatory: mandatory, Prohibited: []string{},
+		Concept: concept, Tone: tone, VisualKeywords: []string{"品牌主视觉", "真实使用场景"},
+		Mandatory: mandatory, Prohibited: prohibited,
 	}, nil
 }

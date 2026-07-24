@@ -36,10 +36,12 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}", server.getWorkspace)
 	mux.HandleFunc("POST /api/strategy/v1/conversations", server.createConversation)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}", server.getConversation)
+	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/memory", server.getConversationMemory)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/messages", server.listMessages)
 	mux.HandleFunc("POST /api/strategy/v1/conversations/{conversation_id}/messages", server.sendMessage)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/events", server.streamEvents)
 	mux.HandleFunc("GET /api/strategy/v1/agent-tasks/{agent_task_id}", server.getAgentTask)
+	mux.HandleFunc("GET /api/strategy/v1/agent-tasks/{agent_task_id}/skill-runs", server.listSkillRuns)
 	mux.HandleFunc("POST /api/strategy/v1/agent-tasks/{agent_task_action}", server.cancelAgentTask)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}", server.getTask)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}/brief-draft", server.getBriefDraft)
@@ -56,11 +58,14 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("PATCH /api/strategy/v1/strategy-drafts/{strategy_id}", server.patchStrategy)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-drafts/{strategy_action}", server.strategyAction)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}", server.getReview)
+	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}/comments", server.listReviewComments)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_id}/comments", server.addReviewComment)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_action}", server.reviewAction)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages", server.listPackages)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}", server.getPackage)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md", server.exportPackage)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/feedback", server.createFeedback)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/feedback", server.listFeedback)
 	server.mux = mux
 	return server
 }
@@ -147,6 +152,13 @@ func (s *Server) getConversation(writer http.ResponseWriter, request *http.Reque
 	writeResult(writer, value, err)
 }
 
+func (s *Server) getConversationMemory(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetConversationMemory(
+		request.Context(), mustActor(request), request.PathValue("conversation_id"),
+	)
+	writeResult(writer, value, err)
+}
+
 func (s *Server) listMessages(writer http.ResponseWriter, request *http.Request) {
 	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
 	values, err := s.Service.ListMessages(request.Context(), mustActor(request), request.PathValue("conversation_id"), request.URL.Query().Get("cursor"), limit)
@@ -178,6 +190,53 @@ func (s *Server) sendMessage(writer http.ResponseWriter, request *http.Request) 
 func (s *Server) getTask(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetTask(request.Context(), mustActor(request), request.PathValue("task_id"))
 	writeResult(writer, value, err)
+}
+
+func (s *Server) listSkillRuns(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListSkillRuns(
+		request.Context(), mustActor(request), request.PathValue("agent_task_id"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) createFeedback(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.CreateFeedbackRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.CreateFeedback(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		idempotencyKey(request), body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listFeedback(writer http.ResponseWriter, request *http.Request) {
+	version, err := strconv.ParseInt(request.URL.Query().Get("target_version"), 10, 64)
+	if err != nil || version < 1 {
+		writeError(writer, strategy.ErrInvalidRequest)
+		return
+	}
+	values, err := s.Service.ListFeedback(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("target_type"), request.URL.Query().Get("target_id"), version,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) getBriefDraft(writer http.ResponseWriter, request *http.Request) {
@@ -379,6 +438,17 @@ func (s *Server) addReviewComment(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listReviewComments(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListReviewComments(
+		request.Context(), mustActor(request), request.PathValue("review_id"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) returnReview(writer http.ResponseWriter, request *http.Request) {
