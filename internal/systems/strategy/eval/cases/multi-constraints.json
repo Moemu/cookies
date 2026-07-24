@@ -1,0 +1,11 @@
+{
+  "id": "regulated-multi-constraints",
+  "scenario": "多重内容与合规约束",
+  "objective": "获取合规的产品咨询",
+  "audience": "关注安全性和可验证性的专业用户",
+  "proposition": "提供透明、可核验的方案信息",
+  "channels": ["xiaohongshu"],
+  "primary_kpi": "合规有效咨询数",
+  "constraints": ["不得使用绝对化表达", "不得承诺结果", "必须标注证据来源"],
+  "expected_signals": ["合规", "证据来源", "风险"]
+}

@@ -10,12 +10,30 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
+
+type SkillExecutionTrace struct {
+	GenerationMode        string
+	ProviderCode          string
+	ModelAlias            string
+	ModelVersion          string
+	RouteRevisionID       string
+	ResponseMode          provider.TextResponseMode
+	PromptVersion         string
+	SkillVersions         map[string]string
+	SkillSnapshotHashes   map[string]string
+	GenerationContextHash string
+	Usage                 *provider.TokenUsage
+	LatencyMS             int64
+	ValidationAttempts    int
+	QualityReport         *QualityReport
+}
 
 type CreateStrategyResult struct {
 	Draft     Draft      `json:"strategy_draft"`
@@ -40,7 +58,8 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return CreateStrategyResult{}, false, err
 	}
-	if _, err := s.GetBriefVersion(ctx, actor, briefID, briefVersion); err != nil {
+	brief, err := s.GetBriefVersion(ctx, actor, briefID, briefVersion)
+	if err != nil {
 		return CreateStrategyResult{}, false, err
 	}
 	if err := s.ensureConcurrencyLimit(ctx, actor.OrganizationID, task.ProjectID, 4); err != nil {
@@ -57,6 +76,9 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	if found || err != nil {
 		return prior, found, err
 	}
+	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
 	strategyID, err := s.newID("strategy")
 	if err != nil {
 		return CreateStrategyResult{}, false, err
@@ -66,7 +88,10 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 		return CreateStrategyResult{}, false, err
 	}
 	now := s.now()
-	skills := map[string]string{"strategy.strategy.generate": "v1.0.0", "channel.xiaohongshu": "v1.0.0"}
+	skills, err := selectedSkillVersions(brief)
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
 	draft := Draft{
 		ID: strategyID, OrganizationID: actor.OrganizationID, ProjectID: task.ProjectID,
 		TaskID: taskID, BriefID: briefID, BriefVersion: briefVersion,
@@ -308,6 +333,9 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 	if found || err != nil {
 		return prior, found, err
 	}
+	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+		return agent.Task{}, false, err
+	}
 	id, err := s.newID("agenttask")
 	if err != nil {
 		return agent.Task{}, false, err
@@ -331,11 +359,19 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 	if err := writer.CreateIn(ctx, tx, agent.CreateRequest{Task: task}); err != nil {
 		return agent.Task{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'generating',
+	result, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'generating',
 		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ?
 		AND id = ? AND version = ?`, now, actor.OrganizationID, draft.ProjectID,
-		strategyID, draft.Version); err != nil {
+		strategyID, draft.Version)
+	if err != nil {
 		return agent.Task{}, false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return agent.Task{}, false, err
+	}
+	if changed != 1 {
+		return agent.Task{}, false, ErrVersionConflict
 	}
 	if err := insertReceipt(ctx, tx, actor, draft.ProjectID, "strategy.revise", key, hash, 202, task, now); err != nil {
 		if isDuplicate(err) {
@@ -432,7 +468,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if err != nil {
 		return nil, err
 	}
-	patch, providerCode, modelVersion, usage, err := s.generateBriefPatch(ctx, agentTask, draft, message)
+	patch, trace, err := s.generateBriefPatch(ctx, agentTask, draft, message)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +482,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 			return nil, err
 		}
 	}
-	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v1.0.0", providerCode, modelVersion, usage, patch)
+	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.0.0", trace, patch)
 	if err != nil {
 		return nil, err
 	}
@@ -495,11 +531,11 @@ func (s Service) handleDraftGenerate(ctx context.Context, agentTask agent.Task) 
 	if err != nil {
 		return nil, err
 	}
-	document, providerCode, modelVersion, usage, err := s.generateStrategy(ctx, agentTask, brief, draft)
+	document, trace, err := s.generateStrategy(ctx, agentTask, brief, draft)
 	if err != nil {
 		return nil, err
 	}
-	return s.persistGeneratedRevision(ctx, agentTask, draft, document, []string{"all"}, providerCode, modelVersion, usage)
+	return s.persistGeneratedRevision(ctx, agentTask, draft, document, []string{"all"}, "strategy.strategy.generate", "v2.0.0", trace)
 }
 
 func (s Service) handleDraftRevise(ctx context.Context, agentTask agent.Task) (*contract.ResourceRef, error) {
@@ -521,12 +557,20 @@ func (s Service) handleDraftRevise(ctx context.Context, agentTask agent.Task) (*
 	if err != nil {
 		return nil, err
 	}
-	document := revision.Document
-	document.AssumptionsAndGaps = append(document.AssumptionsAndGaps, "用户修订要求："+strings.TrimSpace(request.Instruction))
-	return s.persistGeneratedRevision(ctx, agentTask, draft, document, []string{"assumptions_and_gaps"}, "deterministic", "v1", nil)
+	brief, err := scanBriefVersion(s.DB.QueryRowContext(ctx, briefVersionSelect+` WHERE organization_id = ?
+		AND project_id = ? AND brief_id = ? AND version = ?`, agentTask.OrganizationID,
+		agentTask.ProjectID, draft.BriefID, draft.BriefVersion))
+	if err != nil {
+		return nil, err
+	}
+	document, changed, trace, err := s.generateStrategyRevision(ctx, agentTask, brief, draft, revision.Document, request)
+	if err != nil {
+		return nil, err
+	}
+	return s.persistGeneratedRevision(ctx, agentTask, draft, document, changed, "strategy.strategy.revise", "v2.0.0", trace)
 }
 
-func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.Task, draft Draft, document StrategyDocument, changed []string, providerCode, modelVersion string, usage *provider.TokenUsage) (*contract.ResourceRef, error) {
+func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.Task, draft Draft, document StrategyDocument, changed []string, skillName, skillVersion string, trace SkillExecutionTrace) (*contract.ResourceRef, error) {
 	if err := document.Validate(); err != nil {
 		return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: err.Error()}}
 	}
@@ -562,13 +606,26 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 	if err := insertDraftRevision(ctx, tx, agentTask.OrganizationID, agentTask.ProjectID, revision); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'draft',
-		current_revision = ?, version = version + 1, updated_at = ? WHERE organization_id = ?
-		AND project_id = ? AND id = ? AND status = 'generating'`, revisionNumber, now,
-		agentTask.OrganizationID, agentTask.ProjectID, locked.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_reviews SET status = 'invalidated',
+		updated_at = ? WHERE organization_id = ? AND project_id = ? AND strategy_id = ? AND status = 'open'`,
+		now, agentTask.OrganizationID, agentTask.ProjectID, locked.ID); err != nil {
 		return nil, err
 	}
-	if _, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.strategy.generate", "v1.0.0", providerCode, modelVersion, usage, document); err != nil {
+	result, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'draft',
+		current_revision = ?, current_review_id = NULL, version = version + 1, updated_at = ? WHERE organization_id = ?
+		AND project_id = ? AND id = ? AND status = 'generating'`, revisionNumber, now,
+		agentTask.OrganizationID, agentTask.ProjectID, locked.ID)
+	if err != nil {
+		return nil, err
+	}
+	changedRows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changedRows != 1 {
+		return nil, ErrVersionConflict
+	}
+	if _, err := s.insertSkillRun(ctx, tx, agentTask, skillName, skillVersion, trace, document); err != nil {
 		return nil, err
 	}
 	task, err := scanTask(tx.QueryRowContext(ctx, taskSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`,
@@ -587,7 +644,7 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 	return &contract.ResourceRef{Type: "strategy.draft_revision", ID: locked.ID, Version: &revisionNumber}, nil
 }
 
-func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task, name, version, providerCode, modelVersion string, usage *provider.TokenUsage, output any) (string, error) {
+func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task, name, version string, trace SkillExecutionTrace, output any) (string, error) {
 	id, err := s.newID("skillrun")
 	if err != nil {
 		return "", err
@@ -598,28 +655,49 @@ func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task
 	}
 	now := s.now()
 	var inputTokens, outputTokens, totalTokens any
-	if usage != nil {
-		inputTokens, outputTokens, totalTokens = usage.InputTokens, usage.OutputTokens, usage.TotalTokens
+	if trace.Usage != nil {
+		inputTokens, outputTokens, totalTokens = trace.Usage.InputTokens, trace.Usage.OutputTokens, trace.Usage.TotalTokens
+	}
+	var quality any
+	if trace.QualityReport != nil {
+		quality = mustJSON(trace.QualityReport)
+	}
+	outputHash, err := contract.CanonicalJSONHash(output)
+	if err != nil {
+		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO platform_skill_runs
 		(id, organization_id, project_id, agent_task_id, skill_name, skill_version, status,
-		 input_hash, provider_code, model_version, input_tokens, output_tokens, total_tokens,
-		 output_snapshot, started_at, completed_at,
+		 input_hash, provider_code, model_version, generation_mode, model_alias,
+		 route_revision_id, response_mode, prompt_version, skill_versions, skill_snapshot_hashes,
+		 generation_context_hash,
+		 input_tokens, output_tokens, total_tokens, latency_ms, validation_attempts, quality_report,
+		 output_snapshot, output_hash, started_at, completed_at,
 		 created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, task.OrganizationID, task.ProjectID, task.ID, name, version, inputHash,
-		providerCode, modelVersion, inputTokens, outputTokens, totalTokens, mustJSON(output), now, now, now, now)
+		trace.ProviderCode, trace.ModelVersion, trace.GenerationMode, trace.ModelAlias,
+		trace.RouteRevisionID, trace.ResponseMode, trace.PromptVersion, mustJSON(trace.SkillVersions),
+		mustJSON(trace.SkillSnapshotHashes), trace.GenerationContextHash,
+		inputTokens, outputTokens, totalTokens, trace.LatencyMS, trace.ValidationAttempts, quality,
+		mustJSON(output), outputHash, now, now, now, now)
 	return id, err
 }
 
-func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (BriefPatch, string, string, *provider.TokenUsage, error) {
+func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (BriefPatch, SkillExecutionTrace, error) {
+	started := time.Now()
+	promptVersion := "strategy.brief.extract.v2"
 	if s.Text == nil {
-		return deterministicBriefPatch(draft, message), "deterministic", "v1", nil, nil
+		return deterministicBriefPatch(draft, message), SkillExecutionTrace{
+			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
+			PromptVersion: promptVersion, SkillVersions: map[string]string{"strategy.brief.extract": "v2.0.0"},
+			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
+		}, nil
 	}
 	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
 	projectContext, err := s.Projects.GetContext(ctx, actor, task.ProjectID)
 	if err != nil {
-		return BriefPatch{}, "", "", nil, err
+		return BriefPatch{}, SkillExecutionTrace{}, err
 	}
 	modelAlias := s.TextModelAlias
 	if strings.TrimSpace(modelAlias) == "" {
@@ -637,14 +715,26 @@ func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft 
 		OutputJSONSchema: briefPatchOutputSchema(),
 	})
 	if err != nil {
-		return BriefPatch{}, "", "", nil, textGenerationError(err)
+		return BriefPatch{}, SkillExecutionTrace{}, textGenerationError(err)
+	}
+	trace := SkillExecutionTrace{
+		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, PromptVersion: promptVersion,
+		SkillVersions: map[string]string{"strategy.brief.extract": "v2.0.0"},
+		Usage:         response.Usage, LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
-		return deterministicBriefPatch(draft, message), response.ProviderCode, response.ModelVersion, response.Usage, nil
+		trace.GenerationMode = "fake_template"
+		return deterministicBriefPatch(draft, message), trace, nil
 	}
 	var patch BriefPatch
-	if err := decodeStrictJSON(response.StructuredOutput, &patch); err != nil {
-		return BriefPatch{}, "", "", nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch output is invalid"}}
+	candidate := response.StructuredOutput
+	if len(candidate) == 0 {
+		candidate = normalizeJSONCandidate(response.Text)
+	}
+	if err := decodeStrictJSON(candidate, &patch); err != nil {
+		return BriefPatch{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch output is invalid"}}
 	}
 	patch.ContractVersion = "strategy-brief-patch/v1"
 	patch.BaseVersion = draft.Version
@@ -652,44 +742,220 @@ func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft 
 		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: message.ID}
 		patch.Operations[index].Confirmation = "unconfirmed"
 	}
-	return patch, response.ProviderCode, response.ModelVersion, response.Usage, nil
+	return patch, trace, nil
 }
 
-func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft) (StrategyDocument, string, string, *provider.TokenUsage, error) {
+func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft) (StrategyDocument, SkillExecutionTrace, error) {
+	started := time.Now()
+	generation, err := s.buildGenerationContext(ctx, task, brief, draft)
+	if err != nil {
+		return StrategyDocument{}, SkillExecutionTrace{}, err
+	}
+	versions := skillVersions(generation.Skills)
+	snapshotHashes := skillSnapshotHashes(generation.Skills)
+	contextHash, err := contract.CanonicalJSONHash(generation)
+	if err != nil {
+		return StrategyDocument{}, SkillExecutionTrace{}, err
+	}
 	if s.Text == nil {
-		return deterministicStrategy(brief, draft), "deterministic", "v1", nil, nil
+		document := deterministicStrategy(brief, draft)
+		report := evaluateStrategyQuality(document, generation)
+		return document, SkillExecutionTrace{
+			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
+			PromptVersion: generation.PromptVersion, SkillVersions: versions,
+			SkillSnapshotHashes: snapshotHashes, GenerationContextHash: contextHash,
+			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1, QualityReport: &report,
+		}, nil
 	}
 	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
-	projectContext, err := s.Projects.GetContext(ctx, actor, task.ProjectID)
-	if err != nil {
-		return StrategyDocument{}, "", "", nil, err
-	}
 	modelAlias := s.TextModelAlias
 	if strings.TrimSpace(modelAlias) == "" {
 		modelAlias = "cookies.text.standard"
 	}
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
-		Actor: actor, Project: projectContext, ModelAlias: modelAlias,
+		Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "Create a structured, evidence-linked advertising strategy for Xiaohongshu. Return JSON only."},
-			{Role: provider.TextRoleUser, Content: "Confirmed brief: " + string(mustJSON(brief))},
+			{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation)},
+			{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation)},
 		},
 		OutputJSONSchema: strategyOutputSchema(),
 	})
 	if err != nil {
-		return StrategyDocument{}, "", "", nil, textGenerationError(err)
+		return StrategyDocument{}, SkillExecutionTrace{}, textGenerationError(err)
+	}
+	trace := SkillExecutionTrace{
+		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, PromptVersion: generation.PromptVersion,
+		SkillVersions: versions, SkillSnapshotHashes: snapshotHashes,
+		GenerationContextHash: contextHash, Usage: response.Usage, ValidationAttempts: 1,
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
-		return deterministicStrategy(brief, draft), response.ProviderCode, response.ModelVersion, response.Usage, nil
+		document := deterministicStrategy(brief, draft)
+		report := evaluateStrategyQuality(document, generation)
+		trace.GenerationMode = "fake_template"
+		trace.QualityReport = &report
+		trace.LatencyMS = time.Since(started).Milliseconds()
+		return document, trace, nil
+	}
+	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
+	needsRepair := decodeErr != nil || (s.CriticEnabled && !report.Passed)
+	if needsRepair {
+		reasons := report.Errors
+		if decodeErr != nil {
+			reasons = append(reasons, decodeErr.Error())
+		}
+		repair, repairErr := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
+			Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
+			InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy-repair"),
+			Messages: []provider.TextMessage{
+				{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation)},
+				{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation)},
+				{Role: provider.TextRoleAssistant, Content: response.Text},
+				{Role: provider.TextRoleUser, Content: "上一个输出未通过校验。只修复这些问题并返回完整 JSON：\n- " + strings.Join(reasons, "\n- ")},
+			},
+			OutputJSONSchema: strategyOutputSchema(),
+		})
+		if repairErr != nil {
+			return StrategyDocument{}, SkillExecutionTrace{}, textGenerationError(repairErr)
+		}
+		trace.ValidationAttempts = 2
+		trace.ProviderCode = repair.ProviderCode
+		trace.ModelVersion = repair.ModelVersion
+		trace.RouteRevisionID = repair.RouteRevisionID
+		trace.ResponseMode = repair.ResponseMode
+		trace.Usage = addUsage(trace.Usage, repair.Usage)
+		document, report, decodeErr = decodeAndEvaluateStrategy(repair, generation, brief, draft)
+	}
+	if decodeErr != nil || !report.Passed {
+		return StrategyDocument{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Strategy output failed structural or quality validation"}}
+	}
+	trace.QualityReport = &report
+	trace.LatencyMS = time.Since(started).Milliseconds()
+	return document, trace, nil
+}
+
+func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft, current StrategyDocument, request ReviseRequest) (StrategyDocument, []string, SkillExecutionTrace, error) {
+	started := time.Now()
+	generation, err := s.buildGenerationContext(ctx, task, brief, draft)
+	if err != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, err
+	}
+	versions := skillVersions(generation.Skills)
+	snapshotHashes := skillSnapshotHashes(generation.Skills)
+	contextHash, err := contract.CanonicalJSONHash(generation)
+	if err != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, err
+	}
+	if s.Text == nil {
+		document := current
+		document.AssumptionsAndGaps = append(document.AssumptionsAndGaps, "用户修订要求："+strings.TrimSpace(request.Instruction))
+		report := evaluateStrategyQuality(document, generation)
+		return document, []string{"assumptions_and_gaps"}, SkillExecutionTrace{
+			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
+			PromptVersion: "strategy.revise.v2", SkillVersions: versions,
+			SkillSnapshotHashes: snapshotHashes, GenerationContextHash: contextHash,
+			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1, QualityReport: &report,
+		}, nil
+	}
+	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
+	modelAlias := strings.TrimSpace(s.TextModelAlias)
+	if modelAlias == "" {
+		modelAlias = "cookies.text.standard"
+	}
+	currentJSON := string(mustJSON(current))
+	allowedSections := allowedRevisionSections(request.Instruction)
+	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
+		Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
+		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy-revise"),
+		Messages: []provider.TextMessage{
+			{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation) + "\n只修改服务端允许的章节；其他章节保持语义和数据不变。"},
+			{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation) + "\n\n<current_strategy>\n" + currentJSON + "\n</current_strategy>\n<allowed_sections>\n" + strings.Join(allowedSections, ",") + "\n</allowed_sections>\n<revision_instruction>\n" + strings.TrimSpace(request.Instruction) + "\n</revision_instruction>"},
+		},
+		OutputJSONSchema: strategyOutputSchema(),
+	})
+	if err != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, textGenerationError(err)
+	}
+	trace := SkillExecutionTrace{
+		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, PromptVersion: "strategy.revise.v2",
+		SkillVersions: versions, SkillSnapshotHashes: snapshotHashes,
+		GenerationContextHash: contextHash, Usage: response.Usage, LatencyMS: time.Since(started).Milliseconds(),
+		ValidationAttempts: 1,
+	}
+	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
+		document := current
+		document.AssumptionsAndGaps = append(document.AssumptionsAndGaps, "用户修订要求："+strings.TrimSpace(request.Instruction))
+		report := evaluateStrategyQuality(document, generation)
+		trace.GenerationMode = "fake_template"
+		trace.QualityReport = &report
+		return document, []string{"assumptions_and_gaps"}, trace, nil
+	}
+	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
+	if decodeErr == nil {
+		retainAllowedRevisionSections(current, &document, allowedSections)
+		report = evaluateStrategyQuality(document, generation)
+	}
+	if decodeErr != nil || !report.Passed {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_OUTPUT_INVALID", Message: "Strategy revision failed structural or quality validation",
+		}}
+	}
+	changed := changedStrategySections(current, document)
+	if len(changed) == 0 {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_OUTPUT_INVALID", Message: "Strategy revision did not change any section",
+		}}
+	}
+	trace.QualityReport = &report
+	return document, changed, trace, nil
+}
+
+func decodeAndEvaluateStrategy(response provider.SynchronousResponse, generation GenerationContext, brief BriefVersion, draft Draft) (StrategyDocument, QualityReport, error) {
+	candidate := response.StructuredOutput
+	if len(candidate) == 0 {
+		candidate = normalizeJSONCandidate(response.Text)
 	}
 	var document StrategyDocument
-	if err := decodeStrictJSON(response.StructuredOutput, &document); err != nil {
-		return StrategyDocument{}, "", "", nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Strategy output is invalid"}}
+	if err := decodeStrictJSON(candidate, &document); err != nil {
+		return StrategyDocument{}, QualityReport{Errors: []string{"strategy output is not valid JSON"}}, err
 	}
 	document.ContractVersion = "strategy-draft/v1"
-	document.Lineage = StrategyLineage{BriefID: brief.BriefID, BriefVersion: brief.Version, ProjectContextVersion: draft.ProjectContextVersion, SkillVersions: draft.SkillVersions}
-	return document, response.ProviderCode, response.ModelVersion, response.Usage, nil
+	document.Lineage = StrategyLineage{
+		BriefID: brief.BriefID, BriefVersion: brief.Version,
+		ProjectContextVersion: draft.ProjectContextVersion,
+		SkillVersions:         skillVersions(generation.Skills),
+	}
+	report := evaluateStrategyQuality(document, generation)
+	return document, report, nil
+}
+
+func normalizeJSONCandidate(value string) json.RawMessage {
+	content := strings.TrimSpace(value)
+	if strings.HasPrefix(content, "```") {
+		if newline := strings.IndexByte(content, '\n'); newline >= 0 {
+			content = content[newline+1:]
+		}
+		content = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(content), "```"))
+	}
+	return json.RawMessage(content)
+}
+
+func addUsage(first, second *provider.TokenUsage) *provider.TokenUsage {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return &provider.TokenUsage{
+		InputTokens:  first.InputTokens + second.InputTokens,
+		OutputTokens: first.OutputTokens + second.OutputTokens,
+		TotalTokens:  first.TotalTokens + second.TotalTokens,
+	}
 }
 
 func textGenerationError(err error) error {
@@ -795,6 +1061,11 @@ func deterministicStrategy(brief BriefVersion, draft Draft) StrategyDocument {
 	if brief.Snapshot.Schedule.Window == "" {
 		gaps = append(gaps, "排期待确认")
 	}
+	measurement := []string{brief.Snapshot.Measurement.PrimaryKPI}
+	if strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI) == "" {
+		gaps = append(gaps, "核心指标待确认")
+		measurement = []string{"核心指标待确认；生成前先定义与目标匹配的主指标"}
+	}
 	return StrategyDocument{
 		ContractVersion: "strategy-draft/v1", Objective: brief.Snapshot.Campaign.Objective,
 		Audience:    StrategyAudience{Primary: brief.Snapshot.Audience.Primary, Insights: []string{"围绕真实使用场景提供可验证信息"}},
@@ -803,7 +1074,7 @@ func deterministicStrategy(brief BriefVersion, draft Draft) StrategyDocument {
 		Constraints:             brief.Snapshot.Constraints,
 		BudgetAndCadence:        BudgetAndCadence{Budget: brief.Snapshot.Budget.Total, Cadence: "首期 2 周验证，按周复盘"},
 		ExperimentMatrix:        []Experiment{{Hypothesis: "场景痛点开篇可提高有效阅读", Variable: "首屏表达", Metric: "阅读完成率"}},
-		Measurement:             []string{brief.Snapshot.Measurement.PrimaryKPI},
+		Measurement:             measurement,
 		AssumptionsAndGaps:      gaps,
 		Lineage:                 StrategyLineage{BriefID: brief.BriefID, BriefVersion: brief.Version, ProjectContextVersion: draft.ProjectContextVersion, SkillVersions: draft.SkillVersions},
 	}

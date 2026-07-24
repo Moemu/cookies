@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -111,9 +112,62 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || strategyDraft.CurrentRevision != 1 {
 		t.Fatalf("get generated draft: revision=%d err=%v", strategyDraft.CurrentRevision, err)
 	}
+	readiness, err := service.GetGenerationReadiness(ctx, actor, projectID)
+	if err != nil || !readiness.Ready || readiness.GenerationMode != "deterministic" {
+		t.Fatalf("generation readiness=%#v err=%v", readiness, err)
+	}
+	metadata, err := service.GetGenerationMetadata(ctx, actor, strategyDraft.ID)
+	if err != nil {
+		t.Fatalf("get generation metadata: %v", err)
+	}
+	if metadata.GenerationMode != "deterministic" ||
+		metadata.PromptVersion != "strategy.generate.v2" ||
+		len(metadata.SkillVersions) < 3 ||
+		len(metadata.SkillSnapshotHashes) < 2 ||
+		len(metadata.GenerationContextHash) != 64 ||
+		len(metadata.OutputHash) != 64 ||
+		metadata.QualityReport == nil || !metadata.QualityReport.Passed {
+		t.Fatalf("generation metadata=%#v", metadata)
+	}
 	review, duplicate, err := service.SubmitStrategy(ctx, actor, contract.IdempotencyKey("submit_"+suffix), strategyDraft.ID, strategyDraft.Version, strategyDraft.CurrentRevision)
 	if err != nil || duplicate {
 		t.Fatalf("submit strategy: duplicate=%v err=%v", duplicate, err)
+	}
+	strategyDraft, err = service.GetDraft(ctx, actor, strategyDraft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionTask, duplicate, err := service.ReviseStrategy(
+		ctx, actor, contract.IdempotencyKey("revise_"+suffix), strategyDraft.ID,
+		strategy.ReviseRequest{
+			ExpectedVersion: strategyDraft.Version,
+			BaseRevision:    strategyDraft.CurrentRevision,
+			Instruction:     "补充假设与缺口说明",
+		},
+	)
+	if err != nil || duplicate {
+		t.Fatalf("create revision task: duplicate=%v err=%v", duplicate, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, revisionTask); err != nil {
+		t.Fatalf("revise strategy: %v", err)
+	}
+	invalidatedReview, err := service.GetReview(ctx, actor, review.ID)
+	if err != nil || invalidatedReview.Status != "invalidated" {
+		t.Fatalf("review after revision=%#v err=%v", invalidatedReview, err)
+	}
+	strategyDraft, err = service.GetDraft(ctx, actor, strategyDraft.ID)
+	if err != nil || strategyDraft.CurrentRevision != 2 ||
+		strategyDraft.Revision == nil ||
+		len(strategyDraft.Revision.ChangedSections) != 1 ||
+		strategyDraft.Revision.ChangedSections[0] != "assumptions_and_gaps" {
+		t.Fatalf("revised draft=%#v err=%v", strategyDraft, err)
+	}
+	review, duplicate, err = service.SubmitStrategy(
+		ctx, actor, contract.IdempotencyKey("submit_revised_"+suffix),
+		strategyDraft.ID, strategyDraft.Version, strategyDraft.CurrentRevision,
+	)
+	if err != nil || duplicate {
+		t.Fatalf("submit revised strategy: duplicate=%v err=%v", duplicate, err)
 	}
 	strategyDraft, err = service.GetDraft(ctx, actor, strategyDraft.ID)
 	if err != nil {
@@ -136,7 +190,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get package: %v", err)
 	}
-	if !stored.ContentHash.Equal(published.ContentHash) || stored.Snapshot.StrategyRevision != 1 {
+	if !stored.ContentHash.Equal(published.ContentHash) || stored.Snapshot.StrategyRevision != 2 {
 		t.Fatalf("unexpected package: %#v", stored)
 	}
 	replayed, duplicate, err := service.ApproveStrategy(ctx, actor, contract.IdempotencyKey("approve_"+suffix), strategyDraft.ID, strategy.ApproveRequest{
@@ -230,26 +284,44 @@ func runAgentTaskThroughRuntime(ctx context.Context, db *sql.DB, service strateg
 	if !processed {
 		return errors.New("agent dispatch was not processed")
 	}
-	handler := agent.RuntimeHandler(agent.MySQLStore{DB: db}, service.HandleAgentTask, runtimeStore)
+	var domainErr error
+	handler := agent.RuntimeHandler(agent.MySQLStore{DB: db}, func(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
+		ref, err := service.HandleAgentTask(ctx, task)
+		if err != nil {
+			domainErr = err
+		}
+		return ref, err
+	}, runtimeStore)
 	worker := jobruntime.Worker{
 		Store: runtimeStore, Handlers: map[string]jobruntime.Handler{task.Kind: handler},
 		Canceller: runtimeStore,
 	}
-	processed, err = worker.RunOnce(ctx, "strategy-integration")
-	if err != nil {
-		return err
-	}
-	if !processed {
-		return errors.New("agent runtime job was not processed")
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		processed, err = worker.RunOnce(ctx, "strategy-integration")
+		if err != nil {
+			return err
+		}
+		if !processed {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		completed, err := (agent.MySQLStore{DB: db}).Get(ctx, task.OrganizationID, task.ProjectID, task.ID)
+		if err != nil {
+			return err
+		}
+		if completed.Status == agent.TaskSucceeded {
+			return nil
+		}
+		if completed.Status == agent.TaskFailed || completed.Status == agent.TaskCancelled {
+			return fmt.Errorf("agent task did not succeed: status=%s error=%#v domain_error=%v", completed.Status, completed.Error, domainErr)
+		}
 	}
 	completed, err := (agent.MySQLStore{DB: db}).Get(ctx, task.OrganizationID, task.ProjectID, task.ID)
 	if err != nil {
 		return err
 	}
-	if completed.Status != agent.TaskSucceeded {
-		return errors.New("agent task did not succeed")
-	}
-	return nil
+	return fmt.Errorf("agent task did not complete: status=%s error=%#v", completed.Status, completed.Error)
 }
 
 type recordingPublisher struct {

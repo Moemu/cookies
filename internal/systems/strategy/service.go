@@ -33,6 +33,8 @@ type Service struct {
 	Agents               agent.TransactionalTaskWriter
 	Text                 *provider.Service
 	TextModelAlias       string
+	PromptVersion        string
+	CriticEnabled        bool
 	DisableApproval      bool
 	AllowedOrganizations map[contract.OrganizationID]struct{}
 	NewID                func(string) (string, error)
@@ -427,6 +429,9 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	found, err := s.loadReceipt(ctx, actor, conversation.ProjectID, "message.create", key, hash, &prior)
 	if found || err != nil {
 		return prior, found, err
+	}
+	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+		return SendMessageResult{}, false, err
 	}
 	messageID, err := s.newID("msg")
 	if err != nil {

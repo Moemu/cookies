@@ -67,6 +67,9 @@ type Strategy struct {
 	RealProviderEnabled      bool
 	ApproveEnabled           bool
 	PackageToCreativeEnabled bool
+	TextModelAlias           string
+	PromptVersion            string
+	CriticEnabled            bool
 	OrganizationAllowlist    []string
 }
 
@@ -190,6 +193,10 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	strategyCriticEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_CRITIC_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
@@ -213,6 +220,9 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			RealProviderEnabled:      strategyRealProviderEnabled,
 			ApproveEnabled:           strategyApproveEnabled,
 			PackageToCreativeEnabled: strategyPackageToCreativeEnabled,
+			TextModelAlias:           valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
+			PromptVersion:            valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", "strategy.generate.v2"),
+			CriticEnabled:            strategyCriticEnabled,
 			OrganizationAllowlist:    splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
 		},
 		Provider: Provider{
@@ -299,6 +309,15 @@ func (c Config) Validate() error {
 	}
 	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires COOKIES_PROVIDER_TEXT_ADAPTER=adapter_gateway")
+	}
+	if strings.TrimSpace(c.Strategy.TextModelAlias) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_TEXT_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Strategy.PromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION must not be empty")
+	}
+	if c.Strategy.CriticEnabled && !c.Strategy.RealProviderEnabled {
+		return fmt.Errorf("COOKIES_STRATEGY_CRITIC_ENABLED requires COOKIES_STRATEGY_REAL_PROVIDER_ENABLED=true")
 	}
 	if c.Provider.ImageAdapter == "ark_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkImage.APIKey) == "" || strings.TrimSpace(c.Provider.ArkImage.Model) == "") {
 		return fmt.Errorf("ark_image is local-only and requires COOKIES_ARK_IMAGE_API_KEY and COOKIES_ARK_IMAGE_MODEL")

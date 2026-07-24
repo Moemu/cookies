@@ -1,8 +1,10 @@
-import { apiRequest } from '../../shared/api/client'
+import { ApiProblem, apiRequest } from '../../shared/api/client'
 import type {
   BriefDraft,
   BriefVersion,
   ConversationBundle,
+  GenerationMetadata,
+  GenerationReadiness,
   Message,
   PackageVersion,
   Review,
@@ -92,8 +94,33 @@ export function createStrategy(taskId: string, brief: BriefVersion) {
   })
 }
 
+export function getGenerationReadiness(projectId: string, signal?: AbortSignal) {
+  return apiRequest<GenerationReadiness>(`${root}/projects/${encodeURIComponent(projectId)}/generation-readiness`, { signal })
+}
+
 export function getStrategy(strategyId: string, signal?: AbortSignal) {
   return apiRequest<StrategyDraft>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}`, { signal })
+}
+
+export async function getGenerationMetadata(strategyId: string, signal?: AbortSignal) {
+  try {
+    return await apiRequest<GenerationMetadata>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}/generation-metadata`, { signal })
+  } catch (error) {
+    if (error instanceof ApiProblem && error.problem.error.code === 'NOT_FOUND') return null
+    throw error
+  }
+}
+
+export function reviseStrategy(draft: StrategyDraft, instruction: string) {
+  return apiRequest(`${root}/strategy-drafts/${encodeURIComponent(draft.id)}:revise`, {
+    method: 'POST',
+    headers: mutationHeaders(),
+    body: JSON.stringify({
+      expected_version: draft.version,
+      base_revision: draft.current_revision,
+      instruction,
+    }),
+  })
 }
 
 export function patchStrategySection(draft: StrategyDraft, section: string, value: unknown) {

@@ -89,3 +89,36 @@
   .strategy-header { align-items: flex-start; flex-direction: column; }
   .conversation-list { max-height: none; }
 }
+.generation-mode {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  padding: 0.3rem 0.55rem;
+}
+
+.generation-mode--provider {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.generation-warning {
+  color: var(--danger, #b42318);
+}
+
+.strategy-generation-badges,
+.generation-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.generation-proof {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 0 0 0.8rem;
+}
+
+.strategy-revision-form textarea {
+  width: 100%;
+}

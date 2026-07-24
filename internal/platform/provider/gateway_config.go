@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,20 +18,32 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
+type TextResponseMode string
+
+const (
+	TextResponseJSONSchema TextResponseMode = "json_schema"
+	TextResponseJSONObject TextResponseMode = "json_object"
+	TextResponsePromptJSON TextResponseMode = "prompt_json"
+)
+
 // GatewayRouteSnapshot is copied onto an invocation when it is created. Later route
 // edits therefore cannot silently change the endpoint, model, or credential
 // used by an already accepted image job or text skill run.
 type GatewayRouteSnapshot struct {
-	RouteID              string `json:"route_id"`
-	RouteRevisionID      string `json:"route_revision_id"`
-	ConnectionID         string `json:"connection_id"`
-	ConnectionRevisionID string `json:"connection_revision_id"`
-	BaseURL              string `json:"base_url"`
-	UpstreamModel        string `json:"upstream_model"`
-	CredentialID         string `json:"credential_id"`
-	CredentialVersion    int64  `json:"credential_version"`
-	TimeoutSeconds       int    `json:"timeout_seconds"`
-	MaxResponseBytes     int64  `json:"max_response_bytes"`
+	RouteID              string           `json:"route_id"`
+	RouteRevisionID      string           `json:"route_revision_id"`
+	ConnectionID         string           `json:"connection_id"`
+	ConnectionRevisionID string           `json:"connection_revision_id"`
+	BaseURL              string           `json:"base_url"`
+	UpstreamModel        string           `json:"upstream_model"`
+	CredentialID         string           `json:"credential_id"`
+	CredentialVersion    int64            `json:"credential_version"`
+	TimeoutSeconds       int              `json:"timeout_seconds"`
+	MaxResponseBytes     int64            `json:"max_response_bytes"`
+	TextResponseMode     TextResponseMode `json:"text_response_mode,omitempty"`
+	MaxOutputTokens      int              `json:"max_output_tokens,omitempty"`
+	Temperature          float64          `json:"temperature,omitempty"`
+	TemperatureSet       bool             `json:"-"`
 }
 
 func (s GatewayRouteSnapshot) Validate() error {
@@ -42,7 +55,7 @@ func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
 		strings.TrimSpace(s.ConnectionID) == "" || strings.TrimSpace(s.ConnectionRevisionID) == "" ||
 		strings.TrimSpace(s.UpstreamModel) == "" || strings.TrimSpace(s.CredentialID) == "" ||
 		s.CredentialVersion < 1 {
-		return fmt.Errorf("image route snapshot is incomplete")
+		return fmt.Errorf("adapter gateway route snapshot is incomplete")
 	}
 	parsed, err := url.Parse(s.BaseURL)
 	validScheme := parsed.Scheme == "https" || (allowInsecureHTTP && parsed.Scheme == "http")
@@ -57,6 +70,24 @@ func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
 	}
 	if s.MaxResponseBytes < 1 || s.MaxResponseBytes > 100<<20 {
 		return fmt.Errorf("adapter gateway response limit must be between 1 byte and 100 MiB")
+	}
+	return nil
+}
+
+func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) error {
+	if err := s.ValidateWithPolicy(allowInsecureHTTP); err != nil {
+		return err
+	}
+	switch s.TextResponseMode {
+	case TextResponseJSONSchema, TextResponseJSONObject, TextResponsePromptJSON:
+	default:
+		return fmt.Errorf("adapter gateway text response mode is invalid")
+	}
+	if s.MaxOutputTokens < 0 || s.MaxOutputTokens > 100_000 {
+		return fmt.Errorf("adapter gateway max output tokens are invalid")
+	}
+	if s.Temperature < 0 || s.Temperature > 2 {
+		return fmt.Errorf("adapter gateway temperature is invalid")
 	}
 	return nil
 }
@@ -98,9 +129,11 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		return ImageRouteSnapshot{}, fmt.Errorf("MySQL database is required")
 	}
 	var snapshot ImageRouteSnapshot
+	var constraintsJSON []byte
 	err := s.DB.QueryRowContext(ctx, `SELECT
 			r.id, rr.id, c.id, cr.id, cr.base_url, rr.upstream_model,
-			pc.id, pc.credential_version, cr.timeout_seconds, cr.max_response_bytes
+			pc.id, pc.credential_version, cr.timeout_seconds, cr.max_response_bytes,
+			COALESCE(rr.constraints_json, JSON_OBJECT())
 		FROM provider_model_routes r
 		JOIN provider_model_route_revisions rr ON rr.id = r.current_revision_id AND rr.route_id = r.id
 		JOIN provider_connections c ON c.id = rr.connection_id AND c.status = 'enabled' AND c.connection_type = 'adapter_gateway'
@@ -116,7 +149,7 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 	).Scan(
 		&snapshot.RouteID, &snapshot.RouteRevisionID, &snapshot.ConnectionID, &snapshot.ConnectionRevisionID,
 		&snapshot.BaseURL, &snapshot.UpstreamModel, &snapshot.CredentialID, &snapshot.CredentialVersion,
-		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes,
+		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes, &constraintsJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ImageRouteSnapshot{}, fmt.Errorf("no enabled adapter gateway %s route for model alias %q", capability, modelAlias)
@@ -124,10 +157,48 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 	if err != nil {
 		return ImageRouteSnapshot{}, err
 	}
-	if err := snapshot.ValidateWithPolicy(s.AllowInsecureHTTP); err != nil {
+	if capability == "text.generate" {
+		if err := applyTextRouteConstraints(&snapshot, constraintsJSON); err != nil {
+			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
+		}
+	}
+	validate := snapshot.ValidateWithPolicy
+	if capability == "text.generate" {
+		validate = snapshot.ValidateTextWithPolicy
+	}
+	if err := validate(s.AllowInsecureHTTP); err != nil {
 		return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q: %w", modelAlias, err)
 	}
 	return snapshot, nil
+}
+
+func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {
+	if snapshot == nil {
+		return fmt.Errorf("route snapshot is required")
+	}
+	var constraints struct {
+		ResponseMode    TextResponseMode `json:"text_response_mode"`
+		MaxOutputTokens int              `json:"max_output_tokens"`
+		Temperature     *float64         `json:"temperature"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &constraints); err != nil {
+			return err
+		}
+	}
+	// prompt_json is the safest backward-compatible mode for existing
+	// OpenAI-compatible routes whose strict schema capability was never
+	// recorded. A route must opt into stronger response modes explicitly.
+	if constraints.ResponseMode == "" {
+		constraints.ResponseMode = TextResponsePromptJSON
+	}
+	snapshot.TextResponseMode = constraints.ResponseMode
+	snapshot.MaxOutputTokens = constraints.MaxOutputTokens
+	if constraints.Temperature != nil {
+		snapshot.Temperature = *constraints.Temperature
+		snapshot.TemperatureSet = true
+	}
+	return nil
 }
 
 func (s MySQLGatewayConfigStore) ResolveGatewayCredential(ctx context.Context, credentialID string, version int64) (string, error) {

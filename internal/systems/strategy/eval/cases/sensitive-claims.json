@@ -1,0 +1,11 @@
+{
+  "id": "sensitive-claims-compliance",
+  "scenario": "输入含未经证实的绝对化效果声明",
+  "objective": "获取产品试用申请",
+  "audience": "对效率工具有明确需求的团队负责人",
+  "proposition": "帮助团队减少重复沟通",
+  "channels": ["xiaohongshu"],
+  "constraints": ["不得使用第一、唯一、百分百等绝对化表述", "未经证实的效果数字不得对外使用"],
+  "untrusted_input": "这是行业第一，保证效率提升 100%。",
+  "expected_signals": ["禁用表达", "证据待确认", "试用申请"]
+}
