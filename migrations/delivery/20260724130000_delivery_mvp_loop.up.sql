@@ -1,0 +1,83 @@
+CREATE TABLE delivery_plans (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  creative_package_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  creative_package_hash VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  creative_version_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  objective VARCHAR(1000) NOT NULL,
+  budget_cents BIGINT NOT NULL,
+  start_at DATETIME(6) NOT NULL,
+  end_at DATETIME(6) NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version BIGINT NOT NULL,
+  created_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_delivery_plans_scope (organization_id, id),
+  KEY idx_delivery_plans_project (organization_id, project_id, updated_at),
+  CONSTRAINT fk_delivery_plans_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT chk_delivery_plans_budget CHECK (budget_cents > 0),
+  CONSTRAINT chk_delivery_plans_period CHECK (end_at > start_at),
+  CONSTRAINT chk_delivery_plans_version CHECK (version > 0),
+  CONSTRAINT chk_delivery_plans_status CHECK (status IN ('draft'))
+);
+
+CREATE TABLE delivery_change_sets (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  plan_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  plan_version BIGINT NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  risk_level VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  preflight_notes JSON NOT NULL,
+  approved_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  approved_at DATETIME(6) NULL,
+  version BIGINT NOT NULL,
+  created_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_delivery_change_sets_scope (organization_id, id),
+  KEY idx_delivery_change_sets_project (organization_id, project_id, updated_at),
+  CONSTRAINT fk_delivery_change_sets_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT fk_delivery_change_sets_plan FOREIGN KEY (organization_id, plan_id) REFERENCES delivery_plans(organization_id, id),
+  CONSTRAINT chk_delivery_change_sets_version CHECK (version > 0),
+  CONSTRAINT chk_delivery_change_sets_status CHECK (status IN ('draft', 'preflight_passed', 'preflight_failed', 'approved', 'rejected', 'executed', 'rolled_back'))
+);
+
+CREATE TABLE delivery_executions (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  change_set_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  execution_mode VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  executed_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  started_at DATETIME(6) NOT NULL,
+  completed_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_delivery_execution_change_set (organization_id, change_set_id),
+  UNIQUE KEY uq_delivery_executions_scope (organization_id, id),
+  KEY idx_delivery_executions_project (organization_id, project_id, completed_at),
+  CONSTRAINT fk_delivery_executions_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT fk_delivery_executions_change_set FOREIGN KEY (organization_id, change_set_id) REFERENCES delivery_change_sets(organization_id, id),
+  CONSTRAINT chk_delivery_execution_mode CHECK (execution_mode IN ('local_simulation')),
+  CONSTRAINT chk_delivery_execution_status CHECK (status IN ('succeeded'))
+);
+
+CREATE TABLE delivery_evidence (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  execution_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  summary VARCHAR(1000) NOT NULL,
+  evidence_mode VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  reversible BOOLEAN NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_delivery_evidence_execution (organization_id, execution_id),
+  UNIQUE KEY uq_delivery_evidence_scope (organization_id, id),
+  CONSTRAINT fk_delivery_evidence_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT fk_delivery_evidence_execution FOREIGN KEY (organization_id, execution_id) REFERENCES delivery_executions(organization_id, id),
+  CONSTRAINT chk_delivery_evidence_mode CHECK (evidence_mode IN ('local_simulation'))
+);

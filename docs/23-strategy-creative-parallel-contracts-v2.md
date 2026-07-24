@@ -1,7 +1,10 @@
-# cookies Strategy × Creative 并行开发契约（最终版）
+# cookies Strategy × Creative 并行开发契约（已废止）
 
-> 文档状态：最终版
-> 版本：v3.0
+> **文档状态：已废止（2026-07-24）**
+>
+> 前端已改为单一负责人开发，本文关于人员分工、文件所有权、合并顺序、并行冻结和前端 canonical URL 的规定不再生效，也不得作为后续前端实现依据。产品、导航、视觉和页面整改统一以 Kanon 最新 `DESIGN.md`、`docs/22-project-centered-navigation-remediation-plan.md`、`docs/19-module-navigation-architecture.md`、`docs/20-module-submodule-analysis.md` 及对应模块 PRD 为准。本文仅保留为历史记录。
+>
+> 版本：v3.1
 > 日期：2026-07-24
 > 适用范围：首期 Strategy → Creative 图文闭环；不覆盖 Insights、Delivery 的实现
 
@@ -236,5 +239,6 @@ Creative：SH-B1/B2/B3 + CR-1 并行推进
 
 ### 变更记录
 
+- **v3.1（2026-07-24）**：前端改为单一负责人开发，整份并行契约废止；后续前端统一以 Kanon 最新设计、Project 中心化、导航架构和模块 PRD 为准。
 - **v2.0（2026-07-24）**：依据 v1.1 与当前团队职责，明确“你负责 Shared + Creative、另一位开发者负责 Strategy”；将真实登录从可直接开发项改为依赖 Platform/Identity Session Contract 的阻塞项；补充正式前端、Canonical URL、Provider 使用边界与 PR 所有权。
 - **v3.0（2026-07-24）**：最终版。两位开发者各自负责 Strategy / Creative 完整业务线，并分别承担 Shared-A（登录、认证、公共路由）与 Shared-B（个人页、Shell、ProjectSwitcher、Design System）；取消“Shared 全部完成后才能并行”的串行前置。

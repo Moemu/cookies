@@ -62,6 +62,16 @@ export function freezeCreativeVersion(projectId: string, taskId: string, draftVe
   })
 }
 
+export function listCreativeVersions(projectId: string, taskId = '', signal?: AbortSignal) {
+  const query = new URLSearchParams({ limit: '100' })
+  if (taskId) query.set('task_id', taskId)
+  return apiRequest<{ items: CreativeVersion[] }>(`${base(projectId)}/creative-versions?${query}`, { signal })
+}
+
+export function listCreativePackages(projectId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: CreativePackage[] }>(`${base(projectId)}/creative-packages?limit=100`, { signal })
+}
+
 export function createCoverImageJob(projectId: string, taskId: string) {
   return apiRequest<ProviderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:cover-image-job`, {
     method: 'POST',

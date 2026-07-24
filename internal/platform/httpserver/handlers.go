@@ -376,6 +376,10 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusConflict, "INTAKE_NEEDS_CLARIFICATION", "The Creative intake needs the missing fields before a task can be created.", false
 	case errors.Is(err, creative.ErrProviderJobConflict):
 		status, code, message, retryable = http.StatusConflict, "PRODUCTION_JOB_CONFLICT", "A different cover production job already exists for this task.", false
+	case errors.Is(err, creative.ErrInvalidState):
+		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The Creative resource is not in a valid state for this operation.", false
+	case errors.Is(err, creative.ErrVersionConflict):
+		status, code, message, retryable = http.StatusPreconditionFailed, "CREATIVE_VERSION_CONFLICT", "The Creative draft changed. Refresh the task and try again.", false
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
 	case errors.Is(err, project.ErrBrandNotFound):

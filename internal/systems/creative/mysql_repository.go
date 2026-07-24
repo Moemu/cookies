@@ -322,6 +322,31 @@ func (r MySQLRepository) GetVersion(ctx context.Context, organizationID contract
 	return value, err
 }
 
+func (r MySQLRepository) ListVersions(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, taskID string, limit int) ([]CreativeVersion, error) {
+	query := creativeVersionSelect + ` WHERE organization_id = ? AND project_id = ?`
+	args := []any{organizationID, projectID}
+	if taskID != "" {
+		query += ` AND task_id = ?`
+		args = append(args, taskID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]CreativeVersion, 0)
+	for rows.Next() {
+		value, scanErr := scanCreativeVersion(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (r MySQLRepository) RecordVersionCheck(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, versionID string, check CreativeCheck) (CreativeVersion, error) {
 	payload, err := json.Marshal(check)
 	if err != nil {
@@ -424,11 +449,29 @@ func (r MySQLRepository) CreatePackage(ctx context.Context, value CreativePackag
 	return value, nil
 }
 
+func (r MySQLRepository) ListPackages(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]CreativePackage, error) {
+	rows, err := r.DB.QueryContext(ctx, creativePackageSelect+` WHERE organization_id = ? AND project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]CreativePackage, 0)
+	for rows.Next() {
+		value, scanErr := scanCreativePackage(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 const creativeIntakeSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 	request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash, version, created_at, updated_at FROM creative_intakes`
 const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, status, direction_payload, version, created_at, updated_at FROM creative_tasks`
 const creativeVersionSelect = `SELECT id, organization_id, project_id, task_id, version, draft_version, status,
 	snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
+const creativePackageSelect = `SELECT id, organization_id, project_id, creative_version_id, content_hash, snapshot_payload, created_by, created_at FROM creative_packages`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -451,6 +494,18 @@ func scanIntake(row rowScanner) (CreativeIntake, error) {
 		return CreativeIntake{}, fmt.Errorf("decode creative intake warnings: %w", err)
 	}
 	value.ConfirmedBy = confirmed.String
+	return value, nil
+}
+
+func scanCreativePackage(row rowScanner) (CreativePackage, error) {
+	var value CreativePackage
+	var snapshot []byte
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativeVersionID, &value.ContentHash, &snapshot, &value.CreatedBy, &value.CreatedAt); err != nil {
+		return CreativePackage{}, err
+	}
+	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
+		return CreativePackage{}, fmt.Errorf("decode creative package snapshot: %w", err)
+	}
 	return value, nil
 }
 
@@ -494,20 +549,11 @@ func scanCreativeVersion(row rowScanner) (CreativeVersion, error) {
 }
 
 func (r MySQLRepository) getPackageByVersion(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, creativeVersionID string) (CreativePackage, error) {
-	var value CreativePackage
-	var snapshot []byte
-	err := r.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id, creative_version_id, content_hash, snapshot_payload, created_by, created_at
-		FROM creative_packages WHERE organization_id = ? AND project_id = ? AND creative_version_id = ?`, organizationID, projectID, creativeVersionID).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativeVersionID, &value.ContentHash, &snapshot, &value.CreatedBy, &value.CreatedAt)
+	value, err := scanCreativePackage(r.DB.QueryRowContext(ctx, creativePackageSelect+` WHERE organization_id = ? AND project_id = ? AND creative_version_id = ?`, organizationID, projectID, creativeVersionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreativePackage{}, ErrNotFound
 	}
-	if err != nil {
-		return CreativePackage{}, err
-	}
-	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
-		return CreativePackage{}, err
-	}
-	return value, nil
+	return value, err
 }
 
 func (r MySQLRepository) getIntakeByIdempotency(ctx context.Context, intake CreativeIntake) (CreativeIntake, error) {

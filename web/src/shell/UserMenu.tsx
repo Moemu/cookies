@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { logout } from '../auth/api'
 import type { CurrentIdentity } from '../features/platform/types'
-import './shell.css'
 
 export function UserMenu({ identity }: { identity: CurrentIdentity | null }) {
   const navigate = useNavigate()

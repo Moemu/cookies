@@ -55,6 +55,36 @@ func TestManualReadyIntakeCreatesImageTextTaskAndDraft(t *testing.T) {
 	}
 }
 
+func TestListVersionsAndPackagesRestoresDeliveredCreativeAfterRefresh(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	repository := service.Repository.(*memoryRepository)
+	now := time.Date(2026, time.July, 24, 10, 0, 0, 0, time.UTC)
+	version := CreativeVersion{
+		ID: "creativeversion_1", OrganizationID: "org_1", ProjectID: "project_1",
+		TaskID: "creativetask_1", Version: 2, DraftVersion: 2,
+		Status: CreativeVersionApproved, CreatedAt: now,
+	}
+	pkg := CreativePackage{
+		ID: "creativepackage_1", OrganizationID: "org_1", ProjectID: "project_1",
+		CreativeVersionID: version.ID, CreatedAt: now,
+	}
+	repository.versions[version.ID] = version
+	repository.packages[pkg.ID] = pkg
+
+	versions, err := service.ListVersions(context.Background(), testRequestContext().Actor, "project_1", "creativetask_1", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages, err := service.ListPackages(context.Background(), testRequestContext().Actor, "project_1", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 1 || versions[0].ID != version.ID || len(packages) != 1 || packages[0].ID != pkg.ID {
+		t.Fatalf("versions=%#v packages=%#v", versions, packages)
+	}
+}
+
 func TestApprovedStrategyPackageCreatesReadyCreativeIntake(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -386,6 +416,19 @@ func (r *memoryRepository) GetVersion(_ context.Context, _ contract.Organization
 	return value, nil
 }
 
+func (r *memoryRepository) ListVersions(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, taskID string, limit int) ([]CreativeVersion, error) {
+	values := make([]CreativeVersion, 0, len(r.versions))
+	for _, value := range r.versions {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && (taskID == "" || value.TaskID == taskID) {
+			values = append(values, value)
+			if len(values) == limit {
+				break
+			}
+		}
+	}
+	return values, nil
+}
+
 func (r *memoryRepository) RecordVersionCheck(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string, check CreativeCheck) (CreativeVersion, error) {
 	value, ok := r.versions[id]
 	if !ok {
@@ -419,4 +462,17 @@ func (r *memoryRepository) CreatePackage(_ context.Context, value CreativePackag
 	}
 	r.packages[value.ID] = value
 	return value, nil
+}
+
+func (r *memoryRepository) ListPackages(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]CreativePackage, error) {
+	values := make([]CreativePackage, 0, len(r.packages))
+	for _, value := range r.packages {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID {
+			values = append(values, value)
+			if len(values) == limit {
+				break
+			}
+		}
+	}
+	return values, nil
 }

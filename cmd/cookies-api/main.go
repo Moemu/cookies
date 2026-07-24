@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
+	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
@@ -31,6 +33,10 @@ import (
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
+	"github.com/shikanon/cookies/internal/systems/delivery"
+	deliveryhttp "github.com/shikanon/cookies/internal/systems/delivery/httpapi"
+	"github.com/shikanon/cookies/internal/systems/insights"
+	insightshttp "github.com/shikanon/cookies/internal/systems/insights/httpapi"
 	strategysystem "github.com/shikanon/cookies/internal/systems/strategy"
 	strategyhttp "github.com/shikanon/cookies/internal/systems/strategy/httpapi"
 )
@@ -65,6 +71,8 @@ func main() {
 				"provider.read", "provider.generate", "provider.text.generate",
 				"strategy.read", "strategy.write", "strategy.confirm", "strategy.review",
 				"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
+				"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",
+				"insights.read", "insights.write", "insights.confirm",
 			}),
 		}
 		actor = &adminActor
@@ -115,6 +123,20 @@ func main() {
 		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
 	}
+	deliveryService := &delivery.Service{
+		Repository: delivery.MySQLRepository{DB: db},
+		Projects:   projectService,
+		Packages:   creativedelivery.Reader{Service: creativeService},
+	}
+	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
+		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
+	insightsService := &insights.Service{
+		Repository: insights.MySQLRepository{DB: db},
+		Projects:   projectService,
+		Delivery:   deliveryinsights.Reader{Service: deliveryService},
+	}
+	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
+		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	runtimeStore := jobruntime.MySQLStore{DB: db}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { CreativeImageTextPage } from './CreativeImageTextPage'
@@ -113,5 +113,59 @@ describe('CreativeImageTextPage', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/creative/v1/projects/project_1/creative-tasks/creativetask_1:draft', expect.objectContaining({ method: 'PATCH' })))
     fireEvent.click(screen.getByRole('button', { name: '冻结为创意版本' }))
     expect(await screen.findByText('已冻结 CreativeVersion v1')).toBeInTheDocument()
+  })
+
+  it('clears a transient production refresh error after the next successful poll', async () => {
+    const productionDetail = {
+      ...detail,
+      production_jobs: [{ task_id: task.id, kind: 'image_plan_1_job_providerjob_1', provider_job_id: 'providerjob_1', created_at: '2026-07-24T01:00:00Z' }],
+    }
+    let providerReads = 0
+    let pollProduction: (() => Promise<void>) | undefined
+    vi.spyOn(window, 'setInterval').mockImplementation((handler) => {
+      pollProduction = handler as () => Promise<void>
+      return 1 as unknown as ReturnType<typeof setInterval>
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/creative-tasks?limit=100')) return jsonResponse({ items: [task] })
+      if (url.endsWith('/creative-intakes?limit=100')) return jsonResponse({ items: [intake] })
+      if (url.endsWith('/creative-tasks/creativetask_1')) return jsonResponse(productionDetail)
+      if (url.endsWith('/assets?limit=100')) return jsonResponse({ items: [] })
+      if (url.endsWith('/model/jobs/providerjob_1')) {
+        providerReads += 1
+        if (providerReads === 1) return jsonResponse({ error: { code: 'INTERNAL', message: 'The service could not complete the request.', request_id: 'req_transient', retryable: true, details: [] } }, 500)
+        return jsonResponse({ id: 'providerjob_1', provider_status: 'succeeded', progress: 100 })
+      }
+      return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', request_id: 'req_test', retryable: false, details: [] } }, 404)
+    }))
+
+    render(<MemoryRouter initialEntries={['/projects/project_1/creative']}><Routes><Route path="/projects/:projectId/creative" element={<CreativeImageTextPage />} /></Routes></MemoryRouter>)
+
+    expect(await screen.findByText('The service could not complete the request.')).toBeInTheDocument()
+    expect(pollProduction).toBeDefined()
+    await act(async () => { await pollProduction?.() })
+    expect(screen.queryByText('The service could not complete the request.')).not.toBeInTheDocument()
+  })
+
+  it('clears an earlier operation error when the task is opened successfully', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      const method = init?.method || (input instanceof Request ? input.method : 'GET')
+      if (url.endsWith('/creative-tasks?limit=100')) return jsonResponse({ items: [task] })
+      if (url.endsWith('/creative-intakes?limit=100')) return jsonResponse({ items: [intake] })
+      if (url.endsWith('/creative-tasks/creativetask_1')) return jsonResponse(detail)
+      if (url.endsWith('/creative-tasks/creativetask_1:image-job') && method === 'POST') {
+        return jsonResponse({ error: { code: 'INTERNAL', message: 'The service could not complete the request.', request_id: 'req_operation', retryable: true, details: [] } }, 500)
+      }
+      return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', request_id: 'req_test', retryable: false, details: [] } }, 404)
+    }))
+
+    render(<MemoryRouter initialEntries={['/projects/project_1/creative']}><Routes><Route path="/projects/:projectId/creative" element={<CreativeImageTextPage />} /></Routes></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生成第 1 张图' }))
+    expect(await screen.findByText('The service could not complete the request.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '晨光咖啡桌图文方向 · 小红书图文 · 初稿手工创意输入' }))
+    await waitFor(() => expect(screen.queryByText('The service could not complete the request.')).not.toBeInTheDocument())
   })
 })

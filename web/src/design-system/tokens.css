@@ -1,12 +1,28 @@
 :root {
-  --ds-surface: #ffffff;
-  --ds-surface-subtle: #f8fafc;
-  --ds-border: #e2e8f0;
-  --ds-text: #172033;
-  --ds-text-muted: #64748b;
-  --ds-accent: #2563eb;
-  --ds-accent-subtle: #eff6ff;
-  --ds-radius-sm: 8px;
-  --ds-radius-md: 12px;
-  --ds-shadow-menu: 0 14px 32px rgba(15, 23, 42, 0.14);
+  --ds-canvas: oklch(0.976 0.005 255);
+  --ds-surface: oklch(0.995 0.002 255);
+  --ds-surface-subtle: oklch(0.977 0.006 255);
+  --ds-surface-muted: oklch(0.955 0.01 255);
+  --ds-border: oklch(0.9 0.012 255);
+  --ds-border-strong: oklch(0.84 0.02 255);
+  --ds-text: oklch(0.25 0.035 255);
+  --ds-text-muted: oklch(0.5 0.035 255);
+  --ds-text-subtle: oklch(0.64 0.025 255);
+  --ds-accent: oklch(0.57 0.21 257);
+  --ds-accent-hover: oklch(0.51 0.21 257);
+  --ds-accent-subtle: oklch(0.96 0.025 257);
+  --ds-success: oklch(0.53 0.14 155);
+  --ds-success-subtle: oklch(0.97 0.025 155);
+  --ds-success-border: oklch(0.86 0.055 155);
+  --ds-warning: oklch(0.58 0.13 75);
+  --ds-warning-subtle: oklch(0.97 0.03 75);
+  --ds-danger: oklch(0.54 0.19 28);
+  --ds-danger-subtle: oklch(0.97 0.025 28);
+  --ds-radius-xs: 4px;
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 8px;
+  --ds-shadow-menu: 0 16px 38px oklch(0.34 0.05 255 / 0.13);
+  --ds-shadow-panel: 0 7px 20px oklch(0.34 0.04 255 / 0.045);
+  --ds-topbar-height: 56px;
+  --ds-sidebar-width: 232px;
 }

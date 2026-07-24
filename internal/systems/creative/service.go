@@ -401,6 +401,42 @@ func (s Service) CheckVersion(ctx context.Context, actor contract.ActorContext, 
 	return s.Repository.RecordVersionCheck(ctx, actor.OrganizationID, projectID, versionID, check)
 }
 
+// ListVersions restores immutable Creative history after a browser refresh.
+// taskID is optional so the Project stage summary can use the same read model.
+func (s Service) ListVersions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, limit int) ([]CreativeVersion, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	return s.Repository.ListVersions(ctx, actor.OrganizationID, projectID, strings.TrimSpace(taskID), limit)
+}
+
+// ListPackages exposes only Creative's immutable handoff objects. Delivery
+// never needs to inspect Creative drafts or tables.
+func (s Service) ListPackages(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]CreativePackage, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	return s.Repository.ListPackages(ctx, actor.OrganizationID, projectID, limit)
+}
+
 func (s Service) ApproveVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativeVersion, error) {
 	if s.Repository == nil || s.Projects == nil {
 		return CreativeVersion{}, fmt.Errorf("creative dependencies are incomplete")

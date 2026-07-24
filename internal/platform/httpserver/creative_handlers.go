@@ -345,6 +345,37 @@ func (s *Server) transitionCreativeVersion(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) listCreativeVersions(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.creative.ListVersions(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		strings.TrimSpace(r.URL.Query().Get("task_id")), queryLimit(r),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listCreativePackages(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.creative.ListPackages(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), queryLimit(r))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
 func queryLimit(r *http.Request) int {
 	value, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || value < 1 {

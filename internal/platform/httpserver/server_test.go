@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,43 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 	if response.Header().Get("X-Request-ID") == "" {
 		t.Fatal("expected response request ID")
+	}
+}
+
+func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "invalid state", err: creative.ErrInvalidState, wantStatus: http.StatusConflict, wantCode: "INVALID_STATE"},
+		{name: "stale version", err: creative.ErrVersionConflict, wantStatus: http.StatusPreconditionFailed, wantCode: "CREATIVE_VERSION_CONFLICT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/creative/v1/test", nil)
+
+			(&Server{}).writeServiceError(response, request, tt.err)
+
+			if response.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, tt.wantStatus)
+			}
+			var problem struct {
+				Error contract.Error `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&problem); err != nil {
+				t.Fatalf("decode problem: %v", err)
+			}
+			if problem.Error.Code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", problem.Error.Code, tt.wantCode)
+			}
+			if problem.Error.Retryable {
+				t.Fatal("creative domain conflict must not be retryable without refreshing state")
+			}
+		})
 	}
 }
 
@@ -459,6 +497,34 @@ func TestReviseCreativeDraftUsesTaskActionAndExpectedVersion(t *testing.T) {
 	}
 }
 
+func TestCreativeHistoryReadEndpointsSurviveRefresh(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{
+		versions: []creative.CreativeVersion{{ID: "creativeversion_1", TaskID: "creativetask_1"}},
+		packages: []creative.CreativePackage{{ID: "creativepackage_1", CreativeVersionID: "creativeversion_1"}},
+	}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: manager})
+
+	for _, target := range []struct {
+		path string
+		want string
+	}{
+		{"/api/creative/v1/projects/project_1/creative-versions?task_id=creativetask_1", "creativeversion_1"},
+		{"/api/creative/v1/projects/project_1/creative-packages", "creativepackage_1"},
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target.path, nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), target.want) {
+			t.Fatalf("%s status=%d body=%s", target.path, response.Code, response.Body.String())
+		}
+	}
+}
+
 type staticProjectManager struct{ context contract.ProjectContext }
 
 func (s staticProjectManager) GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
@@ -492,6 +558,8 @@ type creativeManagerStub struct {
 	revisedDraft            creative.ImageTextDraft
 	reviseTaskID            string
 	reviseRequest           creative.ReviseDraftRequest
+	versions                []creative.CreativeVersion
+	packages                []creative.CreativePackage
 }
 
 func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
@@ -525,6 +593,9 @@ func (s *creativeManagerStub) FreezeVersion(_ context.Context, _ contract.Reques
 	s.freezeTaskID = taskID
 	return s.frozenVersion, false, nil
 }
+func (s *creativeManagerStub) ListVersions(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]creative.CreativeVersion, error) {
+	return s.versions, nil
+}
 func (s *creativeManagerStub) ReviseDraft(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.ReviseDraftRequest) (creative.ImageTextDraft, error) {
 	s.reviseTaskID = taskID
 	s.reviseRequest = request
@@ -541,6 +612,9 @@ func (s *creativeManagerStub) ApproveVersion(context.Context, contract.ActorCont
 }
 func (s *creativeManagerStub) DeliverVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativePackage, error) {
 	return creative.CreativePackage{}, nil
+}
+func (s *creativeManagerStub) ListPackages(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativePackage, error) {
+	return s.packages, nil
 }
 
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {

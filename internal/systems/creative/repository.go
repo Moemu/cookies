@@ -29,7 +29,9 @@ type Repository interface {
 	RegisterProductionJob(context.Context, contract.OrganizationID, contract.ProjectID, string, ProductionJob) error
 	CreateVersion(context.Context, CreativeVersion) (CreativeVersion, bool, error)
 	GetVersion(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeVersion, error)
+	ListVersions(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]CreativeVersion, error)
 	RecordVersionCheck(context.Context, contract.OrganizationID, contract.ProjectID, string, CreativeCheck) (CreativeVersion, error)
 	ApproveVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, CreativeApproval) (CreativeVersion, error)
 	CreatePackage(context.Context, CreativePackage) (CreativePackage, error)
+	ListPackages(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativePackage, error)
 }

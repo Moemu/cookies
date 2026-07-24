@@ -5,7 +5,7 @@ import { LoginPage } from './auth/LoginPage'
 
 export default function App() {
   return <BrowserRouter><Routes>
-    <Route path="/" element={<Navigate replace to="/strategy" />} />
+    <Route path="/" element={<Navigate replace to="/projects" />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/*" element={<AuthBoundary><Workspace /></AuthBoundary>} />
   </Routes></BrowserRouter>

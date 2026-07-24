@@ -1,29 +1,29 @@
 :root {
-  color: #1d2939;
-  background: #ffffff;
+  color: var(--ds-text);
+  background: var(--ds-canvas);
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --accent: #1265e9;
-  --accent-soft: #eef5ff;
-  --text: #1d2939;
-  --muted: #667085;
-  --subtle: #98a2b3;
-  --border: #e4e9f0;
-  --surface-soft: #f7f9fc;
-  --success: #16a34a;
-  --danger: #d92d20;
+  --accent: var(--ds-accent);
+  --accent-soft: var(--ds-accent-subtle);
+  --text: var(--ds-text);
+  --muted: var(--ds-text-muted);
+  --subtle: var(--ds-text-subtle);
+  --border: var(--ds-border);
+  --surface-soft: var(--ds-surface-subtle);
+  --success: var(--ds-success);
+  --danger: var(--ds-danger);
 }
 
 * { box-sizing: border-box; }
 
-html { min-width: 320px; background: #ffffff; }
-body { min-width: 320px; min-height: 100vh; margin: 0; background: #ffffff; }
+html { background: var(--ds-canvas); }
+body { min-width: 0; min-height: 100vh; margin: 0; background: var(--ds-canvas); }
 button, input, select, a { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .58; }
 button, a, input, select { outline: none; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { box-shadow: 0 0 0 3px rgb(18 101 233 / 18%); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { box-shadow: 0 0 0 3px oklch(0.57 0.21 257 / 0.18); }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
@@ -76,7 +76,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .identity-summary__logout { border: 0; background: transparent; color: var(--muted); padding: 7px 4px; font-size: 12px; }
 .identity-summary__logout:hover { color: var(--danger); }
 .avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-.workspace-alert { border-bottom: 1px solid #fecdca; background: #fffbfa; color: #b42318; padding: 9px 28px; font-size: 13px; }
+.workspace-alert { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #fecdca; background: #fffbfa; color: #b42318; padding: 9px 28px; font-size: 13px; }
 
 .modal-layer { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; }
 .modal-scrim { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(16 24 40 / 44%); padding: 0; cursor: default; animation: modal-fade-in 160ms ease-out; }

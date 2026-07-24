@@ -1,0 +1,326 @@
+openapi: 3.1.0
+info:
+  title: Cookies Delivery API
+  version: 1.0.0
+  description: Versioned plans, controlled local simulation, and execution evidence.
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+paths:
+  /api/delivery/v1/projects/{project_id}/plans:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List delivery plans
+      operationId: listDeliveryPlans
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Project plans.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Create a delivery plan
+      operationId: createDeliveryPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlan'
+      responses:
+        '201':
+          description: Plan created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryPlan'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+    get:
+      summary: Get a delivery plan
+      operationId: getDeliveryPlan
+      responses:
+        '200':
+          description: Plan, change sets, and execution history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}:create-change-set:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+    post:
+      summary: Create a plan change set
+      operationId: createDeliveryChangeSet
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '201':
+          $ref: '#/components/responses/ChangeSet'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:preflight:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    post:
+      summary: Preflight a delivery change set
+      operationId: preflightDeliveryChangeSet
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '200':
+          $ref: '#/components/responses/ChangeSet'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:approve:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    post:
+      summary: Approve a delivery change set
+      operationId: approveDeliveryChangeSet
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '200':
+          $ref: '#/components/responses/ChangeSet'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:execute:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    post:
+      summary: Execute a local simulation
+      operationId: executeDeliveryChangeSet
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '200':
+          description: Local simulation result and evidence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:rollback:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    post:
+      summary: Roll back a simulated change set
+      operationId: rollbackDeliveryChangeSet
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '200':
+          $ref: '#/components/responses/ChangeSet'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/delivery/v1/projects/{project_id}/executions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List delivery execution evidence
+      operationId: listDeliveryExecutions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Execution evidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExecutionResult'
+        default:
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: cookies_session
+  parameters:
+    ProjectID:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    PlanID:
+      name: plan_id
+      in: path
+      required: true
+      schema: { type: string }
+    ChangeSetID:
+      name: change_set_id
+      in: path
+      required: true
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+  requestBodies:
+    ExpectedVersion:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version]
+            properties:
+              expected_version: { type: integer, minimum: 1 }
+  responses:
+    ChangeSet:
+      description: Updated change set.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ChangeSet'
+    Problem:
+      description: Problem details.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    CreatePlan:
+      type: object
+      additionalProperties: false
+      required: [creative_package_id, name, objective, budget_cents, start_at, end_at]
+      properties:
+        creative_package_id: { type: string }
+        name: { type: string, maxLength: 160 }
+        objective: { type: string, maxLength: 1000 }
+        budget_cents: { type: integer, minimum: 1 }
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+    DeliveryPlan:
+      type: object
+      required: [id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        creative_package_id: { type: string }
+        creative_package_hash: { type: string }
+        creative_version_id: { type: string }
+        name: { type: string }
+        objective: { type: string }
+        budget_cents: { type: integer }
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        status: { type: string, enum: [draft] }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ChangeSet:
+      type: object
+      required: [id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        plan_id: { type: string }
+        plan_version: { type: integer }
+        status:
+          type: string
+          enum: [draft, preflight_passed, preflight_failed, approved, rejected, executed, rolled_back]
+        risk_level: { type: string }
+        preflight_notes:
+          type: array
+          items: { type: string }
+        approved_by: { type: string }
+        approved_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ExecutionResult:
+      type: object
+      required: [change_set, execution, evidence]
+      properties:
+        change_set:
+          $ref: '#/components/schemas/ChangeSet'
+        execution:
+          type: object
+          required: [id, change_set_id, status, mode, executed_by, started_at, completed_at]
+          properties:
+            id: { type: string }
+            change_set_id: { type: string }
+            status: { type: string, enum: [succeeded] }
+            mode: { type: string, enum: [local_simulation] }
+            executed_by: { type: string }
+            started_at: { type: string, format: date-time }
+            completed_at: { type: string, format: date-time }
+        evidence:
+          type: object
+          required: [id, execution_id, summary, mode, reversible, created_at]
+          properties:
+            id: { type: string }
+            execution_id: { type: string }
+            summary: { type: string }
+            mode: { type: string, enum: [local_simulation] }
+            reversible: { type: boolean }
+            created_at: { type: string, format: date-time }
+    PlanList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryPlan'
+    PlanDetail:
+      type: object
+      required: [plan, change_sets, executions]
+      properties:
+        plan:
+          $ref: '#/components/schemas/DeliveryPlan'
+        change_sets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeSet'
+        executions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionResult'
+    Problem:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id, retryable, details]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+            retryable: { type: boolean }
+            details:
+              type: array
+              items: { type: object }
