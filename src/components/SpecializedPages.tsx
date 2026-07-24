@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Download, ExternalLink, FileText, Film, Image, Music2, Play, RotateCcw, Save, Scissors, Send, ShieldCheck, Sparkles, Subtitles, ThumbsDown, ThumbsUp, Upload, Video, Volume2, WandSparkles } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Download, ExternalLink, FileText, Film, Image, Music2, Play, RotateCcw, Save, Scissors, Send, ShieldCheck, Sparkles, Subtitles, ThumbsDown, ThumbsUp, Video, Volume2, WandSparkles } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, hookStoryboard } from '../data/commerceHooks'
-import { projectEvidence } from '../data/projects'
-import { api, type ApiGenerationJob } from '../data/api'
+import { api, type ApiArtifact, type ApiGenerationJob, type ApiPrerollScope } from '../data/api'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
@@ -163,17 +162,142 @@ export function VideoCreationPage({ state, activeView, onOpenTask }: { state: Da
 }
 
 function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; onNotice: (message: string) => void }) {
+  const { currentProject, reloadProjects } = useProject()
+  const { providers } = useModelConfig()
   const preset = preRollPresets[mode]
+  const scope: ApiPrerollScope = {
+    projectId: currentProject.id,
+    purpose: 'preroll',
+    prerollType: mode === 'short-drama' ? 'short_drama' : 'game',
+  }
   const [selectedShot, setSelectedShot] = useState(0)
-  const [generated, setGenerated] = useState(false)
+  const [job, setJob] = useState<ApiGenerationJob | null>(null)
+  const [confirmedBriefId, setConfirmedBriefId] = useState('')
+  const [hasPersistedAsset, setHasPersistedAsset] = useState(false)
+  const [interactionFeedback, setInteractionFeedback] = useState('请选择一个镜头以更新中央预览。')
+  const currentShot = preset.shots[selectedShot]
+  const configuredProvider = providers.find(provider => provider.status === '已配置')
+  const generated = job?.status === 'succeeded' && hasPersistedAsset
+  const isGenerating = job?.status === 'queued' || job?.status === 'running'
+  const selectShot = (index: number) => {
+    setSelectedShot(index)
+    setInteractionFeedback(`当前镜头：${String(index + 1).padStart(2, '0')} · ${preset.shots[index]}。`)
+  }
+  const moveShotFocus = (index: number, key: string) => {
+    const nextIndex = key === 'Home' ? 0
+      : key === 'End' ? preset.shots.length - 1
+      : key === 'ArrowUp' || key === 'ArrowLeft' ? Math.max(0, index - 1)
+      : Math.min(preset.shots.length - 1, index + 1)
+    selectShot(nextIndex)
+    document.getElementById(`preroll-shot-${mode}-${nextIndex}`)?.focus()
+  }
+  useEffect(() => {
+    let active = true
+    void Promise.all([
+      api.listArtifacts(currentProject.id),
+      api.listPrerollArtifacts(scope),
+      api.listPrerollJobs(scope),
+    ]).then(([artifacts, prerollArtifacts, jobs]) => {
+      const latest = jobs.at(-1) ?? null
+      const persisted = latest?.status === 'succeeded'
+        && prerollArtifacts.some(artifact => artifact.id === latest.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
+      if (active) {
+        setJob(latest)
+        setConfirmedBriefId(artifacts.filter(artifact => artifact.kind === 'brief' && artifact.status === 'ready').at(-1)?.id ?? '')
+        setHasPersistedAsset(persisted)
+        if (latest?.status === 'succeeded' && !persisted) {
+          setInteractionFeedback('任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
+        }
+      }
+    }).catch(cause => {
+      if (active) setInteractionFeedback(cause instanceof Error ? cause.message : '无法读取服务端任务状态。')
+    })
+    return () => { active = false }
+  }, [currentProject.id, scope.prerollType])
+  useEffect(() => {
+    if (!job || !isGenerating) return
+    const timer = window.setInterval(() => {
+      void api.getPrerollJob(job.id, scope).then(async next => {
+        setJob(next)
+        if (next.status === 'succeeded') {
+          const artifacts = await api.listPrerollArtifacts(scope)
+          const persisted = artifacts.some(artifact => artifact.id === next.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
+          setHasPersistedAsset(persisted)
+          if (persisted) {
+            void reloadProjects()
+            setInteractionFeedback('前贴分镜已生成且产物已持久化，可以加入混剪素材箱。')
+            onNotice(`${mode === 'short-drama' ? '短剧' : '游戏'}前贴分镜已生成，稳定资产已关联到当前 Project。`)
+          } else {
+            setInteractionFeedback('任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
+          }
+        } else if (next.status === 'failed' || next.status === 'cancelled') {
+          setHasPersistedAsset(false)
+          setInteractionFeedback(next.status === 'cancelled' ? '前贴分镜任务已取消，可以修改配置后重试。' : `前贴分镜生成失败${next.diagnostic ? `：${next.diagnostic}` : '，请重试。'}`)
+        }
+      }).catch(cause => setInteractionFeedback(cause instanceof Error ? cause.message : '任务状态读取失败。'))
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [isGenerating, job, mode, onNotice, reloadProjects, scope.projectId, scope.prerollType])
+  const generateStoryboard = async () => {
+    if (!configuredProvider) {
+      setInteractionFeedback('服务端尚未配置 ARK_API_KEY，无法发起前贴分镜生成。')
+      return
+    }
+    if (!confirmedBriefId) {
+      setInteractionFeedback('请先在需求中心确认 Brief，再生成前贴分镜。')
+      return
+    }
+    // A retry never presents a prior successful asset as the pending request's result.
+    setJob(null)
+    setHasPersistedAsset(false)
+    setInteractionFeedback('正在创建新的前贴分镜任务，旧结果不会用于本次生成。')
+    try {
+      const prompt = `${preset.title}。${preset.detail}。分镜：${preset.shots.join('；')}。9:16 竖版，6 秒，静音可理解，品牌事实已校验，结尾保留稳定拼接点。`
+      const next = await api.createPrerollVideo(scope, prompt, confirmedBriefId)
+      setJob(next)
+      if (next.status === 'succeeded') {
+        const artifacts = await api.listPrerollArtifacts(scope)
+        const persisted = artifacts.some(artifact => artifact.id === next.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
+        setHasPersistedAsset(persisted)
+        setInteractionFeedback(persisted
+          ? '前贴分镜已生成且产物已持久化，可以加入混剪素材箱。'
+          : '任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
+      } else {
+        setHasPersistedAsset(false)
+        setInteractionFeedback('前贴分镜任务已创建，正在查询服务端状态。')
+      }
+    } catch (cause) {
+      setJob(null)
+      setHasPersistedAsset(false)
+      setInteractionFeedback(cause instanceof Error ? cause.message : '创建前贴分镜任务失败，请重试。')
+    }
+  }
+  const cancelStoryboard = async () => {
+    if (!job || !isGenerating) return
+    try {
+      setJob(await api.cancelJob(job.id, scope))
+      setHasPersistedAsset(false)
+      setInteractionFeedback('前贴分镜任务已取消，可以修改配置后重试。')
+    } catch (cause) {
+      setInteractionFeedback(cause instanceof Error ? cause.message : '取消前贴分镜任务失败，请重试。')
+    }
+  }
   return <div className="preroll-workspace">
-    <section className={`preroll-preview ${mode}`}>
-      <div className="preroll-screen"><span>{preset.eyebrow}</span><h3>{preset.title}</h3><p>{preset.detail}</p><button aria-label={`播放${mode === 'short-drama' ? '短剧' : '游戏'}前贴预览`} onClick={() => onNotice(`${mode === 'short-drama' ? '短剧' : '游戏'}前贴预览正在播放`)}><Play size={20} fill="currentColor"/></button><small>00:0{selectedShot * 2} / 00:06 · 9:16</small></div>
+    <aside className="preroll-storyboard" aria-label="6 秒前贴分镜">
+      <div className="surface-toolbar"><h3>镜头</h3><span>{generated ? 'v1.1' : '草稿'}</span></div>
+      <p className="preroll-keyboard-hint">上下方向键切换镜头</p>
+      {preset.shots.map((shot, index) => <button id={`preroll-shot-${mode}-${index}`} key={shot} className={selectedShot === index ? 'active' : ''} aria-current={selectedShot === index ? 'step' : undefined} onClick={() => selectShot(index)} onKeyDown={event => {
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          event.preventDefault()
+          moveShotFocus(index, event.key)
+        }
+      }}><span>0{index + 1}</span><div><b>{shot}</b><small>00:0{index * 2}–00:0{index * 2 + 2} · {index === 2 ? '稳定拼接点' : '保持节奏推进'}</small></div><ArrowRight size={15}/></button>)}
+    </aside>
+    <section className={`preroll-preview ${mode}`} aria-label="当前镜头预览">
+      <div className="preroll-preview-header"><span className="section-label">当前镜头</span><b>0{selectedShot + 1} / 03</b><span>{generated ? '分镜已生成' : isGenerating ? '正在生成' : job?.status === 'failed' ? '生成失败' : job?.status === 'cancelled' ? '已取消' : '待生成'}</span></div>
+      <div className="preroll-screen"><span>{preset.eyebrow}</span><h3>{currentShot}</h3><p>{preset.detail}</p><button aria-label={`播放${mode === 'short-drama' ? '短剧' : '游戏'}前贴预览`} disabled={!generated} onClick={() => onNotice(`${mode === 'short-drama' ? '短剧' : '游戏'}前贴预览正在播放：${currentShot}`)}><Play size={20} fill="currentColor"/></button><small>00:0{selectedShot * 2} / 00:06 · 9:16</small></div>
       <div className="preroll-source"><span className="section-label">策略来源</span><b>{preset.source}</b><small>已确认 Brief · 品牌规则通过 · 无真实平台写入</small></div>
-    </section>
-    <section className="preroll-storyboard">
-      <div className="surface-toolbar"><h3>6 秒前贴分镜</h3><span>{generated ? 'v1.1 已生成' : '方案待生成'}</span></div>
-      {preset.shots.map((shot, index) => <button key={shot} className={selectedShot === index ? 'active' : ''} onClick={() => setSelectedShot(index)}><span>0{index + 1}</span><div><b>{shot}</b><small>00:0{index * 2}–00:0{index * 2 + 2} · {index === 2 ? '稳定拼接点' : '保持节奏推进'}</small></div><ArrowRight size={15}/></button>)}
+      <p className="preroll-feedback" role="status" aria-live="polite">{interactionFeedback}</p>
     </section>
     <aside className="preroll-config">
       <span className="section-label">生成配置</span><h3>{mode === 'short-drama' ? '冲突反转型' : '挑战反馈型'}</h3>
@@ -181,8 +305,13 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
       <label>字幕样式<select defaultValue="高对比动态字幕"><option>高对比动态字幕</option><option>品牌极简字幕</option></select></label>
       <label>钩子强度<input aria-label="钩子强度" type="range" min="1" max="5" defaultValue="4"/></label>
       {['静音可理解', '品牌事实已校验', '人物与画面连续', '结尾存在稳定拼接点'].map(item => <span className="analysis-check" key={item}><Check size={14}/>{item}</span>)}
-      <button className="primary-button full" onClick={() => { setGenerated(true); onNotice(`${mode === 'short-drama' ? '短剧' : '游戏'}前贴分镜已生成，可进入素材剪辑`) }}><WandSparkles size={15}/>{generated ? '重新生成前贴' : '生成前贴分镜'}</button>
-      <button className="secondary-button full" disabled={!generated} onClick={() => onNotice('前贴视频已加入素材剪辑箱')}>加入混剪素材箱</button>
+      {!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置 ARK_API_KEY，无法发起前贴分镜生成。</span></div> : null}
+      {!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成前贴分镜。</span></div> : null}
+      <button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || isGenerating} aria-busy={isGenerating} onClick={() => void generateStoryboard()}><WandSparkles size={15}/>{isGenerating ? '正在生成分镜…' : generated ? '重新生成前贴' : '生成前贴分镜'}</button>
+      {isGenerating ? <button className="secondary-button full" onClick={() => void cancelStoryboard()}>取消生成</button> : null}
+      <button className="secondary-button full" disabled={!generated} aria-describedby={!generated ? `preroll-export-hint-${mode}` : undefined} onClick={() => onNotice('前贴视频产物已持久化，可在素材剪辑中选择。')}>加入混剪素材箱</button>
+      {!generated ? <small className="preroll-action-hint" id={`preroll-export-hint-${mode}`}>仅任务成功且服务端产物持久化后，才能加入混剪素材箱。</small> : null}
+      {job ? <div className="inline-notice">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}
     </aside>
   </div>
 }
@@ -291,22 +420,44 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
 }
 
 function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: string) => void, onCreate: () => void }) {
-  const [selectedAssets, setSelectedAssets] = useState(['短剧前贴_v1.mp4', '品牌广告主片_v2.mp4'])
-  const [clipCount, setClipCount] = useState(6)
+  const { currentProject } = useProject()
+  const [assets, setAssets] = useState<ApiArtifact[]>([])
+  const [selectedAssets, setSelectedAssets] = useState<string[]>([])
+  const [assetState, setAssetState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [clipCount, setClipCount] = useState(0)
   const [packaging, setPackaging] = useState(['动态字幕', '品牌片尾'])
-  const assets = [
-    ['短剧前贴_v1.mp4', '生成视频 · 00:06'],
-    ['游戏前贴_v1.mp4', '生成视频 · 00:06'],
-    ['品牌广告主片_v2.mp4', '生成视频 · 00:30'],
-    ['产品主镜头.mov', '授权素材 · 00:08'],
-  ]
-  const toggleAsset = (name: string) => setSelectedAssets(current => current.includes(name) ? current.filter(item => item !== name) : [...current, name])
+  useEffect(() => {
+    let active = true
+    setAssetState('loading')
+    void Promise.all([api.listArtifacts(currentProject.id), api.listJobs(currentProject.id)]).then(([artifacts, jobs]) => {
+      const succeededJobs = new Set(jobs.filter(job => job.status === 'succeeded').map(job => job.id))
+      const nextAssets = artifacts.filter(artifact => (
+        artifact.kind === 'video'
+        && artifact.status === 'ready'
+        && Boolean(artifact.sourceJobId)
+        && succeededJobs.has(artifact.sourceJobId!)
+      ))
+      if (active) {
+        setAssets(nextAssets)
+        setSelectedAssets(current => current.filter(id => nextAssets.some(asset => asset.id === id)))
+        setAssetState('ready')
+      }
+    }).catch(() => {
+      if (active) {
+        setAssets([])
+        setSelectedAssets([])
+        setAssetState('error')
+      }
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+  const toggleAsset = (id: string) => setSelectedAssets(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
   const togglePackaging = (name: string) => setPackaging(current => current.includes(name) ? current.filter(item => item !== name) : [...current, name])
-  const addClip = () => { setClipCount(value => value + selectedAssets.length); onNotice(`已将 ${selectedAssets.length} 段生成视频加入混剪时间线`) }
+  const addClip = () => { setClipCount(value => value + selectedAssets.length); onNotice(`已将 ${selectedAssets.length} 段已持久化视频加入混剪时间线`) }
   return <div className="video-editing-workspace">
     <div className="editing-toolbar"><div><span className="section-label">EditTask · ED-2607-12</span><b>15 秒竖版产品广告</b><small>来源：策略 v2.4 · Creative v1.3</small></div><div><button className="secondary-button" onClick={() => onNotice('低清预览渲染已创建')}><Play size={14} fill="currentColor"/>预览</button><button className="primary-button" onClick={() => onNotice('1080×1920 导出任务已创建')}><Download size={15}/>导出</button></div></div>
     <div className="editing-shell">
-      <aside className="editing-assets"><div className="surface-toolbar"><h3>生成视频素材箱</h3><button aria-label="上传素材" onClick={() => onNotice('素材上传队列已打开')}><Upload size={15}/></button></div><div className="asset-group"><span>选择参与混剪的视频 · {selectedAssets.length}/4</span>{assets.map(([name, meta]) => <button key={name} className={selectedAssets.includes(name) ? 'active' : ''} onClick={() => toggleAsset(name)}><span className="asset-check">{selectedAssets.includes(name) ? <Check size={12}/> : null}</span><Film size={15}/><div><b>{name}</b><small>{meta}</small></div></button>)}</div><button className="secondary-button full" disabled={!selectedAssets.length} onClick={addClip}><Scissors size={15}/>加入混剪时间线</button></aside>
+      <aside className="editing-assets"><div className="surface-toolbar"><h3>视频素材箱</h3><span>当前 Project</span></div><div className="asset-group"><span>选择参与混剪的视频 · {selectedAssets.length}/{assets.length}</span>{assetState === 'loading' ? <div className="panel-empty">正在加载服务端持久化资产…</div> : null}{assetState === 'error' ? <div className="panel-empty">素材箱加载失败，请刷新后重试。</div> : null}{assetState === 'ready' && !assets.length ? <div className="panel-empty">当前 Project 暂无可用于混剪的已持久化视频资产。</div> : null}{assets.map(asset => <button key={asset.id} className={selectedAssets.includes(asset.id) ? 'active' : ''} onClick={() => toggleAsset(asset.id)}><span className="asset-check">{selectedAssets.includes(asset.id) ? <Check size={12}/> : null}</span><Film size={15}/><div><b>{asset.prerollType === 'short_drama' ? '短剧前贴视频' : asset.prerollType === 'game' ? '游戏前贴视频' : '服务端视频资产'}</b><small>已持久化 · {asset.id.slice(0, 8)}</small></div></button>)}</div><button className="secondary-button full" disabled={!selectedAssets.length} onClick={addClip}><Scissors size={15}/>加入混剪时间线</button></aside>
       <section className="editing-center"><div className="editing-preview"><div className="preview-grid"/><div className="editing-safe-frame"><span>9:16</span><b>精度，先于承诺被看见。</b><small>WHITE PRECISION</small></div><button aria-label="播放剪辑预览" onClick={() => onNotice('正在播放当前时间线')}><Play size={18} fill="currentColor"/></button><time>00:06.8 / 00:15.0</time></div><div className="timeline-toolbar"><span>时间线 · v1.3</span><div><button aria-label="撤销编辑" onClick={() => onNotice('已撤销上一步编辑')}>撤销</button><button aria-label="保存时间线" onClick={() => onNotice('时间线 v1.4 已保存')}><Save size={14}/>保存</button></div></div><div className="editing-timeline">{[['视频', 'clip video-a'], ['叠加', 'clip overlay'], ['字幕', 'clip caption'], ['配音', 'clip voice'], ['音乐', 'clip music']].map(([track, className], index) => <div className="timeline-row" key={track}><span>{index === 2 ? <Subtitles size={14}/> : index > 2 ? <Volume2 size={14}/> : <Film size={14}/>} {track}</span><div className="timeline-lane"><button className={className} onClick={() => onNotice(`${track}轨道已选中`)}>{index === 0 ? `${clipCount} 个镜头 · 00:15` : index === 2 ? '精度，先于承诺被看见。' : index === 3 ? '品牌旁白' : index === 4 ? <><Music2 size={13}/>品牌节奏</> : '产品卖点与品牌标识'}</button></div></div>)}</div></section>
       <aside className="editing-inspector"><div className="surface-toolbar"><h3>视频包装</h3><span className="status success"><span/>可导出</span></div><div className="inspector-section"><span>画面规格</span><b>1080 × 1920 · 9:16</b><small>抖音 / 快手信息流</small></div><div className="packaging-options"><span>包装组件</span>{['动态字幕', '节奏音效', '品牌片尾', '转化 CTA'].map(item => <button key={item} className={packaging.includes(item) ? 'active' : ''} onClick={() => togglePackaging(item)} aria-pressed={packaging.includes(item)}>{packaging.includes(item) ? <Check size={13}/> : null}{item}</button>)}</div><div className="editing-checks"><span><Check size={14}/>已选 {selectedAssets.length} 段生成视频</span><span><Check size={14}/>{packaging.length} 个包装组件启用</span><span><Check size={14}/>字幕静音可理解</span><span><Check size={14}/>品牌检查通过</span></div><button className="primary-button full" disabled={!selectedAssets.length} onClick={() => onNotice(`混剪版本 v1.4 已生成：${selectedAssets.length} 段视频 + ${packaging.length} 个包装组件`)}><Sparkles size={15}/>生成混剪版本</button><button className="secondary-button full" onClick={onCreate}><Video size={15}/>保存为 EditTask</button></aside>
     </div>
@@ -319,6 +470,9 @@ export function ReportCenterPage({ state }: { state: DataState }) {
   const [version, setVersion] = useState(4)
   const [notice, setNotice] = useState('')
   const sections = ['执行摘要', '发生了什么', '为什么发生', '创意样本', '下一步行动']
+  const evidence = currentProject.operations.filter(record => record.kind === 'evidence')
+  const metric = currentProject.operations.find(record => record.kind === 'metric')
+  const metricField = (key: string, fallback: string) => String(metric?.fields[key] ?? fallback)
   const save = async () => {
     const nextVersion = `v1.${version + 1}`
     try {
@@ -331,8 +485,8 @@ export function ReportCenterPage({ state }: { state: DataState }) {
   }
   return <StateBoundary state={state}><div className="report-workspace">
     <aside className="report-outline"><div className="surface-toolbar"><h3>报告结构</h3><button aria-label="新增报告章节"><FileText size={15}/></button></div>{sections.map((item, index) => <button className={section === item ? 'active' : ''} key={item} onClick={() => setSection(item)}><span>{String(index + 1).padStart(2, '0')}</span>{item}</button>)}<div className="version-block"><span>报告版本</span><b>v1.{version}</b><small>数据截止 2026-07-22 16:00</small></div></aside>
-    <article className="report-document"><div className="document-meta"><span>{currentProject.name}</span><span>效果分析报告 v1.{version}</span><button onClick={() => setNotice('PDF 导出任务已创建')}><Download size={14}/>导出 PDF</button></div><h1>{section === '执行摘要' ? '证据前置版本，正在形成稳定增量。' : section}</h1><p className="report-lead">过去 12 周，核心素材完成度从 68% 提升到 86%。第 9 周后，增长主要来自“精度证据 + 真实制造场景”的组合。</p><div className="report-metric-line"><div><small>素材完成度</small><b>86%</b><span>较基线 +18%</span></div><div><small>样本</small><b>48</b><span>有效素材版本</span></div><div><small>置信范围</small><b>95%</b><span>差异 +12% 至 +23%</span></div></div><h2>结论与边界</h2><p>该结论适用于白域精工在中国大陆的销售线索广告。样本仍集中于精密制造题材，跨区域复用前需重新验证。</p><div className="report-callout"><b>建议行动</b><p>下一轮将证据前置版本扩大到 30% 素材覆盖，并保留纯产品特写作为对照组。</p></div></article>
-    <aside className="report-sources"><div className="surface-toolbar"><h3>引用与版本</h3><button aria-label="报告更多操作"><ChevronDown size={15}/></button></div>{projectEvidence.map(item => <button key={item.id}><span>{item.id}</span><div><b>{item.title}</b><small>{item.source} · {item.date}</small></div><ExternalLink size={13}/></button>)}<button className="primary-button full" onClick={() => void save()}><Save size={15}/>保存报告版本</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <article className="report-document"><div className="document-meta"><span>{currentProject.name}</span><span>效果分析报告 v1.{version}</span><button onClick={() => setNotice('PDF 导出任务已创建')}><Download size={14}/>导出 PDF</button></div><h1>{section === '执行摘要' ? metricField('summary', '暂无服务端指标摘要。') : section}</h1><p className="report-lead">{metric?.title ?? '暂无服务端趋势记录。'}</p><div className="report-metric-line"><div><small>当前指标</small><b>{metricField('latest', '—')}</b><span>{metricField('comparison', '暂无对比数据')}</span></div><div><small>样本</small><b>{metricField('sample', '—')}</b><span>服务端已存档</span></div><div><small>置信范围</small><b>{metricField('confidence', '—')}</b><span>{metricField('unit', '—')}</span></div></div><h2>结论与边界</h2><p>{metricField('scope', '暂无服务端适用范围说明。')}</p><div className="report-callout"><b>建议行动</b><p>{metricField('recommendation', '暂无服务端建议动作。')}</p></div></article>
+    <aside className="report-sources"><div className="surface-toolbar"><h3>引用与版本</h3><button aria-label="报告更多操作"><ChevronDown size={15}/></button></div>{evidence.map(item => <button key={item.id}><span>{item.id}</span><div><b>{item.title}</b><small>{String(item.fields.source ?? '—')} · {new Date(item.occurredAt).toLocaleDateString('zh-CN')}</small></div><ExternalLink size={13}/></button>)}{!evidence.length ? <div className="panel-empty">暂无服务端证据记录。</div> : null}<button className="primary-button full" onClick={() => void save()}><Save size={15}/>保存报告版本</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div></StateBoundary>
 }
 

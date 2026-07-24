@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiProject } from '../data/api'
+import { api, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiOperationalRecord, type ApiProject } from '../data/api'
 import type { ArtifactKey, ArtifactStatus, BusinessTaskRecord, ChangeSetRecord, ProjectArtifact, ProjectRecord } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { presentCreativeStatus } from '../lib/media-status'
@@ -38,13 +38,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       const apiProjects = await api.listProjects()
       const nextProjects = await Promise.all(apiProjects.map(async project => {
-        const [artifacts, jobs, tasks, changeSets] = await Promise.all([
+        const [artifacts, jobs, tasks, changeSets, operations] = await Promise.all([
           api.listArtifacts(project.id),
           api.listJobs(project.id),
           api.listTasks(project.id),
           deliveryApi.listChangeSets(project.id),
+          api.listOperations(project.id),
         ])
-        return toProjectRecord(project, artifacts, jobs, tasks, changeSets)
+        return toProjectRecord(project, artifacts, jobs, tasks, changeSets, operations)
       }))
       setProjects(nextProjects)
       setCurrentProjectId(current => nextProjects.some(project => project.id === current) ? current : nextProjects[0]?.id ?? '')
@@ -159,29 +160,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
 }
 
-function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], tasks: ApiBusinessTask[] = [], changeSets: DeliveryChangeSet[] = []): ProjectRecord {
+function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], tasks: ApiBusinessTask[] = [], changeSets: DeliveryChangeSet[] = [], operations: ApiOperationalRecord[] = []): ProjectRecord {
   const brief = latestArtifact(artifacts.filter(artifact => artifact.status === 'ready'), 'brief')
     ?? latestArtifact(artifacts, 'brief')
-  const latestMediaJob = latestMediaGenerationJob(jobs)
+  const latestMediaJob = latestMainCreativeGenerationJob(jobs)
   const media = latestMediaJob?.artifactId
     ? artifacts.find(artifact => artifact.id === latestMediaJob.artifactId)
-    : latestArtifact(artifacts, 'image') ?? latestArtifact(artifacts, 'video')
+    : latestMainCreativeArtifact(artifacts)
   const updatedAt = formatDate(project.updatedAt)
   const documents = artifacts.filter(artifact => artifact.kind === 'document')
   return {
     id: project.id,
-    code: project.name.slice(0, 2).toUpperCase() || 'PR',
+    code: project.runtime.code,
     name: project.name,
     brand: project.brand,
-    product: project.brand,
+    product: project.runtime.product,
     goal: project.objective,
-    stage: '需求确认',
-    progress: 12,
-    status: '进行中',
+    stage: project.runtime.stage,
+    progress: project.runtime.progress,
+    status: project.runtime.status === 'completed' ? '已完成' : '进行中',
+    owner: project.runtime.owner,
     updatedAt,
-    budget: 8600,
-    currency: 'CNY',
-    timezone: 'Asia/Shanghai',
+    budget: project.runtime.budget,
+    currency: project.runtime.currency,
+    timezone: project.runtime.timezone,
     artifacts: {
       brief: toArtifactRecord('brief', brief, project.updatedAt),
       strategy: toArtifactRecord('strategy', latestDocument(documents, 'strategy'), project.updatedAt),
@@ -191,16 +193,18 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
     },
     tasks,
     changeSets: changeSets.map(toChangeSetRecord),
+    operations,
     knowledgeCount: documents.filter(artifact => artifact.content.startsWith('[knowledge]')).length,
   }
 }
 
 const emptyProject: ProjectRecord = {
   id: '', code: '—', name: '尚未连接到服务端', brand: '—', product: '—', goal: '请启动本地 MVP API 后重试。',
-  stage: '等待恢复', progress: 0, status: '进行中', updatedAt: '—', budget: 0, currency: 'CNY', timezone: 'Asia/Shanghai',
+  stage: '等待恢复', progress: 0, status: '进行中', owner: '—', updatedAt: '—', budget: 0, currency: 'CNY', timezone: 'Asia/Shanghai',
   artifacts: Object.fromEntries((['brief', 'strategy', 'creative', 'insight', 'delivery'] as ArtifactKey[]).map(key => [key, toArtifactRecord(key, undefined, '')])) as ProjectRecord['artifacts'],
   tasks: [],
   changeSets: [],
+  operations: [],
   knowledgeCount: 0,
 }
 
@@ -265,9 +269,19 @@ function latestArtifact(artifacts: ApiArtifact[], kind: ApiArtifact['kind']): Ap
   return artifacts.filter(artifact => artifact.kind === kind).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
 }
 
-function latestMediaGenerationJob(jobs: ApiGenerationJob[]): ApiGenerationJob | undefined {
+function latestMainCreativeGenerationJob(jobs: ApiGenerationJob[]): ApiGenerationJob | undefined {
   return jobs
-    .filter(job => job.artifactKind === 'image' || job.artifactKind === 'video')
+    .filter(job => (job.artifactKind === 'image' || job.artifactKind === 'video')
+      && job.purpose === undefined
+      && job.prerollType === undefined)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+}
+
+function latestMainCreativeArtifact(artifacts: ApiArtifact[]): ApiArtifact | undefined {
+  return artifacts
+    .filter(artifact => (artifact.kind === 'image' || artifact.kind === 'video')
+      && artifact.purpose === undefined
+      && artifact.prerollType === undefined)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
 }
 

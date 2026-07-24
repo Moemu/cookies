@@ -1,13 +1,13 @@
 import type { ArkProvider, MediaGenerationKind } from "./ark-provider.js";
-import type { Artifact, GenerationJob } from "./domain.js";
+import type { Artifact, GenerationJob, PrerollType, VideoPurpose } from "./domain.js";
 import { DomainError } from "./errors.js";
-import type { FileRepository } from "./repository.js";
+import type { FileRepository, ResourceScope } from "./repository.js";
 
 export interface GenerationService {
   generateBrief(input: GenerationRequest): Promise<{ job: PublicGenerationJob; artifact: Artifact }>;
   createMedia(input: MediaGenerationRequest): Promise<PublicGenerationJob>;
-  syncMedia(jobId: string, actor?: string): Promise<PublicGenerationJob>;
-  cancelMedia(jobId: string, actor?: string): Promise<PublicGenerationJob>;
+  syncMedia(jobId: string, actor?: string, scope?: ResourceScope): Promise<PublicGenerationJob>;
+  cancelMedia(jobId: string, actor?: string, scope?: ResourceScope): Promise<PublicGenerationJob>;
 }
 
 export interface GenerationRequest {
@@ -19,6 +19,8 @@ export interface GenerationRequest {
 export interface MediaGenerationRequest extends GenerationRequest {
   kind: MediaGenerationKind;
   briefId: string;
+  purpose?: VideoPurpose;
+  prerollType?: PrerollType;
 }
 
 export type PublicGenerationJob = Omit<GenerationJob, "providerTaskId">;
@@ -68,6 +70,8 @@ export function createGenerationService(
       let job = await repository.createGenerationJob({
         projectId: input.projectId,
         artifactKind: input.kind,
+        purpose: input.purpose,
+        prerollType: input.prerollType,
         briefArtifactId: input.briefId,
         model: provider.config.models[input.kind],
         actor: input.actor,
@@ -79,18 +83,10 @@ export function createGenerationService(
           job = await repository.setGenerationJobProviderTask(job.id, result.providerTaskId, input.actor);
         }
         if (result.assetUrl) {
-          const artifact = await repository.createArtifact({
-            projectId: input.projectId,
-            kind: input.kind,
+          ({ job } = await repository.completeMediaGenerationJob(job.id, {
             content: result.assetUrl,
-            status: "ready",
-            sourceJobId: job.id,
             actor: input.actor,
-          });
-          job = await repository.transitionGenerationJob(job.id, "succeeded", {
-            artifactId: artifact.id,
-            actor: input.actor,
-          });
+          }));
         }
         return publicJob(job);
       } catch (error) {
@@ -102,8 +98,8 @@ export function createGenerationService(
       }
     },
 
-    async syncMedia(jobId, actor) {
-      const job = await requireMediaJob(repository, jobId);
+    async syncMedia(jobId, actor, scope) {
+      const job = await requireMediaJob(repository, jobId, scope);
       if (job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") {
         return publicJob(job);
       }
@@ -136,25 +132,22 @@ export function createGenerationService(
             actor,
           }));
         }
-        const artifact = await repository.createArtifact({
-          projectId: job.projectId,
-          kind: job.artifactKind,
+        const completed = await repository.completeMediaGenerationJob(job.id, {
           content: result.assetUrl,
-          status: "ready",
-          sourceJobId: job.id,
           actor,
         });
-        return publicJob(await repository.transitionGenerationJob(job.id, "succeeded", {
-          artifactId: artifact.id,
-          actor,
-        }));
+        return publicJob(completed.job);
       } catch (error) {
+        const current = await repository.getGenerationJob(job.id, scope);
+        if (current?.status === "succeeded" || current?.status === "failed" || current?.status === "cancelled") {
+          return publicJob(current);
+        }
         return publicJob(await repository.updateGenerationJobDiagnostic(job.id, safeDiagnostic(error), actor));
       }
     },
 
-    async cancelMedia(jobId, actor) {
-      const job = await requireMediaJob(repository, jobId);
+    async cancelMedia(jobId, actor, scope) {
+      const job = await requireMediaJob(repository, jobId, scope);
       if (job.status === "cancelled") return publicJob(job);
       if (job.status === "succeeded" || job.status === "failed") {
         throw new DomainError("INVALID_STATE_TRANSITION", `Cannot cancel a ${job.status} generation job`);
@@ -180,8 +173,12 @@ async function requireConfirmedBrief(
   return brief;
 }
 
-async function requireMediaJob(repository: FileRepository, jobId: string): Promise<GenerationJob> {
-  const job = await repository.getGenerationJob(jobId);
+async function requireMediaJob(
+  repository: FileRepository,
+  jobId: string,
+  scope?: ResourceScope,
+): Promise<GenerationJob> {
+  const job = await repository.getGenerationJob(jobId, scope);
   if (!job) throw new DomainError("NOT_FOUND", "Generation job was not found");
   if (job.artifactKind !== "image" && job.artifactKind !== "video") {
     throw new DomainError("VALIDATION_ERROR", "Only media generation jobs can be managed");

@@ -1,18 +1,24 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   isArtifactKind,
   isBusinessTaskStatus,
   isBusinessTaskType,
   isGenerationJobStatus,
+  isOperationalRecordKind,
+  isPrerollType,
+  isVideoPurpose,
   type ArtifactStatus,
   type BusinessTaskStatus,
+  type PrerollType,
+  type VideoPurpose,
 } from "./domain.js";
 import { createArkProvider, loadArkConfig, publicCapabilities } from "./ark-provider.js";
 import { seedDemoProject } from "./demo.js";
 import { DomainError, errorStatus, isDomainError } from "./errors.js";
 import { createGenerationService, type GenerationService } from "./generation-service.js";
-import { FileRepository } from "./repository.js";
+import { FileRepository, type ResourceScope } from "./repository.js";
 
 const MAX_BODY_BYTES = 1_000_000;
 const artifactStatuses: readonly ArtifactStatus[] = ["draft", "ready", "archived"];
@@ -74,11 +80,11 @@ async function route(
     return;
   }
   if (resource === "projects") {
-    await projectsRoute(method, id, request, response, repository);
+    await projectsRoute(method, id, action, request, response, repository);
     return;
   }
   if (resource === "artifacts") {
-    await artifactsRoute(method, id, request, response, repository, url.searchParams.get("projectId"));
+    await artifactsRoute(method, id, request, response, repository, resourceScope(url.searchParams));
     return;
   }
   if (resource === "tasks") {
@@ -88,12 +94,16 @@ async function route(
   if (resource === "generation-jobs") {
     if (action === "cancel" && method === "POST" && id) {
       const body = await readBody(request);
-      return sendJson(response, 200, await generationService.cancelMedia(id, optionalString(body, "actor")));
+      return sendJson(response, 200, await generationService.cancelMedia(
+        id,
+        optionalString(body, "actor"),
+        resourceScope(url.searchParams),
+      ));
     }
     if (id && method === "GET") {
-      return sendJson(response, 200, await generationService.syncMedia(id));
+      return sendJson(response, 200, await generationService.syncMedia(id, undefined, resourceScope(url.searchParams)));
     }
-    await jobsRoute(method, id, request, response, repository, url.searchParams.get("projectId"));
+    await jobsRoute(method, id, request, response, repository, resourceScope(url.searchParams));
     return;
   }
   if (resource === "change-sets") {
@@ -156,17 +166,37 @@ async function generationRoute(
     ...input,
     kind,
     briefId: requiredString(body, "briefId"),
+    ...videoMetadata(body, kind),
   }));
 }
 
 async function projectsRoute(
   method: string,
   id: string | undefined,
+  action: string | undefined,
   request: IncomingMessage,
   response: ServerResponse,
   repository: FileRepository,
 ): Promise<void> {
   if (!id && method === "GET") return sendJson(response, 200, await repository.listProjects());
+  if (id && action === "operations" && method === "GET") {
+    if (!await repository.getProject(id)) {
+      throw new DomainError("NOT_FOUND", "Resource was not found");
+    }
+    return sendJson(response, 200, await repository.listOperationalRecords(id));
+  }
+  if (id && action === "operations" && method === "POST") {
+    const body = await readBody(request);
+    return sendJson(response, 201, await repository.upsertOperationalRecord({
+      id: requiredString(body, "id"),
+      projectId: id,
+      kind: requiredOperationalRecordKind(body, "kind"),
+      title: requiredString(body, "title"),
+      status: requiredString(body, "status"),
+      occurredAt: requiredString(body, "occurredAt"),
+      fields: requiredFields(body),
+    }));
+  }
   if (!id && method === "POST") {
     const body = await readBody(request);
     return sendJson(response, 201, await repository.createProject({
@@ -196,9 +226,9 @@ async function artifactsRoute(
   request: IncomingMessage,
   response: ServerResponse,
   repository: FileRepository,
-  projectId: string | null,
+  scope: ResourceScope,
 ): Promise<void> {
-  if (!id && method === "GET") return sendJson(response, 200, await repository.listArtifacts(projectId ?? undefined));
+  if (!id && method === "GET") return sendJson(response, 200, await repository.listArtifacts(scope));
   if (!id && method === "POST") {
     const body = await readBody(request);
     const status = optionalString(body, "status");
@@ -208,13 +238,14 @@ async function artifactsRoute(
     return sendJson(response, 201, await repository.createArtifact({
       projectId: requiredString(body, "projectId"),
       kind: requiredArtifactKind(body, "kind"),
+      ...videoMetadata(body, requiredArtifactKind(body, "kind")),
       content: requiredString(body, "content"),
       status: status as ArtifactStatus | undefined,
       sourceJobId: optionalString(body, "sourceJobId"),
       actor: optionalString(body, "actor"),
     }));
   }
-  if (id && method === "GET") return sendFound(response, await repository.getArtifact(id));
+  if (id && method === "GET") return sendFound(response, await repository.getArtifact(id, scope));
   if (id && method === "PATCH") {
     const body = await readBody(request);
     requireAny(body, ["content", "status", "sourceJobId"]);
@@ -238,16 +269,17 @@ async function jobsRoute(
   request: IncomingMessage,
   response: ServerResponse,
   repository: FileRepository,
-  projectId: string | null,
+  scope: ResourceScope,
 ): Promise<void> {
   if (!id && method === "GET") {
-    return sendJson(response, 200, (await repository.listGenerationJobs(projectId ?? undefined)).map(publicJob));
+    return sendJson(response, 200, (await repository.listGenerationJobs(scope)).map(publicJob));
   }
   if (!id && method === "POST") {
     const body = await readBody(request);
     return sendJson(response, 201, await repository.createGenerationJob({
       projectId: requiredString(body, "projectId"),
       artifactKind: requiredArtifactKind(body, "artifactKind"),
+      ...videoMetadata(body, requiredArtifactKind(body, "artifactKind")),
       model: optionalString(body, "model"),
       actor: optionalString(body, "actor"),
     }));
@@ -386,9 +418,51 @@ function optionalString(body: Record<string, unknown>, field: string): string | 
   return value.trim();
 }
 
+function videoMetadata(
+  body: Record<string, unknown>,
+  kind: ReturnType<typeof requiredArtifactKind>,
+): { purpose?: VideoPurpose; prerollType?: PrerollType } {
+  const purpose = optionalString(body, "purpose");
+  const prerollType = optionalString(body, "prerollType");
+  if (purpose !== undefined && !isVideoPurpose(purpose)) {
+    invalidField("purpose", "Must be a supported video purpose");
+  }
+  if (prerollType !== undefined && !isPrerollType(prerollType)) {
+    invalidField("prerollType", "Must be a supported preroll type");
+  }
+  return { purpose, prerollType };
+}
+
+function resourceScope(searchParams: URLSearchParams): ResourceScope {
+  const projectId = searchParams.get("projectId") ?? undefined;
+  const purpose = searchParams.get("purpose") ?? undefined;
+  const prerollType = searchParams.get("prerollType") ?? undefined;
+  if ((purpose !== undefined || prerollType !== undefined) && projectId === undefined) {
+    invalidField("projectId", "Is required when filtering by video purpose or preroll type");
+  }
+  return videoMetadata({ purpose, prerollType }, "video") && {
+    projectId,
+    purpose: purpose as VideoPurpose | undefined,
+    prerollType: prerollType as PrerollType | undefined,
+  };
+}
+
 function requiredArtifactKind(body: Record<string, unknown>, field: string) {
   if (!isArtifactKind(body[field])) invalidField(field, "Must be brief, image, video, or document");
   return body[field];
+}
+
+function requiredOperationalRecordKind(body: Record<string, unknown>, field: string) {
+  if (!isOperationalRecordKind(body[field])) invalidField(field, "Must be a supported operational record kind");
+  return body[field];
+}
+
+function requiredFields(body: Record<string, unknown>): Record<string, string | number> {
+  const value = body.fields;
+  if (!isRecord(value) || Object.values(value).some((item) => typeof item !== "string" && typeof item !== "number")) {
+    invalidField("fields", "Must be an object of strings or numbers");
+  }
+  return value as Record<string, string | number>;
 }
 
 function optionalStringArray(body: Record<string, unknown>, field: string): string[] | undefined {
@@ -460,7 +534,14 @@ function sendError(response: ServerResponse, error: unknown): void {
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
   const port = Number(process.env.PORT ?? 8787);
-  const repository = await openSeededRepository(resolve(process.cwd(), "data/mvp-store.json"));
+  const dataFile = process.env.DATA_FILE ?? resolve(process.cwd(), "data/mvp-store.json");
+  if (process.env.RESET_DATA_FILE === "true") {
+    await rm(dataFile, { force: true });
+    await rm(`${dataFile}.tmp`, { force: true });
+  }
+  const repository = process.env.SKIP_DEMO_SEED === "true"
+    ? await FileRepository.open(dataFile)
+    : await openSeededRepository(dataFile);
   createApp({ repository }).listen(port, "127.0.0.1", () => {
     console.log(`MVP API listening on http://127.0.0.1:${port}`);
   });

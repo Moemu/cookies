@@ -47,7 +47,7 @@ export function presentCreativeStatus(
     return {
       status,
       summary: job.status === 'succeeded'
-        ? `${mediaLabel}资产已保存，可用于后续投放模拟。`
+        ? artifact?.content ?? `${mediaLabel}资产已保存，可用于后续投放模拟。`
         : job.status === 'failed'
           ? `${mediaLabel}生成失败：${job.diagnostic ?? '请重试任务。'}`
           : job.status === 'cancelled'
@@ -62,7 +62,7 @@ export function presentCreativeStatus(
   if (artifact?.status === 'ready') {
     return {
       status: '已完成',
-      summary: `${artifact.kind === 'video' ? '视频' : '图片'}资产已保存，可用于后续投放模拟。`,
+      summary: artifact.content || `${artifact.kind === 'video' ? '视频' : '图片'}资产已保存，可用于后续投放模拟。`,
       owner: artifact.sourceJobId ? 'AI 生成 · 服务端资产' : '服务端资产',
       sourceVersion: artifact.sourceJobId ? `AI 生成任务 ${artifact.sourceJobId.slice(0, 8)} · 生成于 ${formatDate(artifact.updatedAt)}` : undefined,
       updatedAt: formatDate(artifact.updatedAt),

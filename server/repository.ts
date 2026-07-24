@@ -5,6 +5,7 @@ import {
   type Artifact,
   type ArtifactKind,
   type ArtifactStatus,
+  assertVideoMetadata,
   type BusinessTask,
   type BusinessTaskType,
   assertChangeSetTransition,
@@ -14,11 +15,16 @@ import {
   emptyStore,
   type GenerationJob,
   type GenerationJobStatus,
+  type OperationalRecord,
+  type OperationalRecordKind,
   type PreflightCheck,
   type PreflightResult,
   type Project,
+  type ProjectRuntime,
+  type PrerollType,
   type SimulationEvidence,
   type StoreData,
+  type VideoPurpose,
 } from "./domain.js";
 import { DomainError } from "./errors.js";
 
@@ -26,12 +32,25 @@ export interface CreateProjectInput {
   name: string;
   brand: string;
   objective: string;
+  runtime?: Partial<ProjectRuntime>;
   actor?: string;
+}
+
+export interface UpsertOperationalRecordInput {
+  id: string;
+  projectId: string;
+  kind: OperationalRecordKind;
+  title: string;
+  status: string;
+  occurredAt: string;
+  fields: Record<string, string | number>;
 }
 
 export interface CreateArtifactInput {
   projectId: string;
   kind: ArtifactKind;
+  purpose?: VideoPurpose;
+  prerollType?: PrerollType;
   content: string;
   status?: ArtifactStatus;
   sourceJobId?: string;
@@ -51,9 +70,22 @@ export interface CreateBusinessTaskInput {
 export interface CreateGenerationJobInput {
   projectId: string;
   artifactKind: ArtifactKind;
+  purpose?: VideoPurpose;
+  prerollType?: PrerollType;
   briefArtifactId?: string;
   model?: string;
   actor?: string;
+}
+
+export interface CompleteMediaGenerationInput {
+  content: string;
+  actor?: string;
+}
+
+export interface ResourceScope {
+  projectId?: string;
+  purpose?: VideoPurpose;
+  prerollType?: PrerollType;
 }
 
 export interface CreateChangeSetInput {
@@ -65,6 +97,8 @@ export interface CreateChangeSetInput {
 }
 
 export class FileRepository {
+  private mutationQueue: Promise<void> = Promise.resolve();
+
   private constructor(
     private readonly filePath: string,
     private store: StoreData,
@@ -77,7 +111,11 @@ export class FileRepository {
       return new FileRepository(filePath, {
         ...emptyStore(),
         ...parsed,
-        projects: parsed.projects ?? [],
+        projects: (parsed.projects ?? []).map((project) => ({
+          ...project,
+          runtime: normalizeRuntime(project.runtime),
+        })),
+        operationalRecords: parsed.operationalRecords ?? [],
         businessTasks: (parsed.businessTasks ?? []).map((task) => ({
           ...task,
           sourceTaskIds: task.sourceTaskIds ?? [],
@@ -112,6 +150,7 @@ export class FileRepository {
       name: input.name,
       brand: input.brand,
       objective: input.objective,
+      runtime: normalizeRuntime(input.runtime),
       version: 1,
       createdAt: now,
       updatedAt: now,
@@ -125,7 +164,7 @@ export class FileRepository {
 
   async updateProject(
     id: string,
-    input: Partial<Pick<Project, "name" | "brand" | "objective">> & { actor?: string },
+    input: Partial<Pick<Project, "name" | "brand" | "objective" | "runtime">> & { actor?: string },
   ): Promise<Project> {
     const project = this.requireProject(id);
     await this.mutate(() => {
@@ -137,6 +176,38 @@ export class FileRepository {
 
   async listBusinessTasks(projectId?: string): Promise<BusinessTask[]> {
     return this.store.businessTasks.filter((task) => !projectId || task.projectId === projectId);
+  }
+
+  async listOperationalRecords(projectId?: string): Promise<OperationalRecord[]> {
+    return this.store.operationalRecords
+      .filter((record) => !projectId || record.projectId === projectId)
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt) || left.id.localeCompare(right.id));
+  }
+
+  async upsertOperationalRecord(input: UpsertOperationalRecordInput): Promise<OperationalRecord> {
+    this.requireProject(input.projectId);
+    const existing = this.store.operationalRecords.find((record) => record.id === input.id);
+    if (existing && existing.projectId !== input.projectId) {
+      throw new DomainError("VALIDATION_ERROR", "Operational record ID already belongs to another project", [{
+        field: "id",
+        message: `Operational record ${input.id} belongs to project ${existing.projectId}`,
+      }]);
+    }
+    const now = new Date().toISOString();
+    const record: OperationalRecord = {
+      ...input,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    if (existing && operationalRecordEquals(existing, record)) return existing;
+    await this.mutate(() => {
+      if (existing) {
+        Object.assign(existing, record);
+      } else {
+        this.store.operationalRecords.push(record);
+      }
+    });
+    return record;
   }
 
   async getBusinessTask(id: string): Promise<BusinessTask | undefined> {
@@ -193,21 +264,26 @@ export class FileRepository {
     return task;
   }
 
-  async listArtifacts(projectId?: string): Promise<Artifact[]> {
-    return this.store.artifacts.filter((artifact) => !projectId || artifact.projectId === projectId);
+  async listArtifacts(scope?: string | ResourceScope): Promise<Artifact[]> {
+    const filter = resourceScope(scope);
+    return this.store.artifacts.filter((artifact) => matchesResourceScope(artifact, filter));
   }
 
-  async getArtifact(id: string): Promise<Artifact | undefined> {
-    return this.store.artifacts.find((artifact) => artifact.id === id);
+  async getArtifact(id: string, scope?: ResourceScope): Promise<Artifact | undefined> {
+    return this.store.artifacts.find((artifact) => artifact.id === id && matchesResourceScope(artifact, scope));
   }
 
   async createArtifact(input: CreateArtifactInput): Promise<Artifact> {
     this.requireProject(input.projectId);
+    assertVideoMetadata(input.kind, input.purpose, input.prerollType);
+    if (input.sourceJobId) this.requireMatchingSourceJob(input);
     const now = new Date().toISOString();
     const artifact: Artifact = {
       id: randomUUID(),
       projectId: input.projectId,
       kind: input.kind,
+      purpose: input.purpose,
+      prerollType: input.prerollType,
       status: input.status ?? "draft",
       content: input.content,
       sourceJobId: input.sourceJobId,
@@ -236,21 +312,25 @@ export class FileRepository {
     return artifact;
   }
 
-  async listGenerationJobs(projectId?: string): Promise<GenerationJob[]> {
-    return this.store.generationJobs.filter((job) => !projectId || job.projectId === projectId);
+  async listGenerationJobs(scope?: string | ResourceScope): Promise<GenerationJob[]> {
+    const filter = resourceScope(scope);
+    return this.store.generationJobs.filter((job) => matchesResourceScope(job, filter));
   }
 
-  async getGenerationJob(id: string): Promise<GenerationJob | undefined> {
-    return this.store.generationJobs.find((job) => job.id === id);
+  async getGenerationJob(id: string, scope?: ResourceScope): Promise<GenerationJob | undefined> {
+    return this.store.generationJobs.find((job) => job.id === id && matchesResourceScope(job, scope));
   }
 
   async createGenerationJob(input: CreateGenerationJobInput): Promise<GenerationJob> {
     this.requireProject(input.projectId);
+    assertVideoMetadata(input.artifactKind, input.purpose, input.prerollType);
     const now = new Date().toISOString();
     const job: GenerationJob = {
       id: randomUUID(),
       projectId: input.projectId,
       artifactKind: input.artifactKind,
+      purpose: input.purpose,
+      prerollType: input.prerollType,
       briefArtifactId: input.briefArtifactId,
       status: "queued",
       model: input.model,
@@ -296,6 +376,38 @@ export class FileRepository {
     return job;
   }
 
+  async completeMediaGenerationJob(
+    id: string,
+    input: CompleteMediaGenerationInput,
+  ): Promise<{ job: GenerationJob; artifact: Artifact }> {
+    const job = this.requireGenerationJob(id);
+    assertGenerationJobTransition(job.status, "succeeded");
+    const now = new Date().toISOString();
+    const artifact: Artifact = {
+      id: randomUUID(),
+      projectId: job.projectId,
+      kind: job.artifactKind,
+      purpose: job.purpose,
+      prerollType: job.prerollType,
+      status: "ready",
+      content: input.content,
+      sourceJobId: job.id,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.mutate(() => {
+      this.store.artifacts.push(artifact);
+      this.addAudit(artifact.projectId, input.actor, "artifact.created", "artifact", artifact.id, {});
+      Object.assign(job, { status: "succeeded", artifactId: artifact.id }, touch(job));
+      this.addAudit(job.projectId, input.actor, "generation_job.status_changed", "generation_job", job.id, {
+        from: "running",
+        to: "succeeded",
+      });
+    });
+    return { job, artifact };
+  }
+
   async updateGenerationJobDiagnostic(
     id: string,
     diagnostic: string | undefined,
@@ -321,6 +433,7 @@ export class FileRepository {
 
   async createChangeSet(input: CreateChangeSetInput): Promise<ChangeSet> {
     this.requireProject(input.projectId);
+    this.requireEligibleChangeSetArtifacts(input.projectId, input.artifactIds ?? []);
     const now = new Date().toISOString();
     const changeSet: ChangeSet = {
       id: randomUUID(),
@@ -491,6 +604,21 @@ export class FileRepository {
     return artifact;
   }
 
+  private requireMatchingSourceJob(input: CreateArtifactInput): void {
+    const job = this.requireGenerationJob(input.sourceJobId!);
+    if (
+      job.projectId !== input.projectId
+      || job.artifactKind !== input.kind
+      || job.purpose !== input.purpose
+      || job.prerollType !== input.prerollType
+    ) {
+      throw new DomainError("VALIDATION_ERROR", "Artifact source job must belong to the same project and purpose", [{
+        field: "sourceJobId",
+        message: `Generation job ${job.id} does not match this artifact's project or purpose`,
+      }]);
+    }
+  }
+
   private requireChangeSet(id: string): ChangeSet {
     const changeSet = this.store.changeSets.find((item) => item.id === id);
     if (!changeSet) throw new DomainError("NOT_FOUND", `Change set ${id} was not found`);
@@ -511,10 +639,10 @@ export class FileRepository {
       {
         code: "ready_creative",
         passed: artifacts.some(
-          (artifact) => (artifact.kind === "image" || artifact.kind === "video") && artifact.status === "ready",
+          (artifact) => this.isEligibleMainCreative(artifact) && artifact.status === "ready",
         ),
-        message: "ChangeSet 包含已确认的图片或视频创意",
-        repair: "请关联状态为 ready 的图片或视频创意后重新预检。",
+        message: "ChangeSet 包含当前 Project 已确认的主创意",
+        repair: "请关联当前 Project 中 status 为 ready 且不属于前贴用途的图片或视频创意后重新预检。",
       },
       {
         code: "budget_boundary",
@@ -535,6 +663,30 @@ export class FileRepository {
       );
     }
     return preflight;
+  }
+
+  private requireEligibleChangeSetArtifacts(projectId: string, artifactIds: string[]): void {
+    for (const artifactId of artifactIds) {
+      const artifact = this.store.artifacts.find((item) => item.id === artifactId);
+      if (!artifact || artifact.projectId !== projectId) {
+        throw new DomainError("VALIDATION_ERROR", "ChangeSet artifacts must belong to the current project", [{
+          field: "artifactIds",
+          message: `Artifact ${artifactId} does not belong to project ${projectId}`,
+        }]);
+      }
+      if ((artifact.kind === "image" || artifact.kind === "video") && !this.isEligibleMainCreative(artifact)) {
+        throw new DomainError("VALIDATION_ERROR", "Preroll assets cannot be used as ChangeSet main creatives", [{
+          field: "artifactIds",
+          message: `Artifact ${artifactId} is a preroll asset; select a current project main creative instead`,
+        }]);
+      }
+    }
+  }
+
+  private isEligibleMainCreative(artifact: Artifact): boolean {
+    return (artifact.kind === "image" || artifact.kind === "video")
+      && artifact.purpose === undefined
+      && artifact.prerollType === undefined;
   }
 
   private addAudit(
@@ -558,13 +710,18 @@ export class FileRepository {
   }
 
   private async mutate(action: () => void): Promise<void> {
-    action();
-    await this.persist();
+    const mutation = this.mutationQueue.then(async () => {
+      action();
+      await this.persist();
+    });
+    // Keep later writes available when a prior write reports its error to the caller.
+    this.mutationQueue = mutation.catch(() => undefined);
+    await mutation;
   }
 
   private async persist(): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    const temporaryPath = `${this.filePath}.tmp`;
+    const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
     await writeFile(temporaryPath, JSON.stringify(this.store, null, 2), "utf8");
     await rename(temporaryPath, this.filePath);
   }
@@ -583,4 +740,40 @@ function withoutUndefined<T extends object>(input: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined),
   ) as Partial<T>;
+}
+
+function normalizeRuntime(runtime: Partial<ProjectRuntime> | undefined): ProjectRuntime {
+  return {
+    code: runtime?.code ?? "PRJ",
+    product: runtime?.product ?? "",
+    stage: runtime?.stage ?? "需求梳理",
+    progress: runtime?.progress ?? 0,
+    status: runtime?.status ?? "active",
+    owner: runtime?.owner ?? "demo-user",
+    budget: runtime?.budget ?? 0,
+    currency: "CNY",
+    timezone: "Asia/Shanghai",
+  };
+}
+
+function operationalRecordEquals(first: OperationalRecord, second: OperationalRecord): boolean {
+  return first.projectId === second.projectId
+    && first.kind === second.kind
+    && first.title === second.title
+    && first.status === second.status
+    && first.occurredAt === second.occurredAt
+    && JSON.stringify(first.fields) === JSON.stringify(second.fields);
+}
+
+function resourceScope(scope: string | ResourceScope | undefined): ResourceScope {
+  return typeof scope === "string" ? { projectId: scope } : scope ?? {};
+}
+
+function matchesResourceScope(
+  resource: Pick<Artifact, "projectId" | "purpose" | "prerollType">,
+  scope: ResourceScope | undefined,
+): boolean {
+  return (!scope?.projectId || resource.projectId === scope.projectId)
+    && (!scope?.purpose || resource.purpose === scope.purpose)
+    && (!scope?.prerollType || resource.prerollType === scope.prerollType);
 }

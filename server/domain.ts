@@ -24,6 +24,12 @@ export type ChangeSetStatus = (typeof CHANGE_SET_STATUSES)[number];
 export type ArtifactKind = "brief" | "image" | "video" | "document";
 export type ArtifactStatus = "draft" | "ready" | "archived";
 
+export const VIDEO_PURPOSES = ["preroll"] as const;
+export type VideoPurpose = (typeof VIDEO_PURPOSES)[number];
+
+export const PREROLL_TYPES = ["short_drama", "game", "commerce"] as const;
+export type PrerollType = (typeof PREROLL_TYPES)[number];
+
 export const BUSINESS_TASK_TYPES = [
   "strategy",
   "creative",
@@ -45,7 +51,46 @@ export interface Project {
   name: string;
   brand: string;
   objective: string;
+  runtime: ProjectRuntime;
   version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectRuntime {
+  code: string;
+  product: string;
+  stage: string;
+  progress: number;
+  status: "active" | "completed";
+  owner: string;
+  budget: number;
+  currency: "CNY";
+  timezone: "Asia/Shanghai";
+}
+
+export const OPERATIONAL_RECORD_KINDS = [
+  "work_item",
+  "evidence",
+  "activity",
+  "metric",
+  "performance_ad",
+  "audience_mix",
+  "method",
+  "delivery_diagnostic",
+  "delivery_action",
+  "unified_record",
+] as const;
+export type OperationalRecordKind = (typeof OPERATIONAL_RECORD_KINDS)[number];
+
+export interface OperationalRecord {
+  id: string;
+  projectId: string;
+  kind: OperationalRecordKind;
+  title: string;
+  status: string;
+  occurredAt: string;
+  fields: Record<string, string | number>;
   createdAt: string;
   updatedAt: string;
 }
@@ -69,6 +114,8 @@ export interface Artifact {
   id: string;
   projectId: string;
   kind: ArtifactKind;
+  purpose?: VideoPurpose;
+  prerollType?: PrerollType;
   status: ArtifactStatus;
   content: string;
   sourceJobId?: string;
@@ -81,6 +128,8 @@ export interface GenerationJob {
   id: string;
   projectId: string;
   artifactKind: ArtifactKind;
+  purpose?: VideoPurpose;
+  prerollType?: PrerollType;
   briefArtifactId?: string;
   status: GenerationJobStatus;
   model?: string;
@@ -152,6 +201,7 @@ export interface AuditEvent {
 
 export interface StoreData {
   projects: Project[];
+  operationalRecords: OperationalRecord[];
   businessTasks: BusinessTask[];
   artifacts: Artifact[];
   generationJobs: GenerationJob[];
@@ -161,6 +211,7 @@ export interface StoreData {
 
 export const emptyStore = (): StoreData => ({
   projects: [],
+  operationalRecords: [],
   businessTasks: [],
   artifacts: [],
   generationJobs: [],
@@ -216,8 +267,36 @@ export function isArtifactKind(value: unknown): value is ArtifactKind {
   return value === "brief" || value === "image" || value === "video" || value === "document";
 }
 
+export function isVideoPurpose(value: unknown): value is VideoPurpose {
+  return typeof value === "string" && VIDEO_PURPOSES.includes(value as VideoPurpose);
+}
+
+export function isPrerollType(value: unknown): value is PrerollType {
+  return typeof value === "string" && PREROLL_TYPES.includes(value as PrerollType);
+}
+
+export function assertVideoMetadata(
+  kind: ArtifactKind,
+  purpose: VideoPurpose | undefined,
+  prerollType: PrerollType | undefined,
+): void {
+  if (kind !== "video" && (purpose !== undefined || prerollType !== undefined)) {
+    throw new DomainError("VALIDATION_ERROR", "Only video resources can have a purpose or preroll type");
+  }
+  if (purpose === "preroll" && prerollType === undefined) {
+    throw new DomainError("VALIDATION_ERROR", "Preroll video resources require a preroll type");
+  }
+  if (purpose === undefined && prerollType !== undefined) {
+    throw new DomainError("VALIDATION_ERROR", "A preroll type requires the preroll purpose");
+  }
+}
+
 export function isBusinessTaskType(value: unknown): value is BusinessTaskType {
   return typeof value === "string" && BUSINESS_TASK_TYPES.includes(value as BusinessTaskType);
+}
+
+export function isOperationalRecordKind(value: unknown): value is OperationalRecordKind {
+  return typeof value === "string" && OPERATIONAL_RECORD_KINDS.includes(value as OperationalRecordKind);
 }
 
 export function isBusinessTaskStatus(value: unknown): value is BusinessTaskStatus {

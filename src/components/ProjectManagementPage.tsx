@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   ArrowRight,
-  BadgeCheck,
   Boxes,
   Check,
   CircleAlert,
   FileStack,
   Goal,
-  Layers3,
   Save,
   UsersRound,
 } from 'lucide-react'
@@ -85,6 +83,19 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
     () => currentProject.tasks.slice().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 5),
     [currentProject.tasks],
   )
+  const failedTask = currentProject.tasks.find(task => task.status === 'failed')
+  const hasConfirmedBrief = currentProject.artifacts.brief.status === '已确认'
+  const hasCompletedCreative = currentProject.artifacts.creative.status === '已完成'
+  const pendingChangeSet = currentProject.changeSets.find(change => ['草稿', '待审批'].includes(change.status))
+  const nextAction = failedTask
+    ? { label: '处理失败任务', detail: failedTask.name, system: 'creative' as const, navId: 'tasks', blocker: '存在失败任务，需先恢复后再继续推进。' }
+    : !hasConfirmedBrief
+      ? { label: '确认策略 Brief', detail: '明确目标、受众与创意边界', system: 'strategy' as const, navId: 'workspaces', blocker: '策略 Brief 尚未确认。' }
+      : !hasCompletedCreative
+        ? { label: '进入创意生产', detail: '基于已确认 Brief 生成并评审素材', system: 'creative' as const, navId: 'tasks', blocker: '缺少可用于投放的已完成创意。' }
+        : pendingChangeSet
+          ? { label: '处理 ChangeSet', detail: pendingChangeSet.title, system: 'delivery' as const, navId: 'approvals', blocker: `${pendingChangeSet.id} 等待受控处理。` }
+          : { label: '查看项目进展', detail: '复核当前阶段与跨模块工作', system: 'strategy' as const, navId: 'workspaces', blocker: '当前没有阻塞项。' }
 
   const saveScope = async (event: FormEvent) => {
     event.preventDefault()
@@ -103,8 +114,8 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
 
   return <div className="project-management-page">
     <header className="project-management-heading">
-      <div><span className="section-label">PROJECT MANAGEMENT · {currentProject.code}</span><h1>{currentProject.name}</h1><p>管理项目边界、职责和资产；实际业务推进统一从项目工作台进入。</p></div>
-      <button className="primary-button" onClick={() => onOpenWorkbench(currentProject.id)}>进入项目工作台<ArrowRight size={15}/></button>
+      <div><span className="section-label">PROJECT MANAGEMENT · {currentProject.code}</span><h1>{currentProject.name}</h1><p>先处理当前阶段的关键行动；范围、治理和资产留在辅助区随时可查。</p></div>
+      <button className="secondary-button" onClick={() => onOpenWorkbench(currentProject.id)}>进入项目工作台<ArrowRight size={15}/></button>
     </header>
 
     <nav className="project-management-tabs" aria-label="项目管理视图">
@@ -114,23 +125,22 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
     {notice ? <div className="page-notice" role="status"><Check size={15}/>{notice}</div> : null}
 
     {activeTab === 'overview' ? <div className="project-management-overview">
-      <section className="project-health-strip">
-        <article><Goal size={17}/><span><small>当前目标</small><b>{currentProject.goal}</b></span></article>
-        <article><Layers3 size={17}/><span><small>业务任务</small><b>{activeTasks} 个推进中 · {completedTasks} 个完成</b></span></article>
-        <article><FileStack size={17}/><span><small>已确认产物</small><b>{readyArtifacts} / 5 个核心产物</b></span></article>
-        <article><BadgeCheck size={17}/><span><small>治理记录</small><b>{currentProject.changeSets.length} 个 ChangeSet · {currentProject.knowledgeCount} 条经验</b></span></article>
+      <section className="project-action-workspace" aria-label="项目当前行动">
+        <div className="project-action-stage"><span className="section-label">当前阶段</span><b>{currentProject.stage}</b><strong>{currentProject.progress}%</strong><i><em style={{ width: `${currentProject.progress}%` }}/></i><small>负责人 · {currentProject.owner}</small></div>
+        <div className="project-action-main"><span className="section-label">下一步</span><h2>{nextAction.label}</h2><p>{nextAction.detail}</p><button className="primary-button" onClick={() => onOpenProject(currentProject.id, nextAction.system, nextAction.navId)}>{nextAction.label}<ArrowRight size={15}/></button></div>
+        <div className="project-action-blocker"><CircleAlert size={17}/><div><small>阻塞项 / 状态判断</small><b>{nextAction.blocker}</b><p>{activeTasks} 个任务推进中 · {readyArtifacts} / 5 个核心产物已确认</p></div></div>
       </section>
       <div className="project-management-grid">
         <section className="project-module-map">
-          <div className="management-section-heading"><div><span className="section-label">项目内业务域</span><h2>四个模块，共用一个 Project</h2></div><small>项目 ID · {currentProject.id.slice(0, 12)}</small></div>
+          <div className="management-section-heading"><div><span className="section-label">工作域</span><h2>按业务阶段进入工作</h2></div><small>当前 Project 共享同一上下文</small></div>
           {moduleDefinitions.map((module, index) => <button key={module.system} onClick={() => onOpenProject(currentProject.id, module.system, module.navId)}>
             <span>{String(index + 1).padStart(2, '0')}</span><div><b>{module.label}</b><p>{module.responsibility}</p><small>{module.owner}</small></div><ArrowRight size={15}/>
           </button>)}
         </section>
-        <aside className="project-management-summary">
-          <span className="section-label">项目边界</span>
-          <dl><div><dt>品牌</dt><dd>{currentProject.brand}</dd></div><div><dt>目标</dt><dd>{currentProject.goal}</dd></div><div><dt>时区 / 币种</dt><dd>{currentProject.timezone} · {currentProject.currency}</dd></div><div><dt>预算基线</dt><dd>¥{currentProject.budget.toLocaleString('zh-CN')}</dd></div><div><dt>最近更新</dt><dd>{currentProject.updatedAt}</dd></div></dl>
-          <button className="secondary-button full" onClick={() => setActiveTab('scope')}>编辑项目范围</button>
+        <aside className="project-management-summary project-context-rail">
+          <span className="section-label">项目上下文</span>
+          <dl><div><dt>业务目标</dt><dd>{currentProject.goal}</dd></div><div><dt>预算基线</dt><dd>¥{currentProject.budget.toLocaleString('zh-CN')} · {currentProject.currency}</dd></div><div><dt>治理与审计</dt><dd>{currentProject.changeSets.length} 个 ChangeSet · {currentProject.knowledgeCount} 条经验</dd></div><div><dt>最近更新</dt><dd>{currentProject.updatedAt}</dd></div></dl>
+          <button className="secondary-button full" onClick={() => setActiveTab('scope')}>编辑范围与目标</button>
         </aside>
       </div>
       <section className="recent-project-tasks">
