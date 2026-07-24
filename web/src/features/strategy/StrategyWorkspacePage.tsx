@@ -7,6 +7,7 @@ import {
   confirmBrief,
   createConversation,
   createStrategy,
+  getAgentTask,
   getBriefDraft,
   getConversationMemory,
   getGenerationMetadata,
@@ -51,6 +52,7 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
   const [researchRun, setResearchRun] = useState<ResearchRun | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
+  const [pendingAgentTaskId, setPendingAgentTaskId] = useState('')
   const approveMutationKey = useRef('')
 
   useEffect(() => {
@@ -122,6 +124,36 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
   })
 
   useEffect(() => {
+    if (!pendingAgentTaskId) return
+    const controller = new AbortController()
+    let timer = 0
+    const inspect = async () => {
+      try {
+        const agentTask = await getAgentTask(pendingAgentTaskId, controller.signal)
+        if (agentTask.status === 'failed' || agentTask.status === 'cancelled') {
+          setPendingAgentTaskId('')
+          setError(agentTask.error?.message || '本轮模型生成未完成，请重试。')
+          return
+        }
+        if (agentTask.status === 'succeeded') {
+          await load()
+          return
+        }
+        timer = window.setTimeout(inspect, 1500)
+      } catch (cause) {
+        if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+          timer = window.setTimeout(inspect, 2500)
+        }
+      }
+    }
+    timer = window.setTimeout(inspect, 1500)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [load, pendingAgentTaskId])
+
+  useEffect(() => {
     if (!draft || draft.status !== 'generating') return
     const timer = window.setInterval(() => {
       getStrategy(draft.id).then(setDraft).catch((cause: unknown) => setError(messageOf(cause)))
@@ -132,6 +164,9 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
   const task = detail?.current_task
   const conversation = detail?.current_conversation
   const currentStage = ['conversation', 'brief', 'strategy'].includes(stage) ? stage : 'conversation'
+  const streamingAssistant = pendingAgentTaskId
+    ? messages.find((message) => message.role === 'assistant' && message.agent_task_id === pendingAgentTaskId)
+    : undefined
   const run = async (name: string, action: () => Promise<void>) => {
     setBusy(name)
     setError('')
@@ -155,7 +190,7 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
   }
 
   return (
-    <section className="strategy-page">
+    <section className={`strategy-page strategy-page--${currentStage}`}>
       <header className="strategy-header">
         <div>
           <nav aria-label="策略面包屑"><Link to={`/projects/${projectId}/strategy/workspaces`}>策略</Link><span>/</span><span>{detail.workspace.name}</span></nav>
@@ -169,16 +204,16 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
 
       <nav aria-label="策略阶段" className="strategy-stage-nav">
         {[
-          ['conversation', '对话'],
-          ['brief', 'Brief'],
-          ['strategy', '策略'],
-        ].map(([value, label]) => (
+          ['conversation', '01', '对话梳理'],
+          ['brief', '02', '确认 Brief'],
+          ['strategy', '03', '生成策略'],
+        ].map(([value, index, label]) => (
           <Link
             aria-current={currentStage === value ? 'page' : undefined}
             className={currentStage === value ? 'strategy-stage-nav__item strategy-stage-nav__item--active' : 'strategy-stage-nav__item'}
             key={value}
             to={`/projects/${projectId}/strategy/workspaces/${workspaceId}/${value}`}
-          >{label}</Link>
+          ><small>{index}</small><span>{label}</span></Link>
         ))}
       </nav>
 
@@ -196,15 +231,25 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
       ) : (
         <div className={`strategy-grid strategy-grid--${currentStage}`}>
           {currentStage === 'conversation' ? <ConversationPane
-            busy={busy === 'message'}
+            brief={brief}
+            busy={busy === 'message' || Boolean(pendingAgentTaskId && !streamingAssistant)}
             messages={messages}
+            onStreamComplete={() => setPendingAgentTaskId((current) => current === pendingAgentTaskId ? '' : current)}
             onSend={(content) => run('message', async () => {
-              await sendMessage(conversation.id, content)
-              const result = await listMessages(conversation.id)
-              setMessages(result.items)
+              const result = await sendMessage(conversation.id, content)
+              setPendingAgentTaskId(result.agent_task.id)
+              setMessages((current) => current.some((message) => message.id === result.message.id)
+                ? current
+                : [...current, result.message])
             })}
+            streamingMessageId={streamingAssistant?.id}
           /> : null}
-          {currentStage === 'conversation' || currentStage === 'brief' ? <BriefPane
+          {currentStage === 'conversation' ? <BriefCompanion
+            brief={brief}
+            memory={memory}
+            onOpen={() => navigate(`/projects/${projectId}/strategy/workspaces/${workspaceId}/brief`)}
+          /> : null}
+          {currentStage === 'brief' ? <BriefPane
             brief={brief}
             busy={busy !== ''}
             documents={documents}
@@ -334,28 +379,193 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
   )
 }
 
-function ConversationPane({ busy, messages, onSend }: { busy: boolean; messages: Message[]; onSend: (content: string) => void }) {
+export function ConversationPane({ brief, busy, messages, onSend, onStreamComplete, streamingMessageId }: {
+  brief: BriefDraft | null
+  busy: boolean
+  messages: Message[]
+  onSend: (content: string) => void
+  streamingMessageId?: string
+  onStreamComplete?: () => void
+}) {
   const [content, setContent] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    if (typeof list.scrollTo === 'function') {
+      list.scrollTo({ top: list.scrollHeight, behavior: streamingMessageId ? 'auto' : 'smooth' })
+    } else {
+      list.scrollTop = list.scrollHeight
+    }
+  }, [busy, messages, streamingMessageId])
+  const quickStarts = [
+    '我有一个新品牌，需要从零梳理推广需求',
+    '我已经有产品和目标人群，想制定多平台策略',
+    '我有一份品牌资料，希望结合文档开始',
+  ]
   return <article className="strategy-panel conversation-panel">
-    <header><div><span className="eyebrow">01 · 对话</span><h2>需求梳理</h2></div><span className="live-dot">实时同步</span></header>
-    <div className="conversation-list" aria-live="polite">
-      {messages.length === 0 ? <div className="conversation-welcome"><strong>先说说这次广告要解决什么问题</strong><p>建议包含目标、受众、核心卖点；预算和排期可以稍后补充。</p></div> : null}
-      {messages.map((message) => <div className={`strategy-message strategy-message--${message.role}`} key={message.id}>
-        <span>{message.role === 'user' ? '你' : 'Strategy'}</span><p>{message.content}</p>
-      </div>)}
+    <header className="conversation-panel__header">
+      <div><span className="eyebrow">Strategy copilot</span><h2>把模糊想法聊清楚</h2><p>助手会记录明确的信息，只追问真正缺失的关键条件。</p></div>
+      <span className="live-dot">{brief?.completeness.ready ? '信息已完整' : '实时整理 Brief'}</span>
+    </header>
+    <div className="conversation-list" aria-live="polite" ref={listRef}>
+      {messages.length === 0 ? <section className="conversation-welcome">
+        <span className="conversation-welcome__mark">S</span>
+        <div><strong>从你现在最确定的部分开始</strong><p>不用填写完整表单。说说品牌、产品，或者这次推广最想解决的问题，我会陪你逐步补齐。</p>
+          <div className="conversation-prompts">{quickStarts.map((prompt) => <button disabled={busy} key={prompt} onClick={() => onSend(prompt)} type="button">{prompt}</button>)}</div>
+        </div>
+      </section> : null}
+      {messages.map((message) => {
+        const streaming = message.id === streamingMessageId
+        return <article className={`strategy-message strategy-message--${message.role}${streaming ? ' strategy-message--streaming' : ''}`} key={message.id}>
+          <span className="strategy-message__avatar">{message.role === 'user' ? '你' : 'S'}</span>
+          <div><header><strong>{message.role === 'user' ? '你' : 'Strategy 助手'}</strong>{message.ai_generated ? <small>{streaming ? '正在输出' : 'AI 辅助'}</small> : null}</header>
+            {streaming
+              ? <StreamingAssistantText
+                  content={message.content}
+                  onComplete={onStreamComplete}
+                  onProgress={() => {
+                    const list = listRef.current
+                    if (list) list.scrollTop = list.scrollHeight
+                  }}
+                />
+              : <p>{message.content}</p>}
+          </div>
+        </article>
+      })}
+      {busy ? <article className="strategy-message strategy-message--assistant strategy-message--thinking">
+        <span className="strategy-message__avatar">S</span>
+        <div><header><strong>Strategy 助手</strong><small>正在理解</small></header><p><i /><i /><i /><span>正在对照会话记忆并更新 Brief</span></p></div>
+      </article> : null}
     </div>
-    <form className="strategy-composer" onSubmit={(event) => {
+    <form className="strategy-composer" ref={formRef} onSubmit={(event) => {
       event.preventDefault()
       const value = content.trim()
       if (!value) return
       onSend(value)
       setContent('')
     }}>
-      <label htmlFor="strategy-message">补充需求</label>
-      <textarea id="strategy-message" onChange={(event) => setContent(event.target.value)} placeholder="例如：目标是新品认知；受众：制造企业研发负责人；卖点：缩短研发周期…" rows={4} value={content} />
-      <button className="button button--primary" disabled={busy || !content.trim()} type="submit">{busy ? '正在整理…' : '发送并整理'}</button>
+      <div className="strategy-composer__field">
+        <label htmlFor="strategy-message">继续描述需求</label>
+        <textarea
+          id="strategy-message"
+          onChange={(event) => setContent(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') formRef.current?.requestSubmit()
+          }}
+          placeholder="例如：品牌是灵裁，产品是电商创作工具，首期希望在小红书建立认知……"
+          rows={3}
+          value={content}
+        />
+        <small>Ctrl + Enter 发送 · 明确信息会同步到右侧</small>
+      </div>
+      <button className="button button--primary" disabled={busy || !content.trim()} type="submit">{busy ? '正在整理' : '发送'}</button>
     </form>
   </article>
+}
+
+function StreamingAssistantText({ content, onComplete, onProgress }: {
+  content: string
+  onComplete?: () => void
+  onProgress: () => void
+}) {
+  const characters = Array.from(content)
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  const [visibleCharacters, setVisibleCharacters] = useState(reducedMotion ? characters.length : 0)
+  const completeRef = useRef(onComplete)
+  const progressRef = useRef(onProgress)
+  useEffect(() => {
+    completeRef.current = onComplete
+    progressRef.current = onProgress
+  }, [onComplete, onProgress])
+  useEffect(() => {
+    if (reducedMotion) {
+      const timer = window.setTimeout(() => completeRef.current?.(), 0)
+      return () => window.clearTimeout(timer)
+    }
+    let cursor = 0
+    const chunkSize = Math.max(1, Math.ceil(characters.length / 80))
+    const timer = window.setInterval(() => {
+      cursor = Math.min(characters.length, cursor + chunkSize)
+      setVisibleCharacters(cursor)
+      progressRef.current()
+      if (cursor === characters.length) {
+        window.clearInterval(timer)
+        completeRef.current?.()
+      }
+    }, 24)
+    return () => window.clearInterval(timer)
+  }, [characters.length, reducedMotion])
+  return <p data-testid="streaming-assistant">
+    {characters.slice(0, visibleCharacters).join('')}
+    <span aria-hidden="true" className="strategy-stream-cursor" />
+  </p>
+}
+
+export function BriefCompanion({ brief, memory, onOpen }: {
+  brief: BriefDraft | null
+  memory: { summary: string; open_questions: string[]; version: number } | null
+  onOpen: () => void
+}) {
+  if (!brief) return <aside className="brief-companion"><div className="brief-companion__empty"><span>Brief</span><strong>等待第一轮对话</strong><p>助手理解到的信息会在这里逐项出现。</p></div></aside>
+  const items = briefCompanionItems(brief)
+  const filled = items.filter((item) => item.value).length
+  const confirmed = items.filter((item) => item.status === 'confirmed').length
+  const progress = Math.round((filled / items.length) * 100)
+  return <aside className="brief-companion">
+    <header>
+      <div><span className="eyebrow">Live brief</span><h2>当前理解</h2></div>
+      <strong>{progress}%</strong>
+    </header>
+    <progress aria-label={`Brief 已收集 ${filled} / ${items.length} 项`} className="brief-progress" max="100" value={progress}>{progress}%</progress>
+    <p className="brief-companion__summary">{memory?.summary || '对话中的明确信息会持续沉淀到 Brief。'}</p>
+    <div className="brief-companion__stats">
+      <span><strong>{filled}</strong> 已记录</span>
+      <span><strong>{confirmed}</strong> 已确认</span>
+      <span><strong>{items.length - filled}</strong> 待补充</span>
+    </div>
+    <div className="brief-companion__items">
+      {items.map((item) => <div className={`brief-companion__item brief-companion__item--${item.status}`} key={item.path}>
+        <span className="brief-companion__status" />
+        <div><small>{item.label}</small><strong>{item.value || '等待补充'}</strong></div>
+        <em>{item.status === 'confirmed' ? '已确认' : item.status === 'captured' ? '已记录' : '待补充'}</em>
+      </div>)}
+    </div>
+    {memory?.open_questions.length ? <section className="brief-companion__next"><span>下一步</span><p>{memory.open_questions.slice(0, 2).join('；')}</p></section> : null}
+    <footer><button className="button button--secondary" onClick={onOpen} type="button">查看并确认完整 Brief</button></footer>
+  </aside>
+}
+
+function briefCompanionItems(brief: BriefDraft) {
+  const document = brief.document
+  const channels = document.channels.map((channel) => ({
+    xiaohongshu: '小红书', douyin: '抖音', taobao_tmall: '淘宝天猫', wechat_ecosystem: '微信生态',
+  })[channel] || channel).join('、')
+  const definitions = document.contract_version === 'strategy-brief-version/v2'
+    ? [
+        ['brand.name', '品牌', document.brand?.name || ''],
+        ['product.name', '产品 / 服务', document.product?.name || ''],
+        ['industry', '行业', document.industry || ''],
+        ['campaign.objective', '业务目标', document.campaign.objective],
+        ['audience.primary', '核心受众', document.audience.primary],
+        ['proposition', '核心卖点', document.proposition],
+        ['channels', '投放平台', channels],
+        ['region', '地区', document.region || ''],
+        ['language', '内容语言', document.language || ''],
+      ]
+    : [
+        ['campaign.objective', '业务目标', document.campaign.objective],
+        ['audience.primary', '核心受众', document.audience.primary],
+        ['proposition', '核心卖点', document.proposition],
+        ['channels', '投放平台', channels],
+      ]
+  return definitions.map(([path, label, value]) => ({
+    path,
+    label,
+    value,
+    status: !value ? 'missing' : brief.field_states[path]?.confirmation === 'confirmed' ? 'confirmed' : 'captured',
+  }))
 }
 
 function BriefPane({ brief, busy, documents, memory, researchRun, onField, onConfirm, onUpload, onResearch }: {

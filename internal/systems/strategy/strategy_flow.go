@@ -479,31 +479,39 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if err != nil {
 		return nil, err
 	}
-	patch, trace, err := s.generateBriefPatch(ctx, agentTask, draft, message)
+	decision, trace, err := s.generateConversationTurn(ctx, agentTask, draft, message)
 	if err != nil {
 		return nil, err
 	}
+	now := s.now()
 	updated := draft
-	if len(patch.Operations) > 0 {
-		updated, err = ApplyBriefPatch(draft, patch, PatchFromModel, agentTask.ID, s.now())
+	changed := false
+	if len(decision.Patch.Operations) > 0 {
+		updated, err = ApplyBriefPatch(draft, decision.Patch, PatchFromModel, agentTask.ID, now)
 		if err != nil {
 			return nil, err
 		}
+		changed = true
+	}
+	updated, confirmationsChanged := applyConversationConfirmations(
+		updated, decision.ConfirmFields, message.CreatedBy, message.ID, now, !changed,
+	)
+	changed = changed || confirmationsChanged
+	if changed {
 		if err := updateBriefDraft(ctx, tx, draft.Version, updated); err != nil {
 			return nil, err
 		}
 	}
-	patch.Questions = suggestQuestions(updated)
-	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.0.0", trace, patch)
+	decision = reconcileConversationTurn(updated, decision)
+	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.1.0", trace, decision)
 	if err != nil {
 		return nil, err
 	}
 	assistantID, _ := s.newID("msg")
-	now := s.now()
 	assistant := Message{
 		ID: assistantID, OrganizationID: agentTask.OrganizationID, ProjectID: agentTask.ProjectID,
 		ConversationID: task.ConversationID, Role: "assistant", ContentType: "text",
-		Content: briefAssistantText(updated, patch), AIGenerated: true, AgentTaskID: agentTask.ID,
+		Content: decision.AssistantReply, AIGenerated: true, AgentTaskID: agentTask.ID,
 		SkillRunIDs: []string{skillRunID}, CreatedBy: "strategy-agent", CreatedAt: now,
 	}
 	if err := insertMessage(ctx, tx, assistant); err != nil {
@@ -515,7 +523,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 			ID: task.ConversationID, OrganizationID: agentTask.OrganizationID,
 			ProjectID: agentTask.ProjectID,
 		},
-		updated, patch.Questions, assistant.ID, now,
+		updated, decision.Patch.Questions, assistant.ID, now,
 	); err != nil {
 		return nil, err
 	}
@@ -763,64 +771,95 @@ func (s Service) insertComplianceReport(
 	return err
 }
 
-func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (BriefPatch, SkillExecutionTrace, error) {
+func (s Service) generateConversationTurn(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (ConversationTurnDecision, SkillExecutionTrace, error) {
 	started := time.Now()
-	promptVersion := "strategy.brief.extract.v2"
+	promptVersion := "strategy.conversation.v3"
 	if s.Text == nil {
-		return deterministicBriefPatch(draft, message), SkillExecutionTrace{
+		patch := deterministicBriefPatch(draft, message)
+		decision := sanitizeConversationDecision(draft, message, ConversationTurnDecision{
+			Intent: "provide_requirements", Patch: patch,
+			AssistantReply:    "收到，我已经把你刚才提供的信息整理进 Brief。",
+			FollowUpQuestions: conversationQuestionsFromStrings(patch.Questions),
+		})
+		return decision, SkillExecutionTrace{
 			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
-			PromptVersion: promptVersion, SkillVersions: map[string]string{"strategy.brief.extract": "v2.0.0"},
+			PromptVersion: promptVersion, SkillVersions: map[string]string{"strategy.brief.extract": "v2.1.0"},
 			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
 		}, nil
 	}
 	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
 	projectContext, err := s.Projects.GetContext(ctx, actor, task.ProjectID)
 	if err != nil {
-		return BriefPatch{}, SkillExecutionTrace{}, err
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, err
 	}
 	modelAlias := s.TextModelAlias
 	if strings.TrimSpace(modelAlias) == "" {
 		modelAlias = "cookies.text.standard"
 	}
 	conversation, _ := s.generationConversation(ctx, task, message.ConversationID)
-	prompt := fmt.Sprintf("Current brief draft (version %d): %s\nRecent conversation: %s\nUser message: %s\nReturn a constrained brief patch plus 1-3 concise high-impact questions. Never repeat already answered questions and never mark fields confirmed.",
-		draft.Version, mustJSON(draft.Document), mustJSON(conversation), message.Content)
+	prompt := fmt.Sprintf(`Current Brief draft (version %d): %s
+Current field states: %s
+Recent conversation: %s
+Latest user message: %s
+
+Return one conversational turn decision. assistant_reply must be a short, natural Chinese acknowledgement or answer, without listing follow-up questions. Put questions only in follow_up_questions. Extract only facts explicitly stated by the user; never invent a brand, platform, budget, objective, or product detail. Use low or medium confidence for inference so the application can reject it. Ask at most two high-impact questions, never ask for a field that already has a value, and distinguish business objective from target audience. Use confirm_fields only when the user explicitly confirms previously captured information.`,
+		draft.Version, mustJSON(draft.Document), mustJSON(draft.FieldStates), mustJSON(conversation), message.Content)
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: actor, Project: projectContext, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-brief"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: `Extract advertising requirements for a multi-platform advertising brief. Use only allowed fields and cite the supplied conversation message. Allowed channel enums are xiaohongshu, douyin, taobao_tmall, and wechat_ecosystem. Ask only unresolved, high-impact questions.`},
+			{Role: provider.TextRoleSystem, Content: `You are a calm advertising strategist helping a user clarify an initially vague requirement through conversation. Respond naturally, preserve context, and progressively build a multi-platform advertising Brief. Do not behave like a form. Allowed channel enums are xiaohongshu, douyin, taobao_tmall, and wechat_ecosystem.`},
 			{Role: provider.TextRoleUser, Content: prompt},
 		},
-		OutputJSONSchema: briefPatchOutputSchema(),
+		OutputJSONSchema: conversationDecisionOutputSchema(),
 	})
 	if err != nil {
-		return BriefPatch{}, SkillExecutionTrace{}, textGenerationError(err)
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, textGenerationError(err)
 	}
 	trace := SkillExecutionTrace{
 		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
 		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
 		ResponseMode: response.ResponseMode, PromptVersion: promptVersion,
-		SkillVersions: map[string]string{"strategy.brief.extract": "v2.0.0"},
+		SkillVersions: map[string]string{"strategy.brief.extract": "v2.1.0"},
 		Usage:         response.Usage, LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
 		trace.GenerationMode = "fake_template"
-		return deterministicBriefPatch(draft, message), trace, nil
+		patch := deterministicBriefPatch(draft, message)
+		return sanitizeConversationDecision(draft, message, ConversationTurnDecision{
+			Intent: "provide_requirements", Patch: patch,
+			AssistantReply:    "收到，我已经把你刚才提供的信息整理进 Brief。",
+			FollowUpQuestions: conversationQuestionsFromStrings(patch.Questions),
+		}), trace, nil
 	}
-	var patch BriefPatch
 	candidate := response.StructuredOutput
 	if len(candidate) == 0 {
 		candidate = normalizeJSONCandidate(response.Text)
 	}
-	if err := decodeStrictJSON(candidate, &patch); err != nil {
-		return BriefPatch{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch output is invalid"}}
+	var modelOutput struct {
+		Intent            string                 `json:"intent"`
+		AssistantReply    string                 `json:"assistant_reply"`
+		Operations        []BriefPatchOperation  `json:"operations"`
+		ConfirmFields     []string               `json:"confirm_fields"`
+		FollowUpQuestions []ConversationQuestion `json:"follow_up_questions"`
+		Warnings          []string               `json:"warnings"`
 	}
+	if err := decodeStrictJSON(candidate, &modelOutput); err != nil {
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Conversation output is invalid"}}
+	}
+	decision := ConversationTurnDecision{
+		Intent: modelOutput.Intent, AssistantReply: modelOutput.AssistantReply,
+		Patch:         BriefPatch{BaseVersion: draft.Version, Operations: modelOutput.Operations, Warnings: modelOutput.Warnings},
+		ConfirmFields: modelOutput.ConfirmFields, FollowUpQuestions: modelOutput.FollowUpQuestions,
+		Warnings: modelOutput.Warnings,
+	}
+	decision = sanitizeConversationDecision(draft, message, decision)
+	patch := &decision.Patch
 	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
 		patch.ContractVersion = "strategy-brief-patch/v2"
 	}
-	if err := normalizeModelBriefPatch(&patch); err != nil {
-		return BriefPatch{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch contains unsupported values"}}
+	if err := normalizeModelBriefPatch(patch); err != nil {
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch contains unsupported values"}}
 	}
 	if patch.ContractVersion == "" {
 		patch.ContractVersion = "strategy-brief-patch/v1"
@@ -830,7 +869,7 @@ func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft 
 		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: message.ID}
 		patch.Operations[index].Confirmation = "unconfirmed"
 	}
-	return patch, trace, nil
+	return decision, trace, nil
 }
 
 func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft) (StrategyDocument, SkillExecutionTrace, error) {
@@ -1127,18 +1166,6 @@ func textGenerationError(err error) error {
 	}}
 }
 
-func briefPatchOutputSchema() json.RawMessage {
-	return json.RawMessage(`{
-		"type":"object","additionalProperties":false,"required":["operations","questions","warnings"],
-		"properties":{"operations":{"type":"array","maxItems":32,"items":{"type":"object",
-		"additionalProperties":false,"required":["op","field_path","value","confidence"],
-		"properties":{"op":{"const":"set"},"field_path":{"enum":["brand.name","product.name","industry","region","language","campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi","reference_ids"]},
-		"value":{"oneOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},"confidence":{"enum":["low","medium","high"]}}}},
-		"questions":{"type":"array","maxItems":3,"items":{"type":"string","maxLength":160}},
-		"warnings":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":200}}}
-	}`)
-}
-
 func strategyOutputSchema(v2 bool) json.RawMessage {
 	if v2 {
 		return json.RawMessage(`{
@@ -1238,32 +1265,12 @@ func deterministicBriefPatch(draft BriefDraft, message Message) BriefPatch {
 	return BriefPatch{ContractVersion: contractVersion, BaseVersion: draft.Version, Operations: operations, Questions: suggestQuestions(draft)}
 }
 
-func briefAssistantText(draft BriefDraft, patch BriefPatch) string {
-	if draft.Completeness.Ready {
-		return "Brief 已完整并通过确认规则，可以创建不可变版本。"
-	}
-	if len(patch.Questions) > 0 {
-		return "我已整理本轮信息。接下来想确认：" + strings.Join(patch.Questions, "；")
-	}
-	fields := make([]string, 0, len(draft.Completeness.Blockers))
-	for _, blocker := range draft.Completeness.Blockers {
-		fields = append(fields, blocker.Field)
-	}
-	return "我已整理本轮信息。请在右侧确认或补充这些字段：" + strings.Join(fields, "、")
-}
-
 func suggestQuestions(draft BriefDraft) []string {
-	labels := map[string]string{
-		"brand.name": "品牌名称是什么？", "product.name": "本次推广的产品或服务是什么？",
-		"industry": "所属行业是什么？", "region": "主要投放地区是哪里？", "language": "内容使用什么语言？",
-		"campaign.objective": "这次最重要的业务目标是什么？", "audience.primary": "最希望影响哪一类核心人群？",
-		"proposition": "最希望用户记住的核心卖点是什么？", "channels": "首期希望覆盖哪些平台？",
-	}
 	result := []string{}
-	for _, blocker := range draft.Completeness.Blockers {
-		if question := labels[blocker.Field]; question != "" {
+	for _, field := range missingConversationFields(draft) {
+		if question := conversationFieldQuestions[field]; question != "" {
 			result = append(result, question)
-			if len(result) == 3 {
+			if len(result) == 2 {
 				break
 			}
 		}

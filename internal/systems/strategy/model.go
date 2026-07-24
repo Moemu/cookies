@@ -259,6 +259,24 @@ type BriefPatch struct {
 	Warnings        []string              `json:"warnings,omitempty"`
 }
 
+type ConversationQuestion struct {
+	FieldPath string `json:"field_path"`
+	Text      string `json:"text"`
+}
+
+// ConversationTurnDecision is the model-facing result for one Strategy
+// conversation turn. It is deliberately separate from the frozen Brief patch
+// contract: conversational intent and copy may evolve without changing the
+// artifact exchanged with downstream systems.
+type ConversationTurnDecision struct {
+	Intent            string                 `json:"intent"`
+	AssistantReply    string                 `json:"assistant_reply"`
+	Patch             BriefPatch             `json:"patch"`
+	ConfirmFields     []string               `json:"confirm_fields"`
+	FollowUpQuestions []ConversationQuestion `json:"follow_up_questions"`
+	Warnings          []string               `json:"warnings,omitempty"`
+}
+
 type StrategyDocument struct {
 	ContractVersion         string            `json:"contract_version"`
 	Objective               string            `json:"objective"`

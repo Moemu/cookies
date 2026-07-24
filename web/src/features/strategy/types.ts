@@ -247,6 +247,13 @@ export type KnowledgeDocument = {
   created_at: string
 }
 
+export type AgentTask = {
+  id: string
+  status: 'dispatch_pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  version: number
+  error?: { code: string; message: string; retryable: boolean }
+}
+
 export type ResearchRun = {
   id: string
   mode: 'web' | 'mcp'

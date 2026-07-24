@@ -1,5 +1,6 @@
 import { ApiProblem, apiRequest } from '../../shared/api/client'
 import type {
+  AgentTask,
   BriefDraft,
   BriefVersion,
   ConversationBundle,
@@ -63,8 +64,12 @@ export function getConversationMemory(conversationId: string, signal?: AbortSign
   )
 }
 
+export function getAgentTask(agentTaskId: string, signal?: AbortSignal) {
+  return apiRequest<AgentTask>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}`, { signal })
+}
+
 export function sendMessage(conversationId: string, content: string) {
-  return apiRequest(`${root}/conversations/${encodeURIComponent(conversationId)}/messages`, {
+  return apiRequest<{ message: Message; agent_task: AgentTask }>(`${root}/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',
     headers: mutationHeaders(),
     body: JSON.stringify({ content }),
