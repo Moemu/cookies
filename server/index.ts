@@ -19,6 +19,7 @@ import { seedDemoProject } from "./demo.js";
 import { DomainError, errorStatus, isDomainError } from "./errors.js";
 import { createGenerationService, type GenerationService } from "./generation-service.js";
 import { FileRepository, type ResourceScope } from "./repository.js";
+import type { ShortDramaStoryContext } from "./short-drama-planner.js";
 
 const MAX_BODY_BYTES = 1_000_000;
 const artifactStatuses: readonly ArtifactStatus[] = ["draft", "ready", "archived"];
@@ -77,6 +78,10 @@ async function route(
   }
   if (resource === "generation") {
     await generationRoute(method, id, request, response, generationService);
+    return;
+  }
+  if (resource === "short-drama-preroll-plans") {
+    await shortDramaPrerollPlansRoute(method, request, response, generationService);
     return;
   }
   if (resource === "projects") {
@@ -152,21 +157,43 @@ async function generationRoute(
     throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
   }
   const body = await readBody(request);
-  const input = {
-    projectId: requiredString(body, "projectId"),
-    prompt: requiredString(body, "prompt"),
-    actor: optionalString(body, "actor"),
-  };
+  const input = { projectId: requiredString(body, "projectId"), actor: optionalString(body, "actor") };
   if (operation === "text") {
-    return sendJson(response, 201, await generationService.generateBrief(input));
+    return sendJson(response, 201, await generationService.generateBrief({
+      ...input,
+      prompt: requiredString(body, "prompt"),
+    }));
   }
   const kind = body.kind;
   if (kind !== "image" && kind !== "video") invalidField("kind", "Must be image or video");
+  const metadata = videoMetadata(body, kind);
+  const isShortDramaPreroll = metadata.prerollType === "short_drama";
   return sendJson(response, 202, await generationService.createMedia({
     ...input,
     kind,
     briefId: requiredString(body, "briefId"),
-    ...videoMetadata(body, kind),
+    prompt: isShortDramaPreroll ? rawString(body, "prompt") : requiredString(body, "prompt"),
+    ...metadata,
+    ...(isShortDramaPreroll ? {
+      shortDramaPlanVersion: requiredString(body, "shortDramaPlanVersion"),
+      shortDramaCandidateId: requiredString(body, "shortDramaCandidateId"),
+      storyContext: requiredShortDramaStoryContext(body),
+    } : {}),
+  }));
+}
+
+async function shortDramaPrerollPlansRoute(
+  method: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+  generationService: GenerationService,
+): Promise<void> {
+  if (method !== "POST") throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
+  const body = await readBody(request);
+  return sendJson(response, 200, await generationService.planShortDramaPreroll({
+    projectId: requiredString(body, "projectId"),
+    briefId: requiredString(body, "briefId"),
+    storyContext: requiredShortDramaStoryContext(body),
   }));
 }
 
@@ -416,6 +443,29 @@ function optionalString(body: Record<string, unknown>, field: string): string | 
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) invalidField(field, "Must be a non-empty string");
   return value.trim();
+}
+
+function rawString(body: Record<string, unknown>, field: string): string | undefined {
+  return typeof body[field] === "string" ? body[field] : undefined;
+}
+
+function requiredShortDramaStoryContext(body: Record<string, unknown>): ShortDramaStoryContext {
+  const value = body.storyContext;
+  if (!isRecord(value)) invalidField("storyContext", "Must be an object");
+  const reviewedSellingPoints = value.reviewedSellingPoints;
+  if (!Array.isArray(reviewedSellingPoints) || reviewedSellingPoints.some((item) => typeof item !== "string")) {
+    invalidField("storyContext.reviewedSellingPoints", "Must be an array of strings");
+  }
+  const openingLine = value.openingLine;
+  if (openingLine !== undefined && typeof openingLine !== "string") {
+    invalidField("storyContext.openingLine", "Must be a string");
+  }
+  return {
+    title: typeof value.title === "string" ? value.title : "",
+    synopsis: typeof value.synopsis === "string" ? value.synopsis : "",
+    reviewedSellingPoints,
+    ...(openingLine === undefined ? {} : { openingLine }),
+  };
 }
 
 function videoMetadata(

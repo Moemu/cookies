@@ -38,9 +38,10 @@ test("前贴视频 API 按项目和用途隔离，并在重启后恢复标签化
       status: "ready",
     });
 
+    const provider = successfulVideoProvider();
     server = createApp({
       repository,
-      generationService: createGenerationService(repository, successfulVideoProvider()),
+      generationService: createGenerationService(repository, provider),
     });
     const baseUrl = await listen(server);
     const request = async (path: string, body?: Record<string, unknown>) => {
@@ -51,14 +52,48 @@ test("前贴视频 API 按项目和用途隔离，并在重启后恢复标签化
       } : undefined);
       return { status: response.status, body: await response.json() as any };
     };
+    const storyContext = {
+      title: "雨夜归来的继承人",
+      synopsis: "被逐出家门的女主在雨夜带着证据归来，发现继母正在转移家产，并必须在家族晚宴前揭开真相。",
+      reviewedSellingPoints: ["豪门继承权争夺"],
+      openingLine: "你以为我今晚回来，是为了求你吗？",
+    };
+    const shortDramaPlan = await request("/api/short-drama-preroll-plans", {
+      projectId: firstProject.id,
+      briefId: firstBrief.id,
+      storyContext,
+    });
+    assert.equal(shortDramaPlan.status, 200);
+    const crossProjectPlan = await request("/api/short-drama-preroll-plans", {
+      projectId: firstProject.id,
+      briefId: secondBrief.id,
+      storyContext,
+    });
+    assert.equal(crossProjectPlan.status, 400);
+    assert.equal(crossProjectPlan.body.error.code, "BRIEF_NOT_CONFIRMED");
+    const rejectedSelection = await request("/api/generation/media", {
+      projectId: firstProject.id,
+      kind: "video",
+      purpose: "preroll",
+      prerollType: "short_drama",
+      briefId: firstBrief.id,
+      shortDramaPlanVersion: shortDramaPlan.body.version,
+      shortDramaCandidateId: "forged-candidate",
+      storyContext,
+    });
+    assert.equal(rejectedSelection.status, 400);
+    assert.equal((await request(`/api/generation-jobs?projectId=${firstProject.id}`)).body.length, 0);
 
     const firstJob = await request("/api/generation/media", {
       projectId: firstProject.id,
       kind: "video",
       purpose: "preroll",
       prerollType: "short_drama",
-      prompt: "短剧前贴",
+      prompt: "客户端伪造的短剧 Prompt",
       briefId: firstBrief.id,
+      shortDramaPlanVersion: shortDramaPlan.body.version,
+      shortDramaCandidateId: shortDramaPlan.body.candidates[0].id,
+      storyContext,
     });
     const secondJob = await request("/api/generation/media", {
       projectId: secondProject.id,
@@ -68,8 +103,20 @@ test("前贴视频 API 按项目和用途隔离，并在重启后恢复标签化
       prompt: "游戏前贴",
       briefId: secondBrief.id,
     });
+    const commerceJob = await request("/api/generation/media", {
+      projectId: secondProject.id,
+      kind: "video",
+      purpose: "preroll",
+      prerollType: "commerce",
+      prompt: "电商前贴",
+      briefId: secondBrief.id,
+    });
     assert.equal(firstJob.status, 202);
     assert.equal(secondJob.status, 202);
+    assert.equal(commerceJob.status, 202);
+    assert.equal(provider.prompts[0]?.includes("客户端伪造的短剧 Prompt"), false);
+    assert.equal(provider.prompts[1], "游戏前贴");
+    assert.equal(provider.prompts[2], "电商前贴");
 
     const missingType = await request("/api/generation/media", {
       projectId: firstProject.id,
@@ -106,6 +153,12 @@ test("前贴视频 API 按项目和用途隔离，并在重启后恢复标签化
     assert.equal(firstArtifacts.body[0].sourceJobId, firstJob.body.id);
     assert.equal(firstArtifacts.body[0].purpose, "preroll");
     assert.equal(firstArtifacts.body[0].prerollType, "short_drama");
+    assert.equal(firstArtifacts.body[0].shortDramaPreroll.prompt.includes("客户端伪造的短剧 Prompt"), false);
+    assert.equal(firstArtifacts.body[0].shortDramaPreroll.prompt.includes(storyContext.openingLine), false);
+    const serializedSnapshot = JSON.stringify(firstArtifacts.body[0].shortDramaPreroll);
+    assert.equal(serializedSnapshot.includes(storyContext.openingLine), false);
+    assert.equal(serializedSnapshot.includes("https://assets.test/preroll.mp4"), false);
+    assert.equal(serializedSnapshot.includes("unit-test-credential"), false);
 
     const reopened = await FileRepository.open(filePath);
     const restoredJobs = await reopened.listGenerationJobs({
@@ -121,13 +174,27 @@ test("前贴视频 API 按项目和用途隔离，并在重启后恢复标签化
     assert.deepEqual(restoredJobs.map((job) => job.id), [firstJob.body.id]);
     assert.equal(restoredJobs[0]?.status, "succeeded");
     assert.equal(restoredArtifacts[0]?.id, completed.body.artifactId);
+    assert.equal(restoredArtifacts[0]?.shortDramaPreroll?.planVersion, shortDramaPlan.body.version);
+    const restoredGameJobs = await reopened.listGenerationJobs({
+      projectId: secondProject.id,
+      purpose: "preroll",
+      prerollType: "game",
+    });
+    const restoredCommerceJobs = await reopened.listGenerationJobs({
+      projectId: secondProject.id,
+      purpose: "preroll",
+      prerollType: "commerce",
+    });
+    assert.deepEqual(restoredGameJobs.map((job) => job.id), [secondJob.body.id]);
+    assert.deepEqual(restoredCommerceJobs.map((job) => job.id), [commerceJob.body.id]);
   } finally {
     if (server) await close(server);
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-function successfulVideoProvider(): ArkProvider {
+function successfulVideoProvider(): ArkProvider & { prompts: string[] } {
+  const prompts: string[] = [];
   return {
     config: {
       configured: true,
@@ -142,7 +209,11 @@ function successfulVideoProvider(): ArkProvider {
     },
     ensureConfigured: () => undefined,
     generateText: async () => "Brief",
-    createMedia: async () => ({ providerTaskId: "preroll-provider-task" }),
+    prompts,
+    createMedia: async (_kind, prompt) => {
+      prompts.push(prompt);
+      return { providerTaskId: "preroll-provider-task" };
+    },
     getMediaTask: async () => ({ status: "succeeded", assetUrl: "https://assets.test/preroll.mp4" }),
     cancelMedia: async () => undefined,
   };

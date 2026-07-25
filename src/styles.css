@@ -561,6 +561,29 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .preroll-config input[type="range"] { width: 100%; accent-color: var(--cobalt); }
 .preroll-config .full { margin-top: 10px; }
 .preroll-action-hint { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.short-drama-context { display: grid; gap: 10px; margin-bottom: 12px; padding: 11px; background: var(--subtle); border: 1px solid var(--line); }
+.short-drama-context label { margin: 0; }
+.short-drama-context input, .short-drama-context textarea { width: 100%; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; font-size: 9px; line-height: 1.45; }
+.short-drama-context textarea { min-height: 58px; resize: vertical; }
+.short-drama-context input:focus, .short-drama-context textarea:focus { border-color: var(--cobalt); outline: 2px solid var(--cobalt-soft); }
+.short-drama-context .full { margin-top: 0; }
+.preroll-candidate-panel { min-width: 0; background: var(--canvas); border-right: 1px solid var(--line); }
+.preroll-candidate-panel details { height: 100%; }
+.preroll-candidate-panel summary { display: grid; grid-template-columns: 1fr auto 15px; gap: 6px; align-items: center; min-height: 52px; padding: 12px 14px; cursor: pointer; list-style: none; border-bottom: 1px solid var(--line); }
+.preroll-candidate-panel summary::-webkit-details-marker { display: none; }
+.preroll-candidate-panel summary .section-label { margin: 0; }
+.preroll-candidate-panel summary b { color: var(--cobalt-dark); font-size: 10px; }
+.preroll-candidate-panel summary svg { transition: transform .16s var(--ease); }
+.preroll-candidate-panel details[open] summary svg { transform: rotate(180deg); }
+.preroll-candidate-panel details > p { padding: 10px 14px 4px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.preroll-candidate-panel details > button { display: flex; flex-direction: column; gap: 6px; width: calc(100% - 20px); margin: 8px 10px; padding: 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); text-align: left; }
+.preroll-candidate-panel details > button:hover { border-color: var(--line-strong); background: var(--subtle); }
+.preroll-candidate-panel details > button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); border-color: var(--cobalt); box-shadow: inset 3px 0 var(--cobalt); }
+.preroll-candidate-panel details > button > span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.preroll-candidate-panel details > button > span b { font-size: 10px; }
+.preroll-candidate-panel details > button > span small, .preroll-candidate-panel details > button > small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.preroll-candidate-panel details > button > strong { font-size: 9px; line-height: 1.5; font-weight: 600; }
+.preroll-candidate-empty { margin: 10px; padding: 14px 10px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line-strong); font-size: 9px; line-height: 1.55; }
 
 .asset-group button { grid-template-columns: 16px 16px 1fr; }
 .asset-check { display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid var(--line-strong); border-radius: 3px; }
@@ -890,6 +913,11 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 @media (min-width: 1280px) and (max-width: 1360px) {
   .video-workspace-header, .core-flow-toolbar { gap: 16px; padding-left: 18px; padding-right: 18px; }
   .performance-workflow { grid-template-columns: 220px minmax(0, 1fr) 210px; }
+  .preroll-workspace { grid-template-columns: 185px minmax(420px, 1fr) 215px; }
+  .preroll-preview { padding-left: 16px; padding-right: 16px; }
+  .preroll-screen { padding: 26px; }
+  .preroll-screen h3 { font-size: 24px; }
+  .preroll-config { padding-left: 12px; padding-right: 12px; }
   .performance-mode-list, .video-job-rail { padding: 16px; }
   .image-editor-specialized { grid-template-columns: 165px minmax(0, 1fr) 220px; }
   .ad-insight-workspace { grid-template-columns: minmax(0, 1fr) 235px; }

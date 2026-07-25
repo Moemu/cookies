@@ -1,10 +1,23 @@
 import type { ArkProvider, MediaGenerationKind } from "./ark-provider.js";
-import type { Artifact, GenerationJob, PrerollType, VideoPurpose } from "./domain.js";
+import type {
+  Artifact,
+  GenerationJob,
+  PrerollType,
+  ShortDramaPrerollArtifactSnapshot,
+  VideoPurpose,
+} from "./domain.js";
 import { DomainError } from "./errors.js";
 import type { FileRepository, ResourceScope } from "./repository.js";
+import {
+  buildShortDramaPrerollSnapshot,
+  planShortDramaPreroll,
+  type ShortDramaPrerollPlan,
+  type ShortDramaStoryContext,
+} from "./short-drama-planner.js";
 
 export interface GenerationService {
   generateBrief(input: GenerationRequest): Promise<{ job: PublicGenerationJob; artifact: Artifact }>;
+  planShortDramaPreroll(input: ShortDramaPrerollPlanRequest): Promise<ShortDramaPrerollPlan>;
   createMedia(input: MediaGenerationRequest): Promise<PublicGenerationJob>;
   syncMedia(jobId: string, actor?: string, scope?: ResourceScope): Promise<PublicGenerationJob>;
   cancelMedia(jobId: string, actor?: string, scope?: ResourceScope): Promise<PublicGenerationJob>;
@@ -16,14 +29,26 @@ export interface GenerationRequest {
   actor?: string;
 }
 
-export interface MediaGenerationRequest extends GenerationRequest {
+export interface MediaGenerationRequest {
+  projectId: string;
+  prompt?: string;
+  actor?: string;
   kind: MediaGenerationKind;
   briefId: string;
   purpose?: VideoPurpose;
   prerollType?: PrerollType;
+  shortDramaPlanVersion?: string;
+  shortDramaCandidateId?: string;
+  storyContext?: ShortDramaStoryContext;
 }
 
-export type PublicGenerationJob = Omit<GenerationJob, "providerTaskId">;
+export interface ShortDramaPrerollPlanRequest {
+  projectId: string;
+  briefId: string;
+  storyContext: ShortDramaStoryContext;
+}
+
+export type PublicGenerationJob = Omit<GenerationJob, "providerTaskId" | "shortDramaPreroll">;
 
 export function createGenerationService(
   repository: FileRepository,
@@ -63,15 +88,23 @@ export function createGenerationService(
       }
     },
 
-    async createMedia(input) {
-      const prompt = requiredPrompt(input.prompt);
-      provider.ensureConfigured();
+    async planShortDramaPreroll(input) {
+      await requireProject(repository, input.projectId);
       await requireConfirmedBrief(repository, input.projectId, input.briefId);
+      return planShortDramaPreroll({ prerollType: "short_drama", storyContext: input.storyContext });
+    },
+
+    async createMedia(input) {
+      const brief = await requireConfirmedBrief(repository, input.projectId, input.briefId);
+      const shortDramaPreroll = createShortDramaSnapshot(input, brief);
+      const prompt = shortDramaPreroll?.prompt ?? requiredPrompt(input.prompt ?? "");
+      provider.ensureConfigured();
       let job = await repository.createGenerationJob({
         projectId: input.projectId,
         artifactKind: input.kind,
         purpose: input.purpose,
         prerollType: input.prerollType,
+        shortDramaPreroll,
         briefArtifactId: input.briefId,
         model: provider.config.models[input.kind],
         actor: input.actor,
@@ -85,6 +118,7 @@ export function createGenerationService(
         if (result.assetUrl) {
           ({ job } = await repository.completeMediaGenerationJob(job.id, {
             content: result.assetUrl,
+            shortDramaPreroll,
             actor: input.actor,
           }));
         }
@@ -193,10 +227,46 @@ function requiredPrompt(value: string): string {
 }
 
 function publicJob(job: GenerationJob): PublicGenerationJob {
-  const { providerTaskId: _providerTaskId, ...safeJob } = job;
+  const {
+    providerTaskId: _providerTaskId,
+    shortDramaPreroll: _shortDramaPreroll,
+    ...safeJob
+  } = job;
   return safeJob;
 }
 
 function safeDiagnostic(error: unknown): string {
   return error instanceof DomainError ? error.code : "INTERNAL_ERROR";
+}
+
+async function requireProject(repository: FileRepository, projectId: string): Promise<void> {
+  if (!await repository.getProject(projectId)) {
+    throw new DomainError("NOT_FOUND", "Project was not found");
+  }
+}
+
+function createShortDramaSnapshot(
+  input: MediaGenerationRequest,
+  brief: Artifact,
+): ShortDramaPrerollArtifactSnapshot | undefined {
+  if (input.prerollType !== "short_drama") return undefined;
+  if (input.kind !== "video" || input.purpose !== "preroll") {
+    throw new DomainError("VALIDATION_ERROR", "Short drama generation requires a preroll video");
+  }
+  if (!input.shortDramaPlanVersion || !input.shortDramaCandidateId || !input.storyContext) {
+    throw new DomainError(
+      "VALIDATION_ERROR",
+      "Short drama generation requires a plan version, selected candidate, and story context",
+    );
+  }
+  const plan = planShortDramaPreroll({ prerollType: "short_drama", storyContext: input.storyContext });
+  if (input.shortDramaPlanVersion !== plan.version) {
+    throw new DomainError("VALIDATION_ERROR", "Unsupported short drama plan version");
+  }
+  return buildShortDramaPrerollSnapshot({
+    plan,
+    candidateId: input.shortDramaCandidateId,
+    storyContext: input.storyContext,
+    confirmedBrief: brief.content,
+  });
 }

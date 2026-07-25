@@ -22,6 +22,7 @@ import {
   type Project,
   type ProjectRuntime,
   type PrerollType,
+  type ShortDramaPrerollArtifactSnapshot,
   type SimulationEvidence,
   type StoreData,
   type VideoPurpose,
@@ -51,6 +52,7 @@ export interface CreateArtifactInput {
   kind: ArtifactKind;
   purpose?: VideoPurpose;
   prerollType?: PrerollType;
+  shortDramaPreroll?: ShortDramaPrerollArtifactSnapshot;
   content: string;
   status?: ArtifactStatus;
   sourceJobId?: string;
@@ -72,6 +74,7 @@ export interface CreateGenerationJobInput {
   artifactKind: ArtifactKind;
   purpose?: VideoPurpose;
   prerollType?: PrerollType;
+  shortDramaPreroll?: ShortDramaPrerollArtifactSnapshot;
   briefArtifactId?: string;
   model?: string;
   actor?: string;
@@ -79,6 +82,7 @@ export interface CreateGenerationJobInput {
 
 export interface CompleteMediaGenerationInput {
   content: string;
+  shortDramaPreroll?: ShortDramaPrerollArtifactSnapshot;
   actor?: string;
 }
 
@@ -284,6 +288,7 @@ export class FileRepository {
       kind: input.kind,
       purpose: input.purpose,
       prerollType: input.prerollType,
+      shortDramaPreroll: input.shortDramaPreroll,
       status: input.status ?? "draft",
       content: input.content,
       sourceJobId: input.sourceJobId,
@@ -331,6 +336,7 @@ export class FileRepository {
       artifactKind: input.artifactKind,
       purpose: input.purpose,
       prerollType: input.prerollType,
+      shortDramaPreroll: input.shortDramaPreroll,
       briefArtifactId: input.briefArtifactId,
       status: "queued",
       model: input.model,
@@ -389,6 +395,7 @@ export class FileRepository {
       kind: job.artifactKind,
       purpose: job.purpose,
       prerollType: job.prerollType,
+      shortDramaPreroll: input.shortDramaPreroll ?? job.shortDramaPreroll,
       status: "ready",
       content: input.content,
       sourceJobId: job.id,

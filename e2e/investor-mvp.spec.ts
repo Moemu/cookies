@@ -25,6 +25,18 @@ async function setProviderMode(page: Page, mode: 'success' | 'create_failure' | 
   expect(response.ok()).toBeTruthy()
 }
 
+async function selectShortDramaCandidate(page: Page) {
+  await page.getByLabel('短剧标题').fill('雨夜归来的继承人')
+  await page.getByLabel('故事梗概').fill('被逐出家门的女主在雨夜带着证据归来，发现继母正在转移家产，并必须在家族晚宴前揭开真相。')
+  await page.getByLabel('已审核卖点').fill('豪门继承权争夺')
+  await page.getByLabel('正片首句（可选）').fill('你以为我今晚回来，是为了求你吗？')
+  await page.getByRole('button', { name: '生成 AI 候选' }).click()
+  const candidatePanel = page.getByRole('complementary', { name: '短剧前贴 AI 候选' })
+  await expect(candidatePanel.getByText('需人工选择')).toBeVisible()
+  await expect(candidatePanel.getByText('评分仅表示钩子机制相关性，不代表转化效果预测。')).toBeVisible()
+  await candidatePanel.getByRole('button').first().click()
+}
+
 async function syncPrerollJob(
   page: Page,
   projectId: string,
@@ -77,13 +89,14 @@ test('项目主路径仅使用本用例创建的 Project 和 Brief', async ({ pa
 test('创意镜头支持键盘切换并同步当前预览', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 键盘镜头')
   await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
+  await page.getByRole('tab', { name: /游戏前贴/ }).click()
 
-  const firstShot = page.getByRole('button', { name: /消息弹窗与人物停顿/ })
+  const firstShot = page.getByRole('button', { name: /展示公差挑战目标/ })
   await firstShot.focus()
   await page.keyboard.press('ArrowDown')
 
-  await expect(page.getByRole('button', { name: /切入高速 CNC 现场/ })).toBeFocused()
-  await expect(page.getByRole('status')).toContainText('当前镜头：02 · 切入高速 CNC 现场。')
+  await expect(page.getByRole('button', { name: /失败反馈与进度掉落/ })).toBeFocused()
+  await expect(page.getByRole('status')).toContainText('当前镜头：02 · 失败反馈与进度掉落。')
   await expect(page.getByLabel('当前镜头预览')).toContainText('02 / 03')
 })
 
@@ -94,8 +107,10 @@ test('前贴分镜成功后出现持久化资产，并在刷新后按当前前�
 
   const generate = page.getByRole('button', { name: '生成前贴分镜' })
   const addToLibrary = page.getByRole('button', { name: '加入混剪素材箱' })
-  await expect(generate).toBeEnabled()
+  await expect(generate).toBeDisabled()
   await expect(addToLibrary).toBeDisabled()
+  await selectShortDramaCandidate(page)
+  await expect(generate).toBeEnabled()
   await generate.click()
   await syncPrerollJob(page, projectId, 'short_drama', 'succeeded')
   await page.reload()
@@ -118,13 +133,16 @@ test('前贴任务按项目和类型隔离，重试或失败不会保留旧成�
   const firstProjectId = await openProject(page, 'E2E 前贴重试失败')
   await page.goto(`/projects/${firstProjectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
   await setProviderMode(page, 'success')
+  await selectShortDramaCandidate(page)
   await page.getByRole('button', { name: '生成前贴分镜' }).click()
   await syncPrerollJob(page, firstProjectId, 'short_drama', 'succeeded')
   await page.reload()
   await expect(page.getByRole('button', { name: '加入混剪素材箱' })).toBeEnabled()
 
   await setProviderMode(page, 'task_failure')
-  await page.getByRole('button', { name: '重新生成前贴' }).click()
+  const retry = page.getByRole('button', { name: '重新生成前贴' })
+  await expect(retry).toBeEnabled()
+  await retry.click()
   await expect(page.getByRole('button', { name: '加入混剪素材箱' })).toBeDisabled()
   await syncPrerollJob(page, firstProjectId, 'short_drama', 'failed')
   await page.reload()
@@ -225,6 +243,7 @@ test('前贴任务取消后刷新会恢复服务端取消态，且不暴露旧�
   await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
   await setProviderMode(page, 'success')
 
+  await selectShortDramaCandidate(page)
   await page.getByRole('button', { name: '生成前贴分镜' }).click()
   const cancel = page.getByRole('button', { name: '取消生成' })
   await expect(cancel).toBeVisible()
@@ -250,6 +269,7 @@ for (const width of [1280, 1440, 1680]) {
     await page.setViewportSize({ width, height: 960 })
     const projectId = await openProject(page, `E2E 初始桌面视口 ${width}`)
     await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
+    await page.getByRole('tab', { name: /游戏前贴/ }).click()
 
     const workspace = page.locator('.preroll-workspace')
     const generate = page.getByRole('button', { name: '生成前贴分镜' })
@@ -257,7 +277,7 @@ for (const width of [1280, 1440, 1680]) {
     await expect(workspace).toBeVisible()
     await expectInitialViewportControl(page, generate, width)
     await expect(addToLibrary).toBeVisible()
-    await expect(page.getByRole('button', { name: '播放短剧前贴预览' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '播放游戏前贴预览' })).toBeVisible()
     await expectNoHorizontalOverflow(page)
 
     await setProviderMode(page, 'success')
@@ -267,8 +287,9 @@ for (const width of [1280, 1440, 1680]) {
     await cancel.click()
 
     await page.getByRole('button', { name: '生成前贴分镜' }).click()
-    await syncPrerollJob(page, projectId, 'short_drama', 'succeeded')
+    await syncPrerollJob(page, projectId, 'game', 'succeeded')
     await page.reload()
+    await page.getByRole('tab', { name: /游戏前贴/ }).click()
     await expectInitialViewportControl(page, addToLibrary, width)
     await expectNoHorizontalOverflow(page)
 

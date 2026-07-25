@@ -116,6 +116,7 @@ export interface Artifact {
   kind: ArtifactKind;
   purpose?: VideoPurpose;
   prerollType?: PrerollType;
+  shortDramaPreroll?: ShortDramaPrerollArtifactSnapshot;
   status: ArtifactStatus;
   content: string;
   sourceJobId?: string;
@@ -130,6 +131,7 @@ export interface GenerationJob {
   artifactKind: ArtifactKind;
   purpose?: VideoPurpose;
   prerollType?: PrerollType;
+  shortDramaPreroll?: ShortDramaPrerollArtifactSnapshot;
   briefArtifactId?: string;
   status: GenerationJobStatus;
   model?: string;
@@ -139,6 +141,26 @@ export interface GenerationJob {
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ShortDramaPrerollArtifactSnapshot {
+  planVersion: string;
+  storyContext: {
+    title: string;
+    synopsis: string;
+    reviewedSellingPoints: string[];
+  };
+  selectedCandidate: {
+    id: string;
+    hookType: string;
+    score: number;
+    scoreMeaning: "hook_relevance";
+    evidence: string[];
+    voiceover: string;
+    visualIntent: string;
+    transitionLine: string;
+  };
+  prompt: string;
 }
 
 export interface ChangeSet {
