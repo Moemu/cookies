@@ -58,3 +58,10 @@
   - Tests/Coverage: 通过；`npm run test:server` 25/25、`npm run test:media-status` 3/3、`npm run test:e2e` 11/11 通过；E2E 使用隔离真实 API 和临时仓储，覆盖刷新恢复、项目隔离、失败/取消状态及 1280px/1440px/1680px 初始视口
   - Checklist audit: 30/30 passed, 0 failed
 - **Risks and issues**: 无范围内缺陷；低风险：一次经由 `npm run test:server -- --test-name-pattern` 的定向命令被 npm 参数解析为文件路径，但改用 `tsx` 直接执行同一对抗用例后通过，不影响产品或验收结论
+
+## Round 2
+
+- 完成 Task 19 至 Task 22：短剧前贴候选规划、服务端受控生成、人工选择工作区、README 能力边界、真实 API/E2E 回归和远程交付均完成；对应 checklist 31 至 37 已全部满足。
+- 验证通过：`npm run test:server` 28/28、`npm run check:server`、`npm run build`、`npx playwright test e2e/investor-mvp.spec.ts` 12/12、`git diff --check`；PR #11 的 `CI` 与 `Platform CI` 均为 success。
+- 关键决策：短剧前贴只接受用户审核故事上下文和已确认 Brief；候选评分仅表示钩子机制相关性；短剧分支由服务端重建 Prompt 并持久化脱敏选择快照，继续禁止视频上传、VLM 理解、混剪和真实广告投放。
+- 文件变更：`.trae/specs/build-investor-mvp/tasks.md`、`.trae/specs/build-investor-mvp/checklist.md`、`.trae/specs/build-investor-mvp/progress.md`、`README.md`、`e2e/investor-mvp.spec.ts`、`src/components/SpecializedPages.tsx`。
