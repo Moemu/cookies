@@ -13,6 +13,15 @@ async function createProjectWithBrief(page: Page, name: string) {
   return project.id
 }
 
+async function getReadyBriefId(page: Page, projectId: string) {
+  const response = await page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${projectId}`)
+  expect(response.ok()).toBeTruthy()
+  const artifacts = await response.json() as Array<{ id: string, kind: string, status: string }>
+  const brief = artifacts.find(artifact => artifact.kind === 'brief' && artifact.status === 'ready')
+  expect(brief).toBeTruthy()
+  return brief!.id
+}
+
 async function openProject(page: Page, name: string) {
   const projectId = await createProjectWithBrief(page, name)
   await page.goto(`/projects/${projectId}/home`)
@@ -34,13 +43,16 @@ async function selectShortDramaCandidate(page: Page) {
   const candidatePanel = page.getByRole('complementary', { name: '短剧前贴 AI 候选' })
   await expect(candidatePanel.getByText('需人工选择')).toBeVisible()
   await expect(candidatePanel.getByText('评分仅表示钩子机制相关性，不代表转化效果预测。')).toBeVisible()
+  await expect(candidatePanel.getByRole('button')).toHaveCount(4)
   await candidatePanel.getByRole('button').first().click()
+  await expect(page.getByRole('status')).toContainText('已人工选择')
+  await expect(page.getByLabel('当前镜头预览')).toContainText('已选候选')
 }
 
 async function syncPrerollJob(
   page: Page,
   projectId: string,
-  prerollType: 'short_drama' | 'game',
+  prerollType: 'short_drama' | 'game' | 'commerce',
   expectedStatus: 'succeeded' | 'failed',
 ) {
   const query = `projectId=${projectId}&purpose=preroll&prerollType=${prerollType}`
@@ -115,6 +127,7 @@ test('前贴分镜成功后出现持久化资产，并在刷新后按当前前�
   await syncPrerollJob(page, projectId, 'short_drama', 'succeeded')
   await page.reload()
   await expect(addToLibrary).toBeEnabled()
+  await expect(page.getByLabel('正片首句（可选）')).toHaveValue('')
 
   await expect.poll(async () => {
     const response = await page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${projectId}&purpose=preroll&prerollType=short_drama`)
@@ -129,6 +142,85 @@ test('前贴分镜成功后出现持久化资产，并在刷新后按当前前�
   await expect(page.getByText('当前 Project 暂无可用于混剪的已持久化视频资产。')).toHaveCount(0)
 })
 
+test('短剧规划和生成拒绝跨 Project Brief，游戏与电商前贴保持原有媒体链路', async ({ page }) => {
+  const shortDramaProjectId = await createProjectWithBrief(page, 'E2E 短剧跨项目拒绝')
+  const otherProjectId = await createProjectWithBrief(page, 'E2E 其他 Brief 项目')
+  const shortDramaBriefId = await getReadyBriefId(page, shortDramaProjectId)
+  const otherBriefId = await getReadyBriefId(page, otherProjectId)
+  const storyContext = {
+    title: '雨夜归来的继承人',
+    synopsis: '被逐出家门的女主在雨夜带着证据归来，发现继母正在转移家产，并必须在家族晚宴前揭开真相。',
+    reviewedSellingPoints: ['豪门继承权争夺'],
+    openingLine: '你以为我今晚回来，是为了求你吗？',
+  }
+
+  const rejectedPlan = await page.request.post('http://127.0.0.1:8787/api/short-drama-preroll-plans', {
+    data: { projectId: shortDramaProjectId, briefId: otherBriefId, storyContext },
+  })
+  expect(rejectedPlan.status()).toBe(400)
+  expect((await rejectedPlan.json()).error.code).toBe('BRIEF_NOT_CONFIRMED')
+
+  const planResponse = await page.request.post('http://127.0.0.1:8787/api/short-drama-preroll-plans', {
+    data: { projectId: shortDramaProjectId, briefId: shortDramaBriefId, storyContext },
+  })
+  expect(planResponse.ok()).toBeTruthy()
+  const plan = await planResponse.json() as { version: string, candidates: Array<{ id: string }> }
+  expect(plan.candidates.length).toBeGreaterThanOrEqual(3)
+  expect(plan.candidates.length).toBeLessThanOrEqual(5)
+
+  const rejectedGeneration = await page.request.post('http://127.0.0.1:8787/api/generation/media', {
+    data: {
+      projectId: shortDramaProjectId,
+      kind: 'video',
+      purpose: 'preroll',
+      prerollType: 'short_drama',
+      briefId: otherBriefId,
+      shortDramaPlanVersion: plan.version,
+      shortDramaCandidateId: plan.candidates[0].id,
+      storyContext,
+    },
+  })
+  expect(rejectedGeneration.status()).toBe(400)
+  expect((await rejectedGeneration.json()).error.code).toBe('BRIEF_NOT_CONFIRMED')
+
+  await setProviderMode(page, 'success')
+  const gameJob = await page.request.post('http://127.0.0.1:8787/api/generation/media', {
+    data: {
+      projectId: shortDramaProjectId,
+      kind: 'video',
+      purpose: 'preroll',
+      prerollType: 'game',
+      prompt: '游戏前贴回归：展示目标、失败反馈和成功过关。',
+      briefId: shortDramaBriefId,
+    },
+  })
+  const commerceJob = await page.request.post('http://127.0.0.1:8787/api/generation/media', {
+    data: {
+      projectId: shortDramaProjectId,
+      kind: 'video',
+      purpose: 'preroll',
+      prerollType: 'commerce',
+      prompt: '电商前贴回归：商品保真、动作变化和稳定定格。',
+      briefId: shortDramaBriefId,
+    },
+  })
+  expect(gameJob.status()).toBe(202)
+  expect(commerceJob.status()).toBe(202)
+  await syncPrerollJob(page, shortDramaProjectId, 'game', 'succeeded')
+  await syncPrerollJob(page, shortDramaProjectId, 'commerce', 'succeeded')
+
+  const [gameArtifacts, commerceArtifacts] = await Promise.all([
+    page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${shortDramaProjectId}&purpose=preroll&prerollType=game`),
+    page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${shortDramaProjectId}&purpose=preroll&prerollType=commerce`),
+  ])
+  expect(await gameArtifacts.json()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ status: 'ready', prerollType: 'game' }),
+  ]))
+  expect(await commerceArtifacts.json()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ status: 'ready', prerollType: 'commerce' }),
+  ]))
+})
+
 test('前贴任务按项目和类型隔离，重试或失败不会保留旧成功可用态', async ({ page }) => {
   const firstProjectId = await openProject(page, 'E2E 前贴重试失败')
   await page.goto(`/projects/${firstProjectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
@@ -140,9 +232,7 @@ test('前贴任务按项目和类型隔离，重试或失败不会保留旧成�
   await expect(page.getByRole('button', { name: '加入混剪素材箱' })).toBeEnabled()
 
   await setProviderMode(page, 'task_failure')
-  const retry = page.getByRole('button', { name: '重新生成前贴' })
-  await expect(retry).toBeEnabled()
-  await retry.click()
+  await page.getByRole('button', { name: '重新生成前贴' }).click()
   await expect(page.getByRole('button', { name: '加入混剪素材箱' })).toBeDisabled()
   await syncPrerollJob(page, firstProjectId, 'short_drama', 'failed')
   await page.reload()

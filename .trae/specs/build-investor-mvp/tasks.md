@@ -112,11 +112,11 @@
   - [x] SubTask 21.3: 将中央预览内容绑定当前选中候选，保持当前 Project/Brief/Provider 检查、任务轮询、取消、刷新恢复及“产物持久化后才能加入素材箱”门禁。
   - [x] SubTask 21.4: 调整样式，使候选面板为可收起的辅助区；在 1280px、1440px、1680px 桌面视口中不遮挡预览、候选选择或关键操作。
 
-- [ ] Task 22: 完成短剧前贴增量的全链路验收、文档和远程交付。更新能力说明，执行服务端、构建、真实 API E2E、空白检查和远程 CI 验证，仅提交本任务相关文件。
+- [x] Task 22: 完成短剧前贴增量的全链路验收、文档和远程交付。更新能力说明，执行服务端、构建、真实 API E2E、空白检查和远程 CI 验证，仅提交本任务相关文件。
   - [x] SubTask 22.1: 添加真实 API E2E 或等价集成验证，覆盖已确认 Brief 下的候选规划、显式选择、生成、刷新恢复、跨 Project 拒绝以及游戏/电商前贴回归。
   - [x] SubTask 22.2: 更新 README，明确短剧前贴使用用户审核故事上下文与人工候选选择，不支持视频上传、VLM 理解、混剪、真实投放或前端凭据。
-  - [ ] SubTask 22.3: 执行 `npm run test:server`、`npm run check:server`、`npm run build`、相关 E2E、`git diff --check`，检查暂存内容不含敏感信息，提交并推送当前分支。
-  - [ ] SubTask 22.4: 推送后使用 `gh pr checks` 监测当前提交的必需检查；若失败，读取日志、修复根因、重跑本地检查并再次推送，直至检查通过。
+  - [x] SubTask 22.3: 执行 `npm run test:server`、`npm run check:server`、`npm run build`、相关 E2E、`git diff --check`，检查暂存内容不含敏感信息，提交并推送当前分支。
+  - [x] SubTask 22.4: 推送后使用 `gh pr checks` 监测当前提交的必需检查；若失败，读取日志、修复根因、重跑本地检查并再次推送，直至检查通过。
 
 # Task Dependencies
 - Task 2 依赖 Task 1 的服务端配置与统一错误基础。

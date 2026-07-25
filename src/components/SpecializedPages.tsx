@@ -220,7 +220,7 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
           ? prerollArtifacts.find(artifact => artifact.id === latest?.artifactId)?.shortDramaPreroll
           : undefined
         if (persistedShortDrama) {
-          setStoryContext({ ...persistedShortDrama.storyContext })
+          setStoryContext(context => ({ ...persistedShortDrama.storyContext, openingLine: context.openingLine }))
           setPlan({
             version: persistedShortDrama.planVersion,
             candidates: [persistedShortDrama.selectedCandidate],
@@ -287,7 +287,7 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
           confirmedBriefId,
           plan.version,
           selectedCandidate.id,
-          storyContext,
+          normalizedStoryContext(),
         )
       } else {
         next = await api.createPrerollVideo(
@@ -327,6 +327,14 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
   const updateStoryContext = (field: keyof ApiShortDramaStoryContext, value: string) => {
     setStoryContext(context => ({ ...context, [field]: value }))
   }
+  const normalizedStoryContext = (): ApiShortDramaStoryContext => {
+    const openingLine = storyContext.openingLine?.trim()
+    return {
+      ...storyContext,
+      reviewedSellingPoints: storyContext.reviewedSellingPoints.filter(value => value.trim()),
+      openingLine: openingLine || undefined,
+    }
+  }
   const planShortDrama = async () => {
     if (!confirmedBriefId) {
       setInteractionFeedback('请先在需求中心确认 Brief，系统才会允许规划短剧前贴候选。')
@@ -335,8 +343,7 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
     setIsPlanning(true)
     try {
       const next = await api.planShortDramaPreroll(currentProject.id, confirmedBriefId, {
-        ...storyContext,
-        reviewedSellingPoints: storyContext.reviewedSellingPoints.filter(value => value.trim()),
+        ...normalizedStoryContext(),
       })
       setPlan(next)
       setSelectedCandidateId('')
