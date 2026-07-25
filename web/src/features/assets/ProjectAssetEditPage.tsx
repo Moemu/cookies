@@ -22,27 +22,29 @@ export function ProjectAssetEditPage() {
   const { projectId = '', assetId = '', version = '1' } = useParams()
   const assetVersion = Number(version)
   const [previewUrl, setPreviewUrl] = useState('')
+  const [previewKey, setPreviewKey] = useState('')
   const [prompt, setPrompt] = useState('')
   const [size, setSize] = useState('1024x1024')
   const [job, setJob] = useState<ProviderJob | null>(null)
-  const [loadingPreview, setLoadingPreview] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const currentPreviewKey = `${projectId}:${assetId}:${assetVersion}`
+  const previewMatches = previewKey === currentPreviewKey
   const [error, setError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
-    setLoadingPreview(true)
     getAssetPreview(projectId, assetId, assetVersion, controller.signal).then((signed) => {
+      setPreviewKey(currentPreviewKey)
       setPreviewUrl(signed.url)
       setError('')
     }).catch((caught: unknown) => {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
+      setPreviewUrl('')
+      setPreviewKey(currentPreviewKey)
       setError(caught instanceof Error ? caught.message : '源素材预览加载失败。')
-    }).finally(() => {
-      if (!controller.signal.aborted) setLoadingPreview(false)
     })
     return () => controller.abort()
-  }, [assetId, assetVersion, projectId])
+  }, [assetId, assetVersion, currentPreviewKey, projectId])
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!job?.id) return
@@ -92,7 +94,7 @@ export function ProjectAssetEditPage() {
     <div className="asset-edit-layout">
       <div className="asset-edit-preview">
         <div className="asset-edit-preview__stage">
-          {previewUrl ? <img alt="编辑源素材预览" src={previewUrl} /> : <span>{loadingPreview ? '正在加载源图…' : '源图不可预览'}</span>}
+          {previewMatches && previewUrl ? <img alt="编辑源素材预览" src={previewUrl} /> : <span>{previewMatches ? '源图不可预览' : '正在加载源图…'}</span>}
         </div>
         <dl>
           <div><dt>素材 ID</dt><dd>{assetId}</dd></div>
