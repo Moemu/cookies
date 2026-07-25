@@ -71,9 +71,16 @@ func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract
 	if s.ImageAdapter == nil {
 		return contract.ProviderJob{}, nil, fmt.Errorf("image provider adapter is required")
 	}
+	sources, err := s.resolveImageSources(ctx, record)
+	if err != nil {
+		return contract.ProviderJob{}, nil, err
+	}
+	for _, source := range sources {
+		defer source.Content.Close()
+	}
 	request := ImageGenerationRequest{
 		OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
-		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input,
+		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input, Sources: sources,
 	}
 	if err := request.Validate(); err != nil {
 		return contract.ProviderJob{}, nil, err
@@ -115,6 +122,34 @@ func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract
 		return s.ProcessImageJob(ctx, updated.Job.OrganizationID, updated.Job.ProjectID, updated.Job.ID)
 	}
 	return updated.Job, deferAt(now), nil
+}
+
+func (s Service) resolveImageSources(ctx context.Context, record JobRecord) ([]VisionSource, error) {
+	if len(record.Input.SourceAssets) == 0 {
+		return nil, nil
+	}
+	if s.VisionSources == nil {
+		return nil, fmt.Errorf("image source resolver is required")
+	}
+	project := contract.ProjectContext{
+		OrganizationID:        record.Job.OrganizationID,
+		ProjectID:             record.Job.ProjectID,
+		ProjectContextVersion: record.ProjectContextVersion,
+	}
+	actor := contract.ActorContext{OrganizationID: record.Job.OrganizationID, Principal: record.Principal, Scopes: []contract.Scope{}}
+	sources, err := s.VisionSources.ResolveVisionSources(ctx, actor, project, record.Input.SourceAssets)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateVisionSources(record.Input.SourceAssets, sources); err != nil {
+		for _, source := range sources {
+			if source.Content != nil {
+				source.Content.Close()
+			}
+		}
+		return nil, err
+	}
+	return sources, nil
 }
 
 func (s Service) pollImageJob(ctx context.Context, record JobRecord) (contract.ProviderJob, *time.Time, error) {

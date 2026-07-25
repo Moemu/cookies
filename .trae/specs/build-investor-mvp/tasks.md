@@ -118,6 +118,8 @@
   - [x] SubTask 22.3: 执行 `npm run test:server`、`npm run check:server`、`npm run build`、相关 E2E、`git diff --check`，检查暂存内容不含敏感信息，提交并推送当前分支。
   - [x] SubTask 22.4: 推送后使用 `gh pr checks` 监测当前提交的必需检查；若失败，读取日志、修复根因、重跑本地检查并再次推送，直至检查通过。
 
+- [ ] Task 23: 提交并推送当前范围内未交付变更: 当前工作区仍包含纳入本轮验证范围的未提交文件，远程 PR 检查仅覆盖 `HEAD`，不能证明这些变更已提交到远程代码仓库。
+
 # Task Dependencies
 - Task 2 依赖 Task 1 的服务端配置与统一错误基础。
 - Task 3 依赖 Task 1 与 Task 2 的 API 契约；其前端 API Client 可与 Task 2 并行准备。

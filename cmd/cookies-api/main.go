@@ -90,6 +90,7 @@ func main() {
 			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
 			ImageAdapter:  imageAdapter,
 			TextAdapter:   textAdapter,
+			VisionSources: assetVisionSourceResolver{uploads: uploadService},
 			Intake:        provider.AssetsIntakeClient{API: intakeService},
 			OutputHandles: outputHandles,
 			NewID:         func() (string, error) { return ids.New("providerjob") },
@@ -201,6 +202,26 @@ func buildTextAdapter(cfg config.Config) (provider.TextProviderAdapter, error) {
 	default:
 		return nil, fmt.Errorf("unsupported Provider text adapter %q", cfg.Provider.TextAdapter)
 	}
+}
+
+type assetVisionSourceResolver struct{ uploads *assets.UploadService }
+
+func (r assetVisionSourceResolver) ResolveVisionSources(ctx context.Context, actor contract.ActorContext, projectContext contract.ProjectContext, refs []contract.ProjectAssetRef) ([]provider.VisionSource, error) {
+	if r.uploads == nil {
+		return nil, fmt.Errorf("asset upload service is required")
+	}
+	sources := make([]provider.VisionSource, 0, len(refs))
+	for _, ref := range refs {
+		reader, info, err := r.uploads.OpenPreview(ctx, actor, projectContext.ProjectID, ref.AssetVersion)
+		if err != nil {
+			for _, source := range sources {
+				source.Content.Close()
+			}
+			return nil, err
+		}
+		sources = append(sources, provider.VisionSource{Reference: ref, MIMEType: info.MIMEType, Content: reader})
+	}
+	return sources, nil
 }
 
 func startWorker(ctx context.Context, name string, runOnce func(context.Context) (bool, error)) {

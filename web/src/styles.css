@@ -205,6 +205,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .asset-collection--list { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .asset-card { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: #ffffff; transition: border-color 150ms ease, transform 150ms ease; }
 .asset-card:hover { border-color: #bdc9d8; transform: translateY(-1px); }
+.asset-card__edit { position: absolute; z-index: 2; top: 9px; left: 9px; display: inline-flex; min-height: 32px; align-items: center; border: 1px solid #d8e0ea; border-radius: 7px; background: rgb(255 255 255 / 94%); box-shadow: 0 4px 12px rgb(28 44 68 / 9%); color: var(--accent); padding: 0 10px; font-size: 12px; font-weight: 650; opacity: 0; text-decoration: none; transition: opacity 140ms ease, border-color 140ms ease, background-color 140ms ease; }
+.asset-card:hover .asset-card__edit, .asset-card__edit:focus-visible { opacity: 1; }
+.asset-card__edit:hover { border-color: #b8d4fb; background: #f7faff; }
 .asset-card__remove { position: absolute; z-index: 2; top: 9px; right: 9px; display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid #d8e0ea; border-radius: 7px; background: rgb(255 255 255 / 94%); box-shadow: 0 4px 12px rgb(28 44 68 / 9%); color: #667085; opacity: 0; padding: 0; transition: opacity 140ms ease, color 140ms ease, border-color 140ms ease; }
 .asset-card:hover .asset-card__remove, .asset-card__remove:focus-visible { opacity: 1; }
 .asset-card__remove:hover { border-color: #f3b5b0; color: var(--danger); }
@@ -253,6 +256,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .provider-status i { width: 8px; height: 8px; border-radius: 50%; background: #f79009; }.provider-status span { margin-left: auto; color: var(--muted); }.provider-status--succeeded i { background: var(--success); }.provider-status--failed i, .provider-status--expired i { background: var(--danger); }
 .provider-progress { height: 7px; overflow: hidden; margin-top: 11px; border-radius: 999px; background: #edf1f5; }.provider-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 200ms ease; }
 .provider-job dl { display: grid; gap: 0; margin: 22px 0 0; }.provider-job dl div { display: grid; grid-template-columns: 102px minmax(0, 1fr); gap: 12px; border-top: 1px solid #edf0f4; padding: 10px 0; font-size: 12px; }.provider-job dt { color: var(--muted); }.provider-job dd { overflow: hidden; margin: 0; color: #344054; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+
+.asset-edit-page { min-height: calc(100vh - 64px); padding: 34px 32px; }
+.asset-edit-layout { display: grid; grid-template-columns: minmax(280px, .95fr) minmax(320px, 1fr) minmax(280px, .78fr); align-items: start; gap: 20px; margin-top: 28px; }
+.asset-edit-preview { min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 16px; }
+.asset-edit-preview__stage { display: grid; aspect-ratio: 4 / 3; overflow: hidden; place-items: center; border-radius: 8px; background: #f2f5f8; color: var(--muted); font-size: 13px; }
+.asset-edit-preview__stage img { width: 100%; height: 100%; object-fit: contain; }
+.asset-edit-preview dl { display: grid; gap: 0; margin: 14px 0 0; }
+.asset-edit-preview dl div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; border-top: 1px solid #edf0f4; padding: 10px 0; font-size: 12px; }
+.asset-edit-preview dt { color: var(--muted); }
+.asset-edit-preview dd { overflow: hidden; margin: 0; color: #344054; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.asset-edit-form, .asset-edit-job { min-height: 100%; }
 
 .workflow-page { min-height: calc(100vh - 64px); padding: 34px 32px; }
 .workflow-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 20px; max-width: 1200px; margin-top: 28px; }

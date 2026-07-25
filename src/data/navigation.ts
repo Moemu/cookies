@@ -46,7 +46,7 @@ export const systems: SystemDefinition[] = [
       { id: 'performance', label: '投后分析', icon: TrendingUp, group: '工作', layout: 'analysis', description: '连接投放指标与素材特征，解释表现、疲劳、异常和驱动因素。', views: ['广告指标与素材表现'] },
       { id: 'connections', label: '数据接入', icon: Database, group: '数据', layout: 'operations', description: '管理平台数据源、字段映射、素材映射和同步。', views: ['数据源', '导入任务', '字段映射', '素材映射', '同步记录'] },
       { id: 'assets', label: '分析素材库', icon: Library, group: '素材与分析', layout: 'table', description: '建立可分析素材索引、版本、特征与血缘。', views: ['全部素材', '待匹配', '待提取', '特征', '版本与血缘'] },
-      { id: 'content', label: '内容分析', icon: Film, group: '素材与分析', layout: 'analysis', description: '分析图文和视频的文本、视觉、音频与节奏，同时服务投前参考与投后解释。', views: ['漫剧大盘', '制作方法', '包装检查', '图文', '品牌广告'] },
+      { id: 'content', label: '内容分析', icon: Film, group: '素材与分析', layout: 'analysis', description: '分析图文和视频的文本、视觉、音频与节奏，同时服务投前参考与投后解释。', views: ['案例拆解', '漫剧大盘', '制作方法', '包装检查', '图文', '品牌广告'] },
       { id: 'experiments', label: '实验中心', icon: FlaskConical, group: '素材与分析', layout: 'analysis', description: '管理 A/B 变量、样本检查和可归因结果。', views: ['实验列表', '变量矩阵', '样本检查', '实验结果'] },
       { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['候选经验', '已确认', '待复审', '已失效', '引用记录'] },
       { id: 'reports', label: '报告中心', icon: PanelTop, group: '经验与输出', layout: 'editor', description: '组织任务复盘、周期报告和可引用数据。', views: ['任务复盘', '周期报告', '自定义报告', '协作', '版本与导出'] },

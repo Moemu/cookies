@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
+import { ProjectAssetEditPage } from '../features/assets/ProjectAssetEditPage'
 import { CreativeWorkspacePage } from '../features/creative/CreativeWorkspacePage'
 import { ProviderJobsPage } from '../features/provider/ProviderJobsPage'
 import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
@@ -98,6 +99,7 @@ export function Workspace() {
         <main className="workspace" aria-live="polite">
           <Routes>
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
+            <Route path="/projects/:projectId/assets/:assetId/versions/:version/edit" element={<ProjectAssetEditPage />} />
             <Route path="/projects/:projectId/strategy" element={<StrategyWorkspacePage />} />
             <Route path="/projects/:projectId/creative" element={<CreativeWorkspacePage />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
