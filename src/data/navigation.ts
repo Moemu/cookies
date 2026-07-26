@@ -28,7 +28,7 @@ export const systems: SystemDefinition[] = [
     key: 'creative', label: '创意创作', shortLabel: '创意', icon: WandSparkles,
     statement: '把批准策略转化为可评审、可交付的图文与视频作品。',
     nav: [
-      { id: 'tasks', label: '创意任务', icon: ListChecks, group: '工作', layout: 'table', description: '串联策略来源、制作、变体、检查、评审与交付。', views: ['全部', '进行中', '等待输入', '生成中', '待评审', '已完成', '失败', '归档'] },
+      { id: 'tasks', label: '创意任务', icon: ListChecks, group: '工作', layout: 'table', description: '统一进入图文、视频、前贴和素材剪辑工作区，串联策略来源、制作、评审与交付。', views: ['全部', '进行中', '等待输入', '生成中', '待评审', '已完成', '失败', '归档'] },
       { id: 'image-text', label: '图文创作', icon: GalleryHorizontalEnd, group: '创作', layout: 'editor', description: '完成文案、封面、图组、排版、素材和渠道检查。', views: ['小红书', '公众号', '草稿箱', '图文版本'] },
       { id: 'video', label: '视频创作', icon: Video, group: '创作', layout: 'editor', description: '效果广告、品牌广告与素材剪辑三类稳定工作区。', views: ['效果广告', '品牌广告', '素材剪辑'] },
       { id: 'production', label: '制作中心', icon: Aperture, group: '创作', layout: 'operations', description: '管理图片、视频、音频生成与渲染队列。', views: ['图片生成', '视频生成', '音频生成', '渲染队列', '源素材', '失败任务'] },
@@ -46,7 +46,7 @@ export const systems: SystemDefinition[] = [
       { id: 'performance', label: '投后分析', icon: TrendingUp, group: '工作', layout: 'analysis', description: '连接投放指标与素材特征，解释表现、疲劳、异常和驱动因素。', views: ['广告指标与素材表现'] },
       { id: 'connections', label: '数据接入', icon: Database, group: '数据', layout: 'operations', description: '管理平台数据源、字段映射、素材映射和同步。', views: ['数据源', '导入任务', '字段映射', '素材映射', '同步记录'] },
       { id: 'assets', label: '分析素材库', icon: Library, group: '素材与分析', layout: 'table', description: '建立可分析素材索引、版本、特征与血缘。', views: ['全部素材', '待匹配', '待提取', '特征', '版本与血缘'] },
-      { id: 'content', label: '内容分析', icon: Film, group: '素材与分析', layout: 'analysis', description: '分析图文和视频的文本、视觉、音频与节奏，同时服务投前参考与投后解释。', views: ['漫剧大盘', '制作方法', '包装检查', '图文', '品牌广告'] },
+      { id: 'content', label: '内容分析', icon: Film, group: '素材与分析', layout: 'analysis', description: '分析图文和视频的文本、视觉、音频与节奏，同时服务投前参考与投后解释。', views: ['案例拆解', '漫剧大盘', '制作方法', '包装检查', '图文', '品牌广告'] },
       { id: 'experiments', label: '实验中心', icon: FlaskConical, group: '素材与分析', layout: 'analysis', description: '管理 A/B 变量、样本检查和可归因结果。', views: ['实验列表', '变量矩阵', '样本检查', '实验结果'] },
       { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['候选经验', '已确认', '待复审', '已失效', '引用记录'] },
       { id: 'reports', label: '报告中心', icon: PanelTop, group: '经验与输出', layout: 'editor', description: '组织任务复盘、周期报告和可引用数据。', views: ['任务复盘', '周期报告', '自定义报告', '协作', '版本与导出'] },

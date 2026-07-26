@@ -55,6 +55,19 @@ The local MVP persists one demo project and demonstrates this controlled path:
 
 All delivery operations are **local simulations**. This MVP never connects to or writes to a real advertising platform.
 
+### Short-Drama Preroll
+
+The performance-video workspace includes a controlled short-drama preroll path:
+
+1. Start from a confirmed Brief in the current Project.
+2. Enter user-reviewed story context: title, synopsis, and at least one reviewed selling point.
+3. Generate AI candidate hooks, review their evidence and hook-relevance score, then explicitly select one candidate.
+4. Create the video task only after that human selection. The server rebuilds the prompt and persists the selected-candidate snapshot with the generated asset.
+
+The candidate score describes hook-mechanism relevance only. It is not a conversion or delivery-performance prediction. The optional opening line is used only to prevent verbatim reuse and is not stored in the persisted candidate snapshot or generated prompt.
+
+This MVP does **not** support video uploads, VLM/video understanding, mixed-video editing, real advertising delivery, or browser-managed provider credentials. Use only story context and selling points that have already been reviewed for the intended project.
+
 ## Quick start
 
 Prerequisites: Node.js 20 or later and npm. Clone the repository, then install dependencies:
