@@ -99,6 +99,13 @@ type Service struct {
 
 func NewMemoryService(renders RenderJobReader, newID IDGenerator) *Service {
 	store := NewMemoryStore()
+	return NewServiceWithStore(store, renders, newID)
+}
+
+func NewServiceWithStore(store Store, renders RenderJobReader, newID IDGenerator) *Service {
+	if store == nil {
+		store = NewMemoryStore()
+	}
 	service := &Service{
 		store:   store,
 		renders: renders,

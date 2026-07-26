@@ -1,39 +1,39 @@
 # Checklist
 
-- [ ] 视频 AssetVersion 持久化并返回真实 `duration_seconds`、`fps`、`codec`、poster 引用和 `probe_status`，探测失败时保留可诊断错误。
-- [ ] AI 混剪 Planner 优先使用真实 duration，缺失时才回退旧估算逻辑。
+- [x] 视频 AssetVersion 持久化并返回真实 `duration_seconds`、`fps`、`codec`、poster 引用和 `probe_status`，探测失败时保留可诊断错误。
+- [x] AI 混剪 Planner 优先使用真实 duration，缺失时才回退旧估算逻辑。
 - [x] `AssetFeature` 可按组织、项目、asset id、version 和 feature version 保存、读取，并在缺失时安全降级。
 - [x] 素材卡片或混剪选择 UI 能展示 hook、商品露出、卖点或相似度风险摘要。
-- [ ] RemixPlan v2 保存 `schema_version=remix_plan_v2` 和 segment `shots`，旧 clips 草案仍可读取和展示。
-- [ ] Shot Validate 覆盖 segment、timeline、asset version、planning reason 和风险字段。
-- [ ] RenderJob 使用持久化 store，服务重启后可查询最后状态和进度。
-- [ ] RenderJob 创建支持 `Idempotency-Key`，重复相同请求返回同一 job，不同 body 返回 409。
-- [ ] RenderJob 状态机拒绝非法跳转，并能记录 progress、input snapshot、error code 和 error message。
-- [ ] RenderJob 成功输出通过 generated intake 或等价资产摄取进入素材库，不暴露临时 URL、vendor URL 或 bucket key。
-- [ ] 输出资产记录 provenance，可追溯到 RenderJob、RemixPlan 和输入资产版本。
-- [ ] 生成成片能在素材库预览并可再次作为混剪输入。
-- [ ] `QualityReport` 保存 verdict、overall score、subject defect、corruption、aesthetics、compliance、evidence 和 repair suggestions。
-- [ ] Quality critical/major 结果能影响 RenderJob 状态，严重缺陷不得静默进入 succeeded。
-- [ ] 前端能展示质量报告问题、时间点和修复建议。
-- [ ] `HitAnalysis` 输出的视频 segments 时间连续、不重叠、不遗漏，并包含结构、脚本、视觉元素、转化节点和复刻洞察。
-- [ ] `ProductMapping` 校验目标产品和替换资产，能生成 Shot-based RemixPlan，且不默认复用原爆款视频二进制。
-- [ ] AI 前贴支持 hook type、时长、参考素材、prompt draft/output asset/status，并能插入 opening 段后重算 timeline。
-- [ ] 前贴质检失败时不能插入 RemixPlan，用户看到可恢复错误。
-- [ ] AgentRun、ToolCall、TraceSpan 可持久化，工具调用走现有 service 层和权限校验。
-- [ ] 至少一个渲染诊断 Agent fake 流程可读取 RenderJob 错误并输出可追溯诊断建议。
-- [ ] Agent Trace UI 展示步骤、工具、模型 span、错误和重试入口。
-- [ ] Knowledge 文档可导入、切分、搜索，并返回包含来源文档和 chunk 的 citation。
-- [ ] Planner 或 Agent 使用知识搜索时，输出可展示引用来源。
-- [ ] Remix-MMLU 支持保存 eval case、执行 eval run、返回分数和失败 case，重复运行结果稳定。
-- [ ] 前端能查看评测运行结果、分数和失败样例。
-- [ ] FeedbackEvent 为 append-only，评分和评论不会修改历史 RemixPlan 或 RenderJob。
-- [ ] AssetPerformance 或 PlannerWeightSnapshot 能确定性聚合被选次数、渲染成功次数和平均评分。
-- [ ] 前端评分入口在提交失败时保留输入并提供重试。
-- [ ] OpenAPI 描述覆盖新增核心 endpoint 和 schema。
-- [ ] 桌面端 1280px、1440px、1680px 下新增 UI 无横向溢出，关键操作可见、可点、具备可访问名称和焦点反馈。
-- [ ] `go test ./...` 通过。
-- [ ] 前端相关 Vitest 或等价测试通过。
-- [ ] `npm run build` 通过。
-- [ ] `git diff --check` 通过。
-- [ ] 暂存和提交范围仅包含本 Ralph Loop 任务相关文件，且不包含密钥、token、私有证书或敏感连接串。
-- [ ] 推送后关联 PR 的必需 GitHub Actions checks 全部通过。
+- [x] RemixPlan v2 保存 `schema_version=remix_plan_v2` 和 segment `shots`，旧 clips 草案仍可读取和展示。
+- [x] Shot Validate 覆盖 segment、timeline、asset version、planning reason 和风险字段。
+- [x] RenderJob 使用持久化 store，服务重启后可查询最后状态和进度。
+- [x] RenderJob 创建支持 `Idempotency-Key`，重复相同请求返回同一 job，不同 body 返回 409。
+- [x] RenderJob 状态机拒绝非法跳转，并能记录 progress、input snapshot、error code 和 error message。
+- [x] RenderJob 成功输出通过 generated intake 或等价资产摄取进入素材库，不暴露临时 URL、vendor URL 或 bucket key。
+- [x] 输出资产记录 provenance，可追溯到 RenderJob、RemixPlan 和输入资产版本。
+- [x] 生成成片能在素材库预览并可再次作为混剪输入。
+- [x] `QualityReport` 保存 verdict、overall score、subject defect、corruption、aesthetics、compliance、evidence 和 repair suggestions。
+- [x] Quality critical/major 结果能影响 RenderJob 状态，严重缺陷不得静默进入 succeeded。
+- [x] 前端能展示质量报告问题、时间点和修复建议。
+- [x] `HitAnalysis` 输出的视频 segments 时间连续、不重叠、不遗漏，并包含结构、脚本、视觉元素、转化节点和复刻洞察。
+- [x] `ProductMapping` 校验目标产品和替换资产，能生成 Shot-based RemixPlan，且不默认复用原爆款视频二进制。
+- [x] AI 前贴支持 hook type、时长、参考素材、prompt draft/output asset/status，并能插入 opening 段后重算 timeline。
+- [x] 前贴质检失败时不能插入 RemixPlan，用户看到可恢复错误。
+- [x] AgentRun、ToolCall、TraceSpan 可持久化，工具调用走现有 service 层和权限校验。
+- [x] 至少一个渲染诊断 Agent fake 流程可读取 RenderJob 错误并输出可追溯诊断建议。
+- [x] Agent Trace UI 展示步骤、工具、模型 span、错误和重试入口。
+- [x] Knowledge 文档可导入、切分、搜索，并返回包含来源文档和 chunk 的 citation。
+- [x] Planner 或 Agent 使用知识搜索时，输出可展示引用来源。
+- [x] Remix-MMLU 支持保存 eval case、执行 eval run、返回分数和失败 case，重复运行结果稳定。
+- [x] 前端能查看评测运行结果、分数和失败样例。
+- [x] FeedbackEvent 为 append-only，评分和评论不会修改历史 RemixPlan 或 RenderJob。
+- [x] AssetPerformance 或 PlannerWeightSnapshot 能确定性聚合被选次数、渲染成功次数和平均评分。
+- [x] 前端评分入口在提交失败时保留输入并提供重试。
+- [x] OpenAPI 描述覆盖新增核心 endpoint 和 schema。
+- [x] 桌面端 1280px、1440px、1680px 下新增 UI 无横向溢出，关键操作可见、可点、具备可访问名称和焦点反馈。
+- [x] `go test ./...` 通过。
+- [x] 前端相关 Vitest 或等价测试通过。
+- [x] `npm run build` 通过。
+- [x] `git diff --check` 通过。
+- [x] 暂存和提交范围仅包含本 Ralph Loop 任务相关文件，且不包含密钥、token、私有证书或敏感连接串。
+- [x] 推送后关联 PR 的必需 GitHub Actions checks 全部通过。

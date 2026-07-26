@@ -182,6 +182,66 @@ export type QualityReport = {
   updated_at: string
 }
 
+export type RemixPreroll = {
+  id: string
+  plan_id: string
+  hook_type: string
+  reference_asset: { asset_id: string; version: number }
+  style_constraints: string[]
+  duration_seconds: number
+  mode: 'prompt_only' | 'generate_video'
+  prompt_draft: string
+  quality_verdict: 'pass' | 'major' | 'critical'
+  status: 'draft' | 'ready' | 'failed' | 'applied'
+  error_code?: string
+  error_message?: string
+}
+
+export type AgentRun = {
+  id: string
+  workflow: 'render_diagnosis'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  target: { render_job_id: string }
+  steps: Array<{ id: string; label: string; status: string; summary: string }>
+  tool_calls: Array<{ id: string; name: string; status: string; error_message?: string; references?: Array<{ type: string; id: string }> }>
+  trace_spans: Array<{ id: string; parent_id?: string; name: string; kind: 'agent' | 'tool' | 'model'; status: string; model?: string; error_message?: string; input_tokens?: number; output_tokens?: number }>
+  output?: Record<string, unknown>
+  error_message?: string
+}
+
+export type KnowledgeCitation = {
+  document_id: string
+  chunk_id: string
+  title: string
+  source_uri: string
+  section: string
+  start_line: number
+  end_line: number
+  snippet: string
+}
+
+export type EvalRun = {
+  id: string
+  status: 'succeeded'
+  planner_version: string
+  prompt_version: string
+  score: number
+  total_cases: number
+  passed_cases: number
+  failed_cases: string[]
+  results: Array<{ id: string; case_id: string; case_type: string; score: number; passed: boolean; expected: string; actual: string; reason: string }>
+}
+
+export type FeedbackEvent = {
+  id: string
+  event_type: string
+  target_type: string
+  target_id: string
+  rating?: number
+  comment?: string
+  created_at: string
+}
+
 export function createRemixPlan(projectId: string, plan: BulkRemixPlan, signal?: AbortSignal) {
   return apiRequest<SavedRemixPlan>(`/platform/v1/projects/${encodeURIComponent(projectId)}/remix-plans`, {
     method: 'POST',
@@ -289,4 +349,71 @@ export function createQualityReport(projectId: string, renderJobId: string, sign
 
 export function getRenderJobQualityReport(projectId: string, jobId: string, signal?: AbortSignal) {
   return apiRequest<{ quality_report: QualityReport | null }>(`/platform/v1/projects/${encodeURIComponent(projectId)}/remix-render-jobs/${encodeURIComponent(jobId)}/quality-report`, { signal })
+}
+
+export function createRemixPreroll(projectId: string, planId: string, referenceAsset: { asset_id: string; version: number }, styleConstraints: string[], signal?: AbortSignal) {
+  return apiRequest<RemixPreroll>(`/platform/v1/projects/${encodeURIComponent(projectId)}/remix-prerolls`, {
+    method: 'POST',
+    signal,
+    body: JSON.stringify({
+      plan_id: planId,
+      hook_type: 'conflict',
+      reference_asset: referenceAsset,
+      style_constraints: styleConstraints,
+      duration_seconds: 4,
+      mode: 'generate_video',
+    }),
+  })
+}
+
+export function applyRemixPreroll(projectId: string, prerollId: string, signal?: AbortSignal) {
+  return apiRequest<SavedRemixPlan>(`/platform/v1/projects/${encodeURIComponent(projectId)}/remix-prerolls/${encodeURIComponent(prerollId)}/apply`, {
+    method: 'POST',
+    signal,
+  })
+}
+
+export function createAgentRun(projectId: string, renderJobId: string, signal?: AbortSignal) {
+  return apiRequest<AgentRun>(`/platform/v1/projects/${encodeURIComponent(projectId)}/agent-runs`, {
+    method: 'POST',
+    signal,
+    body: JSON.stringify({
+      workflow: 'render_diagnosis',
+      target: { render_job_id: renderJobId },
+    }),
+  })
+}
+
+export function searchKnowledge(projectId: string, query: string, signal?: AbortSignal) {
+  return apiRequest<{ items: Array<{ citations: KnowledgeCitation[] }> }>(`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/search?q=${encodeURIComponent(query)}&limit=3`, { signal })
+}
+
+export function createEvalRun(projectId: string, signal?: AbortSignal) {
+  return apiRequest<EvalRun>(`/platform/v1/projects/${encodeURIComponent(projectId)}/remix-eval-runs`, {
+    method: 'POST',
+    signal,
+    body: JSON.stringify({
+      planner_version: 'planner-v1',
+      prompt_version: 'prompt-v1',
+      submissions: [
+        { case_id: 'remix_mmlu_hook_mcq_v1', choice_id: 'a' },
+        { case_id: 'remix_mmlu_rubric_v1', answer_text: 'authorized timeline risk' },
+      ],
+    }),
+  })
+}
+
+export function createFeedbackEvent(projectId: string, targetId: string, rating: number, comment: string, assetVersion?: { asset_id: string; version: number }, signal?: AbortSignal) {
+  return apiRequest<FeedbackEvent>(`/platform/v1/projects/${encodeURIComponent(projectId)}/remix-feedback-events`, {
+    method: 'POST',
+    signal,
+    body: JSON.stringify({
+      event_type: 'rating',
+      target_type: assetVersion ? 'asset' : 'remix_plan',
+      target_id: targetId,
+      asset_version: assetVersion,
+      rating,
+      comment,
+    }),
+  })
 }

@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createQualityReport, createRemixPlan, createRemixRenderJob, getAssetFeature, getRenderJobQualityReport, getRemixPlan, getRemixRenderJob, listAssetFeatures, listRemixPlans, putAssetContent, removeProjectAsset, upsertAssetFeature } from './api'
+import { applyRemixPreroll, createAgentRun, createEvalRun, createFeedbackEvent, createQualityReport, createRemixPlan, createRemixPreroll, createRemixRenderJob, getAssetFeature, getRenderJobQualityReport, getRemixPlan, getRemixRenderJob, listAssetFeatures, listRemixPlans, putAssetContent, removeProjectAsset, searchKnowledge, upsertAssetFeature } from './api'
 import type { BulkRemixPlan } from './aiRemixPlanner'
 import type { AssetFeature } from './types'
 
@@ -140,6 +140,27 @@ describe('asset upload API', () => {
       policy: 'fail_critical',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/platform/v1/projects/project%2Fone/remix-render-jobs/job%2Ftwo/quality-report', expect.objectContaining({ headers: expect.any(Headers) }))
+  })
+
+  it('calls task14 remix AI workflow endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ id: 'ok', items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createRemixPreroll('project/one', 'plan/two', { asset_id: 'asset/three', version: 4 }, ['quality:critical'])
+    await applyRemixPreroll('project/one', 'preroll/two')
+    await createAgentRun('project/one', 'job/two')
+    await searchKnowledge('project/one', 'hook citation')
+    await createEvalRun('project/one')
+    await createFeedbackEvent('project/one', 'asset_out', 4, '保留这条评论', { asset_id: 'asset_out', version: 1 })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/platform/v1/projects/project%2Fone/remix-prerolls', expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }))
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toMatchObject({ plan_id: 'plan/two', reference_asset: { asset_id: 'asset/three', version: 4 }, style_constraints: ['quality:critical'] })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/platform/v1/projects/project%2Fone/remix-prerolls/preroll%2Ftwo/apply', expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/platform/v1/projects/project%2Fone/agent-runs', expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/platform/v1/projects/project%2Fone/knowledge/search?q=hook%20citation&limit=3', expect.objectContaining({ headers: expect.any(Headers) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/platform/v1/projects/project%2Fone/remix-eval-runs', expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/platform/v1/projects/project%2Fone/remix-feedback-events', expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }))
+    expect(JSON.parse((fetchMock.mock.calls[5] as [string, RequestInit])[1].body as string)).toMatchObject({ event_type: 'rating', target_type: 'asset', rating: 4, comment: '保留这条评论' })
   })
 })
 

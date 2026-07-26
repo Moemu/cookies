@@ -70,7 +70,11 @@ func main() {
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 	remixService := remix.NewServiceWithQuality(func() (string, error) { return ids.New("remixplan") }, remix.MySQLRenderJobStore{DB: db}, remix.MySQLQualityReportStore{DB: db}, nil, remix.FakeQualityEvaluator{})
 	remixService.SetRenderOutputIntake(intakeService)
-	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
+	agentStore, err := agent.NewFileStore("var/platform-agent-runs.json")
+	if err != nil {
+		log.Fatalf("open agent run store: %v", err)
+	}
+	agentService := agent.NewServiceWithStore(agentStore, remixService, func(prefix string) (string, error) { return ids.New(prefix) })
 	knowledgeService := knowledge.NewMemoryService(func(prefix string) (string, error) { return ids.New(prefix) })
 	dependencies := httpserver.Dependencies{
 		Resolver:          resolver,

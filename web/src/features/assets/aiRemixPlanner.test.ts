@@ -140,6 +140,24 @@ describe('aiRemixPlanner', () => {
     expect(plan.segments[0].clips[0].reason).toContain('卖点：3 秒利益点')
     expect(plan.segments[0].clips.map((clip) => clip.assetId)).not.toContain('risky_captured')
   })
+
+  it('将相似度风险写入 Shot risks 供 UI 展示', () => {
+    const plan = buildBulkRemixPlan({
+      now: new Date('2026-07-25T00:00:00Z'),
+      targetSeconds: 12,
+      pace: 'balanced',
+      assetFeatures: [
+        feature('medium_risk', { hook_strength: 0.8, product_visibility: 0.7, similarity_risk: 'medium', selling_points: ['重复钩子'] }),
+      ],
+      selection: {
+        opening: [asset('medium_risk', { source_type: 'captured', width_pixels: 720, height_pixels: 1280 })],
+        middle: [],
+        ending: [],
+      },
+    })
+
+    expect(plan.segments[0].shots[0].risks).toEqual(['similarity_risk:medium'])
+  })
 })
 
 function feature(id: string, overrides: Partial<AssetFeature>): AssetFeature {

@@ -442,6 +442,42 @@ func TestCreatePlanRequestRejectsInvalidShotTimeline(t *testing.T) {
 	}
 }
 
+func TestCreatePlanRequestRejectsShotWithoutPlanningReason(t *testing.T) {
+	t.Parallel()
+	request := validCreatePlanRequest()
+	request.SchemaVersion = SchemaVersionV2
+	request.Segments[0].Shots = []Shot{validShot(SegmentOpening, "asset_opening")}
+	request.Segments[0].Shots[0].Planning.Reason = " "
+	request.Segments[0].Clips = nil
+
+	if err := request.Validate(); err == nil {
+		t.Fatal("Validate() succeeded for missing shot planning reason")
+	}
+}
+
+func TestCreatePlanPersistsShotRisks(t *testing.T) {
+	t.Parallel()
+	service := NewMemoryService(func() (string, error) { return "remixplan_1", nil })
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}}
+	request := validCreatePlanRequest()
+	request.SchemaVersion = SchemaVersionV2
+	request.Segments[0].Shots = []Shot{validShot(SegmentOpening, "asset_opening")}
+	request.Segments[0].Shots[0].Risks = []string{"similarity_group:duplicate_hook"}
+	request.Segments[0].Clips = nil
+
+	plan, err := service.Create(context.Background(), actor, "project_1", request)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	got, err := service.Get(context.Background(), actor, "project_1", plan.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(got.Segments[0].Shots) != 1 || got.Segments[0].Shots[0].Risks[0] != "similarity_group:duplicate_hook" {
+		t.Fatalf("risks were not persisted/read: %#v", got.Segments[0].Shots)
+	}
+}
+
 func TestHitAnalysisUsesContinuousNonOverlappingSegments(t *testing.T) {
 	t.Parallel()
 	service := NewMemoryService(func() (string, error) { return "hitanalysis_1", nil })

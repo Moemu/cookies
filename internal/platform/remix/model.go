@@ -369,8 +369,26 @@ func (s Shot) Validate(segment Segment) error {
 	if s.Planning.Score < 0 || s.Planning.Score > 1 {
 		return fmt.Errorf("shot planning score must be between 0 and 1")
 	}
+	if strings.TrimSpace(s.Planning.Reason) == "" || len([]rune(s.Planning.Reason)) > 500 {
+		return fmt.Errorf("shot planning reason must be between 1 and 500 characters")
+	}
 	if len(s.Planning.ReasonCodes) > 20 || len(s.Planning.Evidence) > 20 || len(s.Risks) > 20 {
 		return fmt.Errorf("shot annotations exceed supported limits")
+	}
+	for _, value := range s.Planning.ReasonCodes {
+		if strings.TrimSpace(value) == "" || len(value) > 80 {
+			return fmt.Errorf("shot planning reason code is invalid")
+		}
+	}
+	for _, value := range s.Planning.Evidence {
+		if strings.TrimSpace(value) == "" || len([]rune(value)) > 500 {
+			return fmt.Errorf("shot planning evidence is invalid")
+		}
+	}
+	for _, value := range s.Risks {
+		if strings.TrimSpace(value) == "" || len([]rune(value)) > 240 {
+			return fmt.Errorf("shot risk is invalid")
+		}
 	}
 	return nil
 }

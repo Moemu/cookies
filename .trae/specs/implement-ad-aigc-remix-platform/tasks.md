@@ -79,11 +79,20 @@
   - [x] SubTask 12.3: 实现 deterministic 聚合，输出素材被选次数、渲染成功次数、平均评分。
   - [x] SubTask 12.4: 添加 append-only、聚合可重复、权重快照和 UI 提交测试。
 
-- [ ] Task 13: 更新 OpenAPI、文档入口和端到端验证：确保新增接口有契约描述，前端构建和后端测试通过。
-  - [ ] SubTask 13.1: 更新 `api/openapi/platform-v1.yaml` 覆盖新增核心 API 和 schema。
-  - [ ] SubTask 13.2: 更新相关 docs 导航或说明，只记录已实现能力和明确 MVP 边界。
-  - [ ] SubTask 13.3: 执行 `go test ./...`、前端相关 vitest、`npm run build`、`git diff --check`。
-  - [ ] SubTask 13.4: 检查敏感信息、暂存范围和工作区变更，仅提交本任务相关文件。
+- [x] Task 13: 更新 OpenAPI、文档入口和端到端验证：确保新增接口有契约描述，前端构建和后端测试通过。
+  - [x] SubTask 13.1: 更新 `api/openapi/platform-v1.yaml` 覆盖新增核心 API 和 schema。
+  - [x] SubTask 13.2: 更新相关 docs 导航或说明，只记录已实现能力和明确 MVP 边界。
+  - [x] SubTask 13.3: 执行 `go test ./...`、前端相关 vitest、`npm run build`、`git diff --check`。
+  - [x] SubTask 13.4: 检查敏感信息、暂存范围和工作区变更，仅提交本任务相关文件。
+
+- [x] Task 14: 修复 checklist 验收失败项：补齐 Shot 校验、前贴失败 UI、Agent 持久化与 Trace UI、Knowledge citation 接入、Eval/Feedback 前端和桌面视口验收。
+  - [x] SubTask 14.1: 收紧 Shot Validate，显式校验 `planning.reason`，并覆盖 risks 字段的保存/读取/展示测试。
+  - [x] SubTask 14.2: 为前贴质检失败补齐前端可恢复错误展示，确保用户能看到原因并重新生成或调整输入。
+  - [x] SubTask 14.3: 为 AgentRun、ToolCall、TraceSpan 增加持久化 store 或明确接入现有持久层，并补齐 Agent Trace UI。
+  - [x] SubTask 14.4: 将 Knowledge search citation 接入 Planner 或 Agent 输出，确保用户能从生成结果追溯到知识来源。
+  - [x] SubTask 14.5: 补齐 Remix-MMLU 前端评测结果页和 Feedback 评分失败保留输入/重试 UI。
+  - [x] SubTask 14.6: 执行 1280px、1440px、1680px 桌面视口验收，修复新增 UI 横向溢出、遮挡、焦点或可访问名称问题。
+  - [x] SubTask 14.7: 重新运行 checklist 相关测试、`go test ./...`、前端测试、`npm run build`、`git diff --check`、提交推送并确认 PR 必需检查通过。
 
 # Task Dependencies
 
@@ -99,3 +108,4 @@
 - Task 11 can run in parallel with Task 10 after schema conventions are agreed.
 - Task 12 can run after Task 3 and Task 5 expose stable target references.
 - Task 13 depends on all implementation tasks.
+- Task 14 depends on Task 13 and failed checklist findings.

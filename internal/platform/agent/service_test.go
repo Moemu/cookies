@@ -55,6 +55,42 @@ func TestRenderDiagnosisRunPersistsTraceAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestFileStoreReloadsAgentRunTraceAndToolCalls(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/agent-runs.json"
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := newTestService(remix.RenderJob{
+		ID: "remixrender_1", OrganizationID: "org_1", ProjectID: "project_1", PlanID: "remixplan_1",
+		Status: remix.RenderFailed, TargetFormat: "mp4", TargetQuality: "draft", ErrorCode: "ENCODER_FAILED", ErrorMessage: "encoder failed",
+	})
+	service.store = store
+	actor := agentActor(remix.ScopePlanRead, ScopeRunWrite, ScopeRunRead)
+
+	run, err := service.CreateRun(context.Background(), actor, "project_1", CreateRunRequest{
+		Workflow: WorkflowRenderDiagnosis,
+		Target:   DiagnosisTarget{RenderJobID: "remixrender_1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+
+	reloadedStore, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewServiceWithStore(reloadedStore, service.renders, func(prefix string) (string, error) { return prefix + "_unused", nil })
+	got, err := reloaded.GetRun(context.Background(), actor, "project_1", run.ID)
+	if err != nil {
+		t.Fatalf("GetRun() after reload error = %v", err)
+	}
+	if got.ID != run.ID || len(got.ToolCalls) != 1 || len(got.TraceSpans) != 3 || outputString(got.Output, "diagnosis") == "" {
+		t.Fatalf("reloaded run lost trace/tool/output data: %#v", got)
+	}
+}
+
 func TestRenderDiagnosisToolPermissionFailureIsCaptured(t *testing.T) {
 	t.Parallel()
 	service := newTestService(remix.RenderJob{ID: "remixrender_1", OrganizationID: "org_1", ProjectID: "project_1", PlanID: "remixplan_1", Status: remix.RenderFailed, TargetFormat: "mp4", TargetQuality: "draft"})

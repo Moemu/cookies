@@ -191,8 +191,14 @@ function clipToShot(clip: RemixClip): RemixShot {
       reasonCodes: [clip.sourceType, clip.aspect].filter((value) => value !== 'unknown'),
       evidence: [clip.reason],
     },
-    risks: [],
+    risks: risksForClip(clip),
   }
+}
+
+function risksForClip(clip: RemixClip) {
+  if (clip.reason.includes('相似度风险：high')) return ['similarity_risk:high']
+  if (clip.reason.includes('相似度风险：medium')) return ['similarity_risk:medium']
+  return []
 }
 
 function shotTypeForAspect(aspect: RemixClip['aspect']) {
