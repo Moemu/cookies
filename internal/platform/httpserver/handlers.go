@@ -13,6 +13,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/platform/remix"
 )
 
 const maxJSONBody = 1 << 20
@@ -312,6 +313,105 @@ func (s *Server) getGeneratedIntake(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value.Response())
 }
 
+func (s *Server) createRemixPlan(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreatePlanRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.Create(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-plans/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) listRemixPlans(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 100"))
+			return
+		}
+		limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.List(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getRemixPlan(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.Get(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("plan_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createRemixRenderJob(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateRenderJobRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreateRenderJob(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-render-jobs/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) getRemixRenderJob(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetRenderJob(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("job_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	decoder := json.NewDecoder(r.Body)
@@ -345,7 +445,7 @@ func writerHeaderNoStore(w http.ResponseWriter) { w.Header().Set("Cache-Control"
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, message, retryable := http.StatusInternalServerError, "INTERNAL", "The service could not complete the request.", true
 	switch {
-	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound):
+	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound):
 		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "The scoped resource does not exist.", false
 	case errors.Is(err, assets.ErrIdempotencyConflict):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, "The idempotency key conflicts with an earlier request.", false

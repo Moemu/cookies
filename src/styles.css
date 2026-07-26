@@ -521,6 +521,11 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .brand-output-card > div:last-child b { margin-top: 6px; font-size: 15px; }
 .brand-output-card p { margin: 8px 0 14px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .brand-output-card button { margin-right: 7px; }
+.creative-task-banner { display: grid; gap: 4px; margin: 12px 16px 0; padding: 11px 12px; background: var(--cobalt-soft); border: 1px solid var(--line); border-radius: 8px; }
+.creative-task-banner.compact { max-width: 640px; margin: 12px 0 0; }
+.creative-task-banner span { color: var(--cobalt-dark); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.creative-task-banner b { font-size: 11px; line-height: 1.35; }
+.creative-task-banner small { color: var(--muted); font-size: 9px; line-height: 1.45; }
 
 .preroll-workspace { display: grid; grid-template-columns: 210px minmax(440px, 1fr) 230px; min-height: 510px; background: var(--surface); border: 1px solid var(--line); }
 .preroll-preview { min-width: 0; padding: 18px 20px 16px; border-right: 1px solid var(--line); }

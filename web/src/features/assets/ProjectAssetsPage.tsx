@@ -223,6 +223,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
       <label className="select-control"><span className="sr-only">素材状态</span><select onChange={(event) => setStatus(event.target.value as 'all' | AssetStatus)} value={status}><option value="all">全部状态</option><option value="ready">已就绪</option><option value="processing">处理中</option><option value="quarantined">已隔离</option><option value="failed">失败</option><option value="archived">已归档</option></select></label>
       <div className="toolbar-spacer" />
       <button className="icon-button" aria-label="刷新素材" disabled={loading} onClick={() => void loadLibrary()} type="button"><AssetIcon name="refresh" /></button>
+      <Link className="button button--secondary upload-button" to={`/projects/${encodeURIComponent(projectId)}/assets/remix`}>AI 混剪</Link>
       <div className="view-toggle" aria-label="视图方式">
         <button aria-label="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')} type="button"><AssetIcon name="grid" /></button>
         <button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')} type="button"><AssetIcon name="list" /></button>

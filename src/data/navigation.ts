@@ -28,7 +28,7 @@ export const systems: SystemDefinition[] = [
     key: 'creative', label: '创意创作', shortLabel: '创意', icon: WandSparkles,
     statement: '把批准策略转化为可评审、可交付的图文与视频作品。',
     nav: [
-      { id: 'tasks', label: '创意任务', icon: ListChecks, group: '工作', layout: 'table', description: '串联策略来源、制作、变体、检查、评审与交付。', views: ['全部', '进行中', '等待输入', '生成中', '待评审', '已完成', '失败', '归档'] },
+      { id: 'tasks', label: '创意任务', icon: ListChecks, group: '工作', layout: 'table', description: '统一进入图文、视频、前贴和素材剪辑工作区，串联策略来源、制作、评审与交付。', views: ['全部', '进行中', '等待输入', '生成中', '待评审', '已完成', '失败', '归档'] },
       { id: 'image-text', label: '图文创作', icon: GalleryHorizontalEnd, group: '创作', layout: 'editor', description: '完成文案、封面、图组、排版、素材和渠道检查。', views: ['小红书', '公众号', '草稿箱', '图文版本'] },
       { id: 'video', label: '视频创作', icon: Video, group: '创作', layout: 'editor', description: '效果广告、品牌广告与素材剪辑三类稳定工作区。', views: ['效果广告', '品牌广告', '素材剪辑'] },
       { id: 'production', label: '制作中心', icon: Aperture, group: '创作', layout: 'operations', description: '管理图片、视频、音频生成与渲染队列。', views: ['图片生成', '视频生成', '音频生成', '渲染队列', '源素材', '失败任务'] },
