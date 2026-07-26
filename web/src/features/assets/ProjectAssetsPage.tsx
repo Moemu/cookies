@@ -3,9 +3,9 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiProblem } from '../../shared/api/client'
 import { getProjectContext } from '../platform/api'
 import type { Project, ProjectContext } from '../platform/types'
-import { getAssetPreview, listProjectAssets, removeProjectAsset } from './api'
+import { getAssetPreview, listAssetFeatures, listProjectAssets, removeProjectAsset } from './api'
 import { AssetIcon } from './AssetIcon'
-import type { AssetSource, AssetStatus, ProjectAsset, UploadSession } from './types'
+import type { AssetFeature, AssetSource, AssetStatus, ProjectAsset, UploadSession } from './types'
 import { RemoveAssetDialog } from './RemoveAssetDialog'
 import { UploadDrawer } from './UploadDrawer'
 
@@ -40,13 +40,33 @@ function assetLabel(asset: ProjectAsset) {
   return `${asset.asset.id} · v${asset.version.version}`
 }
 
+function assetFeatureKey(asset: ProjectAsset) {
+  return `${asset.asset.id}:${asset.version.version}`
+}
+
+function percent(value: number) {
+  return `${Math.round(value * 100)}%`
+}
+
+function riskLabel(risk: AssetFeature['similarity_risk']) {
+  if (risk === 'high') return '高'
+  if (risk === 'medium') return '中'
+  return '低'
+}
+
+function featureSummary(feature?: AssetFeature) {
+  if (!feature) return '暂无特征，Planner 使用基础元数据降级。'
+  const point = feature.selling_points[0] ? ` · 卖点：${feature.selling_points[0]}` : ''
+  return `Hook ${percent(feature.hook_strength)} · 商品露出 ${percent(feature.product_visibility)} · 相似度风险 ${riskLabel(feature.similarity_risk)}${point}`
+}
+
 function removeErrorMessage(error: unknown) {
   if (error instanceof ApiProblem) return `${error.problem.error.message}（${error.problem.error.code}）`
   if (error instanceof Error) return error.message
   return '素材删除失败，请稍后重试。'
 }
 
-function AssetCard({ asset, editUrl, onRemove, previewUnavailable, previewUrl, view }: { asset: ProjectAsset; editUrl?: string; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; view: ViewMode }) {
+function AssetCard({ asset, editUrl, feature, onRemove, previewUnavailable, previewUrl, view }: { asset: ProjectAsset; editUrl?: string; feature?: AssetFeature; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; view: ViewMode }) {
   const dimensions = asset.version.width_pixels && asset.version.height_pixels
     ? `${asset.version.width_pixels} × ${asset.version.height_pixels}`
     : '尺寸未记录'
@@ -64,6 +84,7 @@ function AssetCard({ asset, editUrl, onRemove, previewUnavailable, previewUrl, v
       <h3 title={asset.asset.id}>{assetLabel(asset)}</h3>
       <div className="asset-source"><span className={`source-dot source-dot--${asset.version.source_type}`} />{sourceLabels[asset.version.source_type]}</div>
       <div className="asset-facts"><span>{dimensions}</span><span>{formatBytes(asset.version.size_bytes)}</span></div>
+      <p className={feature ? 'asset-feature-summary' : 'asset-feature-summary asset-feature-summary--empty'}>{featureSummary(feature)}</p>
       <div className="asset-footer"><span className={`asset-status asset-status--${asset.asset.status}`}><i />{statusLabels[asset.asset.status]}</span><time dateTime={asset.created_at}>{formatDate(asset.created_at)}</time></div>
     </div>
   </article>
@@ -72,6 +93,7 @@ function AssetCard({ asset, editUrl, onRemove, previewUnavailable, previewUrl, v
 export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' | 'status'> }) {
   const { projectId = '' } = useParams()
   const [assets, setAssets] = useState<ProjectAsset[]>([])
+  const [features, setFeatures] = useState<AssetFeature[]>([])
   const [context, setContext] = useState<ProjectContext | null>(null)
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
   const [unavailablePreviewIds, setUnavailablePreviewIds] = useState<Set<string>>(() => new Set())
@@ -94,11 +116,13 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
     setLoading(true)
     setError('')
     try {
-      const [assetList, projectContext] = await Promise.all([
+      const [assetList, projectContext, featureList] = await Promise.all([
         listProjectAssets(projectId, signal),
         getProjectContext(projectId, signal),
+        listAssetFeatures(projectId, signal),
       ])
       setAssets(assetList.items)
+      setFeatures(featureList.items)
       setContext(projectContext)
 
       const previews = await Promise.all(assetList.items.map(async (item) => {
@@ -140,6 +164,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
   const readyCount = assets.filter((asset) => asset.asset.status === 'ready').length
   const generatedCount = assets.filter((asset) => asset.version.source_type === 'provider_generated').length
   const projectCanAcceptAssets = project?.status === 'draft' ? false : context ? Boolean(context.brand_id) : true
+  const featuresByAsset = useMemo(() => new Map(features.map((feature) => [`${feature.asset_id}:${feature.asset_version}`, feature])), [features])
 
   function handleUploadComplete(file: File, session: UploadSession) {
     const assetId = session.project_asset_ref?.asset_version.asset_id
@@ -242,7 +267,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
     </div> : null}
 
     {filteredAssets.length > 0 ? <div className={view === 'list' ? 'asset-collection asset-collection--list' : 'asset-collection'} aria-busy={loading}>
-      {filteredAssets.map((asset) => <AssetCard asset={asset} editUrl={asset.asset.status === 'ready' && (localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]) ? `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.asset.id)}/versions/${asset.version.version}/edit` : undefined} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
+      {filteredAssets.map((asset) => <AssetCard asset={asset} editUrl={asset.asset.status === 'ready' && (localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]) ? `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.asset.id)}/versions/${asset.version.version}/edit` : undefined} feature={featuresByAsset.get(assetFeatureKey(asset))} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
         setRemoveError('')
         setAssetToRemove(asset)
       }} previewUnavailable={unavailablePreviewIds.has(asset.asset.id)} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} view={view} />)}

@@ -30,7 +30,7 @@ const createdProject = {
 const asset = {
   ref: { project_id: 'project_demo', asset_version: { asset_id: 'asset_1234567890', version: 1 } },
   asset: { id: 'asset_1234567890', organization_id: 'org_local', asset_kind: 'image', status: 'ready', owner_system: 'assets', latest_version: 1, created_at: '2026-07-22T00:00:00Z', updated_at: '2026-07-22T00:00:00Z' },
-  version: { organization_id: 'org_local', asset_id: 'asset_1234567890', version: 1, status: 'ready', source_type: 'upload', mime_type: 'image/png', size_bytes: 1024, sha256: 'a'.repeat(64), width_pixels: 1200, height_pixels: 800, project_context_version: 1, created_at: '2026-07-22T00:00:00Z' },
+  version: { organization_id: 'org_local', asset_id: 'asset_1234567890', version: 1, status: 'ready', source_type: 'upload', mime_type: 'image/png', size_bytes: 1024, sha256: 'a'.repeat(64), width_pixels: 1200, height_pixels: 800, media: { probe_status: 'not_required' }, project_context_version: 1, created_at: '2026-07-22T00:00:00Z' },
   created_at: '2026-07-22T00:00:00Z',
 }
 
@@ -50,6 +50,7 @@ describe('App', () => {
       if (url === '/platform/v1/projects') return jsonResponse({ items: [project] })
       if (url === '/platform/v1/projects/project_demo/assets/asset_1234567890/versions/1' && method === 'DELETE') return new Response(null, { status: 204 })
       if (url.endsWith('/context')) return jsonResponse({ organization_id: 'org_local', project_id: url.includes('project_summer') ? 'project_summer' : 'project_demo', brand_id: url.includes('project_summer') ? 'brand_studio' : 'brand_local', product_ids: [], project_context_version: 1 })
+      if (url.includes('/assets/features?')) return jsonResponse({ items: [] })
       if (url.includes('/assets?')) return jsonResponse({ items: [asset] })
       if (url.endsWith('/preview')) return jsonResponse({ url: '', method: 'GET', headers: {}, expires_at: '2026-07-22T01:00:00Z' })
       return jsonResponse({ error: { code: 'RESOURCE_NOT_FOUND', message: 'not found', request_id: 'req_test', retryable: false, details: [] } }, 404)

@@ -10,6 +10,7 @@ import (
 )
 
 const MaxImageBytes int64 = 20 * 1024 * 1024
+const MaxVideoBytes int64 = 500 * 1024 * 1024
 const MaxImageDimension = 16384
 const MaxImagePixels int64 = 100_000_000
 
@@ -53,6 +54,7 @@ type AssetVersion struct {
 	SHA256                string                   `json:"sha256"`
 	WidthPixels           int                      `json:"width_pixels,omitempty"`
 	HeightPixels          int                      `json:"height_pixels,omitempty"`
+	Media                 MediaMetadata            `json:"media"`
 	ProviderJobID         string                   `json:"provider_job_id,omitempty"`
 	ProviderOutputID      string                   `json:"provider_output_id,omitempty"`
 	ProjectContextVersion int64                    `json:"project_context_version,omitempty"`
@@ -64,11 +66,126 @@ func (v AssetVersion) Ref() contract.AssetVersionRef {
 	return contract.AssetVersionRef{AssetID: v.AssetID, Version: v.Version}
 }
 
+type AssetRelationType string
+
+const (
+	AssetRelationGeneratedFrom AssetRelationType = "generated_from"
+)
+
+type AssetRelation struct {
+	OrganizationID contract.OrganizationID  `json:"organization_id"`
+	ProjectID      contract.ProjectID       `json:"project_id"`
+	OutputAsset    contract.AssetVersionRef `json:"output_asset"`
+	RelationType   AssetRelationType        `json:"relation_type"`
+	Source         contract.ResourceRef     `json:"source"`
+	CreatedAt      time.Time                `json:"created_at"`
+}
+
+func (r AssetRelation) Validate() error {
+	if strings.TrimSpace(string(r.OrganizationID)) == "" || strings.TrimSpace(string(r.ProjectID)) == "" {
+		return fmt.Errorf("asset relation scope is required")
+	}
+	if err := r.OutputAsset.Validate(); err != nil {
+		return fmt.Errorf("output asset: %w", err)
+	}
+	if r.RelationType != AssetRelationGeneratedFrom {
+		return fmt.Errorf("asset relation type is invalid")
+	}
+	if err := r.Source.Validate(); err != nil {
+		return fmt.Errorf("source: %w", err)
+	}
+	if r.Source.Type == "asset_version" && r.Source.Version == nil {
+		return fmt.Errorf("asset_version source requires version")
+	}
+	return nil
+}
+
 type ProjectAsset struct {
 	Ref       contract.ProjectAssetRef `json:"ref"`
 	Asset     Asset                    `json:"asset"`
 	Version   AssetVersion             `json:"version"`
 	CreatedAt time.Time                `json:"created_at"`
+}
+
+const AssetFeatureSchemaV1 = "asset_feature_v1"
+
+type AssetFeatureSimilarityRisk string
+
+const (
+	AssetFeatureRiskLow    AssetFeatureSimilarityRisk = "low"
+	AssetFeatureRiskMedium AssetFeatureSimilarityRisk = "medium"
+	AssetFeatureRiskHigh   AssetFeatureSimilarityRisk = "high"
+)
+
+type AssetFeature struct {
+	OrganizationID    contract.OrganizationID    `json:"organization_id"`
+	ProjectID         contract.ProjectID         `json:"project_id"`
+	AssetID           contract.AssetID           `json:"asset_id"`
+	AssetVersion      int64                      `json:"asset_version"`
+	SchemaVersion     string                     `json:"schema_version"`
+	FeatureVersion    string                     `json:"feature_version"`
+	HookStrength      float64                    `json:"hook_strength"`
+	ProductVisibility float64                    `json:"product_visibility"`
+	SceneTags         []string                   `json:"scene_tags"`
+	ProductTags       []string                   `json:"product_tags"`
+	PersonTags        []string                   `json:"person_tags"`
+	ActionTags        []string                   `json:"action_tags"`
+	EmotionTags       []string                   `json:"emotion_tags"`
+	SellingPoints     []string                   `json:"selling_points"`
+	CTAPresence       bool                       `json:"cta_presence"`
+	SimilarityGroup   string                     `json:"similarity_group,omitempty"`
+	SimilarityRisk    AssetFeatureSimilarityRisk `json:"similarity_risk"`
+	Evidence          []string                   `json:"evidence"`
+	CreatedAt         time.Time                  `json:"created_at"`
+	UpdatedAt         time.Time                  `json:"updated_at"`
+}
+
+func (f AssetFeature) Ref() contract.AssetVersionRef {
+	return contract.AssetVersionRef{AssetID: f.AssetID, Version: f.AssetVersion}
+}
+
+func (f AssetFeature) Validate() error {
+	if f.OrganizationID == "" || f.ProjectID == "" || f.AssetID == "" || f.AssetVersion < 1 {
+		return fmt.Errorf("asset feature scope is required")
+	}
+	if f.SchemaVersion != AssetFeatureSchemaV1 {
+		return fmt.Errorf("asset feature schema_version must be %s", AssetFeatureSchemaV1)
+	}
+	if strings.TrimSpace(f.FeatureVersion) == "" || len(f.FeatureVersion) > 96 {
+		return fmt.Errorf("asset feature feature_version is required")
+	}
+	if !validUnitScore(f.HookStrength) || !validUnitScore(f.ProductVisibility) {
+		return fmt.Errorf("asset feature scores must be between 0 and 1")
+	}
+	if f.SimilarityRisk != AssetFeatureRiskLow && f.SimilarityRisk != AssetFeatureRiskMedium && f.SimilarityRisk != AssetFeatureRiskHigh {
+		return fmt.Errorf("asset feature similarity_risk is invalid")
+	}
+	return nil
+}
+
+func validUnitScore(value float64) bool {
+	return value >= 0 && value <= 1
+}
+
+type MediaProbeStatus string
+
+const (
+	MediaProbeNotRequired MediaProbeStatus = "not_required"
+	MediaProbeSucceeded   MediaProbeStatus = "succeeded"
+	MediaProbeFailed      MediaProbeStatus = "failed"
+)
+
+type MediaMetadata struct {
+	DurationSeconds float64          `json:"duration_seconds,omitempty"`
+	FPS             float64          `json:"fps,omitempty"`
+	Codec           string           `json:"codec,omitempty"`
+	BitrateBPS      int64            `json:"bitrate_bps,omitempty"`
+	AudioCodec      string           `json:"audio_codec,omitempty"`
+	AudioChannels   int              `json:"audio_channels,omitempty"`
+	AudioSampleRate int              `json:"audio_sample_rate,omitempty"`
+	PosterFrameRef  string           `json:"poster_frame_ref,omitempty"`
+	ProbeStatus     MediaProbeStatus `json:"probe_status"`
+	ProbeError      string           `json:"probe_error,omitempty"`
 }
 
 type UploadStatus string
@@ -93,11 +210,11 @@ func (r CreateUploadRequest) Validate() error {
 	if strings.TrimSpace(r.Filename) == "" || len(r.Filename) > 512 {
 		return fmt.Errorf("filename must be between 1 and 512 characters")
 	}
-	if !allowedDeclaredImageMIME(r.DeclaredMIMEType) {
-		return fmt.Errorf("declared_mime_type must be image/jpeg or image/png")
+	if !allowedDeclaredAssetMIME(r.DeclaredMIMEType) {
+		return fmt.Errorf("declared_mime_type must be image/jpeg, image/png, or video/*")
 	}
-	if r.DeclaredSizeBytes < 1 || r.DeclaredSizeBytes > MaxImageBytes {
-		return fmt.Errorf("declared_size_bytes must be between 1 and %d", MaxImageBytes)
+	if r.DeclaredSizeBytes < 1 || r.DeclaredSizeBytes > maxBytesForMIME(r.DeclaredMIMEType) {
+		return fmt.Errorf("declared_size_bytes is outside the supported range for %s", r.DeclaredMIMEType)
 	}
 	if r.DeclaredSHA256 != nil && !validSHA256(*r.DeclaredSHA256) {
 		return fmt.Errorf("declared_sha256 must be a lowercase hexadecimal SHA-256 digest")
@@ -149,13 +266,30 @@ type AssetCommit struct {
 	SHA256                string
 	WidthPixels           int
 	HeightPixels          int
+	Media                 MediaMetadata
 	ProviderJobID         string
 	ProviderOutputID      string
 	ProjectContextVersion int64
 	Location              ObjectLocation
 	Event                 contract.EventEnvelope
+	Relations             []AssetRelation
 }
 
 func allowedDeclaredImageMIME(value string) bool {
 	return value == "image/jpeg" || value == "image/png"
+}
+
+func allowedDeclaredVideoMIME(value string) bool {
+	return strings.HasPrefix(value, "video/")
+}
+
+func allowedDeclaredAssetMIME(value string) bool {
+	return allowedDeclaredImageMIME(value) || allowedDeclaredVideoMIME(value)
+}
+
+func maxBytesForMIME(value string) int64 {
+	if allowedDeclaredVideoMIME(value) {
+		return MaxVideoBytes
+	}
+	return MaxImageBytes
 }

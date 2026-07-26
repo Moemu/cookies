@@ -31,6 +31,8 @@
 | [四大模块子板块分析](./20-module-submodule-analysis.md) | 每个子板块的功能、必要性、价值、优先级、角色与展示形式 | 产品、设计、研发、业务负责人 |
 | [视频素材剪辑与开源框架方案](./21-video-material-editor-spec.md) | 素材剪辑子模块、编辑器布局、OpenCut/FFmpeg 选型、数据模型与 MVP | 产品、设计、前端、后端、音视频研发 |
 | [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md) | Project 管理、唯一工作台、八阶段落点、四模块逐页问题、整改计划与全面评估 | 产品、设计、前端、后端、测试 |
+| [广告 AIGC 与 AI 混剪开发知识沉淀](./23-ad-aigc-remix-development-knowledge.md) | 从飞书 Base 重点资料沉淀素材工厂、AI 混剪、RenderJob、VLM 质检、Agent/RAG、评测和合规开发知识 | 产品、架构、后端、前端、算法、音视频研发 |
+| [广告 AIGC 与 AI 混剪逐点技术方案](./24-ad-aigc-remix-technical-breakdown.md) | 将素材元数据、Shot、RenderJob、质检、爆款复刻、前贴、Agent、RAG、评测和反馈逐点拆成可研发落地的技术方案 | 产品、架构、后端、前端、算法、音视频研发 |
 | [广告策略库](./策略/README.md) | 素材洞察、漫剧制作、剪辑包装、商品与素材投放及全链路闭环策略 | 策略、创意、投放、数据、产品 |
 
 ## 系统划分

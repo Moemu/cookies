@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiArtifact, type ApiAuditEvent, type ApiOperationalRecord, type ApiOperationalRecordKind } from '../data/api'
+import { api, type ApiAgentRun, type ApiArtifact, type ApiAuditEvent, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
@@ -462,6 +462,168 @@ function AuditEvidenceSurface() {
   </div>
 }
 
+function RemixMMLUEvalSurface() {
+  const { currentProject } = useProject()
+  const [cases, setCases] = useState<ApiRemixEvalCase[]>([])
+  const [run, setRun] = useState<ApiRemixEvalRun | null>(null)
+  const [notice, setNotice] = useState('')
+  const [isRunning, setIsRunning] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void api.listRemixEvalCases(currentProject.id).then(response => {
+      if (active) setCases(response.items)
+    }).catch(cause => {
+      if (active) setNotice(cause instanceof Error ? cause.message : '读取 Remix-MMLU 评测集失败')
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+
+  const runEval = async () => {
+    setIsRunning(true)
+    setNotice('')
+    try {
+      const nextRun = await api.createRemixEvalRun(currentProject.id, {
+        planner_version: 'planner.v1',
+        prompt_version: 'prompt.v1',
+        submissions: [
+          { case_id: 'remix_mmlu_hook_mcq_v1', choice_id: 'b' },
+          { case_id: 'remix_mmlu_rubric_v1', answer_text: 'authorized timeline risk' },
+        ],
+      })
+      setRun(nextRun)
+      setNotice(`评测运行 ${nextRun.id} 已完成，可复现实验分数。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '运行 Remix-MMLU 评测失败')
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  const failedCaseTitles = run?.failed_cases.map(id => cases.find(item => item.id === id)?.title ?? id) ?? []
+  return <div className="agent-eval-stack">
+    <div className="ops-layout remix-eval-surface">
+      <section className="ops-main">
+        <div className="ops-status"><span className="signal ok"><CircleCheck size={18}/></span><div><span className="section-label">REMIX-MMLU</span><h2>Planner 与 Prompt 回归评测</h2><p>保存 MCQ/rubric seed cases，使用 deterministic scorer 验证混剪 Planner 输出是否稳定。</p></div><button className="primary-button" onClick={() => void runEval()} disabled={isRunning}>{isRunning ? '运行中…' : '运行固定评测'}</button></div>
+        <div className="ops-list">
+          {cases.map(testCase => <div key={testCase.id}><span>{testCase.title}</span><b>{testCase.type.toUpperCase()} · {testCase.planner_version} / {testCase.prompt_version}</b><Status value={testCase.type === 'mcq' ? '选择题' : `Rubric ${Math.round(testCase.passing_score * 100)}分通过`}/><button aria-label={`查看${testCase.title}详情`}><ArrowRight size={15}/></button></div>)}
+          {!cases.length ? <div className="panel-empty">暂无评测 case，等待服务端 seed cases 初始化。</div> : null}
+        </div>
+      </section>
+      <aside className="ops-rail">
+        <span className="section-label">最新运行</span>
+        {run ? <>
+          <div className="activity-item"><time>{Math.round(run.score * 100)}%</time><span><b>{run.passed_cases} / {run.total_cases} cases passed</b><small>{run.planner_version} · {run.prompt_version}</small></span></div>
+          {run.results.map(result => <div className="activity-item" key={result.id}><time>{result.passed ? 'PASS' : 'FAIL'}</time><span><b>{cases.find(item => item.id === result.case_id)?.title ?? result.case_id}</b><small>{result.reason} · {Math.round(result.score * 100)}%</small></span></div>)}
+          {failedCaseTitles.length ? <div className="inline-notice" role="status">失败 case：{failedCaseTitles.join('、')}</div> : <div className="inline-notice" role="status">全部 case 通过，结果可重复。</div>}
+        </> : <div className="panel-empty">点击运行后展示总分、失败 case 和关联版本。</div>}
+        {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+      </aside>
+    </div>
+    <AgentRunTracePanel />
+  </div>
+}
+
+function AgentRunTracePanel() {
+  const { currentProject } = useProject()
+  const [renderJobId, setRenderJobId] = useState('remixrender_1')
+  const [runs, setRuns] = useState<ApiAgentRun[]>([])
+  const [selectedRunId, setSelectedRunId] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void api.listAgentRuns(currentProject.id, 10).then(response => {
+      if (!active) return
+      setRuns(response.items)
+      setSelectedRunId(current => current || response.items[0]?.id || '')
+    }).catch(cause => {
+      if (active) setNotice(cause instanceof Error ? cause.message : '读取 Agent Run 失败')
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+
+  const selectedRun = runs.find(run => run.id === selectedRunId) ?? runs[0]
+  const startDiagnosis = async () => {
+    if (!renderJobId.trim()) {
+      setNotice('请先输入 RenderJob ID。')
+      return
+    }
+    setBusy(true)
+    setNotice('')
+    try {
+      const run = await api.createAgentRun(currentProject.id, renderJobId.trim())
+      setRuns(current => [run, ...current.filter(item => item.id !== run.id)])
+      setSelectedRunId(run.id)
+      setNotice(run.status === 'failed' ? `诊断失败：${run.error_message ?? '未知错误'}` : `Agent Run ${run.id.slice(0, 8)} 已完成。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '启动 Agent Run 失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const retryDiagnosis = () => {
+    if (selectedRun?.target.render_job_id) setRenderJobId(selectedRun.target.render_job_id)
+    void startDiagnosis()
+  }
+  const cancelRun = async () => {
+    if (!selectedRun) return
+    setBusy(true)
+    try {
+      const cancelled = await api.cancelAgentRun(currentProject.id, selectedRun.id)
+      setRuns(current => current.map(item => item.id === cancelled.id ? cancelled : item))
+      setNotice('Agent Run 已取消。')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '取消 Agent Run 失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <section className="agent-trace-surface">
+    <div className="agent-trace-heading">
+      <div><span className="section-label">AGENT RUN / TRACE</span><h2>渲染诊断 Agent</h2><p>持久化展示步骤、工具调用、模型 span、错误和重试入口。</p></div>
+      <div className="agent-run-controls"><input aria-label="RenderJob ID" value={renderJobId} onChange={event => setRenderJobId(event.target.value)} placeholder="输入 remix render job id"/><button className="primary-button" disabled={busy} onClick={() => void startDiagnosis()}>{busy ? '执行中…' : '启动诊断'}</button></div>
+    </div>
+    <div className="agent-trace-grid">
+      <aside className="agent-run-list">
+        {runs.map(run => <button key={run.id} className={run.id === selectedRun?.id ? 'active' : ''} onClick={() => setSelectedRunId(run.id)}>
+          <span>{run.id.slice(0, 12)}</span><b>{run.workflow}</b><small>{run.status} · {run.target.render_job_id}</small>
+        </button>)}
+        {!runs.length ? <div className="panel-empty">暂无 Agent Run，输入 RenderJob ID 后可创建诊断。</div> : null}
+      </aside>
+      <div className="agent-run-detail">
+        {selectedRun ? <>
+          <div className="agent-run-summary"><Status value={agentStatusLabel(selectedRun.status)}/><b>{String(selectedRun.output?.diagnosis ?? selectedRun.error_message ?? '等待诊断输出')}</b><span>{String(selectedRun.output?.recommendation ?? '工具和模型 span 会在运行完成后展示。')}</span></div>
+          <div className="agent-trace-columns">
+            <TraceColumn title="步骤" items={selectedRun.steps.map(step => ({ id: step.id, title: step.label, meta: step.status, body: step.summary }))}/>
+            <TraceColumn title="工具调用" items={selectedRun.tool_calls.map(call => ({ id: call.id, title: call.name, meta: call.status, body: call.error_message ?? String(call.output?.recommendation ?? call.output?.diagnosis ?? '无输出') }))}/>
+            <TraceColumn title="模型 Span" items={selectedRun.trace_spans.map(span => ({ id: span.id, title: span.name, meta: span.parent_id ? `${span.kind} · parent ${span.parent_id.slice(0, 8)}` : span.kind, body: span.error_message ?? `${span.status}${span.model ? ` · ${span.model}` : ''}` }))}/>
+          </div>
+          <div className="agent-run-actions"><button className="secondary-button" disabled={busy || !['queued', 'running'].includes(selectedRun.status)} onClick={() => void cancelRun()}>取消</button><button className="primary-button" disabled={busy} onClick={retryDiagnosis}>重试诊断</button></div>
+        </> : <div className="panel-empty">选择 Agent Run 后查看 trace 详情。</div>}
+      </div>
+    </div>
+    {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+  </section>
+}
+
+function TraceColumn({ title, items }: { title: string; items: Array<{ id: string; title: string; meta: string; body: string }> }) {
+  return <div className="trace-column"><span className="section-label">{title}</span>{items.map(item => <article key={item.id}><small>{item.meta}</small><b>{item.title}</b><p>{item.body}</p></article>)}{!items.length ? <div className="panel-empty">暂无{title}</div> : null}</div>
+}
+
+function agentStatusLabel(status: ApiAgentRun['status']): string {
+  const labels: Record<ApiAgentRun['status'], string> = {
+    queued: '排队中',
+    running: '执行中',
+    succeeded: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  }
+  return labels[status]
+}
+
 function auditActionLabel(action: string): string {
   const labels: Record<string, string> = {
     'project.created': '已创建路演项目',
@@ -541,6 +703,7 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
+    : system.key === 'creative' && item.id === 'operations' ? <RemixMMLUEvalSurface/>
     : null
   if (specialized) surface = specialized
   else {

@@ -5,7 +5,7 @@ import {
   Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiArtifact } from '../data/api'
+import { api, type ApiArtifact, type ApiAssetFeature, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult } from '../data/api'
 import type { DataState, SystemKey } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -346,18 +346,32 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
   const [type, setType] = useState('全部')
   const [selectedId, setSelectedId] = useState('')
   const [artifacts, setArtifacts] = useState<ApiArtifact[]>([])
+  const [assetFeatures, setAssetFeatures] = useState<ApiAssetFeature[]>([])
+  const [knowledgeDocuments, setKnowledgeDocuments] = useState<ApiKnowledgeDocument[]>([])
+  const [knowledgeResults, setKnowledgeResults] = useState<ApiKnowledgeSearchResult[]>([])
   const [assetState, setAssetState] = useState<'loading' | 'ready' | 'error'>('loading')
   const loadArtifacts = useCallback(async () => {
     if (!currentProject.id) return
     setAssetState('loading')
     try {
-      const next = await api.listArtifacts(currentProject.id)
-      setArtifacts(next.filter(artifact => mode === 'knowledge'
-        ? artifact.kind === 'document' && artifact.content.startsWith('[knowledge]')
-        : artifact.kind === 'image' || artifact.kind === 'video'))
+      if (mode === 'knowledge') {
+        const next = await api.listKnowledgeDocuments(currentProject.id, 50)
+        setKnowledgeDocuments(next.items)
+        setKnowledgeResults([])
+      } else {
+        const [next, features] = await Promise.all([
+          api.listArtifacts(currentProject.id),
+          api.listAssetFeatures(currentProject.id),
+        ])
+        setArtifacts(next.filter(artifact => artifact.kind === 'image' || artifact.kind === 'video'))
+        setAssetFeatures(features.items)
+      }
       setAssetState('ready')
     } catch {
       setArtifacts([])
+      setAssetFeatures([])
+      setKnowledgeDocuments([])
+      setKnowledgeResults([])
       setAssetState('error')
     }
   }, [currentProject.id, mode])
@@ -366,10 +380,83 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
     (type === '全部' || assetType(asset) === type)
     && `${asset.id} ${asset.content}`.toLowerCase().includes(query.trim().toLowerCase()),
   ), [artifacts, query, type])
+  const filteredKnowledgeDocuments = useMemo(() => knowledgeDocuments.filter(document =>
+    `${document.id} ${document.title} ${document.source_uri}`.toLowerCase().includes(query.trim().toLowerCase()),
+  ), [knowledgeDocuments, query])
+  useEffect(() => {
+    if (mode !== 'knowledge' || !query.trim()) {
+      setKnowledgeResults([])
+      return
+    }
+    let active = true
+    const timer = window.setTimeout(() => {
+      void api.searchKnowledge(currentProject.id, query.trim(), 10).then(response => {
+        if (active) setKnowledgeResults(response.items)
+      }).catch(() => {
+        if (active) setKnowledgeResults([])
+      })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [currentProject.id, mode, query])
   useEffect(() => {
     setSelectedId(current => filtered.some(asset => asset.id === current) ? current : filtered[0]?.id ?? '')
   }, [filtered])
   const selected = filtered.find(asset => asset.id === selectedId)
+  const selectedFeature = selected ? featureForAsset(selected, assetFeatures) : undefined
+  const importProjectKnowledge = async () => {
+    setAssetState('loading')
+    try {
+      await api.importKnowledgeDocument(currentProject.id, {
+        title: `${currentProject.name} 策略复盘`,
+        source_uri: 'docs/策略/README.md',
+        source_type: 'docs',
+        text: `${currentProject.name}\n目标：${currentProject.goal}\n策略：首屏 Hook、商品露出、证据闭环与 citation 必须可追溯。`,
+      })
+      await loadArtifacts()
+    } catch {
+      setAssetState('error')
+    }
+  }
+
+  if (mode === 'knowledge') {
+    const highlightedResult = knowledgeResults[0]
+    return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
+      <div className="asset-experience-workspace">
+        <section className="asset-library-panel">
+          <div className="core-flow-toolbar">
+            <div><span className="section-label">KNOWLEDGE / RAG</span><h2>项目知识策略库</h2><p>导入项目 docs 文本，使用确定性关键词检索，并在输出中保留 citation。</p></div>
+            <button className="primary-button" onClick={() => void importProjectKnowledge()}><FileInput size={15}/>导入 Project Docs</button>
+          </div>
+          <div className="asset-filterbar">
+            <div className="search-field"><Search size={15}/><input aria-label="搜索知识库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索 Hook、商品露出、质检或 citation"/></div>
+            <span>{query.trim() ? knowledgeResults.length : filteredKnowledgeDocuments.length} 项 · 当前 Project</span>
+          </div>
+          <div className="asset-card-grid">
+            {assetState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的 Knowledge/RAG 策略库…</div> : null}
+            {assetState === 'error' ? <div className="panel-empty">知识库读取失败，请检查平台 API 或重试。</div> : null}
+            {assetState === 'ready' && !query.trim() && !filteredKnowledgeDocuments.length ? <div className="panel-empty">当前 Project 暂无知识文档，可先导入项目 docs 文本。</div> : null}
+            {assetState === 'ready' && query.trim() && !knowledgeResults.length ? <div className="panel-empty">没有命中的知识片段；换一个关键词试试。</div> : null}
+            {!query.trim() ? filteredKnowledgeDocuments.map(document => <button key={document.id} className="asset-analysis-card" onClick={() => setQuery(document.title)}>
+              <span className="asset-card-preview"><BookOpenCheck size={18}/><small>{document.source_type}</small></span>
+              <span><small>{document.id.slice(0, 8)} · {document.chunk_count} chunks</small><b>{document.title}</b><em>{document.source_uri || 'project docs'}</em></span>
+            </button>) : knowledgeResults.map(result => <button key={result.chunk.id} className={highlightedResult?.chunk.id === result.chunk.id ? 'asset-analysis-card active' : 'asset-analysis-card'}>
+              <span className="asset-card-preview"><Search size={18}/><small>score {result.score}</small></span>
+              <span><small>{result.citations[0]?.title ?? result.chunk.document_id} · L{result.chunk.start_line}-L{result.chunk.end_line}</small><b>{result.citations[0]?.snippet || result.chunk.text}</b><em>{result.citations[0]?.source_uri || result.chunk.source_uri}</em></span>
+            </button>)}
+          </div>
+        </section>
+        <aside className="asset-analysis-detail">
+          {highlightedResult ? <><span className="section-label">Citation</span><h3>{highlightedResult.citations[0]?.title ?? '知识片段'}</h3><p>{highlightedResult.chunk.section} · score {highlightedResult.score}</p>
+            <div className="feature-stack"><span>引用来源</span>{highlightedResult.citations.map(citation => <b key={citation.chunk_id}>{citation.source_uri || 'project docs'} · L{citation.start_line}-L{citation.end_line}</b>)}</div>
+            <div className="experience-card"><BookOpenCheck size={18}/><span><small>可追溯片段</small><b>{highlightedResult.citations[0]?.snippet || highlightedResult.chunk.text}</b></span></div>
+          </> : <div className="panel-empty">输入关键词后查看命中的知识片段、来源文档和行号 citation；Planner 或 Agent 可携带这些引用输出。</div>}
+        </aside>
+      </div>
+    </StateBoundary>
+  }
 
   return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
     <div className="asset-experience-workspace">
@@ -386,16 +473,17 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
           {assetState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的服务端产物…</div> : null}
           {assetState === 'error' ? <div className="panel-empty">素材读取失败，请重试。</div> : null}
           {assetState === 'ready' && !filtered.length ? <div className="panel-empty">{mode === 'assets' ? '当前 Project 暂无已持久化的图片或视频资产。' : '当前 Project 暂无已生成并持久化的经验结论。'}</div> : null}
-          {filtered.map(asset => <button key={asset.id} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
+          {filtered.map(asset => { const feature = featureForAsset(asset, assetFeatures); return <button key={asset.id} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
             <span className="asset-card-preview">{asset.kind === 'video' ? <Play size={18} fill="currentColor"/> : <Layers3 size={18}/>}<small>{assetType(asset)}</small></span>
-            <span><small>{asset.id.slice(0, 8)} · {asset.sourceJobId ? '生成任务产物' : '服务端存档'}</small><b>{assetTitle(asset)}</b><em>{asset.status === 'ready' ? '已持久化' : '草稿'}</em></span>
-          </button>)}
+            <span><small>{asset.id.slice(0, 8)} · {asset.sourceJobId ? '生成任务产物' : '服务端存档'}</small><b>{assetTitle(asset)}</b><em>{feature ? featureSummary(feature) : '暂无多模态特征'}</em></span>
+          </button> })}
         </div>
       </section>
       <aside className="asset-analysis-detail">
         {selected ? <><span className="section-label">服务端产物详情</span><h3>{assetTitle(selected)}</h3><p>{assetType(selected)} · {selected.status === 'ready' ? '已持久化' : '草稿'}</p>
           <div className="feature-stack"><span>可追溯元数据</span><b>Artifact {selected.id}</b><b>版本 v{selected.version}</b><b>{selected.sourceJobId ? `来源任务 ${selected.sourceJobId}` : '非生成任务产物'}</b><b>更新时间 {new Date(selected.updatedAt).toLocaleString('zh-CN')}</b></div>
-          <div className="experience-card"><BookOpenCheck size={18}/><span><small>{mode === 'knowledge' ? '已持久化经验' : '产物内容'}</small><b>{selected.content}</b></span></div>
+          {selectedFeature ? <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>Hook {percent(selectedFeature.hookStrength)}</b><b>商品露出 {percent(selectedFeature.productVisibility)}</b><b>相似度风险 {riskLabel(selectedFeature.similarityRisk)}</b>{selectedFeature.sellingPoints.slice(0, 2).map(point => <b key={point}>卖点：{point}</b>)}</div> : <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>暂无特征，Planner 使用基础元数据降级。</b></div>}
+          <div className="experience-card"><BookOpenCheck size={18}/><span><small>产物内容</small><b>{selected.content}</b></span></div>
         </> : <div className="panel-empty">选择当前 Project 的服务端产物后查看详情；系统不会以固定 CTR 或 AI 结论替代真实结果。</div>}
       </aside>
     </div>
@@ -408,4 +496,23 @@ function assetType(artifact: ApiArtifact): string {
 
 function assetTitle(artifact: ApiArtifact): string {
   return artifact.content.replace(/^\[knowledge\]\s*/, '').slice(0, 48) || `${assetType(artifact)}产物`
+}
+
+function featureForAsset(asset: ApiArtifact, features: ApiAssetFeature[]): ApiAssetFeature | undefined {
+  return features
+    .filter(feature => feature.assetId === asset.id && feature.assetVersion === asset.version)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+}
+
+function featureSummary(feature: ApiAssetFeature): string {
+  const sellingPoint = feature.sellingPoints[0] ? ` · ${feature.sellingPoints[0]}` : ''
+  return `Hook ${percent(feature.hookStrength)} · 商品露出 ${percent(feature.productVisibility)} · ${riskLabel(feature.similarityRisk)}${sellingPoint}`
+}
+
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
+function riskLabel(risk: ApiAssetFeature['similarityRisk']): string {
+  return risk === 'high' ? '高相似风险' : risk === 'medium' ? '中相似风险' : '低相似风险'
 }

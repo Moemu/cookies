@@ -35,7 +35,7 @@ func (s GeneratedIntakeService) Create(ctx context.Context, requestContext contr
 	if err := request.Validate(); err != nil {
 		return GeneratedIntake{}, err
 	}
-	if !allowedDeclaredImageMIME(request.Output.DeclaredMIMEType) || request.Output.DeclaredSizeBytes > MaxImageBytes {
+	if !allowedDeclaredAssetMIME(request.Output.DeclaredMIMEType) || request.Output.DeclaredSizeBytes > maxBytesForMIME(request.Output.DeclaredMIMEType) {
 		return GeneratedIntake{}, ErrUnsupportedAsset
 	}
 	now := s.now()
@@ -177,14 +177,14 @@ func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake Genera
 	if err := metadata.Validate(); err != nil {
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_INVALID", Message: "provider returned invalid output metadata", Retryable: false}
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, MaxImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(reader, MaxVideoBytes+1))
 	cancelFetch()
 	if err != nil {
 		return AssetCommit{}, &contract.JobError{Code: "PROVIDER_OUTPUT_READ_FAILED", Message: "failed to read provider output", Retryable: true}
 	}
 	digest := sha256.Sum256(data)
 	actualSHA := hex.EncodeToString(digest[:])
-	if int64(len(data)) > MaxImageBytes || metadata.SizeBytes != int64(len(data)) || metadata.SHA256 != actualSHA {
+	if int64(len(data)) > maxBytesForMIME(metadata.MIMEType) || metadata.SizeBytes != int64(len(data)) || metadata.SHA256 != actualSHA {
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_MISMATCH", Message: "provider output bytes do not match provider metadata", Retryable: false}
 	}
 	declared := intake.Request.Output
@@ -218,7 +218,30 @@ func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake Genera
 		_ = w.Upload.Blobs.Delete(ctx, commit.Location)
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_MISMATCH", Message: "validated asset does not match output metadata", Retryable: false}
 	}
+	commit.Relations = relationsForGeneratedOutput(intake, commit)
 	return commit, nil
+}
+
+func relationsForGeneratedOutput(intake GeneratedIntake, commit AssetCommit) []AssetRelation {
+	output := contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version}
+	relations := make([]AssetRelation, 0, len(intake.Request.Provenance.SourceAssetRefs)+len(intake.Request.Provenance.SourceResourceRefs))
+	add := func(source contract.ResourceRef) {
+		relations = append(relations, AssetRelation{
+			OrganizationID: commit.OrganizationID,
+			ProjectID:      commit.ProjectID,
+			OutputAsset:    output,
+			RelationType:   AssetRelationGeneratedFrom,
+			Source:         source,
+		})
+	}
+	for _, ref := range intake.Request.Provenance.SourceAssetRefs {
+		version := ref.Version
+		add(contract.ResourceRef{Type: "asset_version", ID: string(ref.AssetID), Version: &version})
+	}
+	for _, ref := range intake.Request.Provenance.SourceResourceRefs {
+		add(ref)
+	}
+	return relations
 }
 
 type retryableProviderError interface {

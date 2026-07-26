@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/remix"
 )
@@ -130,11 +132,11 @@ func (s *Server) putUpload(w http.ResponseWriter, r *http.Request) {
 		s.notImplemented(w, r)
 		return
 	}
-	if r.ContentLength < 1 || r.ContentLength > assets.MaxImageBytes {
+	if r.ContentLength < 1 || r.ContentLength > assets.MaxVideoBytes {
 		s.badRequest(w, r, fmt.Errorf("Content-Length is required and outside the supported range"))
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, assets.MaxImageBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, assets.MaxVideoBytes)
 	rc, _ := contract.RequestContextFrom(r.Context())
 	err := s.uploads.PutContent(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("upload_id"), r.Body, r.ContentLength)
 	if err != nil {
@@ -266,6 +268,86 @@ func (s *Server) removeAsset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) listAssetFeatures(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 200"))
+			return
+		}
+		limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.uploads.ListFeatures(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getAssetFeature(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	ref, ok := assetFeatureRef(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.uploads.GetFeature(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), ref, r.PathValue("feature_version"))
+	if errors.Is(err, assets.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]any{"feature": nil})
+		return
+	}
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"feature": value})
+}
+
+func (s *Server) putAssetFeature(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	ref, ok := assetFeatureRef(w, r)
+	if !ok {
+		return
+	}
+	var body assets.AssetFeature
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	body.AssetID = ref.AssetID
+	body.AssetVersion = ref.Version
+	body.FeatureVersion = r.PathValue("feature_version")
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.uploads.UpsertFeature(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func assetFeatureRef(w http.ResponseWriter, r *http.Request) (contract.AssetVersionRef, bool) {
+	version, err := strconv.ParseInt(r.PathValue("version"), 10, 64)
+	if err != nil || version < 1 || strings.TrimSpace(r.PathValue("feature_version")) == "" {
+		writeProblem(w, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "The request does not satisfy the API contract.", RequestID: requestIDFrom(r.Context()), Retryable: false})
+		return contract.AssetVersionRef{}, false
+	}
+	return contract.AssetVersionRef{AssetID: contract.AssetID(r.PathValue("asset_id")), Version: version}, true
+}
+
 func (s *Server) createGeneratedIntake(w http.ResponseWriter, r *http.Request) {
 	if s.intakes == nil {
 		s.notImplemented(w, r)
@@ -379,6 +461,10 @@ func (s *Server) createRemixRenderJob(w http.ResponseWriter, r *http.Request) {
 		s.notImplemented(w, r)
 		return
 	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
 	var body remix.CreateRenderJobRequest
 	if err := decodeJSON(w, r, &body); err != nil {
 		s.badRequest(w, r, err)
@@ -389,7 +475,7 @@ func (s *Server) createRemixRenderJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
-	value, err := s.remixPlans.CreateRenderJob(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	value, err := s.remixPlans.CreateRenderJob(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), key, body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -410,6 +496,510 @@ func (s *Server) getRemixRenderJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createRemixQualityReport(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateQualityReportRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreateQualityReport(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-quality-reports/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getRemixQualityReport(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetQualityReport(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("report_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getRemixRenderJobQualityReport(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetQualityReportForRenderJob(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("job_id"))
+	if errors.Is(err, remix.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]any{"quality_report": nil})
+		return
+	}
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"quality_report": value})
+}
+
+func (s *Server) createRemixHitAnalysis(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateHitAnalysisRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreateHitAnalysis(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-hit-analyses/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getRemixHitAnalysis(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetHitAnalysis(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("analysis_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createRemixProductMapping(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateProductMappingRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreateProductMapping(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-product-mappings/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getRemixProductMapping(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetProductMapping(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("mapping_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) generateRemixPlanFromProductMapping(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GeneratePlanFromProductMapping(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("mapping_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-plans/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) createRemixPreroll(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreatePrerollRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreatePreroll(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-prerolls/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getRemixPreroll(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetPreroll(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("preroll_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) applyRemixPreroll(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.ApplyPreroll(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("preroll_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createRemixFeedbackEvent(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateFeedbackEventRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreateFeedbackEvent(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-feedback-events/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) listRemixFeedbackEvents(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	filter := remix.FeedbackEventFilter{
+		TargetType: remix.FeedbackTargetType(r.URL.Query().Get("target_type")),
+		TargetID:   r.URL.Query().Get("target_id"),
+		Limit:      50,
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 100"))
+			return
+		}
+		filter.Limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.ListFeedbackEvents(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), filter)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getRemixAssetPerformance(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.GetAssetPerformanceSnapshot(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createRemixPlannerWeightSnapshot(w http.ResponseWriter, r *http.Request) {
+	if s.remixPlans == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.remixPlans.CreatePlannerWeightSnapshot(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-planner-weight-snapshots/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) listRemixEvalCases(w http.ResponseWriter, r *http.Request) {
+	if s.evals == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.evals.ListEvalCases(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createRemixEvalCase(w http.ResponseWriter, r *http.Request) {
+	if s.evals == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateEvalCaseRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.evals.CreateEvalCase(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) createRemixEvalRun(w http.ResponseWriter, r *http.Request) {
+	if s.evals == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body remix.CreateEvalRunRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.evals.CreateEvalRun(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/remix-eval-runs/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) getRemixEvalRun(w http.ResponseWriter, r *http.Request) {
+	if s.evals == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.evals.GetEvalRun(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("run_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listAgentRuns(w http.ResponseWriter, r *http.Request) {
+	if s.agentRuns == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 100"))
+			return
+		}
+		limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.agentRuns.ListRuns(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createAgentRun(w http.ResponseWriter, r *http.Request) {
+	if s.agentRuns == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body agent.CreateRunRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.agentRuns.CreateRun(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/agent-runs/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) getAgentRun(w http.ResponseWriter, r *http.Request) {
+	if s.agentRuns == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.agentRuns.GetRun(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("agent_run_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) cancelAgentRun(w http.ResponseWriter, r *http.Request) {
+	if s.agentRuns == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.agentRuns.CancelRun(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("agent_run_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) importKnowledgeDocument(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body knowledge.ImportDocumentRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ImportDocument(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/knowledge/documents/%s", r.PathValue("project_id"), value.ID))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) listKnowledgeDocuments(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 100"))
+			return
+		}
+		limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ListDocuments(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) searchKnowledge(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 10
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 50 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 50"))
+			return
+		}
+		limit = value
+	}
+	request := knowledge.SearchRequest{Query: r.URL.Query().Get("q"), Limit: limit}
+	if err := request.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.Search(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), request)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"query": request.Query, "items": value})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
@@ -445,12 +1035,14 @@ func writerHeaderNoStore(w http.ResponseWriter) { w.Header().Set("Cache-Control"
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, message, retryable := http.StatusInternalServerError, "INTERNAL", "The service could not complete the request.", true
 	switch {
-	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound):
+	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound), errors.Is(err, knowledge.ErrNotFound), errors.Is(err, agent.ErrNotFound):
 		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "The scoped resource does not exist.", false
-	case errors.Is(err, assets.ErrIdempotencyConflict):
+	case errors.Is(err, assets.ErrIdempotencyConflict), errors.Is(err, remix.ErrIdempotencyConflict):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, "The idempotency key conflicts with an earlier request.", false
 	case errors.Is(err, assets.ErrInvalidState):
 		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The resource is not in a valid state for this operation.", false
+	case errors.Is(err, agent.ErrInvalidState):
+		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The agent run is not in a valid state for this operation.", false
 	case errors.Is(err, assets.ErrOutputMetadataMismatch):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorOutputMetadataMismatch, "The uploaded content does not match its declared metadata.", false
 	case errors.Is(err, assets.ErrAssetChecksumMismatch):
@@ -467,6 +1059,10 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusUnprocessableEntity, contract.ErrorAssetIntakeFailed, "Only JPEG and PNG assets within the size limit are supported.", false
 	case errors.Is(err, assets.ErrProjectContextStale):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_CONTEXT_STALE", "The requested project context version is stale.", false
+	case errors.Is(err, remix.ErrInvalidMapping):
+		status, code, message, retryable = http.StatusBadRequest, "INVALID_REQUEST", "The product mapping does not satisfy the remix contract.", false
+	case errors.Is(err, remix.ErrPrerollNotReady):
+		status, code, message, retryable = http.StatusConflict, "PREROLL_NOT_READY", "The preroll must pass quality gate before it can be applied.", false
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
 	case errors.Is(err, project.ErrBrandNotFound):

@@ -34,7 +34,7 @@ export const systems: SystemDefinition[] = [
       { id: 'production', label: '制作中心', icon: Aperture, group: '创作', layout: 'operations', description: '管理图片、视频、音频生成与渲染队列。', views: ['图片生成', '视频生成', '音频生成', '渲染队列', '源素材', '失败任务'] },
       { id: 'reviews', label: '评审中心', icon: BadgeCheck, group: '协作与输出', layout: 'workspace', description: '完成品牌、事实、版权、合规与逐帧评审。', views: ['待我评审', '我发起的', '评论与提及', '退回记录', '已完成'] },
       { id: 'deliveries', label: '交付中心', icon: PackageCheck, group: '协作与输出', layout: 'table', description: '生成稳定发布包、投放包和授权清单。', views: ['待交付', '发布包', '投放包', '下载记录', '停用版本'] },
-      { id: 'operations', label: '创意运营', icon: Sparkles, group: '治理', layout: 'operations', description: '治理渠道规则、Skills、模板和品牌规则映射。', views: ['渠道规则', '领域 Skills', '模板', '品牌规则映射', '评测集', '质量看板'] },
+      { id: 'operations', label: '创意运营', icon: Sparkles, group: '治理', layout: 'operations', description: '治理渠道规则、Skills、模板、品牌规则映射和 Remix-MMLU 评测集。', views: ['渠道规则', '领域 Skills', '模板', '品牌规则映射', '评测集', '质量看板'] },
       { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '配置默认规格、命名、通知、评审与交付规则。', views: ['默认规格', '命名规则', '通知', '评审流', '交付规则'] },
     ],
   },

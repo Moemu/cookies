@@ -318,7 +318,7 @@ func (r MySQLRepository) complete(ctx context.Context, source, sourceID string, 
 }
 
 func insertAssetCommit(ctx context.Context, tx *sql.Tx, c AssetCommit, now time.Time) error {
-	if c.Version != 1 || c.OrganizationID == "" || c.ProjectID == "" || c.AssetID == "" || c.BlobID == "" || c.SizeBytes < 1 || c.SizeBytes > MaxImageBytes || !validSHA256(c.SHA256) || c.Kind != contract.AssetImage || !allowedDeclaredImageMIME(c.MIMEType) || c.OwnerSystem != "assets" {
+	if c.Version != 1 || c.OrganizationID == "" || c.ProjectID == "" || c.AssetID == "" || c.BlobID == "" || c.SizeBytes < 1 || c.SizeBytes > maxBytesForMIME(c.MIMEType) || !validSHA256(c.SHA256) || !validAssetKindForMIME(c.Kind, c.MIMEType) || c.OwnerSystem != "assets" {
 		return fmt.Errorf("invalid asset commit")
 	}
 	if c.Location.Provider == "" || validateObjectTarget(c.Location.Bucket, c.Location.Key) != nil {
@@ -336,14 +336,41 @@ func insertAssetCommit(ctx context.Context, tx *sql.Tx, c AssetCommit, now time.
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO asset_versions (organization_id, asset_id, version, blob_id, status, source_type, mime_type, size_bytes, sha256, width_pixels, height_pixels, provider_job_id, provider_output_id, project_context_version, created_at) VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.OrganizationID, c.AssetID, c.Version, c.BlobID, c.SourceType, c.MIMEType, c.SizeBytes, c.SHA256, nullableInt(c.WidthPixels), nullableInt(c.HeightPixels), nullable(c.ProviderJobID), nullable(c.ProviderOutputID), nullableInt64(c.ProjectContextVersion), now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO asset_versions
+		(organization_id, asset_id, version, blob_id, status, source_type, mime_type, size_bytes, sha256,
+		 width_pixels, height_pixels, duration_seconds, fps, codec, bitrate_bps, audio_codec,
+		 audio_channels, audio_sample_rate, poster_frame_ref, probe_status, probe_error,
+		 provider_job_id, provider_output_id, project_context_version, created_at)
+		VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.OrganizationID, c.AssetID, c.Version, c.BlobID, c.SourceType, c.MIMEType, c.SizeBytes, c.SHA256,
+		nullableInt(c.WidthPixels), nullableInt(c.HeightPixels), nullableFloat(c.Media.DurationSeconds),
+		nullableFloat(c.Media.FPS), nullable(c.Media.Codec), nullableInt64(c.Media.BitrateBPS),
+		nullable(c.Media.AudioCodec), nullableInt(c.Media.AudioChannels), nullableInt(c.Media.AudioSampleRate),
+		nullable(c.Media.PosterFrameRef), probeStatusValue(c.Media.ProbeStatus), nullable(c.Media.ProbeError),
+		nullable(c.ProviderJobID), nullable(c.ProviderOutputID), nullableInt64(c.ProjectContextVersion), now)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO project_assets (organization_id, project_id, asset_id, asset_version, status, created_at) VALUES (?, ?, ?, ?, 'active', ?)`, c.OrganizationID, c.ProjectID, c.AssetID, c.Version, now)
 	if err != nil {
 		return err
+	}
+	for _, relation := range c.Relations {
+		relation.CreatedAt = now
+		if err := relation.Validate(); err != nil {
+			return err
+		}
+		if relation.OrganizationID != c.OrganizationID || relation.ProjectID != c.ProjectID || relation.OutputAsset.AssetID != c.AssetID || relation.OutputAsset.Version != c.Version {
+			return fmt.Errorf("asset relation does not match committed output")
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO asset_relations
+			(organization_id, project_id, output_asset_id, output_asset_version, relation_type, source_type, source_id, source_version, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			relation.OrganizationID, relation.ProjectID, relation.OutputAsset.AssetID, relation.OutputAsset.Version,
+			relation.RelationType, relation.Source.Type, relation.Source.ID, sourceVersionValue(relation.Source.Version), now)
+		if err != nil {
+			return err
+		}
 	}
 	payload, err := json.Marshal(c.Event)
 	if err != nil {
@@ -394,9 +421,129 @@ func (r MySQLRepository) RemoveProjectAsset(ctx context.Context, org contract.Or
 	return err
 }
 
+func (r MySQLRepository) ListAssetRelations(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, ref contract.AssetVersionRef) ([]AssetRelation, error) {
+	if _, err := r.db(); err != nil {
+		return nil, err
+	}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT organization_id, project_id, output_asset_id, output_asset_version,
+		relation_type, source_type, source_id, source_version, created_at
+		FROM asset_relations
+		WHERE organization_id=? AND project_id=? AND output_asset_id=? AND output_asset_version=?
+		ORDER BY created_at, source_type, source_id`, org, project, ref.AssetID, ref.Version)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	relations := make([]AssetRelation, 0)
+	for rows.Next() {
+		var relation AssetRelation
+		var sourceVersion int64
+		if err := rows.Scan(&relation.OrganizationID, &relation.ProjectID, &relation.OutputAsset.AssetID, &relation.OutputAsset.Version,
+			&relation.RelationType, &relation.Source.Type, &relation.Source.ID, &sourceVersion, &relation.CreatedAt); err != nil {
+			return nil, err
+		}
+		if sourceVersion > 0 {
+			version := sourceVersion
+			relation.Source.Version = &version
+		}
+		relations = append(relations, relation)
+	}
+	return relations, rows.Err()
+}
+
+func (r MySQLRepository) UpsertAssetFeature(ctx context.Context, value AssetFeature, now time.Time) (AssetFeature, error) {
+	if _, err := r.db(); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := value.Validate(); err != nil {
+		return AssetFeature{}, err
+	}
+	sceneTags, err := json.Marshal(value.SceneTags)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	productTags, err := json.Marshal(value.ProductTags)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	personTags, err := json.Marshal(value.PersonTags)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	actionTags, err := json.Marshal(value.ActionTags)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	emotionTags, err := json.Marshal(value.EmotionTags)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	sellingPoints, err := json.Marshal(value.SellingPoints)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	evidence, err := json.Marshal(value.Evidence)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	_, err = r.DB.ExecContext(ctx, `INSERT INTO asset_features
+		(organization_id, project_id, asset_id, asset_version, schema_version, feature_version,
+		 hook_strength, product_visibility, scene_tags, product_tags, person_tags, action_tags,
+		 emotion_tags, selling_points, cta_presence, similarity_group, similarity_risk, evidence,
+		 created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE schema_version=VALUES(schema_version), hook_strength=VALUES(hook_strength),
+		 product_visibility=VALUES(product_visibility), scene_tags=VALUES(scene_tags), product_tags=VALUES(product_tags),
+		 person_tags=VALUES(person_tags), action_tags=VALUES(action_tags), emotion_tags=VALUES(emotion_tags),
+		 selling_points=VALUES(selling_points), cta_presence=VALUES(cta_presence), similarity_group=VALUES(similarity_group),
+		 similarity_risk=VALUES(similarity_risk), evidence=VALUES(evidence), updated_at=VALUES(updated_at)`,
+		value.OrganizationID, value.ProjectID, value.AssetID, value.AssetVersion, value.SchemaVersion, value.FeatureVersion,
+		value.HookStrength, value.ProductVisibility, sceneTags, productTags, personTags, actionTags, emotionTags,
+		sellingPoints, value.CTAPresence, nullable(value.SimilarityGroup), value.SimilarityRisk, evidence, now, now)
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	return r.GetAssetFeature(ctx, value.OrganizationID, value.ProjectID, value.Ref(), value.FeatureVersion)
+}
+
+func (r MySQLRepository) GetAssetFeature(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, ref contract.AssetVersionRef, featureVersion string) (AssetFeature, error) {
+	if _, err := r.db(); err != nil {
+		return AssetFeature{}, err
+	}
+	return scanAssetFeature(r.DB.QueryRowContext(ctx, assetFeatureSelect+` WHERE organization_id=? AND project_id=? AND asset_id=? AND asset_version=? AND feature_version=?`,
+		org, project, ref.AssetID, ref.Version, featureVersion))
+}
+
+func (r MySQLRepository) ListAssetFeatures(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, limit int) ([]AssetFeature, error) {
+	if _, err := r.db(); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 200 {
+		limit = 100
+	}
+	rows, err := r.DB.QueryContext(ctx, assetFeatureSelect+` WHERE organization_id=? AND project_id=? ORDER BY updated_at DESC LIMIT ?`, org, project, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]AssetFeature, 0)
+	for rows.Next() {
+		value, err := scanAssetFeature(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
 const uploadSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, status, original_filename, declared_mime_type, declared_size_bytes, declared_sha256, quarantine_provider, quarantine_bucket, quarantine_object_key, idempotency_key, request_hash, project_context_version, target_asset_id, target_blob_id, request_id, trace_id, asset_id, asset_version, error_code, expires_at, created_at, updated_at FROM upload_sessions`
 const intakeSelect = `SELECT id, organization_id, project_id, provider_job_id, output_id, provider_code, status, request_payload, idempotency_key, request_hash, target_asset_id, target_blob_id, asset_id, asset_version, error_code, error_message, retryable, attempt_count, max_attempts, available_at, lock_owner, request_id, trace_id, created_at, updated_at FROM generated_intakes`
-const projectAssetSelect = `SELECT pa.project_id, pa.created_at, a.id, a.organization_id, a.asset_kind, a.status, a.owner_system, a.latest_version, a.created_at, a.updated_at, av.version, av.status, av.source_type, av.mime_type, av.size_bytes, av.sha256, av.width_pixels, av.height_pixels, av.provider_job_id, av.provider_output_id, av.project_context_version, av.created_at, b.storage_provider, b.bucket_name, b.object_key, b.storage_version_id, b.etag FROM project_assets pa JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version JOIN asset_blobs b ON b.id=av.blob_id`
+const projectAssetSelect = `SELECT pa.project_id, pa.created_at, a.id, a.organization_id, a.asset_kind, a.status, a.owner_system, a.latest_version, a.created_at, a.updated_at, av.version, av.status, av.source_type, av.mime_type, av.size_bytes, av.sha256, av.width_pixels, av.height_pixels, av.duration_seconds, av.fps, av.codec, av.bitrate_bps, av.audio_codec, av.audio_channels, av.audio_sample_rate, av.poster_frame_ref, av.probe_status, av.probe_error, av.provider_job_id, av.provider_output_id, av.project_context_version, av.created_at, b.storage_provider, b.bucket_name, b.object_key, b.storage_version_id, b.etag FROM project_assets pa JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version JOIN asset_blobs b ON b.id=av.blob_id`
+const assetFeatureSelect = `SELECT organization_id, project_id, asset_id, asset_version, schema_version, feature_version, hook_strength, product_visibility, scene_tags, product_tags, person_tags, action_tags, emotion_tags, selling_points, cta_presence, similarity_group, similarity_risk, evidence, created_at, updated_at FROM asset_features`
 
 type scanner interface{ Scan(...any) error }
 
@@ -452,9 +599,11 @@ func scanIntake(row scanner) (GeneratedIntake, error) {
 func scanProjectAsset(row scanner) (ProjectAsset, error) {
 	var v ProjectAsset
 	var width, height sql.NullInt64
-	var job, output, versionID, etag sql.NullString
+	var duration, fps sql.NullFloat64
+	var bitrate, channels, sampleRate sql.NullInt64
+	var codec, audioCodec, posterFrame, probeStatus, probeError, job, output, versionID, etag sql.NullString
 	var contextVersion sql.NullInt64
-	err := row.Scan(&v.Ref.ProjectID, &v.CreatedAt, &v.Asset.ID, &v.Asset.OrganizationID, &v.Asset.Kind, &v.Asset.Status, &v.Asset.OwnerSystem, &v.Asset.LatestVersion, &v.Asset.CreatedAt, &v.Asset.UpdatedAt, &v.Version.Version, &v.Version.Status, &v.Version.SourceType, &v.Version.MIMEType, &v.Version.SizeBytes, &v.Version.SHA256, &width, &height, &job, &output, &contextVersion, &v.Version.CreatedAt, &v.Version.Blob.Provider, &v.Version.Blob.Bucket, &v.Version.Blob.Key, &versionID, &etag)
+	err := row.Scan(&v.Ref.ProjectID, &v.CreatedAt, &v.Asset.ID, &v.Asset.OrganizationID, &v.Asset.Kind, &v.Asset.Status, &v.Asset.OwnerSystem, &v.Asset.LatestVersion, &v.Asset.CreatedAt, &v.Asset.UpdatedAt, &v.Version.Version, &v.Version.Status, &v.Version.SourceType, &v.Version.MIMEType, &v.Version.SizeBytes, &v.Version.SHA256, &width, &height, &duration, &fps, &codec, &bitrate, &audioCodec, &channels, &sampleRate, &posterFrame, &probeStatus, &probeError, &job, &output, &contextVersion, &v.Version.CreatedAt, &v.Version.Blob.Provider, &v.Version.Blob.Bucket, &v.Version.Blob.Key, &versionID, &etag)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectAsset{}, ErrNotFound
 	}
@@ -466,11 +615,63 @@ func scanProjectAsset(row scanner) (ProjectAsset, error) {
 	v.Version.AssetID = v.Asset.ID
 	v.Version.WidthPixels = int(width.Int64)
 	v.Version.HeightPixels = int(height.Int64)
+	v.Version.Media = MediaMetadata{
+		DurationSeconds: duration.Float64,
+		FPS:             fps.Float64,
+		Codec:           codec.String,
+		BitrateBPS:      bitrate.Int64,
+		AudioCodec:      audioCodec.String,
+		AudioChannels:   int(channels.Int64),
+		AudioSampleRate: int(sampleRate.Int64),
+		PosterFrameRef:  posterFrame.String,
+		ProbeStatus:     MediaProbeStatus(probeStatus.String),
+		ProbeError:      probeError.String,
+	}
+	if v.Version.Media.ProbeStatus == "" {
+		v.Version.Media.ProbeStatus = MediaProbeNotRequired
+	}
 	v.Version.ProviderJobID = job.String
 	v.Version.ProviderOutputID = output.String
 	v.Version.ProjectContextVersion = contextVersion.Int64
 	v.Version.Blob.VersionID = versionID.String
 	v.Version.Blob.ETag = etag.String
+	return v, nil
+}
+func scanAssetFeature(row scanner) (AssetFeature, error) {
+	var v AssetFeature
+	var sceneTags, productTags, personTags, actionTags, emotionTags, sellingPoints, evidence []byte
+	var similarityGroup sql.NullString
+	err := row.Scan(&v.OrganizationID, &v.ProjectID, &v.AssetID, &v.AssetVersion, &v.SchemaVersion, &v.FeatureVersion,
+		&v.HookStrength, &v.ProductVisibility, &sceneTags, &productTags, &personTags, &actionTags, &emotionTags,
+		&sellingPoints, &v.CTAPresence, &similarityGroup, &v.SimilarityRisk, &evidence, &v.CreatedAt, &v.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AssetFeature{}, ErrNotFound
+	}
+	if err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(sceneTags, &v.SceneTags); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(productTags, &v.ProductTags); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(personTags, &v.PersonTags); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(actionTags, &v.ActionTags); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(emotionTags, &v.EmotionTags); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(sellingPoints, &v.SellingPoints); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := json.Unmarshal(evidence, &v.Evidence); err != nil {
+		return AssetFeature{}, err
+	}
+	v.SimilarityGroup = similarityGroup.String
 	return v, nil
 }
 func isDuplicate(err error) bool {
@@ -494,4 +695,26 @@ func nullableInt64(value int64) any {
 		return nil
 	}
 	return value
+}
+func sourceVersionValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+func nullableFloat(value float64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+func probeStatusValue(value MediaProbeStatus) any {
+	if value == "" {
+		return MediaProbeNotRequired
+	}
+	return value
+}
+func validAssetKindForMIME(kind contract.AssetKind, mimeType string) bool {
+	return (kind == contract.AssetImage && allowedDeclaredImageMIME(mimeType)) ||
+		(kind == contract.AssetVideo && allowedDeclaredVideoMIME(mimeType))
 }

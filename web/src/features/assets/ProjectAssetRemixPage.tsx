@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { buildBulkRemixPlan, isVideoAsset, type BulkRemixPlan, type RemixPace, type RemixSegment, type RemixSelection } from './aiRemixPlanner'
-import { createRemixPlan, createRemixRenderJob, getAssetPreview, getRemixPlan, getRemixRenderJob, listProjectAssets, listRemixPlans, type RemixRenderJob, type SavedRemixPlan } from './api'
-import type { ProjectAsset } from './types'
+import { createQualityReport, createRemixPlan, createRemixRenderJob, getAssetPreview, getRenderJobQualityReport, getRemixPlan, getRemixRenderJob, listAssetFeatures, listProjectAssets, listRemixPlans, type QualityReport, type RemixRenderJob, type SavedRemixPlan } from './api'
+import type { AssetFeature, ProjectAsset } from './types'
 
 const segmentCopy: Record<RemixSegment, { label: string; hint: string }> = {
   opening: { label: '前段', hint: '开场钩子，适合强视觉、强动作、强利益点。' },
@@ -32,9 +32,20 @@ function assetDimensions(asset: ProjectAsset) {
   return `${asset.version.width_pixels} × ${asset.version.height_pixels}`
 }
 
+function featureSummary(feature?: AssetFeature) {
+  if (!feature) return '暂无特征 · 使用基础元数据'
+  const point = feature.selling_points[0] ? ` · ${feature.selling_points[0]}` : ''
+  return `Hook ${Math.round(feature.hook_strength * 100)} · 商品露出 ${Math.round(feature.product_visibility * 100)} · 风险 ${feature.similarity_risk}${point}`
+}
+
+function qualityVerdictLabel(verdict: QualityReport['verdict']) {
+  return verdict === 'critical' ? '严重阻断' : verdict === 'major' ? '需要复核' : '质检通过'
+}
+
 export function ProjectAssetRemixPage() {
   const { projectId = '' } = useParams()
   const [assets, setAssets] = useState<ProjectAsset[]>([])
+  const [features, setFeatures] = useState<AssetFeature[]>([])
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
   const [query, setQuery] = useState('')
   const [targetSeconds, setTargetSeconds] = useState(30)
@@ -48,6 +59,7 @@ export function ProjectAssetRemixPage() {
   const [savedPlan, setSavedPlan] = useState<SavedRemixPlan | null>(null)
   const [savedPlans, setSavedPlans] = useState<SavedRemixPlan[]>([])
   const [renderJob, setRenderJob] = useState<RemixRenderJob | null>(null)
+  const [qualityReport, setQualityReport] = useState<QualityReport | null>(null)
   const [savingPlan, setSavingPlan] = useState(false)
   const [submittingRender, setSubmittingRender] = useState(false)
   const [loadingSavedPlan, setLoadingSavedPlan] = useState('')
@@ -59,11 +71,15 @@ export function ProjectAssetRemixPage() {
     setLoading(true)
     setError('')
     try {
-      const result = await listProjectAssets(projectId, signal)
-      const planResult = await listRemixPlans(projectId, 8, signal)
+      const [result, planResult, featureResult] = await Promise.all([
+        listProjectAssets(projectId, signal),
+        listRemixPlans(projectId, 8, signal),
+        listAssetFeatures(projectId, signal),
+      ])
       const videos = result.items.filter((asset) => asset.asset.status === 'ready' && isVideoAsset(asset))
       setAssets(videos)
       setSavedPlans(planResult.items)
+      setFeatures(featureResult.items)
       const previews = await Promise.all(videos.slice(0, 80).map(async (asset) => {
         try {
           const signed = await getAssetPreview(projectId, asset.asset.id, asset.version.version, signal)
@@ -92,6 +108,7 @@ export function ProjectAssetRemixPage() {
   }, [loadAssets])
 
   const assetByKey = useMemo(() => new Map(assets.map((asset) => [assetKey(asset), asset])), [assets])
+  const featuresByAsset = useMemo(() => new Map(features.map((feature) => [`${feature.asset_id}:${feature.asset_version}`, feature])), [features])
   const filteredAssets = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     if (!keyword) return assets
@@ -104,6 +121,7 @@ export function ProjectAssetRemixPage() {
     setPlan(null)
     setSavedPlan(null)
     setRenderJob(null)
+    setQualityReport(null)
     setSelection((current) => {
       const next = { opening: new Set(current.opening), middle: new Set(current.middle), ending: new Set(current.ending) }
       if (next[segment].has(key)) next[segment].delete(key)
@@ -127,7 +145,7 @@ export function ProjectAssetRemixPage() {
     setError('')
     setSavingPlan(true)
     try {
-      const draft = buildBulkRemixPlan({ selection: buildSelection(), targetSeconds, pace })
+      const draft = buildBulkRemixPlan({ selection: buildSelection(), targetSeconds, pace, assetFeatures: features })
       setPlan(draft)
       const created = await createRemixPlan(projectId, draft)
       const hydrated = await getRemixPlan(projectId, created.id)
@@ -153,6 +171,7 @@ export function ProjectAssetRemixPage() {
     try {
       setSavedPlan(await getRemixPlan(projectId, planId))
       setRenderJob(null)
+      setQualityReport(null)
       setPlan(null)
       setCopied(false)
     } catch (caught) {
@@ -169,10 +188,34 @@ export function ProjectAssetRemixPage() {
     try {
       const created = await createRemixRenderJob(projectId, savedPlan.id, 'draft')
       setRenderJob(await getRemixRenderJob(projectId, created.id))
+      setQualityReport(null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '渲染任务提交失败。')
     } finally {
       setSubmittingRender(false)
+    }
+  }
+
+  async function runQualityCheck() {
+    if (!renderJob) return
+    setError('')
+    try {
+      const report = await createQualityReport(projectId, renderJob.id)
+      setQualityReport(report)
+      setRenderJob(await getRemixRenderJob(projectId, renderJob.id))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '质量检查失败。')
+    }
+  }
+
+  async function loadQualityReport() {
+    if (!renderJob) return
+    setError('')
+    try {
+      const result = await getRenderJobQualityReport(projectId, renderJob.id)
+      setQualityReport(result.quality_report)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '质量报告读取失败。')
     }
   }
 
@@ -229,6 +272,7 @@ export function ProjectAssetRemixPage() {
               <div className="remix-asset__body">
                 <strong title={asset.asset.id}>{asset.asset.id}</strong>
                 <span>{assetDimensions(asset)} · {formatBytes(asset.version.size_bytes)} · {asset.version.source_type}</span>
+                <small className="asset-feature-summary">{featureSummary(featuresByAsset.get(key))}</small>
                 <div className="remix-assignments">
                   {segmentOrder.map((segment) => <button aria-pressed={selection[segment].has(key)} key={segment} onClick={() => toggleAsset(segment, key)} type="button">{segmentCopy[segment].label}</button>)}
                 </div>
@@ -271,7 +315,16 @@ export function ProjectAssetRemixPage() {
       {renderJob ? <div className="remix-render-status">
         <span>渲染任务</span>
         <strong>{renderJob.id}</strong>
-        <em>{renderJob.status} · {renderJob.target_quality} · {renderJob.target_format}</em>
+        <em>{renderJob.status} · {renderJob.progress}% · {renderJob.target_quality} · {renderJob.target_format}{renderJob.requires_review ? ' · 需复核' : ''}</em>
+        <div className="remix-render-actions">
+          <button className="button button--secondary" disabled={Boolean(qualityReport)} onClick={() => void runQualityCheck()} type="button">执行质检</button>
+          <button className="button button--secondary" onClick={() => void loadQualityReport()} type="button">读取质检报告</button>
+        </div>
+      </div> : null}
+      {qualityReport ? <div className={`remix-quality-report remix-quality-report--${qualityReport.verdict}`}>
+        <div><span>QualityReport</span><strong>{qualityVerdictLabel(qualityReport.verdict)} · {Math.round(qualityReport.score * 100)}分</strong></div>
+        <div className="remix-quality-dimensions">{qualityReport.dimensions.slice(0, 4).map((dimension) => <article key={dimension.name}><span>{dimension.name}</span><strong>{Math.round(dimension.score * 100)}%</strong><p>{dimension.summary}</p></article>)}</div>
+        {qualityReport.issues.length > 0 ? <ul>{qualityReport.issues.map((issue) => <li key={issue.code}><strong>{issue.severity} · {issue.dimension}</strong><span>{issue.start_seconds.toFixed(1)}s-{issue.end_seconds.toFixed(1)}s · {issue.description}</span><em>{issue.repair_suggestion}</em></li>)}</ul> : <p>未发现 critical/major 质量问题，可继续进入成片回流。</p>}
       </div> : null}
       {plan ? <div className="remix-timeline">
         {plan.segments.map((segment) => <div className="remix-timeline-segment" key={segment.segment}>
