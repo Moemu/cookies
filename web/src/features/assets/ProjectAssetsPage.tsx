@@ -46,7 +46,7 @@ function removeErrorMessage(error: unknown) {
   return '素材删除失败，请稍后重试。'
 }
 
-function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, projectId, view }: { asset: ProjectAsset; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; projectId: string; view: ViewMode }) {
+function AssetCard({ asset, editUrl, onRemove, previewUnavailable, previewUrl, projectId, view }: { asset: ProjectAsset; editUrl?: string; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; projectId: string; view: ViewMode }) {
   const dimensions = asset.version.width_pixels && asset.version.height_pixels
     ? `${asset.version.width_pixels} × ${asset.version.height_pixels}`
     : '尺寸未记录'
@@ -55,6 +55,7 @@ function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, projectId,
     : <div className="asset-thumbnail__fallback" title={previewUnavailable ? '\u539f\u59cb\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20' : undefined}><AssetIcon name="image" size={30} /><span>{asset.version.mime_type.replace('image/', '').toUpperCase()}</span>{previewUnavailable ? <small>{'\u9884\u89c8\u4e0d\u53ef\u7528'}</small> : null}</div>
 
   return <article className={view === 'list' ? 'asset-card asset-card--list' : 'asset-card'}>
+    {editUrl ? <Link aria-label={`编辑 ${assetLabel(asset)}`} className="asset-card__edit" title="基于此素材编辑图片" to={editUrl}>编辑</Link> : null}
     <button aria-label={`删除 ${assetLabel(asset)}`} className="asset-card__remove" onClick={onRemove} title="从项目中删除" type="button"><AssetIcon name="delete" size={16} /><span>删除</span></button>
     {previewUrl
       ? <a className="asset-thumbnail" href={previewUrl} rel="noreferrer" target="_blank" title="在新窗口查看预览">{content}</a>
@@ -228,6 +229,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
       <label className="select-control"><span className="sr-only">素材状态</span><select onChange={(event) => setStatus(event.target.value as 'all' | AssetStatus)} value={status}><option value="all">全部状态</option><option value="ready">已就绪</option><option value="processing">处理中</option><option value="quarantined">已隔离</option><option value="failed">失败</option><option value="archived">已归档</option></select></label>
       <div className="toolbar-spacer" />
       <button className="icon-button" aria-label="刷新素材" disabled={loading} onClick={() => void loadLibrary()} type="button"><AssetIcon name="refresh" /></button>
+      <Link className="button button--secondary upload-button" to={`/projects/${encodeURIComponent(projectId)}/assets/remix`}>AI 混剪</Link>
       <div className="view-toggle" aria-label="视图方式">
         <button aria-label="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')} type="button"><AssetIcon name="grid" /></button>
         <button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')} type="button"><AssetIcon name="list" /></button>
@@ -246,7 +248,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
     </div> : null}
 
     {filteredAssets.length > 0 ? <div className={view === 'list' ? 'asset-collection asset-collection--list' : 'asset-collection'} aria-busy={loading}>
-      {filteredAssets.map((asset) => <AssetCard asset={asset} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
+      {filteredAssets.map((asset) => <AssetCard asset={asset} editUrl={asset.asset.status === 'ready' && (localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]) ? `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.asset.id)}/versions/${asset.version.version}/edit` : undefined} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
         setRemoveError('')
         setAssetToRemove(asset)
       }} previewUnavailable={unavailablePreviewIds.has(asset.asset.id)} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} projectId={projectId} view={view} />)}

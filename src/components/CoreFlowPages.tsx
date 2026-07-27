@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, BarChart3, BookOpenCheck, Check, CircleAlert, CircleCheck,
   Database, FileInput, Filter, Layers3, Lightbulb, Link2, Play, RefreshCw,
@@ -159,40 +159,98 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
   </StateBoundary>
 }
 
-const adRows = [
-  { id: 'AD-2607-031', name: '精度证据·研发负责人', platform: '巨量引擎', format: '视频', spend: 28640, impressions: 682400, ctr: 4.18, cpa: 54.2, signal: '持续放量' },
-  { id: 'AD-2607-028', name: '真实制造场景·采购线', platform: '腾讯广告', format: '图文', spend: 21800, impressions: 486200, ctr: 3.74, cpa: 61.8, signal: '稳定' },
-  { id: 'AD-2607-019', name: '短剧前贴·交期冲突', platform: '巨量引擎', format: '视频', spend: 18420, impressions: 438900, ctr: 4.62, cpa: 49.6, signal: '优先扩量' },
-  { id: 'AD-2607-014', name: '游戏前贴·精度挑战', platform: '快手磁力', format: '视频', spend: 15680, impressions: 326800, ctr: 3.26, cpa: 68.4, signal: '观察' },
-  { id: 'AD-2607-008', name: '纯产品特写·对照组', platform: '腾讯广告', format: '图文', spend: 13320, impressions: 312100, ctr: 2.41, cpa: 82.7, signal: '建议降量' },
-]
+type PerformanceAd = {
+  id: string
+  name: string
+  platform: string
+  format: string
+  spend: number
+  impressions: number
+  ctr: number
+  cpa: number
+  signal: string
+  occurredAt: string
+}
+
+function performanceAd(record: import('../data/api').ApiOperationalRecord): PerformanceAd | null {
+  if (record.kind !== 'performance_ad') return null
+  const { platform, format, spend, impressions, ctr, cpa } = record.fields
+  if (
+    typeof platform !== 'string' || typeof format !== 'string' || typeof spend !== 'number'
+    || typeof impressions !== 'number' || typeof ctr !== 'number' || typeof cpa !== 'number'
+  ) return null
+  return { id: record.id, name: record.title, platform, format, spend, impressions, ctr, cpa, signal: record.status, occurredAt: record.occurredAt }
+}
+
+function inWindow(occurredAt: string, window: string, latestTime: number): boolean {
+  if (window === '本季度') return true
+  const days = window === '近 7 天' ? 7 : 30
+  const time = new Date(occurredAt).valueOf()
+  return !Number.isNaN(time) && time >= latestTime - days * 24 * 60 * 60 * 1000
+}
+
+function trendPoints(fields: Record<string, string | number>): number[] {
+  if (typeof fields.points !== 'string') return []
+  return fields.points
+    .split(',')
+    .map(value => Number(value.trim()))
+    .filter(value => Number.isFinite(value))
+}
 
 export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataState; onOpenProject: OpenProject }) {
   const { currentProject, reloadProjects } = useProject()
   const [platform, setPlatform] = useState('全部平台')
   const [window, setWindow] = useState('近 30 天')
   const [query, setQuery] = useState('')
-  const [selectedId, setSelectedId] = useState(adRows[0].id)
+  const [selectedId, setSelectedId] = useState('')
   const [notice, setNotice] = useState('')
-  const filtered = useMemo(() => adRows.filter(row =>
+  const ads = useMemo(() => currentProject.operations.map(performanceAd).filter((row): row is PerformanceAd => Boolean(row)), [currentProject.operations])
+  const platforms = useMemo(() => [...new Set(ads.map(row => row.platform))], [ads])
+  const latestTime = useMemo(() => Math.max(...ads.map(row => new Date(row.occurredAt).valueOf())), [ads])
+  const filtered = useMemo(() => ads.filter(row =>
     (platform === '全部平台' || row.platform === platform)
+    && inWindow(row.occurredAt, window, latestTime)
     && `${row.id} ${row.name} ${row.format}`.toLowerCase().includes(query.trim().toLowerCase()),
-  ), [platform, query])
-  const selected = filtered.find(row => row.id === selectedId) ?? filtered[0] ?? adRows[0]
+  ), [ads, latestTime, platform, query, window])
+  const selected = filtered.find(row => row.id === selectedId) ?? filtered[0]
   const spend = filtered.reduce((sum, row) => sum + row.spend, 0)
   const impressions = filtered.reduce((sum, row) => sum + row.impressions, 0)
   const averageCtr = filtered.length ? filtered.reduce((sum, row) => sum + row.ctr, 0) / filtered.length : 0
   const averageCpa = filtered.length ? filtered.reduce((sum, row) => sum + row.cpa, 0) / filtered.length : 0
   const [reportBusy, setReportBusy] = useState(false)
+  const topPerformer = [...filtered].sort((left, right) => right.ctr - left.ctr)[0]
+  const lowestCpa = [...filtered].sort((left, right) => left.cpa - right.cpa)[0]
+  const metrics = useMemo(() => currentProject.operations.filter(record => record.kind === 'metric'), [currentProject.operations])
+  const reasons = useMemo(() => currentProject.operations.filter(record => record.kind === 'evidence'), [currentProject.operations])
+  const actions = useMemo(() => currentProject.operations.filter(record => record.kind === 'delivery_action'), [currentProject.operations])
+  const metric = metrics[0]
+  const recommendation = actions[0]
+  const points = useMemo(() => metric ? trendPoints(metric.fields) : [], [metric])
+  const maxPoint = Math.max(...points, 1)
+  const resetFilters = () => {
+    setPlatform('全部平台')
+    setWindow('近 30 天')
+    setQuery('')
+    setSelectedId('')
+  }
+  const refreshOperations = async () => {
+    try {
+      await reloadProjects()
+      setNotice('已从服务端刷新当前 Project 的运营记录。')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '刷新运营记录失败，请重试。')
+    }
+  }
 
   const createReport = async () => {
+    if (!selected || !topPerformer || !lowestCpa) return
     setReportBusy(true)
     try {
       const report = await api.createArtifact({
         projectId: currentProject.id,
         kind: 'document',
         status: 'ready',
-        content: `[insight] 投后分析报告 | 窗口：${window} | 平台：${platform} | 消耗：¥${spend.toLocaleString('zh-CN')} | 曝光：${impressions.toLocaleString('zh-CN')} | 平均 CTR：${averageCtr.toFixed(2)}% | 平均 CPL：¥${averageCpa.toFixed(1)} | 关键素材：${selected.name} | 结论：精度证据前置与真实制造场景共同驱动表现。`,
+        content: `[insight] 投后分析报告 | 窗口：${window} | 平台：${platform} | 消耗：¥${spend.toLocaleString('zh-CN')} | 曝光：${impressions.toLocaleString('zh-CN')} | 平均 CTR：${averageCtr.toFixed(2)}% | 平均 CPL：¥${averageCpa.toFixed(1)} | 关键素材：${selected.name} | 趋势：${metric?.fields.summary ?? '无服务端趋势记录'} | 建议：${recommendation?.title ?? '无服务端建议动作'}`,
       })
       await reloadProjects()
       setNotice(`投后分析报告 ${report.id.slice(0, 8)} 已确认，可进入经验库沉淀。`)
@@ -203,114 +261,151 @@ export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataSt
     }
   }
 
-  return <StateBoundary state={state} onRetry={() => setNotice('广告数据已重新加载')} onCreate={() => setNotice('数据源接入向导已打开')}>
+  return <StateBoundary state={state} onRetry={() => void refreshOperations()} onCreate={() => setNotice('数据源接入向导已打开')}>
     <div className="ad-insight-workspace">
       <section className="ad-insight-main">
         <div className="core-flow-toolbar">
-          <div><span className="section-label">POST-LAUNCH ANALYSIS</span><h2>投后分析</h2><p>统一查看平台消耗、曝光、点击率与线索成本，并把素材表现解释为下一轮可用经验。</p></div>
+          <div><span className="section-label">POST-LAUNCH ANALYSIS</span><h2>投后结论</h2><p>先确认表现变化、可解释的驱动因素与下一步动作，再进入指标口径和广告明细验证。</p></div>
           <div className="core-flow-actions">
-            <label>平台<select aria-label="广告平台" value={platform} onChange={event => setPlatform(event.target.value)}><option>全部平台</option><option>巨量引擎</option><option>腾讯广告</option><option>快手磁力</option></select></label>
+            <label>平台<select aria-label="广告平台" value={platform} onChange={event => setPlatform(event.target.value)}><option>全部平台</option>{platforms.map(item => <option key={item}>{item}</option>)}</select></label>
             <label>窗口<select aria-label="数据窗口" value={window} onChange={event => setWindow(event.target.value)}><option>近 7 天</option><option>近 30 天</option><option>本季度</option></select></label>
-            <button className="secondary-button" onClick={() => setNotice(`${platform} · ${window} 数据已刷新至 11:30`)}><RefreshCw size={15}/>刷新数据</button>
+            <button className="secondary-button" onClick={() => void refreshOperations()}><RefreshCw size={15}/>刷新数据</button>
           </div>
         </div>
-        <div className="ad-metric-grid">
-          <div><span>广告消耗</span><b>¥{(spend / 1000).toFixed(1)}k</b><small><TrendingUp size={13}/>较前期 +12.4%</small></div>
-          <div><span>曝光</span><b>{(impressions / 1_000_000).toFixed(2)}m</b><small>统一去重口径</small></div>
-          <div><span>平均 CTR</span><b>{averageCtr.toFixed(2)}%</b><small className="positive">证据前置表现更好</small></div>
-          <div><span>平均 CPL</span><b>¥{averageCpa.toFixed(1)}</b><small>高质量销售线索</small></div>
+
+        {filtered.length ? <><div className="postlaunch-brief">
+          <section className="postlaunch-conclusion">
+            <span className="section-label">发生什么</span>
+            <h3>{metric?.fields.summary ?? '当前筛选范围内已汇总服务端广告表现。'}</h3>
+            <p>在 {window}、{platform} 范围内，{topPerformer?.name} 以 {topPerformer?.ctr}% CTR 领跑；{lowestCpa?.name} 的 CPL 为 ¥{lowestCpa?.cpa}，当前平均为 ¥{averageCpa.toFixed(1)}。</p>
+            <div className="postlaunch-signal-line">
+              <span><b>{averageCtr.toFixed(2)}%</b><small>平均 CTR</small></span>
+              <span><b>¥{averageCpa.toFixed(1)}</b><small>平均 CPL</small></span>
+              <span><b>{filtered.length}</b><small>纳入分析的广告</small></span>
+            </div>
+          </section>
+          <section className="postlaunch-trend" aria-label="核心趋势">
+            <div><span className="section-label">核心趋势</span><b>{metric?.title ?? '暂无服务端趋势记录'}</b><small>{String(metric?.fields.comparison ?? '请接入运营指标后重试')}</small></div>
+            {points.length ? <>
+              <div className="postlaunch-sparkline" aria-label={`服务端趋势共 ${points.length} 个点位`}>
+                {points.map((point, index) => <i key={`${metric?.id}-${index}`} style={{ height: `${Math.max((point / maxPoint) * 100, 4)}%`, opacity: 0.45 + ((index + 1) / points.length) * 0.55 }}/>)}
+              </div>
+              <div className="postlaunch-trend-labels"><span>点位 1</span><span>点位 {points.length}</span></div>
+            </> : <p className="postlaunch-trend-empty">当前趋势记录未提供可视化点位。</p>}
+          </section>
         </div>
-        <div className="ad-data-panel">
-          <div className="ad-data-heading"><div className="search-field"><Search size={15}/><input aria-label="搜索广告数据" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索广告、素材或编号"/></div><span>{filtered.length} 条广告 · {window}</span></div>
-          <div className="ad-data-table">
-            <div className="ad-data-row header"><span>广告</span><span>平台</span><span>消耗</span><span>曝光</span><span>CTR</span><span>CPL</span><span>信号</span></div>
-            {filtered.map(row => <button key={row.id} className={selectedId === row.id ? 'ad-data-row active' : 'ad-data-row'} onClick={() => setSelectedId(row.id)}>
-              <span><b>{row.name}</b><small>{row.id} · {row.format}</small></span><span>{row.platform}</span><span>¥{row.spend.toLocaleString('zh-CN')}</span><span>{row.impressions.toLocaleString('zh-CN')}</span><span>{row.ctr}%</span><span>¥{row.cpa}</span><span><i/>{row.signal}</span>
-            </button>)}
-            {!filtered.length ? <div className="panel-empty">没有匹配的广告数据</div> : null}
+
+        <div className="postlaunch-decision-grid">
+          <section className="postlaunch-reasons">
+            <span className="section-label">为什么发生</span>
+            <h3>可复核的表现驱动</h3>
+            <div className="postlaunch-reason-list">
+              {reasons.map((reason, index) => <article key={reason.id}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{reason.title}</b><p>{String(reason.fields.source ?? '服务端运营记录')} · 置信度：{String(reason.fields.confidence ?? '未标注')}</p></div></article>)}
+              {!reasons.length ? <div className="panel-empty">当前 Project 没有可解释原因记录。</div> : null}
+            </div>
+          </section>
+          <section className="postlaunch-action">
+            <span className="section-label">推荐动作</span>
+            <h3>下一轮优先验证</h3>
+            <b>{recommendation?.title ?? '暂无服务端建议动作'}</b>
+            <p>{String(recommendation?.fields.detail ?? '接入并保存建议动作后，可在此执行。')}</p>
+            <div><span>预计影响</span><strong>{String(recommendation?.fields.impact ?? '待评估')}</strong></div>
+            <button className="primary-button full" onClick={() => onOpenProject(currentProject.id, 'delivery', 'optimization')}><TrendingUp size={15}/>进入优化中心执行</button>
+          </section>
+        </div>
+
+        <details className="postlaunch-drilldown">
+          <summary><span><b>广告明细与指标口径</b><small>用于验证结论、筛选广告并查看单条表现</small></span><span>{filtered.length} 条广告 · {window}</span></summary>
+          <div className="ad-data-panel">
+            <div className="ad-data-heading"><div className="search-field"><Search size={15}/><input aria-label="搜索广告数据" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索广告、素材或编号"/></div><span>消耗、曝光按当前平台与窗口汇总；CPL 为每条高质量销售线索成本</span></div>
+            <div className="ad-data-table">
+              <div className="ad-data-row header"><span>广告</span><span>平台</span><span>消耗</span><span>曝光</span><span>CTR</span><span>CPL</span><span>信号</span></div>
+              {filtered.map(row => <button key={row.id} className={selectedId === row.id ? 'ad-data-row active' : 'ad-data-row'} onClick={() => setSelectedId(row.id)}>
+                <span><b>{row.name}</b><small>{row.id} · {row.format}</small></span><span>{row.platform}</span><span>¥{row.spend.toLocaleString('zh-CN')}</span><span>{row.impressions.toLocaleString('zh-CN')}</span><span>{row.ctr}%</span><span>¥{row.cpa}</span><span><i/>{row.signal}</span>
+              </button>)}
+              {!filtered.length ? <div className="panel-empty">没有匹配的广告数据</div> : null}
+            </div>
           </div>
-        </div>
+        </details></> : <section className="panel-empty"><b>没有可用的投后运营数据</b><p>当前 Project 在 {platform}、{window} 与搜索条件下没有服务端广告表现记录。可清除筛选或重新拉取运营记录。</p><button className="secondary-button" onClick={resetFilters}>清除筛选</button><button className="primary-button" onClick={() => void refreshOperations()}><RefreshCw size={15}/>重新拉取</button></section>}
       </section>
-      <aside className="ad-insight-detail">
-        <span className="section-label">选中广告分析</span><h3>{selected.name}</h3><p>{selected.platform} · {selected.format} · 当前信号：{selected.signal}</p>
-        <div className="mini-trend"><BarChart3 size={18}/><div><b>前三秒留存 71%</b><small>较账户视频均值 +14%</small></div></div>
-        {['精度数字在第 1.2 秒出现', '制造过程提供可信证据', 'CTA 与线索目标一致'].map(item => <span className="analysis-check" key={item}><CircleCheck size={15}/>{item}</span>)}
+      <aside className="ad-insight-detail">{selected ? <>
+        <span className="section-label">明细下钻</span><h3>{selected.name}</h3><p>{selected.platform} · {selected.format} · 当前信号：{selected.signal}</p>
+        <div className="mini-trend"><BarChart3 size={18}/><div><b>{selected.ctr}% CTR</b><small>CPL ¥{selected.cpa} · 来自服务端运营记录</small></div></div>
+        {reasons.slice(0, 3).map(item => <span className="analysis-check" key={item.id}><CircleCheck size={15}/>{item.title}</span>)}
         <button className="secondary-button full" disabled={reportBusy} onClick={() => void createReport()}><BarChart3 size={15}/>{reportBusy ? '正在生成报告…' : '生成项目复盘报告'}</button>
-        <button className="primary-button full" onClick={() => onOpenProject(currentProject.id, 'insight', 'knowledge')}>进入经验沉淀<ArrowRight size={15}/></button>
+        <button className="primary-button full" onClick={() => onOpenProject(currentProject.id, 'insight', 'knowledge')}>进入经验沉淀<ArrowRight size={15}/></button></> : <div className="panel-empty">选择或恢复服务端广告记录后可查看复盘输入。</div>}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </aside>
     </div>
   </StateBoundary>
 }
 
-const assets = [
-  { id: 'AS-1042', name: '短剧前贴·交期冲突', type: '视频', source: 'AI 生成', status: '分析完成', ctr: '4.62%', feature: '冲突前置 / 4 秒钩子', experience: '用交期风险制造决策压力' },
-  { id: 'AS-1038', name: '游戏前贴·精度挑战', type: '视频', source: 'AI 生成', status: '分析完成', ctr: '3.26%', feature: '挑战任务 / 结果反馈', experience: '目标、失败、反转需在 6 秒内闭环' },
-  { id: 'AS-1027', name: 'CNC 精度证据主视觉', type: '图文', source: '品牌资产', status: '已沉淀', ctr: '3.74%', feature: '数字证据 / 工艺特写', experience: '证据数字应在首屏完整可见' },
-  { id: 'AS-1019', name: '纯产品特写对照组', type: '图文', source: '历史投放', status: '待复审', ctr: '2.41%', feature: '产品单帧 / 弱证据', experience: '缺少场景时点击率明显下降' },
-]
-
 export function AssetExperiencePage({ state, mode }: { state: DataState; mode: 'assets' | 'knowledge' }) {
-  const { currentProject, reloadProjects } = useProject()
+  const { currentProject } = useProject()
   const [query, setQuery] = useState('')
   const [type, setType] = useState('全部')
-  const [selectedId, setSelectedId] = useState(assets[0].id)
-  const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [confirmed, setConfirmed] = useState<string[]>(['AS-1027'])
-  const filtered = useMemo(() => assets.filter(asset =>
-    (type === '全部' || asset.type === type)
-    && `${asset.id} ${asset.name} ${asset.feature}`.toLowerCase().includes(query.trim().toLowerCase()),
-  ), [query, type])
-  const selected = assets.find(asset => asset.id === selectedId) ?? assets[0]
-  const confirmExperience = async () => {
-    setBusy(true)
+  const [selectedId, setSelectedId] = useState('')
+  const [artifacts, setArtifacts] = useState<ApiArtifact[]>([])
+  const [assetState, setAssetState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const loadArtifacts = useCallback(async () => {
+    if (!currentProject.id) return
+    setAssetState('loading')
     try {
-      await api.createArtifact({
-        projectId: currentProject.id,
-        kind: 'document',
-        content: `[knowledge] ${selected.experience} | 来源 ${selected.id} | 适用：B2B 制造、线索广告、首屏证据型创意 | 边界：纯品牌曝光任务`,
-        status: 'ready',
-      })
-      await reloadProjects()
-      setConfirmed(current => current.includes(selected.id) ? current : [...current, selected.id])
-      setNotice(`已将「${selected.experience}」写入 Project 经验资产，可被下一轮 Brief 与创意引用。`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '经验沉淀失败，请稍后重试。')
-    } finally {
-      setBusy(false)
+      const next = await api.listArtifacts(currentProject.id)
+      setArtifacts(next.filter(artifact => mode === 'knowledge'
+        ? artifact.kind === 'document' && artifact.content.startsWith('[knowledge]')
+        : artifact.kind === 'image' || artifact.kind === 'video'))
+      setAssetState('ready')
+    } catch {
+      setArtifacts([])
+      setAssetState('error')
     }
-  }
+  }, [currentProject.id, mode])
+  useEffect(() => { void loadArtifacts() }, [loadArtifacts])
+  const filtered = useMemo(() => artifacts.filter(asset =>
+    (type === '全部' || assetType(asset) === type)
+    && `${asset.id} ${asset.content}`.toLowerCase().includes(query.trim().toLowerCase()),
+  ), [artifacts, query, type])
+  useEffect(() => {
+    setSelectedId(current => filtered.some(asset => asset.id === current) ? current : filtered[0]?.id ?? '')
+  }, [filtered])
+  const selected = filtered.find(asset => asset.id === selectedId)
 
-  return <StateBoundary state={state} onRetry={() => setNotice('素材索引已重新加载')} onCreate={() => setNotice('素材上传面板已打开')}>
+  return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
     <div className="asset-experience-workspace">
       <section className="asset-library-panel">
         <div className="core-flow-toolbar">
-          <div><span className="section-label">{mode === 'assets' ? 'ASSET MANAGEMENT' : 'EXPERIENCE LIBRARY'}</span><h2>{mode === 'assets' ? '素材管理与分析' : '素材经验沉淀'}</h2><p>从素材特征与广告表现中形成可复用、可追溯的创意经验。</p></div>
-          <button className="primary-button" onClick={() => setNotice(mode === 'assets' ? '素材上传队列已打开' : '已创建一条空白候选经验')}><Sparkles size={15}/>{mode === 'assets' ? '导入素材' : '新建经验'}</button>
+          <div><span className="section-label">{mode === 'assets' ? 'ASSET MANAGEMENT' : 'EXPERIENCE LIBRARY'}</span><h2>{mode === 'assets' ? '当前 Project 素材' : '当前 Project 经验'}</h2><p>仅展示服务端已持久化、归属当前 Project 的产物及其可追溯元数据。</p></div>
         </div>
         <div className="asset-filterbar">
           <div className="search-field"><Search size={15}/><input aria-label="搜索素材经验" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索素材、特征或经验"/></div>
-          <label><Filter size={14}/><select aria-label="素材类型" value={type} onChange={event => setType(event.target.value)}><option>全部</option><option>视频</option><option>图文</option></select></label>
-          <span>{filtered.length} 项 · 已沉淀 {confirmed.length}</span>
+          <label><Filter size={14}/><select aria-label="素材类型" value={type} onChange={event => setType(event.target.value)}><option>全部</option><option>视频</option><option>图文</option><option>文档</option></select></label>
+          <span>{filtered.length} 项 · 当前 Project</span>
         </div>
         <div className="asset-card-grid">
+          {assetState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的服务端产物…</div> : null}
+          {assetState === 'error' ? <div className="panel-empty">素材读取失败，请重试。</div> : null}
+          {assetState === 'ready' && !filtered.length ? <div className="panel-empty">{mode === 'assets' ? '当前 Project 暂无已持久化的图片或视频资产。' : '当前 Project 暂无已生成并持久化的经验结论。'}</div> : null}
           {filtered.map(asset => <button key={asset.id} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
-            <span className="asset-card-preview">{asset.type === '视频' ? <Play size={18} fill="currentColor"/> : <Layers3 size={18}/>}<small>{asset.type}</small></span>
-            <span><small>{asset.id} · {asset.source}</small><b>{asset.name}</b><em>{asset.feature}</em></span>
-            <span><strong>{asset.ctr}</strong><small>CTR</small></span>
-            {confirmed.includes(asset.id) ? <i className="experience-confirmed"><Check size={12}/>已沉淀</i> : null}
+            <span className="asset-card-preview">{asset.kind === 'video' ? <Play size={18} fill="currentColor"/> : <Layers3 size={18}/>}<small>{assetType(asset)}</small></span>
+            <span><small>{asset.id.slice(0, 8)} · {asset.sourceJobId ? '生成任务产物' : '服务端存档'}</small><b>{assetTitle(asset)}</b><em>{asset.status === 'ready' ? '已持久化' : '草稿'}</em></span>
           </button>)}
         </div>
       </section>
       <aside className="asset-analysis-detail">
-        <span className="section-label">分析与经验</span><h3>{selected.name}</h3><p>{selected.status} · {selected.source}</p>
-        <div className="feature-stack"><span>内容特征</span>{selected.feature.split(' / ').map(item => <b key={item}>{item}</b>)}</div>
-        <div className="experience-card"><BookOpenCheck size={18}/><span><small>候选经验</small><b>{selected.experience}</b><p>适用条件：B2B 制造、线索广告、首屏证据型创意。反例：纯品牌曝光任务。</p></span></div>
-        <button className="secondary-button full" onClick={() => setNotice(`已完成「${selected.name}」素材分析，特征与效果已对齐`)}><Database size={15}/>重新分析</button>
-        <button className="primary-button full" onClick={() => { void confirmExperience() }} disabled={busy || confirmed.includes(selected.id)}><BookOpenCheck size={15}/>{busy ? '正在写入项目…' : confirmed.includes(selected.id) ? '经验已沉淀' : '确认并沉淀经验'}</button>
-        {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+        {selected ? <><span className="section-label">服务端产物详情</span><h3>{assetTitle(selected)}</h3><p>{assetType(selected)} · {selected.status === 'ready' ? '已持久化' : '草稿'}</p>
+          <div className="feature-stack"><span>可追溯元数据</span><b>Artifact {selected.id}</b><b>版本 v{selected.version}</b><b>{selected.sourceJobId ? `来源任务 ${selected.sourceJobId}` : '非生成任务产物'}</b><b>更新时间 {new Date(selected.updatedAt).toLocaleString('zh-CN')}</b></div>
+          <div className="experience-card"><BookOpenCheck size={18}/><span><small>{mode === 'knowledge' ? '已持久化经验' : '产物内容'}</small><b>{selected.content}</b></span></div>
+        </> : <div className="panel-empty">选择当前 Project 的服务端产物后查看详情；系统不会以固定 CTR 或 AI 结论替代真实结果。</div>}
       </aside>
     </div>
   </StateBoundary>
+}
+
+function assetType(artifact: ApiArtifact): string {
+  return artifact.kind === 'image' ? '图文' : artifact.kind === 'video' ? '视频' : '文档'
+}
+
+function assetTitle(artifact: ApiArtifact): string {
+  return artifact.content.replace(/^\[knowledge\]\s*/, '').slice(0, 48) || `${assetType(artifact)}产物`
 }

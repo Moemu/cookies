@@ -16,6 +16,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/platform/remix"
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
@@ -175,6 +176,82 @@ func TestRemoveProjectAssetRequiresWriteScope(t *testing.T) {
 	}
 }
 
+func TestRemixPlanRoutesCreateAndReadSavedPlan(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.write", "assets.read"}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans := &fakeRemixPlanManager{}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, RemixPlans: plans})
+	body, _ := json.Marshal(remix.CreatePlanRequest{
+		ClientPlanID:  "client_plan_1",
+		TargetSeconds: 30,
+		ActualSeconds: 9.6,
+		Pace:          remix.PaceBalanced,
+		Segments: []remix.SegmentPlan{
+			httpRemixSegment(remix.SegmentOpening, "前段", "asset_opening"),
+			httpRemixSegment(remix.SegmentMiddle, "中段", "asset_middle"),
+			httpRemixSegment(remix.SegmentEnding, "后段", "asset_ending"),
+		},
+		Summary: remix.PlanSummary{SelectedAssets: 3, UsedAssets: 3, CoveragePercent: 32, Strategy: "balanced"},
+	})
+
+	create := httptest.NewRecorder()
+	server.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/remix-plans", bytes.NewReader(body)))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", create.Code, create.Body.String())
+	}
+	if create.Header().Get("Location") != "/platform/v1/projects/project_1/remix-plans/remixplan_1" {
+		t.Fatalf("location=%q", create.Header().Get("Location"))
+	}
+
+	read := httptest.NewRecorder()
+	server.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/remix-plans/remixplan_1", nil))
+	if read.Code != http.StatusOK {
+		t.Fatalf("read status=%d body=%s", read.Code, read.Body.String())
+	}
+	list := httptest.NewRecorder()
+	server.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/remix-plans?limit=5", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	var listBody struct {
+		Items []remix.Plan `json:"items"`
+	}
+	if err := json.NewDecoder(list.Body).Decode(&listBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(listBody.Items) != 1 || listBody.Items[0].ID != "remixplan_1" {
+		t.Fatalf("list body=%#v", listBody)
+	}
+
+	renderBody, _ := json.Marshal(remix.CreateRenderJobRequest{PlanID: "remixplan_1", TargetQuality: "draft"})
+	render := httptest.NewRecorder()
+	server.ServeHTTP(render, httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/remix-render-jobs", bytes.NewReader(renderBody)))
+	if render.Code != http.StatusAccepted {
+		t.Fatalf("render status=%d body=%s", render.Code, render.Body.String())
+	}
+	if render.Header().Get("Location") != "/platform/v1/projects/project_1/remix-render-jobs/remixrender_1" {
+		t.Fatalf("render location=%q", render.Header().Get("Location"))
+	}
+	renderRead := httptest.NewRecorder()
+	server.ServeHTTP(renderRead, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/remix-render-jobs/remixrender_1", nil))
+	if renderRead.Code != http.StatusOK {
+		t.Fatalf("render read status=%d body=%s", renderRead.Code, renderRead.Body.String())
+	}
+
+	actor.Scopes = []contract.Scope{"assets.read"}
+	resolver, _ = identity.NewStaticResolver(actor)
+	deniedServer := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, RemixPlans: plans})
+	denied := httptest.NewRecorder()
+	deniedServer.ServeHTTP(denied, httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/remix-plans", bytes.NewReader(body)))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("scope denied status=%d", denied.Code)
+	}
+}
+
 func TestLocalAssetPreviewReturnsProtectedContentURL(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.read"}}
@@ -254,6 +331,94 @@ func (fakeIntakeManager) Create(_ context.Context, rc contract.RequestContext, p
 }
 func (fakeIntakeManager) Get(context.Context, contract.ActorContext, contract.ProjectID, string) (assets.GeneratedIntake, error) {
 	return assets.GeneratedIntake{}, assets.ErrNotFound
+}
+
+type fakeRemixPlanManager struct {
+	plan   remix.Plan
+	render remix.RenderJob
+}
+
+func (f *fakeRemixPlanManager) Create(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreatePlanRequest) (remix.Plan, error) {
+	f.plan = remix.Plan{
+		ID:             "remixplan_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		CreatedBy:      actor.Principal,
+		ClientPlanID:   request.ClientPlanID,
+		TargetSeconds:  request.TargetSeconds,
+		ActualSeconds:  request.ActualSeconds,
+		Pace:           request.Pace,
+		Segments:       request.Segments,
+		Warnings:       request.Warnings,
+		Summary:        request.Summary,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	return f.plan, nil
+}
+
+func (f *fakeRemixPlanManager) Get(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.Plan, error) {
+	if id != f.plan.ID {
+		return remix.Plan{}, remix.ErrNotFound
+	}
+	return f.plan, nil
+}
+
+func (f *fakeRemixPlanManager) List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]remix.Plan, error) {
+	if f.plan.ID == "" {
+		return nil, nil
+	}
+	return []remix.Plan{f.plan}, nil
+}
+
+func (f *fakeRemixPlanManager) CreateRenderJob(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreateRenderJobRequest) (remix.RenderJob, error) {
+	if request.PlanID != f.plan.ID {
+		return remix.RenderJob{}, remix.ErrNotFound
+	}
+	f.render = remix.RenderJob{
+		ID:             "remixrender_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		PlanID:         request.PlanID,
+		Status:         remix.RenderQueued,
+		TargetFormat:   "mp4",
+		TargetQuality:  request.TargetQuality,
+		CreatedBy:      actor.Principal,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	return f.render, nil
+}
+
+func (f *fakeRemixPlanManager) GetRenderJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.RenderJob, error) {
+	if id != f.render.ID {
+		return remix.RenderJob{}, remix.ErrNotFound
+	}
+	return f.render, nil
+}
+
+func httpRemixSegment(segment remix.Segment, label string, assetID contract.AssetID) remix.SegmentPlan {
+	return remix.SegmentPlan{
+		Segment:       segment,
+		Label:         label,
+		TargetSeconds: 10,
+		ActualSeconds: 3.2,
+		Clips: []remix.Clip{{
+			ID:              string(segment) + "_clip_1",
+			Segment:         segment,
+			AssetVersion:    contract.AssetVersionRef{AssetID: assetID, Version: 1},
+			Label:           string(assetID) + " · v1",
+			SourceType:      "upload",
+			MimeType:        "video/mp4",
+			Aspect:          "vertical",
+			StartSeconds:    0,
+			DurationSeconds: 3.2,
+			InPointSeconds:  0,
+			OutPointSeconds: 3.2,
+			Score:           0.8,
+			Reason:          "test",
+		}},
+	}
 }
 
 func TestContextFailsClosedWithoutTrustedIdentity(t *testing.T) {

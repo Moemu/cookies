@@ -113,7 +113,7 @@ export function TaskCreateDialog({
   }}>
     <form className="task-create-dialog" role="dialog" aria-modal="true" aria-labelledby="task-dialog-title" onSubmit={submit}>
       <header>
-        <div><span>当前 Project · {currentProject.name}</span><h2 id="task-dialog-title">新建{domain === 'strategy' ? '策略' : '创意'}任务</h2><p>任务会写入服务端，并自动关联当前项目的 Brief、策略和后续产物。</p></div>
+        <div><span>当前 Project · {currentProject.name}</span><h2 id="task-dialog-title">新建{domain === 'strategy' ? '策略' : '创意'}任务</h2><p>{domain === 'creative' ? '先确定任务类型，再进入对应创意工作区；所有生成、素材和交付仍写入同一条 Project 链路。' : '任务会写入服务端，并自动关联当前项目的 Brief、策略和后续产物。'}</p></div>
         <button type="button" aria-label="关闭新建任务" onClick={onClose}><X size={18}/></button>
       </header>
       {domain === 'creative' ? <div className="task-type-picker" role="radiogroup" aria-label="创意任务类型">
@@ -143,6 +143,7 @@ export function TaskCenterPage({
   selectedId,
   onOpenTask,
   onRequestCreate,
+  onContinueTask,
 }: {
   state: DataState
   domain: 'strategy' | 'creative'
@@ -150,6 +151,7 @@ export function TaskCenterPage({
   selectedId?: string
   onOpenTask: (id: string) => void
   onRequestCreate: () => void
+  onContinueTask?: (task: BusinessTaskRecord) => void
 }) {
   const { currentProject, updateTask } = useProject()
   const [notice, setNotice] = useState('')
@@ -179,7 +181,7 @@ export function TaskCenterPage({
   return <StateBoundary state={state} onCreate={onRequestCreate}><div className="business-task-center">
     <div className="task-center-grid">
       <aside className="task-list-rail">
-        <div className="surface-toolbar"><h3>{domain === 'strategy' ? '策略任务' : '创意任务'}</h3><span>{tasks.length}/{allTasks.length}</span></div>
+        <div className="surface-toolbar"><h3>{domain === 'strategy' ? '策略任务' : '统一创意入口'}</h3><span>{tasks.length}/{allTasks.length}</span></div>
         {tasks.map(task => <button className={selected?.id === task.id ? 'active' : ''} key={task.id} onClick={() => onOpenTask(task.id)}>
           <span className="task-type-icon">{task.type === 'strategy' ? <Target size={15}/> : <Film size={15}/>}</span>
           <span><b>{task.name}</b><small>{taskTypeMeta[task.type].label} · v{task.version}</small></span>
@@ -199,9 +201,9 @@ export function TaskCenterPage({
             {(domain === 'strategy'
               ? ['校验 Brief 完整度', '组织受众与研究证据', '形成渠道和创意策略', '提交策略评审']
               : ['继承已批准策略', '配置渠道和生成规格', '制作与生成版本', '品牌检查和交付']
-            ).map((stage, index) => <div className={index === 0 || selected.status !== 'draft' ? 'done' : ''} key={stage}><span>{index === 0 || selected.status !== 'draft' ? <Check size={13}/> : String(index + 1).padStart(2, '0')}</span><b>{stage}</b><small>{index === 0 ? '已继承当前 Project 上下文' : '等待任务推进'}</small></div>)}
+            ).map((stage, index) => <div className={index === 0 || selected.status !== 'draft' ? 'done' : ''} key={stage}><span>{index === 0 || selected.status !== 'draft' ? <Check size={13}/> : String(index + 1).padStart(2, '0')}</span><b>{stage}</b><small>{index === 0 ? '已继承当前 Project 上下文' : domain === 'creative' ? '点击继续制作进入对应工作区' : '等待任务推进'}</small></div>)}
           </div>
-          <footer><span><Clock3 size={14}/>更新于 {new Date(selected.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span><button className="primary-button" onClick={() => void advance()} disabled={selected.status === 'completed'}>{selected.status === 'draft' ? '开始任务' : selected.status === 'in_progress' ? '提交评审' : selected.status === 'ready' ? '确认完成' : '任务已完成'}</button></footer>
+          <footer><span><Clock3 size={14}/>更新于 {new Date(selected.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>{domain === 'creative' && onContinueTask ? <><button className="secondary-button" onClick={() => void advance()} disabled={selected.status === 'completed'}>{selected.status === 'draft' ? '开始任务' : selected.status === 'in_progress' ? '提交评审' : selected.status === 'ready' ? '确认完成' : '任务已完成'}</button><button className="primary-button" onClick={() => onContinueTask(selected)}>继续制作<ArrowRight size={15}/></button></> : <button className="primary-button" onClick={() => void advance()} disabled={selected.status === 'completed'}>{selected.status === 'draft' ? '开始任务' : selected.status === 'in_progress' ? '提交评审' : selected.status === 'ready' ? '确认完成' : '任务已完成'}</button>}</footer>
           {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
         </> : <div className="task-work-empty"><ListChecks size={30}/><h2>创建第一个{domain === 'strategy' ? '策略' : '创意'}任务</h2><p>任务将绑定当前 Project，并成为后续模块的数据来源。</p></div>}
       </section>

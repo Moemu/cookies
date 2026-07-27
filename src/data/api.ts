@@ -3,6 +3,17 @@ export type ApiProject = {
   name: string
   brand: string
   objective: string
+  runtime: {
+    code: string
+    product: string
+    stage: string
+    progress: number
+    status: 'active' | 'completed'
+    owner: string
+    budget: number
+    currency: 'CNY'
+    timezone: 'Asia/Shanghai'
+  }
   version: number
   createdAt: string
   updatedAt: string
@@ -12,6 +23,9 @@ export type ApiArtifact = {
   id: string
   projectId: string
   kind: 'brief' | 'image' | 'video' | 'document'
+  purpose?: ApiVideoPurpose
+  prerollType?: ApiPrerollType
+  shortDramaPreroll?: ApiShortDramaPrerollSnapshot
   status: 'draft' | 'ready' | 'archived'
   content: string
   sourceJobId?: string
@@ -24,6 +38,8 @@ export type ApiGenerationJob = {
   id: string
   projectId: string
   artifactKind: ApiArtifact['kind']
+  purpose?: ApiVideoPurpose
+  prerollType?: ApiPrerollType
   briefArtifactId?: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   model?: string
@@ -32,6 +48,45 @@ export type ApiGenerationJob = {
   version: number
   createdAt: string
   updatedAt: string
+}
+
+export type ApiVideoPurpose = 'preroll'
+export type ApiPrerollType = 'short_drama' | 'game' | 'commerce'
+
+export type ApiShortDramaStoryContext = {
+  title: string
+  synopsis: string
+  reviewedSellingPoints: string[]
+  openingLine?: string
+}
+
+export type ApiShortDramaPrerollCandidate = {
+  id: string
+  hookType: 'conflict' | 'reversal' | 'suspense' | 'selling_point_bridge'
+  score: number
+  scoreMeaning: 'hook_relevance'
+  evidence: string[]
+  voiceover: string
+  visualIntent: string
+  transitionLine: string
+}
+
+export type ApiShortDramaPrerollPlan = {
+  version: 'short_drama_preroll_v1'
+  candidates: ApiShortDramaPrerollCandidate[]
+}
+
+export type ApiShortDramaPrerollSnapshot = {
+  planVersion: ApiShortDramaPrerollPlan['version']
+  storyContext: Omit<ApiShortDramaStoryContext, 'openingLine'>
+  selectedCandidate: ApiShortDramaPrerollCandidate
+  prompt: string
+}
+
+export type ApiPrerollScope = {
+  projectId: string
+  purpose: 'preroll'
+  prerollType: ApiPrerollType
 }
 
 export type ApiBusinessTaskType =
@@ -71,6 +126,30 @@ export type ApiAuditEvent = {
   createdAt: string
 }
 
+export type ApiOperationalRecordKind =
+  | 'work_item'
+  | 'evidence'
+  | 'activity'
+  | 'metric'
+  | 'performance_ad'
+  | 'audience_mix'
+  | 'method'
+  | 'delivery_diagnostic'
+  | 'delivery_action'
+  | 'unified_record'
+
+export type ApiOperationalRecord = {
+  id: string
+  projectId: string
+  kind: ApiOperationalRecordKind
+  title: string
+  status: string
+  occurredAt: string
+  fields: Record<string, string | number>
+  createdAt: string
+  updatedAt: string
+}
+
 export type ApiProviderCapabilities = {
   provider: string
   status: 'configured' | 'not_configured'
@@ -102,6 +181,15 @@ function projectQuery(projectId?: string): string {
   return projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
 }
 
+function prerollQuery(scope: ApiPrerollScope): string {
+  const search = new URLSearchParams({
+    projectId: scope.projectId,
+    purpose: scope.purpose,
+    prerollType: scope.prerollType,
+  })
+  return `?${search.toString()}`
+}
+
 export const api = {
   getCapabilities: () => request<ApiProviderCapabilities>('/provider/capabilities'),
   listProjects: () => request<ApiProject[]>('/projects'),
@@ -111,6 +199,8 @@ export const api = {
     request<ApiProject>(`/projects/${encodeURIComponent(id)}`, 'PATCH', input),
   listArtifacts: (projectId?: string) =>
     request<ApiArtifact[]>(`/artifacts${projectQuery(projectId)}`),
+  listPrerollArtifacts: (scope: ApiPrerollScope) =>
+    request<ApiArtifact[]>(`/artifacts${prerollQuery(scope)}`),
   listTasks: (projectId?: string) =>
     request<ApiBusinessTask[]>(`/tasks${projectQuery(projectId)}`),
   getTask: (id: string) =>
@@ -140,10 +230,17 @@ export const api = {
   ) => request<ApiArtifact>(`/artifacts/${encodeURIComponent(id)}`, 'PATCH', input),
   listJobs: (projectId?: string) =>
     request<ApiGenerationJob[]>(`/generation-jobs${projectQuery(projectId)}`),
+  listPrerollJobs: (scope: ApiPrerollScope) =>
+    request<ApiGenerationJob[]>(`/generation-jobs${prerollQuery(scope)}`),
   getJob: (id: string) =>
     request<ApiGenerationJob>(`/generation-jobs/${encodeURIComponent(id)}`),
-  cancelJob: (id: string) =>
-    request<ApiGenerationJob>(`/generation-jobs/${encodeURIComponent(id)}/cancel`, 'POST'),
+  getPrerollJob: (id: string, scope: ApiPrerollScope) =>
+    request<ApiGenerationJob>(`/generation-jobs/${encodeURIComponent(id)}${prerollQuery(scope)}`),
+  cancelJob: (id: string, scope?: ApiPrerollScope) =>
+    request<ApiGenerationJob>(
+      `/generation-jobs/${encodeURIComponent(id)}/cancel${scope ? prerollQuery(scope) : ''}`,
+      'POST',
+    ),
   generateBrief: (projectId: string, prompt: string) =>
     request<{ job: ApiGenerationJob; artifact: ApiArtifact }>('/generation/text', 'POST', {
       projectId,
@@ -160,6 +257,45 @@ export const api = {
     prompt,
     briefId,
   }),
+  createPrerollVideo: (
+    scope: ApiPrerollScope,
+    prompt: string,
+    briefId: string,
+  ) => request<ApiGenerationJob>('/generation/media', 'POST', {
+    projectId: scope.projectId,
+    kind: 'video',
+    purpose: scope.purpose,
+    prerollType: scope.prerollType,
+    prompt,
+    briefId,
+  }),
+  planShortDramaPreroll: (
+    projectId: string,
+    briefId: string,
+    storyContext: ApiShortDramaStoryContext,
+  ) => request<ApiShortDramaPrerollPlan>('/short-drama-preroll-plans', 'POST', {
+    projectId,
+    briefId,
+    storyContext,
+  }),
+  createShortDramaPrerollVideo: (
+    scope: ApiPrerollScope & { prerollType: 'short_drama' },
+    briefId: string,
+    planVersion: ApiShortDramaPrerollPlan['version'],
+    candidateId: string,
+    storyContext: ApiShortDramaStoryContext,
+  ) => request<ApiGenerationJob>('/generation/media', 'POST', {
+    projectId: scope.projectId,
+    kind: 'video',
+    purpose: scope.purpose,
+    prerollType: scope.prerollType,
+    briefId,
+    shortDramaPlanVersion: planVersion,
+    shortDramaCandidateId: candidateId,
+    storyContext,
+  }),
   listAuditEvents: (projectId?: string) =>
     request<ApiAuditEvent[]>(`/audit-events${projectQuery(projectId)}`),
+  listOperations: (projectId: string) =>
+    request<ApiOperationalRecord[]>(`/projects/${encodeURIComponent(projectId)}/operations`),
 }

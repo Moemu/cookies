@@ -20,6 +20,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/platform/remix"
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
@@ -35,6 +36,7 @@ type Server struct {
 	creative          CreativeManager
 	sessions          SessionManager
 	knowledge         KnowledgeManager
+	remixPlans        RemixPlanManager
 	mux               *http.ServeMux
 	newID             func() (string, error)
 }
@@ -55,6 +57,7 @@ type Dependencies struct {
 	Creative          CreativeManager
 	Sessions          SessionManager
 	Knowledge         KnowledgeManager
+	RemixPlans        RemixPlanManager
 	// AuthenticatedDomainMounts allow vertical systems to share the platform
 	// listener and identity context without making this package import them.
 	// Mount handlers remain responsible for project authorization and scopes.
@@ -121,6 +124,14 @@ type CreativeManager interface {
 	ListPackages(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativePackage, error)
 }
 
+type RemixPlanManager interface {
+	Create(context.Context, contract.ActorContext, contract.ProjectID, remix.CreatePlanRequest) (remix.Plan, error)
+	Get(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.Plan, error)
+	List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]remix.Plan, error)
+	CreateRenderJob(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateRenderJobRequest) (remix.RenderJob, error)
+	GetRenderJob(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.RenderJob, error)
+}
+
 // ProviderJobs keeps the shared HTTP server dependent on Provider's public
 // application seam, rather than its SQL store or vendor adapters.
 type ProviderJobs interface {
@@ -147,6 +158,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 		identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads,
 		intakes: dependencies.Intakes, newID: newRequestID,
 		creative: dependencies.Creative, sessions: dependencies.Sessions, knowledge: dependencies.Knowledge,
+		remixPlans: dependencies.RemixPlans,
 	}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
@@ -171,6 +183,11 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.createKnowledgeDocument))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope("strategy.read", http.HandlerFunc(server.listKnowledgeDocuments))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixPlan))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.listRemixPlans))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-plans/{plan_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixPlan))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-render-jobs", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixRenderJob))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixRenderJob))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/model/jobs", server.requireProject(http.HandlerFunc(server.createImageJob)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/model/jobs/{job_id}", server.requireProject(http.HandlerFunc(server.getProviderJob)))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-intakes", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeIntakes))))
@@ -522,8 +539,8 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid image job object", RequestID: requestContext.RequestID, Retryable: false})
 		return
 	}
-	if body.Capability != "image.generate" || body.Input.Validate() != nil || strings.TrimSpace(body.ModelAlias) == "" || body.ProjectContextVersion < 1 {
-		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Only a valid image.generate request is supported", RequestID: requestContext.RequestID, Retryable: false})
+	if !supportedImageCapability(body.Capability) || body.Input.Validate() != nil || strings.TrimSpace(body.ModelAlias) == "" || body.ProjectContextVersion < 1 {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Only a valid image.generate or image.edit request is supported", RequestID: requestContext.RequestID, Retryable: false})
 		return
 	}
 	if !requestContext.Actor.HasScope(provider.ScopeJobCreate) {
@@ -555,7 +572,7 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 	}
 	job, _, err := s.providerJobs.CreateImageJob(request.Context(), provider.CreateImageJobRequest{
 		Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: requestHash,
-		ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Input: body.Input,
+		ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Operation: body.Capability, Input: body.Input,
 	})
 	if errors.Is(err, provider.ErrIdempotencyConflict) {
 		writeProblem(writer, http.StatusConflict, contract.Error{Code: "IDEMPOTENCY_CONFLICT", Message: "Idempotency key was reused for a different request", RequestID: requestContext.RequestID, Retryable: false})
@@ -566,6 +583,10 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeJSON(writer, http.StatusAccepted, job)
+}
+
+func supportedImageCapability(capability string) bool {
+	return capability == "image.generate" || capability == "image.edit"
 }
 
 func (s *Server) getProviderJob(writer http.ResponseWriter, request *http.Request) {

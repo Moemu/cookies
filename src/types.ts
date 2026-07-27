@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import type { ApiOperationalRecord } from './data/api'
 
 export type SystemKey = 'strategy' | 'creative' | 'insight' | 'delivery'
 export type DataState = 'ready' | 'loading' | 'empty' | 'error' | 'forbidden'
@@ -86,6 +87,7 @@ export interface ProjectRecord {
   stage: string
   progress: number
   status: '进行中' | '已完成'
+  owner: string
   updatedAt: string
   budget: number
   currency: 'CNY'
@@ -93,5 +95,6 @@ export interface ProjectRecord {
   artifacts: Record<ArtifactKey, ProjectArtifact>
   tasks: BusinessTaskRecord[]
   changeSets: ChangeSetRecord[]
+  operations: ApiOperationalRecord[]
   knowledgeCount: number
 }

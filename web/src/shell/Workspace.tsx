@@ -12,6 +12,8 @@ import {
   strategyPath,
 } from '../app/routes'
 import { AccountPage } from '../account/AccountPage'
+import { ProjectAssetEditPage } from '../features/assets/ProjectAssetEditPage'
+import { ProjectAssetRemixPage } from '../features/assets/ProjectAssetRemixPage'
 import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
 import { CreativeImageTextPage } from '../features/creative/CreativeImageTextPage'
 import { DeliveryWorkspacePage } from '../features/delivery/DeliveryWorkspacePage'
@@ -269,6 +271,8 @@ export function Workspace() {
             <Route path="/strategy/projects/:projectId" element={<LegacyStrategyRedirect />} />
             <Route path="/strategy/projects/:projectId/workspaces/:workspaceId/*" element={<LegacyStrategyWorkspaceRedirect />} />
             <Route path="/projects/:projectId/assets" element={<ProjectAssetsPage project={currentProject} />} />
+            <Route path="/projects/:projectId/assets/remix" element={<ProjectAssetRemixPage />} />
+            <Route path="/projects/:projectId/assets/:assetId/versions/:version/edit" element={<ProjectAssetEditPage />} />
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
             <Route path="/projects/:projectId/creative/tasks" element={<CreativeImageTextPage />} />
             <Route path="/projects/:projectId/creative/tasks/:taskId/:creativeStage" element={<CreativeImageTextPage />} />
