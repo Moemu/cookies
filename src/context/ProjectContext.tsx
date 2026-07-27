@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiOperationalRecord, type ApiProject } from '../data/api'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { api, type ApiAgencyWorkbench, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiOperationalRecord, type ApiProject } from '../data/api'
 import type { ArtifactKey, ArtifactStatus, BusinessTaskRecord, ChangeSetRecord, ProjectArtifact, ProjectRecord } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { presentCreativeStatus } from '../lib/media-status'
@@ -7,9 +7,13 @@ import { presentCreativeStatus } from '../lib/media-status'
 interface ProjectContextValue {
   projects: ProjectRecord[]
   currentProject: ProjectRecord
+  agencyWorkbench: ApiAgencyWorkbench | null
+  targetProjectId: string
+  loadedProjectId: string
   isLoading: boolean
   error: string | null
-  reloadProjects: () => Promise<void>
+  routeDiagnostic: string | null
+  reloadProjects: (expectedProjectId?: string) => Promise<void>
   selectProject: (id: string) => void
   createProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => Promise<ProjectRecord>
   updateProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => Promise<void>
@@ -28,15 +32,29 @@ const ProjectContext = createContext<ProjectContextValue | null>(null)
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
-  const [currentProjectId, setCurrentProjectId] = useState('')
+  const [agencyWorkbench, setAgencyWorkbench] = useState<ApiAgencyWorkbench | null>(null)
+  const [targetProjectId, setTargetProjectId] = useState('')
+  const [loadedProjectId, setLoadedProjectId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const currentProject = projects.find(project => project.id === currentProjectId) ?? projects[0] ?? emptyProject
+  const [routeDiagnostic, setRouteDiagnostic] = useState<string | null>(null)
+  const projectsRef = useRef<ProjectRecord[]>([])
+  const targetProjectIdRef = useRef('')
+  const loadedProjectIdRef = useRef('')
+  const reloadRequestRef = useRef(0)
+  const currentProject = projects.find(project => project.id === loadedProjectId) ?? emptyProject
 
-  const reloadProjects = useCallback(async () => {
+  useEffect(() => { projectsRef.current = projects }, [projects])
+
+  const reloadProjects = useCallback(async (expectedProjectId?: string) => {
+    const requestId = reloadRequestRef.current + 1
+    reloadRequestRef.current = requestId
     setIsLoading(true)
     try {
-      const apiProjects = await api.listProjects()
+      const [apiProjects, workbench] = await Promise.all([
+        api.listProjects(),
+        api.listAgencyWorkbench(),
+      ])
       const nextProjects = await Promise.all(apiProjects.map(async project => {
         const [artifacts, jobs, tasks, changeSets, operations] = await Promise.all([
           api.listArtifacts(project.id),
@@ -47,36 +65,85 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         ])
         return toProjectRecord(project, artifacts, jobs, tasks, changeSets, operations)
       }))
+      if (reloadRequestRef.current !== requestId) {
+        setRouteDiagnostic(`已忽略过期的 Project 加载响应，当前路由目标为 ${targetProjectIdRef.current || '未选择 Project'}。`)
+        return
+      }
+      if (expectedProjectId && targetProjectIdRef.current !== expectedProjectId) {
+        setRouteDiagnostic(`已忽略 Project ${expectedProjectId} 的过期响应，当前路由目标为 ${targetProjectIdRef.current || '未选择 Project'}。`)
+        return
+      }
       setProjects(nextProjects)
-      setCurrentProjectId(current => nextProjects.some(project => project.id === current) ? current : nextProjects[0]?.id ?? '')
+      setAgencyWorkbench(workbench)
+      projectsRef.current = nextProjects
+      const activeTargetId = targetProjectIdRef.current
+      const nextLoadedProjectId = activeTargetId && nextProjects.some(project => project.id === activeTargetId)
+        ? activeTargetId
+        : !activeTargetId && nextProjects.length
+          ? nextProjects[0].id
+          : ''
+      if (!activeTargetId && nextLoadedProjectId) {
+        targetProjectIdRef.current = nextLoadedProjectId
+        setTargetProjectId(nextLoadedProjectId)
+      }
+      loadedProjectIdRef.current = nextLoadedProjectId
+      setLoadedProjectId(nextLoadedProjectId)
+      setRouteDiagnostic(activeTargetId && !nextLoadedProjectId ? `路由目标 Project ${activeTargetId} 未在服务端返回结果中找到。` : null)
       setError(null)
     } catch (cause) {
+      if (reloadRequestRef.current !== requestId) {
+        setRouteDiagnostic(`已忽略过期的 Project 加载失败响应，当前路由目标为 ${targetProjectIdRef.current || '未选择 Project'}。`)
+        return
+      }
       setError(cause instanceof Error ? cause.message : '加载项目失败')
     } finally {
-      setIsLoading(false)
+      if (reloadRequestRef.current === requestId) setIsLoading(false)
     }
   }, [])
 
   useEffect(() => { void reloadProjects() }, [reloadProjects])
 
-  const selectProject = useCallback((id: string) => setCurrentProjectId(id), [])
+  const selectProject = useCallback((id: string) => {
+    targetProjectIdRef.current = id
+    setTargetProjectId(id)
+    setRouteDiagnostic(null)
+    const alreadyLoaded = projectsRef.current.some(project => project.id === id)
+    if (alreadyLoaded) {
+      loadedProjectIdRef.current = id
+      setLoadedProjectId(id)
+      setIsLoading(false)
+      return
+    }
+    loadedProjectIdRef.current = ''
+    setLoadedProjectId('')
+    setIsLoading(true)
+    void reloadProjects(id)
+  }, [reloadProjects])
 
   const createProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => {
     const created = toProjectRecord(await api.createProject({ name: input.name, brand: input.brand || '未指定品牌', objective: input.goal }))
-    setProjects(current => [created, ...current])
-    setCurrentProjectId(created.id)
+    setProjects(current => {
+      const nextProjects = [created, ...current]
+      projectsRef.current = nextProjects
+      return nextProjects
+    })
+    targetProjectIdRef.current = created.id
+    loadedProjectIdRef.current = created.id
+    setTargetProjectId(created.id)
+    setLoadedProjectId(created.id)
+    setRouteDiagnostic(null)
     return created
   }, [])
 
   const updateProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => {
-    const project = projects.find(candidate => candidate.id === currentProjectId)
+    const project = projects.find(candidate => candidate.id === loadedProjectId)
     if (!project) throw new Error('请先选择已保存的 Project。')
     await api.updateProject(project.id, { name: input.name, brand: input.brand, objective: input.goal })
     await reloadProjects()
-  }, [currentProjectId, projects, reloadProjects])
+  }, [loadedProjectId, projects, reloadProjects])
 
   const createTask = useCallback(async (input: { type: ApiBusinessTaskType; name: string; objective: string }) => {
-    const project = projects.find(candidate => candidate.id === currentProjectId)
+    const project = projects.find(candidate => candidate.id === loadedProjectId)
     if (!project) throw new Error('请先选择已保存的 Project。')
     const artifacts = await api.listArtifacts(project.id)
     const insightReference = artifacts
@@ -94,7 +161,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     })
     await reloadProjects()
     return task
-  }, [currentProjectId, projects, reloadProjects])
+  }, [loadedProjectId, projects, reloadProjects])
 
   const updateTask = useCallback(async (
     id: string,
@@ -106,7 +173,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [reloadProjects])
 
   const updateArtifact = useCallback(async (key: ArtifactKey, patch: Partial<ProjectRecord['artifacts'][ArtifactKey]>) => {
-    const project = projects.find(candidate => candidate.id === currentProjectId)
+    const project = projects.find(candidate => candidate.id === loadedProjectId)
     if (!project) throw new Error('请先选择已保存的 Project。')
     const artifact = project.artifacts[key]
     const summary = patch.summary ?? artifact.summary
@@ -118,12 +185,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       await api.createArtifact({ projectId: project.id, kind: artifactKind(key), content, status })
     }
     await reloadProjects()
-  }, [currentProjectId, projects, reloadProjects])
+  }, [loadedProjectId, projects, reloadProjects])
 
   const advanceArtifact = useCallback((key: ArtifactKey, status: ProjectRecord['artifacts'][ArtifactKey]['status']) => updateArtifact(key, { status }), [updateArtifact])
 
   const addChangeSet = useCallback(async (budgetLimit?: number) => {
-    const project = projects.find(candidate => candidate.id === currentProjectId)
+    const project = projects.find(candidate => candidate.id === loadedProjectId)
     if (!project) throw new Error('请先选择已保存的 Project。')
     const artifactIds = [project.artifacts.brief.id, project.artifacts.creative.id].filter((id): id is string => Boolean(id))
     const changeSet = await deliveryApi.createChangeSet({
@@ -134,7 +201,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     })
     await reloadProjects()
     return changeSet
-  }, [currentProjectId, projects, reloadProjects])
+  }, [loadedProjectId, projects, reloadProjects])
 
   const preflightChangeSet = useCallback(async (id: string) => {
     const changeSet = await deliveryApi.preflight(id)
@@ -156,7 +223,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     await reloadProjects()
     return changeSet
   }, [reloadProjects])
-  const value = useMemo(() => ({ projects, currentProject, isLoading, error, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet }), [projects, currentProject, isLoading, error, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet])
+  const value = useMemo(() => ({ projects, currentProject, agencyWorkbench, targetProjectId, loadedProjectId, isLoading, error, routeDiagnostic, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet }), [projects, currentProject, agencyWorkbench, targetProjectId, loadedProjectId, isLoading, error, routeDiagnostic, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet])
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
 }
 

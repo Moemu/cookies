@@ -10,6 +10,7 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
+import { calculateProjectProgress, progressBarWidth, progressPercentLabel, progressReasonLabel } from '../lib/project-progress'
 import type { BusinessTaskType, SystemKey } from '../types'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
@@ -87,6 +88,7 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
   const hasConfirmedBrief = currentProject.artifacts.brief.status === '已确认'
   const hasCompletedCreative = currentProject.artifacts.creative.status === '已完成'
   const pendingChangeSet = currentProject.changeSets.find(change => ['草稿', '待审批'].includes(change.status))
+  const projectProgress = calculateProjectProgress(currentProject)
   const nextAction = failedTask
     ? { label: '处理失败任务', detail: failedTask.name, system: 'creative' as const, navId: 'tasks', blocker: '存在失败任务，需先恢复后再继续推进。' }
     : !hasConfirmedBrief
@@ -126,9 +128,9 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
 
     {activeTab === 'overview' ? <div className="project-management-overview">
       <section className="project-action-workspace" aria-label="项目当前行动">
-        <div className="project-action-stage"><span className="section-label">当前阶段</span><b>{currentProject.stage}</b><strong>{currentProject.progress}%</strong><i><em style={{ width: `${currentProject.progress}%` }}/></i><small>负责人 · {currentProject.owner}</small></div>
+        <div className="project-action-stage"><span className="section-label">当前阶段</span><b>{projectProgress.stageLabel}</b><strong>{progressPercentLabel(projectProgress, 'stagePercent')}</strong><i><em style={{ width: progressBarWidth(projectProgress, 'stagePercent') }}/></i><small>负责人 · {currentProject.owner}</small></div>
         <div className="project-action-main"><span className="section-label">下一步</span><h2>{nextAction.label}</h2><p>{nextAction.detail}</p><button className="primary-button" onClick={() => onOpenProject(currentProject.id, nextAction.system, nextAction.navId)}>{nextAction.label}<ArrowRight size={15}/></button></div>
-        <div className="project-action-blocker"><CircleAlert size={17}/><div><small>阻塞项 / 状态判断</small><b>{nextAction.blocker}</b><p>{activeTasks} 个任务推进中 · {readyArtifacts} / 5 个核心产物已确认</p></div></div>
+        <div className="project-action-blocker"><CircleAlert size={17}/><div><small>阻塞项 / 状态判断</small><b>{progressReasonLabel(projectProgress)}</b><p>{activeTasks} 个任务推进中 · {readyArtifacts} / 5 个核心产物已确认</p></div></div>
       </section>
       <div className="project-management-grid">
         <section className="project-module-map">

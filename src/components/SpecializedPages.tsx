@@ -3,7 +3,7 @@ import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardChec
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, hookStoryboard } from '../data/commerceHooks'
-import { api, buildHitAnalysisInput, buildProductMappingInput, buildRemixPrerollInput, type ApiArtifact, type ApiAssetFeature, type ApiGenerationJob, type ApiHitAnalysis, type ApiPrerollScope, type ApiProductMapping, type ApiQualityReport, type ApiRemixHookType, type ApiRemixPlan, type ApiRemixPreroll, type ApiRemixRenderJob, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaStoryContext } from '../data/api'
+import { api, buildHitAnalysisInput, buildProductMappingInput, buildRemixPrerollInput, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPrerollScope, type ApiProductMapping, type ApiQualityReport, type ApiRemixHookType, type ApiRemixPlan, type ApiRemixPreroll, type ApiRemixRenderJob, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaStoryContext } from '../data/api'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
@@ -893,6 +893,76 @@ export function ReportCenterPage({ state }: { state: DataState }) {
   </div></StateBoundary>
 }
 
+type DeliveryGateCheck = {
+  code: string
+  label: string
+  passed: boolean
+  repair: string
+}
+
+type DeliveryGateGroup = {
+  title: string
+  checks: DeliveryGateCheck[]
+}
+
+function statusIsHealthy(status?: ApiAdAccountBinding['permissionStatus']) {
+  return status === 'normal'
+}
+
+function confirmedMaterialFor(pointer: ApiAssetVersionPointer, confirmations: ApiMaterialConfirmation[]) {
+  return confirmations.find(item => item.projectId === pointer.projectId && item.assetId === pointer.assetId && item.assetVersion === pointer.workingVersion && item.status === 'confirmed')
+}
+
+function deliveryPlanSignature(account: ApiAdAccountBinding | undefined, budget: number, materials: ApiAssetVersionPointer[]) {
+  const materialPart = materials.map(item => `${item.assetId}@v${item.workingVersion}`).sort().join('|') || 'no-material'
+  return [account?.id ?? 'no-account', budget, materialPart].join(':')
+}
+
+function deliveryPlanVersion(signature: string) {
+  let hash = 0
+  for (const char of signature) hash = (hash * 31 + char.charCodeAt(0)) % 100000
+  return `plan-v${String(hash).padStart(5, '0')}`
+}
+
+function buildDeliveryGateGroups(account: ApiAdAccountBinding | undefined, budget: number, budgetLimit: number, materials: ApiAssetVersionPointer[], confirmations: ApiMaterialConfirmation[]): DeliveryGateGroup[] {
+  const confirmedCount = materials.filter(pointer => confirmedMaterialFor(pointer, confirmations)).length
+  return [
+    {
+      title: '输入完整性',
+      checks: [
+        { code: 'account', label: account ? `账户已选择：${account.accountName}` : '未选择广告账户', passed: Boolean(account), repair: '选择与当前 Project 绑定的广告账户。' },
+        { code: 'budget', label: `预算 ¥${budget.toLocaleString('zh-CN')} / 护栏 ¥${budgetLimit.toLocaleString('zh-CN')}`, passed: budget > 0 && budget <= budgetLimit, repair: '预算必须大于 0 且不超过 Project 护栏。' },
+        { code: 'materials', label: `素材组合 ${materials.length} 个版本`, passed: materials.length > 0, repair: '至少选择一个已纳入当前 Project 的素材版本。' },
+      ],
+    },
+    {
+      title: '账户权限',
+      checks: [
+        { code: 'permission', label: `权限：${account?.permissionStatus ?? '未连接'}`, passed: statusIsHealthy(account?.permissionStatus), repair: '重新授权广告账户或联系账户负责人。' },
+        { code: 'login', label: `登录：${account?.loginStatus ?? '未连接'}`, passed: statusIsHealthy(account?.loginStatus), repair: '恢复账户登录状态后重新预检。' },
+      ],
+    },
+    {
+      title: '素材品牌版权',
+      checks: [
+        { code: 'human-confirmed', label: `人工确认版本 ${confirmedCount}/${materials.length}`, passed: materials.length > 0 && confirmedCount === materials.length, repair: '仅允许使用 MaterialConfirmation 已确认的当前素材版本。' },
+        { code: 'brand-scope', label: '品牌、版权和使用范围绑定到当前 Project', passed: materials.length > 0 && confirmedCount === materials.length, repair: '回到素材检查页完成品牌版权复核和人工确认。' },
+      ],
+    },
+    {
+      title: '预算追踪回滚',
+      checks: [
+        { code: 'tracking', label: `像素追踪：${account?.trackingStatus ?? '未连接'}`, passed: statusIsHealthy(account?.trackingStatus), repair: '修复像素或转化 API 追踪异常。' },
+        { code: 'rollback', label: '已配置模拟执行证据和回滚说明', passed: Boolean(account) && budget > 0, repair: '补齐账户与预算后才能生成可回滚执行证据。' },
+      ],
+    },
+  ]
+}
+
+function gateGroupsPassed(groups: DeliveryGateGroup[]) {
+  return groups.every(group => group.checks.every(check => check.passed))
+}
+
 export function DeliveryPlanPage({ state }: { state: DataState }) {
   const { currentProject, addChangeSet, preflightChangeSet } = useProject()
   const [step, setStep] = useState('计划配置')
@@ -900,13 +970,36 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
   const [budget, setBudget] = useState(currentProject.budget)
   const [latest, setLatest] = useState<DeliveryChangeSet>()
   const [busy, setBusy] = useState(false)
+  const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
+  const [selectedAccountId, setSelectedAccountId] = useState('')
+  const [preflightSignature, setPreflightSignature] = useState('')
+  const planPeriod = '2026-07-25 至 2026-08-31'
+  const audience = `${currentProject.brand} 高意向人群 / 近 30 天互动用户`
+  const landingPage = `https://demo.cookies.local/lp/${currentProject.code.toLowerCase()}`
+  const pixelId = `PX-${currentProject.code}-LEAD`
+  const namingRule = `${currentProject.code}_{{account}}_{{asset}}_{{date}}`
+  const projectAccounts = useMemo(() => workbench?.adAccountBindings.filter(account => account.projectIds.includes(currentProject.id)) ?? [], [currentProject.id, workbench])
+  const selectedAccount = projectAccounts.find(account => account.id === selectedAccountId) ?? projectAccounts[0]
+  const materials = useMemo(() => workbench?.assetVersionPointers.filter(pointer => pointer.projectId === currentProject.id) ?? [], [currentProject.id, workbench])
+  const confirmations = workbench?.materialConfirmations ?? []
+  const gateGroups = useMemo(() => buildDeliveryGateGroups(selectedAccount, budget, currentProject.budget, materials, confirmations), [budget, confirmations, currentProject.budget, materials, selectedAccount])
+  const planSignature = deliveryPlanSignature(selectedAccount, budget, materials)
+  const planVersion = deliveryPlanVersion(planSignature)
+  const preflightStale = Boolean(latest?.preflight) && preflightSignature !== planSignature
+  const canRunPreflight = latest !== undefined && latest.status === 'draft' && gateGroupsPassed(gateGroups)
   useEffect(() => {
     setBudget(currentProject.budget)
+    setSelectedAccountId('')
+    setPreflightSignature('')
   }, [currentProject.id, currentProject.budget])
   useEffect(() => {
     let active = true
-    void deliveryApi.listChangeSets(currentProject.id).then(records => {
-      if (active) setLatest(records.at(-1))
+    void Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench()]).then(([records, agency]) => {
+      if (!active) return
+      const changeSet = records.at(-1)
+      setLatest(changeSet)
+      setWorkbench(agency)
+      if (changeSet?.preflight) setPreflightSignature('')
     }).catch(() => undefined)
     return () => { active = false }
   }, [currentProject.id])
@@ -915,7 +1008,8 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
     try {
       const changeSet = await addChangeSet(budget)
       setLatest(changeSet)
-      setNotice(`${changeSet.id} 已在服务端创建；尚未执行任何真实广告平台写入。`)
+      setPreflightSignature('')
+      setNotice(`${changeSet.id} 已在服务端创建；当前计划版本为 ${planVersion}，尚未执行任何真实广告平台写入。`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '创建 ChangeSet 失败')
     } finally {
@@ -924,11 +1018,16 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
   }
   const preflight = async () => {
     if (!latest) return
+    if (!gateGroupsPassed(gateGroups)) {
+      setNotice('预检未通过：请先修复账户权限、预算、素材人工确认或追踪回滚问题。')
+      return
+    }
     setBusy(true)
     try {
       const changeSet = await preflightChangeSet(latest.id)
       setLatest(changeSet)
-      setNotice(changeSet.preflight?.passed ? '预检通过，已进入人工审批队列。' : '预检未通过，请按修复建议补齐输入。')
+      setPreflightSignature(planSignature)
+      setNotice(changeSet.preflight?.passed ? `预检通过并绑定 ${planVersion}，可进入执行确认。` : '预检未通过，请按修复建议补齐输入。')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '预检失败')
     } finally {
@@ -936,8 +1035,8 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
     }
   }
   return <StateBoundary state={state}><div className="delivery-plan-workspace">
-    <section className="plan-main"><ArtifactFlow compact/><div className="plan-tabs">{['计划配置', '素材组合', '预算与排期', '校验'].map(item => <button className={step === item ? 'active' : ''} key={item} onClick={() => setStep(item)}>{item}</button>)}</div><div className="plan-form"><div><label>计划名称<input defaultValue="销售线索增长计划 06"/></label><label>转化目标<select defaultValue="高质量销售线索"><option>高质量销售线索</option><option>表单提交</option></select></label></div><div><label>总预算（CNY）<input type="number" value={budget} onChange={event => setBudget(Number(event.target.value))}/></label><label>投放周期<input defaultValue="2026-07-25 至 2026-08-31"/></label></div><label>素材来源<div className="upstream-source"><Sparkles size={17}/><span><b>创意 {currentProject.artifacts.creative.version}</b><small>{currentProject.artifacts.creative.summary}</small></span><CircleCheck size={17}/></div></label></div><div className="validation-list"><h3>上线前校验</h3>{['商品与落地页绑定准确', '预算未超过 Project 护栏', '素材版权与品牌检查通过', '转化追踪最近 30 分钟有信号'].map(item => <span key={item}><CircleCheck size={16}/>{item}</span>)}</div></section>
-    <aside className="changeset-panel"><div className="surface-toolbar"><h3>ChangeSet</h3><span className="source-chip">本地模拟</span></div>{latest ? <><div className="changeset-title"><span>{latest.id} · v{latest.version}</span><h2>{latest.name}</h2><small>预算边界 ¥{latest.budgetLimit?.toLocaleString('zh-CN') ?? 0} · {latest.status}</small></div>{latest.preflight ? <div className="validation-list">{latest.preflight.checks.map(check => <span key={check.code} className={check.passed ? '' : 'preflight-failed'}>{check.passed ? <CircleCheck size={16}/> : <CircleAlert size={16}/>}<b>{check.message}</b>{!check.passed ? <small>{check.repair}</small> : null}</span>)}</div> : <div className="rollback-copy"><ShieldCheck size={16}/><span><b>待运行预检</b><small>系统会校验 Brief、创意和预算边界。</small></span></div>}<div className="rollback-copy"><ShieldCheck size={16}/><span><b>模拟边界</b><small>仅生成本地执行证据，不连接真实广告平台。</small></span></div></> : <div className="panel-empty">尚未创建服务端 ChangeSet</div>}<button className="secondary-button full" onClick={createChange} disabled={busy}>生成 ChangeSet</button><button className="primary-button full" onClick={preflight} disabled={!latest || busy || latest.status !== 'draft'}><Send size={15}/>{latest?.status === 'preflight_passed' ? '已通过预检' : '运行上线前预检'}</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <section className="plan-main"><ArtifactFlow compact/><div className="plan-tabs">{['计划配置', '素材组合', '预算与排期', '校验'].map(item => <button className={step === item ? 'active' : ''} key={item} onClick={() => setStep(item)}>{item}</button>)}</div><div className="plan-form"><div><label>计划名称<input defaultValue="销售线索增长计划 06"/></label><label>广告账户<select value={selectedAccount?.id ?? ''} onChange={event => setSelectedAccountId(event.target.value)}>{projectAccounts.length ? projectAccounts.map(account => <option key={account.id} value={account.id}>{account.platform} · {account.accountName}</option>) : <option value="">无绑定账户</option>}</select></label></div><div><label>总预算（CNY）<input type="number" value={budget} onChange={event => setBudget(Number(event.target.value))}/></label><label>投放周期<input readOnly value={planPeriod}/></label></div><div><label>受众<input readOnly value={audience}/></label><label>落地页<input readOnly value={landingPage}/></label></div><div><label>像素<input readOnly value={pixelId}/></label><label>命名规则<input readOnly value={namingRule}/></label></div><label>素材组合<div className="delivery-material-combo">{materials.map(pointer => { const confirmation = confirmedMaterialFor(pointer, confirmations); return <span key={pointer.id} className={confirmation ? 'confirmed' : 'blocked'}><b>{pointer.assetId} v{pointer.workingVersion}</b><small>{confirmation ? `已人工确认 · ${confirmation.confirmedBy}` : '未人工确认，禁止执行'}</small></span> })}{materials.length === 0 ? <span className="blocked"><b>暂无素材版本</b><small>请先完成素材制作和人工确认。</small></span> : null}</div></label></div><div className="validation-list delivery-gate-list"><h3>上线前预检 · {planVersion}</h3>{gateGroups.flatMap(group => group.checks.map(check => <span key={`${group.title}-${check.code}`} className={check.passed ? '' : 'preflight-failed'}>{check.passed ? <CircleCheck size={16}/> : <CircleAlert size={16}/>}<b>{group.title} · {check.label}</b>{!check.passed ? <small>{check.repair}</small> : null}</span>))}</div></section>
+    <aside className="changeset-panel"><div className="surface-toolbar"><h3>ChangeSet</h3><span className="source-chip">本地模拟</span></div>{latest ? <><div className="changeset-title"><span>{latest.id} · v{latest.version}</span><h2>{latest.name}</h2><small>预算边界 ¥{latest.budgetLimit?.toLocaleString('zh-CN') ?? 0} · {latest.status}</small><small>当前计划版本 {planVersion}</small></div>{latest.preflight ? <div className="validation-list delivery-gate-list">{preflightStale ? <span className="preflight-failed"><CircleAlert size={16}/><b>预检版本已失效</b><small>计划账户、预算或素材组合变化后，必须重新生成 ChangeSet 并预检。</small></span> : <span><CircleCheck size={16}/><b>预检绑定 {planVersion}</b><small>{latest.preflight.checkedAt}</small></span>}{latest.preflight.checks.map(check => <span key={check.code} className={check.passed ? '' : 'preflight-failed'}>{check.passed ? <CircleCheck size={16}/> : <CircleAlert size={16}/>}<b>{check.message}</b>{!check.passed ? <small>{check.repair}</small> : null}</span>)}</div> : <div className="rollback-copy"><ShieldCheck size={16}/><span><b>待运行预检</b><small>系统会校验输入完整性、账户权限、素材品牌版权、预算追踪回滚四组门禁。</small></span></div>}<div className="rollback-copy"><ShieldCheck size={16}/><span><b>执行确认门禁</b><small>仅当预检绑定当前计划版本且素材均为人工确认版本时允许执行。</small></span></div></> : <div className="panel-empty">尚未创建服务端 ChangeSet</div>}<button className="secondary-button full" onClick={createChange} disabled={busy}>生成 ChangeSet</button><button className="primary-button full" onClick={preflight} disabled={!canRunPreflight || busy}><Send size={15}/>{latest?.status === 'preflight_passed' && !preflightStale ? '已通过预检' : '运行上线前预检'}</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div></StateBoundary>
 }
 
@@ -947,12 +1046,22 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   const [selectedId, setSelectedId] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
   const selected = useMemo(() => changeSets.find(item => item.id === selectedId), [changeSets, selectedId])
+  const projectAccounts = workbench?.adAccountBindings.filter(account => account.projectIds.includes(currentProject.id)) ?? []
+  const selectedAccount = projectAccounts[0]
+  const materials = workbench?.assetVersionPointers.filter(pointer => pointer.projectId === currentProject.id) ?? []
+  const confirmations = workbench?.materialConfirmations ?? []
+  const approvalGateGroups = buildDeliveryGateGroups(selectedAccount, selected?.budgetLimit ?? currentProject.budget, currentProject.budget, materials, confirmations)
+  const executionGatePassed = gateGroupsPassed(approvalGateGroups)
+  const objectCount = Math.max(materials.length, 1) * (selectedAccount ? 1 : 0)
+  const riskLabel = executionGatePassed ? '低：账户、素材、预算和回滚均已满足' : '高：存在未确认素材、账户异常或预算追踪阻断'
   const refresh = async () => {
     setBusy(true)
     try {
-      const records = await deliveryApi.listChangeSets(currentProject.id)
+      const [records, agency] = await Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench()])
       setChangeSets(records)
+      setWorkbench(agency)
       setSelectedId(current => records.some(item => item.id === current) ? current : records[0]?.id ?? '')
       setNotice(records.length ? '已从服务端加载投放模拟队列。' : '尚未创建服务端 ChangeSet，请先在投放计划中生成。')
     } catch (error) {
@@ -964,6 +1073,10 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   useEffect(() => { void refresh() }, [currentProject.id])
   const apply = async (action: 'approve' | 'execute' | 'rollback') => {
     if (!selected) return
+    if (action === 'execute' && !executionGatePassed) {
+      setNotice('执行被拦截：素材必须是人工确认版本，且账户、预算、追踪和回滚门禁均需通过。')
+      return
+    }
     setBusy(true)
     try {
       const updated = action === 'approve' ? await approveChangeSet(selected.id) : action === 'execute' ? await executeChangeSet(selected.id) : await rollbackChangeSet(selected.id, '演示用户确认回滚模拟结果')
@@ -977,7 +1090,7 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   }
   return <StateBoundary state={state}><div className="approval-workspace">
     <aside className="approval-queue"><div className="surface-toolbar"><h3>审批队列</h3><button onClick={() => void refresh()} disabled={busy} aria-label="刷新审批队列"><RotateCcw size={15}/></button></div>{changeSets.map(item => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><span>{item.id.slice(0, 8)}</span><b>{item.name}</b><small>{item.status} · ¥{item.budgetLimit?.toLocaleString('zh-CN') ?? 0}</small></button>)}</aside>
-    <section className="approval-detail">{selected ? <><div className="approval-heading"><div><span>{selected.id.slice(0, 8)} · v{selected.version}</span><h2>{selected.name}</h2><p>服务端受控投放模拟。只有预检通过且演示审批人批准后才能执行。</p></div><span className={`approval-status ${selected.status}`}>{selected.status}</span></div><div className="approval-evidence"><h3>预检与执行证据</h3>{selected.preflight?.checks.map(check => <div key={check.code}><ClipboardCheck size={16}/><span><b>{check.message}</b><small>{check.passed ? '预检通过' : check.repair}</small></span></div>)}{selected.execution?.evidence.map(item => <div key={item.step}><CircleCheck size={16}/><span><b>{item.message}</b><small>{item.recordedAt}</small></span></div>)}</div>{selected.rollback ? <div className="rollback-copy"><RotateCcw size={16}/><span><b>已完成模拟回滚</b><small>{selected.rollback.reason}</small></span></div> : null}<div className="approval-actions"><button className="secondary-button" onClick={() => void apply('rollback')} disabled={busy || selected.status !== 'executed'}><RotateCcw size={15}/>回滚模拟</button><button className="secondary-button" onClick={() => void apply('execute')} disabled={busy || selected.status !== 'approved'}><Play size={15}/>模拟执行</button><button className="primary-button" onClick={() => void apply('approve')} disabled={busy || selected.status !== 'preflight_passed'}><ThumbsUp size={15}/>以演示审批人批准</button></div></> : <div className="panel-empty">没有服务端 ChangeSet</div>}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</section>
-    <aside className="approval-audit"><span className="section-label">权限与边界</span><div><time>演示角色</time><span>demo-approver</span></div><div><time>执行范围</time><span>本地模拟，无真实广告平台写入</span></div><div><time>审计</time><span>预检、审批、执行和回滚均由服务端记录</span></div></aside>
+    <section className="approval-detail">{selected ? <><div className="approval-heading"><div><span>{selected.id.slice(0, 8)} · ChangeSet v{selected.version}</span><h2>{selected.name}</h2><p>服务端受控投放模拟。只有预检通过、人工批准且执行确认门禁通过后才能执行。</p></div><span className={`approval-status ${selected.status}`}>{selected.status}</span></div><div className="execution-confirmation"><h3>执行确认</h3><div><b>账户</b><span>{selectedAccount ? `${selectedAccount.platform} · ${selectedAccount.accountName}` : '无绑定账户'}</span></div><div><b>预算</b><span>¥{selected.budgetLimit?.toLocaleString('zh-CN') ?? currentProject.budget.toLocaleString('zh-CN')}</span></div><div><b>对象数量</b><span>{objectCount} 个广告对象 / {materials.length} 个素材版本</span></div><div><b>预计影响</b><span>仅本地模拟执行，记录投放对象、预算和审计证据。</span></div><div><b>风险</b><span className={executionGatePassed ? '' : 'danger-text'}>{riskLabel}</span></div><div><b>回滚能力</b><span>支持模拟回滚并保留原因、时间和执行证据。</span></div></div><div className="approval-evidence"><h3>素材人工确认版本</h3>{materials.map(pointer => { const confirmation = confirmedMaterialFor(pointer, confirmations); return <div key={pointer.id}><ClipboardCheck size={16}/><span><b>{pointer.assetId} v{pointer.workingVersion}</b><small>{confirmation ? `已确认 · ${confirmation.confirmedBy} · ${confirmation.createdAt}` : '未人工确认，禁止执行'}</small></span></div> })}{materials.length === 0 ? <div><CircleAlert size={16}/><span><b>暂无素材版本</b><small>请先完成素材检查和人工确认。</small></span></div> : null}</div><div className="approval-evidence"><h3>预检与执行证据</h3>{selected.preflight?.checks.map(check => <div key={check.code}><ClipboardCheck size={16}/><span><b>{check.message}</b><small>{check.passed ? '预检通过' : check.repair}</small></span></div>)}{approvalGateGroups.flatMap(group => group.checks.filter(check => !check.passed).map(check => <div key={`${group.title}-${check.code}`}><CircleAlert size={16}/><span><b>{group.title} · {check.label}</b><small>{check.repair}</small></span></div>))}{selected.execution?.evidence.map(item => <div key={item.step}><CircleCheck size={16}/><span><b>{item.message}</b><small>{item.recordedAt}</small></span></div>)}</div>{selected.rollback ? <div className="rollback-copy"><RotateCcw size={16}/><span><b>已完成模拟回滚</b><small>{selected.rollback.reason}</small></span></div> : null}<div className="approval-actions"><button className="secondary-button" onClick={() => void apply('rollback')} disabled={busy || selected.status !== 'executed'}><RotateCcw size={15}/>回滚模拟</button><button className="secondary-button" onClick={() => void apply('execute')} disabled={busy || selected.status !== 'approved' || !executionGatePassed}><Play size={15}/>模拟执行</button><button className="primary-button" onClick={() => void apply('approve')} disabled={busy || selected.status !== 'preflight_passed'}><ThumbsUp size={15}/>以演示审批人批准</button></div></> : <div className="panel-empty">没有服务端 ChangeSet</div>}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</section>
+    <aside className="approval-audit"><span className="section-label">权限与边界</span><div><time>演示角色</time><span>demo-approver</span></div><div><time>执行范围</time><span>本地模拟，无真实广告平台写入</span></div><div><time>审计</time><span>预检、审批、执行和回滚均由服务端记录</span></div><div><time>硬门禁</time><span>未人工确认素材不能执行</span></div></aside>
   </div></StateBoundary>
 }
