@@ -670,6 +670,20 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .packaging-options button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); border-color: var(--cobalt); }
 .editing-inspector .primary-button { font-size: 10px; }
 
+/* Keep editing controls inside the initial 960px desktop viewport; the asset grid scrolls internally. */
+.video-editing-workspace .editing-shell { height: min(520px, calc(100vh - 370px)); min-height: 0; }
+.video-editing-workspace .editing-assets,
+.video-editing-workspace .editing-inspector { min-height: 0; overflow: hidden; }
+.video-editing-workspace .video-asset-stage { flex: 1 1 auto; min-height: 0; padding-bottom: 6px; }
+.video-editing-workspace .asset-card-flow { gap: 9px; }
+.video-editing-workspace .video-poster-frame { min-height: 112px; padding: 10px 9px; }
+.video-editing-workspace .poster-cast { inset: 12px 10px auto; gap: 5px; }
+.video-editing-workspace .poster-cast span { width: 18px; height: 34px; }
+.video-editing-workspace .poster-cast span:nth-child(2) { width: 24px; height: 44px; }
+.video-editing-workspace .poster-play { bottom: 50px; }
+.video-editing-workspace .video-library-preview { margin-bottom: 9px; padding: 10px; }
+.video-editing-workspace .video-asset-library > .secondary-button.full { margin-bottom: 10px; }
+
 /* Persistent business tasks and cross-module Project lineage */
 .page-context-label { align-self: center; max-width: 230px; color: var(--muted); font-size: 10px; line-height: 1.45; text-align: right; }
 .project-lineage { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--surface); border: 1px solid var(--line); }

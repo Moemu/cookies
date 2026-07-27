@@ -122,6 +122,11 @@
 
 - [x] Task 24: 提交并推送新增内容分析业务数据文件: 当前工作区存在未跟踪的 `src/data/contentAnalysis.ts`，远程 PR 检查仅覆盖 `HEAD`，不能证明该文件已纳入提交、推送并由 CI 验证。
 
+- [x] Task 25: 修复本轮复核发现的初始视口 E2E 回归并重新完成远程 CI 覆盖。
+  - [x] SubTask 25.1: 修复 `npm run test:e2e` 中桌面 1280px、1440px、1680px 初始视口用例失败，确保前贴工作区和素材剪辑关键控件在页面加载后不预滚动即可位于 960px 高视口内、可见、可点且无横向溢出。
+  - [x] SubTask 25.2: 重新运行 `npm run test:e2e` 并确认 12/12 通过，同时复跑 `npm run test:server`、`npm run check:server`、`npm run build`、`git diff --check` 及相关平台测试。
+  - [x] SubTask 25.3: 推送最新提交并确认 PR 必需检查覆盖最新提交且全部通过。
+
 # Task Dependencies
 - Task 2 依赖 Task 1 的服务端配置与统一错误基础。
 - Task 3 依赖 Task 1 与 Task 2 的 API 契约；其前端 API Client 可与 Task 2 并行准备。
@@ -137,3 +142,4 @@
 - Task 17 依赖 Task 1 的文件仓储基础、Task 15 的前贴任务与素材箱持久化边界，以及 Task 16.4 的隔离真实 API E2E 数据准备；其验证包括并发持久化回归、取消后刷新素材箱门禁、1280px/1440px/1680px 无横向溢出和关键控件可见性 E2E，以及前端构建。
 - Task 18 依赖 Task 17 的前贴桌面视口 E2E 基础；其独立验收进一步要求前贴工作区与素材剪辑页在不预滚动的初始视口中完成可见性、可操作性、视口边界和无横向溢出断言。
 - Task 19 可独立于既有前贴 UI 开始；Task 20 依赖 Task 19 的领域类型与纯规划器；Task 21 依赖 Task 20 的规划和受控生成 API；Task 22 依赖 Task 19 至 Task 21。
+- Task 25 依赖 Task 18 的初始视口验收边界和本轮复核失败证据。

@@ -94,6 +94,11 @@
   - [x] SubTask 14.6: 执行 1280px、1440px、1680px 桌面视口验收，修复新增 UI 横向溢出、遮挡、焦点或可访问名称问题。
   - [x] SubTask 14.7: 重新运行 checklist 相关测试、`go test ./...`、前端测试、`npm run build`、`git diff --check`、提交推送并确认 PR 必需检查通过。
 
+- [x] Task 15: 修复本轮复核失败项并完成远程交付覆盖：当前本地 `HEAD` 尚未推送到 PR，且真实 API E2E 初始视口用例失败，不能认定 checklist 的测试、提交和 PR CI 项已真实通过。
+  - [x] SubTask 15.1: 修复 `e2e/investor-mvp.spec.ts` 中 1280px、1440px、1680px 初始视口下素材剪辑控件超出首屏的问题，确保关键控件无需预滚动即可可见、可点且无横向溢出。
+  - [x] SubTask 15.2: 重新运行 `npm run test:e2e` 并确认 12/12 通过，同时保留 `npm run test:server`、`npm run check:server`、`npm run build`、相关 Go 测试、`npm run build --prefix web`、`npm run lint --prefix web` 和 `git diff --check` 通过证据。
+  - [x] SubTask 15.3: 推送包含最新本地提交的当前分支，并确认 PR #12 的 `Repository quality`、`Platform CI / verify`、`Platform CI / migrations` 覆盖最新提交且全部 SUCCESS。
+
 # Task Dependencies
 
 - Task 2 depends on Task 1.
@@ -109,3 +114,4 @@
 - Task 12 can run after Task 3 and Task 5 expose stable target references.
 - Task 13 depends on all implementation tasks.
 - Task 14 depends on Task 13 and failed checklist findings.
+- Task 15 depends on Task 14 and this checklist复核的失败证据。
