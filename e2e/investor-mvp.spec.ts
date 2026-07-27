@@ -373,6 +373,26 @@ test('素材体验页只展示本用例当前 Project 的持久化 Artifact', as
   await expect(page.getByText('其他项目不可见资产')).toHaveCount(0)
 })
 
+test('内容分析页展示 data 目录导入的公开短视频洞察样本', async ({ page }) => {
+  const projectId = await openProject(page, 'E2E 公开洞察样本')
+
+  await page.goto(`/projects/${projectId}/insight/content`)
+  await expect(page.getByText('公开短视频洞察样本')).toBeVisible()
+  await expect(page.getByText('6 条样本 · 1 个文件')).toBeVisible()
+  await expect(page.getByText('部署后自动导入 data 目录作为示例展示。')).toBeVisible()
+
+  await page.getByLabel('公开短视频洞察行业').selectOption('美妆护肤')
+  await expect(page.getByRole('button', { name: /美妆新品用半脸对比展示上妆速度/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /insight-006/ })).toContainText('美妆护肤')
+  await expect(page.getByText('当前样本拆解')).toBeVisible()
+  await expect(page.getByText('早八通勤只想快但妆面不能糊')).toBeVisible()
+
+  await page.getByLabel('公开短视频洞察行业').selectOption('')
+  await page.getByLabel('搜索公开短视频洞察').fill('护眼学习灯')
+  await expect(page.getByRole('button', { name: /护眼学习灯用场景证明减少家长焦虑/ })).toBeVisible()
+  await expect(page.getByText('别只看亮不亮关键是孩子愿不愿意久坐')).toBeVisible()
+})
+
 test('前贴任务取消后刷新会恢复服务端取消态，且不暴露旧预览或素材箱入口', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 前贴取消恢复')
   await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
