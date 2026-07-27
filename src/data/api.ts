@@ -850,6 +850,8 @@ const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string 
 const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/api`
 const platformBase = `${viteEnv?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/platform/v1`
 
+// Task26 audit: agency workbench data is a front-end portfolio sample, not a
+// persisted Project result. Task27 should move or gate it before production use.
 export const agencyWorkbenchSample: ApiAgencyWorkbench = {
   organizations: [{
     id: 'org-demo-agency',
@@ -1306,6 +1308,68 @@ export const agencyWorkbenchSample: ApiAgencyWorkbench = {
   ],
 }
 
+type AgencyWorkbenchOptions = {
+  projectIds?: string[]
+  includePortfolioSample?: boolean
+}
+
+const emptyAgencyWorkbench: ApiAgencyWorkbench = {
+  organizations: [],
+  clients: [],
+  brands: [],
+  projects: [],
+  adAccountBindings: [],
+  qualityCheckRuns: [],
+  materialConfirmations: [],
+  assetVersionPointers: [],
+}
+
+function filterAgencyWorkbenchByProjects(projectIds: string[]): ApiAgencyWorkbench {
+  const allowedProjects = new Set(projectIds)
+  if (allowedProjects.size === 0) return emptyAgencyWorkbench
+  const projects = agencyWorkbenchSample.projects.filter(project => allowedProjects.has(project.id))
+  const bindings = agencyWorkbenchSample.adAccountBindings
+    .map(binding => ({
+      ...binding,
+      projectIds: binding.projectIds.filter(projectId => allowedProjects.has(projectId)),
+    }))
+    .filter(binding => binding.projectIds.length > 0)
+  const qualityCheckRuns = agencyWorkbenchSample.qualityCheckRuns.filter(run => allowedProjects.has(run.projectId))
+  const materialConfirmations = agencyWorkbenchSample.materialConfirmations.filter(item => allowedProjects.has(item.projectId))
+  const assetVersionPointers = agencyWorkbenchSample.assetVersionPointers.filter(pointer => allowedProjects.has(pointer.projectId))
+  const brandIds = new Set([
+    ...projects.map(project => project.brandId),
+    ...bindings.map(binding => binding.brandId),
+    ...assetVersionPointers.map(pointer => pointer.projectId)
+      .map(projectId => projects.find(project => project.id === projectId)?.brandId)
+      .filter((brandId): brandId is string => Boolean(brandId)),
+  ])
+  const brands = agencyWorkbenchSample.brands.filter(brand => brandIds.has(brand.id))
+  const clientIds = new Set([
+    ...projects.map(project => project.clientId),
+    ...brands.map(brand => brand.clientId),
+    ...bindings.map(binding => binding.clientId),
+  ])
+  const clients = agencyWorkbenchSample.clients.filter(client => clientIds.has(client.id))
+  const organizationIds = new Set([
+    ...projects.map(project => project.organizationId),
+    ...clients.map(client => client.organizationId),
+    ...brands.map(brand => brand.organizationId),
+    ...bindings.map(binding => binding.organizationId),
+  ])
+  const organizations = agencyWorkbenchSample.organizations.filter(organization => organizationIds.has(organization.id))
+  return {
+    organizations,
+    clients,
+    brands,
+    projects,
+    adAccountBindings: bindings,
+    qualityCheckRuns,
+    materialConfirmations,
+    assetVersionPointers,
+  }
+}
+
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
@@ -1573,7 +1637,10 @@ export function buildRemixPrerollInput(
 }
 
 export const api = {
-  listAgencyWorkbench: async () => agencyWorkbenchSample,
+  listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
+    if (options.includePortfolioSample) return agencyWorkbenchSample
+    return filterAgencyWorkbenchByProjects(options.projectIds ?? [])
+  },
   getCapabilities: () => request<ApiProviderCapabilities>('/provider/capabilities'),
   getPublicInsightOverview: () => request<ApiPublicInsightOverview>('/public-insights/overview'),
   getPublicInsightFilters: () => request<ApiPublicInsightFilters>('/public-insights/filters'),

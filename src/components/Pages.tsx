@@ -74,7 +74,7 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
   useEffect(() => {
     let active = true
     setWorkbenchError(false)
-    void api.listAgencyWorkbench().then(next => {
+    void api.listAgencyWorkbench({ projectIds: [currentProject.id] }).then(next => {
       if (active) setWorkbench(next)
     }).catch(() => {
       if (active) {
@@ -566,7 +566,7 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
 
   useEffect(() => {
     let active = true
-    void api.listAgencyWorkbench().then(data => {
+    void api.listAgencyWorkbench({ includePortfolioSample: true }).then(data => {
       if (active) setWorkbench(data)
     }).catch(cause => {
       if (active) setWorkbenchError(cause instanceof Error ? cause.message : '加载代理商工作台失败')
@@ -786,8 +786,8 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
       <div><span className="section-label">AGENCY PORTFOLIO</span><h1>代理商客户组合工作台</h1><p>聚合跨客户待处理、待检查、临期交付、客户健康与团队负载；Home 只做下钻导航，不直接生成、确认或投放。</p></div>
       <button className="secondary-button" onClick={() => onSystemChange('creative')}>进入创意队列<ArrowRight size={15}/></button>
     </section>
-    {projectError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{projectError}，Home 继续展示代理商组合 mock 数据。</div> : null}
-    {workbenchError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{workbenchError}</div> : null}
+    {projectError ? <div className="page-notice warning" role="status"><CircleAlert size={16}/>{projectError}。Home 暂时不能读取 Project 服务端数据，请确认本地 API 已启动后刷新。</div> : null}
+    {workbenchError ? <div className="page-notice warning" role="status"><CircleAlert size={16}/>{workbenchError}。代理商组合队列暂不可用，请稍后重试或直接进入当前 Project。</div> : null}
     <section className="agency-metrics" aria-label="代理商组合指标">
       {portfolio.metrics.map(metric => <button key={metric.label} className={`agency-metric ${metric.tone}`} onClick={() => onSystemChange(metric.label === '账户异常' || metric.label === '临期交付' ? 'delivery' : 'creative')}>
         <span>{metric.label}</span><b>{metric.value}</b><small>{metric.detail}</small>
@@ -804,7 +804,7 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
             <span className="record-meta"><small>截止</small><b>{record.dueAt}</b></span>
             <ArrowRight size={16}/>
           </button>)}
-          {!portfolio.today.length ? <div className="project-empty">{isLoading && !workbench ? '正在恢复代理商工作台…' : '今日没有需要下钻处理的事项'}</div> : null}
+          {!portfolio.today.length ? <div className="project-empty">{isLoading && !workbench ? '正在恢复代理商工作台…' : workbenchError ? '服务未连接，暂时不能读取跨客户待处理队列。' : '今日没有需要下钻处理的事项。可从最近 Project 或创意队列继续。'}</div> : null}
         </div>
       </section>
       <aside className="agency-panel">
@@ -1203,7 +1203,7 @@ function AdAccountBindingSurface({ item, activeView }: { item: NavItem; activeVi
 
   useEffect(() => {
     let active = true
-    void api.listAgencyWorkbench().then(next => {
+    void api.listAgencyWorkbench({ projectIds: [currentProject.id] }).then(next => {
       if (active) setWorkbench(next)
     }).catch(cause => {
       if (active) setNotice(cause instanceof Error ? cause.message : '读取账户绑定失败。')
@@ -1562,7 +1562,17 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   else {
     const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
     const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : item.layout === 'settings' ? <SettingsSurface/> : <OperationsSurface item={item}/>
-    surface = <StateBoundary state={dataState} onRetry={() => setDataState('ready')} onCreate={primaryAction}>{genericSurface}</StateBoundary>
+    surface = <StateBoundary
+      state={dataState}
+      contextLabel={`${system.label} / ${item.label}`}
+      emptyTitle={`${item.label}暂无当前 Project 数据`}
+      emptyDetail="这里不会用示例内容冒充已保存结果。请先完成上游步骤、创建业务对象，或切换到已有数据的 Project。"
+      errorDetail="页面数据读取失败，当前内容不会被覆盖。请确认本地 MVP API 正常运行后重新加载。"
+      forbiddenDetail="当前角色不能查看或操作此页面，请联系 Project 管理员授予相应权限。"
+      createLabel={system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet' : '创建业务对象'}
+      onRetry={() => setDataState('ready')}
+      onCreate={primaryAction}
+    >{genericSurface}</StateBoundary>
   }
 
   const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'

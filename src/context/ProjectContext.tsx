@@ -51,10 +51,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     reloadRequestRef.current = requestId
     setIsLoading(true)
     try {
-      const [apiProjects, workbench] = await Promise.all([
-        api.listProjects(),
-        api.listAgencyWorkbench(),
-      ])
+      const apiProjects = await api.listProjects()
+      const workbench = await api.listAgencyWorkbench({ projectIds: apiProjects.map(project => project.id) })
       const nextProjects = await Promise.all(apiProjects.map(async project => {
         const [artifacts, jobs, tasks, changeSets, operations] = await Promise.all([
           api.listArtifacts(project.id),

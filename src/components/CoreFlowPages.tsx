@@ -120,7 +120,16 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
     }
   }
 
-  return <StateBoundary state={state} onRetry={() => setNotice('投前证据已重新加载')} onCreate={() => setNotice('投前洞察无需新建任务，可直接筛选和引用')}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 投前洞察"
+    emptyTitle="当前 Project 暂无已引用的投前洞察"
+    emptyDetail="可以先筛选公开经验结论并引用到 Brief 或创意任务；引用后会保存为当前 Project 的服务端证据。"
+    errorDetail="投前洞察或引用记录暂时无法读取。请确认 API 服务可用后重新加载，已保存的 Project 内容不会被覆盖。"
+    createLabel="筛选并引用洞察"
+    onRetry={() => setNotice('投前证据已重新加载')}
+    onCreate={() => setNotice('投前洞察无需新建任务，可直接筛选和引用')}
+  >
     <div className="prelaunch-workspace">
       <section className="prelaunch-main">
         <div className="core-flow-toolbar">
@@ -261,7 +270,16 @@ export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataSt
     }
   }
 
-  return <StateBoundary state={state} onRetry={() => void refreshOperations()} onCreate={() => setNotice('数据源接入向导已打开')}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 投后分析"
+    emptyTitle="当前 Project 暂无投后运营记录"
+    emptyDetail="接入或导入广告平台运营记录后，这里会展示表现变化、原因和建议动作；不会用固定前端结论替代真实数据。"
+    errorDetail="投后运营记录读取失败。请确认服务端和数据源连接后重新拉取，已保存报告不会被覆盖。"
+    createLabel="打开数据接入向导"
+    onRetry={() => void refreshOperations()}
+    onCreate={() => setNotice('数据源接入向导已打开')}
+  >
     <div className="ad-insight-workspace">
       <section className="ad-insight-main">
         <div className="core-flow-toolbar">
@@ -423,7 +441,16 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
 
   if (mode === 'knowledge') {
     const highlightedResult = knowledgeResults[0]
-    return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
+    return <StateBoundary
+      state={state}
+      contextLabel="素材洞察 / 经验沉淀"
+      emptyTitle="当前 Project 暂无知识文档"
+      emptyDetail="导入项目 docs 或复盘报告后，系统会提供可追溯的 citation 检索结果。"
+      errorDetail="知识库读取失败，请检查平台 API 后重新加载。"
+      createLabel="导入 Project Docs"
+      onRetry={() => { void loadArtifacts() }}
+      onCreate={() => { void importProjectKnowledge() }}
+    >
       <div className="asset-experience-workspace">
         <section className="asset-library-panel">
           <div className="core-flow-toolbar">
@@ -458,7 +485,14 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
     </StateBoundary>
   }
 
-  return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 素材管理"
+    emptyTitle="当前 Project 暂无已持久化素材"
+    emptyDetail="完成创意生成或上传素材后，这里会展示图片、视频、来源任务和多模态特征。"
+    errorDetail="素材读取失败，请确认 API 服务和资源接口可用后重新加载。"
+    onRetry={() => { void loadArtifacts() }}
+  >
     <div className="asset-experience-workspace">
       <section className="asset-library-panel">
         <div className="core-flow-toolbar">

@@ -50,6 +50,14 @@ export interface UpsertOperationalRecordInput {
   fields: Record<string, string | number>;
 }
 
+export interface DeleteSeedDataOutsideProjectInput {
+  projectId: string;
+  operationalRecordIds?: string[];
+  artifactContents?: string[];
+  changeSetNames?: string[];
+  auditActions?: string[];
+}
+
 export interface CreateArtifactInput {
   projectId: string;
   kind: ArtifactKind;
@@ -246,6 +254,31 @@ export class FileRepository {
       }
     });
     return record;
+  }
+
+  async deleteSeedDataOutsideProject(input: DeleteSeedDataOutsideProjectInput): Promise<void> {
+    const operationalRecordIds = new Set(input.operationalRecordIds ?? []);
+    const artifactContents = new Set(input.artifactContents ?? []);
+    const changeSetNames = new Set(input.changeSetNames ?? []);
+    const auditActions = new Set(input.auditActions ?? []);
+    await this.mutate(() => {
+      if (operationalRecordIds.size) {
+        this.store.operationalRecords = this.store.operationalRecords
+          .filter((record) => record.projectId === input.projectId || !operationalRecordIds.has(record.id));
+      }
+      if (artifactContents.size) {
+        this.store.artifacts = this.store.artifacts
+          .filter((artifact) => artifact.projectId === input.projectId || !artifactContents.has(artifact.content));
+      }
+      if (changeSetNames.size) {
+        this.store.changeSets = this.store.changeSets
+          .filter((changeSet) => changeSet.projectId === input.projectId || !changeSetNames.has(changeSet.name));
+      }
+      if (auditActions.size) {
+        this.store.auditEvents = this.store.auditEvents
+          .filter((event) => event.projectId === input.projectId || !auditActions.has(event.action));
+      }
+    });
   }
 
   async getBusinessTask(id: string): Promise<BusinessTask | undefined> {

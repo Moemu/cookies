@@ -2,6 +2,9 @@ import type { Artifact, ChangeSet, OperationalRecordKind, Project } from "./doma
 import { FileRepository, type UpsertOperationalRecordInput } from "./repository.js";
 
 export const DEMO_PROJECT_NAME = "投资人路演：精度证据增长";
+// Task26 audit: this is the only canonical investor demo Project seed.
+// It is identified by name + brand + objective so reruns reuse the same Project
+// instead of leaking core demo records into user-created Projects.
 const DEMO_PROJECT_IDENTITY = {
   name: DEMO_PROJECT_NAME,
   brand: "白域精工",
@@ -19,17 +22,70 @@ const DEMO_PROJECT_IDENTITY = {
   },
 };
 const DEMO_ACTOR = "demo-seeder";
+const DEMO_BRIEF_CONTENT = "已确认 Brief：以 ±0.01mm 精度、98%+ 准时交付和真实制造场景为核心证据，面向采购与研发负责人获取销售线索。";
+const DEMO_CREATIVE_CONTENT = "预置 AI 图文创意：高精度 CNC 加工画面，展示精度与交期证据；仅作路演资产，不代表真实广告素材。";
+const DEMO_CHANGE_SET_NAME = "精度证据创意与探索预算模拟";
+const DEMO_OPERATIONAL_RECORD_IDS = [
+  "WORK-2607-01",
+  "WORK-2607-02",
+  "WORK-2607-03",
+  "WORK-2607-04",
+  "WORK-2607-05",
+  "EV-021",
+  "EV-024",
+  "INS-014",
+  "EV-027",
+  "ACT-2607-01",
+  "ACT-2607-02",
+  "ACT-2607-03",
+  "ACT-2607-04",
+  "METRIC-2607-01",
+  "AD-2607-031",
+  "AD-2607-028",
+  "AD-2607-019",
+  "AD-2607-014",
+  "AD-2607-008",
+  "MIX-2607-01",
+  "MIX-2607-02",
+  "MIX-2607-03",
+  "MIX-2607-04",
+  "METHOD-M1",
+  "METHOD-M3",
+  "METHOD-M4",
+  "METHOD-M5",
+  "DIAG-2607-01",
+  "DIAG-2607-02",
+  "DIAG-2607-03",
+  "ACTION-P0",
+  "ACTION-P1",
+  "ACTION-P2",
+  "REC-BRF-2607-11",
+  "REC-STR-2607-08",
+  "REC-CR-2607-42",
+  "REC-INS-2607-14",
+  "REC-PLAN-2607-06",
+  "REC-CS-2607-018",
+  "REC-EV-2607-24",
+  "REC-VER-2607-19",
+];
 
 export async function seedDemoProject(repository: FileRepository): Promise<Project> {
   const project = (await repository.listProjects()).find(isDemoProject)
     ?? await repository.createProject({ ...DEMO_PROJECT_IDENTITY, actor: DEMO_ACTOR });
+  await repository.deleteSeedDataOutsideProject({
+    projectId: project.id,
+    operationalRecordIds: DEMO_OPERATIONAL_RECORD_IDS,
+    artifactContents: [DEMO_BRIEF_CONTENT, DEMO_CREATIVE_CONTENT],
+    changeSetNames: [DEMO_CHANGE_SET_NAME],
+    auditActions: ["demo.seed_verified"],
+  });
   const artifacts = await repository.listArtifacts(project.id);
   const brief = artifacts.find(isReadyBrief)
     ?? await repository.createArtifact({
       projectId: project.id,
       kind: "brief",
       status: "ready",
-      content: "已确认 Brief：以 ±0.01mm 精度、98%+ 准时交付和真实制造场景为核心证据，面向采购与研发负责人获取销售线索。",
+      content: DEMO_BRIEF_CONTENT,
       actor: DEMO_ACTOR,
     });
   const creative = artifacts.find(isReadyCreative)
@@ -37,7 +93,7 @@ export async function seedDemoProject(repository: FileRepository): Promise<Proje
       projectId: project.id,
       kind: "image",
       status: "ready",
-      content: "预置 AI 图文创意：高精度 CNC 加工画面，展示精度与交期证据；仅作路演资产，不代表真实广告素材。",
+      content: DEMO_CREATIVE_CONTENT,
       actor: DEMO_ACTOR,
     });
   const completeArtifacts = [...artifacts, brief, creative];
@@ -46,7 +102,7 @@ export async function seedDemoProject(repository: FileRepository): Promise<Proje
   if (!existingChangeSet) {
     const changeSet = await repository.createChangeSet({
       projectId: project.id,
-      name: "精度证据创意与探索预算模拟",
+      name: DEMO_CHANGE_SET_NAME,
       artifactIds: [brief.id, creative.id],
       budgetLimit: 8600,
       actor: DEMO_ACTOR,

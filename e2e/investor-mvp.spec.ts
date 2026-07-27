@@ -90,6 +90,16 @@ async function expectNoHorizontalOverflow(page: Page) {
   })).toBeTruthy()
 }
 
+async function expectInitialViewportElement(page: Page, locator: ReturnType<Page['locator']>, width: number) {
+  await expect(locator).toBeVisible()
+  const box = await locator.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+  expect(box!.y).toBeGreaterThanOrEqual(0)
+  expect(box!.y + box!.height).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight))
+}
+
 test('项目主路径仅使用本用例创建的 Project 和 Brief', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 独立主路径')
 
@@ -420,6 +430,85 @@ test('前贴任务取消后刷新会恢复服务端取消态，且不暴露旧�
 })
 
 for (const width of [1280, 1440, 1680]) {
+  test(`桌面 ${width}px 核心页面主任务可见且无横向溢出`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 })
+    const projectId = await openProject(page, `E2E Task28 核心页面 ${width}`)
+
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '代理商客户组合工作台' })).toBeVisible()
+    await expectInitialViewportControl(page, page.getByRole('button', { name: /进入创意队列/ }), width)
+    await expectNoHorizontalOverflow(page)
+
+    const routes: Array<{
+      path: string
+      heading: string | RegExp
+      headingLevel?: number
+      primary: () => ReturnType<Page['locator']>
+      elementOnly?: boolean
+    }> = [
+      {
+        path: `/projects/${projectId}/home`,
+        heading: `E2E Task28 核心页面 ${width}`,
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: /进入需求与策略/ }),
+      },
+      {
+        path: `/projects/${projectId}/strategy/tasks`,
+        heading: '策略任务',
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: '新建策略任务' }),
+      },
+      {
+        path: `/projects/${projectId}/creative/tasks`,
+        heading: '创意任务',
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: '新建创意任务' }),
+      },
+      {
+        path: `/projects/${projectId}/insight/assets`,
+        heading: '当前 Project 素材',
+        headingLevel: 2,
+        primary: () => page.getByLabel('搜索素材经验'),
+      },
+      {
+        path: `/projects/${projectId}/insight/performance`,
+        heading: '投后结论',
+        headingLevel: 2,
+        primary: () => page.getByRole('button', { name: '重新拉取' }),
+      },
+      {
+        path: `/projects/${projectId}/delivery/approvals`,
+        heading: '审批中心',
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: '刷新审批队列' }),
+      },
+      {
+        path: `/projects/${projectId}/delivery/evidence`,
+        heading: '证据与审计',
+        headingLevel: 1,
+        primary: () => page.getByRole('heading', { name: '服务端审计轨迹' }),
+        elementOnly: true,
+      },
+      {
+        path: `/projects/${projectId}/manage`,
+        heading: `E2E Task28 核心页面 ${width}`,
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: /进入项目工作台/ }),
+      },
+    ]
+
+    for (const route of routes) {
+      await page.goto(route.path)
+      await expect(page.getByRole('heading', { name: route.heading, level: route.headingLevel })).toBeVisible()
+      if (route.elementOnly) {
+        await expectInitialViewportElement(page, route.primary(), width)
+      } else {
+        await expectInitialViewportControl(page, route.primary(), width)
+      }
+      await expectNoHorizontalOverflow(page)
+    }
+  })
+
   test(`桌面 ${width}px 初始视口中前贴工作区和素材剪辑控件可操作且无横向溢出`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 })
     const projectId = await openProject(page, `E2E 初始桌面视口 ${width}`)
