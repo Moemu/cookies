@@ -578,6 +578,31 @@ export type ApiCreateHitAnalysisInput = {
   notes?: string
 }
 
+export type ApiVideoPromptDimensionId =
+  | 'task_goal_type'
+  | 'quality_style_lighting'
+  | 'environment_atmosphere'
+  | 'camera_content'
+  | 'music_sound'
+
+export type ApiVideoPromptDimension = {
+  id: ApiVideoPromptDimensionId
+  label: string
+  prompt: string
+  evidence: string
+}
+
+export type ApiVideoReplicationPrompt = {
+  source_asset: ApiAssetVersionRef
+  source_title: string
+  source_file_name?: string
+  reference_image_name?: string
+  user_instruction?: string
+  dimensions: ApiVideoPromptDimension[]
+  composite_prompt: string
+  model_directive: string
+}
+
 export type ApiProductProfile = {
   name: string
   selling_points: string[]
@@ -1251,7 +1276,172 @@ export function buildHitAnalysisInput(sourceAsset: ApiAssetVersionRef, title: st
     title,
     duration_seconds: durationSeconds,
     language: 'zh-CN',
-    notes: '由爆款复刻流程提交，输出结构用于产品映射和 Shot-based RemixPlan。',
+    notes: '由爆款复刻流程提交，先用视觉理解模型拆解五维视频提示词，再输入视频生成模型生成复刻视频。',
+  }
+}
+
+export function buildLocalHitAnalysis(projectId: string, input: ApiCreateHitAnalysisInput): ApiHitAnalysis {
+  const now = new Date().toISOString()
+  const duration = Math.max(9, input.duration_seconds)
+  const openingEnd = Math.max(3, Math.round(duration * 0.16))
+  const problemEnd = Math.max(openingEnd + 3, Math.round(duration * 0.36))
+  const proofEnd = Math.max(problemEnd + 3, Math.round(duration * 0.68))
+  const offerEnd = Math.max(proofEnd + 2, Math.round(duration * 0.86))
+  return {
+    id: `local-hit-${input.source_asset.asset_id}-${Date.now()}`,
+    organization_id: 'demo-org',
+    project_id: projectId,
+    source_asset: input.source_asset,
+    title: input.title,
+    video_meta: {
+      duration_seconds: duration,
+      language: input.language ?? 'zh-CN',
+    },
+    segments: [
+      {
+        id: 'seg-hook',
+        start_seconds: 0,
+        end_seconds: openingEnd,
+        role: 'hook',
+        summary: '用强冲突或高反差画面在开头建立停留理由。',
+        script: '先别划走，这个结果和你想的不一样。',
+        visual_element: '近景人物停顿、屏幕弹窗、快速推入主体。',
+        conversion_cue: '建立注意力和问题意识。',
+        replication_hint: '复刻开头停顿、反差和字幕强调，不复用原片人物和构图。',
+      },
+      {
+        id: 'seg-problem',
+        start_seconds: openingEnd,
+        end_seconds: problemEnd,
+        role: 'problem',
+        summary: '放大受众痛点，让观众理解为什么需要继续看。',
+        script: '如果你也遇到这个问题，先看这一步。',
+        visual_element: '问题场景、失败瞬间、对比字幕。',
+        conversion_cue: '让痛点与目标产品建立关联。',
+        replication_hint: '保留问题升级节奏，替换为当前 Project 的业务场景。',
+      },
+      {
+        id: 'seg-proof',
+        start_seconds: problemEnd,
+        end_seconds: proofEnd,
+        role: 'proof',
+        summary: '用过程、数据或细节镜头证明解决方案有效。',
+        script: '关键不是更复杂，而是更稳定地做到。',
+        visual_element: '产品特写、流程证明、结果对比、数据角标。',
+        conversion_cue: '展示可信证据和卖点。',
+        replication_hint: '复刻证明段功能，用授权素材和新产品卖点重建。',
+      },
+      {
+        id: 'seg-offer',
+        start_seconds: proofEnd,
+        end_seconds: offerEnd,
+        role: 'offer',
+        summary: '将卖点转成可感知的利益点。',
+        script: '现在就能把这套方法用到你的场景里。',
+        visual_element: '利益点字幕、轻微加速剪辑、正向反馈画面。',
+        conversion_cue: '降低行动成本。',
+        replication_hint: '复刻利益转译方式，避免照搬原口播。',
+      },
+      {
+        id: 'seg-cta',
+        start_seconds: offerEnd,
+        end_seconds: duration,
+        role: 'cta',
+        summary: '用清晰行动指令完成转化收口。',
+        script: '点击预约，获取你的专属方案。',
+        visual_element: 'CTA 定格、品牌露出、按钮式字幕。',
+        conversion_cue: '引导点击或留资。',
+        replication_hint: '保留清晰收口和停顿，不复制原片品牌资产。',
+      },
+    ],
+    scripts: [
+      { segment_id: 'seg-hook', text: '先别划走，这个结果和你想的不一样。' },
+      { segment_id: 'seg-proof', text: '关键不是更复杂，而是更稳定地做到。' },
+      { segment_id: 'seg-cta', text: '点击预约，获取你的专属方案。' },
+    ],
+    visual_elements: ['高反差开场', '问题场景', '产品证明', '数据角标', 'CTA 定格'],
+    conversion_nodes: [
+      { segment_id: 'seg-hook', cue: '停留' },
+      { segment_id: 'seg-proof', cue: '信任' },
+      { segment_id: 'seg-cta', cue: '行动' },
+    ],
+    replication_insights: ['复刻结构与镜头功能，不复刻原片具体表达。', '先建立冲突，再给证据，最后用明确 CTA 收口。'],
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+export function buildVideoReplicationPrompt(
+  analysis: ApiHitAnalysis,
+  input: {
+    productName: string
+    sellingPoints: string[]
+    cta: string
+    sourceFileName?: string
+    referenceImageName?: string
+    userInstruction?: string
+  },
+): ApiVideoReplicationPrompt {
+  const opening = analysis.segments.find(segment => segment.role === 'hook') ?? analysis.segments[0]
+  const proof = analysis.segments.find(segment => segment.role === 'proof') ?? analysis.segments[Math.min(2, analysis.segments.length - 1)]
+  const ctaSegment = analysis.segments.find(segment => segment.role === 'cta') ?? analysis.segments.at(-1)
+  const sellingPoints = input.sellingPoints.filter(Boolean)
+  const sellingPointText = sellingPoints.length ? sellingPoints.join('、') : input.productName
+  const rhythm = analysis.segments.map(segment => `${segment.start_seconds}-${segment.end_seconds}s ${segment.role}`).join('；')
+  const instructionText = input.userInstruction?.trim()
+  const imageText = input.referenceImageName?.trim()
+  const multimodalReference = [
+    '源视频用于复刻节奏、镜头功能和声音结构',
+    instructionText ? `文本指令优先约束内容改写：${instructionText}` : '',
+    imageText ? `参考图片用于约束主体外观、产品形态、色彩或构图气质：${imageText}` : '',
+  ].filter(Boolean).join('；')
+  const dimensions: ApiVideoPromptDimension[] = [
+    {
+      id: 'task_goal_type',
+      label: '任务目标类型',
+      prompt: `生成一条 ${analysis.video_meta.duration_seconds}s 左右的爆款复刻广告视频，目标是复刻源视频的停留结构、节奏推进和转化节点，同时将主题替换为「${input.productName}」。核心转化目标：${input.cta}。${instructionText ? `必须遵守文本指令：${instructionText}。` : ''}`,
+      evidence: `源视频结构：${rhythm}`,
+    },
+    {
+      id: 'quality_style_lighting',
+      label: '画质&风格&光影规范',
+      prompt: `保持高质感商业广告画质，画面干净锐利，主体边缘清晰；参考源视频的强对比停留点与 ${proof?.visual_element ?? '产品证明镜头'}，使用真实材质、高光轮廓、局部微距和可读字幕。${imageText ? `参考图片「${imageText}」用于校准主体形态、材质、配色和视觉气质。` : ''}避免低清、闪烁、畸变和过度相似的原片复制。`,
+      evidence: [proof?.visual_element ?? analysis.visual_elements.join(' / '), imageText ? `参考图片：${imageText}` : ''].filter(Boolean).join('；'),
+    },
+    {
+      id: 'environment_atmosphere',
+      label: '环境氛围',
+      prompt: `营造与「${input.productName}」匹配的可信商业场景：先制造问题压力，再进入解决方案展示，最后转向明确行动氛围；整体情绪从紧张、好奇推进到信任、确定。${instructionText ? `氛围表达需贴合文本指令中的限制和创意方向。` : ''}`,
+      evidence: analysis.replication_insights.join('；'),
+    },
+    {
+      id: 'camera_content',
+      label: '镜头画面内容',
+      prompt: `按源视频镜头功能复刻而非逐帧照抄：开场 ${opening?.summary ?? '用强钩子建立停留'}；中段展示 ${sellingPointText} 的证据镜头；结尾呈现 ${ctaSegment?.conversion_cue ?? input.cta}。镜头包含人物/产品近景、过程证明、字幕强调、CTA 定格。`,
+      evidence: analysis.segments.map(segment => `${segment.role}: ${segment.summary}`).join('；'),
+    },
+    {
+      id: 'music_sound',
+      label: '音乐&音效',
+      prompt: `音乐使用短视频平台高留存节奏：前 2 秒有清晰冲击音效，中段用递进鼓点承接证明信息，CTA 前加入短暂停顿和确认音；旁白与字幕语义一致，静音观看也能理解。`,
+      evidence: analysis.scripts.map(script => script.text).join(' / '),
+    },
+  ]
+  const compositePrompt = [
+    `源视频参考：${analysis.title}${input.sourceFileName ? `（${input.sourceFileName}）` : ''}，Asset ${analysis.source_asset.asset_id} v${analysis.source_asset.version}。`,
+    `多模态输入：${multimodalReference}。`,
+    ...dimensions.map(dimension => `【${dimension.label}】${dimension.prompt}`),
+    '生成要求：视频参考负责节奏和镜头功能，图片参考负责主体视觉，文本指令负责内容改写和约束；三者冲突时以文本指令和版权安全为最高优先级。不复制原视频人物、商标、字幕、画面构图或受版权保护的表达。',
+  ].join('\n')
+  return {
+    source_asset: analysis.source_asset,
+    source_title: analysis.title,
+    source_file_name: input.sourceFileName,
+    reference_image_name: input.referenceImageName,
+    user_instruction: instructionText,
+    dimensions,
+    composite_prompt: compositePrompt,
+    model_directive: `multimodal video remake: source video + reference image + text instruction；输出 ${analysis.video_meta.duration_seconds}s，9:16 竖版，目标产品 ${input.productName}，CTA ${input.cta}`,
   }
 }
 

@@ -455,11 +455,51 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .hook-proof { align-self: center; max-width: 290px; }.hook-proof h3 { margin-top: 8px; font-size: 18px; line-height: 1.35; }.hook-proof p { margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.65; }.hook-proof > div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 16px; }.hook-proof > div span { padding: 4px 7px; color: var(--cobalt-dark); background: var(--cobalt-soft); border-radius: 10px; font-size: 8px; }
 .hook-storyboard { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); background: var(--surface); }.hook-storyboard > div { position: relative; display: grid; grid-template-columns: 1fr; align-content: start; padding: 14px 12px; border-right: 1px solid var(--line); }.hook-storyboard > div:last-child { border-right: 0; }.hook-storyboard span { color: var(--cobalt); font-size: 8px; }.hook-storyboard i { height: 2px; margin: 7px 0 9px; background: var(--cobalt); }.hook-storyboard b { font-size: 9px; }.hook-storyboard small { margin-top: 4px; color: var(--muted); font-size: 8px; line-height: 1.45; }
 .hook-inspector { border-left: 1px solid var(--line); }.hook-inspector > label { display: flex; flex-direction: column; gap: 5px; padding: 9px 12px 0; color: var(--muted); font-size: 9px; }.hook-inspector textarea { width: 100%; min-height: 53px; padding: 8px; resize: none; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; font-size: 9px; line-height: 1.45; }.hook-inspector textarea:focus { border-color: var(--cobalt); outline: 2px solid var(--cobalt-soft); }.hook-guardrail, .hook-model { display: flex; gap: 7px; margin: 10px 12px 0; padding: 9px; background: var(--subtle); }.hook-guardrail svg, .hook-model svg { flex: none; color: var(--success); }.hook-guardrail span, .hook-model span { display: flex; flex-direction: column; gap: 3px; }.hook-guardrail b, .hook-model b { font-size: 9px; }.hook-guardrail small, .hook-model small { color: var(--muted); font-size: 8px; line-height: 1.45; }.hook-model.missing { color: var(--warning); background: oklch(.965 .04 82); }.hook-model.missing svg { color: var(--warning); }.hook-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 10px 12px 14px; }.hook-actions button { padding: 0 8px; font-size: 9px; }
+.viral-remake-lab { display: grid; grid-template-columns: 250px minmax(470px, 1fr) 290px; min-height: 650px; overflow: hidden; background: radial-gradient(circle at 47% 4%, oklch(.95 .055 255), transparent 34%), var(--surface); border: 1px solid var(--line); }
+.viral-source-panel, .viral-generation-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px 16px; background: oklch(.985 .006 255 / .86); }
+.viral-source-panel { border-right: 1px solid var(--line); }
+.viral-generation-panel { border-left: 1px solid var(--line); }
+.viral-source-panel label, .viral-generation-panel label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.viral-source-panel input, .viral-source-panel textarea, .viral-generation-panel input, .viral-generation-panel textarea { width: 100%; min-width: 0; padding: 9px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 10px; }
+.viral-source-panel input:focus, .viral-source-panel textarea:focus, .viral-generation-panel input:focus, .viral-generation-panel textarea:focus, .viral-dimension-card textarea:focus { border-color: var(--cobalt); outline: 2px solid var(--cobalt-soft); }
+.viral-upload { position: relative; padding: 12px; color: var(--cobalt-dark) !important; background: linear-gradient(135deg, var(--cobalt-soft), oklch(.98 .018 105)); border: 1px dashed var(--cobalt); border-radius: 12px; cursor: pointer; }
+.viral-upload.image { color: oklch(.36 .11 155) !important; background: linear-gradient(135deg, oklch(.965 .026 155), oklch(.985 .02 95)); border-color: oklch(.7 .12 155); }
+.viral-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.viral-upload small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.viral-source-preview { position: relative; display: grid; place-items: center; min-height: 230px; overflow: hidden; color: var(--white); background: linear-gradient(145deg, oklch(.18 .035 255), oklch(.08 .02 255)); border-radius: 18px; box-shadow: inset 0 0 0 1px oklch(1 0 0 / .12); }
+.viral-source-preview::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(90deg, oklch(1 0 0 / .06) 1px, transparent 1px), linear-gradient(0deg, oklch(1 0 0 / .05) 1px, transparent 1px); background-size: 22px 22px; mask-image: linear-gradient(180deg, transparent, black 20%, black 80%, transparent); }
+.viral-source-preview video { position: relative; width: 100%; height: 100%; min-height: 230px; object-fit: cover; }
+.viral-source-preview span { position: relative; color: oklch(1 0 0 / .78); font-size: 10px; }
+.viral-image-preview { position: relative; min-height: 98px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--subtle); }
+.viral-image-preview img { width: 100%; height: 118px; object-fit: cover; display: block; }
+.viral-image-preview span { position: absolute; right: 8px; bottom: 8px; max-width: calc(100% - 16px); overflow: hidden; padding: 4px 6px; color: var(--white); background: oklch(.16 .02 255 / .68); border-radius: 8px; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.viral-text-instruction { min-height: 82px; resize: vertical; line-height: 1.5; }
+.viral-dimension-panel { min-width: 0; padding: 20px; }
+.viral-dimension-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px; color: var(--white); background: linear-gradient(135deg, oklch(.22 .07 255), oklch(.34 .09 250)); border-radius: 20px; box-shadow: 0 18px 44px oklch(.2 .04 255 / .18); }
+.viral-dimension-hero h3 { margin-top: 6px; font-size: 21px; line-height: 1.28; }
+.viral-dimension-hero p { max-width: 650px; margin-top: 8px; color: oklch(1 0 0 / .72); font-size: 11px; line-height: 1.65; }
+.viral-dimension-hero .section-label { color: oklch(.86 .09 105); }
+.viral-dimension-hero > div:last-child { display: grid; place-items: center; min-width: 86px; min-height: 86px; border: 1px solid oklch(1 0 0 / .22); border-radius: 50%; }
+.viral-dimension-hero b { font-size: 27px; }
+.viral-dimension-hero small { color: oklch(1 0 0 / .64); font-size: 8px; }
+.viral-dimension-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.viral-dimension-card { display: grid; gap: 10px; min-height: 170px; padding: 14px; background: oklch(1 0 0 / .82); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px oklch(.2 .02 255 / .05); }
+.viral-dimension-card:nth-child(5) { grid-column: 1 / -1; }
+.viral-dimension-card div { display: grid; gap: 5px; }
+.viral-dimension-card span { color: var(--text); font-size: 12px; font-weight: 800; }
+.viral-dimension-card small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.viral-dimension-card textarea { width: 100%; min-height: 96px; resize: vertical; color: var(--text); background: var(--subtle); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: inherit; font-size: 10px; line-height: 1.55; }
+.viral-dimension-card.empty p { color: var(--muted); font-size: 10px; line-height: 1.55; }
+.viral-composite-prompt { min-height: 158px; resize: vertical; line-height: 1.55; }
+.viral-safety-note { display: flex; gap: 8px; padding: 11px; color: oklch(.36 .11 155); background: oklch(.965 .026 155); border-radius: 12px; font-size: 9px; line-height: 1.5; }
+.viral-safety-note svg { flex: none; }
 
 @media (min-width: 1280px) and (max-width: 1360px) {
   .model-settings-page { padding-left: 28px; padding-right: 28px; }
   .model-settings-layout { grid-template-columns: 210px minmax(520px, 1fr) 220px; }
   .commerce-hook-workspace { grid-template-columns: 175px minmax(430px, 1fr) 270px; }
+  .viral-remake-lab { grid-template-columns: 220px minmax(430px, 1fr) 255px; }
+  .viral-source-panel, .viral-generation-panel { padding: 15px 13px; }
   .hook-preview-stage { gap: 16px; padding-left: 16px; padding-right: 16px; }
 }
 

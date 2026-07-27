@@ -3,7 +3,7 @@ import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardChec
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, hookStoryboard } from '../data/commerceHooks'
-import { api, buildHitAnalysisInput, buildProductMappingInput, buildRemixPrerollInput, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPrerollScope, type ApiProductMapping, type ApiQualityReport, type ApiRemixHookType, type ApiRemixPlan, type ApiRemixPreroll, type ApiRemixRenderJob, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaStoryContext } from '../data/api'
+import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPrerollScope, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaStoryContext, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
@@ -176,26 +176,91 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
 }
 
 function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
-  const { currentProject } = useProject()
+  const { currentProject, reloadProjects } = useProject()
+  const { providers } = useModelConfig()
   const [sourceAssetId, setSourceAssetId] = useState('source_video')
   const [sourceVersion, setSourceVersion] = useState(1)
   const [sourceTitle, setSourceTitle] = useState('30 秒爆款结构样本')
   const [durationSeconds, setDurationSeconds] = useState(30)
+  const [sourceFileName, setSourceFileName] = useState('')
+  const [sourcePreviewUrl, setSourcePreviewUrl] = useState('')
+  const [referenceImageName, setReferenceImageName] = useState('')
+  const [referenceImagePreviewUrl, setReferenceImagePreviewUrl] = useState('')
+  const [userInstruction, setUserInstruction] = useState('保留原视频的强停留节奏，但改写为当前产品的原创广告表达。')
   const [productName, setProductName] = useState(currentProject.product)
   const [sellingPoint, setSellingPoint] = useState('±0.01mm 精度')
   const [secondSellingPoint, setSecondSellingPoint] = useState('98% 准时交付')
   const [cta, setCta] = useState('预约获取打样方案')
-  const [hookAssetId, setHookAssetId] = useState('target_hook')
-  const [proofAssetId, setProofAssetId] = useState('target_proof')
-  const [ctaAssetId, setCtaAssetId] = useState('target_cta')
   const [analysis, setAnalysis] = useState<ApiHitAnalysis | null>(null)
-  const [mapping, setMapping] = useState<ApiProductMapping | null>(null)
-  const [plan, setPlan] = useState<ApiRemixPlan | null>(null)
-  const [preroll, setPreroll] = useState<ApiRemixPreroll | null>(null)
-  const [hookType, setHookType] = useState<ApiRemixHookType>('conflict')
-  const [prerollDuration, setPrerollDuration] = useState(4)
-  const [busyStep, setBusyStep] = useState<'analysis' | 'mapping' | 'plan' | 'preroll' | 'apply-preroll' | ''>('')
+  const [replicationPrompt, setReplicationPrompt] = useState<ApiVideoReplicationPrompt | null>(null)
+  const [job, setJob] = useState<ApiGenerationJob | null>(null)
+  const [confirmedBriefId, setConfirmedBriefId] = useState('')
+  const [busyStep, setBusyStep] = useState<'analysis' | 'generate' | ''>('')
+  const configuredProvider = providers.find(provider => provider.status === '已配置')
+  const isGenerating = job?.status === 'queued' || job?.status === 'running'
   const makeAsset = (assetId: string, version = 1) => ({ asset_id: assetId.trim(), version })
+  useEffect(() => {
+    let active = true
+    void api.listArtifacts(currentProject.id).then(artifacts => {
+      if (active) setConfirmedBriefId(artifacts.filter(artifact => artifact.kind === 'brief' && artifact.status === 'ready').at(-1)?.id ?? '')
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [currentProject.id])
+  useEffect(() => () => {
+    if (sourcePreviewUrl) window.URL.revokeObjectURL(sourcePreviewUrl)
+  }, [sourcePreviewUrl])
+  useEffect(() => () => {
+    if (referenceImagePreviewUrl) window.URL.revokeObjectURL(referenceImagePreviewUrl)
+  }, [referenceImagePreviewUrl])
+  useEffect(() => {
+    if (!job || !isGenerating) return
+    const timer = window.setInterval(() => {
+      void api.getJob(job.id).then(next => {
+        setJob(next)
+        if (next.status === 'succeeded') {
+          void reloadProjects()
+          onNotice('复刻视频生成完成，已作为新视频资产关联到当前 Project。')
+        }
+      }).catch(cause => onNotice(cause instanceof Error ? cause.message : '复刻视频任务状态读取失败。'))
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [job, isGenerating, reloadProjects, onNotice])
+  const composePrompt = (prompt: ApiVideoReplicationPrompt, dimensions = prompt.dimensions) => [
+    `源视频参考：${prompt.source_title}${prompt.source_file_name ? `（${prompt.source_file_name}）` : ''}，Asset ${prompt.source_asset.asset_id} v${prompt.source_asset.version}。`,
+    `多模态输入：源视频用于复刻节奏、镜头功能和声音结构；${prompt.user_instruction ? `文本指令优先约束内容改写：${prompt.user_instruction}；` : ''}${prompt.reference_image_name ? `参考图片用于约束主体外观、产品形态、色彩或构图气质：${prompt.reference_image_name}；` : ''}`,
+    ...dimensions.map(dimension => `【${dimension.label}】${dimension.prompt}`),
+    '生成要求：视频参考负责节奏和镜头功能，图片参考负责主体视觉，文本指令负责内容改写和约束；三者冲突时以文本指令和版权安全为最高优先级。不复制原视频人物、商标、字幕、画面构图或受版权保护的表达。',
+  ].join('\n')
+  const handleSourceFile = (file?: File) => {
+    if (sourcePreviewUrl) window.URL.revokeObjectURL(sourcePreviewUrl)
+    if (!file) {
+      setSourceFileName('')
+      setSourcePreviewUrl('')
+      return
+    }
+    setSourceFileName(file.name)
+    setSourceTitle(file.name.replace(/\.[^.]+$/, '') || sourceTitle)
+    setSourcePreviewUrl(window.URL.createObjectURL(file))
+    onNotice(`已载入源视频 ${file.name}，可继续提交视觉理解拆解。`)
+  }
+  const handleReferenceImage = (file?: File) => {
+    if (referenceImagePreviewUrl) window.URL.revokeObjectURL(referenceImagePreviewUrl)
+    if (!file) {
+      setReferenceImageName('')
+      setReferenceImagePreviewUrl('')
+      return
+    }
+    setReferenceImageName(file.name)
+    setReferenceImagePreviewUrl(window.URL.createObjectURL(file))
+    onNotice(`已载入参考图片 ${file.name}，会作为主体外观和风格约束。`)
+  }
+  const updateDimension = (id: ApiVideoPromptDimension['id'], promptText: string) => {
+    setReplicationPrompt(current => {
+      if (!current) return current
+      const dimensions = current.dimensions.map(dimension => dimension.id === id ? { ...dimension, prompt: promptText } : dimension)
+      return { ...current, dimensions, composite_prompt: composePrompt(current, dimensions) }
+    })
+  }
   const analyze = async () => {
     if (!sourceAssetId.trim()) {
       onNotice('请先填写爆款源视频 Asset ID。')
@@ -203,123 +268,89 @@ function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void
     }
     setBusyStep('analysis')
     try {
-      const created = await api.createHitAnalysis(
-        currentProject.id,
-        buildHitAnalysisInput(makeAsset(sourceAssetId, sourceVersion), sourceTitle, durationSeconds),
-      )
+      const analysisInput = buildHitAnalysisInput(makeAsset(sourceAssetId, sourceVersion), sourceTitle, durationSeconds)
+      let usedLocalFallback = false
+      const created = await api.createHitAnalysis(currentProject.id, analysisInput).catch(() => {
+        usedLocalFallback = true
+        return buildLocalHitAnalysis(currentProject.id, analysisInput)
+      })
+      const prompt = buildVideoReplicationPrompt(created, {
+        productName,
+        sellingPoints: [sellingPoint, secondSellingPoint],
+        cta,
+        sourceFileName,
+        referenceImageName,
+        userInstruction,
+      })
       setAnalysis(created)
-      setMapping(null)
-      setPlan(null)
-      onNotice(`已分析为爆款模板：${created.segments.length} 个连续结构段。`)
+      setReplicationPrompt(prompt)
+      setJob(null)
+      onNotice(`视觉理解拆解完成：已生成 ${prompt.dimensions.length} 个维度的视频提示词。${usedLocalFallback ? '当前环境未连接视觉理解服务，已使用本地结构化草案。' : ''}`)
     } catch (cause) {
-      onNotice(cause instanceof Error ? cause.message : '爆款结构分析失败。')
+      onNotice(cause instanceof Error ? cause.message : '视觉理解拆解失败。')
     } finally {
       setBusyStep('')
     }
   }
-  const mapProduct = async () => {
-    if (!analysis) {
-      onNotice('请先完成“分析为爆款模板”。')
+  const generateReplica = async () => {
+    if (!replicationPrompt) {
+      onNotice('请先完成五维视觉理解拆解。')
       return
     }
-    if (![hookAssetId, proofAssetId, ctaAssetId].every(value => value.trim())) {
-      onNotice('请补齐 Hook、证明段和 CTA 的目标素材 Asset ID。')
+    if (!confirmedBriefId) {
+      onNotice('请先确认 Project Brief，系统才会允许生成复刻视频。')
       return
     }
-    setBusyStep('mapping')
+    if (!configuredProvider) {
+      onNotice('服务端尚未配置视频生成模型，无法生成复刻视频。')
+      return
+    }
+    setBusyStep('generate')
     try {
-      const created = await api.createProductMapping(
+      const created = await api.createMedia(
         currentProject.id,
-        buildProductMappingInput(
-          analysis,
-          { name: productName, selling_points: [sellingPoint, secondSellingPoint].filter(Boolean), cta },
-          { hook: makeAsset(hookAssetId), proof: makeAsset(proofAssetId), cta: makeAsset(ctaAssetId) },
-        ),
+        'video',
+        `${replicationPrompt.model_directive}\n\n${replicationPrompt.composite_prompt}`,
+        confirmedBriefId,
       )
-      setMapping(created)
-      setPlan(null)
-      onNotice('产品映射已生成，替换规则仅引用当前 Project 授权素材。')
+      setJob(created)
+      onNotice(created.status === 'succeeded' ? '复刻视频生成完成，资产已保存。' : '复刻视频生成任务已创建，正在轮询模型结果。')
     } catch (cause) {
-      onNotice(cause instanceof Error ? cause.message : '产品映射失败。')
+      onNotice(cause instanceof Error ? cause.message : '创建复刻视频生成任务失败。')
     } finally {
       setBusyStep('')
     }
   }
-  const generatePlan = async () => {
-    if (!mapping) {
-      onNotice('请先完成“映射到产品”。')
-      return
-    }
-    setBusyStep('plan')
-    try {
-      const created = await api.generatePlanFromProductMapping(currentProject.id, mapping.id)
-      setPlan(created)
-      setPreroll(null)
-      onNotice(`混剪草案已生成：${created.summary.used_assets} 个授权素材，${created.segments.length} 段 Shot-based RemixPlan。`)
-    } catch (cause) {
-      onNotice(cause instanceof Error ? cause.message : '生成混剪草案失败。')
-    } finally {
-      setBusyStep('')
-    }
-  }
-  const createPreroll = async () => {
-    if (!plan) {
-      onNotice('请先生成 RemixPlan 草案，再创建 AI 前贴 Hook。')
-      return
-    }
-    if (!hookAssetId.trim()) {
-      onNotice('请先填写前贴参考素材 Asset ID。')
-      return
-    }
-    setBusyStep('preroll')
-    try {
-      const created = await api.createRemixPreroll(currentProject.id, buildRemixPrerollInput(plan.id, hookType, makeAsset(hookAssetId), 'generate_video', prerollDuration, ['9:16 竖版', '静音可理解', `商品卖点：${sellingPoint}`]))
-      setPreroll(created)
-      onNotice(created.status === 'ready' ? 'AI 前贴 Hook 已生成并通过质量门禁，可插入 opening 段。' : `AI 前贴暂不可插入：${created.error_message ?? created.status}`)
-    } catch (cause) {
-      onNotice(cause instanceof Error ? cause.message : 'AI 前贴 Hook 生成失败。')
-    } finally {
-      setBusyStep('')
-    }
-  }
-  const applyPreroll = async () => {
-    if (!preroll || preroll.status !== 'ready') {
-      onNotice('请先生成通过质量门禁的前贴。')
-      return
-    }
-    setBusyStep('apply-preroll')
-    try {
-      const updated = await api.applyRemixPreroll(currentProject.id, preroll.id)
-      setPlan(updated)
-      setPreroll({ ...preroll, status: 'applied', applied_plan_id: updated.id })
-      onNotice('AI 前贴已插入 opening 段，timeline 已重新计算。')
-    } catch (cause) {
-      onNotice(cause instanceof Error ? cause.message : 'AI 前贴插入失败，请重新生成后再试。')
-    } finally {
-      setBusyStep('')
-    }
-  }
-  return <div className="performance-workflow">
-    <aside className="performance-mode-list"><span className="section-label">爆款模板输入</span><label>源视频 Asset ID<input value={sourceAssetId} onChange={event => setSourceAssetId(event.target.value)}/></label><label>源视频版本<input type="number" min={1} value={sourceVersion} onChange={event => setSourceVersion(Number(event.target.value))}/></label><label>模板标题<input value={sourceTitle} onChange={event => setSourceTitle(event.target.value)}/></label><label>时长（秒）<input type="number" min={9} max={180} value={durationSeconds} onChange={event => setDurationSeconds(Number(event.target.value))}/></label><button className="primary-button full" disabled={busyStep === 'analysis'} onClick={() => void analyze()}><WandSparkles size={15}/>{busyStep === 'analysis' ? '分析中…' : '分析为爆款模板'}</button></aside>
-    <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>{analysis ? `${analysis.video_meta.duration_seconds}s · ${analysis.segments.length} 段结构` : '等待爆款分析'}</span><button aria-label="播放爆款复刻预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">结构拆解与草案</span><h3>{analysis ? analysis.title : '先拆解，再映射，再生成草案'}</h3><p>{analysis ? analysis.replication_insights.join(' ') : '系统会提取叙事角色、脚本、视觉元素、转化节点和可复刻洞察。'}</p><div className="workflow-meta"><span><b>映射</b>{mapping ? `${mapping.replacement_rules.length} 条替换规则` : '等待目标商品与素材'}</span><span><b>RemixPlan</b>{plan ? `${plan.schema_version} · ${plan.summary.strategy}` : '待生成'}</span></div>{analysis ? <div className="check-list">{analysis.segments.map(segment => <span key={segment.id}><Check size={14}/>{segment.role} · {segment.start_seconds}s-{segment.end_seconds}s · {segment.summary}</span>)}</div> : null}{plan ? <div className="check-list">{plan.segments.flatMap(segment => segment.shots.map(shot => <span key={shot.id}><Check size={14}/>{segment.label} · {shot.asset_version.asset_id} · {shot.creative.shot_type}</span>))}</div> : null}</div></section>
-    <aside className="video-job-rail">
-      <span className="section-label">产品映射</span>
+  return <div className="viral-remake-lab">
+    <aside className="viral-source-panel">
+      <span className="section-label">多模态输入</span>
+      <label className="viral-upload">上传爆款源视频<input type="file" accept="video/*" onChange={event => handleSourceFile(event.target.files?.[0])}/><small>{sourceFileName || '视频用于拆解节奏、镜头功能和声音结构。'}</small></label>
+      <div className="viral-source-preview">{sourcePreviewUrl ? <video src={sourcePreviewUrl} controls muted aria-label="源视频预览"/> : <><Film size={24}/><span>等待源视频预览</span></>}</div>
+      <label className="viral-upload image">上传参考图片<input type="file" accept="image/*" onChange={event => handleReferenceImage(event.target.files?.[0])}/><small>{referenceImageName || '图片用于约束主体外观、产品形态和视觉风格。'}</small></label>
+      {referenceImagePreviewUrl ? <div className="viral-image-preview"><img src={referenceImagePreviewUrl} alt="参考图片预览"/><span>{referenceImageName}</span></div> : null}
+      <label>文本指令<textarea className="viral-text-instruction" value={userInstruction} onChange={event => setUserInstruction(event.target.value)} placeholder="例如：更年轻化，突出夏季户外场景，避免出现原视频人物和 Logo。"/></label>
+      <label>源视频 Asset ID<input value={sourceAssetId} onChange={event => setSourceAssetId(event.target.value)}/></label>
+      <label>源视频版本<input type="number" min={1} value={sourceVersion} onChange={event => setSourceVersion(Number(event.target.value))}/></label>
+      <label>视频标题<input value={sourceTitle} onChange={event => setSourceTitle(event.target.value)}/></label>
+      <label>时长（秒）<input type="number" min={9} max={180} value={durationSeconds} onChange={event => setDurationSeconds(Number(event.target.value))}/></label>
+      <button className="primary-button full" disabled={busyStep === 'analysis'} onClick={() => void analyze()}><WandSparkles size={15}/>{busyStep === 'analysis' ? '视觉理解中…' : '视觉理解拆解五维提示词'}</button>
+    </aside>
+    <section className="viral-dimension-panel">
+      <div className="viral-dimension-hero"><div><span className="section-label">VLM PROMPT DNA</span><h3>{analysis ? analysis.title : '等待视觉理解模型拆解'}</h3><p>{analysis ? '已将源视频拆为任务、画质风格、环境氛围、镜头内容和音乐音效五个可编辑提示词维度。' : '输入源视频后，系统会把爆款视频拆成可控的生成指令，再送入视频生成模型。'}</p></div><div><b>{replicationPrompt ? replicationPrompt.dimensions.length : 0}</b><small>Prompt 维度</small></div></div>
+      <div className="viral-dimension-grid">{replicationPrompt ? replicationPrompt.dimensions.map(dimension => <article className="viral-dimension-card" key={dimension.id}><div><span>{dimension.label}</span><small>{dimension.evidence}</small></div><textarea aria-label={dimension.label} value={dimension.prompt} onChange={event => updateDimension(dimension.id, event.target.value)}/></article>) : ['任务目标类型', '画质&风格&光影规范', '环境氛围', '镜头画面内容', '音乐&音效'].map(label => <article className="viral-dimension-card empty" key={label}><div><span>{label}</span><small>等待模型输出</small></div><p>上传或填写源视频后点击拆解。</p></article>)}</div>
+    </section>
+    <aside className="viral-generation-panel">
+      <span className="section-label">复刻视频生成</span>
       <label>目标产品<input value={productName} onChange={event => setProductName(event.target.value)}/></label>
       <label>卖点 1<input value={sellingPoint} onChange={event => setSellingPoint(event.target.value)}/></label>
       <label>卖点 2<input value={secondSellingPoint} onChange={event => setSecondSellingPoint(event.target.value)}/></label>
       <label>CTA<input value={cta} onChange={event => setCta(event.target.value)}/></label>
-      <label>Hook 目标素材<input value={hookAssetId} onChange={event => setHookAssetId(event.target.value)}/></label>
-      <label>证明段目标素材<input value={proofAssetId} onChange={event => setProofAssetId(event.target.value)}/></label>
-      <label>CTA 目标素材<input value={ctaAssetId} onChange={event => setCtaAssetId(event.target.value)}/></label>
-      <button className="secondary-button full" disabled={!analysis || busyStep === 'mapping'} onClick={() => void mapProduct()}><Sparkles size={15}/>{busyStep === 'mapping' ? '映射中…' : '映射到产品'}</button>
-      <button className="primary-button full" disabled={!mapping || busyStep === 'plan'} onClick={() => void generatePlan()}><Video size={15}/>{busyStep === 'plan' ? '生成中…' : '生成混剪草案'}</button>
-      {plan ? <div className="inline-notice" role="status">RemixPlan {plan.id.slice(0, 8)} · 使用 {plan.summary.used_assets}/{plan.summary.selected_assets} 个目标素材 · 不默认复用源视频</div> : null}
-      <span className="section-label">AI 前贴 Hook</span>
-      <label>Hook 类型<select value={hookType} onChange={event => setHookType(event.target.value as ApiRemixHookType)}><option value="conflict">冲突钩子</option><option value="reversal">结果反转</option><option value="suspense">悬念开场</option><option value="selling_point_bridge">卖点承接</option><option value="product_demo">商品演示</option><option value="offer">利益点前贴</option></select></label>
-      <label>前贴秒数<input type="number" min={3} max={10} value={prerollDuration} onChange={event => setPrerollDuration(Number(event.target.value))}/></label>
-      <button className="secondary-button full" disabled={!plan || busyStep === 'preroll'} onClick={() => void createPreroll()}><WandSparkles size={15}/>{busyStep === 'preroll' ? '生成中…' : '生成前贴预览'}</button>
-      <button className="primary-button full" disabled={!preroll || preroll.status !== 'ready' || busyStep === 'apply-preroll'} onClick={() => void applyPreroll()}><Check size={15}/>{busyStep === 'apply-preroll' ? '插入中…' : '插入 opening'}</button>
-      {preroll ? <div className="inline-notice" role="status">前贴 {preroll.status} · 质检 {preroll.quality_verdict} · {preroll.output_asset ? `输出 ${preroll.output_asset.asset_version.asset_id}` : preroll.error_message ?? '仅 prompt 草案'}</div> : null}
+      {!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置视频生成模型。</span></div> : null}
+      {!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先确认 Brief，才能生成复刻视频。</span></div> : null}
+      <label>复刻视频总提示词<textarea className="viral-composite-prompt" readOnly value={replicationPrompt?.composite_prompt ?? '五维拆解完成后自动生成总提示词。'}/></label>
+      <button className="primary-button full" disabled={!replicationPrompt || !configuredProvider || !confirmedBriefId || isGenerating || busyStep === 'generate'} onClick={() => void generateReplica()}><Video size={15}/>{isGenerating || busyStep === 'generate' ? '生成中…' : '生成复刻视频'}</button>
+      {job ? <div className="inline-notice" role="status">复刻任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}
+      {replicationPrompt ? <div className="viral-safety-note"><ShieldCheck size={15}/><span>{replicationPrompt.model_directive}；只复刻结构与生成指令，不复制原片受保护表达。</span></div> : null}
     </aside>
   </div>
 }
