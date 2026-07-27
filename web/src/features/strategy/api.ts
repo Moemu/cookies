@@ -1,4 +1,5 @@
 import { ApiProblem, apiRequest } from '../../shared/api/client'
+import { createClientUUID } from '../../shared/clientId'
 import type {
   AgentTask,
   BriefDraft,
@@ -22,7 +23,7 @@ import type {
 const root = '/api/strategy/v1'
 
 export function createMutationKey() {
-  return `strategy-web-${crypto.randomUUID()}`
+  return `strategy-web-${createClientUUID()}`
 }
 
 function mutationHeaders(key = createMutationKey()) {
