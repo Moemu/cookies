@@ -15,8 +15,12 @@ import (
 
 const ScopeJobCreate contract.Scope = "provider.job.create"
 
-const imageJobKind = "provider.image.generate"
-const imageOperation = "image.generate"
+const imageGenerateJobKind = "provider.image.generate"
+const imageEditJobKind = "provider.image.edit"
+const imageGenerateOperation = "image.generate"
+const imageEditOperation = "image.edit"
+const imageJobKind = imageGenerateJobKind
+const imageOperation = imageGenerateOperation
 
 var ErrJobNotFound = errors.New("provider job not found")
 var ErrVersionConflict = errors.New("provider job version conflict")
@@ -25,9 +29,10 @@ var ErrVersionConflict = errors.New("provider job version conflict")
 // Prompt contents may be persisted in protected Provider storage, but callers
 // must never place them in events or ordinary logs.
 type ImageGenerationInput struct {
-	Prompt string
-	Width  int
-	Height int
+	Prompt       string                     `json:"prompt"`
+	Width        int                        `json:"width"`
+	Height       int                        `json:"height"`
+	SourceAssets []contract.ProjectAssetRef `json:"source_assets,omitempty"`
 }
 
 func (i ImageGenerationInput) Validate() error {
@@ -36,6 +41,17 @@ func (i ImageGenerationInput) Validate() error {
 	}
 	if i.Width < 1 || i.Height < 1 {
 		return fmt.Errorf("image dimensions must be positive")
+	}
+	seen := make(map[string]struct{}, len(i.SourceAssets))
+	for index, ref := range i.SourceAssets {
+		if err := ref.Validate(); err != nil {
+			return fmt.Errorf("invalid image source asset at index %d: %w", index, err)
+		}
+		key := string(ref.ProjectID) + ":" + string(ref.AssetVersion.AssetID) + ":" + fmt.Sprint(ref.AssetVersion.Version)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("image source asset at index %d is duplicated", index)
+		}
+		seen[key] = struct{}{}
 	}
 	return nil
 }
@@ -51,6 +67,7 @@ type CreateImageJobRequest struct {
 	ModelAlias     string
 	SourceSystem   string
 	SourceTaskID   string
+	Operation      string
 	Input          ImageGenerationInput
 }
 
@@ -75,6 +92,23 @@ func (r CreateImageJobRequest) Validate() error {
 	}
 	if strings.TrimSpace(r.ModelAlias) == "" {
 		return fmt.Errorf("model alias is required")
+	}
+	switch r.Operation {
+	case imageGenerateOperation:
+		if len(r.Input.SourceAssets) != 0 {
+			return fmt.Errorf("image.generate does not accept source assets")
+		}
+	case imageEditOperation:
+		if len(r.Input.SourceAssets) == 0 {
+			return fmt.Errorf("image.edit requires at least one source asset")
+		}
+		for index, ref := range r.Input.SourceAssets {
+			if ref.ProjectID != r.Project.ProjectID {
+				return fmt.Errorf("image source asset at index %d belongs to another project", index)
+			}
+		}
+	default:
+		return fmt.Errorf("image operation is not supported")
 	}
 	if err := r.Input.Validate(); err != nil {
 		return err
@@ -174,6 +208,9 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 	if s.NewID == nil {
 		return contract.ProviderJob{}, false, fmt.Errorf("provider job ID generator is required")
 	}
+	if strings.TrimSpace(request.Operation) == "" {
+		request.Operation = imageGenerateOperation
+	}
 	if err := request.Validate(); err != nil {
 		return contract.ProviderJob{}, false, err
 	}
@@ -202,7 +239,7 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 	}
 	job := contract.ProviderJob{
 		ID:               providerJobID,
-		Kind:             imageJobKind,
+		Kind:             imageJobKindForOperation(request.Operation),
 		OrganizationID:   request.Actor.OrganizationID,
 		ProjectID:        request.Project.ProjectID,
 		ExecutionStatus:  contract.JobQueued,
@@ -221,7 +258,7 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 	stored, duplicate, err := s.Store.Create(ctx, JobRecord{
 		Job:                   job,
 		Principal:             request.Actor.Principal,
-		Operation:             imageOperation,
+		Operation:             request.Operation,
 		IdempotencyKey:        request.IdempotencyKey,
 		RequestHash:           request.RequestHash,
 		ProjectContextVersion: request.Project.ProjectContextVersion,
@@ -292,12 +329,12 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 				ProviderJobID: record.Job.ID,
 				Output:        output.Ref,
 				Provenance: assets.GenerationProvenance{
-					Capability:            imageOperation,
+					Capability:            record.Operation,
 					ProviderCode:          record.ProviderCode,
 					ModelAlias:            record.ModelAlias,
 					ModelVersion:          record.ModelVersion,
 					PromptRef:             nil,
-					SourceAssetRefs:       []contract.AssetVersionRef{},
+					SourceAssetRefs:       imageSourceAssetVersionRefs(record.Input.SourceAssets),
 					ProjectContextVersion: record.ProjectContextVersion,
 					GeneratedAt:           now,
 				},
@@ -421,6 +458,21 @@ func isProviderTerminal(status contract.ProviderJobStatus) bool {
 	default:
 		return false
 	}
+}
+
+func imageJobKindForOperation(operation string) string {
+	if operation == imageEditOperation {
+		return imageEditJobKind
+	}
+	return imageGenerateJobKind
+}
+
+func imageSourceAssetVersionRefs(refs []contract.ProjectAssetRef) []contract.AssetVersionRef {
+	versions := make([]contract.AssetVersionRef, 0, len(refs))
+	for _, ref := range refs {
+		versions = append(versions, ref.AssetVersion)
+	}
+	return versions
 }
 
 func (s Service) nowUTC() time.Time {

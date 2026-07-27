@@ -32,6 +32,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/platform/remix"
 	"github.com/shikanon/cookies/internal/systems/creative"
 	"github.com/shikanon/cookies/internal/systems/delivery"
 	deliveryhttp "github.com/shikanon/cookies/internal/systems/delivery/httpapi"
@@ -116,12 +117,14 @@ func main() {
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
 		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
 	}
+	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	dependencies := httpserver.Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
+		RemixPlans: remixService,
 	}
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},
@@ -191,6 +194,7 @@ func main() {
 			Store:         provider.MySQLStore{DB: db, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP},
 			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
 			ImageAdapter:  adapter,
+			VisionSources: assetVisionSourceResolver{uploads: uploadService},
 			Intake:        provider.AssetsIntakeClient{API: intakeService},
 			OutputHandles: outputHandles,
 			NewID:         func() (string, error) { return ids.New("providerjob") },
@@ -313,6 +317,26 @@ func strategyOrganizationAllowlist(values []string) map[contract.OrganizationID]
 		result[contract.OrganizationID(value)] = struct{}{}
 	}
 	return result
+}
+
+type assetVisionSourceResolver struct{ uploads *assets.UploadService }
+
+func (r assetVisionSourceResolver) ResolveVisionSources(ctx context.Context, actor contract.ActorContext, projectContext contract.ProjectContext, refs []contract.ProjectAssetRef) ([]provider.VisionSource, error) {
+	if r.uploads == nil {
+		return nil, fmt.Errorf("asset upload service is required")
+	}
+	sources := make([]provider.VisionSource, 0, len(refs))
+	for _, ref := range refs {
+		reader, info, err := r.uploads.OpenPreview(ctx, actor, projectContext.ProjectID, ref.AssetVersion)
+		if err != nil {
+			for _, source := range sources {
+				source.Content.Close()
+			}
+			return nil, err
+		}
+		sources = append(sources, provider.VisionSource{Reference: ref, MIMEType: info.MIMEType, Content: reader})
+	}
+	return sources, nil
 }
 
 func startWorker(ctx context.Context, name string, runOnce func(context.Context) (bool, error)) {

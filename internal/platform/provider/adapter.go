@@ -34,6 +34,7 @@ type ImageGenerationRequest struct {
 	IdempotencyKey contract.IdempotencyKey
 	Input          ImageGenerationInput
 	Route          *ImageRouteSnapshot
+	Sources        []VisionSource
 }
 
 func (r ImageGenerationRequest) Validate() error {
@@ -43,7 +44,18 @@ func (r ImageGenerationRequest) Validate() error {
 	if err := r.IdempotencyKey.Validate(); err != nil {
 		return err
 	}
-	return r.Input.Validate()
+	if err := r.Input.Validate(); err != nil {
+		return err
+	}
+	if len(r.Sources) != len(r.Input.SourceAssets) {
+		return fmt.Errorf("image sources do not match requested source assets")
+	}
+	for index, source := range r.Sources {
+		if source.Reference != r.Input.SourceAssets[index] || strings.TrimSpace(source.MIMEType) == "" || source.Content == nil {
+			return fmt.Errorf("image source at index %d is invalid", index)
+		}
+	}
+	return nil
 }
 
 // ImageSubmissionStatus distinguishes upstream asynchronous acceptance from a

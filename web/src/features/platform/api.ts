@@ -13,11 +13,13 @@ export function getProjectContext(projectId: string, signal?: AbortSignal) {
   return apiRequest<ProjectContext>(`/platform/v1/projects/${encodeURIComponent(projectId)}/context`, { signal })
 }
 
-export function createImageJob(projectId: string, projectContextVersion: number, input: { prompt: string, width: number, height: number }) {
+type ImageJobInput = { prompt: string, width: number, height: number, source_assets?: Array<{ project_id: string, asset_version: { asset_id: string, version: number } }> }
+
+export function createImageJob(projectId: string, projectContextVersion: number, input: ImageJobInput, capability: 'image.generate' | 'image.edit' = 'image.generate') {
   return apiRequest<ProviderJob>(`/platform/v1/projects/${encodeURIComponent(projectId)}/model/jobs`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `web-image-${crypto.randomUUID()}` },
-    body: JSON.stringify({ capability: 'image.generate', model_alias: 'cookies.image.standard', project_context_version: projectContextVersion, input }),
+    headers: { 'Idempotency-Key': `web-${capability.replace('.', '-')}-${crypto.randomUUID()}` },
+    body: JSON.stringify({ capability, model_alias: 'cookies.image.standard', project_context_version: projectContextVersion, input }),
   })
 }
 

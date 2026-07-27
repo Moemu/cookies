@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiProject } from '../data/api'
+import { api, type ApiArtifact, type ApiBusinessTask, type ApiBusinessTaskType, type ApiGenerationJob, type ApiOperationalRecord, type ApiProject } from '../data/api'
 import type { ArtifactKey, ArtifactStatus, BusinessTaskRecord, ChangeSetRecord, ProjectArtifact, ProjectRecord } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { presentCreativeStatus } from '../lib/media-status'
@@ -38,13 +38,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       const apiProjects = await api.listProjects()
       const nextProjects = await Promise.all(apiProjects.map(async project => {
-        const [artifacts, jobs, tasks, changeSets] = await Promise.all([
+        const [artifacts, jobs, tasks, changeSets, operations] = await Promise.all([
           api.listArtifacts(project.id),
           api.listJobs(project.id),
           api.listTasks(project.id),
           deliveryApi.listChangeSets(project.id),
+          api.listOperations(project.id),
         ])
-        return toProjectRecord(project, artifacts, jobs, tasks, changeSets)
+        return toProjectRecord(project, artifacts, jobs, tasks, changeSets, operations)
       }))
       setProjects(nextProjects)
       setCurrentProjectId(current => nextProjects.some(project => project.id === current) ? current : nextProjects[0]?.id ?? '')
@@ -159,7 +160,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
 }
 
-function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], tasks: ApiBusinessTask[] = [], changeSets: DeliveryChangeSet[] = []): ProjectRecord {
+function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], tasks: ApiBusinessTask[] = [], changeSets: DeliveryChangeSet[] = [], operations: ApiOperationalRecord[] = []): ProjectRecord {
   const brief = latestArtifact(artifacts.filter(artifact => artifact.status === 'ready'), 'brief')
     ?? latestArtifact(artifacts, 'brief')
   const latestMediaJob = latestMediaGenerationJob(jobs)
@@ -191,6 +192,7 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
     },
     tasks,
     changeSets: changeSets.map(toChangeSetRecord),
+    operations,
     knowledgeCount: documents.filter(artifact => artifact.content.startsWith('[knowledge]')).length,
   }
 }
@@ -201,6 +203,7 @@ const emptyProject: ProjectRecord = {
   artifacts: Object.fromEntries((['brief', 'strategy', 'creative', 'insight', 'delivery'] as ArtifactKey[]).map(key => [key, toArtifactRecord(key, undefined, '')])) as ProjectRecord['artifacts'],
   tasks: [],
   changeSets: [],
+  operations: [],
   knowledgeCount: 0,
 }
 
