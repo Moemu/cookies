@@ -19,16 +19,33 @@ func TestApplyTextRouteConstraintsReadsSamplingPolicy(t *testing.T) {
 	err := applyTextRouteConstraints(&snapshot, []byte(`{
 		"text_response_mode":"json_object",
 		"max_output_tokens":4096,
+		"output_token_parameter":"max_completion_tokens",
 		"temperature":0.4,
-		"thinking_mode":"disabled"
+		"thinking_mode":"disabled",
+		"reasoning_split":true
 	}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.TextResponseMode != TextResponseJSONObject ||
 		snapshot.MaxOutputTokens != 4096 || snapshot.Temperature != 0.4 || !snapshot.TemperatureSet ||
-		snapshot.ThinkingMode != "disabled" {
+		snapshot.OutputTokenParameter != TextOutputTokenParameterMaxCompletionTokens ||
+		snapshot.ThinkingMode != "disabled" || !snapshot.ReasoningSplit {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestGatewayRouteRejectsUnknownOutputTokenParameter(t *testing.T) {
+	t.Parallel()
+	snapshot := GatewayRouteSnapshot{
+		RouteID: "route", RouteRevisionID: "revision", ConnectionID: "connection",
+		ConnectionRevisionID: "connection_revision", BaseURL: "https://gateway.example",
+		UpstreamModel: "model", CredentialID: "credential", CredentialVersion: 1,
+		TimeoutSeconds: 30, MaxResponseBytes: 1024, TextResponseMode: TextResponsePromptJSON,
+		MaxOutputTokens: 1, OutputTokenParameter: "output_length",
+	}
+	if err := snapshot.ValidateTextWithPolicy(false); err == nil {
+		t.Fatal("expected invalid output token parameter")
 	}
 }
 

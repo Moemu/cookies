@@ -26,25 +26,37 @@ const (
 	TextResponsePromptJSON TextResponseMode = "prompt_json"
 )
 
+// TextOutputTokenParameter records the upstream field used to cap output
+// tokens. Most OpenAI-compatible endpoints use max_tokens, while some
+// providers, including MiniMax, require max_completion_tokens.
+type TextOutputTokenParameter string
+
+const (
+	TextOutputTokenParameterMaxTokens           TextOutputTokenParameter = "max_tokens"
+	TextOutputTokenParameterMaxCompletionTokens TextOutputTokenParameter = "max_completion_tokens"
+)
+
 // GatewayRouteSnapshot is copied onto an invocation when it is created. Later route
 // edits therefore cannot silently change the endpoint, model, or credential
 // used by an already accepted image job or text skill run.
 type GatewayRouteSnapshot struct {
-	RouteID              string           `json:"route_id"`
-	RouteRevisionID      string           `json:"route_revision_id"`
-	ConnectionID         string           `json:"connection_id"`
-	ConnectionRevisionID string           `json:"connection_revision_id"`
-	BaseURL              string           `json:"base_url"`
-	UpstreamModel        string           `json:"upstream_model"`
-	CredentialID         string           `json:"credential_id"`
-	CredentialVersion    int64            `json:"credential_version"`
-	TimeoutSeconds       int              `json:"timeout_seconds"`
-	MaxResponseBytes     int64            `json:"max_response_bytes"`
-	TextResponseMode     TextResponseMode `json:"text_response_mode,omitempty"`
-	MaxOutputTokens      int              `json:"max_output_tokens,omitempty"`
-	Temperature          float64          `json:"temperature,omitempty"`
-	TemperatureSet       bool             `json:"-"`
-	ThinkingMode         string           `json:"thinking_mode,omitempty"`
+	RouteID              string                   `json:"route_id"`
+	RouteRevisionID      string                   `json:"route_revision_id"`
+	ConnectionID         string                   `json:"connection_id"`
+	ConnectionRevisionID string                   `json:"connection_revision_id"`
+	BaseURL              string                   `json:"base_url"`
+	UpstreamModel        string                   `json:"upstream_model"`
+	CredentialID         string                   `json:"credential_id"`
+	CredentialVersion    int64                    `json:"credential_version"`
+	TimeoutSeconds       int                      `json:"timeout_seconds"`
+	MaxResponseBytes     int64                    `json:"max_response_bytes"`
+	TextResponseMode     TextResponseMode         `json:"text_response_mode,omitempty"`
+	MaxOutputTokens      int                      `json:"max_output_tokens,omitempty"`
+	OutputTokenParameter TextOutputTokenParameter `json:"output_token_parameter,omitempty"`
+	Temperature          float64                  `json:"temperature,omitempty"`
+	TemperatureSet       bool                     `json:"-"`
+	ThinkingMode         string                   `json:"thinking_mode,omitempty"`
+	ReasoningSplit       bool                     `json:"reasoning_split,omitempty"`
 }
 
 func (s GatewayRouteSnapshot) Validate() error {
@@ -94,6 +106,13 @@ func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) err
 	}
 	if s.MaxOutputTokens < 0 || s.MaxOutputTokens > 100_000 {
 		return fmt.Errorf("adapter gateway max output tokens are invalid")
+	}
+	if s.MaxOutputTokens > 0 {
+		switch s.OutputTokenParameter {
+		case "", TextOutputTokenParameterMaxTokens, TextOutputTokenParameterMaxCompletionTokens:
+		default:
+			return fmt.Errorf("adapter gateway output token parameter is invalid")
+		}
 	}
 	if s.Temperature < 0 || s.Temperature > 2 {
 		return fmt.Errorf("adapter gateway temperature is invalid")
@@ -201,10 +220,12 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 		return fmt.Errorf("route snapshot is required")
 	}
 	var constraints struct {
-		ResponseMode    TextResponseMode `json:"text_response_mode"`
-		MaxOutputTokens int              `json:"max_output_tokens"`
-		Temperature     *float64         `json:"temperature"`
-		ThinkingMode    string           `json:"thinking_mode"`
+		ResponseMode         TextResponseMode         `json:"text_response_mode"`
+		MaxOutputTokens      int                      `json:"max_output_tokens"`
+		OutputTokenParameter TextOutputTokenParameter `json:"output_token_parameter"`
+		Temperature          *float64                 `json:"temperature"`
+		ThinkingMode         string                   `json:"thinking_mode"`
+		ReasoningSplit       bool                     `json:"reasoning_split"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &constraints); err != nil {
@@ -219,11 +240,13 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 	}
 	snapshot.TextResponseMode = constraints.ResponseMode
 	snapshot.MaxOutputTokens = constraints.MaxOutputTokens
+	snapshot.OutputTokenParameter = constraints.OutputTokenParameter
 	if constraints.Temperature != nil {
 		snapshot.Temperature = *constraints.Temperature
 		snapshot.TemperatureSet = true
 	}
 	snapshot.ThinkingMode = constraints.ThinkingMode
+	snapshot.ReasoningSplit = constraints.ReasoningSplit
 	return nil
 }
 

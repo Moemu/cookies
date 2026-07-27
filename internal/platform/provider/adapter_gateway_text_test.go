@@ -201,6 +201,34 @@ func TestAdapterGatewayTextForwardsThinkingMode(t *testing.T) {
 	}
 }
 
+func TestAdapterGatewayTextUsesMiniMaxResponseControls(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["max_completion_tokens"] != float64(2048) || body["max_tokens"] != nil || body["reasoning_split"] != true {
+			t.Fatalf("MiniMax request body = %#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"model":"MiniMax-M2.7","choices":[{"message":{"content":"{\"ok\":true}"}}]}`))
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.TextResponseMode = TextResponsePromptJSON
+	snapshot.MaxOutputTokens = 2048
+	snapshot.OutputTokenParameter = TextOutputTokenParameterMaxCompletionTokens
+	snapshot.ReasoningSplit = true
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	if _, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "cookies.text.standard",
+		Messages: []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAdapterGatewayTextInspectionDoesNotInvokeModel(t *testing.T) {
 	t.Parallel()
 	snapshot := textRouteSnapshot("https://gateway.example")

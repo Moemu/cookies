@@ -73,13 +73,23 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		}
 	}
 	if route.MaxOutputTokens > 0 {
-		body["max_tokens"] = route.MaxOutputTokens
+		switch route.OutputTokenParameter {
+		case "", TextOutputTokenParameterMaxTokens:
+			body["max_tokens"] = route.MaxOutputTokens
+		case TextOutputTokenParameterMaxCompletionTokens:
+			body["max_completion_tokens"] = route.MaxOutputTokens
+		default:
+			return SynchronousResult{}, fmt.Errorf("adapter gateway output token parameter is invalid")
+		}
 	}
 	if route.TemperatureSet {
 		body["temperature"] = route.Temperature
 	}
 	if route.ThinkingMode != "" {
 		body["thinking"] = map[string]string{"type": route.ThinkingMode}
+	}
+	if route.ReasoningSplit {
+		body["reasoning_split"] = true
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
