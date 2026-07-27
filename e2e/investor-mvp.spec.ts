@@ -114,6 +114,49 @@ test('创意镜头支持键盘切换并同步当前预览', async ({ page }) => 
   await expect(page.getByLabel('当前镜头预览')).toContainText('02 / 03')
 })
 
+test('爆款视频复刻支持五维提示词拆解并生成复刻视频', async ({ page }) => {
+  const projectId = await openProject(page, 'E2E 爆款视频复刻')
+  await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
+  await setProviderMode(page, 'success')
+  await page.getByRole('tab', { name: /爆款复刻/ }).click()
+
+  await page.getByLabel('源视频 Asset ID').fill('viral-source-e2e')
+  await page.getByLabel('视频标题').fill('E2E 爆款源视频')
+  await page.getByLabel('上传参考图片').setInputFiles({
+    name: 'e2e-reference-product.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64'),
+  })
+  await expect(page.locator('.viral-image-preview').getByText('e2e-reference-product.png')).toBeVisible()
+  await page.getByLabel('文本指令').fill('更年轻化，突出夏季户外场景，参考图片主体必须保持清晰。')
+  await page.getByLabel('目标产品').fill('E2E 智能投放助手')
+  await page.getByLabel('卖点 1').fill('3 秒提炼爆款结构')
+  await page.getByLabel('CTA').fill('立即生成复刻脚本')
+  await page.getByRole('button', { name: '视觉理解拆解五维提示词' }).click()
+
+  await expect(page.getByRole('status')).toContainText('视觉理解拆解完成')
+  await expect(page.locator('.viral-dimension-card').filter({ hasText: '任务目标类型' }).getByRole('textbox')).toHaveValue(/生成一条 30s 左右的爆款复刻广告视频/)
+  await expect(page.locator('.viral-dimension-card').filter({ hasText: '画质&风格&光影规范' }).getByRole('textbox')).toHaveValue(/商业广告画质/)
+  await expect(page.locator('.viral-dimension-card').filter({ hasText: '环境氛围' }).getByRole('textbox')).toHaveValue(/问题压力/)
+  await expect(page.locator('.viral-dimension-card').filter({ hasText: '镜头画面内容' }).getByRole('textbox')).toHaveValue(/按源视频镜头功能复刻/)
+  await expect(page.locator('.viral-dimension-card').filter({ hasText: '音乐&音效' }).getByRole('textbox')).toHaveValue(/短视频平台高留存节奏/)
+  await expect(page.getByLabel('复刻视频总提示词')).toHaveValue(/【音乐&音效】/)
+  await expect(page.getByLabel('复刻视频总提示词')).toHaveValue(/文本指令优先约束内容改写：更年轻化/)
+  await expect(page.getByLabel('复刻视频总提示词')).toHaveValue(/参考图片用于约束主体外观.*e2e-reference-product\.png/)
+
+  await page.getByRole('button', { name: '生成复刻视频' }).click()
+  await expect(page.getByText(/复刻视频生成任务已创建|复刻视频生成完成/)).toBeVisible()
+  await expect.poll(async () => {
+    const jobsResponse = await page.request.get(`${apiBaseURL}/api/generation-jobs?projectId=${projectId}`)
+    const jobs = await jobsResponse.json() as Array<{ id: string, artifactKind: string, status: string }>
+    const job = jobs.filter(item => item.artifactKind === 'video').at(-1)
+    if (!job) return ''
+    const syncedResponse = await page.request.get(`${apiBaseURL}/api/generation-jobs/${job.id}?projectId=${projectId}`)
+    const synced = await syncedResponse.json() as { status: string }
+    return synced.status
+  }, { timeout: 10_000 }).toBe('succeeded')
+})
+
 test('前贴分镜成功后出现持久化资产，并在刷新后按当前前贴类型恢复', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 前贴成功恢复')
   await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
