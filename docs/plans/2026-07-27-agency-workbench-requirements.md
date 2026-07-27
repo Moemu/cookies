@@ -1,10 +1,10 @@
 # 广告代理商工作台体验优化需求拆分
 
-> 状态：Draft  
-> 日期：2026-07-27  
-> 适用范围：cookies 登录后桌面 Web 工作台  
-> 目标用户：广告代理商项目经理、策略、创意、投手、数据分析、素材检查确认人  
-> 设计基线：`PRODUCT.md`、`DESIGN.md`  
+> 状态：Draft
+> 日期：2026-07-27
+> 适用范围：cookies 登录后桌面 Web 工作台
+> 目标用户：广告代理商项目经理、策略、创意、投手、数据分析、素材检查确认人
+> 设计基线：`PRODUCT.md`、`DESIGN.md`
 > 关联文档：[模块导航与信息架构](../19-module-navigation-architecture.md)、[四大模块子板块分析](../20-module-submodule-analysis.md)、[Project 中心化页面路径整改规划](../22-project-centered-navigation-remediation-plan.md)
 
 ---
