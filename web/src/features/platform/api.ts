@@ -1,4 +1,5 @@
 import { apiRequest } from '../../shared/api/client'
+import { createClientUUID } from '../../shared/clientId'
 import type { Brand, CreateProjectInput, CurrentIdentity, Project, ProjectContext, ProviderJob, WorkspaceBootstrap } from './types'
 
 export async function getWorkspaceBootstrap(signal?: AbortSignal): Promise<WorkspaceBootstrap> {
@@ -18,7 +19,7 @@ type ImageJobInput = { prompt: string, width: number, height: number, source_ass
 export function createImageJob(projectId: string, projectContextVersion: number, input: ImageJobInput, capability: 'image.generate' | 'image.edit' = 'image.generate') {
   return apiRequest<ProviderJob>(`/platform/v1/projects/${encodeURIComponent(projectId)}/model/jobs`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `web-${capability.replace('.', '-')}-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `web-${capability.replace('.', '-')}-${createClientUUID()}` },
     body: JSON.stringify({ capability, model_alias: 'cookies.image.standard', project_context_version: projectContextVersion, input }),
   })
 }

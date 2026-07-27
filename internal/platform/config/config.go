@@ -461,6 +461,8 @@ func valueOr(lookup func(string) (string, bool), key, fallback string) string {
 	return fallback
 }
 
+// valueOrCompatibility lets deployments migrate from generic object-storage
+// names without changing the existing COOKIES_TOS_* configuration contract.
 func valueOrCompatibility(lookup func(string) (string, bool), key string, compatibilityKeys ...string) string {
 	if value, ok := lookup(key); ok {
 		return strings.TrimSpace(value)

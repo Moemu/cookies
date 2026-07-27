@@ -138,7 +138,6 @@ export type CreativeTaskDetail = {
   video_draft?: VideoDraft
   production_jobs: Array<{ task_id: string, kind: string, provider_job_id: string, created_at: string }>
 }
-
 export type VideoDraft = {
   contract_version: 'creative-video-draft/v1'
   task_id: string

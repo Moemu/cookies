@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BriefDraft } from './types'
-import { BriefCompanion, ConversationPane } from './StrategyWorkspacePage'
+import { BriefCompanion, BriefPane, ConversationPane, StrategyPane } from './StrategyWorkspacePage'
 
 const brief: BriefDraft = {
   id: 'brief_draft_1',
@@ -132,5 +132,99 @@ describe('Strategy conversation experience', () => {
     expect(screen.getAllByText('待补充').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: '查看并确认完整 Brief' }))
     expect(onOpen).toHaveBeenCalledOnce()
+  })
+
+  it('groups Brief fields into an editor and readiness rail', () => {
+    render(<BriefPane
+      brief={brief}
+      busy={false}
+      documents={[]}
+      memory={null}
+      onConfirm={vi.fn()}
+      onField={vi.fn()}
+      onResearch={vi.fn()}
+      onUpload={vi.fn()}
+      researchRun={null}
+    />)
+    expect(screen.getByRole('heading', { name: '确认策略输入' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '品牌与业务' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '传播任务' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '投放条件' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '完成度' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并冻结 Brief' })).toBeDisabled()
+  })
+
+  it('separates conversation memory, project documents, and optional external research', () => {
+    const onResearch = vi.fn()
+    render(<BriefPane
+      brief={brief}
+      busy={false}
+      documents={[]}
+      memory={{ summary: '品牌与产品信息已经确认。', open_questions: [], version: 4 }}
+      onConfirm={vi.fn()}
+      onField={vi.fn()}
+      onResearch={onResearch}
+      onUpload={vi.fn()}
+      researchRun={null}
+    />)
+
+    expect(screen.getByRole('heading', { name: '对话共识' })).toBeInTheDocument()
+    expect(screen.getByText('仅用于当前 Project 的需求梳理，不会随外部研究自动发送。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '项目资料' })).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('例如：近半年小红书护肤新品常用的内容切入点是什么？')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '补充外部研究' }))
+    const query = screen.getByPlaceholderText('例如：近半年小红书护肤新品常用的内容切入点是什么？')
+    const submit = screen.getByRole('button', { name: '确认并开始研究' })
+    fireEvent.change(query, { target: { value: '验证小红书护肤新品的内容切入点' } })
+    expect(submit).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: '同意执行外部研究' }))
+    expect(submit).toBeEnabled()
+    fireEvent.click(submit)
+    expect(onResearch).toHaveBeenCalledWith('web', '验证小红书护肤新品的内容切入点', false)
+  })
+
+  it('keeps sources and external research read-only after the Brief is frozen', () => {
+    render(<BriefPane
+      brief={{ ...brief, status: 'confirmed' }}
+      busy={false}
+      documents={[]}
+      memory={null}
+      onConfirm={vi.fn()}
+      onField={vi.fn()}
+      onResearch={vi.fn()}
+      onUpload={vi.fn()}
+      researchRun={null}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '补充外部研究' }))
+    expect(screen.getByText('当前 Brief 已冻结，资料来源随本版本锁定。补充资料或研究时，需要先进入新一轮需求梳理并形成新的 BriefVersion。')).toBeInTheDocument()
+    expect(screen.getByLabelText('本次要验证的问题')).toBeDisabled()
+    expect(screen.getByLabelText('外部研究方式')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '确认并开始研究' })).toBeDisabled()
+  })
+
+  it('shows a useful Strategy preflight instead of an empty canvas', () => {
+    render(<StrategyPane
+      busy={false}
+      canGenerate={false}
+      draft={null}
+      generationMetadata={null}
+      onApprove={vi.fn()}
+      onCreateCreative={vi.fn()}
+      onFeedback={vi.fn(async () => true)}
+      onGenerate={vi.fn()}
+      onPatch={vi.fn()}
+      onRevise={vi.fn(async () => true)}
+      onSubmit={vi.fn()}
+      packageVersion={null}
+      readiness={null}
+      review={null}
+      skillRuns={[]}
+    />)
+    expect(screen.getByRole('heading', { name: '生成第一版策略' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '生成前检查' })).toBeInTheDocument()
+    expect(screen.getByText('Brief 已冻结')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成第一版策略' })).toBeDisabled()
   })
 })

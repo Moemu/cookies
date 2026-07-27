@@ -1,4 +1,5 @@
 import { apiRequest } from '../../shared/api/client'
+import { createClientUUID } from '../../shared/clientId'
 import type { ProviderJob } from '../platform/types'
 import type { CreateCreativeTaskInput, CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail, CreativeVersion, CreativePackage, ReviseDraftInput, ImageTextDraft, AssetVersionRef, CreativeRenderJob } from './types'
 
@@ -13,7 +14,7 @@ export function listCreativeIntakes(projectId: string, signal?: AbortSignal) {
 export function createCreativeIntake(projectId: string, input: CreativeIntakeInput) {
   return apiRequest<CreativeIntake>(`${base(projectId)}/creative-intakes`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `creative-intake-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `creative-intake-${createClientUUID()}` },
     body: JSON.stringify(input),
   })
 }
@@ -24,7 +25,7 @@ export function createCreativeIntake(projectId: string, input: CreativeIntakeInp
 export function createCreativeIntakeFromStrategy(projectId: string, packageId: string, packageVersion: number, expectedContentHash: string) {
   return apiRequest<CreativeIntake>(`${base(projectId)}/creative-intakes`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `creative-from-strategy-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `creative-from-strategy-${createClientUUID()}` },
     body: JSON.stringify({
       source: 'strategy_package',
       strategy_package: { package_id: packageId, package_version: packageVersion, expected_content_hash: expectedContentHash },
@@ -75,14 +76,14 @@ export function reviseCreativeDraft(projectId: string, taskId: string, input: Re
 
 export function freezeCreativeVersion(projectId: string, taskId: string, draftVersion: number, renderJobId?: string) {
   return apiRequest<CreativeVersion>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:freeze-version`, {
-    method: 'POST', headers: { 'Idempotency-Key': `creative-freeze-${crypto.randomUUID()}` }, body: JSON.stringify({ draft_version: draftVersion, render_job_id: renderJobId }),
+    method: 'POST', headers: { 'Idempotency-Key': `creative-freeze-${createClientUUID()}` }, body: JSON.stringify({ draft_version: draftVersion, render_job_id: renderJobId }),
   })
 }
 
 export function createVideoJob(projectId: string, taskId: string) {
   return apiRequest<ProviderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `creative-video-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `creative-video-${createClientUUID()}` },
     body: JSON.stringify({ model_alias: 'cookies.video.standard' }),
   })
 }
@@ -90,7 +91,7 @@ export function createVideoJob(projectId: string, taskId: string) {
 export function createPreRollRenderJob(projectId: string, taskId: string) {
   return apiRequest<CreativeRenderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:render-preroll`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `creative-render-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `creative-render-${createClientUUID()}` },
     body: JSON.stringify({}),
   })
 }
@@ -112,7 +113,7 @@ export function listCreativePackages(projectId: string, signal?: AbortSignal) {
 export function createCoverImageJob(projectId: string, taskId: string) {
   return apiRequest<ProviderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:cover-image-job`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `creative-cover-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `creative-cover-${createClientUUID()}` },
     body: JSON.stringify({}),
   })
 }
@@ -120,7 +121,7 @@ export function createCoverImageJob(projectId: string, taskId: string) {
 export function createImagePlanJob(projectId: string, taskId: string, imagePlanOrder: number) {
   return apiRequest<ProviderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:image-job`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `creative-image-${imagePlanOrder}-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `creative-image-${imagePlanOrder}-${createClientUUID()}` },
     body: JSON.stringify({ image_plan_order: imagePlanOrder }),
   })
 }

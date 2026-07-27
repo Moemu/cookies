@@ -204,16 +204,22 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
 
       <nav aria-label="策略阶段" className="strategy-stage-nav">
         {[
-          ['conversation', '01', '对话梳理'],
-          ['brief', '02', '确认 Brief'],
-          ['strategy', '03', '生成策略'],
-        ].map(([value, index, label]) => (
+          ['conversation', '01', '对话梳理', '明确需求'],
+          ['brief', '02', '确认 Brief', brief?.status === 'confirmed' ? '版本已冻结' : '核对输入'],
+          ['strategy', '03', '生成策略', draft ? statusLabel(draft.status) : '生成与评审'],
+        ].map(([value, index, label, description]) => (
           <Link
             aria-current={currentStage === value ? 'page' : undefined}
-            className={currentStage === value ? 'strategy-stage-nav__item strategy-stage-nav__item--active' : 'strategy-stage-nav__item'}
+            className={[
+              'strategy-stage-nav__item',
+              currentStage === value ? 'strategy-stage-nav__item--active' : '',
+              (value === 'conversation' && Boolean(brief?.completeness.ready || brief?.status === 'confirmed')) ||
+              (value === 'brief' && brief?.status === 'confirmed') ||
+              (value === 'strategy' && Boolean(draft)) ? 'strategy-stage-nav__item--complete' : '',
+            ].filter(Boolean).join(' ')}
             key={value}
             to={`/projects/${projectId}/strategy/workspaces/${workspaceId}/${value}`}
-          ><small>{index}</small><span>{label}</span></Link>
+          ><small>{index}</small><span><strong>{label}</strong><em>{description}</em></span></Link>
         ))}
       </nav>
 
@@ -267,9 +273,11 @@ export function StrategyWorkspacePage({ project }: { project?: Project }) {
             onField={(path, value) => brief && run(`brief:${path}`, async () => {
               setBrief(await patchBriefField(task.id, brief, path, value))
             })}
-            onResearch={(mode, query) => brief && run('research', async () => {
+            onResearch={(mode, query, includeDocuments) => brief && run('research', async () => {
               const knownDocuments = new Set(documents.map((document) => document.id))
-              const documentIds = (brief.document.reference_ids || []).filter((id) => knownDocuments.has(id))
+              const documentIds = includeDocuments
+                ? (brief.document.reference_ids || []).filter((id) => knownDocuments.has(id))
+                : []
               const value = await runExternalResearch(projectId, {
                 mode,
                 query,
@@ -568,7 +576,7 @@ function briefCompanionItems(brief: BriefDraft) {
   }))
 }
 
-function BriefPane({ brief, busy, documents, memory, researchRun, onField, onConfirm, onUpload, onResearch }: {
+export function BriefPane({ brief, busy, documents, memory, researchRun, onField, onConfirm, onUpload, onResearch }: {
   brief: BriefDraft | null
   busy: boolean
   documents: KnowledgeDocument[]
@@ -577,10 +585,10 @@ function BriefPane({ brief, busy, documents, memory, researchRun, onField, onCon
   onField: (path: string, value: unknown) => void
   onConfirm: () => void
   onUpload: (file: File) => void
-  onResearch: (mode: 'web' | 'mcp', query: string) => void
+  onResearch: (mode: 'web' | 'mcp', query: string, includeDocuments: boolean) => void
 }) {
   if (!brief) return <article className="strategy-panel"><header><div><span className="eyebrow">02 · Brief</span><h2>需求结构</h2></div></header><p className="panel-empty">等待对话开始。</p></article>
-  const fields: Array<{ path: string; label: string; value: string }> = [
+  const fields: Array<{ path: string; label: string; value: string; wide?: boolean }> = [
     ...(brief.document.contract_version === 'strategy-brief-version/v2' ? [
       { path: 'brand.name', label: '品牌', value: brief.document.brand?.name || '' },
       { path: 'product.name', label: '产品 / 服务', value: brief.document.product?.name || '' },
@@ -588,41 +596,70 @@ function BriefPane({ brief, busy, documents, memory, researchRun, onField, onCon
       { path: 'region', label: '地区', value: brief.document.region || '' },
       { path: 'language', label: '内容语言', value: brief.document.language || '' },
     ] : []),
-    { path: 'campaign.objective', label: '广告目标', value: brief.document.campaign.objective },
-    { path: 'audience.primary', label: '核心受众', value: brief.document.audience.primary },
-    { path: 'proposition', label: '核心卖点', value: brief.document.proposition },
+    { path: 'campaign.objective', label: '广告目标', value: brief.document.campaign.objective, wide: true },
+    { path: 'audience.primary', label: '核心受众', value: brief.document.audience.primary, wide: true },
+    { path: 'proposition', label: '核心卖点', value: brief.document.proposition, wide: true },
     { path: 'budget.total', label: '预算', value: brief.document.budget.total },
     { path: 'schedule.window', label: '排期', value: brief.document.schedule.window },
     { path: 'measurement.primary_kpi', label: '核心指标', value: brief.document.measurement.primary_kpi },
   ]
-  return <article className="strategy-panel brief-panel">
-    <header><div><span className="eyebrow">02 · Brief</span><h2>需求结构</h2></div><span className={brief.completeness.ready ? 'readiness readiness--ready' : 'readiness'}>{brief.completeness.ready ? '可以确认' : `${brief.completeness.blockers.length} 项待处理`}</span></header>
-    <div className="brief-fields">
-      {fields.map((field) => <BriefField busy={busy} field={field} key={`${field.path}:${brief.version}`} onSave={onField} state={brief.field_states[field.path]} />)}
-      <div className="brief-field">
-        <label>策略平台</label>
-        {brief.document.contract_version === 'strategy-brief-version/v2' ? <PlatformSelector
-          disabled={busy}
-          onChange={(channels) => onField('channels', channels)}
-          value={brief.document.channels}
-        /> : <div className="platform-chip">小红书图文 <span>v1 冻结契约</span></div>}
+  const groups = [
+    { title: '品牌与业务', description: '确认我们在为谁、为哪类业务制定策略。', paths: ['brand.name', 'product.name', 'industry'] },
+    { title: '传播任务', description: '决定策略的目标、人群与核心表达。', paths: ['campaign.objective', 'audience.primary', 'proposition'] },
+    { title: '投放条件', description: '补充地区、语言、预算、排期和衡量标准。', paths: ['region', 'language', 'budget.total', 'schedule.window', 'measurement.primary_kpi'] },
+  ]
+  const companionItems = briefCompanionItems(brief)
+  const collected = companionItems.filter((item) => item.value).length
+  const confirmed = companionItems.filter((item) => item.status === 'confirmed').length
+  const progress = Math.round((collected / companionItems.length) * 100)
+  return <article className="strategy-panel brief-panel brief-workbench">
+    <header className="brief-workbench__header"><div><span className="eyebrow">Brief workspace</span><h2>确认策略输入</h2><p>逐项核对对话沉淀的信息，确认后冻结为不可变版本。</p></div><span className={brief.completeness.ready ? 'readiness readiness--ready' : 'readiness'}>{brief.completeness.ready ? '可以确认' : `${brief.completeness.blockers.length} 项待处理`}</span></header>
+    <div className="brief-workbench__body">
+      <div className="brief-editor">
+        {groups.map((group) => {
+          const groupFields = fields.filter((field) => group.paths.includes(field.path))
+          if (groupFields.length === 0) return null
+          return <section className="brief-field-group" key={group.title}>
+            <header><div><h3>{group.title}</h3><p>{group.description}</p></div><span>{groupFields.filter((field) => field.value).length}/{groupFields.length}</span></header>
+            <div className="brief-fields">
+              {groupFields.map((field) => <BriefField busy={busy} field={field} key={`${field.path}:${brief.version}`} onSave={onField} state={brief.field_states[field.path]} />)}
+            </div>
+          </section>
+        })}
       </div>
+      <aside className="brief-sidebar">
+        <section className="brief-readiness-card">
+          <header><div><span className="eyebrow">Completion</span><h3>完成度</h3></div><strong>{progress}%</strong></header>
+          <progress aria-label={`Brief 已收集 ${collected} / ${companionItems.length} 项`} className="brief-progress" max="100" value={progress}>{progress}%</progress>
+          <div><span><strong>{collected}</strong> 已记录</span><span><strong>{confirmed}</strong> 已确认</span><span><strong>{brief.completeness.blockers.length}</strong> 待处理</span></div>
+          {brief.completeness.blockers.length ? <ul>{brief.completeness.blockers.slice(0, 5).map((blocker) => <li key={blocker.field}><strong>{briefFieldLabel(blocker.field)}</strong><span>{blocker.reason}</span></li>)}</ul> : <p>关键输入已经齐备，可以冻结 Brief。</p>}
+        </section>
+        <section className="brief-platform-card">
+          <div className="strategy-section-title"><div><h3>策略平台</h3><small>至少保留一个平台</small></div></div>
+          {brief.document.contract_version === 'strategy-brief-version/v2' ? <PlatformSelector
+            disabled={busy}
+            onChange={(channels) => onField('channels', channels)}
+            value={brief.document.channels}
+          /> : <div className="platform-chip">小红书图文 <span>v1 冻结契约</span></div>}
+        </section>
+        {brief.document.contract_version === 'strategy-brief-version/v2' ? <ConversationMemorySummary memory={memory} /> : null}
+        {brief.document.contract_version === 'strategy-brief-version/v2' ? <KnowledgeSources
+          busy={busy}
+          documents={documents}
+          locked={brief.status !== 'open'}
+          onAttach={(id) => onField('reference_ids', Array.from(new Set([...(brief.document.reference_ids || []), id])))}
+          onResearch={onResearch}
+          onUpload={onUpload}
+          referenceIds={brief.document.reference_ids || []}
+          researchRun={researchRun}
+        /> : null}
+        {brief.completeness.warnings.length ? <div className="brief-warnings">{brief.completeness.warnings.map((warning) => <p key={warning.field}>{warning.reason}</p>)}</div> : null}
+        <footer className="brief-sidebar__actions">
+          <span>草稿 v{brief.version} · {brief.status === 'confirmed' ? '已冻结' : '可编辑'}</span>
+          <button className="button button--primary" disabled={busy || !brief.completeness.ready || brief.status !== 'open'} onClick={onConfirm} type="button">{brief.status === 'confirmed' ? 'Brief 已确认' : '确认并冻结 Brief'}</button>
+        </footer>
+      </aside>
     </div>
-    {brief.document.contract_version === 'strategy-brief-version/v2' ? <KnowledgeSources
-      busy={busy}
-      documents={documents}
-      memory={memory}
-      onAttach={(id) => onField('reference_ids', Array.from(new Set([...(brief.document.reference_ids || []), id])))}
-      onResearch={onResearch}
-      onUpload={onUpload}
-      referenceIds={brief.document.reference_ids || []}
-      researchRun={researchRun}
-    /> : null}
-    {brief.completeness.warnings.length ? <div className="brief-warnings">{brief.completeness.warnings.map((warning) => <p key={warning.field}>{warning.reason}</p>)}</div> : null}
-    <footer>
-      <span>草稿 v{brief.version} · {brief.status === 'confirmed' ? '已冻结' : '可编辑'}</span>
-      <button className="button button--primary" disabled={busy || !brief.completeness.ready || brief.status !== 'open'} onClick={onConfirm} type="button">{brief.status === 'confirmed' ? 'Brief 已确认' : '确认 Brief'}</button>
-    </footer>
   </article>
 }
 
@@ -653,27 +690,46 @@ function PlatformSelector({ value, disabled, onChange }: {
   </div>
 }
 
-function KnowledgeSources({ documents, referenceIds, memory, researchRun, busy, onUpload, onAttach, onResearch }: {
+function ConversationMemorySummary({ memory }: {
+  memory: { summary: string; open_questions: string[]; version: number } | null
+}) {
+  return <section className="brief-memory-card">
+    <header>
+      <div><span className="eyebrow">Conversation</span><h3>对话共识</h3></div>
+      {memory ? <span>v{memory.version}</span> : null}
+    </header>
+    <p>{memory?.summary || '对话中的明确信息会在这里沉淀，方便确认 Brief 时核对。'}</p>
+    {memory?.open_questions.length ? <div><strong>仍需确认</strong><ul>{memory.open_questions.slice(0, 3).map((question) => <li key={question}>{question}</li>)}</ul></div> : <small>仅用于当前 Project 的需求梳理，不会随外部研究自动发送。</small>}
+  </section>
+}
+
+function KnowledgeSources({ documents, referenceIds, researchRun, busy, locked, onUpload, onAttach, onResearch }: {
   documents: KnowledgeDocument[]
   referenceIds: string[]
-  memory: { summary: string; open_questions: string[]; version: number } | null
   researchRun: ResearchRun | null
   busy: boolean
+  locked: boolean
   onUpload: (file: File) => void
   onAttach: (id: string) => void
-  onResearch: (mode: 'web' | 'mcp', query: string) => void
+  onResearch: (mode: 'web' | 'mcp', query: string, includeDocuments: boolean) => void
 }) {
   const [mode, setMode] = useState<'web' | 'mcp'>('web')
   const [query, setQuery] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
+  const [researchOpen, setResearchOpen] = useState(Boolean(researchRun))
+  const [includeDocuments, setIncludeDocuments] = useState(false)
+  const [confirmedScope, setConfirmedScope] = useState<string | null>(null)
   const referencedDocumentCount = documents.filter((document) => referenceIds.includes(document.id)).length
+  const controlsDisabled = busy || locked
+  const sendDocuments = includeDocuments && referencedDocumentCount > 0
+  const consentScope = `${mode}:${query.trim()}:${sendDocuments ? referencedDocumentCount : 0}`
+  const confirmed = confirmedScope === consentScope
   return <section className="knowledge-sources">
-    <div className="strategy-section-title"><div><h3>资料与研究</h3><small>支持 Markdown、Word；资料在 Project 内保存。</small></div>
+    <div className="strategy-section-title"><div><span className="eyebrow">Project sources</span><h3>项目资料</h3><small>上传品牌、产品或历史方案，解析后保存在当前 Project。</small></div>
       <label className="button button--secondary">
         上传资料
         <input
           accept=".md,.docx,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          disabled={busy}
+          disabled={controlsDisabled}
           hidden
           onChange={(event) => {
             const file = event.target.files?.[0]
@@ -684,38 +740,74 @@ function KnowledgeSources({ documents, referenceIds, memory, researchRun, busy, 
         />
       </label>
     </div>
-    {memory ? <div className="memory-card"><strong>会话记忆 v{memory.version}</strong><p>{memory.summary}</p>{memory.open_questions.length > 0 ? <small>待确认：{memory.open_questions.join('；')}</small> : null}</div> : null}
     <div className="knowledge-document-list">
-      {documents.length === 0 ? <p>尚未上传资料。</p> : documents.map((document) => {
+      {documents.length === 0 ? <p>尚未上传资料。没有内部资料也可以继续确认 Brief。</p> : documents.map((document) => {
         const attached = referenceIds.includes(document.id)
         return <div key={document.id}><span><strong>{document.filename}</strong><small>{formatBytes(document.size_bytes)} · {document.text_sha256.slice(0, 10)}</small></span>
-          {attached ? <em>已引用</em> : <button className="text-action" disabled={busy} onClick={() => onAttach(document.id)} type="button">引用</button>}
+          {attached ? <em>已引用</em> : <button className="text-action" disabled={controlsDisabled} onClick={() => onAttach(document.id)} type="button">引用</button>}
         </div>
       })}
     </div>
-    <div className="research-consent">
-      <div><select aria-label="外部研究方式" disabled={busy} onChange={(event) => setMode(event.target.value as 'web' | 'mcp')} value={mode}><option value="web">联网搜索</option><option value="mcp">MCP</option></select>
-        <input disabled={busy} onChange={(event) => setQuery(event.target.value)} placeholder="要补充验证的问题" value={query} /></div>
-      <label><input checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />{referencedDocumentCount > 0
-        ? `我确认本次将查询词和 ${referencedDocumentCount} 份已引用文档全文发送给所选外部服务。`
-        : '我确认本次将查询词发送给所选外部服务；当前没有文档内容会被发送。'}</label>
-      <button className="button" disabled={busy || !query.trim() || !confirmed} onClick={() => {
-        onResearch(mode, query.trim())
-        setConfirmed(false)
-      }} type="button">确认并执行本次调用</button>
-      {researchRun ? <p className={`research-status research-status--${researchRun.status}`}>{researchRun.status === 'unavailable' ? '外部执行器尚未配置，本次没有发送任何资料。' : researchRun.status === 'succeeded' ? `已生成 ${researchRun.artifacts.length} 条 ResearchArtifact。` : researchRun.error_message || researchRun.status}</p> : null}
+    <div className={`external-research ${researchOpen ? 'external-research--open' : ''}`}>
+      <button aria-expanded={researchOpen} aria-label={researchOpen ? '收起外部研究' : '补充外部研究'} className="external-research__toggle" onClick={() => setResearchOpen((value) => !value)} type="button">
+        <span><small>可选步骤</small><strong>补充外部研究</strong><em>需要验证行业、竞品或平台信息时再使用</em></span>
+        <b>{researchOpen ? '收起' : '展开'}</b>
+      </button>
+      {researchOpen ? <div className="research-consent">
+        {locked ? <p className="research-locked">当前 Brief 已冻结，资料来源随本版本锁定。补充资料或研究时，需要先进入新一轮需求梳理并形成新的 BriefVersion。</p> : null}
+        <div className="research-purpose">
+          <strong>研究会怎样影响策略？</strong>
+          <p>结果会保存为可追溯的 ResearchArtifact，并作为当前 Brief 的引用依据参与策略生成。</p>
+        </div>
+        <label className="research-query">
+          <span>本次要验证的问题</span>
+          <input disabled={controlsDisabled} onChange={(event) => {
+            setQuery(event.target.value)
+            setConfirmedScope(null)
+          }} placeholder="例如：近半年小红书护肤新品常用的内容切入点是什么？" type="text" value={query} />
+        </label>
+        <label className="research-mode">
+          <span>调用方式</span>
+          <select aria-label="外部研究方式" disabled={controlsDisabled} onChange={(event) => {
+            setMode(event.target.value as 'web' | 'mcp')
+            setConfirmedScope(null)
+          }} value={mode}><option value="web">联网搜索</option><option value="mcp">MCP</option></select>
+        </label>
+        <div className="research-disclosure">
+          <strong>本次发送范围</strong>
+          <ul>
+            <li><span>查询问题</span><em>发送</em></li>
+            <li><span>对话记忆</span><em>不发送</em></li>
+            <li><span>{referencedDocumentCount > 0 ? `${referencedDocumentCount} 份已引用文档全文` : '已引用文档全文'}</span><em>{sendDocuments ? '发送' : '不发送'}</em></li>
+          </ul>
+          {referencedDocumentCount > 0 ? <label><input aria-label="发送已引用文档全文" checked={includeDocuments} disabled={controlsDisabled} onChange={(event) => {
+            setIncludeDocuments(event.target.checked)
+            setConfirmedScope(null)
+          }} type="checkbox" />本次研究需要同时发送已引用文档全文</label> : null}
+        </div>
+        <label className="research-confirm"><input aria-label="同意执行外部研究" checked={confirmed} disabled={controlsDisabled} onChange={(event) => setConfirmedScope(event.target.checked ? consentScope : null)} type="checkbox" />我已核对研究问题、调用方式和发送范围，同意执行本次外部调用。</label>
+        <button className="button button--secondary" disabled={controlsDisabled || !query.trim() || !confirmed} onClick={() => {
+          onResearch(mode, query.trim(), sendDocuments)
+          setConfirmedScope(null)
+        }} type="button">确认并开始研究</button>
+      </div> : null}
+      {researchRun ? <div className={`research-status research-status--${researchRun.status}`}>
+        <strong>{researchRun.status === 'unavailable' ? '外部研究未执行' : researchRun.status === 'succeeded' ? `已生成 ${researchRun.artifacts.length} 条研究依据` : '外部研究执行中'}</strong>
+        <p>{researchRun.status === 'unavailable' ? '外部执行器尚未配置，本次没有发送任何资料。' : researchRun.status === 'succeeded' ? '研究结果已经附加到当前 Brief，可在策略生成时引用。' : researchRun.error_message || researchRun.status}</p>
+        {researchRun.artifacts.length > 0 ? <ul>{researchRun.artifacts.slice(0, 4).map((artifact) => <li key={artifact.id}>{artifact.source_url ? <a href={artifact.source_url} rel="noreferrer" target="_blank">{artifact.title}</a> : artifact.title}</li>)}</ul> : null}
+      </div> : null}
     </div>
   </section>
 }
 
 function BriefField({ field, state, busy, onSave }: {
-  field: { path: string; label: string; value: string }
+  field: { path: string; label: string; value: string; wide?: boolean }
   state?: { confirmation: string; confidence: string; source: { type: string } }
   busy: boolean
   onSave: (path: string, value: unknown) => void
 }) {
   const [value, setValue] = useState(field.value)
-  return <div className="brief-field">
+  return <div className={field.wide ? 'brief-field brief-field--wide' : 'brief-field'}>
     <label htmlFor={`brief-${field.path}`}>{field.label}</label>
     <textarea id={`brief-${field.path}`} onChange={(event) => setValue(event.target.value)} placeholder="待补充" rows={2} value={value} />
     <div className="field-meta">
@@ -725,7 +817,7 @@ function BriefField({ field, state, busy, onSave }: {
   </div>
 }
 
-function StrategyPane({ draft, review, packageVersion, readiness, generationMetadata, skillRuns, busy, canGenerate, onGenerate, onPatch, onRevise, onSubmit, onApprove, onCreateCreative, onFeedback }: {
+export function StrategyPane({ draft, review, packageVersion, readiness, generationMetadata, skillRuns, busy, canGenerate, onGenerate, onPatch, onRevise, onSubmit, onApprove, onCreateCreative, onFeedback }: {
   draft: StrategyDraft | null
   review: Review | null
   packageVersion: PackageVersion | null
@@ -745,30 +837,58 @@ function StrategyPane({ draft, review, packageVersion, readiness, generationMeta
   const readinessText = readiness?.generation_mode === 'provider'
     ? readiness.ready ? `真实模型 · ${readiness.upstream_model || readiness.model_alias}` : '真实模型尚未就绪'
     : '演示模板'
-  if (!draft) return <article className="strategy-panel strategy-document"><header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div><span className={`generation-mode generation-mode--${readiness?.generation_mode || 'unknown'}`}>{readinessText}</span></header><div className="panel-empty"><p>确认 Brief 后，基于固定版本生成策略。</p>{readiness && !readiness.ready ? <p className="generation-warning">{generationReadinessMessage(readiness.reason_code)}</p> : null}<button className="button button--primary" disabled={busy || !canGenerate || readiness?.ready === false} onClick={onGenerate} type="button">生成策略</button></div></article>
-  if (draft.status === 'generating' || !draft.revision) return <article className="strategy-panel strategy-document"><header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div></header><div className="panel-empty"><span className="strategy-spinner" /><p>正在生成结构化策略，刷新或断线不会丢失任务。</p></div></article>
+  if (!draft) return <article className="strategy-panel strategy-document strategy-document--empty">
+    <header><div><span className="eyebrow">Strategy workspace</span><h2>生成第一版策略</h2><p>系统将使用已冻结 Brief，生成跨平台角色、内容方向和衡量方案。</p></div><span className={`generation-mode generation-mode--${readiness?.generation_mode || 'unknown'}`}>{readinessText}</span></header>
+    <div className="strategy-launch">
+      <section>
+        <span className="strategy-launch__index">03</span>
+        <h3>从已确认事实开始，而不是从空白页开始</h3>
+        <p>生成结果会形成可编辑 Revision，并保留模型、Prompt、Skill 与合规运行记录。</p>
+        {readiness && !readiness.ready ? <p className="generation-warning">{generationReadinessMessage(readiness.reason_code)}</p> : null}
+        <button className="button button--primary" disabled={busy || !canGenerate || readiness?.ready === false} onClick={onGenerate} type="button">{busy ? '正在创建任务' : '生成第一版策略'}</button>
+      </section>
+      <aside>
+        <span className="eyebrow">Preflight</span>
+        <h3>生成前检查</h3>
+        <ul>
+          <li className={canGenerate ? 'is-ready' : ''}><span>{canGenerate ? '✓' : '1'}</span><div><strong>Brief 已冻结</strong><small>{canGenerate ? '已锁定输入版本' : '先回到上一步确认 Brief'}</small></div></li>
+          <li className={readiness?.ready ? 'is-ready' : ''}><span>{readiness?.ready ? '✓' : '2'}</span><div><strong>文本模型可用</strong><small>{readiness?.ready ? readinessText : '等待模型路由就绪'}</small></div></li>
+          <li><span>3</span><div><strong>生成可追溯 Revision</strong><small>完成后进入修改、评审与发布</small></div></li>
+        </ul>
+      </aside>
+    </div>
+  </article>
+  if (draft.status === 'generating' || !draft.revision) return <article className="strategy-panel strategy-document strategy-document--empty"><header><div><span className="eyebrow">Strategy workspace</span><h2>正在生成策略</h2><p>任务在后台持久运行，刷新或断线不会丢失结果。</p></div></header><div className="strategy-generating"><div className="strategy-generating__visual"><span className="strategy-spinner" /><i /><i /><i /></div><div><strong>正在构建结构化策略</strong><p>梳理跨平台角色、内容支柱、实验矩阵与合规检查。</p></div></div></article>
   const document = draft.revision.document
-  return <article className="strategy-panel strategy-document">
-    <header><div><span className="eyebrow">03 · Strategy</span><h2>策略文档</h2></div><div className="strategy-generation-badges"><span className="revision-chip">Revision {draft.current_revision}</span><span className={`generation-mode generation-mode--${generationMetadata?.generation_mode || 'unknown'}`}>{generationMetadata?.generation_mode === 'provider' ? generationMetadata.model_version : generationMetadata?.generation_mode === 'fake_template' ? 'Fake 模板' : '演示模板'}</span></div></header>
+  return <article className="strategy-panel strategy-document strategy-document--ready">
+    <header><div><span className="eyebrow">Strategy workspace</span><h2>策略文档</h2><p>正文可持续修订；右侧保留运行证据、评审与交接动作。</p></div><div className="strategy-generation-badges"><span className="revision-chip">Revision {draft.current_revision}</span><span className={`generation-mode generation-mode--${generationMetadata?.generation_mode || 'unknown'}`}>{generationMetadata?.generation_mode === 'provider' ? generationMetadata.model_version : generationMetadata?.generation_mode === 'fake_template' ? 'Fake 模板' : '演示模板'}</span></div></header>
     {generationMetadata ? <div className="generation-proof"><span>Prompt {generationMetadata.prompt_version || 'unknown'}</span><span>规则检查 {generationMetadata.quality_report?.score ?? '—'}</span><span>校验 {generationMetadata.validation_attempts} 次</span>{generationMetadata.usage ? <span>{generationMetadata.usage.total_tokens} tokens</span> : null}</div> : null}
-    {document.executive_summary ? <section><h3>执行摘要</h3><p>{document.executive_summary}</p></section> : null}
-    <EditableStrategyField disabled={busy || draft.status === 'approved'} label="目标" onSave={(value) => onPatch('objective', value)} value={document.objective} />
-    <section><h3>核心受众</h3><p>{document.audience.primary}</p></section>
-    <EditableStrategyField disabled={busy || draft.status === 'approved'} label="核心主张" onSave={(value) => onPatch('proposition', value)} value={document.proposition} />
-    <section><h3>渠道策略</h3>{document.channel_strategy.map((channel) => <div className="channel-card" key={channel.platform}><strong>{channel.platform === 'xiaohongshu' ? '小红书' : channel.platform}</strong><p>{channel.role}</p><small>{channel.formats.join(' · ')}</small></div>)}</section>
-    {document.platform_plans?.length ? <section><h3>分平台执行方案</h3><div className="platform-plan-list">{document.platform_plans.map((plan) => <article key={plan.platform}><header><strong>{platformLabel(plan.platform)}</strong><span>{plan.primary_kpi}</span></header><p>{plan.role}</p><dl><div><dt>内容支柱</dt><dd>{plan.content_pillars.join('、')}</dd></div><div><dt>转化路径</dt><dd>{plan.conversion_path}</dd></div><div><dt>节奏</dt><dd>{plan.cadence}</dd></div></dl><ul>{plan.creative_ideas.map((idea) => <li key={idea}>{idea}</li>)}</ul></article>)}</div></section> : null}
-    <section><h3>创意建议</h3><ul>{document.creative_recommendations.map((item) => <li key={item}>{item}</li>)}</ul></section>
-    {document.assumptions_and_gaps.length ? <section className="gap-section"><h3>假设与缺口</h3><ul>{document.assumptions_and_gaps.map((item) => <li key={item}>{item}</li>)}</ul></section> : null}
-    <section className="skill-run-section"><h3>Skill 与合规运行</h3>{skillRuns.length === 0 ? <p>运行记录正在同步。</p> : <div>{skillRuns.map((run) => <article key={run.id}><span className={`skill-status skill-status--${run.status}`} /> <strong>{run.skill_name}</strong><small>{run.skill_version} · {run.latency_ms}ms</small></article>)}</div>}
-      {document.compliance ? <div className={document.compliance.passed ? 'compliance-card compliance-card--passed' : 'compliance-card compliance-card--blocked'}><strong>{document.compliance.passed ? '合规检查通过' : '合规检查存在阻断'}</strong>{document.compliance.issues.length ? <ul>{document.compliance.issues.map((issue) => <li key={`${issue.rule_id}:${issue.evidence || ''}`}>{issue.message}{issue.evidence ? `：${issue.evidence}` : ''}</li>)}</ul> : <small>未发现规则问题。</small>}</div> : null}
-    </section>
-    <StrategyRevisionForm disabled={busy || draft.status === 'approved'} mode={generationMetadata?.generation_mode || 'deterministic'} onSubmit={onRevise} />
-    <footer className="strategy-review-actions">
-      {packageVersion ? <div className="published-proof"><strong>策略包 v{packageVersion.version} 已发布</strong><code>{packageVersion.content_hash}</code><button className="button button--primary" disabled={busy || !packageVersion.snapshot.readiness.creative_ready} onClick={onCreateCreative} type="button">创建创意输入</button>{!packageVersion.snapshot.readiness.creative_ready ? <small>Creative 首期只接收含小红书执行方案的策略包。</small> : null}<FeedbackForm busy={busy} onSubmit={onFeedback} /></div> : review?.status === 'open' ? <>
-        <div><strong>评审候选已冻结</strong><small>{review.candidate_content_hash}</small></div>
-        <button className="button button--primary" disabled={busy} onClick={onApprove} type="button">批准并发布</button>
-      </> : <button className="button button--primary" disabled={busy || draft.status === 'approved'} onClick={onSubmit} type="button">提交评审</button>}
-    </footer>
+    <div className="strategy-document__layout">
+      <div className="strategy-document__main">
+        {document.executive_summary ? <section className="strategy-executive-summary"><span className="eyebrow">Executive summary</span><h3>执行摘要</h3><p>{document.executive_summary}</p></section> : null}
+        <div className="strategy-core-grid">
+          <EditableStrategyField disabled={busy || draft.status === 'approved'} label="目标" onSave={(value) => onPatch('objective', value)} value={document.objective} />
+          <section><h3>核心受众</h3><p>{document.audience.primary}</p></section>
+          <EditableStrategyField disabled={busy || draft.status === 'approved'} label="核心主张" onSave={(value) => onPatch('proposition', value)} value={document.proposition} />
+        </div>
+        <section><h3>渠道策略</h3><div className="channel-card-list">{document.channel_strategy.map((channel) => <div className="channel-card" key={channel.platform}><strong>{platformLabel(channel.platform)}</strong><p>{channel.role}</p><small>{channel.formats.join(' · ')}</small></div>)}</div></section>
+        {document.platform_plans?.length ? <section><h3>分平台执行方案</h3><div className="platform-plan-list">{document.platform_plans.map((plan) => <article key={plan.platform}><header><strong>{platformLabel(plan.platform)}</strong><span>{plan.primary_kpi}</span></header><p>{plan.role}</p><dl><div><dt>内容支柱</dt><dd>{plan.content_pillars.join('、')}</dd></div><div><dt>转化路径</dt><dd>{plan.conversion_path}</dd></div><div><dt>节奏</dt><dd>{plan.cadence}</dd></div></dl><ul>{plan.creative_ideas.map((idea) => <li key={idea}>{idea}</li>)}</ul></article>)}</div></section> : null}
+        <section><h3>创意建议</h3><ul>{document.creative_recommendations.map((item) => <li key={item}>{item}</li>)}</ul></section>
+        {document.assumptions_and_gaps.length ? <section className="gap-section"><h3>假设与缺口</h3><ul>{document.assumptions_and_gaps.map((item) => <li key={item}>{item}</li>)}</ul></section> : null}
+      </div>
+      <aside className="strategy-document__rail">
+        <section className="skill-run-section"><div className="strategy-section-title"><div><span className="eyebrow">Execution trace</span><h3>Skill 与合规运行</h3></div></div>{skillRuns.length === 0 ? <p>运行记录正在同步。</p> : <div>{skillRuns.map((run) => <article key={run.id}><span className={`skill-status skill-status--${run.status}`} /> <strong>{run.skill_name}</strong><small>{run.skill_version} · {run.latency_ms}ms</small></article>)}</div>}
+          {document.compliance ? <div className={document.compliance.passed ? 'compliance-card compliance-card--passed' : 'compliance-card compliance-card--blocked'}><strong>{document.compliance.passed ? '合规检查通过' : '合规检查存在阻断'}</strong>{document.compliance.issues.length ? <ul>{document.compliance.issues.map((issue) => <li key={`${issue.rule_id}:${issue.evidence || ''}`}>{issue.message}{issue.evidence ? `：${issue.evidence}` : ''}</li>)}</ul> : <small>未发现规则问题。</small>}</div> : null}
+        </section>
+        <StrategyRevisionForm disabled={busy || draft.status === 'approved'} mode={generationMetadata?.generation_mode || 'deterministic'} onSubmit={onRevise} />
+        <footer className="strategy-review-actions">
+          {packageVersion ? <div className="published-proof"><strong>策略包 v{packageVersion.version} 已发布</strong><code>{packageVersion.content_hash}</code><button className="button button--primary" disabled={busy || !packageVersion.snapshot.readiness.creative_ready} onClick={onCreateCreative} type="button">创建创意输入</button>{!packageVersion.snapshot.readiness.creative_ready ? <small>Creative 首期只接收含小红书执行方案的策略包。</small> : null}<FeedbackForm busy={busy} onSubmit={onFeedback} /></div> : review?.status === 'open' ? <>
+            <div><strong>评审候选已冻结</strong><small>{review.candidate_content_hash}</small></div>
+            <button className="button button--primary" disabled={busy} onClick={onApprove} type="button">批准并发布</button>
+          </> : <><div><strong>准备进入评审</strong><small>提交后候选内容将被冻结。</small></div><button className="button button--primary" disabled={busy || draft.status === 'approved'} onClick={onSubmit} type="button">提交评审</button></>}
+        </footer>
+      </aside>
+    </div>
   </article>
 }
 
@@ -812,6 +932,24 @@ function sourceLabel(source: string) {
   if (source === 'conversation_message') return '来自对话'
   if (source === 'user_edit') return '用户编辑'
   return source
+}
+
+function briefFieldLabel(field: string) {
+  const labels: Record<string, string> = {
+    'brand.name': '品牌',
+    'product.name': '产品 / 服务',
+    industry: '行业',
+    region: '地区',
+    language: '内容语言',
+    'campaign.objective': '广告目标',
+    'audience.primary': '核心受众',
+    proposition: '核心卖点',
+    channels: '策略平台',
+    'budget.total': '预算',
+    'schedule.window': '排期',
+    'measurement.primary_kpi': '核心指标',
+  }
+  return labels[field] || field
 }
 
 function generationReadinessMessage(reason?: string) {

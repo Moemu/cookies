@@ -1,4 +1,5 @@
 import { apiRequest } from '../../shared/api/client'
+import { createClientUUID } from '../../shared/clientId'
 import type { BulkRemixPlan } from './aiRemixPlanner'
 import type { CreateUploadResponse, ProjectAsset, SignedRequest, UploadSession } from './types'
 
@@ -21,7 +22,7 @@ export function createAssetUpload(projectId: string, file: File, sha256: string,
   return apiRequest<CreateUploadResponse>(`/platform/v1/projects/${encodeURIComponent(projectId)}/assets/uploads`, {
     method: 'POST',
     signal,
-    headers: { 'Idempotency-Key': `web-upload-${crypto.randomUUID()}` },
+    headers: { 'Idempotency-Key': `web-upload-${createClientUUID()}` },
     body: JSON.stringify({
       filename: file.name,
       declared_mime_type: file.type,

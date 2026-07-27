@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { activity, chartPoints, deliveryActions, deliveryDiagnostics, evidence, manhuaMethods, manhuaMix, workItems } from '../data/mock'
-import { unifiedRecords } from '../data/projects'
-import { api, type ApiArtifact, type ApiAuditEvent } from '../data/api'
+import { api, type ApiArtifact, type ApiAuditEvent, type ApiOperationalRecord, type ApiOperationalRecordKind } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
-import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, SystemDefinition, SystemKey } from '../types'
+import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
 import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
@@ -54,6 +52,36 @@ function Status({ value }: { value: string }) {
   return <span className={`status ${kind}`}><span />{value}</span>
 }
 
+function operationRecords(records: ApiOperationalRecord[], kind: ApiOperationalRecordKind) {
+  return records.filter(record => record.kind === kind)
+}
+
+function operationField(record: ApiOperationalRecord, key: string): string {
+  const value = record.fields[key]
+  return value === undefined ? '—' : String(value)
+}
+
+function projectNextStep(project: ProjectRecord): { label: string; detail: string; system: SystemKey; navId: string; blocker: string } {
+  const hasConfirmedBrief = project.artifacts.brief.status === '已确认'
+  const failedTask = project.tasks.find(task => task.status === 'failed')
+  const pendingChange = project.changeSets.find(change => ['草稿', '待审批'].includes(change.status))
+  const hasReadyCreative = project.artifacts.creative.status === '已完成'
+
+  if (failedTask) {
+    return { label: '处理失败任务', detail: failedTask.name, system: 'creative', navId: 'tasks', blocker: '存在失败任务，需先恢复后再推进。' }
+  }
+  if (!hasConfirmedBrief) {
+    return { label: '确认策略 Brief', detail: '明确目标、受众与创意边界', system: 'strategy', navId: 'workspaces', blocker: '策略 Brief 尚未确认。' }
+  }
+  if (!hasReadyCreative) {
+    return { label: '进入创意生产', detail: '基于已确认 Brief 生成并评审素材', system: 'creative', navId: 'tasks', blocker: '缺少可用于投放的已完成创意。' }
+  }
+  if (pendingChange) {
+    return { label: '处理 ChangeSet', detail: pendingChange.title, system: 'delivery', navId: 'approvals', blocker: `ChangeSet ${pendingChange.id} 等待受控处理。` }
+  }
+  return { label: '查看项目进展', detail: '复核当前阶段与跨模块工作', system: 'strategy', navId: 'workspaces', blocker: '当前没有阻塞项。' }
+}
+
 export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string) => void; onManageProject: (id: string) => void }) {
   const { projects, createProject: createProjectRecord, error: projectError, isLoading } = useProject()
   const [creating, setCreating] = useState(false)
@@ -76,13 +104,15 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
     }
   }
   const visibleProjects = filter === '全部' ? projects : projects.filter(project => project.status === filter)
+  const focusProject = visibleProjects[0]
+  const focusStep = focusProject ? projectNextStep(focusProject) : null
 
   return <div className="home-page">
     <section className="home-hero">
-      <div><span className="section-label">PROJECT HOME</span><h1>让每个增长项目，拥有清晰的下一步。</h1><p>项目连接需求、策略、创意、洞察与投放。创建后，四个系统将共享同一项目上下文。</p></div>
+      <div><span className="section-label">PROJECT OVERVIEW</span><h1>从一个明确的下一步，推进增长项目。</h1><p>先处理当前阶段的关键决策，再进入需求、策略、创意、洞察与受控投放的协作链路。</p></div>
       <button className="primary-button" onClick={() => setCreating(true)}><Plus size={16}/>创建 Project</button>
     </section>
-    {projectError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{projectError}，当前显示上次可用的演示数据。</div> : null}
+    {projectError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{projectError}，未显示静态运营 mock 数据。</div> : null}
     {creating && <form className="project-create" onSubmit={submitProject}>
       <div className="create-intro"><span className="create-index">01</span><div><h2>创建新 Project</h2><p>先定义项目边界，进入系统后再完善 Brief、策略与执行配置。</p></div></div>
       <label><span>项目名称</span><input value={name} onChange={event => setName(event.target.value)} placeholder="例如：夏季新品增长计划" autoFocus /></label>
@@ -90,9 +120,15 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
       <label className="goal-field"><span>项目目标</span><input value={goal} onChange={event => setGoal(event.target.value)} placeholder="例如：获得 1,000 条高质量销售线索" /></label>
       <div className="create-actions"><button type="button" className="secondary-button" onClick={() => setCreating(false)}>取消</button><button type="submit" className="primary-button" disabled={!name.trim() || !goal.trim()}>创建并进入项目</button></div>
     </form>}
+    {focusProject && focusStep ? <section className="project-command-card" aria-label={`${focusProject.name}当前行动`}>
+      <div className="project-command-index"><span>NOW</span><b>{focusProject.progress}%</b></div>
+      <div className="project-command-main"><span className="section-label">当前优先项目 · {focusProject.code}</span><h2>{focusProject.name}</h2><p>{focusProject.stage} · {focusProject.goal}</p><div className="project-command-meta"><Status value={focusProject.status}/><span>负责人 {focusProject.owner}</span><span>更新于 {focusProject.updatedAt}</span></div></div>
+      <div className="project-command-decision"><small>下一步</small><b>{focusStep.label}</b><span>{focusStep.detail}</span><button className="primary-button" onClick={() => onOpenProject(focusProject.id, focusStep.system, focusStep.navId)}>继续推进<ArrowRight size={15}/></button></div>
+      <div className="project-command-blocker"><small>状态判断</small><b>{focusStep.blocker}</b><button className="text-button" onClick={() => onManageProject(focusProject.id)}>查看项目上下文<ArrowRight size={14}/></button></div>
+    </section> : null}
     <div className="home-grid">
       <section className="projects-section">
-        <div className="section-header"><div><span className="section-label">项目</span><h2>项目管理</h2></div><div className="project-filters">{(['进行中', '已完成', '全部'] as const).map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} aria-pressed={filter === item}>{item}</button>)}</div></div>
+        <div className="section-header"><div><span className="section-label">项目队列</span><h2>其他项目与进展</h2></div><div className="project-filters">{(['进行中', '已完成', '全部'] as const).map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} aria-pressed={filter === item}>{item}</button>)}</div></div>
         <div className="project-list">
           {visibleProjects.map((project, index) => <div className="project-row-shell" key={project.id}><button className="project-row" onClick={() => onOpenProject(project.id)}>
               <span className="project-order">{String(index + 1).padStart(2, '0')}</span>
@@ -130,7 +166,8 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
   const [notice, setNotice] = useState('')
   const [taskDomain, setTaskDomain] = useState<'strategy' | 'creative' | null>(null)
   const systemIndex = systems.findIndex(s => s.key === system.key)
-  const currentItem = workItems[systemIndex]
+  const workItems = operationRecords(currentProject.operations, 'work_item')
+  const currentItem = workItems[systemIndex] ?? workItems[0]
   const journey = dashboardJourneys[system.key]
   const dashboardAction = system.key === 'strategy' ? '新建策略任务' : system.key === 'creative' ? '新建创意任务' : system.key === 'insight' ? '查看广告数据' : '配置投放计划'
   const runDashboardAction = () => {
@@ -155,7 +192,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
     </section>
     <section className="focus-band">
       <div className="focus-number">01</div>
-      <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{currentProject.stage}已推进至 {currentProject.progress}%，下一步需要确认关键决策与证据边界。</p><div className="focus-meta"><Status value={currentItem.status} /><span>负责人 {currentItem.owner}</span><span>更新于 {currentProject.updatedAt}</span></div></div>
+      <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{currentProject.stage}已推进至 {currentProject.progress}%，下一步需要确认关键决策与证据边界。</p><div className="focus-meta">{currentItem ? <><Status value={currentItem.status} /><span>负责人 {operationField(currentItem, 'owner')}</span></> : <span>暂无服务端工作项</span>}<span>更新于 {currentProject.updatedAt}</span></div></div>
       <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${currentProject.progress * 3.6}deg`} as CSSProperties}><span>{currentProject.progress}<small>%</small></span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'knowledge' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
     </section>
     <div className="dashboard-grid">
@@ -163,16 +200,13 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
         <div className="section-header"><div><span className="section-label">跨系统进度</span><h2>{currentProject.name}</h2></div><button className="secondary-button" onClick={() => onOpenProject(currentProject.id, 'strategy', 'workspaces')}>查看项目总览</button></div>
         <ArtifactFlow compact/>
         <div className="work-list">
-          {workItems.slice(0, 4).map(item => <div className="work-row" key={item.name}><div className="work-name"><b>{item.name}</b><small>{item.type} · {item.owner}</small></div><div className="inline-progress"><span style={{width: `${item.progress}%`}} /></div><strong>{item.progress}%</strong><Status value={item.status} /><button aria-label="更多操作"><MoreHorizontal size={17} /></button></div>)}
+          {workItems.slice(0, 4).map(item => <div className="work-row" key={item.id}><div className="work-name"><b>{item.title}</b><small>{operationField(item, 'type')} · {operationField(item, 'owner')}</small></div><div className="inline-progress"><span style={{width: `${operationField(item, 'progress')}%`}} /></div><strong>{operationField(item, 'progress')}%</strong><Status value={item.status} /><button aria-label="更多操作"><MoreHorizontal size={17} /></button></div>)}
+          {!workItems.length ? <div className="panel-empty">暂无服务端工作项。</div> : null}
         </div>
       </section>
       <aside className="attention-rail">
-        <div className="section-header"><div><span className="section-label">你的队列</span><h2>3 项待处理</h2></div></div>
-        <div className="queue-list">
-          <button onClick={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', 'STR-2607-08')}><span className="queue-icon warning"><Clock3 size={16} /></span><span><b>确认品牌核心信息</b><small>策略 · 今天 12:00 前</small></span><ArrowRight size={15} /></button>
-          <button onClick={() => onOpenProject(currentProject.id, 'insight', 'assets', 'EV-2607-24')}><span className="queue-icon danger"><CircleAlert size={16} /></span><span><b>处理素材映射异常</b><small>洞察 · 影响 12 个素材</small></span><ArrowRight size={15} /></button>
-          <button onClick={() => onOpenProject(currentProject.id, 'delivery', 'approvals', 'CS-2607-018')}><span className="queue-icon info"><Bot size={16} /></span><span><b>审批投放 ChangeSet</b><small>投放 · 预计 ¥8,600</small></span><ArrowRight size={15} /></button>
-        </div>
+        <div className="section-header"><div><span className="section-label">你的队列</span><h2>{workItems.length} 项服务端工作</h2></div></div>
+        <div className="queue-list">{workItems.slice(0, 3).map((item, index) => <button key={item.id} onClick={() => onOpenProject(currentProject.id, index === 0 ? 'strategy' : index === 1 ? 'creative' : 'delivery', index === 2 ? 'approvals' : 'tasks', item.id)}><span className={`queue-icon ${index === 1 ? 'danger' : index === 2 ? 'info' : 'warning'}`}>{index === 1 ? <CircleAlert size={16} /> : index === 2 ? <Bot size={16} /> : <Clock3 size={16} />}</span><span><b>{item.title}</b><small>{operationField(item, 'type')} · {item.status}</small></span><ArrowRight size={15} /></button>)}{!workItems.length ? <div className="panel-empty">暂无服务端待处理项。</div> : null}</div>
         <div className="quick-actions"><span className="section-label">快速开始</span>{quickActions.map(action => <button key={action.label} onClick={() => onSystemChange(action.system)}><span><b>{action.label}</b><small>{action.detail}</small></span><ArrowRight size={15} /></button>)}</div>
       </aside>
     </div>
@@ -187,6 +221,7 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
   const [briefModel, setBriefModel] = useState('')
   const [briefNotice, setBriefNotice] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const evidence = operationRecords(currentProject.operations, 'evidence')
 
   useEffect(() => {
     let active = true
@@ -245,20 +280,25 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
       {briefNotice ? <div className="inline-notice" role="status">{briefNotice}</div> : null}
     </section>
     <section className="brief-panel"><div className="surface-toolbar"><h3>对象摘要</h3><button className="text-button">编辑</button></div>{[['项目', currentProject.name], ['目标', currentProject.goal], ['核心产品', currentProject.product], ['主要区域', '中国大陆（华东、华南）'], ['预算', `¥${currentProject.budget.toLocaleString('zh-CN')}`], ['周期', '2026-07-25 至 2026-08-31']].map(([label, value]) => <div className="kv" key={label}><span>{label}</span><b>{value}</b></div>)}<div className="decision-block"><div><b>关键决策</b><span>4/5 已确认</span></div>{['品牌主张', '核心信息', '受众定义', '创意路线', '成功指标'].map((v, i) => <div key={v}><span>{v}</span><Status value={i === 0 ? '已确认' : 'AI 建议'} /></div>)}</div></section>
-    <aside className="evidence-panel"><div className="surface-toolbar"><h3>证据</h3><button className="text-button">收起</button></div>{evidence.map(item => <button className="evidence-item" key={item.id}><span className="evidence-id">{item.id}</span><span><b>{item.title}</b><small>来源：{item.source}</small><small>{item.date} · {item.confidence}相关</small></span><ExternalLink size={14} /></button>)}</aside>
+    <aside className="evidence-panel"><div className="surface-toolbar"><h3>证据</h3><button className="text-button">收起</button></div>{evidence.map(item => <button className="evidence-item" key={item.id}><span className="evidence-id">{item.id}</span><span><b>{item.title}</b><small>来源：{operationField(item, 'source')}</small><small>{new Date(item.occurredAt).toLocaleDateString('zh-CN')} · {operationField(item, 'confidence')}相关</small></span><ExternalLink size={14} /></button>)}{!evidence.length ? <div className="panel-empty">暂无服务端证据记录。</div> : null}</aside>
   </div>
 }
 
 function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: string }) {
+  const { currentProject } = useProject()
+  const metric = operationRecords(currentProject.operations, 'metric')[0]
+  const chartPoints = metric?.fields.points?.toString().split(',').map(Number).filter(Number.isFinite) ?? []
   return <div className="analysis-layout">
-    <section className="analysis-main"><div className="analysis-heading"><div><span className="section-label">{activeView}</span><h2>{item.label}中，什么正在改变？</h2><p>观察窗口为 2026-05-01 至 2026-07-22，指标口径为进入投放的有效素材版本。</p></div><div className="metric-pair"><span><small>当前</small><b>86%</b></span><span><small>较基线</small><b className="positive">+18%</b></span></div></div><TrendChart points={chartPoints} /><div className="chart-axis"><span>W1</span><span>W4</span><span>W8</span><span>W12</span></div><div className="insight-note"><span>关键转折</span><p>{activeView}视图显示，第 9 周上线的“精度证据 + 真实场景”组合显著优于纯产品特写，95% 置信范围内差异为 +12% 至 +23%。</p></div></section>
-    <aside className="analysis-rail"><span className="section-label">解释与行动</span><h3>三个主要驱动因素</h3>{[['01', '首屏主张更具体', '+8.4%'], ['02', '制造过程可见', '+6.1%'], ['03', '客户证据前置', '+3.5%']].map(([id, title, value]) => <div className="driver" key={id}><span>{id}</span><b>{title}</b><strong>{value}</strong></div>)}<button className="secondary-button full">查看证据与样本</button></aside>
+    <section className="analysis-main"><div className="analysis-heading"><div><span className="section-label">{activeView}</span><h2>{item.label}中，什么正在改变？</h2><p>指标基于当前 Project 的服务端运营记录。</p></div><div className="metric-pair"><span><small>当前</small><b>{chartPoints.at(-1) ?? '—'}{chartPoints.length ? '%' : ''}</b></span><span><small>指标</small><b className="positive">{metric ? operationField(metric, 'unit') : '—'}</b></span></div></div>{chartPoints.length ? <><TrendChart points={chartPoints} /><div className="chart-axis"><span>W1</span><span>W4</span><span>W8</span><span>W12</span></div></> : <div className="panel-empty">暂无服务端指标趋势。</div>}<div className="insight-note"><span>关键转折</span><p>{metric?.title ?? `${activeView}暂无服务端分析结论。`}</p></div></section>
+    <aside className="analysis-rail"><span className="section-label">解释与行动</span><h3>服务端指标说明</h3><div className="driver"><span>01</span><b>{metric?.title ?? '暂无指标记录'}</b><strong>{metric ? operationField(metric, 'unit') : '—'}</strong></div><button className="secondary-button full">查看证据与样本</button></aside>
   </div>
 }
 
 function MaterialInsightSurface() {
-  const { advanceArtifact } = useProject()
+  const { advanceArtifact, currentProject } = useProject()
   const [notice, setNotice] = useState('')
+  const manhuaMix = operationRecords(currentProject.operations, 'audience_mix')
+  const manhuaMethods = operationRecords(currentProject.operations, 'method')
   const createMaterials = async () => {
     try {
       await advanceArtifact('creative', '制作中')
@@ -272,21 +312,24 @@ function MaterialInsightSurface() {
       <div className="analysis-heading"><div><span className="section-label">漫剧供需结构</span><h2>供给多，不等于消耗贡献高。</h2><p>动态漫与仿真人在来源样本中仅占 14% 供给，却贡献 38.13% 消耗。当前结论是“优先补充验证”，不是直接扩量。</p></div><span className="source-chip">来源样本 · 待账户验证</span></div>
       <div className="mix-legend"><span><i className="supply"/>供给占比</span><span><i className="spend"/>消耗占比</span></div>
       <div className="mix-table">
-        {manhuaMix.map(row => <div className="mix-row" key={row.name}>
-          <div><b>{row.name}</b><small>{row.signal}</small></div>
-          <div className="mix-bars"><span className="mix-bar supply" style={{width: `${row.supply * 1.55}%`}}/><span className="mix-bar spend" style={{width: `${row.spend * 1.55}%`}}/></div>
-          <div className="mix-values"><span>{row.supply}%</span><strong>{row.spend}%</strong></div>
+        {manhuaMix.map(row => <div className="mix-row" key={row.id}>
+          <div><b>{row.title}</b><small>{row.status}</small></div>
+          <div className="mix-bars"><span className="mix-bar supply" style={{width: `${Number(row.fields.supply ?? 0) * 1.55}%`}}/><span className="mix-bar spend" style={{width: `${Number(row.fields.spend ?? 0) * 1.55}%`}}/></div>
+          <div className="mix-values"><span>{operationField(row, 'supply')}%</span><strong>{operationField(row, 'spend')}%</strong></div>
         </div>)}
+        {!manhuaMix.length ? <div className="panel-empty">暂无服务端供需记录。</div> : null}
       </div>
       <div className="insight-note"><span>策略建议</span><p>先用同商品、同人群、同预算的小样本测试验证结构机会。首轮只改变制作方法或钩子，避免同时改变多个变量。</p></div>
     </section>
-    <aside className="strategy-method-rail"><span className="section-label">推荐首轮素材池</span><h3>从低成本验证开始</h3>{manhuaMethods.map(item => <div className="method-card" key={item.id}><span>{item.id}</span><div><b>{item.name}</b><small>{item.detail}</small></div></div>)}<button className="primary-button full" onClick={() => void createMaterials()}>创建 4 组测试素材</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">数据来自学习资料《漫剧素材分析》，比例保留原始样本语境。</p></aside>
+    <aside className="strategy-method-rail"><span className="section-label">推荐首轮素材池</span><h3>从低成本验证开始</h3>{manhuaMethods.map(item => <div className="method-card" key={item.id}><span>{item.id}</span><div><b>{item.title}</b><small>{operationField(item, 'detail')}</small></div></div>)}{!manhuaMethods.length ? <div className="panel-empty">暂无服务端推荐方法。</div> : null}<button className="primary-button full" onClick={() => void createMaterials()}>创建 4 组测试素材</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">数据来自当前 Project 的服务端运营记录。</p></aside>
   </div>
 }
 
 function DeliveryStrategySurface() {
-  const { addChangeSet } = useProject()
+  const { addChangeSet, currentProject } = useProject()
   const [notice, setNotice] = useState('')
+  const deliveryDiagnostics = operationRecords(currentProject.operations, 'delivery_diagnostic')
+  const deliveryActions = operationRecords(currentProject.operations, 'delivery_action')
   const createChangeSet = async () => {
     try {
       const change = await addChangeSet()
@@ -297,9 +340,9 @@ function DeliveryStrategySurface() {
   }
   return <div className="strategy-analysis-layout">
     <section className="strategy-analysis-main delivery-strategy">
-      <div className="analysis-heading"><div><span className="section-label">商品 × 素材诊断</span><h2>先减少重复，再为新素材留出探索空间。</h2><p>当前同时出现起量放缓和组合重复信号，建议生成 ChangeSet；任何暂停、删除和预算动作仍需人工审批。</p></div><span className="source-chip alert">3 项需处理</span></div>
-      <div className="diagnostic-grid">{deliveryDiagnostics.map(item => <div className={`diagnostic-card ${item.tone}`} key={item.id}><span>{item.id}</span><small>{item.name}</small><b>{item.value}</b><p>{item.detail}</p></div>)}</div>
-      <div className="action-table"><div className="action-head"><span>优先级</span><span>建议动作</span><span>依据</span><span>预计影响</span></div>{deliveryActions.map(item => <div className="action-row" key={item.priority}><strong>{item.priority}</strong><b>{item.name}</b><span>{item.detail}</span><em>{item.impact}</em></div>)}</div>
+      <div className="analysis-heading"><div><span className="section-label">商品 × 素材诊断</span><h2>先减少重复，再为新素材留出探索空间。</h2><p>当前同时出现起量放缓和组合重复信号，建议生成 ChangeSet；任何暂停、删除和预算动作仍需人工审批。</p></div><span className="source-chip alert">{deliveryDiagnostics.length} 项服务端诊断</span></div>
+      <div className="diagnostic-grid">{deliveryDiagnostics.map(item => <div className={`diagnostic-card ${item.status}`} key={item.id}><span>{item.id}</span><small>{item.title}</small><b>{operationField(item, 'value')}</b><p>{operationField(item, 'detail')}</p></div>)}{!deliveryDiagnostics.length ? <div className="panel-empty">暂无服务端投放诊断。</div> : null}</div>
+      <div className="action-table"><div className="action-head"><span>优先级</span><span>建议动作</span><span>依据</span><span>预计影响</span></div>{deliveryActions.map(item => <div className="action-row" key={item.id}><strong>{item.status}</strong><b>{item.title}</b><span>{operationField(item, 'detail')}</span><em>{operationField(item, 'impact')}</em></div>)}{!deliveryActions.length ? <div className="panel-empty">暂无服务端建议动作。</div> : null}</div>
     </section>
     <aside className="strategy-method-rail"><span className="section-label">执行边界</span><h3>自动建议，人工决策</h3>{['准确绑定商品与资产', '统计重复组合与无消耗广告', '新素材改变核心内容', '变更进入 ChangeSet 审批'].map((item, index) => <div className="guardrail" key={item}><CircleCheck size={16}/><span><b>{String(index + 1).padStart(2, '0')}</b>{item}</span></div>)}<button className="primary-button full" onClick={() => void createChangeSet()}>生成优化 ChangeSet</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">60% / 90% 差异与 5–10% 探索预算均为来源建议，不是平台保证。</p></aside>
   </div>
@@ -375,19 +418,23 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
 }
 
 function TableSurface({ item, activeView, onOpenRecord }: { item: NavItem; activeView: string; onOpenRecord: (id: string) => void }) {
+  const { currentProject } = useProject()
   const [search, setSearch] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [showOwner, setShowOwner] = useState(true)
   const [page, setPage] = useState(0)
   const pageSize = 4
-  const filtered = useMemo(() => unifiedRecords.filter(record => `${record.id} ${record.name} ${record.kind} ${record.status}`.toLowerCase().includes(search.toLowerCase()) && (!attentionOnly || ['待审批', '待确认'].includes(record.status))), [search, attentionOnly])
+  const records = operationRecords(currentProject.operations, 'unified_record')
+  const filtered = useMemo(() => records.filter(record => `${record.id} ${record.title} ${operationField(record, 'kind')} ${record.status}`.toLowerCase().includes(search.toLowerCase()) && (!attentionOnly || ['待审批', '待确认'].includes(record.status))), [records, search, attentionOnly])
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const rows = filtered.slice(page * pageSize, page * pageSize + pageSize)
-  return <section className="table-surface"><div className="table-toolbar"><div className="search-field"><Search size={16}/><input aria-label="搜索列表" value={search} onChange={event => { setSearch(event.target.value); setPage(0) }} placeholder={`搜索${item.label}`}/></div><button className={attentionOnly ? 'secondary-button active-filter' : 'secondary-button'} onClick={() => { setAttentionOnly(value => !value); setPage(0) }} aria-pressed={attentionOnly}><Filter size={15}/>待处理</button><button className="secondary-button" onClick={() => setShowOwner(value => !value)} aria-pressed={showOwner}><SlidersHorizontal size={15}/>{showOwner ? '隐藏负责人' : '显示负责人'}</button><span className="table-count">{activeView} · 共 {filtered.length} 条</span></div><table><thead><tr><th>编号</th><th>名称</th><th>类型</th><th>状态</th>{showOwner ? <th>负责人</th> : null}<th>最后更新</th><th aria-label="操作"/></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td className="code">{row.id}</td><td><button className="table-object-link" onClick={() => onOpenRecord(row.id)}><b>{row.name}</b><small>春季新品上市</small></button></td><td>{row.kind}</td><td><Status value={row.status}/></td>{showOwner ? <td>{row.owner}</td> : null}<td>{row.updatedAt}</td><td><button aria-label={`${row.name}更多操作`} onClick={() => onOpenRecord(row.id)}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{!rows.length ? <div className="table-empty">没有匹配记录，请调整搜索或筛选条件。</div> : null}<div className="table-footer"><span>第 {page + 1} / {pageCount} 页</span><div><button disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>上一页</button><button disabled={page >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>下一页</button></div></div></section>
+  return <section className="table-surface"><div className="table-toolbar"><div className="search-field"><Search size={16}/><input aria-label="搜索列表" value={search} onChange={event => { setSearch(event.target.value); setPage(0) }} placeholder={`搜索${item.label}`}/></div><button className={attentionOnly ? 'secondary-button active-filter' : 'secondary-button'} onClick={() => { setAttentionOnly(value => !value); setPage(0) }} aria-pressed={attentionOnly}><Filter size={15}/>待处理</button><button className="secondary-button" onClick={() => setShowOwner(value => !value)} aria-pressed={showOwner}><SlidersHorizontal size={15}/>{showOwner ? '隐藏负责人' : '显示负责人'}</button><span className="table-count">{activeView} · 共 {filtered.length} 条</span></div><table><thead><tr><th>编号</th><th>名称</th><th>类型</th><th>状态</th>{showOwner ? <th>负责人</th> : null}<th>最后更新</th><th aria-label="操作"/></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td className="code">{row.id}</td><td><button className="table-object-link" onClick={() => onOpenRecord(row.id)}><b>{row.title}</b><small>{currentProject.name}</small></button></td><td>{operationField(row, 'kind')}</td><td><Status value={row.status}/></td>{showOwner ? <td>{operationField(row, 'owner')}</td> : null}<td>{new Date(row.updatedAt).toLocaleString('zh-CN', { hour12: false })}</td><td><button aria-label={`${row.title}更多操作`} onClick={() => onOpenRecord(row.id)}><MoreHorizontal size={17}/></button></td></tr>)}</tbody></table>{!rows.length ? <div className="table-empty">没有服务端记录，请调整搜索或筛选条件。</div> : null}<div className="table-footer"><span>第 {page + 1} / {pageCount} 页</span><div><button disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>上一页</button><button disabled={page >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>下一页</button></div></div></section>
 }
 
 function OperationsSurface({ item }: { item: NavItem }) {
-  return <div className="ops-layout"><section className="ops-main"><div className="ops-status"><span className="signal ok"><CircleCheck size={18}/></span><div><span className="section-label">系统状态</span><h2>{item.label}运行稳定</h2><p>截至 2026-07-22 16:30，过去 24 小时完成 128 个任务，3 个任务等待人工输入。</p></div><button className="secondary-button">查看运行记录</button></div><div className="ops-list">{[['队列吞吐', '128 个任务', '正常'], ['平均处理时间', '4 分 12 秒', '正常'], ['等待用户', '3 个任务', '需关注'], ['失败重试', '1 个任务', '已恢复']].map(([name, value, status]) => <div key={name}><span>{name}</span><b>{value}</b><Status value={status}/><button aria-label={`查看${name}详情`}><ArrowRight size={15}/></button></div>)}</div></section><aside className="ops-rail"><span className="section-label">最近活动</span>{activity.map(item => <div className="activity-item" key={item.title}><time>{item.time}</time><span><b>{item.title}</b><small>{item.meta}</small></span></div>)}</aside></div>
+  const { currentProject } = useProject()
+  const activity = operationRecords(currentProject.operations, 'activity')
+  return <div className="ops-layout"><section className="ops-main"><div className="ops-status"><span className="signal ok"><CircleCheck size={18}/></span><div><span className="section-label">系统状态</span><h2>{item.label}运行稳定</h2><p>当前状态和活动均来自当前 Project 的服务端运营记录。</p></div><button className="secondary-button">查看运行记录</button></div><div className="ops-list">{activity.slice(0, 4).map(record => <div key={record.id}><span>{record.title}</span><b>{operationField(record, 'detail')}</b><Status value={record.status}/><button aria-label={`查看${record.title}详情`}><ArrowRight size={15}/></button></div>)}{!activity.length ? <div className="panel-empty">暂无服务端运行记录。</div> : null}</div></section><aside className="ops-rail"><span className="section-label">最近活动</span>{activity.map(record => <div className="activity-item" key={record.id}><time>{new Date(record.occurredAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time><span><b>{record.title}</b><small>{operationField(record, 'actor')} · {operationField(record, 'detail')}</small></span></div>)}{!activity.length ? <div className="panel-empty">暂无服务端活动。</div> : null}</aside></div>
 }
 
 function AuditEvidenceSurface() {
@@ -439,10 +486,10 @@ function SettingsSurface() {
 
 function ObjectDetail({ system, item, objectId, onOpenProject }: { system: SystemDefinition; item: NavItem; objectId: string; onOpenProject: OpenProject }) {
   const { currentProject } = useProject()
-  const record = unifiedRecords.find(value => value.id === objectId)
-  const name = record?.name ?? `${item.label}草稿 ${objectId}`
+  const record = operationRecords(currentProject.operations, 'unified_record').find(value => value.id === objectId)
+  const name = record?.title ?? `${item.label}草稿 ${objectId}`
   const next = system.key === 'strategy' ? ['creative', 'tasks', 'CR-2607-42', '基于此策略创建创意任务'] as const : system.key === 'creative' ? ['creative', 'reviews', 'CR-2607-42', '提交评审'] as const : system.key === 'insight' ? ['strategy', 'workspaces', 'STR-2607-08', '将洞察应用到策略'] as const : ['delivery', 'execution', objectId, '进入执行中心'] as const
-  return <aside className="object-detail" aria-label={`${name}详情`}><div><span className="section-label">Mock 对象详情</span><h2>{name}</h2><p>{record ? `${record.kind} · ${record.status} · ${record.owner}` : `当前 Project：${currentProject.name}`}</p></div><div className="detail-kv"><span>对象 ID</span><b>{objectId}</b></div><div className="detail-kv"><span>来源版本</span><b>{currentProject.artifacts.strategy.version} → {currentProject.artifacts.creative.version}</b></div><button className="primary-button full" onClick={() => onOpenProject(currentProject.id, next[0], next[1], next[2])}>{next[3]}<ArrowRight size={15}/></button><button className="secondary-button full" onClick={() => onOpenProject(currentProject.id, system.key, item.id)}>返回{item.label}列表</button></aside>
+  return <aside className="object-detail" aria-label={`${name}详情`}><div><span className="section-label">服务端对象详情</span><h2>{name}</h2><p>{record ? `${operationField(record, 'kind')} · ${record.status} · ${operationField(record, 'owner')}` : `当前 Project：${currentProject.name}`}</p></div><div className="detail-kv"><span>对象 ID</span><b>{objectId}</b></div><div className="detail-kv"><span>来源版本</span><b>{currentProject.artifacts.strategy.version} → {currentProject.artifacts.creative.version}</b></div><button className="primary-button full" onClick={() => onOpenProject(currentProject.id, next[0], next[1], next[2])}>{next[3]}<ArrowRight size={15}/></button><button className="secondary-button full" onClick={() => onOpenProject(currentProject.id, system.key, item.id)}>返回{item.label}列表</button></aside>
 }
 
 export function ModulePage({ system, item, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {

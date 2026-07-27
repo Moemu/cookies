@@ -87,6 +87,7 @@ export interface ProjectRecord {
   stage: string
   progress: number
   status: '进行中' | '已完成'
+  owner: string
   updatedAt: string
   budget: number
   currency: 'CNY'
@@ -94,6 +95,6 @@ export interface ProjectRecord {
   artifacts: Record<ArtifactKey, ProjectArtifact>
   tasks: BusinessTaskRecord[]
   changeSets: ChangeSetRecord[]
-  operations?: ApiOperationalRecord[]
+  operations: ApiOperationalRecord[]
   knowledgeCount: number
 }

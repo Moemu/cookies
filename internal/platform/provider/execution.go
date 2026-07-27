@@ -80,7 +80,8 @@ func (s Service) submitImageJob(ctx context.Context, record JobRecord) (contract
 	}
 	request := ImageGenerationRequest{
 		OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
-		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey, Input: record.Input, Route: record.Route, Sources: sources,
+		ProviderJobID: record.Job.ID, ModelAlias: record.ModelAlias, IdempotencyKey: record.IdempotencyKey,
+		Input: record.Input, Route: record.Route, Sources: sources,
 	}
 	if err := request.Validate(); err != nil {
 		return contract.ProviderJob{}, nil, err
