@@ -23,9 +23,9 @@ func (s MySQLStore) CreateProposal(ctx context.Context, proposal Proposal) (Prop
 		return Proposal{}, false, err
 	}
 	result, err := s.DB.ExecContext(ctx, `INSERT INTO strategy_proposals
-		(id, organization_id, project_id, input_json, input_hash, template_version, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id=id`,
-		proposal.ID, proposal.OrganizationID, proposal.ProjectID, input, proposal.InputHash, proposal.TemplateVersion, proposal.Status)
+		(id, organization_id, project_id, source_type, source_object_uri, input_json, input_hash, template_version, status)
+		VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id=id`,
+		proposal.ID, proposal.OrganizationID, proposal.ProjectID, proposal.SourceType, proposal.SourceObjectURI, input, proposal.InputHash, proposal.TemplateVersion, proposal.Status)
 	if err != nil {
 		return Proposal{}, false, err
 	}
@@ -45,9 +45,10 @@ func (s MySQLStore) CreateProposal(ctx context.Context, proposal Proposal) (Prop
 func (s MySQLStore) GetProposal(ctx context.Context, org contract.OrganizationID, projectID contract.ProjectID, proposalID string) (Proposal, error) {
 	var proposal Proposal
 	var input []byte
-	err := s.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id, input_json, input_hash, template_version, status, created_at, updated_at
+	var sourceType, sourceObjectURI sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id, source_type, source_object_uri, input_json, input_hash, template_version, status, created_at, updated_at
 		FROM strategy_proposals WHERE organization_id=? AND project_id=? AND id=?`, org, projectID, proposalID).
-		Scan(&proposal.ID, &proposal.OrganizationID, &proposal.ProjectID, &input, &proposal.InputHash, &proposal.TemplateVersion, &proposal.Status, &proposal.CreatedAt, &proposal.UpdatedAt)
+		Scan(&proposal.ID, &proposal.OrganizationID, &proposal.ProjectID, &sourceType, &sourceObjectURI, &input, &proposal.InputHash, &proposal.TemplateVersion, &proposal.Status, &proposal.CreatedAt, &proposal.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Proposal{}, ErrProposalNotFound
 	}
@@ -57,6 +58,8 @@ func (s MySQLStore) GetProposal(ctx context.Context, org contract.OrganizationID
 	if err := json.Unmarshal(input, &proposal.Input); err != nil {
 		return Proposal{}, fmt.Errorf("decode proposal input: %w", err)
 	}
+	proposal.SourceType = sourceType.String
+	proposal.SourceObjectURI = sourceObjectURI.String
 	return proposal, nil
 }
 

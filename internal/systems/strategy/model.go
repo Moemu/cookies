@@ -20,6 +20,8 @@ type Proposal struct {
 	ID              string                  `json:"id"`
 	OrganizationID  contract.OrganizationID `json:"organization_id"`
 	ProjectID       contract.ProjectID      `json:"project_id"`
+	SourceType      string                  `json:"source_type,omitempty"`
+	SourceObjectURI string                  `json:"source_object_uri,omitempty"`
 	Input           prompts.ProposalInput   `json:"input"`
 	InputHash       string                  `json:"-"`
 	TemplateVersion string                  `json:"template_version"`

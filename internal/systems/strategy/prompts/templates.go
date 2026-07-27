@@ -12,15 +12,17 @@ import (
 const TemplateVersion = "volcad-v1"
 
 type ProposalInput struct {
-	Brand       string   `json:"brand"`
-	Product     string   `json:"product"`
-	Audience    string   `json:"audience"`
-	Platform    string   `json:"platform"`
-	Budget      string   `json:"budget"`
-	Timeline    string   `json:"timeline"`
-	Compliance  []string `json:"compliance"`
-	Directions  []string `json:"directions"`
-	Description string   `json:"description"`
+	Brand           string                 `json:"brand"`
+	Product         string                 `json:"product"`
+	Audience        string                 `json:"audience"`
+	Platform        string                 `json:"platform"`
+	Budget          string                 `json:"budget"`
+	Timeline        string                 `json:"timeline"`
+	Compliance      []string               `json:"compliance"`
+	Directions      []string               `json:"directions"`
+	Description     string                 `json:"description"`
+	Source          ProposalSource         `json:"source,omitempty"`
+	ProposalPackage *VolcadProposalPackage `json:"proposal_package,omitempty"`
 }
 
 func (i ProposalInput) Validate() error {
@@ -31,6 +33,68 @@ func (i ProposalInput) Validate() error {
 		return fmt.Errorf("compliance and directions must be arrays")
 	}
 	return nil
+}
+
+type ProposalSource struct {
+	Type      string               `json:"type,omitempty"`
+	ObjectURI string               `json:"object_uri,omitempty"`
+	Archive   string               `json:"archive,omitempty"`
+	Files     []ProposalSourceFile `json:"files,omitempty"`
+}
+
+type ProposalSourceFile struct {
+	Name    string `json:"name"`
+	Size    int    `json:"size"`
+	Preview string `json:"preview"`
+}
+
+type VolcadProposalPackage struct {
+	CampaignName      string                  `json:"campaign_name"`
+	Brief             VolcadBrandBrief        `json:"brief"`
+	Options           VolcadGenerationOptions `json:"options"`
+	ExtraRequirements string                  `json:"extra_requirements"`
+	CreativeKeywords  []string                `json:"creative_keywords"`
+	ImageDirection    VolcadImageDirection    `json:"image_direction"`
+	VideoDirection    VolcadVideoDirection    `json:"video_direction"`
+	ActivityCadence   []string                `json:"activity_cadence"`
+	CompetitorNotes   []string                `json:"competitor_notes"`
+	UserFeedback      []string                `json:"user_feedback"`
+}
+
+type VolcadBrandBrief struct {
+	BrandName       string   `json:"brand_name"`
+	Category        string   `json:"category"`
+	ProductName     string   `json:"product_name"`
+	SellingPoints   []string `json:"selling_points"`
+	TargetAudience  string   `json:"target_audience"`
+	Platforms       []string `json:"platforms"`
+	Tone            string   `json:"tone"`
+	Budget          string   `json:"budget"`
+	ROIGoal         string   `json:"roi_goal"`
+	ComplianceNotes string   `json:"compliance_notes"`
+}
+
+type VolcadGenerationOptions struct {
+	AssetKinds    []string `json:"asset_kinds"`
+	MaterialTypes []string `json:"material_types"`
+	CopyCount     int      `json:"copy_count"`
+	ImageCount    int      `json:"image_count"`
+	VideoCount    int      `json:"video_count"`
+	ImageSize     string   `json:"image_size"`
+	VideoRatio    string   `json:"video_ratio"`
+	VideoDuration int      `json:"video_duration"`
+}
+
+type VolcadImageDirection struct {
+	MainVisual string   `json:"main_visual"`
+	CopySlots  []string `json:"copy_slots"`
+	MustShow   []string `json:"must_show"`
+}
+
+type VolcadVideoDirection struct {
+	OpeningHooks []string `json:"opening_hooks"`
+	ShotKeywords []string `json:"shot_keywords"`
+	CTA          string   `json:"cta"`
 }
 
 func BuildProposalStrategyMessages(input ProposalInput) []provider.TextMessage {
@@ -62,9 +126,19 @@ func StrategyJSONSchema() json.RawMessage {
 }
 
 func proposalContext(input ProposalInput) string {
-	return fmt.Sprintf("模板版本：%s\n品牌：%s\n产品：%s\n受众：%s\n平台：%s\n预算：%s\n时间：%s\n需求：%s\n合规限制：%s\n创意方向：%s",
+	extra := ""
+	if input.Source.ObjectURI != "" {
+		extra += "\n提案包来源对象：" + input.Source.ObjectURI
+	}
+	if input.ProposalPackage != nil {
+		extra += "\n提案包活动：" + input.ProposalPackage.CampaignName
+		extra += "\n核心卖点：" + strings.Join(input.ProposalPackage.Brief.SellingPoints, "；")
+		extra += "\n素材类型：" + strings.Join(input.ProposalPackage.Options.MaterialTypes, "；")
+		extra += "\n视频钩子：" + strings.Join(input.ProposalPackage.VideoDirection.OpeningHooks, "；")
+	}
+	return fmt.Sprintf("模板版本：%s\n品牌：%s\n产品：%s\n受众：%s\n平台：%s\n预算：%s\n时间：%s\n需求：%s\n合规限制：%s\n创意方向：%s%s",
 		TemplateVersion, input.Brand, input.Product, input.Audience, input.Platform, input.Budget, input.Timeline,
-		input.Description, strings.Join(input.Compliance, "；"), strings.Join(input.Directions, "；"))
+		input.Description, strings.Join(input.Compliance, "；"), strings.Join(input.Directions, "；"), extra)
 }
 
 func direction(input ProposalInput, variant int) string {
