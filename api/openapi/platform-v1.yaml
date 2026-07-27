@@ -330,6 +330,552 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/assets/features:
+    get:
+      operationId: listAssetFeatures
+      summary: List project-scoped multimodal asset feature payloads.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+      responses:
+        '200':
+          description: Asset feature list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetFeatureList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/features/{feature_version}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - {name: asset_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      - {name: feature_version, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 96}}
+    get:
+      operationId: getAssetFeature
+      summary: Return one feature payload; missing payloads return feature null.
+      responses:
+        '200':
+          description: Asset feature lookup result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetFeatureLookup'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    put:
+      operationId: putAssetFeature
+      summary: Upsert one project-scoped asset feature payload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssetFeature'}
+      responses:
+        '200':
+          description: Asset feature saved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetFeature'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-plans:
+    get:
+      operationId: listRemixPlans
+      summary: List saved AI remix plans for a project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Remix plan list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixPlanList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createRemixPlan
+      summary: Persist a clip-compatible or Shot-based AI remix plan.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateRemixPlanRequest'}
+      responses:
+        '201':
+          description: Remix plan created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixPlan'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-plans/{plan_id}:
+    get:
+      operationId: getRemixPlan
+      summary: Return one saved remix plan.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: plan_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Remix plan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixPlan'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-render-jobs:
+    post:
+      operationId: createRemixRenderJob
+      summary: Create an idempotent remix render job from a saved plan.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateRemixRenderJobRequest'}
+      responses:
+        '202':
+          description: Render job accepted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixRenderJob'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}:
+    get:
+      operationId: getRemixRenderJob
+      summary: Return current remix render job state, progress and output asset reference.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: job_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Remix render job.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixRenderJob'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}/quality-report:
+    get:
+      operationId: getRemixRenderJobQualityReport
+      summary: Return the quality report attached to a render job, or quality_report null.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: job_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Render job quality report lookup result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QualityReportLookup'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-quality-reports:
+    post:
+      operationId: createRemixQualityReport
+      summary: Create a deterministic MVP quality report for a render output.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateQualityReportRequest'}
+      responses:
+        '201':
+          description: Quality report created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QualityReport'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-quality-reports/{report_id}:
+    get:
+      operationId: getRemixQualityReport
+      summary: Return one quality report.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: report_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Quality report.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QualityReport'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-hit-analyses:
+    post:
+      operationId: createRemixHitAnalysis
+      summary: Analyze a source video into deterministic hit-video structure.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateHitAnalysisRequest'}
+      responses:
+        '201':
+          description: Hit analysis created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HitAnalysis'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-hit-analyses/{analysis_id}:
+    get:
+      operationId: getRemixHitAnalysis
+      summary: Return one hit analysis.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: analysis_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Hit analysis.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HitAnalysis'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-product-mappings:
+    post:
+      operationId: createRemixProductMapping
+      summary: Map a hit analysis to target product assets and constraints.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateProductMappingRequest'}
+      responses:
+        '201':
+          description: Product mapping created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductMapping'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-product-mappings/{mapping_id}:
+    get:
+      operationId: getRemixProductMapping
+      summary: Return one product mapping.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: mapping_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Product mapping.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductMapping'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-product-mappings/{mapping_id}/plans:
+    post:
+      operationId: generateRemixPlanFromProductMapping
+      summary: Generate a Shot-based remix plan from a product mapping.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: mapping_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '201':
+          description: Remix plan generated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixPlan'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-prerolls:
+    post:
+      operationId: createRemixPreroll
+      summary: Draft or generate a 3-10 second opening preroll hook.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreatePrerollRequest'}
+      responses:
+        '201':
+          description: Preroll created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Preroll'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-prerolls/{preroll_id}:
+    get:
+      operationId: getRemixPreroll
+      summary: Return one preroll.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: preroll_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Preroll.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Preroll'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-prerolls/{preroll_id}/apply:
+    post:
+      operationId: applyRemixPreroll
+      summary: Insert a ready preroll into the opening segment and return the updated plan.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: preroll_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Updated remix plan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemixPlan'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-feedback-events:
+    get:
+      operationId: listRemixFeedbackEvents
+      summary: List append-only remix feedback events.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: target_type, in: query, schema: {$ref: '#/components/schemas/FeedbackTargetType'}}
+        - {name: target_id, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Feedback event list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FeedbackEventList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createRemixFeedbackEvent
+      summary: Append one feedback event for a plan, render job or asset.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateFeedbackEventRequest'}
+      responses:
+        '201':
+          description: Feedback event appended.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FeedbackEvent'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-asset-performance:
+    get:
+      operationId: getRemixAssetPerformance
+      summary: Return deterministic asset performance aggregates from feedback events.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Asset performance list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetPerformanceList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-planner-weight-snapshots:
+    post:
+      operationId: createRemixPlannerWeightSnapshot
+      summary: Create planner weights from current deterministic asset performance aggregates.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '201':
+          description: Planner weight snapshot created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlannerWeightSnapshot'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-eval-cases:
+    get:
+      operationId: listRemixEvalCases
+      summary: List seeded and user-created Remix-MMLU eval cases.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Eval case list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvalCaseList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createRemixEvalCase
+      summary: Create or replace one project-scoped eval case.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateEvalCaseRequest'}
+      responses:
+        '201':
+          description: Eval case created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvalCase'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/remix-eval-runs:
+    post:
+      operationId: createRemixEvalRun
+      summary: Run deterministic scoring for matching Remix-MMLU cases.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateEvalRunRequest'}
+      responses:
+        '202':
+          description: Eval run completed by the deterministic MVP scorer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvalRun'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/remix-eval-runs/{run_id}:
+    get:
+      operationId: getRemixEvalRun
+      summary: Return one eval run and per-case results.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: run_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Eval run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvalRun'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/agent-runs:
+    get:
+      operationId: listAgentRuns
+      summary: List auditable project-scoped agent runs.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Agent run list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRunList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createAgentRun
+      summary: Start the deterministic render diagnosis agent workflow.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateAgentRunRequest'}
+      responses:
+        '202':
+          description: Agent run accepted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRun'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/agent-runs/{agent_run_id}:
+    get:
+      operationId: getAgentRun
+      summary: Return one agent run with steps, tool calls and trace spans.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: agent_run_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Agent run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRun'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/agent-runs/{agent_run_id}/cancel:
+    post:
+      operationId: cancelAgentRun
+      summary: Cancel an agent run if it has not already completed.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: agent_run_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Cancelled or terminal agent run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRun'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/documents:
+    get:
+      operationId: listKnowledgeDocuments
+      summary: List imported project knowledge documents.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Knowledge document list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeDocumentList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: importKnowledgeDocument
+      summary: Import plain-text docs, strategy notes, Feishu summaries or retrospectives into keyword-searchable chunks.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportKnowledgeDocumentRequest'}
+      responses:
+        '201':
+          description: Knowledge document imported.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeDocument'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/knowledge/search:
+    get:
+      operationId: searchKnowledge
+      summary: Search imported knowledge chunks with citations.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 160}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 10}}
+      responses:
+        '200':
+          description: Knowledge search results.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeSearchResultList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
   /api/strategy/v1/projects/{project_id}/proposals:
     post:
       operationId: createStrategyProposal
@@ -619,7 +1165,7 @@ components:
       properties:
         capability:
           type: string
-          enum: [image.generate]
+          enum: [image.generate, image.edit]
         model_alias:
           type: string
           examples: [cookies.image.standard]
@@ -1047,8 +1593,8 @@ components:
       required: [filename, declared_mime_type, declared_size_bytes]
       properties:
         filename: {type: string, minLength: 1, maxLength: 512}
-        declared_mime_type: {type: string, enum: [image/jpeg, image/png]}
-        declared_size_bytes: {type: integer, minimum: 1, maximum: 20971520}
+        declared_mime_type: {type: string, pattern: '^(image/jpeg|image/png|video/.+)$'}
+        declared_size_bytes: {type: integer, minimum: 1, maximum: 524288000}
         declared_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
       additionalProperties: false
     SignedRequest:
@@ -1094,9 +1640,807 @@ components:
       required: [ref, asset, version, created_at]
       properties:
         ref: {$ref: '#/components/schemas/ProjectAssetRef'}
-        asset: {type: object}
-        version: {type: object}
+        asset: {$ref: '#/components/schemas/Asset'}
+        version: {$ref: '#/components/schemas/AssetVersion'}
         created_at: {type: string, format: date-time}
+      additionalProperties: false
+    Asset:
+      type: object
+      required: [id, organization_id, asset_kind, status, owner_system, latest_version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        asset_kind: {type: string, enum: [image, video, audio, text, data]}
+        status: {type: string, enum: [processing, ready, quarantined, failed, archived]}
+        owner_system: {type: string}
+        latest_version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    AssetVersion:
+      type: object
+      required: [organization_id, asset_id, version, status, source_type, mime_type, size_bytes, sha256, media, created_at]
+      properties:
+        organization_id: {type: string}
+        asset_id: {type: string}
+        version: {type: integer, minimum: 1}
+        status: {type: string, enum: [processing, ready, quarantined, failed, archived]}
+        source_type: {type: string}
+        mime_type: {type: string}
+        size_bytes: {type: integer, minimum: 1}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        width_pixels: {type: integer, minimum: 1}
+        height_pixels: {type: integer, minimum: 1}
+        media: {$ref: '#/components/schemas/MediaMetadata'}
+        provider_job_id: {type: string}
+        provider_output_id: {type: string}
+        project_context_version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
+    MediaMetadata:
+      type: object
+      required: [probe_status]
+      properties:
+        duration_seconds: {type: number, minimum: 0}
+        fps: {type: number, minimum: 0}
+        codec: {type: string}
+        bitrate_bps: {type: integer, minimum: 0}
+        audio_codec: {type: string}
+        audio_channels: {type: integer, minimum: 0}
+        audio_sample_rate: {type: integer, minimum: 0}
+        poster_frame_ref: {type: string}
+        probe_status: {type: string, enum: [not_required, succeeded, failed]}
+        probe_error: {type: string}
+      additionalProperties: false
+    AssetFeature:
+      type: object
+      required: [organization_id, project_id, asset_id, asset_version, schema_version, feature_version, hook_strength, product_visibility, scene_tags, product_tags, person_tags, action_tags, emotion_tags, selling_points, cta_presence, similarity_risk, evidence, created_at, updated_at]
+      properties:
+        organization_id: {type: string}
+        project_id: {type: string}
+        asset_id: {type: string}
+        asset_version: {type: integer, minimum: 1}
+        schema_version: {type: string, enum: [asset_feature_v1]}
+        feature_version: {type: string, minLength: 1, maxLength: 96}
+        hook_strength: {type: number, minimum: 0, maximum: 1}
+        product_visibility: {type: number, minimum: 0, maximum: 1}
+        scene_tags: {type: array, items: {type: string}}
+        product_tags: {type: array, items: {type: string}}
+        person_tags: {type: array, items: {type: string}}
+        action_tags: {type: array, items: {type: string}}
+        emotion_tags: {type: array, items: {type: string}}
+        selling_points: {type: array, items: {type: string}}
+        cta_presence: {type: boolean}
+        similarity_group: {type: string}
+        similarity_risk: {type: string, enum: [low, medium, high]}
+        evidence: {type: array, items: {type: string}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    AssetFeatureList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AssetFeature'}}
+      additionalProperties: false
+    AssetFeatureLookup:
+      type: object
+      required: [feature]
+      properties:
+        feature:
+          oneOf: [{$ref: '#/components/schemas/AssetFeature'}, {type: 'null'}]
+      additionalProperties: false
+    CreateRemixPlanRequest:
+      type: object
+      required: [client_plan_id, target_seconds, actual_seconds, pace, segments, warnings, summary]
+      properties:
+        schema_version: {type: string, enum: [remix_plan_v1, remix_plan_v2]}
+        client_plan_id: {type: string, minLength: 1, maxLength: 128}
+        target_seconds: {type: integer, minimum: 9, maximum: 180}
+        actual_seconds: {type: number, minimum: 0, maximum: 360}
+        pace: {$ref: '#/components/schemas/RemixPace'}
+        segments: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/RemixSegmentPlan'}}
+        warnings: {type: array, items: {type: string}}
+        summary: {$ref: '#/components/schemas/RemixPlanSummary'}
+      additionalProperties: false
+    RemixPlan:
+      allOf:
+        - $ref: '#/components/schemas/CreateRemixPlanRequest'
+        - type: object
+          required: [id, organization_id, project_id, created_by, schema_version, created_at, updated_at]
+          properties:
+            id: {type: string}
+            organization_id: {type: string}
+            project_id: {type: string}
+            created_by: {$ref: '#/components/schemas/Principal'}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+          additionalProperties: false
+    RemixPlanList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/RemixPlan'}}
+      additionalProperties: false
+    RemixPace:
+      type: string
+      enum: [fast, balanced, story]
+    RemixSegment:
+      type: string
+      enum: [opening, middle, ending]
+    RemixSegmentPlan:
+      type: object
+      required: [segment, label, target_seconds, actual_seconds, clips, shots]
+      properties:
+        segment: {$ref: '#/components/schemas/RemixSegment'}
+        label: {type: string}
+        target_seconds: {type: integer, minimum: 0}
+        actual_seconds: {type: number, minimum: 0}
+        clips: {type: array, items: {$ref: '#/components/schemas/RemixClip'}}
+        shots: {type: array, items: {$ref: '#/components/schemas/RemixShot'}}
+      additionalProperties: false
+    RemixClip:
+      type: object
+      required: [id, segment, asset_version, label, source_type, mime_type, aspect, start_seconds, duration_seconds, in_point_seconds, out_point_seconds, score, reason]
+      properties:
+        id: {type: string}
+        segment: {$ref: '#/components/schemas/RemixSegment'}
+        asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+        label: {type: string}
+        source_type: {type: string}
+        mime_type: {type: string}
+        aspect: {type: string}
+        start_seconds: {type: number}
+        duration_seconds: {type: number, minimum: 0}
+        in_point_seconds: {type: number, minimum: 0}
+        out_point_seconds: {type: number, minimum: 0}
+        score: {type: number}
+        reason: {type: string}
+      additionalProperties: false
+    RemixShot:
+      type: object
+      required: [id, segment, source, asset_version, timeline, creative, planning, risks]
+      properties:
+        id: {type: string}
+        segment: {$ref: '#/components/schemas/RemixSegment'}
+        source: {type: string, enum: [existing_asset, generated_asset]}
+        asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+        timeline: {$ref: '#/components/schemas/ShotTimeline'}
+        creative: {$ref: '#/components/schemas/ShotCreative'}
+        planning: {$ref: '#/components/schemas/ShotPlanning'}
+        risks: {type: array, items: {type: string}}
+      additionalProperties: false
+    ShotTimeline:
+      type: object
+      required: [start_seconds, duration_seconds, in_point_seconds, out_point_seconds]
+      properties:
+        start_seconds: {type: number, minimum: 0}
+        duration_seconds: {type: number, minimum: 0}
+        in_point_seconds: {type: number, minimum: 0}
+        out_point_seconds: {type: number, minimum: 0}
+      additionalProperties: false
+    ShotCreative:
+      type: object
+      required: [scene, shot_type, camera_angle, dialogue_or_narration, subtitle, transition, cta_element]
+      properties:
+        scene: {type: string}
+        shot_type: {type: string}
+        camera_angle: {type: string}
+        dialogue_or_narration: {type: string}
+        subtitle: {type: string}
+        transition: {type: string}
+        cta_element: {type: string}
+      additionalProperties: false
+    ShotPlanning:
+      type: object
+      required: [score, reason_codes, reason, evidence]
+      properties:
+        score: {type: number}
+        reason_codes: {type: array, items: {type: string}}
+        reason: {type: string}
+        evidence: {type: array, items: {type: string}}
+      additionalProperties: false
+    RemixPlanSummary:
+      type: object
+      required: [selected_assets, used_assets, coverage_percent, strategy]
+      properties:
+        selected_assets: {type: integer, minimum: 0}
+        used_assets: {type: integer, minimum: 0}
+        coverage_percent: {type: integer, minimum: 0, maximum: 100}
+        strategy: {type: string}
+      additionalProperties: false
+    CreateRemixRenderJobRequest:
+      type: object
+      required: [plan_id, target_format, target_quality]
+      properties:
+        plan_id: {type: string, minLength: 1, maxLength: 128}
+        target_format: {type: string}
+        target_quality: {type: string}
+      additionalProperties: false
+    RemixRenderJob:
+      type: object
+      required: [id, organization_id, project_id, plan_id, status, progress, target_format, target_quality, input_snapshot, requires_review, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        plan_id: {type: string}
+        status: {type: string, enum: [queued, running, requires_review, succeeded, failed]}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        target_format: {type: string}
+        target_quality: {type: string}
+        idempotency_key: {type: string}
+        request_hash: {type: string}
+        input_snapshot: {$ref: '#/components/schemas/RenderInputSnapshot'}
+        requires_review: {type: boolean}
+        quality_report_id: {type: string}
+        output_asset: {$ref: '#/components/schemas/ProjectAssetRef'}
+        output_preview: {$ref: '#/components/schemas/RenderOutputPreview'}
+        provenance: {$ref: '#/components/schemas/RenderProvenanceSummary'}
+        error_code: {type: string}
+        error_message: {type: string}
+        created_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    RenderInputSnapshot:
+      type: object
+      required: [plan, request]
+      properties:
+        plan: {$ref: '#/components/schemas/RemixPlan'}
+        request: {$ref: '#/components/schemas/CreateRemixRenderJobRequest'}
+      additionalProperties: false
+    RenderOutputPreview:
+      type: object
+      required: [url]
+      properties:
+        url: {type: string}
+      additionalProperties: false
+    RenderProvenanceSummary:
+      type: object
+      required: [plan_id, render_job_id, input_assets]
+      properties:
+        plan_id: {type: string}
+        render_job_id: {type: string}
+        input_assets: {type: array, items: {$ref: '#/components/schemas/AssetVersionRef'}}
+      additionalProperties: false
+    CreateQualityReportRequest:
+      type: object
+      required: [render_job_id]
+      properties:
+        render_job_id: {type: string, minLength: 1}
+        output_asset: {$ref: '#/components/schemas/ProjectAssetRef'}
+        policy: {type: string}
+      additionalProperties: false
+    QualityReport:
+      type: object
+      required: [id, organization_id, project_id, render_job_id, verdict, score, dimensions, issues, evidence, repair_suggestions, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        render_job_id: {type: string}
+        output_asset: {$ref: '#/components/schemas/ProjectAssetRef'}
+        verdict: {$ref: '#/components/schemas/QualityVerdict'}
+        score: {type: number, minimum: 0, maximum: 1}
+        dimensions: {type: array, items: {$ref: '#/components/schemas/QualityDimension'}}
+        issues: {type: array, items: {$ref: '#/components/schemas/QualityIssue'}}
+        evidence: {type: array, items: {$ref: '#/components/schemas/QualityEvidence'}}
+        repair_suggestions: {type: array, items: {type: string}}
+        created_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    QualityReportLookup:
+      type: object
+      required: [quality_report]
+      properties:
+        quality_report:
+          oneOf: [{$ref: '#/components/schemas/QualityReport'}, {type: 'null'}]
+      additionalProperties: false
+    QualityVerdict:
+      type: string
+      enum: [pass, major, critical]
+    QualityDimension:
+      type: object
+      required: [name, score, verdict, summary]
+      properties:
+        name: {type: string}
+        score: {type: number}
+        verdict: {type: string}
+        summary: {type: string}
+      additionalProperties: false
+    QualityIssue:
+      type: object
+      required: [code, severity, dimension, start_seconds, end_seconds, description, repair_suggestion]
+      properties:
+        code: {type: string}
+        severity: {$ref: '#/components/schemas/QualityVerdict'}
+        dimension: {type: string}
+        start_seconds: {type: number, minimum: 0}
+        end_seconds: {type: number, minimum: 0}
+        description: {type: string}
+        repair_suggestion: {type: string}
+      additionalProperties: false
+    QualityEvidence:
+      type: object
+      required: [kind, timestamp_sec, summary]
+      properties:
+        kind: {type: string}
+        timestamp_sec: {type: number, minimum: 0}
+        summary: {type: string}
+      additionalProperties: false
+    CreateHitAnalysisRequest:
+      type: object
+      required: [source_asset, title, duration_seconds]
+      properties:
+        source_asset: {$ref: '#/components/schemas/AssetVersionRef'}
+        title: {type: string, minLength: 1, maxLength: 160}
+        duration_seconds: {type: number, exclusiveMinimum: 0, maximum: 600}
+        language: {type: string}
+        notes: {type: string, maxLength: 2000}
+      additionalProperties: false
+    HitAnalysis:
+      type: object
+      required: [id, organization_id, project_id, source_asset, title, video_meta, segments, scripts, visual_elements, conversion_nodes, replication_insights, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        source_asset: {$ref: '#/components/schemas/AssetVersionRef'}
+        title: {type: string}
+        video_meta: {$ref: '#/components/schemas/HitVideoMeta'}
+        segments: {type: array, items: {$ref: '#/components/schemas/HitSegment'}}
+        scripts: {type: array, items: {$ref: '#/components/schemas/HitScriptLine'}}
+        visual_elements: {type: array, items: {type: string}}
+        conversion_nodes: {type: array, items: {$ref: '#/components/schemas/HitConversionNode'}}
+        replication_insights: {type: array, items: {type: string}}
+        created_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    HitVideoMeta:
+      type: object
+      required: [duration_seconds, language]
+      properties:
+        duration_seconds: {type: number, minimum: 0}
+        language: {type: string}
+      additionalProperties: false
+    HitSegmentRole:
+      type: string
+      enum: [hook, problem, proof, offer, cta]
+    HitSegment:
+      type: object
+      required: [id, start_seconds, end_seconds, role, summary, script, visual_element, conversion_cue, replication_hint]
+      properties:
+        id: {type: string}
+        start_seconds: {type: number, minimum: 0}
+        end_seconds: {type: number, minimum: 0}
+        role: {$ref: '#/components/schemas/HitSegmentRole'}
+        summary: {type: string}
+        script: {type: string}
+        visual_element: {type: string}
+        conversion_cue: {type: string}
+        replication_hint: {type: string}
+      additionalProperties: false
+    HitScriptLine:
+      type: object
+      required: [segment_id, text]
+      properties:
+        segment_id: {type: string}
+        text: {type: string}
+      additionalProperties: false
+    HitConversionNode:
+      type: object
+      required: [segment_id, cue]
+      properties:
+        segment_id: {type: string}
+        cue: {type: string}
+      additionalProperties: false
+    CreateProductMappingRequest:
+      type: object
+      required: [hit_analysis_id, target_product, required_assets, replacement_rules]
+      properties:
+        hit_analysis_id: {type: string, minLength: 1, maxLength: 128}
+        target_product: {$ref: '#/components/schemas/ProductProfile'}
+        required_assets: {type: array, minItems: 1, maxItems: 80, items: {$ref: '#/components/schemas/AssetVersionRef'}}
+        replacement_rules: {type: array, minItems: 1, maxItems: 80, items: {$ref: '#/components/schemas/ReplacementRule'}}
+        constraints: {type: array, maxItems: 20, items: {type: string}}
+        target_seconds: {type: integer, minimum: 9, maximum: 180}
+        pace: {$ref: '#/components/schemas/RemixPace'}
+      additionalProperties: false
+    ProductMapping:
+      allOf:
+        - $ref: '#/components/schemas/CreateProductMappingRequest'
+        - type: object
+          required: [id, organization_id, project_id, created_by, created_at, updated_at]
+          properties:
+            id: {type: string}
+            organization_id: {type: string}
+            project_id: {type: string}
+            created_by: {$ref: '#/components/schemas/Principal'}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+          additionalProperties: false
+    ProductProfile:
+      type: object
+      required: [name, selling_points, cta]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        selling_points: {type: array, minItems: 1, maxItems: 12, items: {type: string, minLength: 1, maxLength: 160}}
+        cta: {type: string, minLength: 1, maxLength: 80}
+      additionalProperties: false
+    ReplacementRule:
+      type: object
+      required: [role, target_asset, message]
+      properties:
+        role: {$ref: '#/components/schemas/HitSegmentRole'}
+        target_asset: {$ref: '#/components/schemas/AssetVersionRef'}
+        message: {type: string, minLength: 1, maxLength: 240}
+      additionalProperties: false
+    CreatePrerollRequest:
+      type: object
+      required: [plan_id, hook_type, reference_asset, duration_seconds]
+      properties:
+        plan_id: {type: string, minLength: 1, maxLength: 128}
+        hook_type: {$ref: '#/components/schemas/HookType'}
+        reference_asset: {$ref: '#/components/schemas/AssetVersionRef'}
+        style_constraints: {type: array, maxItems: 20, items: {type: string}}
+        duration_seconds: {type: number, minimum: 3, maximum: 10}
+        mode: {type: string, enum: [prompt_only, generate_video]}
+      additionalProperties: false
+    HookType:
+      type: string
+      enum: [conflict, reversal, suspense, selling_point_bridge, product_demo, offer]
+    Preroll:
+      type: object
+      required: [id, organization_id, project_id, plan_id, hook_type, reference_asset, style_constraints, duration_seconds, mode, prompt_draft, quality_verdict, status, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        plan_id: {type: string}
+        hook_type: {$ref: '#/components/schemas/HookType'}
+        reference_asset: {$ref: '#/components/schemas/AssetVersionRef'}
+        style_constraints: {type: array, items: {type: string}}
+        duration_seconds: {type: number, minimum: 3, maximum: 10}
+        mode: {type: string, enum: [prompt_only, generate_video]}
+        prompt_draft: {type: string}
+        output_asset: {$ref: '#/components/schemas/ProjectAssetRef'}
+        quality_verdict: {$ref: '#/components/schemas/QualityVerdict'}
+        status: {type: string, enum: [draft, ready, failed, applied]}
+        error_code: {type: string}
+        error_message: {type: string}
+        applied_plan_id: {type: string}
+        created_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateFeedbackEventRequest:
+      type: object
+      required: [event_type, target_type, target_id]
+      properties:
+        event_type: {type: string, enum: [rating, comment, asset_selected, render_succeeded]}
+        target_type: {$ref: '#/components/schemas/FeedbackTargetType'}
+        target_id: {type: string, minLength: 1, maxLength: 160}
+        asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+        rating: {type: integer, minimum: 1, maximum: 5}
+        comment: {type: string, maxLength: 1000}
+      additionalProperties: false
+    FeedbackTargetType:
+      type: string
+      enum: [remix_plan, render_job, asset]
+    FeedbackEvent:
+      allOf:
+        - $ref: '#/components/schemas/CreateFeedbackEventRequest'
+        - type: object
+          required: [id, organization_id, project_id, created_by, created_at]
+          properties:
+            id: {type: string}
+            organization_id: {type: string}
+            project_id: {type: string}
+            created_by: {$ref: '#/components/schemas/Principal'}
+            created_at: {type: string, format: date-time}
+          additionalProperties: false
+    FeedbackEventList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/FeedbackEvent'}}
+      additionalProperties: false
+    AssetPerformance:
+      type: object
+      required: [asset_version, selected_count, render_succeeded_count, feedback_count, average_rating, updated_at]
+      properties:
+        asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+        selected_count: {type: integer, minimum: 0}
+        render_succeeded_count: {type: integer, minimum: 0}
+        feedback_count: {type: integer, minimum: 0}
+        average_rating: {type: number, minimum: 0, maximum: 5}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    AssetPerformanceList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AssetPerformance'}}
+      additionalProperties: false
+    PlannerWeightSnapshot:
+      type: object
+      required: [id, organization_id, project_id, asset_weights, created_by, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        asset_weights: {type: array, items: {$ref: '#/components/schemas/PlannerAssetWeight'}}
+        created_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
+    PlannerAssetWeight:
+      type: object
+      required: [asset_version, weight, reasons]
+      properties:
+        asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+        weight: {type: number}
+        reasons: {type: array, items: {type: string}}
+      additionalProperties: false
+    CreateEvalCaseRequest:
+      type: object
+      required: [type, title, prompt, planner_version, prompt_version, passing_score]
+      properties:
+        id: {type: string}
+        type: {type: string, enum: [mcq, rubric]}
+        title: {type: string, minLength: 1, maxLength: 160}
+        prompt: {type: string, minLength: 1, maxLength: 2000}
+        planner_version: {type: string, minLength: 1}
+        prompt_version: {type: string, minLength: 1}
+        choices: {type: array, items: {$ref: '#/components/schemas/EvalChoice'}}
+        expected_choice: {type: string}
+        rubric: {type: array, items: {$ref: '#/components/schemas/EvalRubricCriterion'}}
+        passing_score: {type: number, minimum: 0, maximum: 1}
+      additionalProperties: false
+    EvalCase:
+      allOf:
+        - $ref: '#/components/schemas/CreateEvalCaseRequest'
+        - type: object
+          required: [id, organization_id, project_id, created_at]
+          properties:
+            id: {type: string}
+            organization_id: {type: string}
+            project_id: {type: string}
+            created_at: {type: string, format: date-time}
+          additionalProperties: false
+    EvalCaseList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/EvalCase'}}
+      additionalProperties: false
+    EvalChoice:
+      type: object
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
+      additionalProperties: false
+    EvalRubricCriterion:
+      type: object
+      required: [id, label, signal, weight, required]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        signal: {type: string}
+        weight: {type: number, exclusiveMinimum: 0, maximum: 1}
+        required: {type: boolean}
+      additionalProperties: false
+    CreateEvalRunRequest:
+      type: object
+      required: [planner_version, prompt_version, submissions]
+      properties:
+        planner_version: {type: string, minLength: 1, maxLength: 128}
+        prompt_version: {type: string, minLength: 1, maxLength: 128}
+        submissions: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/EvalSubmission'}}
+      additionalProperties: false
+    EvalSubmission:
+      type: object
+      required: [case_id]
+      properties:
+        case_id: {type: string, minLength: 1}
+        choice_id: {type: string}
+        answer_text: {type: string}
+        rubric_evidence: {type: array, items: {type: string}}
+      additionalProperties: false
+    EvalRun:
+      type: object
+      required: [id, organization_id, project_id, status, planner_version, prompt_version, score, total_cases, passed_cases, failed_cases, results, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        status: {type: string, enum: [succeeded]}
+        planner_version: {type: string}
+        prompt_version: {type: string}
+        score: {type: number, minimum: 0, maximum: 1}
+        total_cases: {type: integer, minimum: 0}
+        passed_cases: {type: integer, minimum: 0}
+        failed_cases: {type: array, items: {type: string}}
+        results: {type: array, items: {$ref: '#/components/schemas/EvalResult'}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    EvalResult:
+      type: object
+      required: [id, run_id, case_id, case_type, score, passed, expected, actual, reason]
+      properties:
+        id: {type: string}
+        run_id: {type: string}
+        case_id: {type: string}
+        case_type: {type: string}
+        score: {type: number, minimum: 0, maximum: 1}
+        passed: {type: boolean}
+        expected: {type: string}
+        actual: {type: string}
+        reason: {type: string}
+      additionalProperties: false
+    CreateAgentRunRequest:
+      type: object
+      required: [workflow, target]
+      properties:
+        workflow: {type: string, enum: [render_diagnosis]}
+        target: {$ref: '#/components/schemas/DiagnosisTarget'}
+      additionalProperties: false
+    DiagnosisTarget:
+      type: object
+      required: [render_job_id]
+      properties:
+        render_job_id: {type: string, minLength: 1, maxLength: 160}
+      additionalProperties: false
+    AgentRun:
+      type: object
+      required: [id, organization_id, project_id, workflow, status, target, steps, tool_calls, trace_spans, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        workflow: {type: string, enum: [render_diagnosis]}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
+        target: {$ref: '#/components/schemas/DiagnosisTarget'}
+        steps: {type: array, items: {$ref: '#/components/schemas/AgentStep'}}
+        tool_calls: {type: array, items: {$ref: '#/components/schemas/ToolCall'}}
+        trace_spans: {type: array, items: {$ref: '#/components/schemas/TraceSpan'}}
+        output: {type: object, additionalProperties: true}
+        error_message: {type: string}
+        created_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+      additionalProperties: false
+    AgentRunList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}
+      additionalProperties: false
+    AgentStep:
+      type: object
+      required: [id, label, status, summary, started_at]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
+        summary: {type: string}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+      additionalProperties: false
+    ToolCall:
+      type: object
+      required: [id, name, status, input, started_at]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        status: {type: string, enum: [pending, running, succeeded, failed]}
+        input: {type: object, additionalProperties: true}
+        output: {type: object, additionalProperties: true}
+        error_message: {type: string}
+        references: {type: array, items: {$ref: '#/components/schemas/ResourceRef'}}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+      additionalProperties: false
+    TraceSpan:
+      type: object
+      required: [id, name, kind, status, started_at]
+      properties:
+        id: {type: string}
+        parent_id: {type: string}
+        name: {type: string}
+        kind: {type: string, enum: [agent, tool, model]}
+        status: {type: string, enum: [running, succeeded, failed, cancelled]}
+        model: {type: string}
+        input_tokens: {type: integer, minimum: 0}
+        output_tokens: {type: integer, minimum: 0}
+        error_message: {type: string}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+      additionalProperties: false
+    ImportKnowledgeDocumentRequest:
+      type: object
+      required: [title, text]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 160}
+        source_uri: {type: string, maxLength: 512}
+        source_type: {type: string, enum: [docs, strategy, retrospective, feishu_summary]}
+        text: {type: string, minLength: 1, maxLength: 200000}
+      additionalProperties: false
+    KnowledgeDocument:
+      type: object
+      required: [id, organization_id, project_id, title, source_uri, source_type, chunk_count, imported_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        title: {type: string}
+        source_uri: {type: string}
+        source_type: {type: string}
+        chunk_count: {type: integer, minimum: 0}
+        imported_by: {$ref: '#/components/schemas/Principal'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    KnowledgeDocumentList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/KnowledgeDocument'}}
+      additionalProperties: false
+    KnowledgeChunk:
+      type: object
+      required: [id, document_id, organization_id, project_id, index, text, source_uri, section, start_line, end_line, created_at]
+      properties:
+        id: {type: string}
+        document_id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        index: {type: integer, minimum: 0}
+        text: {type: string}
+        source_uri: {type: string}
+        section: {type: string}
+        start_line: {type: integer, minimum: 0}
+        end_line: {type: integer, minimum: 0}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
+    KnowledgeCitation:
+      type: object
+      required: [document_id, chunk_id, title, source_uri, section, start_line, end_line, snippet]
+      properties:
+        document_id: {type: string}
+        chunk_id: {type: string}
+        title: {type: string}
+        source_uri: {type: string}
+        section: {type: string}
+        start_line: {type: integer, minimum: 0}
+        end_line: {type: integer, minimum: 0}
+        snippet: {type: string}
+      additionalProperties: false
+    KnowledgeSearchResult:
+      type: object
+      required: [chunk, score, citations]
+      properties:
+        chunk: {$ref: '#/components/schemas/KnowledgeChunk'}
+        score: {type: integer, minimum: 0}
+        citations: {type: array, items: {$ref: '#/components/schemas/KnowledgeCitation'}}
+      additionalProperties: false
+    KnowledgeSearchResultList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/KnowledgeSearchResult'}}
+      additionalProperties: false
+    Principal:
+      type: object
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [user, service]}
+        id: {type: string}
       additionalProperties: false
     Problem:
       type: object

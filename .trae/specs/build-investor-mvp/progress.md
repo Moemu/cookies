@@ -114,3 +114,26 @@
   - Tests/Coverage: 通过；`npm run test:server` 28/28、`npm run test:e2e` 12/12 通过；对抗探针 `npx tsx --test --test-name-pattern "短剧前贴候选和受控 Prompt 不逐字复用正片首句" server/short-drama-planner.test.ts` 命中用例 1/1 通过
   - Checklist audit: 37/37 passed, 0 failed
 - **风险和问题**: 无范围内缺陷；低风险：`gh pr checks` 本机仍以 `invalid character 'd' after object key` 异常退出，已用 `gh pr view --json statusCheckRollup` 取得等价远程检查状态；低风险：`npm run build --prefix web` 在 Node 20.17.0 下提示低于 Vite 建议版本 20.19+，但命令退出 0 且远程必需检查通过
+
+## Round 8
+
+- **结论**: FAIL
+- **复核范围**: MVP checklist 的初始视口、真实 API E2E、本地测试、提交状态与 PR CI 覆盖。
+- **验证结果**:
+  - 本地通过：`git diff --check` 无输出；`npm run test:server` 33/33 通过；`npm run check:server` 通过；`npm run build` 通过；`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 通过；`npm run build --prefix web` 通过但提示本机 Node 20.17.0 低于 Vite 建议版本；`npm run lint --prefix web` 通过。
+  - 本地失败：`npm run test:e2e` 9/12 通过、3/12 失败；桌面 1280px、1440px、1680px 初始视口用例断言失败，控件底部 `1444.296875` 超出 `window.innerHeight=960`，不能证明 checklist 的初始视口可见/可操作项真实通过。
+  - 远程状态：当前分支 PR #12 的远程 `headRefOid=a82f428282b973fa6ce457c6b71f078e154b4d54` 已有 `Repository quality`、`Platform CI / verify`、`Platform CI / migrations` SUCCESS，但本地 `HEAD=f1104b0a71d38b7ba4ff595b203d81cbcec725de` 相对远端 ahead 1，远程 CI 未覆盖最新本地提交。
+- **追加任务**: 已新增 Task 25，要求修复初始视口 E2E 回归、复跑本地门禁、推送最新提交并确认远程必需检查通过。
+- **提交状态**: 本轮按用户要求未提交。
+
+## Round 9
+
+- **结论**: PASS
+- **复核范围**: Task 25 初始视口 E2E 修复、本地门禁、提交推送和 PR 必需检查覆盖。
+- **修复内容**:
+  - 素材剪辑工作区改为首屏内固定高度，素材箱内部滚动，压缩素材卡、预览卡和素材箱间距，确保素材卡与“加入混剪时间线”无需页面预滚动即可可见可点。
+  - 将“保存为 EditTask”提升到右侧检查器核心动作区，避免被质量报告和反馈飞轮区域挤出 960px 初始视口。
+- **验证结果**:
+  - 本地通过：`npx playwright test investor-mvp.spec.ts --grep "初始视口"` 3/3 通过；`npm run test:e2e` 12/12 通过；`npm run test:server` 33/33 通过；`npm run check:server` 通过；`npm run build` 通过；`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 通过；`npm run build --prefix web` 通过但提示本机 Node 20.17.0 低于 Vite 建议版本；`npm run lint --prefix web` 通过；`git diff --check` 通过。
+  - 远程通过：PR 最新提交覆盖必需检查，均为 SUCCESS。
+- **提交状态**: 已提交并推送 Task 25 修复。

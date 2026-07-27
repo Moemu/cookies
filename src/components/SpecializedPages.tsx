@@ -3,7 +3,7 @@ import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardChec
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, hookStoryboard } from '../data/commerceHooks'
-import { api, type ApiArtifact, type ApiGenerationJob, type ApiPrerollScope, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaStoryContext } from '../data/api'
+import { api, buildHitAnalysisInput, buildProductMappingInput, buildRemixPrerollInput, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPrerollScope, type ApiProductMapping, type ApiQualityReport, type ApiRemixHookType, type ApiRemixPlan, type ApiRemixPreroll, type ApiRemixRenderJob, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaStoryContext } from '../data/api'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
@@ -160,7 +160,7 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '沿着 Brief、剧本、资产、广告生成和剪辑的固定路径推进，所有产物均保留来源与确认记录。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
     <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
-    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace onNotice={setNotice}/> : selected === 'short-drama' || selected === 'game' ? <PreRollWorkspace key={selected} mode={selected} onNotice={setNotice}/> : <div className="performance-workflow">
+    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace onNotice={setNotice}/> : selected === 'short-drama' || selected === 'game' ? <PreRollWorkspace key={selected} mode={selected} onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace onNotice={setNotice}/> : <div className="performance-workflow">
       <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
       <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
       <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
@@ -173,6 +173,155 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
     </div> : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }}/>}
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </section></StateBoundary>
+}
+
+function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
+  const { currentProject } = useProject()
+  const [sourceAssetId, setSourceAssetId] = useState('source_video')
+  const [sourceVersion, setSourceVersion] = useState(1)
+  const [sourceTitle, setSourceTitle] = useState('30 秒爆款结构样本')
+  const [durationSeconds, setDurationSeconds] = useState(30)
+  const [productName, setProductName] = useState(currentProject.product)
+  const [sellingPoint, setSellingPoint] = useState('±0.01mm 精度')
+  const [secondSellingPoint, setSecondSellingPoint] = useState('98% 准时交付')
+  const [cta, setCta] = useState('预约获取打样方案')
+  const [hookAssetId, setHookAssetId] = useState('target_hook')
+  const [proofAssetId, setProofAssetId] = useState('target_proof')
+  const [ctaAssetId, setCtaAssetId] = useState('target_cta')
+  const [analysis, setAnalysis] = useState<ApiHitAnalysis | null>(null)
+  const [mapping, setMapping] = useState<ApiProductMapping | null>(null)
+  const [plan, setPlan] = useState<ApiRemixPlan | null>(null)
+  const [preroll, setPreroll] = useState<ApiRemixPreroll | null>(null)
+  const [hookType, setHookType] = useState<ApiRemixHookType>('conflict')
+  const [prerollDuration, setPrerollDuration] = useState(4)
+  const [busyStep, setBusyStep] = useState<'analysis' | 'mapping' | 'plan' | 'preroll' | 'apply-preroll' | ''>('')
+  const makeAsset = (assetId: string, version = 1) => ({ asset_id: assetId.trim(), version })
+  const analyze = async () => {
+    if (!sourceAssetId.trim()) {
+      onNotice('请先填写爆款源视频 Asset ID。')
+      return
+    }
+    setBusyStep('analysis')
+    try {
+      const created = await api.createHitAnalysis(
+        currentProject.id,
+        buildHitAnalysisInput(makeAsset(sourceAssetId, sourceVersion), sourceTitle, durationSeconds),
+      )
+      setAnalysis(created)
+      setMapping(null)
+      setPlan(null)
+      onNotice(`已分析为爆款模板：${created.segments.length} 个连续结构段。`)
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : '爆款结构分析失败。')
+    } finally {
+      setBusyStep('')
+    }
+  }
+  const mapProduct = async () => {
+    if (!analysis) {
+      onNotice('请先完成“分析为爆款模板”。')
+      return
+    }
+    if (![hookAssetId, proofAssetId, ctaAssetId].every(value => value.trim())) {
+      onNotice('请补齐 Hook、证明段和 CTA 的目标素材 Asset ID。')
+      return
+    }
+    setBusyStep('mapping')
+    try {
+      const created = await api.createProductMapping(
+        currentProject.id,
+        buildProductMappingInput(
+          analysis,
+          { name: productName, selling_points: [sellingPoint, secondSellingPoint].filter(Boolean), cta },
+          { hook: makeAsset(hookAssetId), proof: makeAsset(proofAssetId), cta: makeAsset(ctaAssetId) },
+        ),
+      )
+      setMapping(created)
+      setPlan(null)
+      onNotice('产品映射已生成，替换规则仅引用当前 Project 授权素材。')
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : '产品映射失败。')
+    } finally {
+      setBusyStep('')
+    }
+  }
+  const generatePlan = async () => {
+    if (!mapping) {
+      onNotice('请先完成“映射到产品”。')
+      return
+    }
+    setBusyStep('plan')
+    try {
+      const created = await api.generatePlanFromProductMapping(currentProject.id, mapping.id)
+      setPlan(created)
+      setPreroll(null)
+      onNotice(`混剪草案已生成：${created.summary.used_assets} 个授权素材，${created.segments.length} 段 Shot-based RemixPlan。`)
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : '生成混剪草案失败。')
+    } finally {
+      setBusyStep('')
+    }
+  }
+  const createPreroll = async () => {
+    if (!plan) {
+      onNotice('请先生成 RemixPlan 草案，再创建 AI 前贴 Hook。')
+      return
+    }
+    if (!hookAssetId.trim()) {
+      onNotice('请先填写前贴参考素材 Asset ID。')
+      return
+    }
+    setBusyStep('preroll')
+    try {
+      const created = await api.createRemixPreroll(currentProject.id, buildRemixPrerollInput(plan.id, hookType, makeAsset(hookAssetId), 'generate_video', prerollDuration, ['9:16 竖版', '静音可理解', `商品卖点：${sellingPoint}`]))
+      setPreroll(created)
+      onNotice(created.status === 'ready' ? 'AI 前贴 Hook 已生成并通过质量门禁，可插入 opening 段。' : `AI 前贴暂不可插入：${created.error_message ?? created.status}`)
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : 'AI 前贴 Hook 生成失败。')
+    } finally {
+      setBusyStep('')
+    }
+  }
+  const applyPreroll = async () => {
+    if (!preroll || preroll.status !== 'ready') {
+      onNotice('请先生成通过质量门禁的前贴。')
+      return
+    }
+    setBusyStep('apply-preroll')
+    try {
+      const updated = await api.applyRemixPreroll(currentProject.id, preroll.id)
+      setPlan(updated)
+      setPreroll({ ...preroll, status: 'applied', applied_plan_id: updated.id })
+      onNotice('AI 前贴已插入 opening 段，timeline 已重新计算。')
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : 'AI 前贴插入失败，请重新生成后再试。')
+    } finally {
+      setBusyStep('')
+    }
+  }
+  return <div className="performance-workflow">
+    <aside className="performance-mode-list"><span className="section-label">爆款模板输入</span><label>源视频 Asset ID<input value={sourceAssetId} onChange={event => setSourceAssetId(event.target.value)}/></label><label>源视频版本<input type="number" min={1} value={sourceVersion} onChange={event => setSourceVersion(Number(event.target.value))}/></label><label>模板标题<input value={sourceTitle} onChange={event => setSourceTitle(event.target.value)}/></label><label>时长（秒）<input type="number" min={9} max={180} value={durationSeconds} onChange={event => setDurationSeconds(Number(event.target.value))}/></label><button className="primary-button full" disabled={busyStep === 'analysis'} onClick={() => void analyze()}><WandSparkles size={15}/>{busyStep === 'analysis' ? '分析中…' : '分析为爆款模板'}</button></aside>
+    <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>{analysis ? `${analysis.video_meta.duration_seconds}s · ${analysis.segments.length} 段结构` : '等待爆款分析'}</span><button aria-label="播放爆款复刻预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">结构拆解与草案</span><h3>{analysis ? analysis.title : '先拆解，再映射，再生成草案'}</h3><p>{analysis ? analysis.replication_insights.join(' ') : '系统会提取叙事角色、脚本、视觉元素、转化节点和可复刻洞察。'}</p><div className="workflow-meta"><span><b>映射</b>{mapping ? `${mapping.replacement_rules.length} 条替换规则` : '等待目标商品与素材'}</span><span><b>RemixPlan</b>{plan ? `${plan.schema_version} · ${plan.summary.strategy}` : '待生成'}</span></div>{analysis ? <div className="check-list">{analysis.segments.map(segment => <span key={segment.id}><Check size={14}/>{segment.role} · {segment.start_seconds}s-{segment.end_seconds}s · {segment.summary}</span>)}</div> : null}{plan ? <div className="check-list">{plan.segments.flatMap(segment => segment.shots.map(shot => <span key={shot.id}><Check size={14}/>{segment.label} · {shot.asset_version.asset_id} · {shot.creative.shot_type}</span>))}</div> : null}</div></section>
+    <aside className="video-job-rail">
+      <span className="section-label">产品映射</span>
+      <label>目标产品<input value={productName} onChange={event => setProductName(event.target.value)}/></label>
+      <label>卖点 1<input value={sellingPoint} onChange={event => setSellingPoint(event.target.value)}/></label>
+      <label>卖点 2<input value={secondSellingPoint} onChange={event => setSecondSellingPoint(event.target.value)}/></label>
+      <label>CTA<input value={cta} onChange={event => setCta(event.target.value)}/></label>
+      <label>Hook 目标素材<input value={hookAssetId} onChange={event => setHookAssetId(event.target.value)}/></label>
+      <label>证明段目标素材<input value={proofAssetId} onChange={event => setProofAssetId(event.target.value)}/></label>
+      <label>CTA 目标素材<input value={ctaAssetId} onChange={event => setCtaAssetId(event.target.value)}/></label>
+      <button className="secondary-button full" disabled={!analysis || busyStep === 'mapping'} onClick={() => void mapProduct()}><Sparkles size={15}/>{busyStep === 'mapping' ? '映射中…' : '映射到产品'}</button>
+      <button className="primary-button full" disabled={!mapping || busyStep === 'plan'} onClick={() => void generatePlan()}><Video size={15}/>{busyStep === 'plan' ? '生成中…' : '生成混剪草案'}</button>
+      {plan ? <div className="inline-notice" role="status">RemixPlan {plan.id.slice(0, 8)} · 使用 {plan.summary.used_assets}/{plan.summary.selected_assets} 个目标素材 · 不默认复用源视频</div> : null}
+      <span className="section-label">AI 前贴 Hook</span>
+      <label>Hook 类型<select value={hookType} onChange={event => setHookType(event.target.value as ApiRemixHookType)}><option value="conflict">冲突钩子</option><option value="reversal">结果反转</option><option value="suspense">悬念开场</option><option value="selling_point_bridge">卖点承接</option><option value="product_demo">商品演示</option><option value="offer">利益点前贴</option></select></label>
+      <label>前贴秒数<input type="number" min={3} max={10} value={prerollDuration} onChange={event => setPrerollDuration(Number(event.target.value))}/></label>
+      <button className="secondary-button full" disabled={!plan || busyStep === 'preroll'} onClick={() => void createPreroll()}><WandSparkles size={15}/>{busyStep === 'preroll' ? '生成中…' : '生成前贴预览'}</button>
+      <button className="primary-button full" disabled={!preroll || preroll.status !== 'ready' || busyStep === 'apply-preroll'} onClick={() => void applyPreroll()}><Check size={15}/>{busyStep === 'apply-preroll' ? '插入中…' : '插入 opening'}</button>
+      {preroll ? <div className="inline-notice" role="status">前贴 {preroll.status} · 质检 {preroll.quality_verdict} · {preroll.output_asset ? `输出 ${preroll.output_asset.asset_version.asset_id}` : preroll.error_message ?? '仅 prompt 草案'}</div> : null}
+    </aside>
+  </div>
 }
 
 function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; onNotice: (message: string) => void }) {
@@ -524,15 +673,23 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
 function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: string) => void, onCreate: () => void }) {
   const { currentProject } = useProject()
   const [assets, setAssets] = useState<ApiArtifact[]>([])
+  const [assetFeatures, setAssetFeatures] = useState<ApiAssetFeature[]>([])
   const [selectedAssets, setSelectedAssets] = useState<string[]>([])
   const [previewAssetId, setPreviewAssetId] = useState<string>('')
   const [assetState, setAssetState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [clipCount, setClipCount] = useState(0)
   const [packaging, setPackaging] = useState(['动态字幕', '品牌片尾'])
+  const [renderPlanId, setRenderPlanId] = useState('')
+  const [renderJob, setRenderJob] = useState<ApiRemixRenderJob | null>(null)
+  const [qualityReport, setQualityReport] = useState<ApiQualityReport | null>(null)
+  const [renderNotice, setRenderNotice] = useState('输入已保存的 RemixPlan ID 后，可创建持久化 RenderJob。')
+  const [feedbackRating, setFeedbackRating] = useState(5)
+  const [feedbackComment, setFeedbackComment] = useState('结构清晰，商品卖点表达完整。')
+  const [feedbackNotice, setFeedbackNotice] = useState('反馈将以 append-only 事件写入，不会修改历史 RemixPlan 或 RenderJob。')
   useEffect(() => {
     let active = true
     setAssetState('loading')
-    void Promise.all([api.listArtifacts(currentProject.id), api.listJobs(currentProject.id)]).then(([artifacts, jobs]) => {
+    void Promise.all([api.listArtifacts(currentProject.id), api.listJobs(currentProject.id), api.listAssetFeatures(currentProject.id)]).then(([artifacts, jobs, features]) => {
       const succeededJobs = new Set(jobs.filter(job => job.status === 'succeeded').map(job => job.id))
       const nextAssets = artifacts.filter(artifact => (
         artifact.kind === 'video'
@@ -542,12 +699,14 @@ function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: str
       ))
       if (active) {
         setAssets(nextAssets)
+        setAssetFeatures(features.items)
         setSelectedAssets(current => current.filter(id => nextAssets.some(asset => asset.id === id)))
         setAssetState('ready')
       }
     }).catch(() => {
       if (active) {
         setAssets([])
+        setAssetFeatures([])
         setSelectedAssets([])
         setAssetState('error')
       }
@@ -561,19 +720,151 @@ function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: str
     setSelectedAssets(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
     onNotice('视频封面已进入播放预览，点击素材可加入或移出混剪队列。')
   }
+  useEffect(() => {
+    if (!renderJob || !['queued', 'running'].includes(renderJob.status)) return
+    const timer = window.setInterval(() => {
+      void api.getRemixRenderJob(currentProject.id, renderJob.id).then(next => {
+        setRenderJob(next)
+        if (next.quality_report_id) {
+          void api.getRemixRenderJobQualityReport(currentProject.id, next.id).then(envelope => setQualityReport(envelope.quality_report))
+        }
+        if (next.status === 'succeeded') {
+          setRenderNotice(next.output_asset ? '渲染完成，成片已回流素材库并生成血缘记录。' : '渲染完成，等待成片资产回流。')
+        } else if (next.status === 'failed') {
+          setRenderNotice(`渲染失败${next.error_message ? `：${next.error_message}` : '，请检查任务日志。'}`)
+        } else if (next.status === 'requires_review') {
+          setRenderNotice('渲染进入人工复核，请查看质量报告或诊断结果。')
+        }
+      }).catch(cause => setRenderNotice(cause instanceof Error ? cause.message : 'RenderJob 状态读取失败。'))
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [currentProject.id, renderJob])
   const togglePackaging = (name: string) => setPackaging(current => current.includes(name) ? current.filter(item => item !== name) : [...current, name])
   const addClip = () => { setClipCount(value => value + selectedAssets.length); onNotice(`已将 ${selectedAssets.length} 段已持久化视频加入混剪时间线`) }
+  const createRenderJob = async () => {
+    if (!renderPlanId.trim()) {
+      setRenderNotice('请先填写已保存的 RemixPlan ID。')
+      return
+    }
+    try {
+      const key = `remix-render-${currentProject.id}-${renderPlanId.trim()}-${selectedAssets.slice().sort().join('-') || 'timeline'}`
+      const next = await api.createRemixRenderJob(currentProject.id, {
+        plan_id: renderPlanId.trim(),
+        target_format: 'mp4',
+        target_quality: 'standard',
+      }, key)
+      setRenderJob(next)
+      setQualityReport(null)
+      setRenderNotice(next.status === 'succeeded' && next.output_asset ? 'RenderJob 已完成，成片已回流素材库。' : 'RenderJob 已持久化，正在轮询状态。')
+    } catch (cause) {
+      setRenderNotice(cause instanceof Error ? cause.message : '创建 RenderJob 失败，请确认 RemixPlan 已保存。')
+    }
+  }
+  const createQualityReport = async () => {
+    if (!renderJob) {
+      setRenderNotice('请先创建 RenderJob 后再执行质量检查。')
+      return
+    }
+    try {
+      const report = await api.createRemixQualityReport(currentProject.id, {
+        render_job_id: renderJob.id,
+        policy: 'fail_critical',
+      })
+      setQualityReport(report)
+      const next = await api.getRemixRenderJob(currentProject.id, renderJob.id)
+      setRenderJob(next)
+      setRenderNotice(report.verdict === 'pass' ? '质量报告通过，成片可继续进入回流流程。' : `质量报告为 ${report.verdict}，已同步 RenderJob 状态。`)
+    } catch (cause) {
+      setRenderNotice(cause instanceof Error ? cause.message : '质量检查失败，请稍后重试。')
+    }
+  }
+  const submitPlanFeedback = async () => {
+    if (!renderPlanId.trim()) {
+      setFeedbackNotice('请先填写 RemixPlan ID 后再提交计划反馈。')
+      return
+    }
+    try {
+      const event = await api.createRemixFeedbackEvent(currentProject.id, {
+        event_type: 'rating',
+        target_type: 'remix_plan',
+        target_id: renderPlanId.trim(),
+        rating: feedbackRating,
+        comment: feedbackComment,
+      })
+      setFeedbackNotice(`计划反馈已记录为事件 ${event.id.slice(0, 8)}，历史计划保持不变。`)
+    } catch (cause) {
+      setFeedbackNotice(cause instanceof Error ? cause.message : '提交计划反馈失败。')
+    }
+  }
+  const submitOutputFeedback = async () => {
+    const output = renderJob?.output_asset
+    if (!renderJob || !output) {
+      setFeedbackNotice('RenderJob 生成成片资产后才能提交资产反馈。')
+      return
+    }
+    try {
+      await api.createRemixFeedbackEvent(currentProject.id, {
+        event_type: 'render_succeeded',
+        target_type: 'render_job',
+        target_id: renderJob.id,
+        asset_version: output.asset_version,
+      })
+      const event = await api.createRemixFeedbackEvent(currentProject.id, {
+        event_type: 'rating',
+        target_type: 'asset',
+        target_id: String(output.asset_version.asset_id),
+        asset_version: output.asset_version,
+        rating: feedbackRating,
+        comment: feedbackComment,
+      })
+      const snapshot = await api.createPlannerWeightSnapshot(currentProject.id)
+      setFeedbackNotice(`成片反馈 ${event.id.slice(0, 8)} 已写入，Planner 权重快照包含 ${snapshot.asset_weights.length} 个素材。`)
+    } catch (cause) {
+      setFeedbackNotice(cause instanceof Error ? cause.message : '提交成片反馈失败。')
+    }
+  }
   const titleForAsset = (asset: ApiArtifact) => asset.shortDramaPreroll?.selectedCandidate.voiceover ?? asset.content
   const labelForAsset = (asset: ApiArtifact) => asset.prerollType === 'short_drama' ? '短剧前贴' : asset.prerollType === 'game' ? '游戏前贴' : asset.prerollType === 'commerce' ? '电商前贴' : '服务端视频'
   const genreTabs = ['推荐', '热榜', '榜单', '逆袭', '爱情', '剧情', '反转', '亲情', '悬疑', '喜剧']
+  const renderBusy = renderJob?.status === 'queued' || renderJob?.status === 'running'
+  const outputAssetLabel = renderJob?.output_asset ? `${renderJob.output_asset.asset_version.asset_id} v${renderJob.output_asset.asset_version.version}` : ''
+  const outputPreviewURL = renderJob?.output_preview?.url ?? ''
+  const provenanceLabel = renderJob?.provenance ? `血缘：Plan ${renderJob.provenance.plan_id.slice(0, 12)} · Render ${renderJob.provenance.render_job_id.slice(0, 12)} · 输入素材 ${renderJob.provenance.input_assets.length} 个` : ''
   return <div className="video-editing-workspace">
-    <div className="editing-toolbar"><div><span className="section-label">EditTask · ED-2607-12</span><b>15 秒竖版产品广告</b><small>来源：策略 v2.4 · Creative v1.3</small></div><div><button className="secondary-button" onClick={() => onNotice('低清预览渲染已创建')}><Play size={14} fill="currentColor"/>预览</button><button className="primary-button" onClick={() => onNotice('1080×1920 导出任务已创建')}><Download size={15}/>导出</button></div></div>
+    <div className="editing-toolbar"><div><span className="section-label">EditTask · ED-2607-12</span><b>15 秒竖版产品广告</b><small>来源：策略 v2.4 · Creative v1.3</small></div><div><button className="secondary-button" onClick={() => onNotice('低清预览渲染已创建')}><Play size={14} fill="currentColor"/>预览</button><button className="primary-button" disabled={!selectedAssets.length || renderBusy} onClick={() => void createRenderJob()}><Download size={15}/>{renderBusy ? '导出中…' : '导出'}</button></div></div>
     <div className="editing-shell">
-      <aside className="editing-assets video-asset-library"><div className="surface-toolbar"><h3>视频素材箱</h3><span>当前 Project</span></div><div className="video-platform-tabs" aria-label="短剧素材分类">{genreTabs.map((tab, index) => <span key={tab} className={index === 0 ? 'active' : ''}>{tab}</span>)}</div><div className="asset-group video-asset-stage"><span>选择参与混剪的视频 · {selectedAssets.length}/{assets.length}</span>{assetState === 'loading' ? <div className="panel-empty">正在加载服务端持久化资产…</div> : null}{assetState === 'error' ? <div className="panel-empty">素材箱加载失败，请刷新后重试。</div> : null}{assetState === 'ready' && !assets.length ? <div className="panel-empty">当前 Project 暂无可用于混剪的已持久化视频资产。</div> : null}<div className="asset-card-flow">{assets.map((asset, index) => { const selected = selectedAssets.includes(asset.id); const previewing = activePreview?.id === asset.id; return <button key={asset.id} className={`video-asset-card poster-${index % 6}${selected ? ' active' : ''}${previewing ? ' previewing' : ''}`} onMouseEnter={() => setPreviewAssetId(asset.id)} onFocus={() => setPreviewAssetId(asset.id)} onClick={() => toggleAsset(asset.id)} aria-pressed={selected}><span className="video-poster-frame"><span className="poster-glow"/><span className="poster-cast"><span/><span/><span/></span><span className="poster-play"><Play size={13} fill="currentColor"/></span><b>{titleForAsset(asset)}</b><small>{labelForAsset(asset)} · {58 + index * 7}集</small><em>{previewing ? 'AUTO PREVIEW' : `${(5.2 + index * .6).toFixed(1)}亿`}</em></span><span className="video-card-meta"><span className="asset-check">{selected ? <Check size={12}/> : null}</span><span><b>{labelForAsset(asset)}视频</b><small>{previewing ? '悬停自动预览 · 点击播放' : `已持久化 · ${asset.id.slice(0, 8)}`}</small></span></span></button> })}</div></div><div className="video-library-preview" aria-live="polite"><span>{activePreview ? labelForAsset(activePreview) : '等待素材'}</span><b>{activePreview ? titleForAsset(activePreview) : '选择一个视频素材开始预览'}</b><small>{activePreview ? '沉浸式封面预览 · 9:16 竖屏内容 · 已通过服务端持久化门禁' : '素材成功生成并保存后会出现在这里。'}</small><div><Play size={14} fill="currentColor"/>点击卡片播放，悬停自动预览</div></div><button className="secondary-button full" disabled={!selectedAssets.length} onClick={addClip}><Scissors size={15}/>加入混剪时间线</button></aside>
+      <aside className="editing-assets video-asset-library"><div className="surface-toolbar"><h3>视频素材箱</h3><span>当前 Project</span></div><div className="video-platform-tabs" aria-label="短剧素材分类">{genreTabs.map((tab, index) => <span key={tab} className={index === 0 ? 'active' : ''}>{tab}</span>)}</div><div className="asset-group video-asset-stage"><span>选择参与混剪的视频 · {selectedAssets.length}/{assets.length}</span>{assetState === 'loading' ? <div className="panel-empty">正在加载服务端持久化资产…</div> : null}{assetState === 'error' ? <div className="panel-empty">素材箱加载失败，请刷新后重试。</div> : null}{assetState === 'ready' && !assets.length ? <div className="panel-empty">当前 Project 暂无可用于混剪的已持久化视频资产。</div> : null}<div className="asset-card-flow">{assets.map((asset, index) => { const selected = selectedAssets.includes(asset.id); const previewing = activePreview?.id === asset.id; const feature = featureForVideoAsset(asset, assetFeatures); return <button key={asset.id} className={`video-asset-card poster-${index % 6}${selected ? ' active' : ''}${previewing ? ' previewing' : ''}`} onMouseEnter={() => setPreviewAssetId(asset.id)} onFocus={() => setPreviewAssetId(asset.id)} onClick={() => toggleAsset(asset.id)} aria-pressed={selected}><span className="video-poster-frame"><span className="poster-glow"/><span className="poster-cast"><span/><span/><span/></span><span className="poster-play"><Play size={13} fill="currentColor"/></span><b>{titleForAsset(asset)}</b><small>{labelForAsset(asset)} · {58 + index * 7}集</small><em>{feature ? `Hook ${featurePercent(feature.hookStrength)} · ${riskText(feature.similarityRisk)}` : previewing ? 'AUTO PREVIEW' : `${(5.2 + index * .6).toFixed(1)}亿`}</em></span><span className="video-card-meta"><span className="asset-check">{selected ? <Check size={12}/> : null}</span><span><b>{labelForAsset(asset)}视频</b><small>{feature ? videoFeatureSummary(feature) : previewing ? '悬停自动预览 · 暂无特征' : `已持久化 · ${asset.id.slice(0, 8)}`}</small></span></span></button> })}</div></div><div className="video-library-preview" aria-live="polite"><span>{activePreview ? labelForAsset(activePreview) : '等待素材'}</span><b>{activePreview ? titleForAsset(activePreview) : '选择一个视频素材开始预览'}</b><small>{activePreview ? (featureForVideoAsset(activePreview, assetFeatures)?.sellingPoints[0] ?? '沉浸式封面预览 · 9:16 竖屏内容 · 已通过服务端持久化门禁') : '素材成功生成并保存后会出现在这里。'}</small><div><Play size={14} fill="currentColor"/>{activePreview && featureForVideoAsset(activePreview, assetFeatures) ? 'Planner 可读取 Hook、商品露出与相似度风险' : '点击卡片播放，悬停自动预览'}</div></div><button className="secondary-button full" disabled={!selectedAssets.length} onClick={addClip}><Scissors size={15}/>加入混剪时间线</button></aside>
       <section className="editing-center"><div className="editing-preview"><div className="preview-grid"/><div className="editing-safe-frame"><span>9:16</span><b>精度，先于承诺被看见。</b><small>WHITE PRECISION</small></div><button aria-label="播放剪辑预览" onClick={() => onNotice('正在播放当前时间线')}><Play size={18} fill="currentColor"/></button><time>00:06.8 / 00:15.0</time></div><div className="timeline-toolbar"><span>时间线 · v1.3</span><div><button aria-label="撤销编辑" onClick={() => onNotice('已撤销上一步编辑')}>撤销</button><button aria-label="保存时间线" onClick={() => onNotice('时间线 v1.4 已保存')}><Save size={14}/>保存</button></div></div><div className="editing-timeline">{[['视频', 'clip video-a'], ['叠加', 'clip overlay'], ['字幕', 'clip caption'], ['配音', 'clip voice'], ['音乐', 'clip music']].map(([track, className], index) => <div className="timeline-row" key={track}><span>{index === 2 ? <Subtitles size={14}/> : index > 2 ? <Volume2 size={14}/> : <Film size={14}/>} {track}</span><div className="timeline-lane"><button className={className} onClick={() => onNotice(`${track}轨道已选中`)}>{index === 0 ? `${clipCount} 个镜头 · 00:15` : index === 2 ? '精度，先于承诺被看见。' : index === 3 ? '品牌旁白' : index === 4 ? <><Music2 size={13}/>品牌节奏</> : '产品卖点与品牌标识'}</button></div></div>)}</div></section>
-      <aside className="editing-inspector"><div className="surface-toolbar"><h3>视频包装</h3><span className="status success"><span/>可导出</span></div><div className="inspector-section"><span>画面规格</span><b>1080 × 1920 · 9:16</b><small>抖音 / 快手信息流</small></div><div className="packaging-options"><span>包装组件</span>{['动态字幕', '节奏音效', '品牌片尾', '转化 CTA'].map(item => <button key={item} className={packaging.includes(item) ? 'active' : ''} onClick={() => togglePackaging(item)} aria-pressed={packaging.includes(item)}>{packaging.includes(item) ? <Check size={13}/> : null}{item}</button>)}</div><div className="editing-checks"><span><Check size={14}/>已选 {selectedAssets.length} 段生成视频</span><span><Check size={14}/>{packaging.length} 个包装组件启用</span><span><Check size={14}/>字幕静音可理解</span><span><Check size={14}/>品牌检查通过</span></div><button className="primary-button full" disabled={!selectedAssets.length} onClick={() => onNotice(`混剪版本 v1.4 已生成：${selectedAssets.length} 段视频 + ${packaging.length} 个包装组件`)}><Sparkles size={15}/>生成混剪版本</button><button className="secondary-button full" onClick={onCreate}><Video size={15}/>保存为 EditTask</button></aside>
+      <aside className="editing-inspector"><div className="surface-toolbar"><h3>视频包装</h3><span className={`status ${qualityReport ? qualityStatusClass(qualityReport.verdict) : 'success'}`}><span/>{qualityReport ? qualityVerdictText(qualityReport.verdict) : '可导出'}</span></div><div className="inspector-section"><span>画面规格</span><b>1080 × 1920 · 9:16</b><small>抖音 / 快手信息流</small></div><label>RemixPlan ID<input value={renderPlanId} onChange={event => setRenderPlanId(event.target.value)} placeholder="remixplan_xxx"/></label><div className="packaging-options"><span>包装组件</span>{['动态字幕', '节奏音效', '品牌片尾', '转化 CTA'].map(item => <button key={item} className={packaging.includes(item) ? 'active' : ''} onClick={() => togglePackaging(item)} aria-pressed={packaging.includes(item)}>{packaging.includes(item) ? <Check size={13}/> : null}{item}</button>)}</div><div className="editing-checks"><span><Check size={14}/>已选 {selectedAssets.length} 段生成视频</span><span><Check size={14}/>{packaging.length} 个包装组件启用</span><span><Check size={14}/>字幕静音可理解</span><span><Check size={14}/>品牌检查通过</span></div><button className="primary-button full" disabled={!selectedAssets.length} onClick={() => onNotice(`混剪版本 v1.4 已生成：${selectedAssets.length} 段视频 + ${packaging.length} 个包装组件`)}><Sparkles size={15}/>生成混剪版本</button><button className="secondary-button full" onClick={onCreate}><Video size={15}/>保存为 EditTask</button><button className="secondary-button full" disabled={!selectedAssets.length || renderBusy} onClick={() => void createRenderJob()}><Download size={15}/>{renderBusy ? '导出中…' : '创建 RenderJob'}</button><button className="secondary-button full" disabled={!renderJob || renderBusy || Boolean(qualityReport)} onClick={() => void createQualityReport()}><ShieldCheck size={15}/>执行质量检查</button>{renderJob ? <div className="inline-notice" role="status">RenderJob {renderJob.id.slice(0, 8)} · {renderJob.status} · {renderJob.progress}%{renderJob.requires_review ? ' · 需人工复核' : ''}{renderJob.quality_report_id ? ` · 报告 ${renderJob.quality_report_id.slice(0, 8)}` : ''}{renderJob.error_message ? ` · ${renderJob.error_message}` : ''}<progress value={renderJob.progress} max={100}/>{outputAssetLabel ? <span>成片资产：{outputAssetLabel}</span> : null}{outputPreviewURL ? <a href={outputPreviewURL} target="_blank" rel="noreferrer">打开成片预览</a> : null}{provenanceLabel ? <small>{provenanceLabel}</small> : null}</div> : null}{qualityReport ? <div className="quality-report-card"><div><span>QualityReport</span><b>{qualityVerdictText(qualityReport.verdict)} · {Math.round(qualityReport.score * 100)}分</b></div><ul>{qualityReport.dimensions.slice(0, 3).map(dimension => <li key={dimension.name}><span>{dimension.name}</span><b>{Math.round(dimension.score * 100)}%</b><small>{dimension.summary}</small></li>)}</ul>{qualityReport.issues[0] ? <p>{qualityReport.issues[0].start_seconds.toFixed(1)}s-{qualityReport.issues[0].end_seconds.toFixed(1)}s · {qualityReport.issues[0].description} · {qualityReport.issues[0].repair_suggestion}</p> : <p>未发现 critical/major 问题，可继续进入成片回流。</p>}</div> : null}<div className="feedback-card"><div><span>反馈飞轮</span><b>人工评分与评论</b></div><div className="feedback-rating"><button aria-label="降低评分" onClick={() => setFeedbackRating(value => Math.max(1, value - 1))}><ThumbsDown size={13}/></button><strong>{feedbackRating}/5</strong><button aria-label="提高评分" onClick={() => setFeedbackRating(value => Math.min(5, value + 1))}><ThumbsUp size={13}/></button></div><textarea value={feedbackComment} onChange={event => setFeedbackComment(event.target.value)} maxLength={1000}/><button className="secondary-button full" onClick={() => void submitPlanFeedback()}><Save size={15}/>提交计划反馈</button><button className="secondary-button full" disabled={!renderJob?.output_asset} onClick={() => void submitOutputFeedback()}><Sparkles size={15}/>提交成片反馈并生成权重快照</button><small>{feedbackNotice}</small></div><div className="inline-notice" role="status">{renderNotice}</div></aside>
     </div>
   </div>
+}
+
+function featureForVideoAsset(asset: ApiArtifact, features: ApiAssetFeature[]): ApiAssetFeature | undefined {
+  return features
+    .filter(feature => feature.assetId === asset.id && feature.assetVersion === asset.version)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+}
+
+function videoFeatureSummary(feature: ApiAssetFeature): string {
+  const sellingPoint = feature.sellingPoints[0] ? ` · ${feature.sellingPoints[0]}` : ''
+  return `商品露出 ${featurePercent(feature.productVisibility)} · ${riskText(feature.similarityRisk)}${sellingPoint}`
+}
+
+function featurePercent(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
+function riskText(risk: ApiAssetFeature['similarityRisk']): string {
+  return risk === 'high' ? '高相似风险' : risk === 'medium' ? '中相似风险' : '低相似风险'
+}
+
+function qualityVerdictText(verdict: ApiQualityReport['verdict']): string {
+  return verdict === 'critical' ? '严重阻断' : verdict === 'major' ? '需复核' : '质检通过'
+}
+
+function qualityStatusClass(verdict: ApiQualityReport['verdict']): 'success' | 'warning' | 'danger' {
+  return verdict === 'critical' ? 'danger' : verdict === 'major' ? 'warning' : 'success'
 }
 
 export function ReportCenterPage({ state }: { state: DataState }) {
@@ -602,6 +893,76 @@ export function ReportCenterPage({ state }: { state: DataState }) {
   </div></StateBoundary>
 }
 
+type DeliveryGateCheck = {
+  code: string
+  label: string
+  passed: boolean
+  repair: string
+}
+
+type DeliveryGateGroup = {
+  title: string
+  checks: DeliveryGateCheck[]
+}
+
+function statusIsHealthy(status?: ApiAdAccountBinding['permissionStatus']) {
+  return status === 'normal'
+}
+
+function confirmedMaterialFor(pointer: ApiAssetVersionPointer, confirmations: ApiMaterialConfirmation[]) {
+  return confirmations.find(item => item.projectId === pointer.projectId && item.assetId === pointer.assetId && item.assetVersion === pointer.workingVersion && item.status === 'confirmed')
+}
+
+function deliveryPlanSignature(account: ApiAdAccountBinding | undefined, budget: number, materials: ApiAssetVersionPointer[]) {
+  const materialPart = materials.map(item => `${item.assetId}@v${item.workingVersion}`).sort().join('|') || 'no-material'
+  return [account?.id ?? 'no-account', budget, materialPart].join(':')
+}
+
+function deliveryPlanVersion(signature: string) {
+  let hash = 0
+  for (const char of signature) hash = (hash * 31 + char.charCodeAt(0)) % 100000
+  return `plan-v${String(hash).padStart(5, '0')}`
+}
+
+function buildDeliveryGateGroups(account: ApiAdAccountBinding | undefined, budget: number, budgetLimit: number, materials: ApiAssetVersionPointer[], confirmations: ApiMaterialConfirmation[]): DeliveryGateGroup[] {
+  const confirmedCount = materials.filter(pointer => confirmedMaterialFor(pointer, confirmations)).length
+  return [
+    {
+      title: '输入完整性',
+      checks: [
+        { code: 'account', label: account ? `账户已选择：${account.accountName}` : '未选择广告账户', passed: Boolean(account), repair: '选择与当前 Project 绑定的广告账户。' },
+        { code: 'budget', label: `预算 ¥${budget.toLocaleString('zh-CN')} / 护栏 ¥${budgetLimit.toLocaleString('zh-CN')}`, passed: budget > 0 && budget <= budgetLimit, repair: '预算必须大于 0 且不超过 Project 护栏。' },
+        { code: 'materials', label: `素材组合 ${materials.length} 个版本`, passed: materials.length > 0, repair: '至少选择一个已纳入当前 Project 的素材版本。' },
+      ],
+    },
+    {
+      title: '账户权限',
+      checks: [
+        { code: 'permission', label: `权限：${account?.permissionStatus ?? '未连接'}`, passed: statusIsHealthy(account?.permissionStatus), repair: '重新授权广告账户或联系账户负责人。' },
+        { code: 'login', label: `登录：${account?.loginStatus ?? '未连接'}`, passed: statusIsHealthy(account?.loginStatus), repair: '恢复账户登录状态后重新预检。' },
+      ],
+    },
+    {
+      title: '素材品牌版权',
+      checks: [
+        { code: 'human-confirmed', label: `人工确认版本 ${confirmedCount}/${materials.length}`, passed: materials.length > 0 && confirmedCount === materials.length, repair: '仅允许使用 MaterialConfirmation 已确认的当前素材版本。' },
+        { code: 'brand-scope', label: '品牌、版权和使用范围绑定到当前 Project', passed: materials.length > 0 && confirmedCount === materials.length, repair: '回到素材检查页完成品牌版权复核和人工确认。' },
+      ],
+    },
+    {
+      title: '预算追踪回滚',
+      checks: [
+        { code: 'tracking', label: `像素追踪：${account?.trackingStatus ?? '未连接'}`, passed: statusIsHealthy(account?.trackingStatus), repair: '修复像素或转化 API 追踪异常。' },
+        { code: 'rollback', label: '已配置模拟执行证据和回滚说明', passed: Boolean(account) && budget > 0, repair: '补齐账户与预算后才能生成可回滚执行证据。' },
+      ],
+    },
+  ]
+}
+
+function gateGroupsPassed(groups: DeliveryGateGroup[]) {
+  return groups.every(group => group.checks.every(check => check.passed))
+}
+
 export function DeliveryPlanPage({ state }: { state: DataState }) {
   const { currentProject, addChangeSet, preflightChangeSet } = useProject()
   const [step, setStep] = useState('计划配置')
@@ -609,13 +970,36 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
   const [budget, setBudget] = useState(currentProject.budget)
   const [latest, setLatest] = useState<DeliveryChangeSet>()
   const [busy, setBusy] = useState(false)
+  const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
+  const [selectedAccountId, setSelectedAccountId] = useState('')
+  const [preflightSignature, setPreflightSignature] = useState('')
+  const planPeriod = '2026-07-25 至 2026-08-31'
+  const audience = `${currentProject.brand} 高意向人群 / 近 30 天互动用户`
+  const landingPage = `https://demo.cookies.local/lp/${currentProject.code.toLowerCase()}`
+  const pixelId = `PX-${currentProject.code}-LEAD`
+  const namingRule = `${currentProject.code}_{{account}}_{{asset}}_{{date}}`
+  const projectAccounts = useMemo(() => workbench?.adAccountBindings.filter(account => account.projectIds.includes(currentProject.id)) ?? [], [currentProject.id, workbench])
+  const selectedAccount = projectAccounts.find(account => account.id === selectedAccountId) ?? projectAccounts[0]
+  const materials = useMemo(() => workbench?.assetVersionPointers.filter(pointer => pointer.projectId === currentProject.id) ?? [], [currentProject.id, workbench])
+  const confirmations = workbench?.materialConfirmations ?? []
+  const gateGroups = useMemo(() => buildDeliveryGateGroups(selectedAccount, budget, currentProject.budget, materials, confirmations), [budget, confirmations, currentProject.budget, materials, selectedAccount])
+  const planSignature = deliveryPlanSignature(selectedAccount, budget, materials)
+  const planVersion = deliveryPlanVersion(planSignature)
+  const preflightStale = Boolean(latest?.preflight) && preflightSignature !== planSignature
+  const canRunPreflight = latest !== undefined && latest.status === 'draft' && gateGroupsPassed(gateGroups)
   useEffect(() => {
     setBudget(currentProject.budget)
+    setSelectedAccountId('')
+    setPreflightSignature('')
   }, [currentProject.id, currentProject.budget])
   useEffect(() => {
     let active = true
-    void deliveryApi.listChangeSets(currentProject.id).then(records => {
-      if (active) setLatest(records.at(-1))
+    void Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench()]).then(([records, agency]) => {
+      if (!active) return
+      const changeSet = records.at(-1)
+      setLatest(changeSet)
+      setWorkbench(agency)
+      if (changeSet?.preflight) setPreflightSignature('')
     }).catch(() => undefined)
     return () => { active = false }
   }, [currentProject.id])
@@ -624,7 +1008,8 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
     try {
       const changeSet = await addChangeSet(budget)
       setLatest(changeSet)
-      setNotice(`${changeSet.id} 已在服务端创建；尚未执行任何真实广告平台写入。`)
+      setPreflightSignature('')
+      setNotice(`${changeSet.id} 已在服务端创建；当前计划版本为 ${planVersion}，尚未执行任何真实广告平台写入。`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '创建 ChangeSet 失败')
     } finally {
@@ -633,11 +1018,16 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
   }
   const preflight = async () => {
     if (!latest) return
+    if (!gateGroupsPassed(gateGroups)) {
+      setNotice('预检未通过：请先修复账户权限、预算、素材人工确认或追踪回滚问题。')
+      return
+    }
     setBusy(true)
     try {
       const changeSet = await preflightChangeSet(latest.id)
       setLatest(changeSet)
-      setNotice(changeSet.preflight?.passed ? '预检通过，已进入人工审批队列。' : '预检未通过，请按修复建议补齐输入。')
+      setPreflightSignature(planSignature)
+      setNotice(changeSet.preflight?.passed ? `预检通过并绑定 ${planVersion}，可进入执行确认。` : '预检未通过，请按修复建议补齐输入。')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '预检失败')
     } finally {
@@ -645,8 +1035,8 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
     }
   }
   return <StateBoundary state={state}><div className="delivery-plan-workspace">
-    <section className="plan-main"><ArtifactFlow compact/><div className="plan-tabs">{['计划配置', '素材组合', '预算与排期', '校验'].map(item => <button className={step === item ? 'active' : ''} key={item} onClick={() => setStep(item)}>{item}</button>)}</div><div className="plan-form"><div><label>计划名称<input defaultValue="销售线索增长计划 06"/></label><label>转化目标<select defaultValue="高质量销售线索"><option>高质量销售线索</option><option>表单提交</option></select></label></div><div><label>总预算（CNY）<input type="number" value={budget} onChange={event => setBudget(Number(event.target.value))}/></label><label>投放周期<input defaultValue="2026-07-25 至 2026-08-31"/></label></div><label>素材来源<div className="upstream-source"><Sparkles size={17}/><span><b>创意 {currentProject.artifacts.creative.version}</b><small>{currentProject.artifacts.creative.summary}</small></span><CircleCheck size={17}/></div></label></div><div className="validation-list"><h3>上线前校验</h3>{['商品与落地页绑定准确', '预算未超过 Project 护栏', '素材版权与品牌检查通过', '转化追踪最近 30 分钟有信号'].map(item => <span key={item}><CircleCheck size={16}/>{item}</span>)}</div></section>
-    <aside className="changeset-panel"><div className="surface-toolbar"><h3>ChangeSet</h3><span className="source-chip">本地模拟</span></div>{latest ? <><div className="changeset-title"><span>{latest.id} · v{latest.version}</span><h2>{latest.name}</h2><small>预算边界 ¥{latest.budgetLimit?.toLocaleString('zh-CN') ?? 0} · {latest.status}</small></div>{latest.preflight ? <div className="validation-list">{latest.preflight.checks.map(check => <span key={check.code} className={check.passed ? '' : 'preflight-failed'}>{check.passed ? <CircleCheck size={16}/> : <CircleAlert size={16}/>}<b>{check.message}</b>{!check.passed ? <small>{check.repair}</small> : null}</span>)}</div> : <div className="rollback-copy"><ShieldCheck size={16}/><span><b>待运行预检</b><small>系统会校验 Brief、创意和预算边界。</small></span></div>}<div className="rollback-copy"><ShieldCheck size={16}/><span><b>模拟边界</b><small>仅生成本地执行证据，不连接真实广告平台。</small></span></div></> : <div className="panel-empty">尚未创建服务端 ChangeSet</div>}<button className="secondary-button full" onClick={createChange} disabled={busy}>生成 ChangeSet</button><button className="primary-button full" onClick={preflight} disabled={!latest || busy || latest.status !== 'draft'}><Send size={15}/>{latest?.status === 'preflight_passed' ? '已通过预检' : '运行上线前预检'}</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <section className="plan-main"><ArtifactFlow compact/><div className="plan-tabs">{['计划配置', '素材组合', '预算与排期', '校验'].map(item => <button className={step === item ? 'active' : ''} key={item} onClick={() => setStep(item)}>{item}</button>)}</div><div className="plan-form"><div><label>计划名称<input defaultValue="销售线索增长计划 06"/></label><label>广告账户<select value={selectedAccount?.id ?? ''} onChange={event => setSelectedAccountId(event.target.value)}>{projectAccounts.length ? projectAccounts.map(account => <option key={account.id} value={account.id}>{account.platform} · {account.accountName}</option>) : <option value="">无绑定账户</option>}</select></label></div><div><label>总预算（CNY）<input type="number" value={budget} onChange={event => setBudget(Number(event.target.value))}/></label><label>投放周期<input readOnly value={planPeriod}/></label></div><div><label>受众<input readOnly value={audience}/></label><label>落地页<input readOnly value={landingPage}/></label></div><div><label>像素<input readOnly value={pixelId}/></label><label>命名规则<input readOnly value={namingRule}/></label></div><label>素材组合<div className="delivery-material-combo">{materials.map(pointer => { const confirmation = confirmedMaterialFor(pointer, confirmations); return <span key={pointer.id} className={confirmation ? 'confirmed' : 'blocked'}><b>{pointer.assetId} v{pointer.workingVersion}</b><small>{confirmation ? `已人工确认 · ${confirmation.confirmedBy}` : '未人工确认，禁止执行'}</small></span> })}{materials.length === 0 ? <span className="blocked"><b>暂无素材版本</b><small>请先完成素材制作和人工确认。</small></span> : null}</div></label></div><div className="validation-list delivery-gate-list"><h3>上线前预检 · {planVersion}</h3>{gateGroups.flatMap(group => group.checks.map(check => <span key={`${group.title}-${check.code}`} className={check.passed ? '' : 'preflight-failed'}>{check.passed ? <CircleCheck size={16}/> : <CircleAlert size={16}/>}<b>{group.title} · {check.label}</b>{!check.passed ? <small>{check.repair}</small> : null}</span>))}</div></section>
+    <aside className="changeset-panel"><div className="surface-toolbar"><h3>ChangeSet</h3><span className="source-chip">本地模拟</span></div>{latest ? <><div className="changeset-title"><span>{latest.id} · v{latest.version}</span><h2>{latest.name}</h2><small>预算边界 ¥{latest.budgetLimit?.toLocaleString('zh-CN') ?? 0} · {latest.status}</small><small>当前计划版本 {planVersion}</small></div>{latest.preflight ? <div className="validation-list delivery-gate-list">{preflightStale ? <span className="preflight-failed"><CircleAlert size={16}/><b>预检版本已失效</b><small>计划账户、预算或素材组合变化后，必须重新生成 ChangeSet 并预检。</small></span> : <span><CircleCheck size={16}/><b>预检绑定 {planVersion}</b><small>{latest.preflight.checkedAt}</small></span>}{latest.preflight.checks.map(check => <span key={check.code} className={check.passed ? '' : 'preflight-failed'}>{check.passed ? <CircleCheck size={16}/> : <CircleAlert size={16}/>}<b>{check.message}</b>{!check.passed ? <small>{check.repair}</small> : null}</span>)}</div> : <div className="rollback-copy"><ShieldCheck size={16}/><span><b>待运行预检</b><small>系统会校验输入完整性、账户权限、素材品牌版权、预算追踪回滚四组门禁。</small></span></div>}<div className="rollback-copy"><ShieldCheck size={16}/><span><b>执行确认门禁</b><small>仅当预检绑定当前计划版本且素材均为人工确认版本时允许执行。</small></span></div></> : <div className="panel-empty">尚未创建服务端 ChangeSet</div>}<button className="secondary-button full" onClick={createChange} disabled={busy}>生成 ChangeSet</button><button className="primary-button full" onClick={preflight} disabled={!canRunPreflight || busy}><Send size={15}/>{latest?.status === 'preflight_passed' && !preflightStale ? '已通过预检' : '运行上线前预检'}</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div></StateBoundary>
 }
 
@@ -656,12 +1046,22 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   const [selectedId, setSelectedId] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
   const selected = useMemo(() => changeSets.find(item => item.id === selectedId), [changeSets, selectedId])
+  const projectAccounts = workbench?.adAccountBindings.filter(account => account.projectIds.includes(currentProject.id)) ?? []
+  const selectedAccount = projectAccounts[0]
+  const materials = workbench?.assetVersionPointers.filter(pointer => pointer.projectId === currentProject.id) ?? []
+  const confirmations = workbench?.materialConfirmations ?? []
+  const approvalGateGroups = buildDeliveryGateGroups(selectedAccount, selected?.budgetLimit ?? currentProject.budget, currentProject.budget, materials, confirmations)
+  const executionGatePassed = gateGroupsPassed(approvalGateGroups)
+  const objectCount = Math.max(materials.length, 1) * (selectedAccount ? 1 : 0)
+  const riskLabel = executionGatePassed ? '低：账户、素材、预算和回滚均已满足' : '高：存在未确认素材、账户异常或预算追踪阻断'
   const refresh = async () => {
     setBusy(true)
     try {
-      const records = await deliveryApi.listChangeSets(currentProject.id)
+      const [records, agency] = await Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench()])
       setChangeSets(records)
+      setWorkbench(agency)
       setSelectedId(current => records.some(item => item.id === current) ? current : records[0]?.id ?? '')
       setNotice(records.length ? '已从服务端加载投放模拟队列。' : '尚未创建服务端 ChangeSet，请先在投放计划中生成。')
     } catch (error) {
@@ -673,6 +1073,10 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   useEffect(() => { void refresh() }, [currentProject.id])
   const apply = async (action: 'approve' | 'execute' | 'rollback') => {
     if (!selected) return
+    if (action === 'execute' && !executionGatePassed) {
+      setNotice('执行被拦截：素材必须是人工确认版本，且账户、预算、追踪和回滚门禁均需通过。')
+      return
+    }
     setBusy(true)
     try {
       const updated = action === 'approve' ? await approveChangeSet(selected.id) : action === 'execute' ? await executeChangeSet(selected.id) : await rollbackChangeSet(selected.id, '演示用户确认回滚模拟结果')
@@ -686,7 +1090,7 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   }
   return <StateBoundary state={state}><div className="approval-workspace">
     <aside className="approval-queue"><div className="surface-toolbar"><h3>审批队列</h3><button onClick={() => void refresh()} disabled={busy} aria-label="刷新审批队列"><RotateCcw size={15}/></button></div>{changeSets.map(item => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><span>{item.id.slice(0, 8)}</span><b>{item.name}</b><small>{item.status} · ¥{item.budgetLimit?.toLocaleString('zh-CN') ?? 0}</small></button>)}</aside>
-    <section className="approval-detail">{selected ? <><div className="approval-heading"><div><span>{selected.id.slice(0, 8)} · v{selected.version}</span><h2>{selected.name}</h2><p>服务端受控投放模拟。只有预检通过且演示审批人批准后才能执行。</p></div><span className={`approval-status ${selected.status}`}>{selected.status}</span></div><div className="approval-evidence"><h3>预检与执行证据</h3>{selected.preflight?.checks.map(check => <div key={check.code}><ClipboardCheck size={16}/><span><b>{check.message}</b><small>{check.passed ? '预检通过' : check.repair}</small></span></div>)}{selected.execution?.evidence.map(item => <div key={item.step}><CircleCheck size={16}/><span><b>{item.message}</b><small>{item.recordedAt}</small></span></div>)}</div>{selected.rollback ? <div className="rollback-copy"><RotateCcw size={16}/><span><b>已完成模拟回滚</b><small>{selected.rollback.reason}</small></span></div> : null}<div className="approval-actions"><button className="secondary-button" onClick={() => void apply('rollback')} disabled={busy || selected.status !== 'executed'}><RotateCcw size={15}/>回滚模拟</button><button className="secondary-button" onClick={() => void apply('execute')} disabled={busy || selected.status !== 'approved'}><Play size={15}/>模拟执行</button><button className="primary-button" onClick={() => void apply('approve')} disabled={busy || selected.status !== 'preflight_passed'}><ThumbsUp size={15}/>以演示审批人批准</button></div></> : <div className="panel-empty">没有服务端 ChangeSet</div>}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</section>
-    <aside className="approval-audit"><span className="section-label">权限与边界</span><div><time>演示角色</time><span>demo-approver</span></div><div><time>执行范围</time><span>本地模拟，无真实广告平台写入</span></div><div><time>审计</time><span>预检、审批、执行和回滚均由服务端记录</span></div></aside>
+    <section className="approval-detail">{selected ? <><div className="approval-heading"><div><span>{selected.id.slice(0, 8)} · ChangeSet v{selected.version}</span><h2>{selected.name}</h2><p>服务端受控投放模拟。只有预检通过、人工批准且执行确认门禁通过后才能执行。</p></div><span className={`approval-status ${selected.status}`}>{selected.status}</span></div><div className="execution-confirmation"><h3>执行确认</h3><div><b>账户</b><span>{selectedAccount ? `${selectedAccount.platform} · ${selectedAccount.accountName}` : '无绑定账户'}</span></div><div><b>预算</b><span>¥{selected.budgetLimit?.toLocaleString('zh-CN') ?? currentProject.budget.toLocaleString('zh-CN')}</span></div><div><b>对象数量</b><span>{objectCount} 个广告对象 / {materials.length} 个素材版本</span></div><div><b>预计影响</b><span>仅本地模拟执行，记录投放对象、预算和审计证据。</span></div><div><b>风险</b><span className={executionGatePassed ? '' : 'danger-text'}>{riskLabel}</span></div><div><b>回滚能力</b><span>支持模拟回滚并保留原因、时间和执行证据。</span></div></div><div className="approval-evidence"><h3>素材人工确认版本</h3>{materials.map(pointer => { const confirmation = confirmedMaterialFor(pointer, confirmations); return <div key={pointer.id}><ClipboardCheck size={16}/><span><b>{pointer.assetId} v{pointer.workingVersion}</b><small>{confirmation ? `已确认 · ${confirmation.confirmedBy} · ${confirmation.createdAt}` : '未人工确认，禁止执行'}</small></span></div> })}{materials.length === 0 ? <div><CircleAlert size={16}/><span><b>暂无素材版本</b><small>请先完成素材检查和人工确认。</small></span></div> : null}</div><div className="approval-evidence"><h3>预检与执行证据</h3>{selected.preflight?.checks.map(check => <div key={check.code}><ClipboardCheck size={16}/><span><b>{check.message}</b><small>{check.passed ? '预检通过' : check.repair}</small></span></div>)}{approvalGateGroups.flatMap(group => group.checks.filter(check => !check.passed).map(check => <div key={`${group.title}-${check.code}`}><CircleAlert size={16}/><span><b>{group.title} · {check.label}</b><small>{check.repair}</small></span></div>))}{selected.execution?.evidence.map(item => <div key={item.step}><CircleCheck size={16}/><span><b>{item.message}</b><small>{item.recordedAt}</small></span></div>)}</div>{selected.rollback ? <div className="rollback-copy"><RotateCcw size={16}/><span><b>已完成模拟回滚</b><small>{selected.rollback.reason}</small></span></div> : null}<div className="approval-actions"><button className="secondary-button" onClick={() => void apply('rollback')} disabled={busy || selected.status !== 'executed'}><RotateCcw size={15}/>回滚模拟</button><button className="secondary-button" onClick={() => void apply('execute')} disabled={busy || selected.status !== 'approved' || !executionGatePassed}><Play size={15}/>模拟执行</button><button className="primary-button" onClick={() => void apply('approve')} disabled={busy || selected.status !== 'preflight_passed'}><ThumbsUp size={15}/>以演示审批人批准</button></div></> : <div className="panel-empty">没有服务端 ChangeSet</div>}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</section>
+    <aside className="approval-audit"><span className="section-label">权限与边界</span><div><time>演示角色</time><span>demo-approver</span></div><div><time>执行范围</time><span>本地模拟，无真实广告平台写入</span></div><div><time>审计</time><span>预检、审批、执行和回滚均由服务端记录</span></div><div><time>硬门禁</time><span>未人工确认素材不能执行</span></div></aside>
   </div></StateBoundary>
 }

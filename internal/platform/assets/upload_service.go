@@ -30,6 +30,7 @@ type UploadService struct {
 	Projects         ActiveProjectResolver
 	Blobs            BlobStore
 	Scanner          ContentScanner
+	MediaProbe       MediaProbe
 	QuarantineBucket string
 	AssetsBucket     string
 	UploadTTL        time.Duration
@@ -259,35 +260,66 @@ func (s UploadService) Remove(ctx context.Context, actor contract.ActorContext, 
 	return s.Repository.RemoveProjectAsset(ctx, actor.OrganizationID, projectID, ref)
 }
 
+func (s UploadService) UpsertFeature(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, feature AssetFeature) (AssetFeature, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AssetFeature{}, err
+	}
+	feature.OrganizationID = actor.OrganizationID
+	feature.ProjectID = projectID
+	if err := feature.Validate(); err != nil {
+		return AssetFeature{}, err
+	}
+	if _, err := s.Repository.GetProjectAsset(ctx, actor.OrganizationID, projectID, feature.Ref()); err != nil {
+		return AssetFeature{}, err
+	}
+	return s.Repository.UpsertAssetFeature(ctx, feature, s.now())
+}
+
+func (s UploadService) GetFeature(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef, featureVersion string) (AssetFeature, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return AssetFeature{}, err
+	}
+	if strings.TrimSpace(featureVersion) == "" {
+		return AssetFeature{}, fmt.Errorf("feature_version is required")
+	}
+	return s.Repository.GetAssetFeature(ctx, actor.OrganizationID, projectID, ref, featureVersion)
+}
+
+func (s UploadService) ListFeatures(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]AssetFeature, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	return s.Repository.ListAssetFeatures(ctx, actor.OrganizationID, projectID, limit)
+}
+
 func (s UploadService) ingestStoredObject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, assetID contract.AssetID, blobID string, projectContextVersion int64, source contract.AssetSourceType, sourceLocation ObjectLocation, providerJobID, providerOutputID, traceID string) (AssetCommit, error) {
 	reader, info, err := s.Blobs.Open(ctx, sourceLocation)
 	if err != nil {
 		return AssetCommit{}, err
 	}
 	defer reader.Close()
-	if info.SizeBytes < 1 || info.SizeBytes > MaxImageBytes {
-		return AssetCommit{}, fmt.Errorf("%w: size is outside the supported image range", ErrInvalidAssetContent)
+	if info.SizeBytes < 1 || info.SizeBytes > MaxVideoBytes {
+		return AssetCommit{}, fmt.Errorf("%w: size is outside the supported asset range", ErrInvalidAssetContent)
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, MaxImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(reader, MaxVideoBytes+1))
 	if err != nil {
 		return AssetCommit{}, err
 	}
-	if int64(len(data)) != info.SizeBytes || int64(len(data)) > MaxImageBytes {
+	if int64(len(data)) != info.SizeBytes || int64(len(data)) > MaxVideoBytes {
 		return AssetCommit{}, fmt.Errorf("%w: size changed while reading", ErrInvalidAssetContent)
 	}
 	mimeType := http.DetectContentType(data[:min(len(data), 512)])
-	if !allowedDeclaredImageMIME(mimeType) {
-		return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported image", ErrInvalidAssetContent)
+	if !allowedDeclaredAssetMIME(mimeType) {
+		return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported asset", ErrInvalidAssetContent)
 	}
-	imageConfig, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return AssetCommit{}, fmt.Errorf("%w: decode image metadata: %v", ErrInvalidAssetContent, err)
-	}
-	if imageConfig.Width < 1 || imageConfig.Height < 1 {
-		return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions are invalid", ErrInvalidAssetContent)
-	}
-	if imageConfig.Width > MaxImageDimension || imageConfig.Height > MaxImageDimension || int64(imageConfig.Width)*int64(imageConfig.Height) > MaxImagePixels {
-		return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions exceed safety limits", ErrInvalidAssetContent)
+	if int64(len(data)) > maxBytesForMIME(mimeType) {
+		return AssetCommit{}, fmt.Errorf("%w: size exceeds MIME-specific limit", ErrInvalidAssetContent)
 	}
 	if err := s.Scanner.Scan(ctx, bytes.NewReader(data)); err != nil {
 		if errors.Is(err, ErrMalwareDetected) {
@@ -297,10 +329,37 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	}
 	digest := sha256.Sum256(data)
 	sha256Value := hex.EncodeToString(digest[:])
+	kind := contract.AssetImage
+	width, height := 0, 0
+	media := MediaMetadata{ProbeStatus: MediaProbeNotRequired}
+	if allowedDeclaredImageMIME(mimeType) {
+		imageConfig, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return AssetCommit{}, fmt.Errorf("%w: decode image metadata: %v", ErrInvalidAssetContent, err)
+		}
+		if imageConfig.Width < 1 || imageConfig.Height < 1 {
+			return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions are invalid", ErrInvalidAssetContent)
+		}
+		if imageConfig.Width > MaxImageDimension || imageConfig.Height > MaxImageDimension || int64(imageConfig.Width)*int64(imageConfig.Height) > MaxImagePixels {
+			return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions exceed safety limits", ErrInvalidAssetContent)
+		}
+		width, height = imageConfig.Width, imageConfig.Height
+	} else {
+		kind = contract.AssetVideo
+	}
 	durableKey := fmt.Sprintf("assets/%s/%s/versions/1/original", organizationID, assetID)
 	durable, err := s.Blobs.Put(ctx, s.AssetsBucket, durableKey, bytes.NewReader(data), int64(len(data)), mimeType)
 	if err != nil {
 		return AssetCommit{}, err
+	}
+	if kind == contract.AssetVideo {
+		probe := s.mediaProbe()
+		media, err = probe.Probe(ctx, MediaProbeSource{Location: durable.ObjectLocation, MIMEType: mimeType, SizeBytes: int64(len(data)), SHA256: sha256Value})
+		if err != nil {
+			media = normalizeProbeFailure(err)
+		} else if media.ProbeStatus == "" {
+			media.ProbeStatus = MediaProbeSucceeded
+		}
 	}
 	eventID, err := s.idGenerator()("event")
 	if err != nil {
@@ -309,7 +368,7 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	}
 	version := int64(1)
 	eventData, err := json.Marshal(contract.AssetReadyData{
-		AssetKind: contract.AssetImage, MIMEType: mimeType, SizeBytes: int64(len(data)), SourceType: source,
+		AssetKind: kind, MIMEType: mimeType, SizeBytes: int64(len(data)), SourceType: source,
 		ProviderJobID: providerJobID, OutputID: providerOutputID,
 	})
 	if err != nil {
@@ -328,8 +387,8 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	}
 	return AssetCommit{
 		BlobID: blobID, OrganizationID: organizationID, ProjectID: projectID, AssetID: assetID, Version: 1,
-		Kind: contract.AssetImage, SourceType: source, OwnerSystem: "assets", MIMEType: mimeType,
-		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: imageConfig.Width, HeightPixels: imageConfig.Height,
+		Kind: kind, SourceType: source, OwnerSystem: "assets", MIMEType: mimeType,
+		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: width, HeightPixels: height, Media: media,
 		ProviderJobID: providerJobID, ProviderOutputID: providerOutputID, ProjectContextVersion: projectContextVersion,
 		Location: durable.ObjectLocation, Event: event,
 	}, nil
@@ -354,6 +413,13 @@ func (s UploadService) idGenerator() ids.Generator {
 		return s.NewID
 	}
 	return ids.New
+}
+
+func (s UploadService) mediaProbe() MediaProbe {
+	if s.MediaProbe != nil {
+		return s.MediaProbe
+	}
+	return UnconfiguredMediaProbe{}
 }
 
 func (s UploadService) uploadTTL() time.Duration {

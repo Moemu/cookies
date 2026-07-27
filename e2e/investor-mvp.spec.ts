@@ -1,12 +1,14 @@
 import { expect, test, type Page } from '@playwright/test'
 
+const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8787'
+
 async function createProjectWithBrief(page: Page, name: string) {
-  const projectResponse = await page.request.post('http://127.0.0.1:8787/api/projects', {
+  const projectResponse = await page.request.post(`${apiBaseURL}/api/projects`, {
     data: { name, brand: 'E2E 隔离品牌', objective: '独立验证当前项目服务端事实来源' },
   })
   expect(projectResponse.ok()).toBeTruthy()
   const project = await projectResponse.json() as { id: string }
-  const briefResponse = await page.request.post('http://127.0.0.1:8787/api/artifacts', {
+  const briefResponse = await page.request.post(`${apiBaseURL}/api/artifacts`, {
     data: { projectId: project.id, kind: 'brief', status: 'ready', content: `${name} 已确认 Brief` },
   })
   expect(briefResponse.ok()).toBeTruthy()
@@ -14,7 +16,7 @@ async function createProjectWithBrief(page: Page, name: string) {
 }
 
 async function getReadyBriefId(page: Page, projectId: string) {
-  const response = await page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${projectId}`)
+  const response = await page.request.get(`${apiBaseURL}/api/artifacts?projectId=${projectId}`)
   expect(response.ok()).toBeTruthy()
   const artifacts = await response.json() as Array<{ id: string, kind: string, status: string }>
   const brief = artifacts.find(artifact => artifact.kind === 'brief' && artifact.status === 'ready')
@@ -57,11 +59,11 @@ async function syncPrerollJob(
 ) {
   const query = `projectId=${projectId}&purpose=preroll&prerollType=${prerollType}`
   await expect.poll(async () => {
-    const jobsResponse = await page.request.get(`http://127.0.0.1:8787/api/generation-jobs?${query}`)
+    const jobsResponse = await page.request.get(`${apiBaseURL}/api/generation-jobs?${query}`)
     const jobs = await jobsResponse.json() as Array<{ id: string }>
     const job = jobs.at(-1)
     if (!job) return false
-    const response = await page.request.get(`http://127.0.0.1:8787/api/generation-jobs/${job.id}?${query}`)
+    const response = await page.request.get(`${apiBaseURL}/api/generation-jobs/${job.id}?${query}`)
     const synced = await response.json() as { status: string }
     return synced.status === expectedStatus
   }, { timeout: 10_000 }).toBe(true)
@@ -130,7 +132,7 @@ test('前贴分镜成功后出现持久化资产，并在刷新后按当前前�
   await expect(page.getByLabel('正片首句（可选）')).toHaveValue('')
 
   await expect.poll(async () => {
-    const response = await page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${projectId}&purpose=preroll&prerollType=short_drama`)
+    const response = await page.request.get(`${apiBaseURL}/api/artifacts?projectId=${projectId}&purpose=preroll&prerollType=short_drama`)
     const items = await response.json() as Array<{ status: string, sourceJobId?: string }>
     return items.some(item => item.status === 'ready' && Boolean(item.sourceJobId))
   }).toBe(true)
@@ -154,13 +156,13 @@ test('短剧规划和生成拒绝跨 Project Brief，游戏与电商前贴保持
     openingLine: '你以为我今晚回来，是为了求你吗？',
   }
 
-  const rejectedPlan = await page.request.post('http://127.0.0.1:8787/api/short-drama-preroll-plans', {
+  const rejectedPlan = await page.request.post(`${apiBaseURL}/api/short-drama-preroll-plans`, {
     data: { projectId: shortDramaProjectId, briefId: otherBriefId, storyContext },
   })
   expect(rejectedPlan.status()).toBe(400)
   expect((await rejectedPlan.json()).error.code).toBe('BRIEF_NOT_CONFIRMED')
 
-  const planResponse = await page.request.post('http://127.0.0.1:8787/api/short-drama-preroll-plans', {
+  const planResponse = await page.request.post(`${apiBaseURL}/api/short-drama-preroll-plans`, {
     data: { projectId: shortDramaProjectId, briefId: shortDramaBriefId, storyContext },
   })
   expect(planResponse.ok()).toBeTruthy()
@@ -168,7 +170,7 @@ test('短剧规划和生成拒绝跨 Project Brief，游戏与电商前贴保持
   expect(plan.candidates.length).toBeGreaterThanOrEqual(3)
   expect(plan.candidates.length).toBeLessThanOrEqual(5)
 
-  const rejectedGeneration = await page.request.post('http://127.0.0.1:8787/api/generation/media', {
+  const rejectedGeneration = await page.request.post(`${apiBaseURL}/api/generation/media`, {
     data: {
       projectId: shortDramaProjectId,
       kind: 'video',
@@ -184,7 +186,7 @@ test('短剧规划和生成拒绝跨 Project Brief，游戏与电商前贴保持
   expect((await rejectedGeneration.json()).error.code).toBe('BRIEF_NOT_CONFIRMED')
 
   await setProviderMode(page, 'success')
-  const gameJob = await page.request.post('http://127.0.0.1:8787/api/generation/media', {
+  const gameJob = await page.request.post(`${apiBaseURL}/api/generation/media`, {
     data: {
       projectId: shortDramaProjectId,
       kind: 'video',
@@ -194,7 +196,7 @@ test('短剧规划和生成拒绝跨 Project Brief，游戏与电商前贴保持
       briefId: shortDramaBriefId,
     },
   })
-  const commerceJob = await page.request.post('http://127.0.0.1:8787/api/generation/media', {
+  const commerceJob = await page.request.post(`${apiBaseURL}/api/generation/media`, {
     data: {
       projectId: shortDramaProjectId,
       kind: 'video',
@@ -210,8 +212,8 @@ test('短剧规划和生成拒绝跨 Project Brief，游戏与电商前贴保持
   await syncPrerollJob(page, shortDramaProjectId, 'commerce', 'succeeded')
 
   const [gameArtifacts, commerceArtifacts] = await Promise.all([
-    page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${shortDramaProjectId}&purpose=preroll&prerollType=game`),
-    page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${shortDramaProjectId}&purpose=preroll&prerollType=commerce`),
+    page.request.get(`${apiBaseURL}/api/artifacts?projectId=${shortDramaProjectId}&purpose=preroll&prerollType=game`),
+    page.request.get(`${apiBaseURL}/api/artifacts?projectId=${shortDramaProjectId}&purpose=preroll&prerollType=commerce`),
   ])
   expect(await gameArtifacts.json()).toEqual(expect.arrayContaining([
     expect.objectContaining({ status: 'ready', prerollType: 'game' }),
@@ -250,9 +252,9 @@ test('前贴任务按项目和类型隔离，重试或失败不会保留旧成�
   await expect(page.getByRole('button', { name: '加入混剪素材箱' })).toBeEnabled()
 
   const [firstGameJobs, secondShortJobs, secondGameArtifacts] = await Promise.all([
-    page.request.get(`http://127.0.0.1:8787/api/generation-jobs?projectId=${firstProjectId}&purpose=preroll&prerollType=game`),
-    page.request.get(`http://127.0.0.1:8787/api/generation-jobs?projectId=${secondProjectId}&purpose=preroll&prerollType=short_drama`),
-    page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${secondProjectId}&purpose=preroll&prerollType=game`),
+    page.request.get(`${apiBaseURL}/api/generation-jobs?projectId=${firstProjectId}&purpose=preroll&prerollType=game`),
+    page.request.get(`${apiBaseURL}/api/generation-jobs?projectId=${secondProjectId}&purpose=preroll&prerollType=short_drama`),
+    page.request.get(`${apiBaseURL}/api/artifacts?projectId=${secondProjectId}&purpose=preroll&prerollType=game`),
   ])
   expect(await firstGameJobs.json()).toEqual([])
   expect(await secondShortJobs.json()).toEqual([])
@@ -275,14 +277,14 @@ test('前贴创建被 Provider 拒绝时展示可重试错误，且不伪造资�
 
 test('主创意聚合和 ChangeSet 不接受前贴资产', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 主创意边界')
-  const artifactsResponse = await page.request.get(`http://127.0.0.1:8787/api/artifacts?projectId=${projectId}`)
+  const artifactsResponse = await page.request.get(`${apiBaseURL}/api/artifacts?projectId=${projectId}`)
   const artifacts = await artifactsResponse.json() as Array<{ id: string, kind: string }>
   const briefId = artifacts.find(artifact => artifact.kind === 'brief')?.id
   expect(briefId).toBeTruthy()
-  const mainCreative = await page.request.post('http://127.0.0.1:8787/api/artifacts', {
+  const mainCreative = await page.request.post(`${apiBaseURL}/api/artifacts`, {
     data: { projectId, kind: 'image', status: 'ready', content: '当前项目主创意' },
   })
-  const preroll = await page.request.post('http://127.0.0.1:8787/api/artifacts', {
+  const preroll = await page.request.post(`${apiBaseURL}/api/artifacts`, {
     data: {
       projectId,
       kind: 'video',
@@ -298,14 +300,14 @@ test('主创意聚合和 ChangeSet 不接受前贴资产', async ({ page }) => {
   const prerollArtifact = await preroll.json() as { id: string }
 
   await page.goto(`/projects/${projectId}/delivery/plans`)
-  await expect(page.locator('.upstream-source')).toContainText('当前项目主创意')
-  await expect(page.locator('.upstream-source')).not.toContainText('不得作为主创意的前贴')
+  await expect(page.getByRole('button', { name: '素材组合' })).toBeVisible()
+  await expect(page.getByText('不得作为主创意的前贴')).toHaveCount(0)
 
-  const rejected = await page.request.post('http://127.0.0.1:8787/api/change-sets', {
+  const rejected = await page.request.post(`${apiBaseURL}/api/change-sets`, {
     data: { projectId, name: '拒绝前贴', artifactIds: [briefId, prerollArtifact.id], budgetLimit: 100 },
   })
   expect(rejected.status()).toBe(400)
-  const accepted = await page.request.post('http://127.0.0.1:8787/api/change-sets', {
+  const accepted = await page.request.post(`${apiBaseURL}/api/change-sets`, {
     data: { projectId, name: '接受主创意', artifactIds: [briefId, mainArtifact.id], budgetLimit: 100 },
   })
   expect(accepted.ok()).toBeTruthy()
@@ -313,12 +315,12 @@ test('主创意聚合和 ChangeSet 不接受前贴资产', async ({ page }) => {
 
 test('素材体验页只展示本用例当前 Project 的持久化 Artifact', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 资产体验')
-  const currentAsset = await page.request.post('http://127.0.0.1:8787/api/artifacts', {
+  const currentAsset = await page.request.post(`${apiBaseURL}/api/artifacts`, {
     data: { projectId, kind: 'image', status: 'ready', content: '本项目持久化主创意' },
   })
   expect(currentAsset.ok()).toBeTruthy()
   const otherProjectId = await createProjectWithBrief(page, 'E2E 其他资产项目')
-  const otherAsset = await page.request.post('http://127.0.0.1:8787/api/artifacts', {
+  const otherAsset = await page.request.post(`${apiBaseURL}/api/artifacts`, {
     data: { projectId: otherProjectId, kind: 'video', status: 'ready', content: '其他项目不可见资产' },
   })
   expect(otherAsset.ok()).toBeTruthy()
@@ -343,7 +345,7 @@ test('前贴任务取消后刷新会恢复服务端取消态，且不暴露旧�
 
   const query = `projectId=${projectId}&purpose=preroll&prerollType=short_drama`
   await expect.poll(async () => {
-    const response = await page.request.get(`http://127.0.0.1:8787/api/generation-jobs?${query}`)
+    const response = await page.request.get(`${apiBaseURL}/api/generation-jobs?${query}`)
     const jobs = await response.json() as Array<{ status: string }>
     return jobs.at(-1)?.status
   }).toBe('cancelled')
@@ -383,7 +385,7 @@ for (const width of [1280, 1440, 1680]) {
     await expectInitialViewportControl(page, addToLibrary, width)
     await expectNoHorizontalOverflow(page)
 
-    const assetResponse = await page.request.post('http://127.0.0.1:8787/api/artifacts', {
+    const assetResponse = await page.request.post(`${apiBaseURL}/api/artifacts`, {
       data: {
         projectId,
         kind: 'video',

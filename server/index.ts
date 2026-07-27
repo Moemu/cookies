@@ -88,6 +88,10 @@ async function route(
     await projectsRoute(method, id, action, request, response, repository);
     return;
   }
+  if (resource === "asset-features") {
+    await assetFeaturesRoute(method, request, response, repository, url.searchParams);
+    return;
+  }
   if (resource === "artifacts") {
     await artifactsRoute(method, id, request, response, repository, resourceScope(url.searchParams));
     return;
@@ -374,6 +378,58 @@ async function businessTasksRoute(
   throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
 }
 
+async function assetFeaturesRoute(
+  method: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+  repository: FileRepository,
+  searchParams: URLSearchParams,
+): Promise<void> {
+  if (method === "GET") {
+    const scope = assetFeatureScope(searchParams);
+    const hasExactLookup = scope.assetId !== undefined || scope.assetVersion !== undefined || scope.featureVersion !== undefined;
+    if (hasExactLookup) {
+      if (scope.assetId === undefined || scope.assetVersion === undefined || scope.featureVersion === undefined) {
+        invalidField("assetId", "Must be provided with assetVersion and featureVersion for exact lookup");
+      }
+      const feature = await repository.getAssetFeature({
+        organizationId: scope.organizationId,
+        projectId: scope.projectId,
+        assetId: scope.assetId,
+        assetVersion: scope.assetVersion,
+        featureVersion: scope.featureVersion,
+      });
+      return sendJson(response, 200, { feature: feature ?? null });
+    }
+    return sendJson(response, 200, { items: await repository.listAssetFeatures(scope) });
+  }
+  if (method === "PUT") {
+    const body = await readBody(request);
+    return sendJson(response, 200, await repository.upsertAssetFeature({
+      organizationId: requiredString(body, "organizationId"),
+      projectId: requiredString(body, "projectId"),
+      assetId: requiredString(body, "assetId"),
+      assetVersion: requiredPositiveInteger(body, "assetVersion"),
+      schemaVersion: requiredString(body, "schemaVersion") as "asset_feature_v1",
+      featureVersion: requiredString(body, "featureVersion"),
+      hookStrength: requiredNumber(body, "hookStrength"),
+      productVisibility: requiredNumber(body, "productVisibility"),
+      sceneTags: requiredStringArray(body, "sceneTags"),
+      productTags: requiredStringArray(body, "productTags"),
+      personTags: requiredStringArray(body, "personTags"),
+      actionTags: requiredStringArray(body, "actionTags"),
+      emotionTags: requiredStringArray(body, "emotionTags"),
+      sellingPoints: requiredStringArray(body, "sellingPoints"),
+      ctaPresence: requiredBoolean(body, "ctaPresence"),
+      similarityGroup: optionalString(body, "similarityGroup"),
+      similarityRisk: requiredString(body, "similarityRisk") as "low" | "medium" | "high",
+      evidence: requiredStringArray(body, "evidence"),
+      actor: optionalString(body, "actor"),
+    }));
+  }
+  throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
+}
+
 function publicJob<T extends { providerTaskId?: string }>(job: T): Omit<T, "providerTaskId"> {
   const { providerTaskId: _providerTaskId, ...safeJob } = job;
   return safeJob;
@@ -497,6 +553,20 @@ function resourceScope(searchParams: URLSearchParams): ResourceScope {
   };
 }
 
+function assetFeatureScope(searchParams: URLSearchParams) {
+  const organizationId = searchParams.get("organizationId");
+  const projectId = searchParams.get("projectId");
+  if (!organizationId) invalidField("organizationId", "Required non-empty string");
+  if (!projectId) invalidField("projectId", "Required non-empty string");
+  return {
+    organizationId,
+    projectId,
+    assetId: searchParams.get("assetId") ?? undefined,
+    assetVersion: optionalSearchPositiveInteger(searchParams, "assetVersion"),
+    featureVersion: searchParams.get("featureVersion") ?? undefined,
+  };
+}
+
 function requiredArtifactKind(body: Record<string, unknown>, field: string) {
   if (!isArtifactKind(body[field])) invalidField(field, "Must be brief, image, video, or document");
   return body[field];
@@ -522,6 +592,42 @@ function optionalStringArray(body: Record<string, unknown>, field: string): stri
     invalidField(field, "Must be an array of non-empty strings");
   }
   return value;
+}
+
+function requiredStringArray(body: Record<string, unknown>, field: string): string[] {
+  const value = optionalStringArray(body, field);
+  if (value === undefined) invalidField(field, "Required array of non-empty strings");
+  return value;
+}
+
+function requiredNumber(body: Record<string, unknown>, field: string): number {
+  const value = body[field];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    invalidField(field, "Must be a finite number");
+  }
+  return value;
+}
+
+function requiredBoolean(body: Record<string, unknown>, field: string): boolean {
+  const value = body[field];
+  if (typeof value !== "boolean") invalidField(field, "Must be a boolean");
+  return value;
+}
+
+function requiredPositiveInteger(body: Record<string, unknown>, field: string): number {
+  const value = body[field];
+  if (!Number.isInteger(value) || typeof value !== "number" || value < 1) {
+    invalidField(field, "Must be a positive integer");
+  }
+  return value;
+}
+
+function optionalSearchPositiveInteger(searchParams: URLSearchParams, field: string): number | undefined {
+  const value = searchParams.get(field);
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) invalidField(field, "Must be a positive integer");
+  return parsed;
 }
 
 function optionalNonNegativeNumber(body: Record<string, unknown>, field: string): number | undefined {
@@ -560,7 +666,7 @@ function setCorsHeaders(request: IncomingMessage, response: ServerResponse): voi
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
   }
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 

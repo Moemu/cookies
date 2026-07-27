@@ -5,6 +5,9 @@ import {
   type Artifact,
   type ArtifactKind,
   type ArtifactStatus,
+  type AssetFeature,
+  type AssetFeatureSimilarityRisk,
+  assertAssetFeaturePayload,
   assertVideoMetadata,
   type BusinessTask,
   type BusinessTaskType,
@@ -56,6 +59,36 @@ export interface CreateArtifactInput {
   content: string;
   status?: ArtifactStatus;
   sourceJobId?: string;
+  actor?: string;
+}
+
+export interface AssetFeatureScope {
+  organizationId: string;
+  projectId: string;
+  assetId?: string;
+  assetVersion?: number;
+  featureVersion?: string;
+}
+
+export interface UpsertAssetFeatureInput {
+  organizationId: string;
+  projectId: string;
+  assetId: string;
+  assetVersion: number;
+  schemaVersion: "asset_feature_v1";
+  featureVersion: string;
+  hookStrength: number;
+  productVisibility: number;
+  sceneTags: string[];
+  productTags: string[];
+  personTags: string[];
+  actionTags: string[];
+  emotionTags: string[];
+  sellingPoints: string[];
+  ctaPresence: boolean;
+  similarityGroup?: string;
+  similarityRisk: AssetFeatureSimilarityRisk;
+  evidence: string[];
   actor?: string;
 }
 
@@ -125,6 +158,7 @@ export class FileRepository {
           sourceTaskIds: task.sourceTaskIds ?? [],
         })),
         artifacts: parsed.artifacts ?? [],
+        assetFeatures: parsed.assetFeatures ?? [],
         generationJobs: parsed.generationJobs ?? [],
         changeSets: parsed.changeSets ?? [],
         auditEvents: parsed.auditEvents ?? [],
@@ -315,6 +349,67 @@ export class FileRepository {
       });
     });
     return artifact;
+  }
+
+  async listAssetFeatures(scope: AssetFeatureScope): Promise<AssetFeature[]> {
+    this.requireProject(scope.projectId);
+    if (scope.assetId) this.requireScopedArtifact(scope.projectId, scope.assetId);
+    return this.store.assetFeatures.filter((feature) => matchesAssetFeatureScope(feature, scope));
+  }
+
+  async getAssetFeature(scope: Required<AssetFeatureScope>): Promise<AssetFeature | undefined> {
+    this.requireProject(scope.projectId);
+    this.requireScopedArtifact(scope.projectId, scope.assetId);
+    return this.store.assetFeatures.find((feature) => matchesAssetFeatureScope(feature, scope));
+  }
+
+  async upsertAssetFeature(input: UpsertAssetFeatureInput): Promise<AssetFeature> {
+    this.requireProject(input.projectId);
+    const asset = this.requireScopedArtifact(input.projectId, input.assetId);
+    if ((asset.kind !== "image" && asset.kind !== "video") || asset.version !== input.assetVersion) {
+      throw new DomainError("NOT_FOUND", "Resource was not found");
+    }
+    assertAssetFeaturePayload(input);
+    const existing = this.store.assetFeatures.find((feature) => matchesAssetFeatureScope(feature, input));
+    const now = new Date().toISOString();
+    const feature: AssetFeature = {
+      id: existing?.id ?? randomUUID(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      assetId: input.assetId,
+      assetVersion: input.assetVersion,
+      schemaVersion: input.schemaVersion,
+      featureVersion: input.featureVersion,
+      hookStrength: input.hookStrength,
+      productVisibility: input.productVisibility,
+      sceneTags: [...input.sceneTags],
+      productTags: [...input.productTags],
+      personTags: [...input.personTags],
+      actionTags: [...input.actionTags],
+      emotionTags: [...input.emotionTags],
+      sellingPoints: [...input.sellingPoints],
+      ctaPresence: input.ctaPresence,
+      similarityGroup: input.similarityGroup,
+      similarityRisk: input.similarityRisk,
+      evidence: [...input.evidence],
+      version: existing ? existing.version + 1 : 1,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.mutate(() => {
+      if (existing) {
+        Object.assign(existing, feature);
+      } else {
+        this.store.assetFeatures.push(feature);
+      }
+      this.addAudit(feature.projectId, input.actor, "asset_feature.upserted", "asset_feature", feature.id, {
+        assetId: feature.assetId,
+        assetVersion: feature.assetVersion,
+        featureVersion: feature.featureVersion,
+        version: feature.version,
+      });
+    });
+    return feature;
   }
 
   async listGenerationJobs(scope?: string | ResourceScope): Promise<GenerationJob[]> {
@@ -611,6 +706,12 @@ export class FileRepository {
     return artifact;
   }
 
+  private requireScopedArtifact(projectId: string, id: string): Artifact {
+    const artifact = this.store.artifacts.find((item) => item.id === id && item.projectId === projectId);
+    if (!artifact) throw new DomainError("NOT_FOUND", "Resource was not found");
+    return artifact;
+  }
+
   private requireMatchingSourceJob(input: CreateArtifactInput): void {
     const job = this.requireGenerationJob(input.sourceJobId!);
     if (
@@ -783,4 +884,12 @@ function matchesResourceScope(
   return (!scope?.projectId || resource.projectId === scope.projectId)
     && (!scope?.purpose || resource.purpose === scope.purpose)
     && (!scope?.prerollType || resource.prerollType === scope.prerollType);
+}
+
+function matchesAssetFeatureScope(feature: AssetFeature, scope: AssetFeatureScope): boolean {
+  return feature.organizationId === scope.organizationId
+    && feature.projectId === scope.projectId
+    && (scope.assetId === undefined || feature.assetId === scope.assetId)
+    && (scope.assetVersion === undefined || feature.assetVersion === scope.assetVersion)
+    && (scope.featureVersion === undefined || feature.featureVersion === scope.featureVersion);
 }

@@ -3,6 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const dataDirectory = join(tmpdir(), 'cookies-e2e-store')
+const isGitHubActions = process.env.GITHUB_ACTIONS === 'true'
+const reuseExistingServer = !isGitHubActions
+const apiPort = process.env.E2E_API_PORT ?? (isGitHubActions ? '8787' : '18787')
+const apiBaseURL = `http://127.0.0.1:${apiPort}`
+process.env.E2E_API_BASE_URL = apiBaseURL
 
 export default defineConfig({
   testDir: './e2e',
@@ -17,11 +22,11 @@ export default defineConfig({
     {
       command: 'tsx e2e/mock-ark.ts',
       url: 'http://127.0.0.1:8791/test/mode',
-      reuseExistingServer: false,
+      reuseExistingServer,
     },
     {
       command: 'npm run server',
-      url: 'http://127.0.0.1:8787/health',
+      url: `${apiBaseURL}/health`,
       env: {
         ...process.env,
         NODE_ENV: 'test',
@@ -29,16 +34,20 @@ export default defineConfig({
         ARK_BASE_URL: 'http://127.0.0.1:8791/api/v3',
         ARK_ALLOW_INSECURE_LOCAL_PROVIDER: 'true',
         DATA_FILE: join(dataDirectory, 'mvp-store.json'),
-        PORT: '8787',
+        PORT: apiPort,
         RESET_DATA_FILE: 'true',
         SKIP_DEMO_SEED: 'true',
       },
-      reuseExistingServer: false,
+      reuseExistingServer,
     },
     {
       command: 'npm run dev -- --port 4173',
       url: 'http://127.0.0.1:4173',
-      reuseExistingServer: false,
+      env: {
+        ...process.env,
+        VITE_API_BASE_URL: apiBaseURL,
+      },
+      reuseExistingServer,
     },
   ],
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

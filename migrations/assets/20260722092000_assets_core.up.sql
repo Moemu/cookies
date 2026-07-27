@@ -47,7 +47,16 @@ CREATE TABLE IF NOT EXISTS asset_versions (
   sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   width_pixels INT UNSIGNED NULL,
   height_pixels INT UNSIGNED NULL,
-  duration_millis BIGINT UNSIGNED NULL,
+  duration_seconds DOUBLE NULL,
+  fps DOUBLE NULL,
+  codec VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  bitrate_bps BIGINT UNSIGNED NULL,
+  audio_codec VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  audio_channels INT UNSIGNED NULL,
+  audio_sample_rate INT UNSIGNED NULL,
+  poster_frame_ref VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  probe_status VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'not_required',
+  probe_error VARCHAR(1024) NULL,
   provider_job_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NULL,
   provider_output_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NULL,
   project_context_version BIGINT NULL,
@@ -60,7 +69,8 @@ CREATE TABLE IF NOT EXISTS asset_versions (
   CONSTRAINT chk_asset_versions_version CHECK (version > 0),
   CONSTRAINT chk_asset_versions_size CHECK (size_bytes > 0),
   CONSTRAINT chk_asset_versions_status CHECK (status IN ('processing', 'ready', 'quarantined', 'failed')),
-  CONSTRAINT chk_asset_versions_source CHECK (source_type IN ('upload', 'provider_generated', 'imported', 'captured'))
+  CONSTRAINT chk_asset_versions_source CHECK (source_type IN ('upload', 'provider_generated', 'imported', 'captured')),
+  CONSTRAINT chk_asset_versions_probe_status CHECK (probe_status IN ('not_required', 'succeeded', 'failed'))
 );
 
 CREATE TABLE IF NOT EXISTS project_assets (
@@ -75,6 +85,36 @@ CREATE TABLE IF NOT EXISTS project_assets (
   CONSTRAINT fk_project_assets_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
   CONSTRAINT fk_project_assets_version FOREIGN KEY (organization_id, asset_id, asset_version) REFERENCES asset_versions(organization_id, asset_id, version),
   CONSTRAINT chk_project_assets_status CHECK (status IN ('active', 'archived', 'removed'))
+);
+
+CREATE TABLE IF NOT EXISTS asset_features (
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  asset_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  asset_version BIGINT NOT NULL,
+  schema_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  feature_version VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  hook_strength DOUBLE NOT NULL,
+  product_visibility DOUBLE NOT NULL,
+  scene_tags JSON NOT NULL,
+  product_tags JSON NOT NULL,
+  person_tags JSON NOT NULL,
+  action_tags JSON NOT NULL,
+  emotion_tags JSON NOT NULL,
+  selling_points JSON NOT NULL,
+  cta_presence BOOLEAN NOT NULL,
+  similarity_group VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  similarity_risk VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  evidence JSON NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (organization_id, project_id, asset_id, asset_version, feature_version),
+  KEY idx_asset_features_project (organization_id, project_id, updated_at),
+  CONSTRAINT fk_asset_features_project_asset FOREIGN KEY (organization_id, project_id, asset_id, asset_version) REFERENCES project_assets(organization_id, project_id, asset_id, asset_version),
+  CONSTRAINT chk_asset_features_schema CHECK (schema_version = 'asset_feature_v1'),
+  CONSTRAINT chk_asset_features_hook CHECK (hook_strength >= 0 AND hook_strength <= 1),
+  CONSTRAINT chk_asset_features_product_visibility CHECK (product_visibility >= 0 AND product_visibility <= 1),
+  CONSTRAINT chk_asset_features_similarity_risk CHECK (similarity_risk IN ('low', 'medium', 'high'))
 );
 
 CREATE TABLE IF NOT EXISTS upload_sessions (

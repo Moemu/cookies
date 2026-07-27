@@ -125,6 +125,35 @@ export interface Artifact {
   updatedAt: string;
 }
 
+export const ASSET_FEATURE_SCHEMA_VERSION = "asset_feature_v1";
+export const ASSET_FEATURE_SIMILARITY_RISKS = ["low", "medium", "high"] as const;
+export type AssetFeatureSimilarityRisk = (typeof ASSET_FEATURE_SIMILARITY_RISKS)[number];
+
+export interface AssetFeature {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  assetId: string;
+  assetVersion: number;
+  schemaVersion: typeof ASSET_FEATURE_SCHEMA_VERSION;
+  featureVersion: string;
+  hookStrength: number;
+  productVisibility: number;
+  sceneTags: string[];
+  productTags: string[];
+  personTags: string[];
+  actionTags: string[];
+  emotionTags: string[];
+  sellingPoints: string[];
+  ctaPresence: boolean;
+  similarityGroup?: string;
+  similarityRisk: AssetFeatureSimilarityRisk;
+  evidence: string[];
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GenerationJob {
   id: string;
   projectId: string;
@@ -215,7 +244,7 @@ export interface AuditEvent {
   projectId: string;
   actor: string;
   action: string;
-  entityType: "project" | "business_task" | "artifact" | "generation_job" | "change_set";
+  entityType: "project" | "business_task" | "artifact" | "asset_feature" | "generation_job" | "change_set";
   entityId: string;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -226,6 +255,7 @@ export interface StoreData {
   operationalRecords: OperationalRecord[];
   businessTasks: BusinessTask[];
   artifacts: Artifact[];
+  assetFeatures: AssetFeature[];
   generationJobs: GenerationJob[];
   changeSets: ChangeSet[];
   auditEvents: AuditEvent[];
@@ -236,6 +266,7 @@ export const emptyStore = (): StoreData => ({
   operationalRecords: [],
   businessTasks: [],
   artifacts: [],
+  assetFeatures: [],
   generationJobs: [],
   changeSets: [],
   auditEvents: [],
@@ -311,6 +342,72 @@ export function assertVideoMetadata(
   if (purpose === undefined && prerollType !== undefined) {
     throw new DomainError("VALIDATION_ERROR", "A preroll type requires the preroll purpose");
   }
+}
+
+export function assertAssetFeaturePayload(feature: Pick<
+  AssetFeature,
+  | "schemaVersion"
+  | "featureVersion"
+  | "hookStrength"
+  | "productVisibility"
+  | "sceneTags"
+  | "productTags"
+  | "personTags"
+  | "actionTags"
+  | "emotionTags"
+  | "sellingPoints"
+  | "ctaPresence"
+  | "similarityGroup"
+  | "similarityRisk"
+  | "evidence"
+>): void {
+  if (feature.schemaVersion !== ASSET_FEATURE_SCHEMA_VERSION) {
+    throw new DomainError("VALIDATION_ERROR", "schemaVersion must be asset_feature_v1", [{
+      field: "schemaVersion",
+      message: "Must be asset_feature_v1",
+    }]);
+  }
+  assertNonEmptyString(feature.featureVersion, "featureVersion");
+  assertScore(feature.hookStrength, "hookStrength");
+  assertScore(feature.productVisibility, "productVisibility");
+  assertStringList(feature.sceneTags, "sceneTags");
+  assertStringList(feature.productTags, "productTags");
+  assertStringList(feature.personTags, "personTags");
+  assertStringList(feature.actionTags, "actionTags");
+  assertStringList(feature.emotionTags, "emotionTags");
+  assertStringList(feature.sellingPoints, "sellingPoints");
+  assertStringList(feature.evidence, "evidence");
+  if (typeof feature.ctaPresence !== "boolean") {
+    invalidAssetFeatureField("ctaPresence", "Must be a boolean");
+  }
+  if (feature.similarityGroup !== undefined) {
+    assertNonEmptyString(feature.similarityGroup, "similarityGroup");
+  }
+  if (!ASSET_FEATURE_SIMILARITY_RISKS.includes(feature.similarityRisk)) {
+    invalidAssetFeatureField("similarityRisk", "Must be low, medium, or high");
+  }
+}
+
+function assertScore(value: number, field: string): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    invalidAssetFeatureField(field, "Must be a number between 0 and 1");
+  }
+}
+
+function assertStringList(value: string[], field: string): void {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+    invalidAssetFeatureField(field, "Must be an array of non-empty strings");
+  }
+}
+
+function assertNonEmptyString(value: string, field: string): void {
+  if (typeof value !== "string" || !value.trim()) {
+    invalidAssetFeatureField(field, "Must be a non-empty string");
+  }
+}
+
+function invalidAssetFeatureField(field: string, message: string): never {
+  throw new DomainError("VALIDATION_ERROR", `${field} ${message.toLowerCase()}`, [{ field, message }]);
 }
 
 export function isBusinessTaskType(value: unknown): value is BusinessTaskType {

@@ -225,6 +225,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .source-dot--imported { background: #0e9384; }
 .source-dot--captured { background: #f79009; }
 .asset-facts { display: flex; gap: 12px; margin-top: 9px; color: #667085; font-size: 11px; }
+.asset-feature-summary { overflow: hidden; margin: 8px 0 0; color: #344054; font-size: 11px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.asset-feature-summary--empty { color: #98a2b3; }
 .asset-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; color: #667085; font-size: 11px; }
 .asset-status { display: inline-flex; align-items: center; gap: 6px; }
 .asset-status i { width: 6px; height: 6px; border-radius: 50%; background: #98a2b3; }
@@ -297,6 +299,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .remix-asset__body { min-width: 0; }
 .remix-asset__body strong { display: block; overflow: hidden; color: #253246; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .remix-asset__body > span { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+.remix-asset__body > small.asset-feature-summary { display: block; }
 .remix-assignments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .remix-assignments button { min-height: 27px; border: 1px solid #d8e0ea; border-radius: 999px; background: #fff; color: #526174; padding: 0 10px; font-size: 11px; font-weight: 650; }
 .remix-assignments button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -319,10 +322,47 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .remix-plan-summary strong { display: block; margin-top: 5px; color: #202b3a; font-size: 20px; }
 .remix-warnings { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .remix-warnings span { border: 1px solid #fedf89; border-radius: 999px; background: #fffcf5; color: #93370d; padding: 6px 9px; font-size: 11px; }
+.remix-ai-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.remix-ai-panel, .remix-agent-trace { min-width: 0; border: 1px solid #edf0f4; border-radius: 12px; background: #fbfcfe; padding: 13px; }
+.remix-ai-panel__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.remix-ai-panel__heading h3 { margin: 0; color: #202b3a; font-size: 13px; }
+.remix-ai-panel__heading span { flex: 0 0 auto; border-radius: 999px; background: #eef5ff; color: var(--accent); padding: 4px 8px; font-size: 10px; font-weight: 700; }
+.remix-ai-panel p, .remix-agent-trace p { overflow-wrap: anywhere; margin: 9px 0 0; color: #526174; font-size: 11px; line-height: 1.55; }
+.remix-ai-panel ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.remix-ai-panel li { min-width: 0; border-top: 1px solid #edf0f4; padding-top: 8px; }
+.remix-ai-panel li strong { display: block; overflow: hidden; color: #344054; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.remix-ai-panel li span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.remix-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
+.remix-panel-actions .button { min-height: 31px; padding: 0 10px; font-size: 11px; }
+.remix-recoverable-error, .remix-preroll-result { border: 1px solid #fecdca; border-radius: 9px; background: #fffbfa; color: #b42318; padding: 9px; }
+.remix-preroll-result { border-color: #cfe8d6; background: #f6fef9; color: #317547; }
+.remix-recoverable-error strong, .remix-preroll-result strong { display: block; font-size: 12px; }
+.remix-trace-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.remix-trace-grid > div { min-width: 0; border: 1px solid #edf0f4; border-radius: 10px; background: #fff; padding: 10px; }
+.remix-trace-grid strong { color: #344054; font-size: 11px; }
+.remix-trace-grid p { display: grid; gap: 3px; border-top: 1px solid #edf0f4; padding-top: 7px; }
+.remix-trace-grid p span { color: var(--muted); }
+.remix-feedback-field { display: grid; gap: 6px; margin-top: 10px; color: #344054; font-size: 11px; font-weight: 650; }
+.remix-feedback-field input, .remix-feedback-field textarea { width: 100%; min-width: 0; border: 1px solid #d8e0ea; border-radius: 8px; background: #fff; color: var(--text); padding: 8px 10px; font: inherit; font-size: 12px; }
+.remix-feedback-field textarea { min-height: 70px; resize: vertical; line-height: 1.5; }
 .remix-render-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 14px; border: 1px solid #cfe8d6; border-radius: 10px; background: #f6fef9; padding: 11px 12px; }
 .remix-render-status span { color: #317547; font-size: 11px; font-weight: 700; }
 .remix-render-status strong { overflow: hidden; color: #202b3a; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .remix-render-status em { color: #526174; font-size: 11px; font-style: normal; white-space: nowrap; }
+.remix-render-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.remix-render-actions .button { min-height: 30px; padding: 0 10px; font-size: 11px; }
+.remix-quality-report { display: grid; gap: 12px; margin-top: 12px; border: 1px solid #edf0f4; border-radius: 14px; background: #fbfcfe; padding: 14px; }
+.remix-quality-report--major { border-color: #fedf89; background: #fffcf5; }
+.remix-quality-report--critical { border-color: #fecaca; background: #fff7f7; }
+.remix-quality-report > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.remix-quality-report span { color: var(--muted); font-size: 11px; }
+.remix-quality-report strong { color: #202b3a; font-size: 13px; }
+.remix-quality-dimensions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.remix-quality-dimensions article { border: 1px solid #edf0f4; border-radius: 10px; background: #fff; padding: 10px; }
+.remix-quality-dimensions p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.remix-quality-report ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.remix-quality-report li { display: grid; gap: 4px; border-top: 1px solid #edf0f4; padding-top: 8px; }
+.remix-quality-report li span, .remix-quality-report li em, .remix-quality-report > p { color: #526174; font-size: 12px; font-style: normal; line-height: 1.5; }
 .remix-timeline { display: grid; gap: 16px; margin-top: 18px; }
 .remix-timeline-segment { min-width: 0; border-top: 1px solid var(--border); padding-top: 13px; }
 .remix-timeline-segment header { display: flex; align-items: center; justify-content: space-between; color: #344054; font-size: 12px; }
@@ -331,6 +371,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .remix-clip strong { overflow: hidden; color: #1d2939; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .remix-clip span { color: #526174; font-size: 10px; }
 .remix-clip p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.remix-risk-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.remix-risk-list em { border-radius: 999px; background: #fff7ed; color: #9a3412; padding: 3px 6px; font-size: 9px; font-style: normal; overflow-wrap: anywhere; }
 .remix-empty-segment { margin: 12px 0 0; color: var(--subtle); font-size: 12px; }
 .remix-saved-json { max-height: 420px; overflow: auto; margin: 16px 0 0; border: 1px solid #edf0f4; border-radius: 10px; background: #0f172a; color: #dbeafe; padding: 14px; font-size: 11px; line-height: 1.55; }
 
@@ -423,6 +465,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .asset-card--list .asset-card__body { grid-template-columns: 1fr; gap: 8px; }
   .provider-layout { grid-template-columns: 1fr; }
   .workflow-layout { grid-template-columns: 1fr; }
+  .remix-ai-panels, .remix-trace-grid { grid-template-columns: 1fr; }
+  .remix-render-status { grid-template-columns: 1fr; align-items: start; }
+  .remix-render-status em { white-space: normal; }
   .asset-summary { grid-template-columns: repeat(4, 1fr); }
   .asset-summary > div { padding: 0 12px; }
   .asset-summary p { grid-column: 1 / -1; justify-self: start; margin-top: 13px; text-align: left; }
