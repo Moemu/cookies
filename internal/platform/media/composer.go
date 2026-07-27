@@ -220,7 +220,8 @@ func (c FFmpegComposer) normalize(ctx context.Context, runner CommandRunner, inp
 }
 
 func ffconcatPath(value string) string {
-	return strings.ReplaceAll(filepath.ToSlash(value), "'", "'\\''")
+	normalized := strings.ReplaceAll(filepath.ToSlash(value), `\`, "/")
+	return strings.ReplaceAll(normalized, "'", "'\\''")
 }
 
 type cleanupReadCloser struct {
