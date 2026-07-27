@@ -130,6 +130,7 @@ type JobRecord struct {
 	SourceSystem          string
 	SourceTaskID          string
 	Input                 ImageGenerationInput
+	VideoInput            VideoGenerationInput
 	ProviderCode          string
 	ModelVersion          string
 	ExternalTaskID        string
@@ -191,14 +192,23 @@ type Service struct {
 	Store         JobStore
 	Scheduler     ExecutionScheduler
 	ImageAdapter  ImageProviderAdapter
+	VideoAdapter  VideoProviderAdapter
 	TextAdapter   TextProviderAdapter
 	VisionAdapter VisionProviderAdapter
 	VisionSources VisionSourceResolver
 	Intake        GeneratedIntakeClient
 	OutputHandles OutputHandleStore
 	Routes        ImageRouteResolver
+	VideoRoutes   VideoRouteResolver
 	NewID         func() (string, error)
 	Now           func() time.Time
+}
+
+// ProcessVideoJob uses the same Assets intake protocol as image generation.
+// The durable output MIME type and provenance capability distinguish the
+// resulting asset; Assets remains the owner of storage and asset versions.
+func (s Service) ProcessVideoJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, *time.Time, error) {
+	return s.ProcessImageJob(ctx, organizationID, projectID, jobID)
 }
 
 func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobRequest) (contract.ProviderJob, bool, error) {

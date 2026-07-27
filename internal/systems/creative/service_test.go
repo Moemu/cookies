@@ -1,13 +1,17 @@
 package creative
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/media"
 )
 
 func TestManualIntakeNeedsClarificationBeforeCreatingTask(t *testing.T) {
@@ -240,6 +244,138 @@ func TestImagePlanRetriesRetainEachProviderAttempt(t *testing.T) {
 	}
 }
 
+func TestCreateVideoTaskConsumesApprovedRouteAndReadyProjectVideo(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{
+		PackageID: "package_1", PackageVersion: 1, ContentHash: "hash_1", CreativeReady: true,
+		Objective: "转化", Audience: "短剧观众", CoreMessage: "五秒建立产品利益点", Concept: "先看利益点再进正片",
+		Tone: []string{"直接"}, VisualKeywords: []string{"竖屏"}, Mandatory: []string{}, Prohibited: []string{},
+		CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"},
+			Reason: "正片前快速建立关联", TargetDurationSeconds: 5, AspectRatio: "9:16",
+			SourceAssetRefs: []contract.AssetVersionRef{}, EvidenceRefs: []string{}, RequiresHumanConfirmation: true,
+		}},
+	}}
+	service.Assets = testAssetReader{snapshot: CreativeAssetSnapshot{
+		Ref: contract.AssetVersionRef{AssetID: "asset_main", Version: 1}, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true,
+	}}
+	rc := testRequestContext()
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "video-intake-1", CreateIntakeRequest{
+		Source:          IntakeSourceStrategyPackage,
+		StrategyPackage: &StrategyPackageReference{PackageID: "package_1", PackageVersion: 1, ExpectedContentHash: "hash_1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateVideoTask(context.Background(), rc.Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		RouteIndex: 0, Channel: ChannelDouyin,
+		SourceVideo: contract.AssetVersionRef{AssetID: "asset_main", Version: 1},
+		Concept:     "利益点前贴", Prompt: "竖屏五秒产品利益点广告", CallToAction: "继续观看",
+		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), rc.Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Format != FormatVideo || task.PerformanceMode != "pre_roll" || detail.VideoDraft == nil ||
+		detail.VideoDraft.SourceVideo.AssetID != "asset_main" || detail.VideoDraft.DurationSeconds != 5 {
+		t.Fatalf("unexpected video task detail: %+v", detail)
+	}
+}
+
+func TestRenderJobPersistsFinalAssetLineage(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	repository := service.Repository.(*memoryRepository)
+	now := service.now()
+	intake := CreativeIntake{
+		ID: "intake_video", OrganizationID: "org_1", ProjectID: "project_1", Status: IntakeReady,
+		Request: CreateIntakeRequest{
+			StrategyPackage: &StrategyPackageReference{PackageID: "strategy_package_1", PackageVersion: 1, ExpectedContentHash: "sha256:strategy"},
+			CreativeRoutes: []CreativeRouteSnapshot{{
+				RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"}, Reason: "approved",
+				TargetDurationSeconds: 5, AspectRatio: "9:16", RequiresHumanConfirmation: true,
+			}},
+		},
+	}
+	repository.intakes[intake.ID] = intake
+	task := CreativeTask{
+		ID: "task_video", OrganizationID: "org_1", ProjectID: "project_1", IntakeID: intake.ID,
+		Format: FormatVideo, Channel: ChannelDouyin, VideoPurpose: "performance", PerformanceMode: "pre_roll",
+		Status: TaskDraft, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	draft := VideoDraft{
+		ContractVersion: "creative-video-draft/v1", TaskID: task.ID, Revision: 1, Concept: "concept", Prompt: "prompt",
+		DurationSeconds: 5, AspectRatio: "9:16", Resolution: "720p",
+		SourceVideo: contract.AssetVersionRef{AssetID: "asset_main", Version: 1},
+		Mandatory:   []string{}, Prohibited: []string{}, CreatedAt: now,
+	}
+	if _, err := repository.CreateVideoTask(context.Background(), task, draft); err != nil {
+		t.Fatal(err)
+	}
+	taskDetail := repository.tasks[task.ID]
+	taskDetail.ProductionJobs = []ProductionJob{{TaskID: task.ID, Kind: "video_generate", ProviderJobID: "providerjob_video_1", CreatedAt: now}}
+	repository.tasks[task.ID] = taskDetail
+	service.Assets = testAssetReader{snapshot: CreativeAssetSnapshot{
+		Ref: contract.AssetVersionRef{AssetID: "asset_preroll", Version: 1}, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true,
+	}}
+	scheduler := &testRenderScheduler{}
+	writer := &testRenderedAssetWriter{ref: contract.ProjectAssetRef{
+		ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "asset_final", Version: 1},
+	}}
+	service.RenderScheduler = scheduler
+	service.Composer = testVideoComposer{}
+	service.RenderedAssets = writer
+	rc := testRequestContext()
+	render, _, err := service.CreateRenderJob(context.Background(), rc, "project_1", task.ID, CreateRenderJobRequest{
+		PreRollVideo: contract.AssetVersionRef{AssetID: "asset_preroll", Version: 1},
+	}, "render-once")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduler.render.ID != render.ID {
+		t.Fatalf("render was not durably scheduled: %+v", scheduler.render)
+	}
+	if err := service.ExecuteRenderJob(context.Background(), "org_1", "project_1", render.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetRenderJob(context.Background(), "org_1", "project_1", render.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != RenderSucceeded || stored.OutputAsset == nil || stored.OutputAsset.AssetVersion.AssetID != "asset_final" || writer.renderJobID != render.ID {
+		t.Fatalf("render lineage is incomplete: render=%+v writer=%+v", stored, writer)
+	}
+	version, _, err := service.FreezeVersion(context.Background(), rc, "project_1", task.ID, FreezeVersionRequest{
+		DraftVersion: 1, RenderJobID: render.ID,
+	}, "freeze-video-once")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version.VideoSnapshot == nil || version.VideoSnapshot.FinalVideo.AssetID != "asset_final" ||
+		version.VideoSnapshot.ProviderJobID != "providerjob_video_1" {
+		t.Fatalf("video version lineage is incomplete: %+v", version)
+	}
+	checked, err := service.CheckVersion(context.Background(), rc.Actor, "project_1", version.ID)
+	if err != nil || checked.Check == nil || !checked.Check.Passed {
+		t.Fatalf("video check failed: version=%+v err=%v", checked, err)
+	}
+	if _, err := service.ApproveVersion(context.Background(), rc.Actor, "project_1", version.ID); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := service.DeliverVersion(context.Background(), rc.Actor, "project_1", version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Format != FormatVideo || pkg.VideoSnapshot == nil || pkg.VideoSnapshot.RenderJobID != render.ID {
+		t.Fatalf("delivered package lost video lineage: %+v", pkg)
+	}
+}
+
 func validManualRequest() CreateIntakeRequest {
 	return CreateIntakeRequest{
 		Source: IntakeSourceManual, Channel: ChannelXiaohongshu, Objective: "建立新品认知", Audience: "关注生活方式的年轻上班族", CoreMessage: "一杯咖啡，也可以成为从容开始的仪式", CallToAction: "收藏这份晨间灵感",
@@ -257,13 +393,59 @@ func testRequestContext() contract.RequestContext {
 
 func testService() Service {
 	sequence := 0
-	return Service{Repository: &memoryRepository{intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}, versions: map[string]CreativeVersion{}, packages: map[string]CreativePackage{}}, Projects: testProjects{}, Now: func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+	return Service{
+		Repository: &memoryRepository{
+			intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}, renders: map[string]RenderJob{},
+			versions: map[string]CreativeVersion{}, packages: map[string]CreativePackage{},
+		},
+		Projects: testProjects{},
+		Now:      func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) },
+		NewID: func(prefix string) (string, error) {
+			sequence++
+			return fmt.Sprintf("%s_%d", prefix, sequence), nil
+		},
+	}
 }
 
 type testProjects struct{}
 
 type strategyPackageReader struct {
 	snapshot StrategyPackageSnapshot
+}
+
+type testAssetReader struct {
+	snapshot CreativeAssetSnapshot
+	err      error
+}
+
+type testRenderScheduler struct{ render RenderJob }
+
+func (s *testRenderScheduler) ScheduleRender(_ context.Context, render RenderJob) error {
+	s.render = render
+	return nil
+}
+
+type testVideoComposer struct{}
+
+func (testVideoComposer) ComposePreRoll(context.Context, media.PreRollCompositionRequest) (media.CompositionOutput, error) {
+	return media.CompositionOutput{
+		Content: io.NopCloser(bytes.NewReader([]byte("rendered-video"))), SizeBytes: 14,
+		Metadata: assets.VideoMetadata{DurationMS: 1000, WidthPixels: 720, HeightPixels: 1280, FrameRate: "25/1", VideoCodec: "h264"},
+	}, nil
+}
+
+type testRenderedAssetWriter struct {
+	ref         contract.ProjectAssetRef
+	renderJobID string
+}
+
+func (w *testRenderedAssetWriter) IngestRenderedVideo(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, renderJobID string, _ io.Reader, _ int64) (contract.ProjectAssetRef, error) {
+	w.renderJobID = renderJobID
+	return w.ref, nil
+}
+
+func (r testAssetReader) ReadForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ contract.AssetVersionRef) (CreativeAssetSnapshot, error) {
+	return r.snapshot, r.err
 }
 
 func (r strategyPackageReader) ReadForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, reference StrategyPackageReference) (StrategyPackageSnapshot, error) {
@@ -285,6 +467,7 @@ func (testProjects) RequireActiveContext(_ context.Context, actor contract.Actor
 type memoryRepository struct {
 	intakes  map[string]CreativeIntake
 	tasks    map[string]TaskDetail
+	renders  map[string]RenderJob
 	versions map[string]CreativeVersion
 	packages map[string]CreativePackage
 }
@@ -326,6 +509,48 @@ func (r *memoryRepository) GetIntake(_ context.Context, _ contract.OrganizationI
 func (r *memoryRepository) CreateTask(_ context.Context, task CreativeTask, draft ImageTextDraft) (CreativeTask, error) {
 	r.tasks[task.ID] = TaskDetail{Task: task, Intake: r.intakes[task.IntakeID], Draft: draft, ProductionJobs: []ProductionJob{}}
 	return task, nil
+}
+func (r *memoryRepository) CreateVideoTask(_ context.Context, task CreativeTask, draft VideoDraft) (CreativeTask, error) {
+	value := draft
+	r.tasks[task.ID] = TaskDetail{Task: task, Intake: r.intakes[task.IntakeID], VideoDraft: &value, ProductionJobs: []ProductionJob{}}
+	return task, nil
+}
+func (r *memoryRepository) CreateRenderJob(_ context.Context, value RenderJob) (RenderJob, bool, error) {
+	for _, existing := range r.renders {
+		if existing.IdempotencyKey == value.IdempotencyKey && existing.CreatedBy == value.CreatedBy && existing.ProjectID == value.ProjectID {
+			if existing.RequestHash != value.RequestHash {
+				return RenderJob{}, false, ErrIdempotencyConflict
+			}
+			return existing, true, nil
+		}
+	}
+	r.renders[value.ID] = value
+	return value, false, nil
+}
+func (r *memoryRepository) GetRenderJob(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string) (RenderJob, error) {
+	value, ok := r.renders[id]
+	if !ok {
+		return RenderJob{}, ErrNotFound
+	}
+	return value, nil
+}
+func (r *memoryRepository) MarkRenderRunning(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string, now time.Time) (RenderJob, error) {
+	value := r.renders[id]
+	value.Status, value.UpdatedAt = RenderRunning, now
+	r.renders[id] = value
+	return value, nil
+}
+func (r *memoryRepository) CompleteRenderJob(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id string, ref contract.ProjectAssetRef, now time.Time) error {
+	value := r.renders[id]
+	value.Status, value.OutputAsset, value.UpdatedAt = RenderSucceeded, &ref, now
+	r.renders[id] = value
+	return nil
+}
+func (r *memoryRepository) FailRenderJob(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, id, code, message string, now time.Time) error {
+	value := r.renders[id]
+	value.Status, value.ErrorCode, value.ErrorMessage, value.UpdatedAt = RenderFailed, code, message, now
+	r.renders[id] = value
+	return nil
 }
 func (r *memoryRepository) ListTasks(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, _ int) ([]CreativeTask, error) {
 	values := make([]CreativeTask, 0, len(r.tasks))

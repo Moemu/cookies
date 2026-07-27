@@ -22,11 +22,17 @@ type Repository interface {
 	ListIntakes(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativeIntake, error)
 	GetIntake(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeIntake, error)
 	CreateTask(context.Context, CreativeTask, ImageTextDraft) (CreativeTask, error)
+	CreateVideoTask(context.Context, CreativeTask, VideoDraft) (CreativeTask, error)
 	ListTasks(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativeTask, error)
 	GetTaskDetail(context.Context, contract.OrganizationID, contract.ProjectID, string) (TaskDetail, error)
 	ArchiveTask(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) error
 	ReviseDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ImageTextDraft) (ImageTextDraft, error)
 	RegisterProductionJob(context.Context, contract.OrganizationID, contract.ProjectID, string, ProductionJob) error
+	CreateRenderJob(context.Context, RenderJob) (RenderJob, bool, error)
+	GetRenderJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (RenderJob, error)
+	MarkRenderRunning(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) (RenderJob, error)
+	CompleteRenderJob(context.Context, contract.OrganizationID, contract.ProjectID, string, contract.ProjectAssetRef, time.Time) error
+	FailRenderJob(context.Context, contract.OrganizationID, contract.ProjectID, string, string, string, time.Time) error
 	CreateVersion(context.Context, CreativeVersion) (CreativeVersion, bool, error)
 	GetVersion(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeVersion, error)
 	ListVersions(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]CreativeVersion, error)

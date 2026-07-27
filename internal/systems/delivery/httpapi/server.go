@@ -24,6 +24,8 @@ type Application interface {
 	Execute(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ExecutionResult, error)
 	Rollback(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	ListExecutions(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.ExecutionResult, error)
+	CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error)
+	ListMetricSnapshots(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryMetricSnapshot, error)
 }
 
 type Server struct {
@@ -39,6 +41,8 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_action}", server.createChangeSet)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/change-sets/{change_set_action}", server.changeSetAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.createMetricSnapshot)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.listMetricSnapshots)
 	return server
 }
 
@@ -138,6 +142,32 @@ func (s *Server) changeSetAction(writer http.ResponseWriter, request *http.Reque
 
 func (s *Server) listExecutions(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.app.ListExecutions(request.Context(), mustActor(request), projectID(request), queryLimit(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) createMetricSnapshot(writer http.ResponseWriter, request *http.Request) {
+	var body delivery.CreateMetricSnapshotRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.CreateDemoMetricSnapshot(
+		request.Context(), mustActor(request), projectID(request), request.PathValue("execution_id"), body,
+	)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listMetricSnapshots(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.app.ListMetricSnapshots(
+		request.Context(), mustActor(request), projectID(request), request.PathValue("execution_id"), queryLimit(request),
+	)
 	if err != nil {
 		writeError(writer, request, err)
 		return

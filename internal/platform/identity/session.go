@@ -234,7 +234,7 @@ func normalizeUsername(value string) string {
 func adminScopes() []contract.Scope {
 	values := []string{
 		"project.read", "project.write", "assets.read", "assets.write",
-		"provider.read", "provider.generate", "provider.text.generate",
+		"provider.read", "provider.generate", "provider.job.create", "provider.text.generate",
 		"strategy.read", "strategy.write", "strategy.confirm", "strategy.review",
 		"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
 		"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",

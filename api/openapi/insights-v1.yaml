@@ -185,15 +185,9 @@ components:
     CreateReport:
       type: object
       additionalProperties: false
-      required: [execution_id, summary, findings]
+      required: [execution_id]
       properties:
         execution_id: { type: string }
-        summary: { type: string, maxLength: 2000 }
-        findings:
-          type: array
-          minItems: 1
-          maxItems: 20
-          items: { type: string, maxLength: 500 }
     CreateExperience:
       type: object
       additionalProperties: false
@@ -211,17 +205,37 @@ components:
           items: { type: string, maxLength: 500 }
     DeliveryExecutionSnapshot:
       type: object
-      required: [id, change_set_id, plan_id, mode, evidence_id, evidence_summary]
+      required: [id, change_set_id, plan_id, creative_package_id, mode, evidence_id, evidence_summary]
       properties:
         id: { type: string }
         change_set_id: { type: string }
         plan_id: { type: string }
+        creative_package_id: { type: string }
         mode: { type: string, enum: [local_simulation] }
         evidence_id: { type: string }
         evidence_summary: { type: string }
+        metric_snapshot:
+          $ref: '#/components/schemas/DeliveryMetricSnapshot'
+    DeliveryMetricSnapshot:
+      type: object
+      required: [id, source, is_simulated, dataset_version, currency, raw_metrics]
+      properties:
+        id: { type: string }
+        source: { type: string, const: demo_fixture }
+        is_simulated: { type: boolean, const: true }
+        dataset_version: { type: string, const: preroll-demo/v1 }
+        currency: { type: string, const: CNY }
+        raw_metrics:
+          type: object
+          required: [impressions, clicks, conversions, spend_cents]
+          properties:
+            impressions: { type: integer, minimum: 0 }
+            clicks: { type: integer, minimum: 0 }
+            conversions: { type: integer, minimum: 0 }
+            spend_cents: { type: integer, minimum: 0 }
     InsightReport:
       type: object
-      required: [id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, status, summary, findings, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -230,6 +244,10 @@ components:
         delivery_mode: { type: string, enum: [local_simulation] }
         evidence_id: { type: string }
         evidence_summary: { type: string }
+        metric_snapshot_id: { type: string }
+        creative_package_id: { type: string }
+        is_simulated: { type: boolean }
+        dataset_version: { type: string }
         status: { type: string, enum: [draft, confirmed] }
         summary: { type: string }
         findings:
@@ -243,7 +261,7 @@ components:
         updated_at: { type: string, format: date-time }
     Experience:
       type: object
-      required: [id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -251,6 +269,7 @@ components:
         report_id: { type: string }
         source_execution_id: { type: string }
         source_evidence_id: { type: string }
+        source_metric_snapshot_id: { type: string }
         conclusion: { type: string }
         conditions:
           type: array

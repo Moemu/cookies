@@ -30,3 +30,26 @@ func TestAESGCMCredentialCipherRoundTripAndTamperDetection(t *testing.T) {
 		t.Fatal("Decrypt() accepted an unavailable key version")
 	}
 }
+
+func TestVideoRouteAllowsLongPollingAndVideoSizedResponses(t *testing.T) {
+	t.Parallel()
+	route := GatewayRouteSnapshot{
+		RouteID:              "route_video_1",
+		RouteRevisionID:      "route_video_r1",
+		ConnectionID:         "connection_video_1",
+		ConnectionRevisionID: "connection_video_r1",
+		BaseURL:              "https://ark.cn-beijing.volces.com/api/v3",
+		UpstreamModel:        "doubao-seedance-2-0-fast-260128",
+		CredentialID:         "credential_video_1",
+		CredentialVersion:    1,
+		TimeoutSeconds:       900,
+		MaxResponseBytes:     200 << 20,
+	}
+
+	if err := route.ValidateVideoWithPolicy(false); err != nil {
+		t.Fatalf("ValidateVideoWithPolicy() rejected a supported Seedance route: %v", err)
+	}
+	if err := route.ValidateWithPolicy(false); err == nil {
+		t.Fatal("image/text route policy unexpectedly accepted video-sized limits")
+	}
+}

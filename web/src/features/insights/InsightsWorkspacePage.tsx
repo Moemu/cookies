@@ -125,7 +125,7 @@ function ReportsView({ busy, executions, experiences, onAction, projectId, repor
       {executions.map((item) => <div className="outcome-list__item" key={item.id}><strong>{item.id}</strong><span>{reported.has(item.id) ? '已建立报告' : '等待报告'}</span></div>)}
     </aside>
     <main className="outcome-detail">
-      {executions.filter((item) => !reported.has(item.id)).map((item) => <ReportComposer busy={busy} execution={item} key={item.id} onCreate={(summary, findings) => onAction(() => createInsightReport(projectId, { execution_id: item.id, summary, findings }))} />)}
+      {executions.filter((item) => !reported.has(item.id)).map((item) => <AutomatedReportComposer busy={busy} execution={item} key={item.id} onCreate={() => onAction(() => createInsightReport(projectId, { execution_id: item.id }))} />)}
       {reports.map((report) => <article className="report-card" key={report.id}>
         <div className="outcome-card__top"><span className="status-chip status-chip--active">{report.status === 'confirmed' ? '已确认' : '待确认'}</span><code>{report.id} · v{report.version}</code></div>
         <h2>{report.summary}</h2>
@@ -147,7 +147,22 @@ function ReportsView({ busy, executions, experiences, onAction, projectId, repor
   </div>
 }
 
-function ReportComposer({ busy, execution, onCreate }: { busy: boolean, execution: DeliveryExecutionSnapshot, onCreate: (summary: string, findings: string[]) => void }) {
+function AutomatedReportComposer({ busy, execution, onCreate }: { busy: boolean, execution: DeliveryExecutionSnapshot, onCreate: () => void }) {
+  const metrics = execution.metric_snapshot?.raw_metrics
+  return <section className="report-composer">
+    <span className="page-eyebrow">EVIDENCE-BASED REPORT</span>
+    <h2>为 {execution.id} 生成模拟复盘</h2>
+    {metrics ? <dl className="outcome-facts">
+      <div><dt>曝光</dt><dd>{metrics.impressions.toLocaleString()}</dd></div>
+      <div><dt>点击</dt><dd>{metrics.clicks.toLocaleString()}</dd></div>
+      <div><dt>转化</dt><dd>{metrics.conversions.toLocaleString()}</dd></div>
+    </dl> : <p>请先在智能投放中生成模拟指标快照。</p>}
+    <Disclosure>报告摘要和 CTR/CVR 由服务端根据 demo_fixture 自动计算；模拟数据不代表真实广告效果。</Disclosure>
+    <button className="button button--primary button--compact" disabled={busy || !metrics} onClick={onCreate} type="button">生成复盘草稿</button>
+  </section>
+}
+
+export function ReportComposer({ busy, execution, onCreate }: { busy: boolean, execution: DeliveryExecutionSnapshot, onCreate: (summary: string, findings: string[]) => void }) {
   const [summary, setSummary] = useState('')
   const [findings, setFindings] = useState('')
   return <form className="report-composer" onSubmit={(event) => { event.preventDefault(); onCreate(summary, findings.split('\n').map((item) => item.trim()).filter(Boolean)) }}>

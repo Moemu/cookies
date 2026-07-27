@@ -211,6 +211,17 @@ export type PackageVersion = {
     strategy_revision: number
     strategy?: StrategyDocument
     brief?: BriefVersion
+    creative_routes?: Array<{
+      route_type: 'pre_roll'
+      video_purpose: 'performance'
+      channels: Array<'douyin' | 'kuaishou'>
+      reason: string
+      target_duration_seconds: 5
+      aspect_ratio: '9:16'
+      source_asset_refs: Array<{ asset_id: string; version: number }>
+      evidence_refs: string[]
+      requires_human_confirmation: true
+    }>
     readiness: {
       creative_ready: boolean
       delivery_ready: boolean

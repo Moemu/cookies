@@ -45,6 +45,11 @@ const (
 
 const ExecutionModeLocalSimulation = "local_simulation"
 
+const (
+	DemoMetricDatasetVersion = "preroll-demo/v1"
+	MetricSourceDemoFixture  = "demo_fixture"
+)
+
 type CreatePlanRequest struct {
 	CreativePackageID string    `json:"creative_package_id"`
 	Name              string    `json:"name"`
@@ -137,6 +142,45 @@ type ExecutionResult struct {
 	Evidence  Evidence  `json:"evidence"`
 }
 
+type RawMetrics struct {
+	Impressions int64 `json:"impressions"`
+	Clicks      int64 `json:"clicks"`
+	Conversions int64 `json:"conversions"`
+	SpendCents  int64 `json:"spend_cents"`
+}
+
+// DeliveryMetricSnapshot is an immutable observation bound to one execution
+// and the exact CreativePackage used by its DeliveryPlan. Demo snapshots are
+// deliberately and permanently labelled as simulated.
+type DeliveryMetricSnapshot struct {
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	ExecutionID       string                  `json:"execution_id"`
+	PlanID            string                  `json:"plan_id"`
+	CreativePackageID string                  `json:"creative_package_id"`
+	Source            string                  `json:"source"`
+	IsSimulated       bool                    `json:"is_simulated"`
+	DatasetVersion    string                  `json:"dataset_version"`
+	Currency          string                  `json:"currency"`
+	WindowStart       time.Time               `json:"window_start"`
+	WindowEnd         time.Time               `json:"window_end"`
+	RawMetrics        RawMetrics              `json:"raw_metrics"`
+	CreatedBy         string                  `json:"created_by"`
+	CreatedAt         time.Time               `json:"created_at"`
+}
+
+type CreateMetricSnapshotRequest struct {
+	DatasetVersion string `json:"dataset_version"`
+}
+
+func (r CreateMetricSnapshotRequest) Validate() error {
+	if strings.TrimSpace(r.DatasetVersion) != DemoMetricDatasetVersion {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 type PlanDetail struct {
 	Plan       DeliveryPlan      `json:"plan"`
 	ChangeSets []ChangeSet       `json:"change_sets"`
@@ -162,6 +206,8 @@ type Repository interface {
 	TransitionChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ChangeSetStatus, string, time.Time) (ChangeSet, error)
 	RecordExecution(context.Context, ChangeSet, Execution, Evidence) (ExecutionResult, error)
 	ListExecutions(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ExecutionResult, error)
+	CreateMetricSnapshot(context.Context, DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error)
+	ListMetricSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]DeliveryMetricSnapshot, error)
 }
 
 type Service struct {
@@ -360,6 +406,59 @@ func (s Service) ListExecutions(ctx context.Context, actor contract.ActorContext
 	return s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
 }
 
+func (s Service) CreateDemoMetricSnapshot(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, request CreateMetricSnapshotRequest) (DeliveryMetricSnapshot, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	if strings.TrimSpace(executionID) == "" {
+		return DeliveryMetricSnapshot{}, ErrInvalidRequest
+	}
+	if err := request.Validate(); err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	execution, err := s.findExecution(ctx, actor.OrganizationID, projectID, executionID)
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	if execution.Execution.Mode != ExecutionModeLocalSimulation || execution.Execution.Status != "succeeded" {
+		return DeliveryMetricSnapshot{}, ErrInvalidState
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, execution.ChangeSet.PlanID)
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	id, err := s.idGenerator()("deliverymetric")
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	value := DeliveryMetricSnapshot{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		ExecutionID: execution.Execution.ID, PlanID: plan.ID, CreativePackageID: plan.CreativePackageID,
+		Source: MetricSourceDemoFixture, IsSimulated: true, DatasetVersion: DemoMetricDatasetVersion,
+		Currency: "CNY", WindowStart: plan.StartAt, WindowEnd: plan.EndAt,
+		RawMetrics: RawMetrics{Impressions: 10000, Clicks: 420, Conversions: 31, SpendCents: 50000},
+		CreatedBy:  actor.Principal.ID, CreatedAt: s.now(),
+	}
+	stored, _, err := s.Repository.CreateMetricSnapshot(ctx, value)
+	return stored, err
+}
+
+func (s Service) ListMetricSnapshots(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, limit int) ([]DeliveryMetricSnapshot, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(executionID) == "" {
+		return nil, ErrInvalidRequest
+	}
+	return s.Repository.ListMetricSnapshots(ctx, actor.OrganizationID, projectID, executionID, normalizeLimit(limit))
+}
+
 // ListExecutionEvidence is the narrow internal projection used by the
 // Delivery→Insights integration. The Insights service authorizes its own
 // caller before using this method; Delivery still enforces tenant and active
@@ -375,6 +474,50 @@ func (s Service) ListExecutionEvidence(ctx context.Context, actor contract.Actor
 		return nil, err
 	}
 	return s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+}
+
+// ReadExecutionEvidence is the narrow cross-domain projection for Insights.
+// It deliberately carries immutable metric and CreativePackage lineage rather
+// than exposing Delivery's repository to another domain.
+func (s Service) ReadExecutionEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string) (ExecutionResult, *DeliveryMetricSnapshot, DeliveryPlan, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return ExecutionResult{}, nil, DeliveryPlan{}, fmt.Errorf("delivery evidence dependencies are incomplete")
+	}
+	if actor.OrganizationID == "" || projectID == "" || strings.TrimSpace(executionID) == "" {
+		return ExecutionResult{}, nil, DeliveryPlan{}, ErrInvalidRequest
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ExecutionResult{}, nil, DeliveryPlan{}, err
+	}
+	execution, err := s.findExecution(ctx, actor.OrganizationID, projectID, executionID)
+	if err != nil {
+		return ExecutionResult{}, nil, DeliveryPlan{}, err
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, execution.ChangeSet.PlanID)
+	if err != nil {
+		return ExecutionResult{}, nil, DeliveryPlan{}, err
+	}
+	values, err := s.Repository.ListMetricSnapshots(ctx, actor.OrganizationID, projectID, executionID, 1)
+	if err != nil {
+		return ExecutionResult{}, nil, DeliveryPlan{}, err
+	}
+	if len(values) == 0 {
+		return execution, nil, plan, nil
+	}
+	return execution, &values[0], plan, nil
+}
+
+func (s Service) findExecution(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string) (ExecutionResult, error) {
+	values, err := s.Repository.ListExecutions(ctx, organizationID, projectID, 100)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	for _, value := range values {
+		if value.Execution.ID == executionID {
+			return value, nil
+		}
+	}
+	return ExecutionResult{}, ErrNotFound
 }
 
 func (s Service) ready(actor contract.ActorContext, projectID contract.ProjectID, scope contract.Scope) error {

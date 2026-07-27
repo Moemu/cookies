@@ -35,11 +35,18 @@ const (
 
 type CreativeFormat string
 
-const FormatImageText CreativeFormat = "image_text"
+const (
+	FormatImageText CreativeFormat = "image_text"
+	FormatVideo     CreativeFormat = "video"
+)
 
 type CreativeChannel string
 
-const ChannelXiaohongshu CreativeChannel = "xiaohongshu"
+const (
+	ChannelXiaohongshu CreativeChannel = "xiaohongshu"
+	ChannelDouyin      CreativeChannel = "douyin"
+	ChannelKuaishou    CreativeChannel = "kuaishou"
+)
 
 type TaskStatus string
 
@@ -47,6 +54,11 @@ const (
 	TaskDraft      TaskStatus = "draft"
 	TaskInProgress TaskStatus = "in_progress"
 	TaskReady      TaskStatus = "ready_for_review"
+	TaskGenerating TaskStatus = "generating"
+	TaskGenerated  TaskStatus = "generated"
+	TaskRendering  TaskStatus = "rendering"
+	TaskApproved   TaskStatus = "approved"
+	TaskDelivered  TaskStatus = "delivered"
 	// TaskArchived is a reversible-looking UI state backed by a retained record.
 	// It deliberately does not delete drafts, Provider lineage, or frozen versions.
 	TaskArchived TaskStatus = "archived"
@@ -58,6 +70,7 @@ type CreateIntakeRequest struct {
 	// from an immutable Strategy package. The server reads and validates that
 	// package; callers never submit its content as trusted Creative input.
 	StrategyPackage *StrategyPackageReference `json:"strategy_package,omitempty"`
+	CreativeRoutes  []CreativeRouteSnapshot   `json:"creative_routes,omitempty"`
 	Channel         CreativeChannel           `json:"channel"`
 	Objective       string                    `json:"objective"`
 	Audience        string                    `json:"audience"`
@@ -68,6 +81,37 @@ type CreateIntakeRequest struct {
 	VisualKeywords  []string                  `json:"visual_keywords"`
 	Mandatory       []string                  `json:"mandatory_elements"`
 	Prohibited      []string                  `json:"prohibited_claims"`
+}
+
+type CreativeRouteSnapshot struct {
+	RouteType                 string                     `json:"route_type"`
+	VideoPurpose              string                     `json:"video_purpose"`
+	Channels                  []string                   `json:"channels"`
+	Reason                    string                     `json:"reason"`
+	TargetDurationSeconds     int                        `json:"target_duration_seconds"`
+	AspectRatio               string                     `json:"aspect_ratio"`
+	SourceAssetRefs           []contract.AssetVersionRef `json:"source_asset_refs"`
+	EvidenceRefs              []string                   `json:"evidence_refs"`
+	RequiresHumanConfirmation bool                       `json:"requires_human_confirmation"`
+}
+
+func (r CreativeRouteSnapshot) Validate() error {
+	if r.RouteType != "pre_roll" || r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
+		r.TargetDurationSeconds != 5 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
+		!r.RequiresHumanConfirmation {
+		return fmt.Errorf("creative pre-roll route is incomplete")
+	}
+	for _, channel := range r.Channels {
+		if channel != "douyin" && channel != "kuaishou" {
+			return fmt.Errorf("creative route channel %q is unsupported", channel)
+		}
+	}
+	for _, ref := range r.SourceAssetRefs {
+		if err := ref.Validate(); err != nil {
+			return fmt.Errorf("creative route source asset: %w", err)
+		}
+	}
+	return nil
 }
 
 type StrategyPackageReference struct {
@@ -89,12 +133,15 @@ func (r CreateIntakeRequest) Validate() error {
 	}
 	switch r.Source {
 	case IntakeSourceManual:
-		if r.StrategyPackage != nil {
+		if r.StrategyPackage != nil || len(r.CreativeRoutes) != 0 {
 			return fmt.Errorf("manual intake must not include strategy_package")
 		}
 	case IntakeSourceStrategyPackage:
 		if r.StrategyPackage == nil {
 			return fmt.Errorf("strategy_package is required for a strategy intake")
+		}
+		if len(r.CreativeRoutes) != 0 {
+			return fmt.Errorf("creative_routes are resolved from Strategy and must not be submitted by a caller")
 		}
 		return r.StrategyPackage.Validate()
 	default:
@@ -155,17 +202,72 @@ type CreativeIntake struct {
 }
 
 type CreativeTask struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	IntakeID       string                  `json:"intake_id"`
-	Format         CreativeFormat          `json:"format"`
-	Channel        CreativeChannel         `json:"channel"`
-	Status         TaskStatus              `json:"status"`
-	Direction      CreativeDirection       `json:"direction"`
-	Version        int64                   `json:"version"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	ID              string                  `json:"id"`
+	OrganizationID  contract.OrganizationID `json:"organization_id"`
+	ProjectID       contract.ProjectID      `json:"project_id"`
+	IntakeID        string                  `json:"intake_id"`
+	Format          CreativeFormat          `json:"format"`
+	Channel         CreativeChannel         `json:"channel"`
+	VideoPurpose    string                  `json:"video_purpose,omitempty"`
+	PerformanceMode string                  `json:"performance_mode,omitempty"`
+	Status          TaskStatus              `json:"status"`
+	Direction       CreativeDirection       `json:"direction"`
+	Version         int64                   `json:"version"`
+	CreatedAt       time.Time               `json:"created_at"`
+	UpdatedAt       time.Time               `json:"updated_at"`
+}
+
+type CreateVideoTaskRequest struct {
+	RouteIndex   int                      `json:"route_index"`
+	Channel      CreativeChannel          `json:"channel"`
+	SourceVideo  contract.AssetVersionRef `json:"source_video"`
+	Concept      string                   `json:"concept"`
+	Prompt       string                   `json:"prompt"`
+	CallToAction string                   `json:"call_to_action"`
+	Mandatory    []string                 `json:"mandatory_elements"`
+	Prohibited   []string                 `json:"prohibited_claims"`
+	ConfirmRoute bool                     `json:"confirm_route"`
+}
+
+func (r CreateVideoTaskRequest) Validate() error {
+	if r.RouteIndex < 0 || (r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
+		return fmt.Errorf("route_index, supported video channel, and explicit route confirmation are required")
+	}
+	if err := r.SourceVideo.Validate(); err != nil {
+		return fmt.Errorf("source_video: %w", err)
+	}
+	if strings.TrimSpace(r.Concept) == "" || len(r.Concept) > 500 || strings.TrimSpace(r.Prompt) == "" || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
+		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
+	}
+	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
+		return err
+	}
+	return validateStringList("prohibited_claims", r.Prohibited, 20, 200)
+}
+
+type VideoDraft struct {
+	ContractVersion string                   `json:"contract_version"`
+	TaskID          string                   `json:"task_id"`
+	Revision        int64                    `json:"revision"`
+	Concept         string                   `json:"concept"`
+	Prompt          string                   `json:"prompt"`
+	DurationSeconds int                      `json:"duration_seconds"`
+	AspectRatio     string                   `json:"aspect_ratio"`
+	Resolution      string                   `json:"resolution"`
+	SourceVideo     contract.AssetVersionRef `json:"source_video"`
+	Mandatory       []string                 `json:"mandatory_elements"`
+	Prohibited      []string                 `json:"prohibited_claims"`
+	CallToAction    string                   `json:"cta"`
+	CreatedAt       time.Time                `json:"created_at"`
+}
+
+func (d VideoDraft) Validate() error {
+	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
+		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds != 5 ||
+		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.SourceVideo.Validate() != nil || d.CreatedAt.IsZero() {
+		return fmt.Errorf("creative video draft is incomplete")
+	}
+	return nil
 }
 
 type CreativeContentType string
@@ -259,6 +361,17 @@ type CreateImageJobRequest struct {
 	ModelAlias     string `json:"model_alias"`
 }
 
+type CreateVideoJobRequest struct {
+	ModelAlias string `json:"model_alias"`
+}
+
+func (r CreateVideoJobRequest) Validate() error {
+	if len(strings.TrimSpace(r.ModelAlias)) > 128 {
+		return fmt.Errorf("model_alias is too long")
+	}
+	return nil
+}
+
 func (r CreateImageJobRequest) Validate() error {
 	if r.ImagePlanOrder < 1 || r.ImagePlanOrder > 12 {
 		return fmt.Errorf("image_plan_order must be between 1 and 12")
@@ -325,7 +438,8 @@ const (
 )
 
 type FreezeVersionRequest struct {
-	DraftVersion int64 `json:"draft_version"`
+	DraftVersion int64  `json:"draft_version"`
+	RenderJobID  string `json:"render_job_id,omitempty"`
 }
 
 func (r FreezeVersionRequest) Validate() error {
@@ -340,10 +454,12 @@ type CreativeVersion struct {
 	OrganizationID contract.OrganizationID `json:"organization_id"`
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	TaskID         string                  `json:"creative_task_id"`
+	Format         CreativeFormat          `json:"format"`
 	Version        int64                   `json:"version"`
 	DraftVersion   int64                   `json:"draft_version"`
 	Status         CreativeVersionStatus   `json:"status"`
 	Snapshot       ImageTextDraft          `json:"snapshot"`
+	VideoSnapshot  *VideoVersionSnapshot   `json:"video_snapshot,omitempty"`
 	ContentHash    contract.ContentHash    `json:"content_hash"`
 	CreatedBy      string                  `json:"created_by"`
 	CreatedAt      time.Time               `json:"created_at"`
@@ -351,6 +467,35 @@ type CreativeVersion struct {
 	Approval       *CreativeApproval       `json:"approval,omitempty"`
 	IdempotencyKey contract.IdempotencyKey `json:"-"`
 	RequestHash    string                  `json:"-"`
+}
+
+type VideoVersionSnapshot struct {
+	ContractVersion  string                    `json:"contract_version"`
+	Format           CreativeFormat            `json:"format"`
+	Channel          CreativeChannel           `json:"channel"`
+	VideoPurpose     string                    `json:"video_purpose"`
+	PerformanceMode  string                    `json:"performance_mode"`
+	StrategyPackage  *StrategyPackageReference `json:"strategy_package_ref,omitempty"`
+	DraftRevision    int64                     `json:"draft_revision"`
+	SourceVideo      contract.AssetVersionRef  `json:"source_video"`
+	GeneratedPreRoll contract.AssetVersionRef  `json:"generated_preroll"`
+	FinalVideo       contract.AssetVersionRef  `json:"final_video"`
+	ProviderJobID    string                    `json:"provider_job_id"`
+	RenderJobID      string                    `json:"render_job_id"`
+}
+
+func (v VideoVersionSnapshot) Validate() error {
+	if v.ContractVersion != "creative-video-version/v1" || v.Format != FormatVideo ||
+		(v.Channel != ChannelDouyin && v.Channel != ChannelKuaishou) ||
+		v.VideoPurpose != "performance" || v.PerformanceMode != "pre_roll" || v.DraftRevision < 1 ||
+		v.SourceVideo.Validate() != nil || v.GeneratedPreRoll.Validate() != nil || v.FinalVideo.Validate() != nil ||
+		strings.TrimSpace(v.ProviderJobID) == "" || strings.TrimSpace(v.RenderJobID) == "" {
+		return fmt.Errorf("creative video version snapshot is incomplete")
+	}
+	if v.StrategyPackage == nil || v.StrategyPackage.Validate() != nil {
+		return fmt.Errorf("creative video version requires immutable Strategy package lineage")
+	}
+	return nil
 }
 
 // CreativeCheck is an auditable, deterministic Phase-1 gate. It records why
@@ -375,8 +520,10 @@ type CreativePackage struct {
 	OrganizationID    contract.OrganizationID `json:"organization_id"`
 	ProjectID         contract.ProjectID      `json:"project_id"`
 	CreativeVersionID string                  `json:"creative_version_id"`
+	Format            CreativeFormat          `json:"format"`
 	ContentHash       contract.ContentHash    `json:"content_hash"`
 	Snapshot          ImageTextDraft          `json:"snapshot"`
+	VideoSnapshot     *VideoVersionSnapshot   `json:"video_snapshot,omitempty"`
 	CreatedBy         string                  `json:"created_by"`
 	CreatedAt         time.Time               `json:"created_at"`
 }
@@ -389,8 +536,17 @@ func (v CreativeVersion) Validate() error {
 	if v.Status != CreativeVersionCreated && v.Status != CreativeVersionChecked && v.Status != CreativeVersionApproved && v.Status != CreativeVersionSuperseded {
 		return fmt.Errorf("creative version status is invalid")
 	}
-	if v.Snapshot.TaskID != v.TaskID || v.Snapshot.Version != v.DraftVersion {
-		return fmt.Errorf("creative version snapshot does not match its draft reference")
+	switch v.Format {
+	case "", FormatImageText:
+		if v.Snapshot.TaskID != v.TaskID || v.Snapshot.Version != v.DraftVersion || v.VideoSnapshot != nil {
+			return fmt.Errorf("creative version snapshot does not match its image-text draft reference")
+		}
+	case FormatVideo:
+		if v.VideoSnapshot == nil || v.VideoSnapshot.DraftRevision != v.DraftVersion || v.VideoSnapshot.Validate() != nil {
+			return fmt.Errorf("creative version snapshot does not match its video draft reference")
+		}
+	default:
+		return fmt.Errorf("creative version format is invalid")
 	}
 	return nil
 }
@@ -414,6 +570,7 @@ type TaskDetail struct {
 	Task           CreativeTask    `json:"task"`
 	Intake         CreativeIntake  `json:"intake"`
 	Draft          ImageTextDraft  `json:"draft"`
+	VideoDraft     *VideoDraft     `json:"video_draft,omitempty"`
 	ProductionJobs []ProductionJob `json:"production_jobs"`
 }
 

@@ -16,6 +16,7 @@ import { ProjectAssetsPage } from '../features/assets/ProjectAssetsPage'
 import { ProjectAssetEditPage } from '../features/assets/ProjectAssetEditPage'
 import { ProjectAssetRemixPage } from '../features/assets/ProjectAssetRemixPage'
 import { CreativeImageTextPage } from '../features/creative/CreativeImageTextPage'
+import { CreativePreRollPage } from '../features/creative/CreativePreRollPage'
 import { DeliveryWorkspacePage } from '../features/delivery/DeliveryWorkspacePage'
 import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
 import { InsightsWorkspacePage } from '../features/insights/InsightsWorkspacePage'
@@ -276,6 +277,7 @@ export function Workspace() {
             <Route path="/projects/:projectId/provider-jobs" element={<ProviderJobsPage />} />
             <Route path="/projects/:projectId/creative/tasks" element={<CreativeImageTextPage />} />
             <Route path="/projects/:projectId/creative/tasks/:taskId/:creativeStage" element={<CreativeImageTextPage />} />
+            <Route path="/projects/:projectId/creative/video/performance/pre-roll" element={<CreativePreRollPage />} />
             <Route path="/projects/:projectId/creative" element={<LegacyCreativeRedirect />} />
             <Route path="/projects/:projectId/delivery/plans" element={canDelivery ? <DeliveryWorkspacePage project={currentProject} view="plans" /> : <ForbiddenPage />} />
             <Route path="/projects/:projectId/delivery/plans/:planId" element={canDelivery ? <DeliveryWorkspacePage project={currentProject} view="plans" /> : <ForbiddenPage />} />

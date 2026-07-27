@@ -141,6 +141,47 @@ func (r MySQLRepository) CreateTask(ctx context.Context, task CreativeTask, draf
 	return task, nil
 }
 
+func (r MySQLRepository) CreateVideoTask(ctx context.Context, task CreativeTask, draft VideoDraft) (CreativeTask, error) {
+	if r.DB == nil {
+		return CreativeTask{}, fmt.Errorf("creative MySQL database is required")
+	}
+	if task.Format != FormatVideo || draft.TaskID != task.ID {
+		return CreativeTask{}, fmt.Errorf("creative video task and draft do not match")
+	}
+	direction, err := json.Marshal(task.Direction)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	content, err := json.Marshal(draft)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO creative_tasks (
+		id, organization_id, project_id, intake_id, creative_format, channel, video_purpose, performance_mode,
+		status, direction_payload, version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel,
+		task.VideoPurpose, task.PerformanceMode, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO creative_video_drafts
+		(organization_id, task_id, revision, content_payload, created_at) VALUES (?, ?, ?, ?, ?)`,
+		task.OrganizationID, task.ID, draft.Revision, content, draft.CreatedAt)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CreativeTask{}, err
+	}
+	return task, nil
+}
+
 func (r MySQLRepository) ListTasks(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]CreativeTask, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("creative MySQL database is required")
@@ -194,15 +235,25 @@ func (r MySQLRepository) GetTaskDetail(ctx context.Context, organizationID contr
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	draft, err := r.getLatestDraft(ctx, organizationID, taskID)
-	if err != nil {
-		return TaskDetail{}, err
+	var draft ImageTextDraft
+	var videoDraft *VideoDraft
+	if task.Format == FormatVideo {
+		value, videoErr := r.getLatestVideoDraft(ctx, organizationID, taskID)
+		if videoErr != nil {
+			return TaskDetail{}, videoErr
+		}
+		videoDraft = &value
+	} else {
+		draft, err = r.getLatestDraft(ctx, organizationID, taskID)
+		if err != nil {
+			return TaskDetail{}, err
+		}
 	}
 	jobs, err := r.productionJobs(ctx, organizationID, projectID, taskID)
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	return TaskDetail{Task: task, Intake: intake, Draft: draft, ProductionJobs: jobs}, nil
+	return TaskDetail{Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft, ProductionJobs: jobs}, nil
 }
 
 func (r MySQLRepository) ReviseDraft(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, taskID string, expectedVersion int64, draft ImageTextDraft) (ImageTextDraft, error) {
@@ -250,6 +301,86 @@ func (r MySQLRepository) ReviseDraft(ctx context.Context, organizationID contrac
 	return draft, nil
 }
 
+func (r MySQLRepository) CreateRenderJob(ctx context.Context, value RenderJob) (RenderJob, bool, error) {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO creative_render_jobs
+		(id, organization_id, project_id, task_id, status, pre_roll_asset_id, pre_roll_asset_version,
+		 main_asset_id, main_asset_version, created_by_kind, created_by_id, idempotency_key, request_hash, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.TaskID, value.Status,
+		value.PreRollVideo.AssetID, value.PreRollVideo.Version, value.MainVideo.AssetID, value.MainVideo.Version,
+		value.CreatedBy.Kind, value.CreatedBy.ID, value.IdempotencyKey, value.RequestHash, value.CreatedAt, value.UpdatedAt)
+	if err == nil {
+		return value, false, nil
+	}
+	var mysqlError *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlError) || mysqlError.Number != 1062 {
+		return RenderJob{}, false, err
+	}
+	existing, getErr := scanRenderJob(r.DB.QueryRowContext(ctx, creativeRenderSelect+`
+		WHERE organization_id=? AND project_id=? AND created_by_kind=? AND created_by_id=? AND idempotency_key=?`,
+		value.OrganizationID, value.ProjectID, value.CreatedBy.Kind, value.CreatedBy.ID, value.IdempotencyKey))
+	if getErr != nil {
+		return RenderJob{}, false, getErr
+	}
+	if existing.RequestHash != value.RequestHash {
+		return RenderJob{}, false, ErrIdempotencyConflict
+	}
+	return existing, true, nil
+}
+
+func (r MySQLRepository) GetRenderJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (RenderJob, error) {
+	value, err := scanRenderJob(r.DB.QueryRowContext(ctx, creativeRenderSelect+` WHERE organization_id=? AND project_id=? AND id=?`, organizationID, projectID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return RenderJob{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) MarkRenderRunning(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, now time.Time) (RenderJob, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_render_jobs SET status='running', error_code=NULL, error_message=NULL, updated_at=?
+		WHERE organization_id=? AND project_id=? AND id=? AND status IN ('queued','running')`, now, organizationID, projectID, id)
+	if err != nil {
+		return RenderJob{}, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return RenderJob{}, ErrInvalidState
+	}
+	return r.GetRenderJob(ctx, organizationID, projectID, id)
+}
+
+func (r MySQLRepository) CompleteRenderJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, ref contract.ProjectAssetRef, now time.Time) error {
+	if ref.ProjectID != projectID || ref.Validate() != nil {
+		return ErrInvalidState
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_render_jobs
+		SET status='succeeded', output_asset_id=?, output_asset_version=?, error_code=NULL, error_message=NULL, updated_at=?
+		WHERE organization_id=? AND project_id=? AND id=? AND status='running'`,
+		ref.AssetVersion.AssetID, ref.AssetVersion.Version, now, organizationID, projectID, id)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return ErrInvalidState
+	}
+	return nil
+}
+
+func (r MySQLRepository) FailRenderJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id, code, message string, now time.Time) error {
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_render_jobs SET status='failed', error_code=?, error_message=?, updated_at=?
+		WHERE organization_id=? AND project_id=? AND id=? AND status IN ('queued','running')`,
+		code, message, now, organizationID, projectID, id)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return ErrInvalidState
+	}
+	return nil
+}
+
 func (r MySQLRepository) RegisterProductionJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, taskID string, job ProductionJob) error {
 	if r.DB == nil {
 		return fmt.Errorf("creative MySQL database is required")
@@ -281,12 +412,19 @@ func (r MySQLRepository) CreateVersion(ctx context.Context, value CreativeVersio
 	if err != nil {
 		return CreativeVersion{}, false, fmt.Errorf("encode creative version snapshot: %w", err)
 	}
+	var videoSnapshot any
+	if value.VideoSnapshot != nil {
+		videoSnapshot, err = json.Marshal(value.VideoSnapshot)
+		if err != nil {
+			return CreativeVersion{}, false, fmt.Errorf("encode creative video version snapshot: %w", err)
+		}
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO creative_versions (
-		id, organization_id, project_id, task_id, version, draft_version, status,
-		snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, organization_id, project_id, task_id, version, draft_version, creative_format, status,
+		snapshot_payload, video_snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.TaskID, value.Version, value.DraftVersion,
-		value.Status, snapshot, value.ContentHash, value.CreatedBy, value.IdempotencyKey, value.RequestHash, value.CreatedAt)
+		value.Format, value.Status, snapshot, videoSnapshot, value.ContentHash, value.CreatedBy, value.IdempotencyKey, value.RequestHash, value.CreatedAt)
 	if err == nil {
 		return value, false, nil
 	}
@@ -415,13 +553,20 @@ func (r MySQLRepository) CreatePackage(ctx context.Context, value CreativePackag
 	if err != nil {
 		return CreativePackage{}, err
 	}
+	var videoSnapshot any
+	if value.VideoSnapshot != nil {
+		videoSnapshot, err = json.Marshal(value.VideoSnapshot)
+		if err != nil {
+			return CreativePackage{}, err
+		}
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return CreativePackage{}, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO creative_packages (id, organization_id, project_id, creative_version_id, content_hash, snapshot_payload, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.CreativeVersionID, value.ContentHash, snapshot, value.CreatedBy, value.CreatedAt)
+	_, err = tx.ExecContext(ctx, `INSERT INTO creative_packages (id, organization_id, project_id, creative_version_id, creative_format, content_hash, snapshot_payload, video_snapshot_payload, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.CreativeVersionID, value.Format, value.ContentHash, snapshot, videoSnapshot, value.CreatedBy, value.CreatedAt)
 	if err != nil {
 		var mysqlError *mysqlDriver.MySQLError
 		if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
@@ -468,10 +613,15 @@ func (r MySQLRepository) ListPackages(ctx context.Context, organizationID contra
 
 const creativeIntakeSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 	request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash, version, created_at, updated_at FROM creative_intakes`
-const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, status, direction_payload, version, created_at, updated_at FROM creative_tasks`
+const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks`
 const creativeVersionSelect = `SELECT id, organization_id, project_id, task_id, version, draft_version, status,
-	snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
-const creativePackageSelect = `SELECT id, organization_id, project_id, creative_version_id, content_hash, snapshot_payload, created_by, created_at FROM creative_packages`
+	creative_format, snapshot_payload, video_snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
+const creativePackageSelect = `SELECT id, organization_id, project_id, creative_version_id, creative_format, content_hash, snapshot_payload, video_snapshot_payload, created_by, created_at FROM creative_packages`
+const creativeRenderSelect = `SELECT id, organization_id, project_id, task_id, status,
+	pre_roll_asset_id, pre_roll_asset_version, main_asset_id, main_asset_version,
+	output_asset_id, output_asset_version, error_code, error_message,
+	created_by_kind, created_by_id, idempotency_key, request_hash, created_at, updated_at
+	FROM creative_render_jobs`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -500,11 +650,18 @@ func scanIntake(row rowScanner) (CreativeIntake, error) {
 func scanCreativePackage(row rowScanner) (CreativePackage, error) {
 	var value CreativePackage
 	var snapshot []byte
-	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativeVersionID, &value.ContentHash, &snapshot, &value.CreatedBy, &value.CreatedAt); err != nil {
+	var videoSnapshot []byte
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativeVersionID, &value.Format, &value.ContentHash, &snapshot, &videoSnapshot, &value.CreatedBy, &value.CreatedAt); err != nil {
 		return CreativePackage{}, err
 	}
 	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
 		return CreativePackage{}, fmt.Errorf("decode creative package snapshot: %w", err)
+	}
+	if len(videoSnapshot) > 0 {
+		value.VideoSnapshot = &VideoVersionSnapshot{}
+		if err := json.Unmarshal(videoSnapshot, value.VideoSnapshot); err != nil {
+			return CreativePackage{}, fmt.Errorf("decode creative package video snapshot: %w", err)
+		}
 	}
 	return value, nil
 }
@@ -512,7 +669,7 @@ func scanCreativePackage(row rowScanner) (CreativePackage, error) {
 func scanTask(row rowScanner) (CreativeTask, error) {
 	var value CreativeTask
 	var direction []byte
-	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.IntakeID, &value.Format, &value.Channel, &value.Status, &direction, &value.Version, &value.CreatedAt, &value.UpdatedAt)
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.IntakeID, &value.Format, &value.Channel, &value.VideoPurpose, &value.PerformanceMode, &value.Status, &direction, &value.Version, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return CreativeTask{}, err
 	}
@@ -522,16 +679,47 @@ func scanTask(row rowScanner) (CreativeTask, error) {
 	return value, nil
 }
 
+func scanRenderJob(row rowScanner) (RenderJob, error) {
+	var value RenderJob
+	var outputAsset, errorCode, errorMessage sql.NullString
+	var outputVersion sql.NullInt64
+	err := row.Scan(
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.TaskID, &value.Status,
+		&value.PreRollVideo.AssetID, &value.PreRollVideo.Version, &value.MainVideo.AssetID, &value.MainVideo.Version,
+		&outputAsset, &outputVersion, &errorCode, &errorMessage,
+		&value.CreatedBy.Kind, &value.CreatedBy.ID, &value.IdempotencyKey, &value.RequestHash,
+		&value.CreatedAt, &value.UpdatedAt,
+	)
+	if err != nil {
+		return RenderJob{}, err
+	}
+	value.ErrorCode, value.ErrorMessage = errorCode.String, errorMessage.String
+	if outputAsset.Valid && outputVersion.Valid {
+		ref := contract.ProjectAssetRef{
+			ProjectID:    value.ProjectID,
+			AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID(outputAsset.String), Version: outputVersion.Int64},
+		}
+		value.OutputAsset = &ref
+	}
+	return value, nil
+}
+
 func scanCreativeVersion(row rowScanner) (CreativeVersion, error) {
 	var value CreativeVersion
-	var snapshot, check, approval []byte
+	var snapshot, videoSnapshot, check, approval []byte
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.TaskID, &value.Version, &value.DraftVersion,
-		&value.Status, &snapshot, &value.ContentHash, &value.CreatedBy, &value.IdempotencyKey, &value.RequestHash, &value.CreatedAt, &check, &approval)
+		&value.Status, &value.Format, &snapshot, &videoSnapshot, &value.ContentHash, &value.CreatedBy, &value.IdempotencyKey, &value.RequestHash, &value.CreatedAt, &check, &approval)
 	if err != nil {
 		return CreativeVersion{}, err
 	}
 	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
 		return CreativeVersion{}, fmt.Errorf("decode creative version snapshot: %w", err)
+	}
+	if len(videoSnapshot) > 0 {
+		value.VideoSnapshot = &VideoVersionSnapshot{}
+		if err := json.Unmarshal(videoSnapshot, value.VideoSnapshot); err != nil {
+			return CreativeVersion{}, fmt.Errorf("decode creative video version snapshot: %w", err)
+		}
 	}
 	if len(check) > 0 {
 		value.Check = &CreativeCheck{}
@@ -592,6 +780,22 @@ func (r MySQLRepository) getLatestDraft(ctx context.Context, organizationID cont
 	}
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return ImageTextDraft{}, fmt.Errorf("decode creative draft: %w", err)
+	}
+	return value, nil
+}
+
+func (r MySQLRepository) getLatestVideoDraft(ctx context.Context, organizationID contract.OrganizationID, taskID string) (VideoDraft, error) {
+	var payload []byte
+	var value VideoDraft
+	err := r.DB.QueryRowContext(ctx, `SELECT content_payload FROM creative_video_drafts WHERE organization_id = ? AND task_id = ? ORDER BY revision DESC LIMIT 1`, organizationID, taskID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return VideoDraft{}, ErrNotFound
+	}
+	if err != nil {
+		return VideoDraft{}, err
+	}
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return VideoDraft{}, fmt.Errorf("decode creative video draft: %w", err)
 	}
 	return value, nil
 }

@@ -333,7 +333,13 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		ContractVersion: packageContractVersion, PackageID: packageID, PackageVersion: versionNumber,
 		OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID, StrategyID: strategyID,
 		StrategyRevision: revision.Revision, Brief: brief, Strategy: revision.Document, Readiness: readiness,
-		Approval: PackageApproval{ReviewID: review.ID, ApprovedBy: actor.Principal.ID, ApprovedAt: now},
+		CreativeRoutes: creativeRoutesForPackage(brief, revision.Document),
+		Approval:       PackageApproval{ReviewID: review.ID, ApprovedBy: actor.Principal.ID, ApprovedAt: now},
+	}
+	for _, route := range snapshot.CreativeRoutes {
+		if err := route.Validate(); err != nil {
+			return PackageVersion{}, false, err
+		}
 	}
 	contentHash, err := PackageContentHash(snapshot)
 	if err != nil {
@@ -458,7 +464,8 @@ func calculateReadiness(brief BriefVersion, document StrategyDocument) Readiness
 			break
 		}
 	}
-	result.CreativeReady = len(document.CreativeRecommendations) > 0 && xiaohongshuReady
+	videoRouteReady := len(creativeRoutesForPackage(brief, document)) > 0
+	result.CreativeReady = len(document.CreativeRecommendations) > 0 && (xiaohongshuReady || videoRouteReady)
 	result.DeliveryReady = strings.TrimSpace(brief.Snapshot.Budget.Total) != "" && strings.TrimSpace(brief.Snapshot.Schedule.Window) != ""
 	result.InsightsReady = strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI) != ""
 	return result

@@ -192,6 +192,67 @@ func (r MySQLRepository) ListExecutions(ctx context.Context, organizationID cont
 	return values, rows.Err()
 }
 
+func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {
+	result, err := r.DB.ExecContext(ctx, `INSERT IGNORE INTO delivery_metric_snapshots (
+		id, organization_id, project_id, execution_id, plan_id, creative_package_id,
+		source, is_simulated, dataset_version, currency, window_start, window_end,
+		impressions, clicks, conversions, spend_cents, created_by, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, value.PlanID, value.CreativePackageID,
+		value.Source, value.IsSimulated, value.DatasetVersion, value.Currency, value.WindowStart, value.WindowEnd,
+		value.RawMetrics.Impressions, value.RawMetrics.Clicks, value.RawMetrics.Conversions, value.RawMetrics.SpendCents,
+		value.CreatedBy, value.CreatedAt)
+	if err != nil {
+		return DeliveryMetricSnapshot{}, false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return DeliveryMetricSnapshot{}, false, err
+	}
+	if affected == 1 {
+		return value, true, nil
+	}
+	values, err := r.ListMetricSnapshots(ctx, value.OrganizationID, value.ProjectID, value.ExecutionID, 100)
+	if err != nil {
+		return DeliveryMetricSnapshot{}, false, err
+	}
+	for _, existing := range values {
+		if existing.DatasetVersion == value.DatasetVersion {
+			return existing, false, nil
+		}
+	}
+	return DeliveryMetricSnapshot{}, false, ErrNotFound
+}
+
+func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string, limit int) ([]DeliveryMetricSnapshot, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT
+		id, organization_id, project_id, execution_id, plan_id, creative_package_id,
+		source, is_simulated, dataset_version, currency, window_start, window_end,
+		impressions, clicks, conversions, spend_cents, created_by, created_at
+		FROM delivery_metric_snapshots
+		WHERE organization_id = ? AND project_id = ? AND execution_id = ?
+		ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, executionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]DeliveryMetricSnapshot, 0)
+	for rows.Next() {
+		var value DeliveryMetricSnapshot
+		if err := rows.Scan(
+			&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &value.PlanID,
+			&value.CreativePackageID, &value.Source, &value.IsSimulated, &value.DatasetVersion,
+			&value.Currency, &value.WindowStart, &value.WindowEnd, &value.RawMetrics.Impressions,
+			&value.RawMetrics.Clicks, &value.RawMetrics.Conversions, &value.RawMetrics.SpendCents,
+			&value.CreatedBy, &value.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, created_by, created_at, updated_at FROM delivery_plans`
 const changeSetSelect = `SELECT id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, approved_by, approved_at, version, created_by, created_at, updated_at FROM delivery_change_sets`
 

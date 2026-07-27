@@ -1,0 +1,35 @@
+.preroll-page { min-height: calc(100vh - 56px); padding: 28px 30px 56px; color: #17253a; background: #f5f7fa; }
+.preroll-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 1320px; margin: 0 auto; }
+.preroll-header h1 { margin: 7px 0 4px; font-size: 28px; letter-spacing: -.7px; }
+.preroll-header p { max-width: 720px; margin: 0; color: #66758a; font-size: 13px; line-height: 1.7; }
+.preroll-progress { display: grid; grid-template-columns: repeat(5, 1fr); max-width: 1320px; margin: 24px auto 18px; padding: 0; border: 1px solid #dfe6ef; border-radius: 10px; background: #fff; list-style: none; }
+.preroll-progress li { display: flex; align-items: center; gap: 9px; min-height: 54px; border-right: 1px solid #edf1f5; padding: 0 16px; color: #8a96a6; font-size: 12px; font-weight: 650; }
+.preroll-progress li:last-child { border-right: 0; }
+.preroll-progress b { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 50%; background: #eef2f6; font-size: 11px; }
+.preroll-progress .is-done { color: #1768ba; background: #f7fbff; }
+.preroll-progress .is-done b { color: #fff; background: #1875d1; }
+.preroll-page > .workspace-alert { max-width: 1320px; margin: 0 auto 16px; }
+.preroll-grid { display: grid; grid-template-columns: minmax(360px, .78fr) minmax(520px, 1.22fr); gap: 18px; max-width: 1320px; margin: 0 auto; }
+.preroll-panel { display: grid; align-content: start; gap: 15px; border: 1px solid #dfe6ef; border-radius: 12px; background: #fff; padding: 22px; box-shadow: 0 1px 2px rgb(22 38 60 / 3%); }
+.preroll-panel__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 4px; }
+.preroll-panel__heading > div > span { color: #4779a8; font-size: 10px; font-weight: 750; letter-spacing: .06em; }
+.preroll-panel__heading h2 { margin: 5px 0 0; font-size: 18px; }
+.preroll-panel label { display: grid; gap: 7px; color: #34445a; font-size: 12px; font-weight: 700; }
+.preroll-panel input, .preroll-panel select, .preroll-panel textarea { width: 100%; border: 1px solid #d2dce8; border-radius: 8px; background: #fff; padding: 10px 11px; color: #24364c; font: inherit; font-size: 13px; outline: 0; }
+.preroll-panel textarea { min-height: 92px; resize: vertical; line-height: 1.6; }
+.preroll-panel input:focus, .preroll-panel select:focus, .preroll-panel textarea:focus { border-color: #5d9ad5; box-shadow: 0 0 0 3px rgb(24 117 209 / 10%); }
+.route-card { border: 1px solid #bcd9f3; border-left: 3px solid #1875d1; border-radius: 8px; background: #f5faff; padding: 13px; }
+.route-card strong, .route-card small { display: block; }
+.route-card p { margin: 6px 0; color: #50657c; font-size: 12px; line-height: 1.55; }
+.route-card small { color: #6f8499; font-size: 10px; }
+.preroll-empty { border: 1px dashed #bed0e2; border-radius: 8px; background: #fbfdff; padding: 16px; }
+.preroll-empty p { margin: 0 0 8px; color: #64758a; font-size: 12px; line-height: 1.55; }
+.preroll-empty a { color: #1768ba; font-size: 12px; font-weight: 700; }
+.preroll-production { gap: 0; }
+.preroll-step { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 13px; align-items: center; border-top: 1px solid #e8edf3; padding: 18px 0; }
+.preroll-step > b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 7px; color: #1768ba; background: #eaf3fc; font-size: 11px; }
+.preroll-step strong { font-size: 13px; }
+.preroll-step p { overflow-wrap: anywhere; margin: 5px 0 0; color: #738197; font-size: 11px; line-height: 1.5; }
+.preroll-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+@media (max-width: 980px) { .preroll-grid { grid-template-columns: 1fr; } .preroll-progress { grid-template-columns: 1fr; } .preroll-progress li { border-right: 0; border-bottom: 1px solid #edf1f5; } }
+@media (max-width: 640px) { .preroll-page { padding: 20px 14px 40px; } .preroll-header { display: grid; } .preroll-step { grid-template-columns: 28px 1fr; } .preroll-step > div:last-child { grid-column: 2; } }

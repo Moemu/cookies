@@ -36,6 +36,7 @@ type UploadService struct {
 	PreviewTTL       time.Duration
 	Now              func() time.Time
 	NewID            ids.Generator
+	VideoProbe       VideoMetadataProbe
 }
 
 func (s UploadService) Create(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, key contract.IdempotencyKey, request CreateUploadRequest) (CreateUploadResponse, error) {
@@ -160,7 +161,7 @@ func (s UploadService) Finalize(ctx context.Context, requestContext contract.Req
 	}
 	commit, err := s.ingestStoredObject(ctx, session.OrganizationID, session.ProjectID, session.TargetAssetID,
 		session.TargetBlobID, session.ProjectContextVersion, contract.AssetSourceUpload, session.Quarantine,
-		"", "", session.TraceID)
+		"", "", "", session.TraceID)
 	if err != nil {
 		code := "ASSET_INTAKE_FAILED"
 		if errors.Is(err, ErrMalwareDetected) {
@@ -201,6 +202,16 @@ func (s UploadService) List(ctx context.Context, actor contract.ActorContext, pr
 		limit = 50
 	}
 	return s.Repository.ListProjectAssets(ctx, actor.OrganizationID, projectID, limit)
+}
+
+func (s UploadService) Get(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (ProjectAsset, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ProjectAsset{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return ProjectAsset{}, err
+	}
+	return s.Repository.GetProjectAsset(ctx, actor.OrganizationID, projectID, ref)
 }
 
 func (s UploadService) Preview(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (SignedRequest, error) {
@@ -259,35 +270,109 @@ func (s UploadService) Remove(ctx context.Context, actor contract.ActorContext, 
 	return s.Repository.RemoveProjectAsset(ctx, actor.OrganizationID, projectID, ref)
 }
 
-func (s UploadService) ingestStoredObject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, assetID contract.AssetID, blobID string, projectContextVersion int64, source contract.AssetSourceType, sourceLocation ObjectLocation, providerJobID, providerOutputID, traceID string) (AssetCommit, error) {
+// IngestRenderedVideo is the Assets-owned boundary used by a media renderer.
+// The render job remains Creative-owned; Assets validates and persists a new
+// immutable video version and makes retries idempotent by render_job_id.
+func (s UploadService) IngestRenderedVideo(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, renderJobID string, content io.Reader, sizeBytes int64) (contract.ProjectAssetRef, error) {
+	if err := s.validateDependencies(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if err := requestContext.Validate(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if !requestContext.Actor.HasScope("assets.write") {
+		return contract.ProjectAssetRef{}, fmt.Errorf("assets.write scope is required")
+	}
+	if strings.TrimSpace(renderJobID) == "" || len(renderJobID) > 96 || content == nil || sizeBytes < 1 || sizeBytes > MaxVideoBytes {
+		return contract.ProjectAssetRef{}, fmt.Errorf("render_job_id and supported video content are required")
+	}
+	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	newID := s.idGenerator()
+	assetIDValue, err := newID("asset")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	blobID, err := newID("blob")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	stagingID, err := newID("renderstage")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	staged, err := s.Blobs.Put(ctx, s.QuarantineBucket, quarantineKey(requestContext.Actor.OrganizationID, stagingID), io.LimitReader(content, MaxVideoBytes+1), sizeBytes, "video/mp4")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	defer s.Blobs.Delete(ctx, staged.ObjectLocation)
+	commit, err := s.ingestStoredObject(ctx, requestContext.Actor.OrganizationID, projectID, contract.AssetID(assetIDValue), blobID,
+		project.ProjectContextVersion, contract.AssetSourceRendered, staged.ObjectLocation, "", "", renderJobID, requestContext.TraceID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	ref, err := s.Repository.CompleteRender(ctx, renderJobID, commit, s.now())
+	if err != nil {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, err
+	}
+	if ref.AssetVersion.AssetID != commit.AssetID || ref.AssetVersion.Version != commit.Version {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+	}
+	return ref, nil
+}
+
+func (s UploadService) ingestStoredObject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, assetID contract.AssetID, blobID string, projectContextVersion int64, source contract.AssetSourceType, sourceLocation ObjectLocation, providerJobID, providerOutputID, renderJobID, traceID string) (AssetCommit, error) {
 	reader, info, err := s.Blobs.Open(ctx, sourceLocation)
 	if err != nil {
 		return AssetCommit{}, err
 	}
 	defer reader.Close()
-	if info.SizeBytes < 1 || info.SizeBytes > MaxImageBytes {
-		return AssetCommit{}, fmt.Errorf("%w: size is outside the supported image range", ErrInvalidAssetContent)
+	assetKind, maxBytes, supported := generatedAssetPolicy(info.MIMEType)
+	if !supported || info.SizeBytes < 1 || info.SizeBytes > maxBytes {
+		return AssetCommit{}, fmt.Errorf("%w: size or media type is outside the supported range", ErrInvalidAssetContent)
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, MaxImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
 	if err != nil {
 		return AssetCommit{}, err
 	}
-	if int64(len(data)) != info.SizeBytes || int64(len(data)) > MaxImageBytes {
+	if int64(len(data)) != info.SizeBytes || int64(len(data)) > maxBytes {
 		return AssetCommit{}, fmt.Errorf("%w: size changed while reading", ErrInvalidAssetContent)
 	}
 	mimeType := http.DetectContentType(data[:min(len(data), 512)])
-	if !allowedDeclaredImageMIME(mimeType) {
-		return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported image", ErrInvalidAssetContent)
-	}
-	imageConfig, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return AssetCommit{}, fmt.Errorf("%w: decode image metadata: %v", ErrInvalidAssetContent, err)
-	}
-	if imageConfig.Width < 1 || imageConfig.Height < 1 {
-		return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions are invalid", ErrInvalidAssetContent)
-	}
-	if imageConfig.Width > MaxImageDimension || imageConfig.Height > MaxImageDimension || int64(imageConfig.Width)*int64(imageConfig.Height) > MaxImagePixels {
-		return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions exceed safety limits", ErrInvalidAssetContent)
+	width, height := 0, 0
+	var videoMetadata VideoMetadata
+	switch assetKind {
+	case contract.AssetImage:
+		if !allowedDeclaredImageMIME(mimeType) {
+			return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported image", ErrInvalidAssetContent)
+		}
+		imageConfig, _, decodeErr := image.DecodeConfig(bytes.NewReader(data))
+		if decodeErr != nil {
+			return AssetCommit{}, fmt.Errorf("%w: decode image metadata: %v", ErrInvalidAssetContent, decodeErr)
+		}
+		width, height = imageConfig.Width, imageConfig.Height
+		if width < 1 || height < 1 {
+			return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions are invalid", ErrInvalidAssetContent)
+		}
+		if width > MaxImageDimension || height > MaxImageDimension || int64(width)*int64(height) > MaxImagePixels {
+			return AssetCommit{}, fmt.Errorf("%w: decoded image dimensions exceed safety limits", ErrInvalidAssetContent)
+		}
+	case contract.AssetVideo:
+		if info.MIMEType != "video/mp4" || len(data) < 12 || string(data[4:8]) != "ftyp" {
+			return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported MP4", ErrInvalidAssetContent)
+		}
+		if s.VideoProbe == nil {
+			return AssetCommit{}, fmt.Errorf("%w: FFprobe video validation is unavailable", ErrInvalidAssetContent)
+		}
+		videoMetadata, err = s.VideoProbe.Probe(ctx, data)
+		if err != nil {
+			return AssetCommit{}, fmt.Errorf("%w: %v", ErrInvalidAssetContent, err)
+		}
+		width, height = videoMetadata.WidthPixels, videoMetadata.HeightPixels
+		mimeType = "video/mp4"
 	}
 	if err := s.Scanner.Scan(ctx, bytes.NewReader(data)); err != nil {
 		if errors.Is(err, ErrMalwareDetected) {
@@ -309,8 +394,8 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	}
 	version := int64(1)
 	eventData, err := json.Marshal(contract.AssetReadyData{
-		AssetKind: contract.AssetImage, MIMEType: mimeType, SizeBytes: int64(len(data)), SourceType: source,
-		ProviderJobID: providerJobID, OutputID: providerOutputID,
+		AssetKind: assetKind, MIMEType: mimeType, SizeBytes: int64(len(data)), SourceType: source,
+		ProviderJobID: providerJobID, OutputID: providerOutputID, RenderJobID: renderJobID,
 	})
 	if err != nil {
 		_ = s.Blobs.Delete(ctx, durable.ObjectLocation)
@@ -328,9 +413,10 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	}
 	return AssetCommit{
 		BlobID: blobID, OrganizationID: organizationID, ProjectID: projectID, AssetID: assetID, Version: 1,
-		Kind: contract.AssetImage, SourceType: source, OwnerSystem: "assets", MIMEType: mimeType,
-		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: imageConfig.Width, HeightPixels: imageConfig.Height,
-		ProviderJobID: providerJobID, ProviderOutputID: providerOutputID, ProjectContextVersion: projectContextVersion,
+		Kind: assetKind, SourceType: source, OwnerSystem: "assets", MIMEType: mimeType,
+		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: width, HeightPixels: height,
+		DurationMS: videoMetadata.DurationMS, FrameRate: videoMetadata.FrameRate, VideoCodec: videoMetadata.VideoCodec, AudioCodec: videoMetadata.AudioCodec,
+		RenderJobID: renderJobID, ProviderJobID: providerJobID, ProviderOutputID: providerOutputID, ProjectContextVersion: projectContextVersion,
 		Location: durable.ObjectLocation, Event: event,
 	}, nil
 }

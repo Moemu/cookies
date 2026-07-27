@@ -1,6 +1,6 @@
 import { apiRequest } from '../../shared/api/client'
 import type { ProviderJob } from '../platform/types'
-import type { CreateCreativeTaskInput, CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail, CreativeVersion, CreativePackage, ReviseDraftInput, ImageTextDraft } from './types'
+import type { CreateCreativeTaskInput, CreativeIntake, CreativeIntakeInput, CreativeTask, CreativeTaskDetail, CreativeVersion, CreativePackage, ReviseDraftInput, ImageTextDraft, AssetVersionRef, CreativeRenderJob } from './types'
 
 function base(projectId: string) {
   return `/api/creative/v1/projects/${encodeURIComponent(projectId)}`
@@ -36,12 +36,29 @@ export function createCreativeTask(projectId: string, intakeId: string, input: C
   return apiRequest<CreativeTask>(`${base(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-task`, { method: 'POST', body: JSON.stringify(input) })
 }
 
+export function createVideoTask(projectId: string, intakeId: string, input: {
+  route_index: number
+  channel: 'douyin' | 'kuaishou'
+  source_video: AssetVersionRef
+  concept: string
+  prompt: string
+  call_to_action: string
+  mandatory_elements: string[]
+  prohibited_claims: string[]
+  confirm_route: true
+}) {
+  return apiRequest<CreativeTask>(`${base(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`, {
+    method: 'POST', body: JSON.stringify(input),
+  })
+}
+
 export function listCreativeTasks(projectId: string, signal?: AbortSignal) {
   return apiRequest<{ items: CreativeTask[] }>(`${base(projectId)}/creative-tasks?limit=100`, { signal })
 }
 
 export function getCreativeTask(projectId: string, taskId: string, signal?: AbortSignal) {
   return apiRequest<CreativeTaskDetail>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}`, { signal })
+    .then((detail) => ({ ...detail, production_jobs: detail.production_jobs ?? [] }))
 }
 
 // This is intentionally an archive operation. The API uses DELETE for the
@@ -56,10 +73,30 @@ export function reviseCreativeDraft(projectId: string, taskId: string, input: Re
   })
 }
 
-export function freezeCreativeVersion(projectId: string, taskId: string, draftVersion: number) {
+export function freezeCreativeVersion(projectId: string, taskId: string, draftVersion: number, renderJobId?: string) {
   return apiRequest<CreativeVersion>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:freeze-version`, {
-    method: 'POST', headers: { 'Idempotency-Key': `creative-freeze-${crypto.randomUUID()}` }, body: JSON.stringify({ draft_version: draftVersion }),
+    method: 'POST', headers: { 'Idempotency-Key': `creative-freeze-${crypto.randomUUID()}` }, body: JSON.stringify({ draft_version: draftVersion, render_job_id: renderJobId }),
   })
+}
+
+export function createVideoJob(projectId: string, taskId: string) {
+  return apiRequest<ProviderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': `creative-video-${crypto.randomUUID()}` },
+    body: JSON.stringify({ model_alias: 'cookies.video.standard' }),
+  })
+}
+
+export function createPreRollRenderJob(projectId: string, taskId: string) {
+  return apiRequest<CreativeRenderJob>(`${base(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:render-preroll`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': `creative-render-${crypto.randomUUID()}` },
+    body: JSON.stringify({}),
+  })
+}
+
+export function getCreativeRenderJob(projectId: string, renderJobId: string, signal?: AbortSignal) {
+  return apiRequest<CreativeRenderJob>(`${base(projectId)}/creative-render-jobs/${encodeURIComponent(renderJobId)}`, { signal })
 }
 
 export function listCreativeVersions(projectId: string, taskId = '', signal?: AbortSignal) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
+	"github.com/shikanon/cookies/internal/platform/media"
 )
 
 type ActiveProjectResolver interface {
@@ -19,6 +20,17 @@ type ActiveProjectResolver interface {
 // authorization-checked package snapshot rather than exposing Strategy tables.
 type StrategyPackageReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, StrategyPackageReference) (StrategyPackageSnapshot, error)
+}
+
+type AssetReader interface {
+	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
+}
+
+type CreativeAssetSnapshot struct {
+	Ref      contract.AssetVersionRef
+	Kind     contract.AssetKind
+	MIMEType string
+	Ready    bool
 }
 
 type StrategyPackageSnapshot struct {
@@ -34,14 +46,88 @@ type StrategyPackageSnapshot struct {
 	VisualKeywords []string
 	Mandatory      []string
 	Prohibited     []string
+	CreativeRoutes []CreativeRouteSnapshot
 }
 
 type Service struct {
 	Repository       Repository
 	Projects         ActiveProjectResolver
 	StrategyPackages StrategyPackageReader
+	Assets           AssetReader
+	Composer         media.VideoComposer
+	RenderedAssets   RenderedAssetWriter
+	RenderScheduler  RenderScheduler
 	NewID            ids.Generator
 	Now              func() time.Time
+}
+
+func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateVideoTaskRequest) (CreativeTask, error) {
+	if s.Repository == nil || s.Projects == nil || s.Assets == nil {
+		return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeTask{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return CreativeTask{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeTask{}, err
+	}
+	intake, err := s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	if intake.Status != IntakeReady || intake.Source != IntakeSourceStrategyPackage || request.RouteIndex >= len(intake.Request.CreativeRoutes) {
+		return CreativeTask{}, ErrIntakeNotReady
+	}
+	route := intake.Request.CreativeRoutes[request.RouteIndex]
+	if err := route.Validate(); err != nil {
+		return CreativeTask{}, err
+	}
+	channelAllowed := false
+	for _, channel := range route.Channels {
+		if channel == string(request.Channel) {
+			channelAllowed = true
+			break
+		}
+	}
+	if !channelAllowed {
+		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
+	}
+	source, err := s.Assets.ReadForCreative(ctx, actor, projectID, request.SourceVideo)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	if !source.Ready || source.Kind != contract.AssetVideo || source.MIMEType != "video/mp4" || source.Ref != request.SourceVideo {
+		return CreativeTask{}, fmt.Errorf("source_video must be a ready MP4 in the same project")
+	}
+	id, err := s.idGenerator()("creativetask")
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	now := s.now()
+	task := CreativeTask{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intake.ID,
+		Format: FormatVideo, Channel: request.Channel, VideoPurpose: route.VideoPurpose, PerformanceMode: route.RouteType,
+		Status: TaskDraft, Direction: CreativeDirection{
+			Focus: request.Concept, Audience: intake.Request.Audience, CoreMessage: intake.Request.CoreMessage,
+			CallToAction: request.CallToAction, Concept: request.Concept,
+			Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...),
+		},
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	draft := VideoDraft{
+		ContractVersion: "creative-video-draft/v1", TaskID: task.ID, Revision: 1,
+		Concept: request.Concept, Prompt: request.Prompt, DurationSeconds: route.TargetDurationSeconds,
+		AspectRatio: route.AspectRatio, Resolution: "720p", SourceVideo: request.SourceVideo,
+		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
+		CallToAction: request.CallToAction, CreatedAt: now,
+	}
+	if err := draft.Validate(); err != nil {
+		return CreativeTask{}, err
+	}
+	return s.Repository.CreateVideoTask(ctx, task, draft)
 }
 
 func (s Service) CreateIntake(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, key contract.IdempotencyKey, request CreateIntakeRequest) (CreativeIntake, error) {
@@ -79,6 +165,11 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 		request = resolvedStrategyPackageRequest(request.StrategyPackage, snapshot)
 		if err := request.validateContent(); err != nil {
 			return CreativeIntake{}, err
+		}
+		for _, route := range request.CreativeRoutes {
+			if err := route.Validate(); err != nil {
+				return CreativeIntake{}, err
+			}
 		}
 		strategyReady = snapshot.CreativeReady
 	}
@@ -121,6 +212,7 @@ func resolvedStrategyPackageRequest(reference *StrategyPackageReference, snapsho
 		CallToAction: "了解更多并收藏这份内容", Concept: concept,
 		Tone: append([]string{}, snapshot.Tone...), VisualKeywords: append([]string{}, snapshot.VisualKeywords...),
 		Mandatory: append([]string{}, snapshot.Mandatory...), Prohibited: append([]string{}, snapshot.Prohibited...),
+		CreativeRoutes: append([]CreativeRouteSnapshot{}, snapshot.CreativeRoutes...),
 	}
 }
 
@@ -289,6 +381,31 @@ func (s Service) RegisterCoverImageJob(ctx context.Context, actor contract.Actor
 	return s.RegisterImagePlanJob(ctx, actor, projectID, taskID, 1, providerJobID)
 }
 
+func (s Service) RegisterVideoJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID, providerJobID string) error {
+	if s.Repository == nil || s.Projects == nil {
+		return fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(providerJobID) == "" {
+		return fmt.Errorf("provider job ID is required")
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return err
+	}
+	if detail.Task.Format != FormatVideo || detail.VideoDraft == nil || detail.Task.Status == TaskArchived {
+		return ErrInvalidState
+	}
+	return s.Repository.RegisterProductionJob(ctx, actor.OrganizationID, projectID, taskID, ProductionJob{
+		TaskID: taskID, Kind: "video_generate", ProviderJobID: providerJobID, CreatedAt: s.now(),
+	})
+}
+
 func (s Service) RegisterImagePlanJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, imagePlanOrder int, providerJobID string) error {
 	if s.Repository == nil || s.Projects == nil {
 		return fmt.Errorf("creative dependencies are incomplete")
@@ -338,16 +455,53 @@ func (s Service) FreezeVersion(ctx context.Context, requestContext contract.Requ
 	if err != nil {
 		return CreativeVersion{}, false, err
 	}
-	if detail.Draft.Version != request.DraftVersion {
-		return CreativeVersion{}, false, ErrVersionConflict
+	var imageSnapshot ImageTextDraft
+	var videoSnapshot *VideoVersionSnapshot
+	draftVersion := request.DraftVersion
+	if detail.Task.Format == FormatVideo {
+		if detail.VideoDraft == nil || detail.VideoDraft.Revision != request.DraftVersion {
+			return CreativeVersion{}, false, ErrVersionConflict
+		}
+		if strings.TrimSpace(request.RenderJobID) == "" {
+			return CreativeVersion{}, false, fmt.Errorf("render_job_id is required for a video version")
+		}
+		render, renderErr := s.Repository.GetRenderJob(ctx, requestContext.Actor.OrganizationID, projectID, request.RenderJobID)
+		if renderErr != nil {
+			return CreativeVersion{}, false, renderErr
+		}
+		if render.TaskID != taskID || render.Status != RenderSucceeded || render.OutputAsset == nil {
+			return CreativeVersion{}, false, ErrInvalidState
+		}
+		providerJobID := ""
+		for _, job := range detail.ProductionJobs {
+			if job.Kind == "video_generate" {
+				providerJobID = job.ProviderJobID
+			}
+		}
+		videoSnapshot = &VideoVersionSnapshot{
+			ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
+			VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
+			StrategyPackage: detail.Intake.Request.StrategyPackage, DraftRevision: detail.VideoDraft.Revision,
+			SourceVideo: detail.VideoDraft.SourceVideo, GeneratedPreRoll: render.PreRollVideo,
+			FinalVideo: render.OutputAsset.AssetVersion, ProviderJobID: providerJobID, RenderJobID: render.ID,
+		}
+		if err := videoSnapshot.Validate(); err != nil {
+			return CreativeVersion{}, false, err
+		}
+	} else {
+		if detail.Draft.Version != request.DraftVersion {
+			return CreativeVersion{}, false, ErrVersionConflict
+		}
+		imageSnapshot = detail.Draft
 	}
 	hashInput := struct {
-		TaskID       string          `json:"creative_task_id"`
-		DraftVersion int64           `json:"draft_version"`
-		Format       CreativeFormat  `json:"format"`
-		Channel      CreativeChannel `json:"channel"`
-		Snapshot     ImageTextDraft  `json:"snapshot"`
-	}{TaskID: detail.Task.ID, DraftVersion: detail.Draft.Version, Format: detail.Task.Format, Channel: detail.Task.Channel, Snapshot: detail.Draft}
+		TaskID       string                `json:"creative_task_id"`
+		DraftVersion int64                 `json:"draft_version"`
+		Format       CreativeFormat        `json:"format"`
+		Channel      CreativeChannel       `json:"channel"`
+		Image        ImageTextDraft        `json:"image_text_snapshot,omitempty"`
+		Video        *VideoVersionSnapshot `json:"video_snapshot,omitempty"`
+	}{TaskID: detail.Task.ID, DraftVersion: draftVersion, Format: detail.Task.Format, Channel: detail.Task.Channel, Image: imageSnapshot, Video: videoSnapshot}
 	contentHash, err := contract.NewContentHash(hashInput)
 	if err != nil {
 		return CreativeVersion{}, false, err
@@ -362,8 +516,8 @@ func (s Service) FreezeVersion(ctx context.Context, requestContext contract.Requ
 	}
 	value := CreativeVersion{
 		ID: id, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, TaskID: taskID,
-		Version: detail.Draft.Version, DraftVersion: detail.Draft.Version, Status: CreativeVersionCreated,
-		Snapshot: detail.Draft, ContentHash: contentHash, CreatedBy: requestContext.Actor.Principal.ID,
+		Format: detail.Task.Format, Version: draftVersion, DraftVersion: draftVersion, Status: CreativeVersionCreated,
+		Snapshot: imageSnapshot, VideoSnapshot: videoSnapshot, ContentHash: contentHash, CreatedBy: requestContext.Actor.Principal.ID,
 		CreatedAt: s.now(), IdempotencyKey: key, RequestHash: requestHash,
 	}
 	if err := value.Validate(); err != nil {
@@ -478,7 +632,7 @@ func (s Service) DeliverVersion(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return CreativePackage{}, err
 	}
-	value := CreativePackage{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, CreativeVersionID: version.ID, ContentHash: version.ContentHash, Snapshot: version.Snapshot, CreatedBy: actor.Principal.ID, CreatedAt: s.now()}
+	value := CreativePackage{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, CreativeVersionID: version.ID, Format: version.Format, ContentHash: version.ContentHash, Snapshot: version.Snapshot, VideoSnapshot: version.VideoSnapshot, CreatedBy: actor.Principal.ID, CreatedAt: s.now()}
 	return s.Repository.CreatePackage(ctx, value)
 }
 
@@ -492,6 +646,12 @@ func imagePlanJobKind(order int, providerJobID string) string {
 func evaluateVersion(version CreativeVersion, intake CreativeIntake, actorID string, now time.Time) CreativeCheck {
 	blockers := make([]string, 0)
 	warnings := make([]string, 0)
+	if version.Format == FormatVideo {
+		if version.VideoSnapshot == nil || version.VideoSnapshot.Validate() != nil {
+			blockers = append(blockers, "video production lineage is incomplete")
+		}
+		return CreativeCheck{Passed: len(blockers) == 0, Blockers: blockers, Warnings: warnings, CheckedBy: actorID, CheckedAt: now}
+	}
 	for _, item := range version.Snapshot.ImagePlan {
 		if item.AssetRef == nil {
 			blockers = append(blockers, fmt.Sprintf("image_plan[%d] has no bound project asset", item.Order))

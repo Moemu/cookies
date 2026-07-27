@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 func TestPasswordHashIsSaltedAndVerifiable(t *testing.T) {
@@ -52,5 +54,13 @@ func TestSessionCookiesAreHttpOnlyAndSameSiteStrict(t *testing.T) {
 	expired := service.ExpiredCookie()
 	if expired.MaxAge != -1 || expired.Value != "" || !expired.HttpOnly || !expired.Secure {
 		t.Fatalf("unsafe expired session cookie: %#v", expired)
+	}
+}
+
+func TestAdminSessionCanCreateProviderJobs(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{Scopes: adminScopes()}
+	if !actor.HasScope("provider.job.create") {
+		t.Fatal("admin login must include provider.job.create for image and video generation")
 	}
 }

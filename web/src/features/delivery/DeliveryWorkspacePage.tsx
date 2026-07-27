@@ -7,6 +7,7 @@ import type { CreativePackage } from '../creative/types'
 import type { Project } from '../platform/types'
 import {
   createDeliveryChangeSet,
+  createDemoMetricSnapshot,
   createDeliveryPlan,
   executeDeliveryChangeSet,
   getDeliveryPlan,
@@ -114,15 +115,23 @@ export function DeliveryWorkspacePage({ project, view = 'plans' }: { project?: P
             detail={detail}
             latestChangeSet={latestChangeSet}
             onAction={(action, changeSet) => act(() => action === 'execute'
-              ? executeDeliveryChangeSet(projectId, changeSet.id, changeSet.version)
+              ? executeDeliveryChangeSet(projectId, changeSet.id, changeSet.version).then(async (result) => {
+                  await createDemoMetricSnapshot(projectId, result.execution.id)
+                  return result
+                })
               : transitionDeliveryChangeSet(projectId, changeSet.id, action, changeSet.version))}
             onCreateChangeSet={() => act(() => createDeliveryChangeSet(projectId, detail.plan.id, detail.plan.version))}
+            onCreateMetric={(executionId) => act(() => createDemoMetricSnapshot(projectId, executionId))}
           /> : <EmptyState title="选择一个投放计划" description="计划详情会展示版本、变更集、审批状态和执行证据。" />}
         </main>
       </div>
     </> : null}
 
-    {!loading && view === 'monitoring' ? <ExecutionCards executions={executions} /> : null}
+    {!loading && view === 'monitoring' ? <ExecutionCards
+      busy={busy}
+      executions={executions}
+      onCreateMetric={(executionId) => act(() => createDemoMetricSnapshot(projectId, executionId))}
+    /> : null}
     {!loading && view === 'accounts' ? <EmptyState title="尚未连接真实广告账户" description="Phase 1—3 使用本地模拟执行。未来账户接入必须经过独立授权、最小权限和审计设计。" /> : null}
     {!loading && view === 'optimization' ? <section className="outcome-cards">
       {executions.length ? executions.map((item) => <article className="outcome-card" key={item.execution.id}>
@@ -145,12 +154,13 @@ export function DeliveryWorkspacePage({ project, view = 'plans' }: { project?: P
   </section>
 }
 
-function PlanDetail({ busy, detail, latestChangeSet, onAction, onCreateChangeSet }: {
+function PlanDetail({ busy, detail, latestChangeSet, onAction, onCreateChangeSet, onCreateMetric }: {
   busy: boolean
   detail: DeliveryPlanDetail
   latestChangeSet?: DeliveryChangeSet
   onAction: (action: 'preflight' | 'approve' | 'execute' | 'rollback', changeSet: DeliveryChangeSet) => void
   onCreateChangeSet: () => void
+  onCreateMetric: (executionId: string) => void
 }) {
   const nextAction = !latestChangeSet
     ? null
@@ -184,17 +194,27 @@ function PlanDetail({ busy, detail, latestChangeSet, onAction, onCreateChangeSet
         {nextAction ? <button className={nextAction === 'execute' ? 'button button--primary button--compact' : 'button button--secondary button--compact'} disabled={busy} onClick={() => onAction(nextAction, latestChangeSet)} type="button">{labels[nextAction]}</button> : null}
       </article> : <p className="outcome-list__empty">计划已创建，下一步需要创建不可变的 ChangeSet。</p>}
     </section>
-    <ExecutionCards executions={detail.executions} />
+    <ExecutionCards busy={busy} executions={detail.executions} onCreateMetric={onCreateMetric} />
   </>
 }
 
-function ExecutionCards({ executions }: { executions: DeliveryExecutionResult[] }) {
+function ExecutionCards({ busy = false, executions, onCreateMetric }: {
+  busy?: boolean
+  executions: DeliveryExecutionResult[]
+  onCreateMetric?: (executionId: string) => void
+}) {
   return <section className="outcome-cards" aria-label="执行证据">
     {executions.map((item) => <article className="outcome-card" key={item.execution.id}>
       <div className="outcome-card__top"><span className="status-chip status-chip--active">模拟执行成功</span><code>{item.execution.id}</code></div>
       <h2>执行证据</h2>
       <p>{item.evidence.summary}</p>
       <dl><div><dt>模式</dt><dd>{item.execution.mode}</dd></div><div><dt>可回滚</dt><dd>{item.evidence.reversible ? '是' : '否'}</dd></div></dl>
+      {onCreateMetric ? <button
+        className="button button--secondary button--compact"
+        disabled={busy}
+        onClick={() => onCreateMetric(item.execution.id)}
+        type="button"
+      >生成或恢复模拟指标</button> : null}
     </article>)}
     {executions.length === 0 ? <EmptyState title="还没有执行证据" description="只有通过预检和审批的 ChangeSet 才能进入本地模拟执行。" /> : null}
   </section>

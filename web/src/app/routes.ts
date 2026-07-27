@@ -37,6 +37,10 @@ export function creativeTasksPath(projectId: string) {
   return `/projects/${encodeURIComponent(projectId)}/creative/tasks`
 }
 
+export function creativePreRollPath(projectId: string) {
+  return `/projects/${encodeURIComponent(projectId)}/creative/video/performance/pre-roll`
+}
+
 export function creativeTaskPath(projectId: string, taskId: string, stage: CreativeStage = 'content') {
   return `${creativeTasksPath(projectId)}/${encodeURIComponent(taskId)}/${stage}`
 }

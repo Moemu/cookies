@@ -415,6 +415,49 @@ func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
 	}
 }
 
+func TestCreateVideoJobUsesProviderVideoSeam(t *testing.T) {
+	t.Parallel()
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{provider.ScopeJobCreate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	jobs.job.Kind = "provider.video.generate"
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Projects: staticProjectManager{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+		ProviderJobs: jobs,
+	})
+	request := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/model/jobs", bytes.NewBufferString(`{
+		"capability":"video.generate",
+		"model_alias":"cookies.video.standard",
+		"input":{"prompt":"five-second product pre-roll","duration_seconds":5,"aspect_ratio":"9:16","resolution":"720p"},
+		"project_context_version":7,
+		"source_system":"creative",
+		"source_task_id":"creative_task_1"
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "create-video-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if jobs.videoRequest.Input.DurationSeconds != 5 || jobs.videoRequest.Input.AspectRatio != "9:16" || jobs.videoRequest.SourceTaskID != "creative_task_1" {
+		t.Fatalf("unexpected Provider video request: %+v", jobs.videoRequest)
+	}
+}
+
 func TestCreativeCoverJobKeepsCreativeTaskLineage(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate}}
@@ -544,9 +587,10 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 }
 
 type providerJobStub struct {
-	job         contract.ProviderJob
-	request     provider.CreateImageJobRequest
-	createCalls int
+	job          contract.ProviderJob
+	request      provider.CreateImageJobRequest
+	videoRequest provider.CreateVideoJobRequest
+	createCalls  int
 }
 
 type creativeManagerStub struct {
@@ -571,6 +615,9 @@ func (s *creativeManagerStub) ListIntakes(context.Context, contract.ActorContext
 func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateTaskRequest) (creative.CreativeTask, error) {
 	return creative.CreativeTask{}, nil
 }
+func (s *creativeManagerStub) CreateVideoTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateVideoTaskRequest) (creative.CreativeTask, error) {
+	return creative.CreativeTask{}, nil
+}
 func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
 	return nil, nil
 }
@@ -587,6 +634,16 @@ func (s *creativeManagerStub) RegisterCoverImageJob(_ context.Context, _ contrac
 func (s *creativeManagerStub) RegisterImagePlanJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, _ int, providerJobID string) error {
 	s.registeredProviderJobID = providerJobID
 	return nil
+}
+func (s *creativeManagerStub) RegisterVideoJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) error {
+	s.registeredProviderJobID = providerJobID
+	return nil
+}
+func (s *creativeManagerStub) CreateRenderJob(context.Context, contract.RequestContext, contract.ProjectID, string, creative.CreateRenderJobRequest, contract.IdempotencyKey) (creative.RenderJob, bool, error) {
+	return creative.RenderJob{}, false, nil
+}
+func (s *creativeManagerStub) GetRenderJob(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.RenderJob, error) {
+	return creative.RenderJob{}, nil
 }
 func (s *creativeManagerStub) FreezeVersion(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, taskID string, _ creative.FreezeVersionRequest, key contract.IdempotencyKey) (creative.CreativeVersion, bool, error) {
 	s.freezeKey = key
@@ -620,6 +677,12 @@ func (s *creativeManagerStub) ListPackages(context.Context, contract.ActorContex
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {
 	s.createCalls++
 	s.request = request
+	return s.job, false, nil
+}
+
+func (s *providerJobStub) CreateVideoJob(_ context.Context, request provider.CreateVideoJobRequest) (contract.ProviderJob, bool, error) {
+	s.createCalls++
+	s.videoRequest = request
 	return s.job, false, nil
 }
 

@@ -97,6 +97,39 @@ func TestExecutionEvidenceProjectionDoesNotRequireDeliveryReadScope(t *testing.T
 	}
 }
 
+func TestCreateDemoMetricSnapshotIsIdempotentAndKeepsPackageLineage(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	plan, _ := service.CreatePlan(context.Background(), actor, "project_1", validPlanRequest())
+	changeSet, _ := service.CreateChangeSet(context.Background(), actor, "project_1", plan.ID, plan.Version)
+	changeSet, _ = service.Preflight(context.Background(), actor, "project_1", changeSet.ID, changeSet.Version)
+	changeSet, _ = service.Approve(context.Background(), actor, "project_1", changeSet.ID, changeSet.Version)
+	executed, err := service.Execute(context.Background(), actor, "project_1", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := service.CreateDemoMetricSnapshot(context.Background(), actor, "project_1", executed.Execution.ID, CreateMetricSnapshotRequest{
+		DatasetVersion: DemoMetricDatasetVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateDemoMetricSnapshot(context.Background(), actor, "project_1", executed.Execution.ID, CreateMetricSnapshotRequest{
+		DatasetVersion: DemoMetricDatasetVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID || !first.IsSimulated || first.Source != MetricSourceDemoFixture {
+		t.Fatalf("snapshots first=%#v second=%#v", first, second)
+	}
+	if first.CreativePackageID != plan.CreativePackageID || first.RawMetrics.Impressions == 0 {
+		t.Fatalf("snapshot lineage=%#v", first)
+	}
+}
+
 func validPlanRequest() CreatePlanRequest {
 	return CreatePlanRequest{
 		CreativePackageID: "creativepackage_1", Name: "投放计划", Objective: "验证素材",
@@ -121,6 +154,7 @@ func testService() Service {
 			changeSets: map[string]ChangeSet{},
 			executions: map[string]Execution{},
 			evidence:   map[string]Evidence{},
+			metrics:    map[string]DeliveryMetricSnapshot{},
 		},
 		Projects: testProjects{},
 		Packages: testPackages{},
@@ -151,6 +185,7 @@ type memoryRepository struct {
 	changeSets map[string]ChangeSet
 	executions map[string]Execution
 	evidence   map[string]Evidence
+	metrics    map[string]DeliveryMetricSnapshot
 }
 
 func (r *memoryRepository) CreatePlan(_ context.Context, value DeliveryPlan) (DeliveryPlan, error) {
@@ -242,6 +277,25 @@ func (r *memoryRepository) ListExecutions(_ context.Context, organizationID cont
 			if evidence.ExecutionID == execution.ID {
 				values = append(values, ExecutionResult{ChangeSet: r.changeSets[execution.ChangeSetID], Execution: execution, Evidence: evidence})
 			}
+		}
+	}
+	return values, nil
+}
+
+func (r *memoryRepository) CreateMetricSnapshot(_ context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {
+	key := value.ExecutionID + "|" + value.DatasetVersion
+	if existing, ok := r.metrics[key]; ok {
+		return existing, false, nil
+	}
+	r.metrics[key] = value
+	return value, true, nil
+}
+
+func (r *memoryRepository) ListMetricSnapshots(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string, _ int) ([]DeliveryMetricSnapshot, error) {
+	values := make([]DeliveryMetricSnapshot, 0)
+	for _, value := range r.metrics {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.ExecutionID == executionID {
+			values = append(values, value)
 		}
 	}
 	return values, nil

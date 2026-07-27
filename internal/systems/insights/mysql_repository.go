@@ -22,10 +22,12 @@ func (r MySQLRepository) CreateReport(ctx context.Context, value InsightReport) 
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_reports (
 		id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary,
+		metric_snapshot_id, creative_package_id, is_simulated, dataset_version,
 		status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, value.DeliveryMode,
-		value.EvidenceID, value.EvidenceSummary, value.Status, value.Summary, findings,
+		value.EvidenceID, value.EvidenceSummary, value.MetricSnapshotID, value.CreativePackageID,
+		value.IsSimulated, value.DatasetVersion, value.Status, value.Summary, findings,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if err != nil {
 		return InsightReport{}, err
@@ -91,11 +93,11 @@ func (r MySQLRepository) CreateExperience(ctx context.Context, value Experience)
 		return Experience{}, err
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_experiences (
-		id, organization_id, project_id, report_id, source_execution_id, source_evidence_id,
+		id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id,
 		conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ReportID, value.SourceExecutionID,
-		value.SourceEvidenceID, value.Conclusion, conditions, counterexamples, value.Status,
+		value.SourceEvidenceID, value.SourceMetricSnapshotID, value.Conclusion, conditions, counterexamples, value.Status,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if err != nil {
 		return Experience{}, err
@@ -128,8 +130,8 @@ func (r MySQLRepository) GetExperience(ctx context.Context, organizationID contr
 	return value, err
 }
 
-const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
-const experienceSelect = `SELECT id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at FROM insight_experiences`
+const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
+const experienceSelect = `SELECT id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at FROM insight_experiences`
 
 type rowScanner interface {
 	Scan(...any) error
@@ -141,7 +143,8 @@ func scanInsightReport(row rowScanner) (InsightReport, error) {
 	var confirmedBy sql.NullString
 	var confirmedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &value.DeliveryMode,
-		&value.EvidenceID, &value.EvidenceSummary, &value.Status, &value.Summary, &findings, &value.Version,
+		&value.EvidenceID, &value.EvidenceSummary, &value.MetricSnapshotID, &value.CreativePackageID,
+		&value.IsSimulated, &value.DatasetVersion, &value.Status, &value.Summary, &findings, &value.Version,
 		&value.CreatedBy, &confirmedBy, &confirmedAt, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return InsightReport{}, err
@@ -162,7 +165,7 @@ func scanExperience(row rowScanner) (Experience, error) {
 	var value Experience
 	var conditions, counterexamples []byte
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ReportID,
-		&value.SourceExecutionID, &value.SourceEvidenceID, &value.Conclusion, &conditions,
+		&value.SourceExecutionID, &value.SourceEvidenceID, &value.SourceMetricSnapshotID, &value.Conclusion, &conditions,
 		&counterexamples, &value.Status, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return Experience{}, err

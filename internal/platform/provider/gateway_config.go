@@ -52,6 +52,14 @@ func (s GatewayRouteSnapshot) Validate() error {
 }
 
 func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
+	return s.validateWithLimits(allowInsecureHTTP, 600, 100<<20)
+}
+
+func (s GatewayRouteSnapshot) ValidateVideoWithPolicy(allowInsecureHTTP bool) error {
+	return s.validateWithLimits(allowInsecureHTTP, 1800, 200<<20)
+}
+
+func (s GatewayRouteSnapshot) validateWithLimits(allowInsecureHTTP bool, maxTimeoutSeconds int, maxResponseBytes int64) error {
 	if strings.TrimSpace(s.RouteID) == "" || strings.TrimSpace(s.RouteRevisionID) == "" ||
 		strings.TrimSpace(s.ConnectionID) == "" || strings.TrimSpace(s.ConnectionRevisionID) == "" ||
 		strings.TrimSpace(s.UpstreamModel) == "" || strings.TrimSpace(s.CredentialID) == "" ||
@@ -66,11 +74,11 @@ func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
 		return fmt.Errorf("adapter gateway base URL cannot contain a query or fragment")
 	}
-	if s.TimeoutSeconds < 1 || s.TimeoutSeconds > 600 {
-		return fmt.Errorf("adapter gateway timeout must be between 1 and 600 seconds")
+	if s.TimeoutSeconds < 1 || s.TimeoutSeconds > maxTimeoutSeconds {
+		return fmt.Errorf("adapter gateway timeout must be between 1 and %d seconds", maxTimeoutSeconds)
 	}
-	if s.MaxResponseBytes < 1 || s.MaxResponseBytes > 100<<20 {
-		return fmt.Errorf("adapter gateway response limit must be between 1 byte and 100 MiB")
+	if s.MaxResponseBytes < 1 || s.MaxResponseBytes > maxResponseBytes {
+		return fmt.Errorf("adapter gateway response limit must be between 1 byte and %d bytes", maxResponseBytes)
 	}
 	return nil
 }
@@ -106,6 +114,10 @@ type TextRouteResolver interface {
 	ResolveTextRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
 }
 
+type VideoRouteResolver interface {
+	ResolveVideoRoute(context.Context, contract.OrganizationID, string) (VideoRouteSnapshot, error)
+}
+
 // ImageRouteSnapshot is retained as a source-compatible alias for the
 // existing durable ProviderJob JSON contract.
 type ImageRouteSnapshot = GatewayRouteSnapshot
@@ -123,14 +135,18 @@ type MySQLGatewayConfigStore struct {
 }
 
 func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (ImageRouteSnapshot, error) {
-	return s.resolveRoute(ctx, organizationID, "image.generate", modelAlias)
+	return s.resolveRoute(ctx, organizationID, "image.generate", modelAlias, "adapter_gateway")
 }
 
 func (s MySQLGatewayConfigStore) ResolveTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
-	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias)
+	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "adapter_gateway")
 }
 
-func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationID contract.OrganizationID, capability, modelAlias string) (ImageRouteSnapshot, error) {
+func (s MySQLGatewayConfigStore) ResolveVideoRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (VideoRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "video.generate", modelAlias, "ark")
+}
+
+func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationID contract.OrganizationID, capability, modelAlias, connectionType string) (ImageRouteSnapshot, error) {
 	if s.DB == nil {
 		return ImageRouteSnapshot{}, fmt.Errorf("MySQL database is required")
 	}
@@ -142,7 +158,7 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 			COALESCE(rr.constraints_json, JSON_OBJECT())
 		FROM provider_model_routes r
 		JOIN provider_model_route_revisions rr ON rr.id = r.current_revision_id AND rr.route_id = r.id
-		JOIN provider_connections c ON c.id = rr.connection_id AND c.status = 'enabled' AND c.connection_type = 'adapter_gateway'
+		JOIN provider_connections c ON c.id = rr.connection_id AND c.status = 'enabled' AND c.connection_type = ?
 		JOIN provider_connection_revisions cr ON cr.id = rr.connection_revision_id AND cr.connection_id = c.id
 		JOIN provider_credentials pc ON pc.connection_id = c.id AND pc.status = 'active'
 		WHERE r.capability = ? AND r.model_alias = ? AND r.status = 'enabled'
@@ -151,14 +167,14 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 			AND (pc.active_until IS NULL OR pc.active_until > UTC_TIMESTAMP(6))
 		ORDER BY (r.organization_id IS NOT NULL) DESC, pc.credential_version DESC
 		LIMIT 1`,
-		capability, modelAlias, organizationID,
+		connectionType, capability, modelAlias, organizationID,
 	).Scan(
 		&snapshot.RouteID, &snapshot.RouteRevisionID, &snapshot.ConnectionID, &snapshot.ConnectionRevisionID,
 		&snapshot.BaseURL, &snapshot.UpstreamModel, &snapshot.CredentialID, &snapshot.CredentialVersion,
 		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes, &constraintsJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ImageRouteSnapshot{}, fmt.Errorf("no enabled adapter gateway %s route for model alias %q", capability, modelAlias)
+		return ImageRouteSnapshot{}, fmt.Errorf("no enabled %s %s route for model alias %q", connectionType, capability, modelAlias)
 	}
 	if err != nil {
 		return ImageRouteSnapshot{}, err
@@ -171,6 +187,8 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 	validate := snapshot.ValidateWithPolicy
 	if capability == "text.generate" {
 		validate = snapshot.ValidateTextWithPolicy
+	} else if capability == "video.generate" {
+		validate = snapshot.ValidateVideoWithPolicy
 	}
 	if err := validate(s.AllowInsecureHTTP); err != nil {
 		return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q: %w", modelAlias, err)

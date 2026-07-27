@@ -55,22 +55,38 @@ func (s *Server) createCreativeTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.PathValue("intake_action")
-	if !strings.HasSuffix(action, ":create-task") {
+	createVideo := strings.HasSuffix(action, ":create-video-task")
+	if !createVideo && !strings.HasSuffix(action, ":create-task") {
 		s.notFound(w, r)
 		return
 	}
-	intakeID := strings.TrimSuffix(action, ":create-task")
+	suffix := ":create-task"
+	if createVideo {
+		suffix = ":create-video-task"
+	}
+	intakeID := strings.TrimSuffix(action, suffix)
 	if intakeID == "" {
 		s.notFound(w, r)
 		return
 	}
-	var body creative.CreateTaskRequest
-	if err := decodeJSON(w, r, &body); err != nil {
-		s.badRequest(w, r, err)
-		return
-	}
 	rc, _ := contract.RequestContextFrom(r.Context())
-	value, err := s.creative.CreateTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), intakeID, body)
+	var value creative.CreativeTask
+	var err error
+	if createVideo {
+		var body creative.CreateVideoTaskRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = s.creative.CreateVideoTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), intakeID, body)
+	} else {
+		var body creative.CreateTaskRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = s.creative.CreateTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), intakeID, body)
+	}
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -163,6 +179,14 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 		s.bindCreativeImageAsset(w, r, strings.TrimSuffix(action, ":bind-image-asset"))
 		return
 	}
+	if strings.HasSuffix(action, ":video-job") {
+		s.createCreativeVideoJob(w, r, strings.TrimSuffix(action, ":video-job"))
+		return
+	}
+	if strings.HasSuffix(action, ":render-preroll") {
+		s.createCreativeRenderJob(w, r, strings.TrimSuffix(action, ":render-preroll"))
+		return
+	}
 	if (!strings.HasSuffix(action, ":cover-image-job") && !strings.HasSuffix(action, ":image-job")) || s.providerJobs == nil || s.projects == nil {
 		s.notFound(w, r)
 		return
@@ -239,6 +263,133 @@ func (s *Server) createCreativeCoverImageJob(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := s.creative.RegisterImagePlanJob(r.Context(), rc.Actor, projectID, taskID, body.ImagePlanOrder, job.ID); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) createCreativeRenderJob(w http.ResponseWriter, r *http.Request, taskID string) {
+	if taskID == "" || s.providerJobs == nil {
+		s.notFound(w, r)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	detail, err := s.creative.GetTaskDetail(r.Context(), rc.Actor, projectID, taskID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	providerJobID := ""
+	for _, job := range detail.ProductionJobs {
+		if job.Kind == "video_generate" {
+			providerJobID = job.ProviderJobID
+		}
+	}
+	if providerJobID == "" {
+		s.writeServiceError(w, r, creative.ErrInvalidState)
+		return
+	}
+	providerJob, err := s.providerJobs.GetJob(r.Context(), rc.Actor.OrganizationID, projectID, providerJobID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if providerJob.ProviderStatus != contract.ProviderJobSucceeded || len(providerJob.ProjectAssetRefs) != 1 {
+		s.writeServiceError(w, r, creative.ErrInvalidState)
+		return
+	}
+	value, duplicate, err := s.creative.CreateRenderJob(r.Context(), rc, projectID, taskID, creative.CreateRenderJobRequest{
+		PreRollVideo: providerJob.ProjectAssetRefs[0].AssetVersion,
+	}, key)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if duplicate {
+		w.Header().Set("Idempotent-Replay", "true")
+	}
+	w.Header().Set("Location", fmt.Sprintf("/api/creative/v1/projects/%s/creative-render-jobs/%s", projectID, value.ID))
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) getCreativeRenderJob(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetRenderJob(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("render_job_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, taskID string) {
+	if taskID == "" || s.providerJobs == nil || s.projects == nil {
+		s.notFound(w, r)
+		return
+	}
+	var body creative.CreateVideoJobRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	modelAlias := strings.TrimSpace(body.ModelAlias)
+	if modelAlias == "" {
+		modelAlias = "cookies.video.standard"
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	detail, err := s.creative.GetTaskDetail(r.Context(), rc.Actor, projectID, taskID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if detail.Task.Format != creative.FormatVideo || detail.VideoDraft == nil {
+		s.writeServiceError(w, r, creative.ErrInvalidState)
+		return
+	}
+	project, err := s.projects.GetContext(r.Context(), rc.Actor, projectID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	requestBody := struct {
+		TaskID                string              `json:"task_id"`
+		ModelAlias            string              `json:"model_alias"`
+		Draft                 creative.VideoDraft `json:"draft"`
+		ProjectContextVersion int64               `json:"project_context_version"`
+	}{TaskID: taskID, ModelAlias: modelAlias, Draft: *detail.VideoDraft, ProjectContextVersion: project.ProjectContextVersion}
+	hash, err := contract.CanonicalJSONHash(requestBody)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	job, _, err := s.providerJobs.CreateVideoJob(r.Context(), provider.CreateVideoJobRequest{
+		Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: hash,
+		ModelAlias: modelAlias, SourceSystem: "creative", SourceTaskID: taskID,
+		Input: provider.VideoGenerationInput{
+			Prompt: detail.VideoDraft.Prompt, DurationSeconds: detail.VideoDraft.DurationSeconds,
+			AspectRatio: detail.VideoDraft.AspectRatio, Resolution: detail.VideoDraft.Resolution,
+		},
+	})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if err := s.creative.RegisterVideoJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
 		s.writeServiceError(w, r, err)
 		return
 	}

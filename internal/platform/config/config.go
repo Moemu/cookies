@@ -38,6 +38,7 @@ type Config struct {
 	Auth          Auth
 	ObjectStorage ObjectStorage
 	Scanner       Scanner
+	Media         Media
 	Provider      Provider
 	Strategy      Strategy
 	LocalIdentity *LocalIdentity
@@ -67,6 +68,15 @@ type Scanner struct {
 	Address string
 }
 
+// Media configures optional local media executables. Empty executable paths
+// keep non-video capabilities available while video probing/rendering reports
+// an explicit capability error at the operation boundary.
+type Media struct {
+	FFmpegPath    string
+	FFprobePath   string
+	VideoWorkRoot string
+}
+
 // Strategy controls gradual rollout independently from the Creative system.
 // Package-to-Creative permits only the explicit package-to-Intake handoff;
 // approval never creates a Creative task implicitly.
@@ -86,12 +96,14 @@ type Strategy struct {
 // the process environment (or ignored local .env), never from project data.
 type Provider struct {
 	ImageAdapter      string
+	VideoAdapter      string
 	TextAdapter       string
 	MasterKey         string
 	MasterKeyVersion  string
 	OutputBucket      string
 	AllowInsecureHTTP bool
 	ArkImage          ArkImage
+	ArkVideo          ArkVideo
 	ArkText           ArkText
 	OpenAIImage       OpenAIImage
 }
@@ -103,6 +115,12 @@ type ArkImage struct {
 }
 
 type ArkText struct {
+	APIKey  string
+	Model   string
+	BaseURL string
+}
+
+type ArkVideo struct {
 	APIKey  string
 	Model   string
 	BaseURL string
@@ -251,6 +269,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			AssetsBucket:     valueOrCompatibility(lookup, "COOKIES_TOS_ASSETS_BUCKET", "OBJECT_STORAGE_ASSETS_BUCKET", "OBJECT_STORAGE_BUCKET_NAME", "cookies-assets"),
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
+		Media: Media{
+			FFmpegPath:    valueOr(lookup, "COOKIES_FFMPEG_PATH", ""),
+			FFprobePath:   valueOr(lookup, "COOKIES_FFPROBE_PATH", ""),
+			VideoWorkRoot: valueOr(lookup, "COOKIES_VIDEO_WORK_ROOT", ".data/video-work"),
+		},
 		Strategy: Strategy{
 			Enabled:                  strategyEnabled,
 			V2Enabled:                strategyV2Enabled,
@@ -264,6 +287,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
+			VideoAdapter:      valueOr(lookup, "COOKIES_PROVIDER_VIDEO_ADAPTER", "fake"),
 			TextAdapter:       valueOr(lookup, "COOKIES_PROVIDER_TEXT_ADAPTER", "fake"),
 			MasterKey:         valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY", ""),
 			MasterKeyVersion:  valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY_VERSION", "v1"),
@@ -273,6 +297,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 				APIKey:  valueOr(lookup, "COOKIES_ARK_IMAGE_API_KEY", ""),
 				Model:   valueOr(lookup, "COOKIES_ARK_IMAGE_MODEL", ""),
 				BaseURL: valueOr(lookup, "COOKIES_ARK_IMAGE_BASE_URL", ""),
+			},
+			ArkVideo: ArkVideo{
+				APIKey:  valueOr(lookup, "COOKIES_ARK_VIDEO_API_KEY", ""),
+				Model:   valueOr(lookup, "COOKIES_ARK_VIDEO_MODEL", ""),
+				BaseURL: valueOr(lookup, "COOKIES_ARK_VIDEO_BASE_URL", ""),
 			},
 			ArkText: ArkText{
 				APIKey:  valueOr(lookup, "COOKIES_ARK_TEXT_API_KEY", ""),
@@ -351,11 +380,17 @@ func (c Config) Validate() error {
 	if c.Scanner.Mode == "clamav" && c.Scanner.Address == "" {
 		return fmt.Errorf("ClamAV scanner requires COOKIES_CLAMAV_ADDRESS")
 	}
+	if strings.TrimSpace(c.Media.VideoWorkRoot) == "" {
+		return fmt.Errorf("COOKIES_VIDEO_WORK_ROOT must not be empty")
+	}
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")
 	}
 	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake, adapter_gateway, or ark_text")
+	}
+	if c.Provider.VideoAdapter != "fake" && c.Provider.VideoAdapter != "ark_video" {
+		return fmt.Errorf("COOKIES_PROVIDER_VIDEO_ADAPTER must be fake or ark_video")
 	}
 	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires a real text adapter")
@@ -372,16 +407,20 @@ func (c Config) Validate() error {
 	if c.Provider.ImageAdapter == "ark_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkImage.APIKey) == "" || strings.TrimSpace(c.Provider.ArkImage.Model) == "") {
 		return fmt.Errorf("ark_image is local-only and requires COOKIES_ARK_IMAGE_API_KEY and COOKIES_ARK_IMAGE_MODEL")
 	}
+	if c.Provider.VideoAdapter == "ark_video" && c.Environment != EnvironmentLocal {
+		return fmt.Errorf("ark_video is local-only in Phase 1")
+	}
 	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
 		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
 	}
 	if c.Provider.TextAdapter == "ark_text" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkText.APIKey) == "" || strings.TrimSpace(c.Provider.ArkText.Model) == "") {
 		return fmt.Errorf("ark_text is local-only and requires COOKIES_ARK_TEXT_API_KEY and COOKIES_ARK_TEXT_MODEL")
 	}
-	if (c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway") && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
-		return fmt.Errorf("adapter_gateway requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")
+	usesCredentialBroker := c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway" || c.Provider.VideoAdapter == "ark_video"
+	if usesCredentialBroker && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
+		return fmt.Errorf("configured Provider adapter requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")
 	}
-	if c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway" {
+	if usesCredentialBroker {
 		key, err := base64.StdEncoding.DecodeString(c.Provider.MasterKey)
 		if err != nil || len(key) != 32 {
 			return fmt.Errorf("COOKIES_PROVIDER_MASTER_KEY must be base64-encoded 32 bytes")

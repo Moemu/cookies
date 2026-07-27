@@ -29,12 +29,12 @@ func (s MySQLStore) Create(ctx context.Context, record JobRecord) (JobRecord, bo
 	if err := validateRecord(record, s.AllowInsecureHTTP); err != nil {
 		return JobRecord{}, false, err
 	}
-	payload, err := json.Marshal(record.Input)
+	payload, err := marshalProviderInput(record)
 	if err != nil {
 		return JobRecord{}, false, fmt.Errorf("encode provider input: %w", err)
 	}
 	job := record.Job
-	routeSnapshot, err := marshalRouteSnapshot(record.Route, s.AllowInsecureHTTP)
+	routeSnapshot, err := marshalRouteSnapshot(record.Route, record.Operation, s.AllowInsecureHTTP)
 	if err != nil {
 		return JobRecord{}, false, err
 	}
@@ -108,7 +108,7 @@ func (s MySQLStore) Update(ctx context.Context, record JobRecord) (JobRecord, er
 	if err := validateRecord(record, s.AllowInsecureHTTP); err != nil {
 		return JobRecord{}, err
 	}
-	payload, err := json.Marshal(record.Input)
+	payload, err := marshalProviderInput(record)
 	if err != nil {
 		return JobRecord{}, fmt.Errorf("encode provider input: %w", err)
 	}
@@ -119,7 +119,7 @@ func (s MySQLStore) Update(ctx context.Context, record JobRecord) (JobRecord, er
 		errorMessage = record.Job.Error.Message
 		retryable = record.Job.Error.Retryable
 	}
-	routeSnapshot, err := marshalRouteSnapshot(record.Route, s.AllowInsecureHTTP)
+	routeSnapshot, err := marshalRouteSnapshot(record.Route, record.Operation, s.AllowInsecureHTTP)
 	if err != nil {
 		return JobRecord{}, err
 	}
@@ -329,8 +329,8 @@ func scanRecord(row rowScanner) (JobRecord, error) {
 	if errorCode.Valid {
 		record.Job.Error = &contract.JobError{Code: errorCode.String, Message: errorMessage.String, Retryable: retryable.Bool}
 	}
-	if err := json.Unmarshal(input, &record.Input); err != nil {
-		return JobRecord{}, fmt.Errorf("decode provider input: %w", err)
+	if err := unmarshalProviderInput(input, &record); err != nil {
+		return JobRecord{}, err
 	}
 	return record, nil
 }
@@ -357,11 +357,20 @@ func validateRecord(record JobRecord, allowInsecureHTTP bool) error {
 	if strings.TrimSpace(record.ModelAlias) == "" {
 		return fmt.Errorf("model alias is required")
 	}
-	if err := record.Input.Validate(); err != nil {
-		return err
+	switch record.Operation {
+	case imageGenerateOperation, imageEditOperation:
+		if err := record.Input.Validate(); err != nil {
+			return err
+		}
+	case videoGenerateOperation:
+		if err := record.VideoInput.Validate(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("provider operation is not supported")
 	}
 	if record.Route != nil {
-		if err := record.Route.ValidateWithPolicy(allowInsecureHTTP); err != nil {
+		if err := validateRouteForOperation(*record.Route, record.Operation, allowInsecureHTTP); err != nil {
 			return err
 		}
 		switch record.SubmissionState {
@@ -378,11 +387,47 @@ func validateRecord(record JobRecord, allowInsecureHTTP bool) error {
 	return nil
 }
 
-func marshalRouteSnapshot(snapshot *ImageRouteSnapshot, allowInsecureHTTP bool) (any, error) {
+func marshalProviderInput(record JobRecord) ([]byte, error) {
+	var input any
+	switch record.Operation {
+	case imageGenerateOperation, imageEditOperation:
+		input = record.Input
+	case videoGenerateOperation:
+		input = record.VideoInput
+	default:
+		return nil, fmt.Errorf("provider operation is not supported")
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("encode provider input: %w", err)
+	}
+	return payload, nil
+}
+
+func unmarshalProviderInput(input json.RawMessage, record *JobRecord) error {
+	if record == nil {
+		return fmt.Errorf("provider job record is required")
+	}
+	var target any
+	switch record.Operation {
+	case imageGenerateOperation, imageEditOperation:
+		target = &record.Input
+	case videoGenerateOperation:
+		target = &record.VideoInput
+	default:
+		return fmt.Errorf("provider operation is not supported")
+	}
+	if err := json.Unmarshal(input, target); err != nil {
+		return fmt.Errorf("decode provider input: %w", err)
+	}
+	return nil
+}
+
+func marshalRouteSnapshot(snapshot *ImageRouteSnapshot, operation string, allowInsecureHTTP bool) (any, error) {
 	if snapshot == nil {
 		return nil, nil
 	}
-	if err := snapshot.ValidateWithPolicy(allowInsecureHTTP); err != nil {
+	if err := validateRouteForOperation(*snapshot, operation, allowInsecureHTTP); err != nil {
 		return nil, err
 	}
 	encoded, err := json.Marshal(snapshot)
@@ -390,6 +435,13 @@ func marshalRouteSnapshot(snapshot *ImageRouteSnapshot, allowInsecureHTTP bool) 
 		return nil, fmt.Errorf("encode provider route snapshot: %w", err)
 	}
 	return encoded, nil
+}
+
+func validateRouteForOperation(snapshot GatewayRouteSnapshot, operation string, allowInsecureHTTP bool) error {
+	if operation == videoGenerateOperation {
+		return snapshot.ValidateVideoWithPolicy(allowInsecureHTTP)
+	}
+	return snapshot.ValidateWithPolicy(allowInsecureHTTP)
 }
 
 func validateOutput(jobID string, output OutputRecord) error {

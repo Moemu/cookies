@@ -22,6 +22,9 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if !strings.Contains(value.MySQL.DSN, "127.0.0.1:3307") {
 		t.Fatalf("default MySQL DSN does not use the isolated local port: %q", value.MySQL.DSN)
 	}
+	if value.Media.FFmpegPath != "" || value.Media.FFprobePath != "" || value.Media.VideoWorkRoot != ".data/video-work" {
+		t.Fatalf("unexpected safe media defaults: %#v", value.Media)
+	}
 }
 
 func TestPasswordAuthenticationDefaultsToLocalOnly(t *testing.T) {
@@ -211,6 +214,26 @@ func TestArkImageAdapterIsExplicitAndLocalOnly(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected Ark adapter outside local to be rejected")
+	}
+}
+
+func TestArkVideoAdapterIsExplicitAndLocalOnly(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video"})); err == nil {
+		t.Fatal("expected Ark video configuration without credentials to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "local", "COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video",
+		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	}))
+	if err != nil || config.Provider.VideoAdapter != "ark_video" {
+		t.Fatalf("valid local Ark video configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory", "COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video",
+		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	})); err == nil {
+		t.Fatal("expected Ark video adapter outside local to be rejected")
 	}
 }
 

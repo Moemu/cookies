@@ -25,6 +25,15 @@ const detail = {
   production_jobs: [],
 }
 
+const preRollTask = {
+  ...task,
+  id: 'creativetask_video_1',
+  format: 'video',
+  channel: 'douyin',
+  video_purpose: 'performance',
+  performance_mode: 'pre_roll',
+}
+
 function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }) }
 
 describe('CreativeImageTextPage', () => {
@@ -42,6 +51,30 @@ describe('CreativeImageTextPage', () => {
   })
 
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+  it('redirects a pre-roll video task away from the image-text production route', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/creative-tasks?limit=100')) return jsonResponse({ items: [preRollTask] })
+      if (url.endsWith('/creative-intakes?limit=100')) return jsonResponse({ items: [intake] })
+      return jsonResponse({ error: { code: 'NOT_FOUND', message: 'not found', request_id: 'req_test', retryable: false, details: [] } }, 404)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/projects/project_1/creative/tasks/creativetask_video_1/production']}>
+        <Routes>
+          <Route path="/projects/:projectId/creative/tasks/:taskId/:creativeStage" element={<CreativeImageTextPage />} />
+          <Route path="/projects/:projectId/creative/video/performance/pre-roll" element={<h1>Pre-roll workbench</h1>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Pre-roll workbench' })).toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalledWith(
+      '/api/creative/v1/projects/project_1/creative-tasks/creativetask_video_1',
+      expect.anything(),
+    )
+  })
 
   it('creates a ready manual Intake and shows its image-text draft', async () => {
     render(<MemoryRouter initialEntries={['/projects/project_1/creative']}><Routes><Route path="/projects/:projectId/creative" element={<CreativeImageTextPage />} /></Routes></MemoryRouter>)

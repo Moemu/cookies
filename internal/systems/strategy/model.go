@@ -493,6 +493,7 @@ type PackageSnapshot struct {
 	StrategyRevision int64                   `json:"strategy_revision"`
 	Brief            BriefVersion            `json:"brief"`
 	Strategy         StrategyDocument        `json:"strategy"`
+	CreativeRoutes   []CreativeRoute         `json:"creative_routes,omitempty"`
 	Readiness        Readiness               `json:"readiness"`
 	Approval         PackageApproval         `json:"approval"`
 }

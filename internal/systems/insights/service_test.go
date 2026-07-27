@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,26 @@ func TestInsightsRejectsExperienceFromUnconfirmedReport(t *testing.T) {
 	}
 }
 
+func TestCreateReportDerivesFindingsFromSimulatedMetricSnapshot(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	report, err := service.CreateReport(context.Background(), testActor(), "project_1", CreateReportRequest{
+		ExecutionID: "deliveryexecution_1",
+		Summary:     "client supplied summary must be ignored",
+		Findings:    []string{"client supplied finding must be ignored"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.IsSimulated || report.MetricSnapshotID != "deliverymetric_1" ||
+		report.CreativePackageID != "creativepackage_1" {
+		t.Fatalf("report lineage=%#v", report)
+	}
+	if strings.Contains(report.Summary, "client supplied") || strings.Contains(strings.Join(report.Findings, " "), "client supplied") {
+		t.Fatalf("report must be server-derived: %#v", report)
+	}
+}
+
 func testActor() contract.ActorContext {
 	return contract.ActorContext{
 		OrganizationID: "org_1",
@@ -92,6 +113,12 @@ func (testDelivery) ReadExecution(_ context.Context, _ contract.ActorContext, _ 
 	return DeliveryExecutionSnapshot{
 		ID: id, ChangeSetID: "deliverychangeset_1", PlanID: "deliveryplan_1",
 		Mode: "local_simulation", EvidenceID: "deliveryevidence_1",
+		CreativePackageID: "creativepackage_1",
+		MetricSnapshot: &DeliveryMetricSnapshot{
+			ID: "deliverymetric_1", DatasetVersion: "preroll-demo/v1", Source: "demo_fixture",
+			IsSimulated: true, Currency: "CNY",
+			RawMetrics: RawMetrics{Impressions: 10000, Clicks: 420, Conversions: 31, SpendCents: 50000},
+		},
 		EvidenceSummary: "本地模拟执行完成，无真实广告平台写入。",
 	}, nil
 }

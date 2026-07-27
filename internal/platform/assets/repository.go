@@ -33,6 +33,7 @@ type Repository interface {
 	CompleteIntake(context.Context, GeneratedIntake, AssetCommit, time.Time) (contract.ProjectAssetRef, error)
 	RetryIntake(context.Context, GeneratedIntake, contract.JobError, time.Time) error
 	FailIntake(context.Context, GeneratedIntake, contract.JobError, time.Time) error
+	CompleteRender(context.Context, string, AssetCommit, time.Time) (contract.ProjectAssetRef, error)
 
 	GetProjectAsset(context.Context, contract.OrganizationID, contract.ProjectID, contract.AssetVersionRef) (ProjectAsset, error)
 	ListProjectAssets(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ProjectAsset, error)

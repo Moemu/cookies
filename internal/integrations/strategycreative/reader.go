@@ -52,11 +52,23 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 			break
 		}
 	}
+	routes := make([]creative.CreativeRouteSnapshot, 0, len(value.Snapshot.CreativeRoutes))
+	for _, route := range value.Snapshot.CreativeRoutes {
+		routes = append(routes, creative.CreativeRouteSnapshot{
+			RouteType: route.RouteType, VideoPurpose: route.VideoPurpose,
+			Channels: append([]string{}, route.Channels...), Reason: route.Reason,
+			TargetDurationSeconds: route.TargetDurationSeconds, AspectRatio: route.AspectRatio,
+			SourceAssetRefs:           append([]contract.AssetVersionRef{}, route.SourceAssetRefs...),
+			EvidenceRefs:              append([]string{}, route.EvidenceRefs...),
+			RequiresHumanConfirmation: route.RequiresHumanConfirmation,
+		})
+	}
 	return creative.StrategyPackageSnapshot{
 		PackageID: value.PackageID, PackageVersion: value.Version, ContentHash: string(value.ContentHash),
 		CreativeReady: value.Snapshot.Readiness.CreativeReady,
 		Objective:     document.Objective, Audience: document.Audience.Primary, CoreMessage: document.Proposition,
 		Concept: concept, Tone: tone, VisualKeywords: []string{"品牌主视觉", "真实使用场景"},
 		Mandatory: mandatory, Prohibited: prohibited,
+		CreativeRoutes: routes,
 	}, nil
 }

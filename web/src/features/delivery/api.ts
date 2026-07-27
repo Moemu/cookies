@@ -1,5 +1,5 @@
 import { apiRequest } from '../../shared/api/client'
-import type { DeliveryChangeSet, DeliveryExecutionResult, DeliveryPlan, DeliveryPlanDetail } from './types'
+import type { DeliveryChangeSet, DeliveryExecutionResult, DeliveryMetricSnapshot, DeliveryPlan, DeliveryPlanDetail } from './types'
 
 const base = (projectId: string) => `/api/delivery/v1/projects/${encodeURIComponent(projectId)}`
 
@@ -42,4 +42,15 @@ export function executeDeliveryChangeSet(projectId: string, changeSetId: string,
 
 export function listDeliveryExecutions(projectId: string, signal?: AbortSignal) {
   return apiRequest<{ items: DeliveryExecutionResult[] }>(`${base(projectId)}/executions?limit=100`, { signal })
+}
+
+export function createDemoMetricSnapshot(projectId: string, executionId: string) {
+  return apiRequest<DeliveryMetricSnapshot>(`${base(projectId)}/executions/${encodeURIComponent(executionId)}/metric-snapshots`, {
+    method: 'POST',
+    body: JSON.stringify({ dataset_version: 'preroll-demo/v1' }),
+  })
+}
+
+export function listMetricSnapshots(projectId: string, executionId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: DeliveryMetricSnapshot[] }>(`${base(projectId)}/executions/${encodeURIComponent(executionId)}/metric-snapshots?limit=100`, { signal })
 }

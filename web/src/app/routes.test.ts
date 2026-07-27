@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   activeBusinessModule,
+  creativePreRollPath,
   creativeTaskPath,
   deliveryPlanPath,
   destinationForProject,
@@ -13,6 +14,7 @@ describe('application route manifest', () => {
   it('keeps the project identity in stable business URLs', () => {
     expect(projectHomePath('project spring')).toBe('/projects/project%20spring/home')
     expect(creativeTaskPath('project_1', 'task_1', 'production')).toBe('/projects/project_1/creative/tasks/task_1/production')
+    expect(creativePreRollPath('project spring')).toBe('/projects/project%20spring/creative/video/performance/pre-roll')
     expect(deliveryPlanPath('project_1', 'plan_1')).toBe('/projects/project_1/delivery/plans/plan_1')
     expect(insightsPath('project_1', 'reports')).toBe('/projects/project_1/insights/reports')
     expect(routeProjectId('/projects/project_1/creative/tasks/task_1/review')).toBe('project_1')

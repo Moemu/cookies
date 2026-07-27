@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { creativeStages, creativeTaskPath, creativeTasksPath, type CreativeStage } from '../../app/routes'
+import { creativePreRollPath, creativeStages, creativeTaskPath, creativeTasksPath, type CreativeStage } from '../../app/routes'
 import { getAssetPreview, listProjectAssets, removeProjectAsset } from '../assets/api'
 import { RemoveAssetDialog } from '../assets/RemoveAssetDialog'
 import type { ProjectAsset } from '../assets/types'
@@ -146,10 +146,18 @@ export function CreativeImageTextPage() {
     setError('')
     try {
       const [taskResponse, intakeResponse] = await Promise.all([listCreativeTasks(projectId, signal), listCreativeIntakes(projectId, signal)])
-      setTasks(taskResponse.items)
-      setIntakes(intakeResponse.items)
-      const requestedTask = taskId && taskResponse.items.some((task) => task.id === taskId) ? taskId : taskResponse.items[0]?.id
-      if (requestedTask) await selectTask(requestedTask, signal)
+      const allTasks = taskResponse.items ?? []
+      const imageTextTasks = allTasks.filter((task) => task.format === 'image_text')
+      const requestedTask = taskId ? allTasks.find((task) => task.id === taskId) : undefined
+      setTasks(imageTextTasks)
+      setIntakes(intakeResponse.items ?? [])
+      if (requestedTask?.format === 'video' && requestedTask.performance_mode === 'pre_roll') {
+        setSelected(null)
+        navigate(creativePreRollPath(projectId), { replace: true })
+        return
+      }
+      const requestedImageTaskID = requestedTask?.format === 'image_text' ? requestedTask.id : imageTextTasks[0]?.id
+      if (requestedImageTaskID) await selectTask(requestedImageTaskID, signal)
       else setSelected(null)
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
@@ -157,7 +165,7 @@ export function CreativeImageTextPage() {
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [projectId, selectTask, taskId])
+  }, [navigate, projectId, selectTask, taskId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -386,6 +394,7 @@ export function CreativeImageTextPage() {
       <div><span className="creative-kicker">创意创作 / 图文创作</span><h1>小红书图文创作</h1><p>从策略方向到图文初稿、真实生图与项目素材入库的一体化工作区。</p></div>
       <div className="creative-page__header-actions">
         <Link className="button button--secondary" to={`/projects/${encodeURIComponent(projectId)}/assets`}>查看项目素材</Link>
+        <Link className="button button--secondary" to={creativePreRollPath(projectId)}>短剧前贴</Link>
         <button className="button button--primary" onClick={() => {
           setManualOpen(true)
           window.requestAnimationFrame(() => document.getElementById('creative-intake-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))

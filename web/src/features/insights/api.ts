@@ -7,7 +7,7 @@ export function listInsightReports(projectId: string, signal?: AbortSignal) {
   return apiRequest<{ items: InsightReport[] }>(`${base(projectId)}/reports?limit=100`, { signal })
 }
 
-export function createInsightReport(projectId: string, input: { execution_id: string, summary: string, findings: string[] }) {
+export function createInsightReport(projectId: string, input: { execution_id: string }) {
   return apiRequest<InsightReport>(`${base(projectId)}/reports`, { method: 'POST', body: JSON.stringify(input) })
 }
 

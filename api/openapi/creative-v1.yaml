@@ -48,6 +48,19 @@ paths:
       responses:
         '201': {description: Image and text CreativeTask created with an initial draft.}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-video-task:
+    post:
+      operationId: createCreativePreRollVideoTask
+      summary: Confirm an approved Strategy route and create one pre-roll video CreativeTask.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateVideoTaskRequest'}
+      responses:
+        '201': {description: Video CreativeTask and immutable Strategy route snapshot created.}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-tasks:
     get:
       operationId: listCreativeTasks
@@ -115,6 +128,44 @@ paths:
       responses:
         '202': {description: Provider image job created with Creative image-plan lineage.}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:video-job:
+    post:
+      operationId: createCreativePreRollVideoJob
+      summary: Create a Provider video job through cookies.video.standard.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                model_alias: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '202': {description: Provider video job created and registered to the CreativeTask.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:render-preroll:
+    post:
+      operationId: createCreativePreRollRenderJob
+      summary: Compose the generated pre-roll before the authorized main video.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '202': {description: Durable FFmpeg render job accepted.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-render-jobs/{render_job_id}:
+    get:
+      operationId: getCreativeRenderJob
+      summary: Get a durable pre-roll render job and its output Asset reference.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/RenderJobID'}]
+      responses:
+        '200': {description: Render job state and immutable input/output lineage.}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:bind-image-asset:
     post:
       operationId: bindCreativeImageAsset
@@ -167,6 +218,7 @@ components:
     IntakeID: {name: intake_id, in: path, required: true, schema: {type: string, minLength: 1}}
     TaskID: {name: task_id, in: path, required: true, schema: {type: string, minLength: 1}}
     VersionID: {name: version_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    RenderJobID: {name: render_job_id, in: path, required: true, schema: {type: string, minLength: 1}}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 255}}
   schemas:
     CreateCreativeIntakeRequest:
@@ -203,12 +255,34 @@ components:
         audience: {type: string, maxLength: 500}
         core_message: {type: string, maxLength: 1000}
         call_to_action: {type: string, maxLength: 300}
+    AssetVersionRef:
+      type: object
+      additionalProperties: false
+      required: [asset_id, version]
+      properties:
+        asset_id: {type: string, minLength: 1}
+        version: {type: integer, minimum: 1}
+    CreateVideoTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [route_index, channel, source_video, concept, prompt, call_to_action, mandatory_elements, prohibited_claims, confirm_route]
+      properties:
+        route_index: {type: integer, minimum: 0}
+        channel: {enum: [douyin, kuaishou]}
+        source_video: {$ref: '#/components/schemas/AssetVersionRef'}
+        concept: {type: string, minLength: 1, maxLength: 500}
+        prompt: {type: string, minLength: 1, maxLength: 4000}
+        call_to_action: {type: string, maxLength: 300}
+        mandatory_elements: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
+        prohibited_claims: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
+        confirm_route: {type: boolean, const: true}
     FreezeCreativeVersionRequest:
       type: object
       additionalProperties: false
       required: [draft_version]
       properties:
         draft_version: {type: integer, minimum: 1}
+        render_job_id: {type: string, minLength: 1}
     CreateImageJobRequest:
       type: object
       additionalProperties: false

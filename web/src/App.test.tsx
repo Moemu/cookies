@@ -138,7 +138,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: '上传素材' })).toBeInTheDocument()
 
     const file = new File(['image'], 'campaign.png', { type: 'image/png' })
-    fireEvent.change(screen.getByLabelText('选择图片文件'), { target: { files: [file] } })
+    fireEvent.change(screen.getByLabelText('选择素材文件'), { target: { files: [file] } })
     expect(screen.getByText('campaign.png')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: '开始上传' })).toBeEnabled())
   })

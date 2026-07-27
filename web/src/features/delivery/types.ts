@@ -73,3 +73,26 @@ export type DeliveryPlanDetail = {
   change_sets: DeliveryChangeSet[]
   executions: DeliveryExecutionResult[]
 }
+
+export type DeliveryMetricSnapshot = {
+  id: string
+  organization_id: string
+  project_id: string
+  execution_id: string
+  plan_id: string
+  creative_package_id: string
+  source: 'demo_fixture'
+  is_simulated: true
+  dataset_version: 'preroll-demo/v1'
+  currency: 'CNY'
+  window_start: string
+  window_end: string
+  raw_metrics: {
+    impressions: number
+    clicks: number
+    conversions: number
+    spend_cents: number
+  }
+  created_by: string
+  created_at: string
+}

@@ -4,11 +4,13 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -116,6 +118,7 @@ type CreativeManager interface {
 	CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error)
 	ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error)
 	CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateTaskRequest) (creative.CreativeTask, error)
+	CreateVideoTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateVideoTaskRequest) (creative.CreativeTask, error)
 	ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error)
 	GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error)
 	ArchiveTask(context.Context, contract.ActorContext, contract.ProjectID, string) error
@@ -123,6 +126,9 @@ type CreativeManager interface {
 	BindImageAsset(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BindImageAssetRequest) (creative.ImageTextDraft, error)
 	RegisterCoverImageJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) error
 	RegisterImagePlanJob(context.Context, contract.ActorContext, contract.ProjectID, string, int, string) error
+	RegisterVideoJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) error
+	CreateRenderJob(context.Context, contract.RequestContext, contract.ProjectID, string, creative.CreateRenderJobRequest, contract.IdempotencyKey) (creative.RenderJob, bool, error)
+	GetRenderJob(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.RenderJob, error)
 	FreezeVersion(context.Context, contract.RequestContext, contract.ProjectID, string, creative.FreezeVersionRequest, contract.IdempotencyKey) (creative.CreativeVersion, bool, error)
 	ListVersions(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]creative.CreativeVersion, error)
 	CheckVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error)
@@ -135,6 +141,7 @@ type CreativeManager interface {
 // application seam, rather than its SQL store or vendor adapters.
 type ProviderJobs interface {
 	CreateImageJob(context.Context, provider.CreateImageJobRequest) (contract.ProviderJob, bool, error)
+	CreateVideoJob(context.Context, provider.CreateVideoJobRequest) (contract.ProviderJob, bool, error)
 	GetJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (contract.ProviderJob, error)
 }
 
@@ -197,6 +204,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("DELETE /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.archiveCreativeTask))))
 	server.mux.Handle("PATCH /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.reviseCreativeDraft))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createCreativeCoverImageJob))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-render-jobs/{render_job_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getCreativeRenderJob))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-versions", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeVersions))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-versions/{version_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.transitionCreativeVersion))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-packages", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativePackages))))
@@ -512,13 +520,13 @@ func (s *Server) runKnowledgeResearch(writer http.ResponseWriter, request *http.
 	writeJSON(writer, http.StatusCreated, value)
 }
 
-type imageJobCreateBody struct {
-	Capability            string                        `json:"capability"`
-	ModelAlias            string                        `json:"model_alias"`
-	Input                 provider.ImageGenerationInput `json:"input"`
-	ProjectContextVersion int64                         `json:"project_context_version"`
-	SourceSystem          string                        `json:"source_system"`
-	SourceTaskID          string                        `json:"source_task_id"`
+type modelJobCreateBody struct {
+	Capability            string          `json:"capability"`
+	ModelAlias            string          `json:"model_alias"`
+	Input                 json.RawMessage `json:"input"`
+	ProjectContextVersion int64           `json:"project_context_version"`
+	SourceSystem          string          `json:"source_system"`
+	SourceTaskID          string          `json:"source_task_id"`
 }
 
 func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Request) {
@@ -527,19 +535,36 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 		s.notImplemented(writer, request)
 		return
 	}
-	var body imageJobCreateBody
+	var body modelJobCreateBody
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil {
-		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid image job object", RequestID: requestContext.RequestID, Retryable: false})
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid model job object", RequestID: requestContext.RequestID, Retryable: false})
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid image job object", RequestID: requestContext.RequestID, Retryable: false})
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Request body must be one valid model job object", RequestID: requestContext.RequestID, Retryable: false})
 		return
 	}
-	if !supportedImageCapability(body.Capability) || body.Input.Validate() != nil || strings.TrimSpace(body.ModelAlias) == "" || body.ProjectContextVersion < 1 {
-		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Only a valid image.generate or image.edit request is supported", RequestID: requestContext.RequestID, Retryable: false})
+	var imageInput provider.ImageGenerationInput
+	var videoInput provider.VideoGenerationInput
+	switch {
+	case supportedImageCapability(body.Capability):
+		if err := decodeStrictInput(body.Input, &imageInput); err != nil || imageInput.Validate() != nil {
+			writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Image job input is invalid", RequestID: requestContext.RequestID, Retryable: false})
+			return
+		}
+	case body.Capability == "video.generate":
+		if err := decodeStrictInput(body.Input, &videoInput); err != nil || videoInput.Validate() != nil {
+			writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Video job input is invalid", RequestID: requestContext.RequestID, Retryable: false})
+			return
+		}
+	default:
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Only image.generate, image.edit, or video.generate is supported", RequestID: requestContext.RequestID, Retryable: false})
+		return
+	}
+	if strings.TrimSpace(body.ModelAlias) == "" || body.ProjectContextVersion < 1 {
+		writeProblem(writer, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "Model alias and project context version are required", RequestID: requestContext.RequestID, Retryable: false})
 		return
 	}
 	if !requestContext.Actor.HasScope(provider.ScopeJobCreate) {
@@ -569,10 +594,18 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 		writeProblem(writer, http.StatusInternalServerError, contract.Error{Code: "REQUEST_CANONICALIZATION_FAILED", Message: "Provider request cannot be processed", RequestID: requestContext.RequestID, Retryable: true})
 		return
 	}
-	job, _, err := s.providerJobs.CreateImageJob(request.Context(), provider.CreateImageJobRequest{
-		Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: requestHash,
-		ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Operation: body.Capability, Input: body.Input,
-	})
+	var job contract.ProviderJob
+	if body.Capability == "video.generate" {
+		job, _, err = s.providerJobs.CreateVideoJob(request.Context(), provider.CreateVideoJobRequest{
+			Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: requestHash,
+			ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Input: videoInput,
+		})
+	} else {
+		job, _, err = s.providerJobs.CreateImageJob(request.Context(), provider.CreateImageJobRequest{
+			Actor: requestContext.Actor, Project: project, IdempotencyKey: key, RequestHash: requestHash,
+			ModelAlias: body.ModelAlias, SourceSystem: body.SourceSystem, SourceTaskID: body.SourceTaskID, Operation: body.Capability, Input: imageInput,
+		})
+	}
 	if errors.Is(err, provider.ErrIdempotencyConflict) {
 		writeProblem(writer, http.StatusConflict, contract.Error{Code: "IDEMPOTENCY_CONFLICT", Message: "Idempotency key was reused for a different request", RequestID: requestContext.RequestID, Retryable: false})
 		return
@@ -582,6 +615,21 @@ func (s *Server) createImageJob(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeJSON(writer, http.StatusAccepted, job)
+}
+
+func decodeStrictInput(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("model input is required")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("model input must contain one JSON object")
+	}
+	return nil
 }
 
 func supportedImageCapability(capability string) bool {

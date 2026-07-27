@@ -131,11 +131,11 @@ func (s *Server) putUpload(w http.ResponseWriter, r *http.Request) {
 		s.notImplemented(w, r)
 		return
 	}
-	if r.ContentLength < 1 || r.ContentLength > assets.MaxImageBytes {
+	if r.ContentLength < 1 || r.ContentLength > assets.MaxVideoBytes {
 		s.badRequest(w, r, fmt.Errorf("Content-Length is required and outside the supported range"))
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, assets.MaxImageBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, assets.MaxVideoBytes)
 	rc, _ := contract.RequestContextFrom(r.Context())
 	err := s.uploads.PutContent(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("upload_id"), r.Body, r.ContentLength)
 	if err != nil {
