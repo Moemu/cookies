@@ -1,0 +1,920 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-creative-handoff-v1.schema.json",
+  "title": "strategy-creative-handoff/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "project_id",
+    "package_ref",
+    "handoff_content_hash",
+    "creative_view",
+    "routes",
+    "upstream_readiness",
+    "published_at"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "strategy-creative-handoff/v1"
+    },
+    "organization_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "project_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "package_ref": {
+      "$ref": "#/$defs/packageSnapshotRef"
+    },
+    "handoff_content_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "creative_view": {
+      "$ref": "#/$defs/creativeView"
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/route"
+      }
+    },
+    "upstream_readiness": {
+      "$ref": "#/$defs/readiness"
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "stringList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      },
+      "uniqueItems": true
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "stage",
+        "path",
+        "message",
+        "source"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "stage": {
+          "enum": [
+            "planning",
+            "generation",
+            "production"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "message": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "source": {
+          "enum": [
+            "strategy",
+            "creative_validation"
+          ]
+        },
+        "source_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "blockers",
+        "warnings"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ready",
+            "blocked"
+          ]
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      }
+    },
+    "packageSnapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_id",
+        "package_version",
+        "package_content_hash",
+        "approved_at"
+      ],
+      "properties": {
+        "package_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "package_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "package_content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "intakePackageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_id",
+        "package_version",
+        "package_content_hash",
+        "handoff_contract_version",
+        "handoff_content_hash"
+      ],
+      "properties": {
+        "package_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "package_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "package_content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "handoff_contract_version": {
+          "const": "strategy-creative-handoff/v1"
+        },
+        "handoff_content_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref_id",
+        "ref_type",
+        "producer",
+        "resource_uri",
+        "version",
+        "content_hash",
+        "observed_at"
+      ],
+      "properties": {
+        "ref_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "ref_type": {
+          "enum": [
+            "client_material",
+            "client_brief",
+            "web_research",
+            "prelaunch_insight",
+            "brand_knowledge",
+            "historical_experience"
+          ]
+        },
+        "producer": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "resource_uri": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "objective_type",
+        "statement",
+        "success_signals"
+      ],
+      "properties": {
+        "objective_type": {
+          "enum": [
+            "brand",
+            "performance",
+            "mixed"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "success_signals": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "audienceSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "label",
+        "priority",
+        "insight",
+        "tension",
+        "evidence_ref_ids"
+      ],
+      "properties": {
+        "segment_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "insight": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "tension": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "evidence_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "productAndOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_ref_ids",
+        "campaign_mechanism",
+        "offer_text",
+        "landing_destination"
+      ],
+      "properties": {
+        "product_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        },
+        "campaign_mechanism": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "offer_text": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "landing_destination": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priority",
+        "message",
+        "evidence_ref_ids"
+      ],
+      "properties": {
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "message": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "evidence_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "communication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "single_minded_proposition",
+        "message_hierarchy",
+        "cta_intent",
+        "approved_ctas",
+        "tone_constraints"
+      ],
+      "properties": {
+        "single_minded_proposition": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "message_hierarchy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/message"
+          }
+        },
+        "cta_intent": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "approved_ctas": {
+          "$ref": "#/$defs/stringList"
+        },
+        "tone_constraints": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "guardrail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "guardrail_id",
+        "kind",
+        "severity",
+        "scope",
+        "text",
+        "source_ref_ids"
+      ],
+      "properties": {
+        "guardrail_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "enum": [
+            "mandatory",
+            "prohibited",
+            "disclosure"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "blocker",
+            "warning"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "global",
+            "copy",
+            "visual",
+            "claim",
+            "channel",
+            "route"
+          ]
+        },
+        "text": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "source_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "claimValidity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "markets",
+        "channels"
+      ],
+      "properties": {
+        "markets": {
+          "$ref": "#/$defs/stringList"
+        },
+        "channels": {
+          "$ref": "#/$defs/stringList"
+        },
+        "valid_from": {
+          "type": "string",
+          "format": "date"
+        },
+        "valid_to": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "approved_text",
+        "paraphrase_policy",
+        "evidence_ref_ids",
+        "required_disclaimer",
+        "validity"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "approved_text": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "paraphrase_policy": {
+          "enum": [
+            "exact_only",
+            "limited",
+            "free"
+          ]
+        },
+        "evidence_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        },
+        "required_disclaimer": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "validity": {
+          "$ref": "#/$defs/claimValidity"
+        }
+      }
+    },
+    "assetVersionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "version"
+      ],
+      "properties": {
+        "asset_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "assetRights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "generative_ai_allowed",
+        "derivative_work_allowed",
+        "allowed_channels",
+        "territories",
+        "valid_until"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "verified",
+            "pending",
+            "restricted",
+            "expired"
+          ]
+        },
+        "generative_ai_allowed": {
+          "type": "boolean"
+        },
+        "derivative_work_allowed": {
+          "type": "boolean"
+        },
+        "allowed_channels": {
+          "$ref": "#/$defs/stringList"
+        },
+        "territories": {
+          "$ref": "#/$defs/stringList"
+        },
+        "valid_until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_ref",
+        "role",
+        "rights"
+      ],
+      "properties": {
+        "asset_ref": {
+          "$ref": "#/$defs/assetVersionRef"
+        },
+        "role": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rights": {
+          "$ref": "#/$defs/assetRights"
+        }
+      }
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hypothesis_id",
+        "statement",
+        "variable",
+        "variants",
+        "metric_ref_ids"
+      ],
+      "properties": {
+        "hypothesis_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "statement": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "variable": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "uniqueItems": true
+        },
+        "metric_ref_ids": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "creativeView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "language",
+        "objective",
+        "audience_segments",
+        "product_and_offer",
+        "communication",
+        "guardrails",
+        "claims",
+        "assets",
+        "creative_hypotheses",
+        "open_questions",
+        "source_refs"
+      ],
+      "properties": {
+        "market": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "objective": {
+          "$ref": "#/$defs/objective"
+        },
+        "audience_segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/audienceSegment"
+          }
+        },
+        "product_and_offer": {
+          "$ref": "#/$defs/productAndOffer"
+        },
+        "communication": {
+          "$ref": "#/$defs/communication"
+        },
+        "guardrails": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/guardrail"
+          }
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/claim"
+          }
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/asset"
+          }
+        },
+        "creative_hypotheses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/experiment"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "routeSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aspect_ratio",
+        "resolution",
+        "composition_required"
+      ],
+      "properties": {
+        "target_duration_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "aspect_ratio": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "resolution": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "hook_deadline_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "composition_required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ctaPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_for_generation",
+        "required_for_delivery",
+        "cta_intent"
+      ],
+      "properties": {
+        "required_for_generation": {
+          "type": "boolean"
+        },
+        "required_for_delivery": {
+          "type": "boolean"
+        },
+        "cta_intent": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "assetRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "required_stage"
+      ],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "required_stage": {
+          "enum": [
+            "generation",
+            "production"
+          ]
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route_id",
+        "deliverable_type",
+        "purpose",
+        "channels",
+        "reason",
+        "spec",
+        "cta_policy",
+        "claim_refs",
+        "asset_requirements",
+        "asset_refs",
+        "route_readiness"
+      ],
+      "properties": {
+        "route_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "deliverable_type": {
+          "enum": [
+            "image_text",
+            "video"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "performance",
+            "brand"
+          ]
+        },
+        "performance_mode": {
+          "enum": [
+            "short_drama_preroll",
+            "game_preroll",
+            "commerce_preroll",
+            "viral_remake",
+            "brand_video"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "xiaohongshu",
+              "wechat_official_account",
+              "douyin",
+              "kuaishou"
+            ]
+          }
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "spec": {
+          "$ref": "#/$defs/routeSpec"
+        },
+        "cta_policy": {
+          "$ref": "#/$defs/ctaPolicy"
+        },
+        "claim_refs": {
+          "$ref": "#/$defs/stringList"
+        },
+        "asset_requirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assetRequirement"
+          }
+        },
+        "asset_refs": {
+          "$ref": "#/$defs/stringList"
+        },
+        "route_readiness": {
+          "$ref": "#/$defs/readiness"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "deliverable_type": {
+                "const": "video"
+              },
+              "purpose": {
+                "const": "performance"
+              }
+            },
+            "required": [
+              "deliverable_type",
+              "purpose"
+            ]
+          },
+          "then": {
+            "required": [
+              "performance_mode"
+            ],
+            "properties": {
+              "performance_mode": {
+                "enum": [
+                  "short_drama_preroll",
+                  "game_preroll",
+                  "commerce_preroll",
+                  "viral_remake"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "deliverable_type": {
+                "const": "video"
+              },
+              "purpose": {
+                "const": "brand"
+              }
+            },
+            "required": [
+              "deliverable_type",
+              "purpose"
+            ]
+          },
+          "then": {
+            "required": [
+              "performance_mode"
+            ],
+            "properties": {
+              "performance_mode": {
+                "const": "brand_video"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "deliverable_type": {
+                "const": "video"
+              }
+            },
+            "required": [
+              "deliverable_type"
+            ]
+          },
+          "then": {
+            "properties": {
+            "spec": {
+              "type": "object",
+              "required": [
+                "target_duration_seconds"
+              ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "deliverable_type": {
+                "const": "image_text"
+              }
+            },
+            "required": [
+              "deliverable_type"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "performance_mode"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

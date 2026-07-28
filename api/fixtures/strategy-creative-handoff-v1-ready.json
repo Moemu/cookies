@@ -1,0 +1,290 @@
+{
+  "contract_version": "strategy-creative-handoff/v1",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "package_ref": {
+    "package_id": "strategy_package_03",
+    "package_version": 3,
+    "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "approved_at": "2026-07-28T06:00:00Z"
+  },
+  "handoff_content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c",
+  "creative_view": {
+    "market": "CN",
+    "language": "zh-CN",
+    "objective": {
+      "objective_type": "mixed",
+      "statement": "建立新品高端修护认知，并验证功效证据对咨询意愿的提升。",
+      "success_signals": [
+        "品牌搜索提升",
+        "有效咨询率提升"
+      ]
+    },
+    "audience_segments": [
+      {
+        "segment_id": "audience_urban_25_35",
+        "label": "25—35 岁高线城市功效护肤人群",
+        "priority": 1,
+        "insight": "愿意为高端修护投入，但需要可信证据降低决策风险。",
+        "tension": "追求可感知体验，同时担心夸张功效表达。",
+        "evidence_ref_ids": [
+          "prelaunch_insight_03"
+        ]
+      }
+    ],
+    "product_and_offer": {
+      "product_ref_ids": [
+        "product_abeille_royale_01"
+      ],
+      "campaign_mechanism": "新品上市种草与效果验证",
+      "offer_text": "以品牌最终确认的电商活动权益为准。",
+      "landing_destination": "https://example.com/campaign"
+    },
+    "communication": {
+      "single_minded_proposition": "以可验证的蜂皇修护体验，回应高端功效护肤人群对可信修护的期待。",
+      "message_hierarchy": [
+        {
+          "priority": 1,
+          "message": "从真实使用场景和肌肤状态切入修护需求。",
+          "evidence_ref_ids": [
+            "prelaunch_insight_03"
+          ]
+        },
+        {
+          "priority": 2,
+          "message": "使用已批准的产品功效表述解释核心价值。",
+          "evidence_ref_ids": [
+            "claim_evidence_07"
+          ]
+        }
+      ],
+      "cta_intent": "引导用户进一步了解产品并进入官方活动页。",
+      "approved_ctas": [
+        "了解更多新品信息",
+        "前往官方活动页"
+      ],
+      "tone_constraints": [
+        "高级但不疏离",
+        "可信",
+        "避免绝对化功效承诺"
+      ]
+    },
+    "guardrails": [
+      {
+        "guardrail_id": "guardrail_no_absolute_claim",
+        "kind": "prohibited",
+        "severity": "blocker",
+        "scope": "claim",
+        "text": "不得使用无法验证的绝对化功效承诺。",
+        "source_ref_ids": [
+          "brand_knowledge_12"
+        ]
+      },
+      {
+        "guardrail_id": "guardrail_product_pack",
+        "kind": "mandatory",
+        "severity": "blocker",
+        "scope": "visual",
+        "text": "成片或图组中必须出现已批准的产品包装正面。",
+        "source_ref_ids": [
+          "client_brief_04"
+        ]
+      }
+    ],
+    "claims": [
+      {
+        "claim_id": "claim_guerlain_repair_01",
+        "approved_text": "帮助改善肌肤干燥与粗糙感。",
+        "paraphrase_policy": "limited",
+        "evidence_ref_ids": [
+          "claim_evidence_07"
+        ],
+        "required_disclaimer": "实际使用体验因人而异。",
+        "validity": {
+          "markets": [
+            "CN"
+          ],
+          "channels": [
+            "xiaohongshu",
+            "douyin"
+          ],
+          "valid_from": "2026-07-01",
+          "valid_to": "2026-12-31"
+        }
+      }
+    ],
+    "assets": [
+      {
+        "asset_ref": {
+          "asset_id": "asset_product_packshot",
+          "version": 1
+        },
+        "role": "product_image",
+        "rights": {
+          "status": "verified",
+          "generative_ai_allowed": true,
+          "derivative_work_allowed": true,
+          "allowed_channels": [
+            "xiaohongshu",
+            "douyin"
+          ],
+          "territories": [
+            "CN"
+          ],
+          "valid_until": "2026-12-31T15:59:59Z"
+        }
+      }
+    ],
+    "creative_hypotheses": [
+      {
+        "hypothesis_id": "hypothesis_evidence_hook_01",
+        "statement": "证据先行的开场比场景先行更能提升有效咨询率。",
+        "variable": "opening_hook",
+        "variants": [
+          "evidence_first",
+          "scenario_first"
+        ],
+        "metric_ref_ids": [
+          "metric_valid_consultation_rate"
+        ]
+      }
+    ],
+    "open_questions": [],
+    "source_refs": [
+      {
+        "ref_id": "client_brief_04",
+        "ref_type": "client_brief",
+        "producer": "strategy",
+        "resource_uri": "/api/strategy/v1/projects/project_01/briefs/brief_01/versions/4",
+        "version": "4",
+        "content_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "observed_at": "2026-07-27T02:00:00Z"
+      },
+      {
+        "ref_id": "prelaunch_insight_03",
+        "ref_type": "prelaunch_insight",
+        "producer": "insights",
+        "resource_uri": "/api/insights/v1/projects/project_01/prelaunch-insights/insight_01/versions/3",
+        "version": "3",
+        "content_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "observed_at": "2026-07-26T10:00:00Z"
+      },
+      {
+        "ref_id": "claim_evidence_07",
+        "ref_type": "brand_knowledge",
+        "producer": "assets",
+        "resource_uri": "/api/assets/v1/projects/project_01/knowledge/claim_evidence_07/versions/1",
+        "version": "1",
+        "content_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "observed_at": "2026-07-20T04:00:00Z"
+      },
+      {
+        "ref_id": "brand_knowledge_12",
+        "ref_type": "brand_knowledge",
+        "producer": "assets",
+        "resource_uri": "/api/assets/v1/projects/project_01/knowledge/brand_knowledge_12/versions/2",
+        "version": "2",
+        "content_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "observed_at": "2026-07-20T04:00:00Z"
+      }
+    ]
+  },
+  "routes": [
+    {
+      "route_id": "route_xhs_image_text",
+      "deliverable_type": "image_text",
+      "purpose": "brand",
+      "channels": [
+        "xiaohongshu"
+      ],
+      "reason": "以真实体验和功效证据建立新品认知。",
+      "spec": {
+        "aspect_ratio": "3:4",
+        "resolution": "1080x1440",
+        "composition_required": false
+      },
+      "cta_policy": {
+        "required_for_generation": false,
+        "required_for_delivery": false,
+        "cta_intent": "了解更多新品信息"
+      },
+      "claim_refs": [
+        "claim_guerlain_repair_01"
+      ],
+      "asset_requirements": [
+        {
+          "role": "product_image",
+          "required_stage": "generation"
+        }
+      ],
+      "asset_refs": [
+        "asset_product_packshot_v1"
+      ],
+      "route_readiness": {
+        "status": "ready",
+        "blockers": [],
+        "warnings": []
+      }
+    },
+    {
+      "route_id": "route_douyin_commerce_preroll",
+      "deliverable_type": "video",
+      "purpose": "performance",
+      "performance_mode": "commerce_preroll",
+      "channels": [
+        "douyin"
+      ],
+      "reason": "使用首秒商品动作建立信息缺口并承接转化正片。",
+      "spec": {
+        "target_duration_seconds": 6,
+        "aspect_ratio": "9:16",
+        "resolution": "720p",
+        "hook_deadline_seconds": 1,
+        "composition_required": true
+      },
+      "cta_policy": {
+        "required_for_generation": false,
+        "required_for_delivery": true,
+        "cta_intent": "进入官方渠道了解产品"
+      },
+      "claim_refs": [
+        "claim_guerlain_repair_01"
+      ],
+      "asset_requirements": [
+        {
+          "role": "product_image",
+          "required_stage": "generation"
+        },
+        {
+          "role": "main_video",
+          "required_stage": "production"
+        }
+      ],
+      "asset_refs": [
+        "asset_product_packshot_v1"
+      ],
+      "route_readiness": {
+        "status": "ready",
+        "blockers": [],
+        "warnings": []
+      }
+    }
+  ],
+  "upstream_readiness": {
+    "status": "ready",
+    "blockers": [],
+    "warnings": [
+      {
+        "code": "offer_copy_requires_final_confirmation",
+        "stage": "production",
+        "path": "creative_view.product_and_offer.offer_text",
+        "message": "活动权益文案在交付前需要品牌最终确认。",
+        "source": "strategy",
+        "source_ref_ids": [
+          "client_brief_04"
+        ]
+      }
+    ]
+  },
+  "published_at": "2026-07-28T06:00:00Z"
+}

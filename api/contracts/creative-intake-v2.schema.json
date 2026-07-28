@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-intake-v2.schema.json",
+  "title": "creative-intake/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "id",
+    "organization_id",
+    "project_id",
+    "source",
+    "status",
+    "strategy_package_ref",
+    "selected_route_id",
+    "input_snapshot",
+    "readiness",
+    "blockers",
+    "warnings",
+    "assumptions",
+    "version",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "creative-intake/v2"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "const": "strategy_package"
+    },
+    "status": {
+      "enum": [
+        "needs_clarification",
+        "ready",
+        "superseded"
+      ]
+    },
+    "strategy_package_ref": {
+      "$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef"
+    },
+    "selected_route_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "input_snapshot": {
+      "$ref": "./strategy-creative-handoff-v1.schema.json"
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planning_ready",
+        "generation_ready",
+        "production_ready"
+      ],
+      "properties": {
+        "planning_ready": {
+          "type": "boolean"
+        },
+        "generation_ready": {
+          "type": "boolean"
+        },
+        "production_ready": {
+          "type": "boolean"
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/issue"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/issue"
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "confirmed_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ready"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "confirmed_by"
+        ],
+        "properties": {
+          "selected_route_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "readiness": {
+            "type": "object",
+            "properties": {
+              "planning_ready": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "needs_clarification"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "readiness": {
+            "type": "object",
+            "properties": {
+              "planning_ready": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "readiness": {
+            "type": "object",
+            "properties": {
+              "generation_ready": {
+                "const": true
+              }
+            },
+            "required": [
+              "generation_ready"
+            ]
+          }
+        },
+        "required": [
+          "readiness"
+        ]
+      },
+      "then": {
+        "properties": {
+          "readiness": {
+            "type": "object",
+            "properties": {
+              "planning_ready": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "readiness": {
+            "type": "object",
+            "properties": {
+              "production_ready": {
+                "const": true
+              }
+            },
+            "required": [
+              "production_ready"
+            ]
+          }
+        },
+        "required": [
+          "readiness"
+        ]
+      },
+      "then": {
+        "properties": {
+          "readiness": {
+            "type": "object",
+            "properties": {
+              "generation_ready": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
