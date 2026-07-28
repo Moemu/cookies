@@ -90,6 +90,16 @@ async function expectNoHorizontalOverflow(page: Page) {
   })).toBeTruthy()
 }
 
+async function expectInitialViewportElement(page: Page, locator: ReturnType<Page['locator']>, width: number) {
+  await expect(locator).toBeVisible()
+  const box = await locator.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+  expect(box!.y).toBeGreaterThanOrEqual(0)
+  expect(box!.y + box!.height).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight))
+}
+
 test('项目主路径仅使用本用例创建的 Project 和 Brief', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 独立主路径')
 
@@ -373,6 +383,26 @@ test('素材体验页只展示本用例当前 Project 的持久化 Artifact', as
   await expect(page.getByText('其他项目不可见资产')).toHaveCount(0)
 })
 
+test('内容分析页展示 data 目录导入的公开短视频洞察样本', async ({ page }) => {
+  const projectId = await openProject(page, 'E2E 公开洞察样本')
+
+  await page.goto(`/projects/${projectId}/insight/content`)
+  await expect(page.getByText('公开短视频洞察样本')).toBeVisible()
+  await expect(page.getByText('6 条样本 · 1 个文件')).toBeVisible()
+  await expect(page.getByText('部署后自动导入 data 目录作为示例展示。')).toBeVisible()
+
+  await page.getByLabel('公开短视频洞察行业').selectOption('美妆护肤')
+  await expect(page.getByRole('button', { name: /美妆新品用半脸对比展示上妆速度/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /insight-006/ })).toContainText('美妆护肤')
+  await expect(page.getByText('当前样本拆解')).toBeVisible()
+  await expect(page.getByText('早八通勤只想快但妆面不能糊')).toBeVisible()
+
+  await page.getByLabel('公开短视频洞察行业').selectOption('')
+  await page.getByLabel('搜索公开短视频洞察').fill('护眼学习灯')
+  await expect(page.getByRole('button', { name: /护眼学习灯用场景证明减少家长焦虑/ })).toBeVisible()
+  await expect(page.getByText('别只看亮不亮关键是孩子愿不愿意久坐')).toBeVisible()
+})
+
 test('前贴任务取消后刷新会恢复服务端取消态，且不暴露旧预览或素材箱入口', async ({ page }) => {
   const projectId = await openProject(page, 'E2E 前贴取消恢复')
   await page.goto(`/projects/${projectId}/creative/video?view=${encodeURIComponent('效果广告')}`)
@@ -400,6 +430,85 @@ test('前贴任务取消后刷新会恢复服务端取消态，且不暴露旧�
 })
 
 for (const width of [1280, 1440, 1680]) {
+  test(`桌面 ${width}px 核心页面主任务可见且无横向溢出`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 })
+    const projectId = await openProject(page, `E2E Task28 核心页面 ${width}`)
+
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '代理商客户组合工作台' })).toBeVisible()
+    await expectInitialViewportControl(page, page.getByRole('button', { name: /进入创意队列/ }), width)
+    await expectNoHorizontalOverflow(page)
+
+    const routes: Array<{
+      path: string
+      heading: string | RegExp
+      headingLevel?: number
+      primary: () => ReturnType<Page['locator']>
+      elementOnly?: boolean
+    }> = [
+      {
+        path: `/projects/${projectId}/home`,
+        heading: `E2E Task28 核心页面 ${width}`,
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: /进入需求与策略/ }),
+      },
+      {
+        path: `/projects/${projectId}/strategy/tasks`,
+        heading: '策略任务',
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: '新建策略任务' }),
+      },
+      {
+        path: `/projects/${projectId}/creative/tasks`,
+        heading: '创意任务',
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: '新建创意任务' }),
+      },
+      {
+        path: `/projects/${projectId}/insight/assets`,
+        heading: '当前 Project 素材',
+        headingLevel: 2,
+        primary: () => page.getByLabel('搜索素材经验'),
+      },
+      {
+        path: `/projects/${projectId}/insight/performance`,
+        heading: '投后结论',
+        headingLevel: 2,
+        primary: () => page.getByRole('button', { name: '重新拉取' }),
+      },
+      {
+        path: `/projects/${projectId}/delivery/approvals`,
+        heading: '审批中心',
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: '刷新审批队列' }),
+      },
+      {
+        path: `/projects/${projectId}/delivery/evidence`,
+        heading: '证据与审计',
+        headingLevel: 1,
+        primary: () => page.getByRole('heading', { name: '服务端审计轨迹' }),
+        elementOnly: true,
+      },
+      {
+        path: `/projects/${projectId}/manage`,
+        heading: `E2E Task28 核心页面 ${width}`,
+        headingLevel: 1,
+        primary: () => page.getByRole('button', { name: /进入项目工作台/ }),
+      },
+    ]
+
+    for (const route of routes) {
+      await page.goto(route.path)
+      await expect(page.getByRole('heading', { name: route.heading, level: route.headingLevel })).toBeVisible()
+      if (route.elementOnly) {
+        await expectInitialViewportElement(page, route.primary(), width)
+      } else {
+        await expectInitialViewportControl(page, route.primary(), width)
+      }
+      await expectNoHorizontalOverflow(page)
+    }
+  })
+
   test(`桌面 ${width}px 初始视口中前贴工作区和素材剪辑控件可操作且无横向溢出`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 })
     const projectId = await openProject(page, `E2E 初始桌面视口 ${width}`)

@@ -21,6 +21,11 @@ export default function App() {
   }, [route.projectId, selectProject])
 
   useEffect(() => {
+    if (!route.isLegacyProjectSystemRoute || isLoading || !currentProject.id) return
+    navigate(projectPath(currentProject.id, route.systemKey, route.navId, route.objectId, route.view), true)
+  }, [currentProject.id, isLoading, navigate, route])
+
+  useEffect(() => {
     if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
     rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view))
   }, [route])
@@ -43,6 +48,7 @@ export default function App() {
   const projectRouteState = isLoading || targetProjectId !== route.projectId ? 'loading' : 'error'
   const content = route.isModelSettings ? <ModelSettingsPage/>
     : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject} onManageProject={manageProject}/>
+    : route.isLegacyProjectSystemRoute ? <ProjectRouteBoundary targetProjectId="默认 Project" diagnostic={`旧式模块路由 ${route.systemKey} 将在 Project 加载后自动跳转。`} state={isLoading || currentProject.id ? 'loading' : 'error'} onRetry={() => { void reloadProjects() }}/>
     : routeNeedsProject && !routeProjectReady ? <ProjectRouteBoundary targetProjectId={route.projectId!} diagnostic={routeDiagnostic} state={projectRouteState} onRetry={() => { void reloadProjects(route.projectId) }}/>
     : route.isProjectHome ? <ProjectFlowDashboard onOpenProject={openProject} onManageProject={manageProject}/>
     : route.isProjectManagement ? <ProjectManagementPage onOpenWorkbench={id => openProject(id)} onOpenProject={openProject}/>

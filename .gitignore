@@ -38,8 +38,10 @@ web/.vite/
 # Local persistent object storage
 .data/
 
-# Local MVP backend persistence
-/data/
+# Local MVP backend persistence. Keep deployable public insight examples.
+/data/*
+!/data/insights/
+!/data/insights/**
 
 # Editor/IDE
 # .idea/

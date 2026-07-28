@@ -127,6 +127,37 @@
   - [x] SubTask 25.2: 重新运行 `npm run test:e2e` 并确认 12/12 通过，同时复跑 `npm run test:server`、`npm run check:server`、`npm run build`、`git diff --check` 及相关平台测试。
   - [x] SubTask 25.3: 推送最新提交并确认 PR 必需检查覆盖最新提交且全部通过。
 
+- [x] Task 26: 审计并标注核心演示数据归属。系统梳理仍在前端、服务端种子、测试或页面逻辑中的模拟/演示/公开样本数据，区分核心演示数据、公开洞察样本、纯视觉配置和真实 Project 数据。
+  - [x] SubTask 26.1: 盘点 `src/data/api.ts`、`server/demo.ts`、`src/components`、`src/context/ProjectContext.tsx`、`e2e` 中的 demo、mock、sample、seed、preset、模拟相关数据和文案。
+  - [x] SubTask 26.2: 定义唯一指定演示 Project 的识别方式、数据范围和允许展示的核心演示链路。
+  - [x] SubTask 26.3: 输出需迁移、需保留、需改为空态或需明确标识来源的数据清单，并同步到实现任务。
+  - 审计结论：唯一指定核心演示 Project 为 `server/demo.ts` 中 `DEMO_PROJECT_IDENTITY` 匹配的“投资人路演：精度证据增长 / 白域精工 / 向采购与研发负责人展示精度证据，获取高质量销售线索。”；`seedDemoProject()` 只应向该 Project 写入预置 Brief、创意、ChangeSet、审计事件和 `demoOperationalRecords()` 运营记录。
+  - 需迁移或隔离：`src/data/api.ts` 的 `agencyWorkbenchSample`、`api.listAgencyWorkbench()`、默认 `demo-org`、代理商账户/质检/人工确认/版本指针样本仍是前端 portfolio sample；它们不应被表达为当前 Project 的服务端真实结果，Task27 应迁移到服务端幂等种子或按 demo/agency Project 明确隔离。
+  - 需保留但标识来源：`data/insights/public_data_insight_source_export/*.csv` 及 `/api/public-insights/*` 属于公开洞察样本，`Pages.tsx` 内容分析页已标识为 data 目录示例展示；后续保留展示时仍需说明它用于跨项目参考，不是当前 Project 的业务结论。
+  - 需保留为纯视觉/教学配置：`src/components/SpecializedPages.tsx` 的 `preRollPresets`、`performanceModes`、`brandSteps`、页面 workflow 文案和 Remix-MMLU seed case 文案属于 UI 教学、流程或评测配置，不应迁移为 Project 业务记录。
+  - 已为空态/真实 Project 来源：`src/context/ProjectContext.tsx` 从 `/projects`、`/artifacts`、`/generation-jobs`、`/tasks`、`/change-sets`、`/operations` 组装当前 Project，API 失败时使用 `emptyProject` 和可恢复错误；`investor-mvp.spec.ts` 大多独立创建 E2E Project 验证隔离，`agency-workbench.spec.ts` 的 `mockAgencyProjectApi()` 仅为测试夹具。
+  - 已同步的标注修正：`server/demo.ts` 增加唯一 demo Project seed 注释；`src/data/api.ts` 增加 agency workbench sample 归属注释；`Pages.tsx` 将“Home 继续展示代理商组合 mock 数据”改为“Home 仅展示前端代理商组合样本，不能视为当前 Project 的服务端结果”。
+
+- [x] Task 27: 将核心演示数据收拢到指定演示 Project。让预置演示链路、演示运营记录、演示审计证据、演示资产和演示工作项只在指定 demo Project 下出现。
+  - [x] SubTask 27.1: 将仍由前端静态数组或默认回退提供的核心业务演示数据迁移到服务端幂等种子或按 demo Project 隔离的 API 响应。
+  - [x] SubTask 27.2: 修改 ProjectContext、页面查询和数据映射，确保非 demo Project 不继承 demo 工作项、运营记录、审计、资产结论、质量结果或投放模拟证据。
+  - [x] SubTask 27.3: 对公开洞察样本、素材模板和纯视觉配置保留展示时增加清晰来源、用途、适用范围和与当前 Project 的关系说明。
+  - [x] SubTask 27.4: 添加服务端和前端回归验证，覆盖 demo Project 完整可演示、非 demo Project 真实空态、新建 Project 不被演示数据污染、刷新后隔离仍然成立。
+
+- [x] Task 28: 落地核心页面体验及格线优化。基于用户体验审计结果，优先修复会影响理解、主路径推进和信任感的问题。
+  - [x] SubTask 28.1: 复核 Home、项目总览、策略、创意、素材、投后分析、投放审批、审计和项目管理页面的信息层级、主操作、数据来源、空态、错误态、加载态和下一步提示。
+  - [x] SubTask 28.2: 修复高价值体验问题：消除“mock 数据”误导提示、补齐服务不可用/无数据/无权限/未连接状态、让主 CTA 和下一步路径在桌面首屏内清晰可见。
+  - [x] SubTask 28.3: 强化可访问性与状态表达，确保关键按钮有可访问名称，状态不只依赖颜色，键盘焦点可见，减少动效设置生效。
+  - [x] SubTask 28.4: 在 1280px、1440px、1680px 桌面视口下验证关键页面无横向溢出、关键控件不被遮挡、首屏主任务可理解。
+
+- [x] Task 29: 完成数据收拢与体验优化的全量验证和交付。执行本地门禁、端到端回归、空白检查和必要的远程 PR 检查，确保整体体验达到可演示及格线。
+  - [x] SubTask 29.1: 增加或更新服务端测试、前端测试和真实 API E2E，覆盖演示数据隔离、非 demo Project 空态、体验关键路径和刷新恢复。
+  - [x] SubTask 29.2: 执行 `npm run test:server`、`npm run check:server`、`npm run build`、相关 E2E、必要 Go 测试和 `git diff --check`。
+  - [x] SubTask 29.3: 检查变更不包含密钥、Token、私有证书、真实客户数据或敏感连接串；仅提交当前任务相关文件。
+  - [x] SubTask 29.4: 如发生提交或推送，使用可用的 GitHub CLI 检查 PR 必需检查覆盖最新提交并全部通过；若失败，读取日志并修复根因。
+
+- [x] Task 30: 提交并验证当前工作区未交付变更: 当前工作区仍包含演示数据收拢、核心页面体验、服务端种子/仓储、E2E 和规格文档相关未提交变更，以及未跟踪的 `test/agency-workbench-filter.test.ts`；远程 PR 检查仅覆盖 `HEAD`，不能证明这些本地变更已提交、推送并由 CI 验证。
+
 # Task Dependencies
 - Task 2 依赖 Task 1 的服务端配置与统一错误基础。
 - Task 3 依赖 Task 1 与 Task 2 的 API 契约；其前端 API Client 可与 Task 2 并行准备。
@@ -143,3 +174,7 @@
 - Task 18 依赖 Task 17 的前贴桌面视口 E2E 基础；其独立验收进一步要求前贴工作区与素材剪辑页在不预滚动的初始视口中完成可见性、可操作性、视口边界和无横向溢出断言。
 - Task 19 可独立于既有前贴 UI 开始；Task 20 依赖 Task 19 的领域类型与纯规划器；Task 21 依赖 Task 20 的规划和受控生成 API；Task 22 依赖 Task 19 至 Task 21。
 - Task 25 依赖 Task 18 的初始视口验收边界和本轮复核失败证据。
+- Task 27 依赖 Task 26 的演示数据归属清单。
+- Task 28 可在 Task 26 完成后与 Task 27 并行推进，但涉及数据来源文案的修复需与 Task 27 保持一致。
+- Task 29 依赖 Task 27 和 Task 28。
+- Task 30 依赖 Task 29 的本地验证结果和当前工作区范围核对。

@@ -137,3 +137,54 @@
   - 本地通过：`npx playwright test investor-mvp.spec.ts --grep "初始视口"` 3/3 通过；`npm run test:e2e` 12/12 通过；`npm run test:server` 33/33 通过；`npm run check:server` 通过；`npm run build` 通过；`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 通过；`npm run build --prefix web` 通过但提示本机 Node 20.17.0 低于 Vite 建议版本；`npm run lint --prefix web` 通过；`git diff --check` 通过。
   - 远程通过：PR 最新提交覆盖必需检查，均为 SUCCESS。
 - **提交状态**: 已提交并推送 Task 25 修复。
+
+## Round 10
+
+- 完成 Task28 核心页面体验及格线优化：审计 Home、项目总览、策略、创意、素材、投后分析、投放审批、审计和项目管理页面，补齐页面状态上下文、可恢复空/错/权限态文案和下一步动作。
+- 修复高价值体验问题：去除会误导用户的 mock/样本文案，Home 服务异常改为明确服务不可用与恢复路径；项目总览压缩八阶段地图、支持链和阶段详情高度，让主 CTA 在 1280px、1440px、1680px 的 960px 初始桌面视口内可见可点。
+- 强化可访问性与状态表达：`StateBoundary` 支持上下文 `aria-label`、可配置空错权限态、明确按钮文案；新增核心页面视口 E2E，按标题层级和首屏控件位置验证关键页面。
+- 验证通过：`npx playwright test e2e/investor-mvp.spec.ts -g "核心页面主任务"` 3/3 通过；`npx playwright test e2e/investor-mvp.spec.ts -g "初始视口中前贴"` 3/3 通过；`npm run build` 通过；`git diff --check` 通过。构建仍有既有 Vite chunk 大于 500 kB 警告。
+- 变更文件：`.trae/specs/build-investor-mvp/tasks.md`、`.trae/specs/build-investor-mvp/checklist.md`、`.trae/specs/build-investor-mvp/progress.md`、`src/components/StateBoundary.tsx`、`src/components/Pages.tsx`、`src/components/CoreFlowPages.tsx`、`src/components/SpecializedPages.tsx`、`src/styles.css`、`e2e/investor-mvp.spec.ts`。
+
+## Round 11
+
+- **结论**: PASS
+- **复核范围**: Task29 全量收尾、本地门禁、真实 API E2E、必要 Go 平台测试、空白检查、敏感信息扫描和工作区范围核对。
+- **验证结果**:
+  - `git diff --check` 通过，未发现空白错误。
+  - `npm run test:server` 35/35 通过，覆盖服务端持久化、演示数据隔离、媒体任务、ChangeSet、前贴、反馈和平台 API 流程。
+  - `npm run check:server` 通过。
+  - `npm run build` 通过；Vite 仍提示单个 chunk 大于 500 kB 的既有体积警告，命令退出码为 0。
+  - `npm run test:e2e` 22/22 通过，覆盖真实 API 端到端回归。
+  - `CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 通过。
+- **安全与范围**: 敏感信息关键字扫描仅命中 `ARK_API_KEY` 配置变量名、安全边界文案、测试占位凭据和 token 计数字段，未发现真实密钥、Token、私有证书、真实客户数据或敏感连接串；未执行 `git add`、提交或推送。
+- **文档更新**: 勾选 Task29 及 SubTask 29.1 至 29.4，勾选 checklist 50 至 52；E2E 生成的临时 `test-results/` 已删除。
+- **剩余风险**: 当前工作区仍有未提交变更和未跟踪的 `test/agency-workbench-filter.test.ts`，按本轮用户要求未提交推送，因此远程 PR 检查未覆盖这些本地变更；若后续需要交付到远端，仍需按仓库规则只暂存任务相关文件、提交推送并等待必需 GitHub Actions 全部通过。
+
+## Round 2
+
+- **Verdict**: FAIL
+- **Scope reviewed**: 演示数据归属收拢、非 demo Project 隔离、核心页面体验优化、服务端持久化与种子、真实 API E2E、前端/Go 构建测试门禁、PR 检查覆盖和当前工作区交付状态
+- **Verification results**:
+  - Build/Runtime: 通过；`git diff --check`、`npm run check:server`、`npm run build`、`npm run build --prefix web`、`npm run lint --prefix web`、`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 均通过；PR #14 的 `Repository quality`、`Platform CI / verify`、`Platform CI / migrations` 覆盖当前 `HEAD=089064ede91f16bbf2d777c660836eb66ea3078f` 且均为 SUCCESS
+  - Tests/Coverage: 通过；`npm run test:server` 35/35 通过，`npm run test:e2e` 22/22 通过；对抗探针 `npx tsx --test --test-name-pattern "核心演示种子会清理误归属到非 demo Project 的旧数据" server/operations.test.ts` 命中用例 1/1 通过
+  - Checklist audit: 52/53 passed, 1 failed
+- **Risks and issues**: 高风险：当前工作区仍有 15 个任务相关已修改文件和未跟踪的 `test/agency-workbench-filter.test.ts`，这些本地变更未提交、未推送且未被远程 PR 检查覆盖；低风险：根构建仍有既有 Vite chunk 大于 500 kB 警告，`web` 构建在本机 Node 20.17.0 下提示低于 Vite 建议版本但退出码为 0
+
+## Round 3
+
+- **结论**: PASS
+- **完成范围**: 完成 Task30，提交并推送演示数据收拢、核心页面体验优化、服务端种子/仓储、真实 API E2E、规格文档以及 `test/agency-workbench-filter.test.ts`；未纳入临时 `test-results/` 产物。
+- **本地验证**: `git diff --check`、`git diff --cached --check`、`npm run test:server` 35/35、`npm run check:server`、`npx tsx --test test/agency-workbench-filter.test.ts` 1/1、`npm run build`、`npm run test:e2e` 22/22、`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 均通过；`npm run build` 仍仅提示既有 Vite chunk 大于 500 kB 警告。
+- **交付状态**: 暂存与提交范围仅包含本轮相关源码、测试和规格文档；推送后确认 PR 必需 GitHub Actions checks 覆盖最新提交且全部通过。
+- **清单状态**: Task30 与 checklist 最后一项已勾选，演示数据收拢与体验优化范围的未交付变更已被远端 CI 覆盖。
+
+## Round 4
+
+- **结论**: PASS
+- **复核范围**: 演示数据收拢到指定 demo Project、非 demo Project 隔离、核心页面体验及格线、服务端持久化与种子、真实 API E2E、前端/Go 构建测试门禁、PR #14 最新提交检查覆盖
+- **验证结果**:
+  - 构建/运行: 通过；`git diff --check`、`npm run check:server`、`npm run build`、`npm run build --prefix web`、`npm run lint --prefix web`、`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 均退出 0；PR #14 的 `Repository quality`、`Platform CI / verify`、`Platform CI / migrations` 覆盖当前 `HEAD=5e73d095f04d07fc7d0942dc3bcf8bd3d9e474d2` 且均为 pass/SUCCESS
+  - 测试/覆盖: 通过；`npm run test:server` 35/35、`npm run test:e2e` 22/22、`npx tsx --test test/agency-workbench-filter.test.ts` 1/1 通过；对抗探针 `npx tsx --test --test-name-pattern "核心演示种子会清理误归属到非 demo Project 的旧数据" server/operations.test.ts` 命中用例 1/1 通过
+  - 清单审计: 51/51 passed, 0 failed
+- **风险和问题**: 无范围内缺陷；低风险：根构建仍有既有 Vite chunk 大于 500 kB 警告，`web` 构建在本机 Node 20.17.0 下提示低于 Vite 建议版本但退出码为 0

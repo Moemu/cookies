@@ -44,6 +44,7 @@ func (s Service) CreateProposal(ctx context.Context, actor contract.ActorContext
 	now := s.now()
 	return s.Store.CreateProposal(ctx, Proposal{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: project.ProjectID, Input: input, InputHash: hash,
+		SourceType: input.Source.Type, SourceObjectURI: input.Source.ObjectURI,
 		TemplateVersion: prompts.TemplateVersion, Status: ProposalDraft, CreatedAt: now, UpdatedAt: now,
 	})
 }

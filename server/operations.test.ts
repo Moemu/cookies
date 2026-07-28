@@ -129,3 +129,81 @@ test("项目运营数据 API 按项目隔离，并拒绝不存在的项目", asy
     await temporary.dispose();
   }
 });
+
+test("核心演示种子会清理误归属到非 demo Project 的旧数据", async () => {
+  const temporary = await temporaryRepository();
+  try {
+    const userProjectId = "user-project";
+    await writeFile(temporary.filePath, JSON.stringify({
+      projects: [{
+        id: userProjectId,
+        name: "用户项目",
+        brand: "Cookies",
+        objective: "验证 demo 数据不会污染用户项目",
+        version: 1,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      }],
+      operationalRecords: [{
+        id: "WORK-2607-01",
+        projectId: userProjectId,
+        kind: "work_item",
+        title: "误归属工作项",
+        status: "待评审",
+        occurredAt: "2026-07-22T08:30:00.000Z",
+        fields: { owner: "Amelia Meng" },
+        createdAt: "2026-07-22T08:30:00.000Z",
+        updatedAt: "2026-07-22T08:30:00.000Z",
+      }],
+      artifacts: [{
+        id: "leaked-demo-brief",
+        projectId: userProjectId,
+        kind: "brief",
+        status: "ready",
+        content: "已确认 Brief：以 ±0.01mm 精度、98%+ 准时交付和真实制造场景为核心证据，面向采购与研发负责人获取销售线索。",
+        version: 1,
+        createdAt: "2026-07-22T08:30:00.000Z",
+        updatedAt: "2026-07-22T08:30:00.000Z",
+      }],
+      changeSets: [{
+        id: "leaked-demo-change-set",
+        projectId: userProjectId,
+        name: "精度证据创意与探索预算模拟",
+        status: "preflight_passed",
+        artifactIds: ["leaked-demo-brief"],
+        budgetLimit: 8600,
+        preflight: {
+          passed: true,
+          checkedAt: "2026-07-22T08:30:00.000Z",
+          checks: [],
+        },
+        version: 1,
+        createdAt: "2026-07-22T08:30:00.000Z",
+        updatedAt: "2026-07-22T08:30:00.000Z",
+      }],
+      auditEvents: [{
+        id: "leaked-demo-audit",
+        projectId: userProjectId,
+        action: "demo.seed_verified",
+        entityType: "project",
+        entityId: userProjectId,
+        actor: "demo-seeder",
+        metadata: { source: "startup" },
+        occurredAt: "2026-07-22T08:30:00.000Z",
+      }],
+    }), "utf8");
+    const repository = await FileRepository.open(temporary.filePath);
+
+    const demo = await seedDemoProject(repository);
+
+    assert.notEqual(demo.id, userProjectId);
+    assert.equal((await repository.listOperationalRecords(userProjectId)).some((record) => record.id === "WORK-2607-01"), false);
+    assert.equal((await repository.listArtifacts(userProjectId)).some((artifact) => artifact.id === "leaked-demo-brief"), false);
+    assert.equal((await repository.listChangeSets(userProjectId)).some((changeSet) => changeSet.name === "精度证据创意与探索预算模拟"), false);
+    assert.equal((await repository.listAuditEvents(userProjectId)).some((event) => event.action === "demo.seed_verified"), false);
+    assert.equal((await repository.listOperationalRecords(demo.id)).some((record) => record.id === "WORK-2607-01"), true);
+    assert.equal((await repository.listArtifacts(demo.id)).some((artifact) => artifact.content.includes("±0.01mm 精度")), true);
+  } finally {
+    await temporary.dispose();
+  }
+});

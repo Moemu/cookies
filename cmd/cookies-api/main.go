@@ -65,6 +65,16 @@ func main() {
 	}
 	scanner := buildScanner(cfg)
 	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
+	if actor != nil {
+		projectContext, contextErr := projectService.GetContext(context.Background(), *actor, contract.ProjectID(cfg.LocalIdentity.ProjectID))
+		if contextErr != nil {
+			log.Fatalf("load project context for VolcAd proposal seed: %v", contextErr)
+		}
+		_, _, seedErr := strategy.SeedPolarisFreshProposal(context.Background(), strategy.Service{Store: strategy.MySQLStore{DB: db}}, *actor, projectContext)
+		if seedErr != nil {
+			log.Fatalf("seed VolcAd proposal package: %v", seedErr)
+		}
+	}
 	assetRepository := assets.MySQLRepository{DB: db}
 	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}

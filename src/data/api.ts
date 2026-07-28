@@ -19,6 +19,91 @@ export type ApiProject = {
   updatedAt: string
 }
 
+export type ApiPublicInsightIndustryStat = {
+  name: string
+  count: number
+  views: number
+}
+
+export type ApiPublicInsightOverview = {
+  total_videos: number
+  total_views: number
+  average_like_rate: number
+  average_finish_rate: number
+  ai_ratio: number
+  industries: ApiPublicInsightIndustryStat[]
+  files: Array<{ filename: string; row_count: number; modified_at: string }>
+  loaded_at: string
+  data_dir: string
+}
+
+export type ApiPublicInsightFilterOption = {
+  value: string
+  count: number
+}
+
+export type ApiPublicInsightFilters = {
+  industries: ApiPublicInsightFilterOption[]
+  visual_styles: ApiPublicInsightFilterOption[]
+  ai_types: string[]
+  date_range: { min: string; max: string }
+}
+
+export type ApiPublicInsightVideoListItem = {
+  item_id: string
+  url: string
+  frame_first: string
+  item_title: string
+  item_create_day: string
+  author_cert_type: string
+  vv_all: number
+  like_cnt_all: number
+  comment_cnt_all: number
+  share_cnt_all: number
+  favourite_cnt_all: number
+  finish_vv_all: number
+  ctr: string
+  bounce_rate_map: string
+  has_ai_generated: string
+  industry: string
+  date: string
+  finish_rate: number
+  like_rate: number
+  playback_url: string
+}
+
+export type ApiPublicInsightVideoDetail = ApiPublicInsightVideoListItem & {
+  storyboard_structure: string
+  ai_creative_type: string
+  item_asr: string
+  item_ocr: string
+  first3s_visual_creative_type: string
+  main_visual_elements: string
+  shooting_scene: string
+  characters_relation: string
+  mentioned_brand: string
+  oral_product_desc: string
+  bgm_style: string
+  bgm_bpm: string
+  bgm_emotion: string
+  voice_type: string
+  speech_speed: string
+  oral_script: string
+  storyboard_prompt: string
+  visual_style: string
+  creative_highlight: string
+  source_file: string
+  storyboard: unknown[]
+}
+
+export type ApiPublicInsightVideoPage = {
+  items: ApiPublicInsightVideoListItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 export type ApiAgencyHealthStatus = 'healthy' | 'watch' | 'blocked'
 export type ApiAdPlatform = '巨量引擎' | '腾讯广告' | '快手磁力'
 export type ApiBindingHealthStatus = 'normal' | 'warning' | 'expired'
@@ -765,6 +850,8 @@ const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string 
 const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/api`
 const platformBase = `${viteEnv?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/platform/v1`
 
+// Task26 audit: agency workbench data is a front-end portfolio sample, not a
+// persisted Project result. Task27 should move or gate it before production use.
 export const agencyWorkbenchSample: ApiAgencyWorkbench = {
   organizations: [{
     id: 'org-demo-agency',
@@ -1221,6 +1308,68 @@ export const agencyWorkbenchSample: ApiAgencyWorkbench = {
   ],
 }
 
+type AgencyWorkbenchOptions = {
+  projectIds?: string[]
+  includePortfolioSample?: boolean
+}
+
+const emptyAgencyWorkbench: ApiAgencyWorkbench = {
+  organizations: [],
+  clients: [],
+  brands: [],
+  projects: [],
+  adAccountBindings: [],
+  qualityCheckRuns: [],
+  materialConfirmations: [],
+  assetVersionPointers: [],
+}
+
+function filterAgencyWorkbenchByProjects(projectIds: string[]): ApiAgencyWorkbench {
+  const allowedProjects = new Set(projectIds)
+  if (allowedProjects.size === 0) return emptyAgencyWorkbench
+  const projects = agencyWorkbenchSample.projects.filter(project => allowedProjects.has(project.id))
+  const bindings = agencyWorkbenchSample.adAccountBindings
+    .map(binding => ({
+      ...binding,
+      projectIds: binding.projectIds.filter(projectId => allowedProjects.has(projectId)),
+    }))
+    .filter(binding => binding.projectIds.length > 0)
+  const qualityCheckRuns = agencyWorkbenchSample.qualityCheckRuns.filter(run => allowedProjects.has(run.projectId))
+  const materialConfirmations = agencyWorkbenchSample.materialConfirmations.filter(item => allowedProjects.has(item.projectId))
+  const assetVersionPointers = agencyWorkbenchSample.assetVersionPointers.filter(pointer => allowedProjects.has(pointer.projectId))
+  const brandIds = new Set([
+    ...projects.map(project => project.brandId),
+    ...bindings.map(binding => binding.brandId),
+    ...assetVersionPointers.map(pointer => pointer.projectId)
+      .map(projectId => projects.find(project => project.id === projectId)?.brandId)
+      .filter((brandId): brandId is string => Boolean(brandId)),
+  ])
+  const brands = agencyWorkbenchSample.brands.filter(brand => brandIds.has(brand.id))
+  const clientIds = new Set([
+    ...projects.map(project => project.clientId),
+    ...brands.map(brand => brand.clientId),
+    ...bindings.map(binding => binding.clientId),
+  ])
+  const clients = agencyWorkbenchSample.clients.filter(client => clientIds.has(client.id))
+  const organizationIds = new Set([
+    ...projects.map(project => project.organizationId),
+    ...clients.map(client => client.organizationId),
+    ...brands.map(brand => brand.organizationId),
+    ...bindings.map(binding => binding.organizationId),
+  ])
+  const organizations = agencyWorkbenchSample.organizations.filter(organization => organizationIds.has(organization.id))
+  return {
+    organizations,
+    clients,
+    brands,
+    projects,
+    adAccountBindings: bindings,
+    qualityCheckRuns,
+    materialConfirmations,
+    assetVersionPointers,
+  }
+}
+
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
@@ -1488,8 +1637,37 @@ export function buildRemixPrerollInput(
 }
 
 export const api = {
-  listAgencyWorkbench: async () => agencyWorkbenchSample,
+  listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
+    if (options.includePortfolioSample) return agencyWorkbenchSample
+    return filterAgencyWorkbenchByProjects(options.projectIds ?? [])
+  },
   getCapabilities: () => request<ApiProviderCapabilities>('/provider/capabilities'),
+  getPublicInsightOverview: () => request<ApiPublicInsightOverview>('/public-insights/overview'),
+  getPublicInsightFilters: () => request<ApiPublicInsightFilters>('/public-insights/filters'),
+  listPublicInsightVideos: (input: {
+    page?: number
+    pageSize?: number
+    keyword?: string
+    industry?: string
+    aiGenerated?: string
+    visualStyle?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  } = {}) => {
+    const search = new URLSearchParams({
+      page: String(input.page ?? 1),
+      page_size: String(input.pageSize ?? 20),
+      keyword: input.keyword ?? '',
+      industry: input.industry ?? '',
+      ai_generated: input.aiGenerated ?? '全部',
+      visual_style: input.visualStyle ?? '',
+      sort_by: input.sortBy ?? 'vv_all',
+      sort_order: input.sortOrder ?? 'desc',
+    })
+    return request<ApiPublicInsightVideoPage>(`/public-insights/videos?${search.toString()}`)
+  },
+  getPublicInsightVideo: (itemId: string) =>
+    request<ApiPublicInsightVideoDetail>(`/public-insights/videos/${encodeURIComponent(itemId)}`),
   listProjects: () => request<ApiProject[]>('/projects'),
   createProject: (input: Pick<ApiProject, 'name' | 'brand' | 'objective'>) =>
     request<ApiProject>('/projects', 'POST', input),

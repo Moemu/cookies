@@ -18,6 +18,7 @@ import { createArkProvider, loadArkConfig, publicCapabilities } from "./ark-prov
 import { seedDemoProject } from "./demo.js";
 import { DomainError, errorStatus, isDomainError } from "./errors.js";
 import { createGenerationService, type GenerationService } from "./generation-service.js";
+import { getPublicInsightVideo, publicInsightFilters, publicInsightOverview, queryPublicInsightVideos } from "./public-insights.js";
 import { FileRepository, type ResourceScope } from "./repository.js";
 import type { ShortDramaStoryContext } from "./short-drama-planner.js";
 
@@ -84,6 +85,10 @@ async function route(
     await shortDramaPrerollPlansRoute(method, request, response, generationService);
     return;
   }
+  if (resource === "public-insights") {
+    await publicInsightsRoute(method, segments.slice(2), url, response);
+    return;
+  }
   if (resource === "projects") {
     await projectsRoute(method, id, action, request, response, repository);
     return;
@@ -145,6 +150,48 @@ async function route(
   }
   if (resource === "audit-events") {
     await auditEventsRoute(method, id, response, repository, url.searchParams.get("projectId"));
+    return;
+  }
+  throw new DomainError("ROUTE_NOT_FOUND", "Route was not found");
+}
+
+async function publicInsightsRoute(
+  method: string,
+  segments: string[],
+  url: URL,
+  response: ServerResponse,
+): Promise<void> {
+  if (method !== "GET" && method !== "POST") throw new DomainError("ROUTE_NOT_FOUND", "Route was not found");
+  const [area, id] = segments;
+  if (method === "GET" && area === "overview") {
+    sendJson(response, 200, await publicInsightOverview());
+    return;
+  }
+  if (method === "GET" && area === "filters") {
+    sendJson(response, 200, await publicInsightFilters());
+    return;
+  }
+  if (method === "GET" && area === "videos" && id) {
+    sendJson(response, 200, await getPublicInsightVideo(decodeURIComponent(id)));
+    return;
+  }
+  if (method === "GET" && area === "videos") {
+    sendJson(response, 200, await queryPublicInsightVideos({
+      page: Number(url.searchParams.get("page") ?? 1),
+      pageSize: Number(url.searchParams.get("page_size") ?? 20),
+      keyword: url.searchParams.get("keyword") ?? "",
+      industry: url.searchParams.get("industry") ?? "",
+      aiGenerated: url.searchParams.get("ai_generated") ?? "全部",
+      visualStyle: url.searchParams.get("visual_style") ?? "",
+      dateFrom: url.searchParams.get("date_from") ?? "",
+      dateTo: url.searchParams.get("date_to") ?? "",
+      sortBy: url.searchParams.get("sort_by") ?? "vv_all",
+      sortOrder: url.searchParams.get("sort_order") ?? "desc",
+    }));
+    return;
+  }
+  if (method === "POST" && area === "reload") {
+    sendJson(response, 200, await publicInsightOverview());
     return;
   }
   throw new DomainError("ROUTE_NOT_FOUND", "Route was not found");
