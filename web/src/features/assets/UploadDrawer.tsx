@@ -5,7 +5,8 @@ import { AssetIcon } from './AssetIcon'
 import type { UploadSession } from './types'
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
-const acceptedTypes = new Set(['image/png', 'image/jpeg'])
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024
+const acceptedTypes = new Set(['image/png', 'image/jpeg', 'video/mp4'])
 
 type UploadStage = 'idle' | 'hashing' | 'creating' | 'uploading' | 'processing' | 'done' | 'error'
 
@@ -29,11 +30,13 @@ function errorMessage(error: unknown) {
 }
 
 export function UploadDrawer({
+  acceptVideoOnly = false,
   open,
   projectId,
   onClose,
   onComplete,
 }: {
+  acceptVideoOnly?: boolean
   open: boolean
   projectId: string
   onClose: () => void
@@ -74,12 +77,13 @@ export function UploadDrawer({
 
   function selectFile(nextFile?: File) {
     if (!nextFile) return
-    if (!acceptedTypes.has(nextFile.type)) {
-      setError('仅支持 PNG 或 JPEG 图片。')
+    if (!acceptedTypes.has(nextFile.type) || (acceptVideoOnly && nextFile.type !== 'video/mp4')) {
+      setError(acceptVideoOnly ? '仅支持 MP4 视频。' : '仅支持 PNG、JPEG 图片或 MP4 视频。')
       return
     }
-    if (nextFile.size < 1 || nextFile.size > MAX_IMAGE_BYTES) {
-      setError('图片大小必须在 20 MB 以内。')
+    const maxBytes = nextFile.type === 'video/mp4' ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES
+    if (nextFile.size < 1 || nextFile.size > maxBytes) {
+      setError(nextFile.type === 'video/mp4' ? 'MP4 视频必须在 200 MB 以内。' : '图片大小必须在 20 MB 以内。')
       return
     }
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
@@ -139,7 +143,7 @@ export function UploadDrawer({
         <header className="drawer-header">
           <div>
             <h2>上传素材</h2>
-            <p>图片将先进入隔离区，校验完成后再写入项目素材库。</p>
+            <p>{acceptVideoOnly ? 'MP4 主视频会先校验格式与媒体信息，再写入当前项目素材库。' : '素材将先进入隔离区，校验完成后再写入项目素材库。'}</p>
           </div>
           <button className="icon-button" aria-label="关闭" onClick={close} type="button"><AssetIcon name="close" /></button>
         </header>
@@ -164,13 +168,13 @@ export function UploadDrawer({
           }}
         >
           <AssetIcon name="upload" size={30} />
-          <strong>拖拽图片到此处</strong>
+          <strong>{acceptVideoOnly ? '拖拽 MP4 主视频到此处' : '拖拽图片或 MP4 视频到此处'}</strong>
           <span>或 <button disabled={busy} onClick={() => inputRef.current?.click()} type="button">点击选择文件</button></span>
-          <small>支持 PNG / JPEG，最大 20 MB</small>
+          <small>{acceptVideoOnly ? '支持 MP4，最大 200 MB' : 'PNG / JPEG 最大 20 MB，MP4 最大 200 MB'}</small>
           <input
             ref={inputRef}
-            aria-label="选择图片文件"
-            accept="image/png,image/jpeg"
+            aria-label={acceptVideoOnly ? '选择 MP4 视频文件' : '选择素材文件'}
+            accept={acceptVideoOnly ? 'video/mp4' : 'image/png,image/jpeg,video/mp4'}
             disabled={busy}
             hidden
             onChange={(event) => selectFile(event.target.files?.[0])}
@@ -181,7 +185,7 @@ export function UploadDrawer({
         {file ? <section className="selected-file" aria-label="已选择文件">
           <div className="selected-file__summary">
             <div className="selected-file__preview">
-              {previewUrl ? <img alt="待上传素材预览" src={previewUrl} /> : <AssetIcon name="image" />}
+              {previewUrl && file.type.startsWith('image/') ? <img alt="待上传素材预览" src={previewUrl} /> : <AssetIcon name="image" />}
             </div>
             <div><strong>{file.name}</strong><span>{formatBytes(file.size)} · {file.type}</span></div>
             <button className="text-button" disabled={busy} onClick={clearFile} type="button">移除</button>

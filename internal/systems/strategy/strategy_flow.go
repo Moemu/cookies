@@ -10,12 +10,30 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
+
+type SkillExecutionTrace struct {
+	GenerationMode        string
+	ProviderCode          string
+	ModelAlias            string
+	ModelVersion          string
+	RouteRevisionID       string
+	ResponseMode          provider.TextResponseMode
+	PromptVersion         string
+	SkillVersions         map[string]string
+	SkillSnapshotHashes   map[string]string
+	GenerationContextHash string
+	Usage                 *provider.TokenUsage
+	LatencyMS             int64
+	ValidationAttempts    int
+	QualityReport         *QualityReport
+}
 
 type CreateStrategyResult struct {
 	Draft     Draft      `json:"strategy_draft"`
@@ -40,7 +58,8 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return CreateStrategyResult{}, false, err
 	}
-	if _, err := s.GetBriefVersion(ctx, actor, briefID, briefVersion); err != nil {
+	brief, err := s.GetBriefVersion(ctx, actor, briefID, briefVersion)
+	if err != nil {
 		return CreateStrategyResult{}, false, err
 	}
 	if err := s.ensureConcurrencyLimit(ctx, actor.OrganizationID, task.ProjectID, 4); err != nil {
@@ -57,6 +76,9 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	if found || err != nil {
 		return prior, found, err
 	}
+	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
 	strategyID, err := s.newID("strategy")
 	if err != nil {
 		return CreateStrategyResult{}, false, err
@@ -66,7 +88,10 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 		return CreateStrategyResult{}, false, err
 	}
 	now := s.now()
-	skills := map[string]string{"strategy.strategy.generate": "v1.0.0", "channel.xiaohongshu": "v1.0.0"}
+	skills, err := selectedSkillVersions(brief)
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
 	draft := Draft{
 		ID: strategyID, OrganizationID: actor.OrganizationID, ProjectID: task.ProjectID,
 		TaskID: taskID, BriefID: briefID, BriefVersion: briefVersion,
@@ -230,6 +255,14 @@ func (s Service) PatchStrategy(ctx context.Context, actor contract.ActorContext,
 	if err := setStrategySection(&document, patch.Section, patch.Value); err != nil {
 		return Draft{}, false, err
 	}
+	brief, err := scanBriefVersion(tx.QueryRowContext(ctx, briefVersionSelect+` WHERE organization_id = ?
+		AND project_id = ? AND brief_id = ? AND version = ?`, actor.OrganizationID,
+		draft.ProjectID, locked.BriefID, locked.BriefVersion))
+	if err != nil {
+		return Draft{}, false, err
+	}
+	compliance := evaluateCompliance(document, brief, s.now())
+	document.Compliance = &compliance
 	if err := document.Validate(); err != nil {
 		return Draft{}, false, err
 	}
@@ -240,6 +273,9 @@ func (s Service) PatchStrategy(ctx context.Context, actor contract.ActorContext,
 		return Draft{}, false, err
 	}
 	if err := insertDraftRevision(ctx, tx, actor.OrganizationID, draft.ProjectID, next); err != nil {
+		return Draft{}, false, err
+	}
+	if err := s.insertComplianceReport(ctx, tx, actor.OrganizationID, draft.ProjectID, strategyID, next, compliance); err != nil {
 		return Draft{}, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE strategy_reviews SET status = 'invalidated',
@@ -308,6 +344,9 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 	if found || err != nil {
 		return prior, found, err
 	}
+	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+		return agent.Task{}, false, err
+	}
 	id, err := s.newID("agenttask")
 	if err != nil {
 		return agent.Task{}, false, err
@@ -331,11 +370,19 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 	if err := writer.CreateIn(ctx, tx, agent.CreateRequest{Task: task}); err != nil {
 		return agent.Task{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'generating',
+	result, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'generating',
 		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ?
 		AND id = ? AND version = ?`, now, actor.OrganizationID, draft.ProjectID,
-		strategyID, draft.Version); err != nil {
+		strategyID, draft.Version)
+	if err != nil {
 		return agent.Task{}, false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return agent.Task{}, false, err
+	}
+	if changed != 1 {
+		return agent.Task{}, false, ErrVersionConflict
 	}
 	if err := insertReceipt(ctx, tx, actor, draft.ProjectID, "strategy.revise", key, hash, 202, task, now); err != nil {
 		if isDuplicate(err) {
@@ -432,33 +479,52 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if err != nil {
 		return nil, err
 	}
-	patch, providerCode, modelVersion, usage, err := s.generateBriefPatch(ctx, agentTask, draft, message)
+	decision, trace, err := s.generateConversationTurn(ctx, agentTask, draft, message)
 	if err != nil {
 		return nil, err
 	}
+	now := s.now()
 	updated := draft
-	if len(patch.Operations) > 0 {
-		updated, err = ApplyBriefPatch(draft, patch, PatchFromModel, agentTask.ID, s.now())
+	changed := false
+	if len(decision.Patch.Operations) > 0 {
+		updated, err = ApplyBriefPatch(draft, decision.Patch, PatchFromModel, agentTask.ID, now)
 		if err != nil {
 			return nil, err
 		}
+		changed = true
+	}
+	updated, confirmationsChanged := applyConversationConfirmations(
+		updated, decision.ConfirmFields, message.CreatedBy, message.ID, now, !changed,
+	)
+	changed = changed || confirmationsChanged
+	if changed {
 		if err := updateBriefDraft(ctx, tx, draft.Version, updated); err != nil {
 			return nil, err
 		}
 	}
-	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v1.0.0", providerCode, modelVersion, usage, patch)
+	decision = reconcileConversationTurn(updated, decision)
+	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.1.0", trace, decision)
 	if err != nil {
 		return nil, err
 	}
 	assistantID, _ := s.newID("msg")
-	now := s.now()
 	assistant := Message{
 		ID: assistantID, OrganizationID: agentTask.OrganizationID, ProjectID: agentTask.ProjectID,
 		ConversationID: task.ConversationID, Role: "assistant", ContentType: "text",
-		Content: briefAssistantText(updated), AIGenerated: true, AgentTaskID: agentTask.ID,
+		Content: decision.AssistantReply, AIGenerated: true, AgentTaskID: agentTask.ID,
 		SkillRunIDs: []string{skillRunID}, CreatedBy: "strategy-agent", CreatedAt: now,
 	}
 	if err := insertMessage(ctx, tx, assistant); err != nil {
+		return nil, err
+	}
+	if err := upsertConversationMemory(
+		ctx, tx,
+		Conversation{
+			ID: task.ConversationID, OrganizationID: agentTask.OrganizationID,
+			ProjectID: agentTask.ProjectID,
+		},
+		updated, decision.Patch.Questions, assistant.ID, now,
+	); err != nil {
 		return nil, err
 	}
 	eventID, _ := s.newID("stratevent")
@@ -495,11 +561,11 @@ func (s Service) handleDraftGenerate(ctx context.Context, agentTask agent.Task) 
 	if err != nil {
 		return nil, err
 	}
-	document, providerCode, modelVersion, usage, err := s.generateStrategy(ctx, agentTask, brief, draft)
+	document, trace, err := s.generateStrategy(ctx, agentTask, brief, draft)
 	if err != nil {
 		return nil, err
 	}
-	return s.persistGeneratedRevision(ctx, agentTask, draft, document, []string{"all"}, providerCode, modelVersion, usage)
+	return s.persistGeneratedRevision(ctx, agentTask, draft, document, []string{"all"}, "strategy.strategy.generate", "v2.0.0", trace)
 }
 
 func (s Service) handleDraftRevise(ctx context.Context, agentTask agent.Task) (*contract.ResourceRef, error) {
@@ -521,12 +587,28 @@ func (s Service) handleDraftRevise(ctx context.Context, agentTask agent.Task) (*
 	if err != nil {
 		return nil, err
 	}
-	document := revision.Document
-	document.AssumptionsAndGaps = append(document.AssumptionsAndGaps, "用户修订要求："+strings.TrimSpace(request.Instruction))
-	return s.persistGeneratedRevision(ctx, agentTask, draft, document, []string{"assumptions_and_gaps"}, "deterministic", "v1", nil)
+	brief, err := scanBriefVersion(s.DB.QueryRowContext(ctx, briefVersionSelect+` WHERE organization_id = ?
+		AND project_id = ? AND brief_id = ? AND version = ?`, agentTask.OrganizationID,
+		agentTask.ProjectID, draft.BriefID, draft.BriefVersion))
+	if err != nil {
+		return nil, err
+	}
+	document, changed, trace, err := s.generateStrategyRevision(ctx, agentTask, brief, draft, revision.Document, request)
+	if err != nil {
+		return nil, err
+	}
+	return s.persistGeneratedRevision(ctx, agentTask, draft, document, changed, "strategy.strategy.revise", "v2.0.0", trace)
 }
 
-func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.Task, draft Draft, document StrategyDocument, changed []string, providerCode, modelVersion string, usage *provider.TokenUsage) (*contract.ResourceRef, error) {
+func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.Task, draft Draft, document StrategyDocument, changed []string, skillName, skillVersion string, trace SkillExecutionTrace) (*contract.ResourceRef, error) {
+	brief, err := scanBriefVersion(s.DB.QueryRowContext(ctx, briefVersionSelect+` WHERE organization_id = ?
+		AND project_id = ? AND brief_id = ? AND version = ?`, agentTask.OrganizationID,
+		agentTask.ProjectID, draft.BriefID, draft.BriefVersion))
+	if err != nil {
+		return nil, err
+	}
+	compliance := evaluateCompliance(document, brief, s.now())
+	document.Compliance = &compliance
 	if err := document.Validate(); err != nil {
 		return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: err.Error()}}
 	}
@@ -562,13 +644,53 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 	if err := insertDraftRevision(ctx, tx, agentTask.OrganizationID, agentTask.ProjectID, revision); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'draft',
-		current_revision = ?, version = version + 1, updated_at = ? WHERE organization_id = ?
-		AND project_id = ? AND id = ? AND status = 'generating'`, revisionNumber, now,
-		agentTask.OrganizationID, agentTask.ProjectID, locked.ID); err != nil {
+	if err := s.insertComplianceReport(
+		ctx, tx, agentTask.OrganizationID, agentTask.ProjectID, locked.ID, revision, compliance,
+	); err != nil {
 		return nil, err
 	}
-	if _, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.strategy.generate", "v1.0.0", providerCode, modelVersion, usage, document); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_reviews SET status = 'invalidated',
+		updated_at = ? WHERE organization_id = ? AND project_id = ? AND strategy_id = ? AND status = 'open'`,
+		now, agentTask.OrganizationID, agentTask.ProjectID, locked.ID); err != nil {
+		return nil, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'draft',
+		current_revision = ?, current_review_id = NULL, version = version + 1, updated_at = ? WHERE organization_id = ?
+		AND project_id = ? AND id = ? AND status = 'generating'`, revisionNumber, now,
+		agentTask.OrganizationID, agentTask.ProjectID, locked.ID)
+	if err != nil {
+		return nil, err
+	}
+	changedRows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changedRows != 1 {
+		return nil, ErrVersionConflict
+	}
+	if _, err := s.insertSkillRun(ctx, tx, agentTask, skillName, skillVersion, trace, document); err != nil {
+		return nil, err
+	}
+	for name, version := range trace.SkillVersions {
+		if name == skillName && version == skillVersion {
+			continue
+		}
+		visibilityTrace := trace
+		visibilityTrace.Usage = nil
+		visibilityTrace.QualityReport = nil
+		if _, err := s.insertSkillRun(ctx, tx, agentTask, name, version, visibilityTrace, map[string]any{
+			"applied": true, "snapshot_hash": trace.SkillSnapshotHashes[name],
+		}); err != nil {
+			return nil, err
+		}
+	}
+	complianceTrace := trace
+	complianceTrace.Usage = nil
+	complianceTrace.QualityReport = nil
+	if _, err := s.insertSkillRun(
+		ctx, tx, agentTask, "strategy.compliance.check", "v1.0.0",
+		complianceTrace, compliance,
+	); err != nil {
 		return nil, err
 	}
 	task, err := scanTask(tx.QueryRowContext(ctx, taskSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`,
@@ -587,7 +709,7 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 	return &contract.ResourceRef{Type: "strategy.draft_revision", ID: locked.ID, Version: &revisionNumber}, nil
 }
 
-func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task, name, version, providerCode, modelVersion string, usage *provider.TokenUsage, output any) (string, error) {
+func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task, name, version string, trace SkillExecutionTrace, output any) (string, error) {
 	id, err := s.newID("skillrun")
 	if err != nil {
 		return "", err
@@ -598,98 +720,440 @@ func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task
 	}
 	now := s.now()
 	var inputTokens, outputTokens, totalTokens any
-	if usage != nil {
-		inputTokens, outputTokens, totalTokens = usage.InputTokens, usage.OutputTokens, usage.TotalTokens
+	if trace.Usage != nil {
+		inputTokens, outputTokens, totalTokens = trace.Usage.InputTokens, trace.Usage.OutputTokens, trace.Usage.TotalTokens
+	}
+	var quality any
+	if trace.QualityReport != nil {
+		quality = mustJSON(trace.QualityReport)
+	}
+	outputHash, err := contract.CanonicalJSONHash(output)
+	if err != nil {
+		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO platform_skill_runs
 		(id, organization_id, project_id, agent_task_id, skill_name, skill_version, status,
-		 input_hash, provider_code, model_version, input_tokens, output_tokens, total_tokens,
-		 output_snapshot, started_at, completed_at,
+		 input_hash, provider_code, model_version, generation_mode, model_alias,
+		 route_revision_id, response_mode, prompt_version, skill_versions, skill_snapshot_hashes,
+		 generation_context_hash,
+		 input_tokens, output_tokens, total_tokens, latency_ms, validation_attempts, quality_report,
+		 output_snapshot, output_hash, started_at, completed_at,
 		 created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, task.OrganizationID, task.ProjectID, task.ID, name, version, inputHash,
-		providerCode, modelVersion, inputTokens, outputTokens, totalTokens, mustJSON(output), now, now, now, now)
+		trace.ProviderCode, trace.ModelVersion, trace.GenerationMode, trace.ModelAlias,
+		trace.RouteRevisionID, trace.ResponseMode, trace.PromptVersion, mustJSON(trace.SkillVersions),
+		mustJSON(trace.SkillSnapshotHashes), trace.GenerationContextHash,
+		inputTokens, outputTokens, totalTokens, trace.LatencyMS, trace.ValidationAttempts, quality,
+		mustJSON(output), outputHash, now, now, now, now)
 	return id, err
 }
 
-func (s Service) generateBriefPatch(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (BriefPatch, string, string, *provider.TokenUsage, error) {
+func (s Service) insertComplianceReport(
+	ctx context.Context,
+	tx *sql.Tx,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	strategyID string,
+	revision DraftRevision,
+	report ComplianceReport,
+) error {
+	id, err := s.newID("compliancereport")
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO strategy_compliance_reports
+		(id, organization_id, project_id, strategy_id, strategy_revision, candidate_content_hash,
+		 passed, report, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, organizationID, projectID, strategyID, revision.Revision, revision.ContentHash,
+		report.Passed, mustJSON(report), report.CheckedAt)
+	return err
+}
+
+func (s Service) generateConversationTurn(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (ConversationTurnDecision, SkillExecutionTrace, error) {
+	started := time.Now()
+	promptVersion := "strategy.conversation.v3"
 	if s.Text == nil {
-		return deterministicBriefPatch(draft, message), "deterministic", "v1", nil, nil
+		patch := deterministicBriefPatch(draft, message)
+		decision := sanitizeConversationDecision(draft, message, ConversationTurnDecision{
+			Intent: "provide_requirements", Patch: patch,
+			AssistantReply:    "收到，我已经把你刚才提供的信息整理进 Brief。",
+			FollowUpQuestions: conversationQuestionsFromStrings(patch.Questions),
+		})
+		return decision, SkillExecutionTrace{
+			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
+			PromptVersion: promptVersion, SkillVersions: map[string]string{"strategy.brief.extract": "v2.1.0"},
+			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
+		}, nil
 	}
 	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
 	projectContext, err := s.Projects.GetContext(ctx, actor, task.ProjectID)
 	if err != nil {
-		return BriefPatch{}, "", "", nil, err
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, err
 	}
 	modelAlias := s.TextModelAlias
 	if strings.TrimSpace(modelAlias) == "" {
 		modelAlias = "cookies.text.standard"
 	}
-	prompt := fmt.Sprintf("Current brief draft (version %d): %s\nUser message: %s\nReturn only a constrained brief patch. Never mark fields confirmed.",
-		draft.Version, mustJSON(draft.Document), message.Content)
+	conversation, _ := s.generationConversation(ctx, task, message.ConversationID)
+	prompt := fmt.Sprintf(`Current Brief draft (version %d): %s
+Current field states: %s
+Recent conversation: %s
+Latest user message: %s
+
+Return one conversational turn decision. assistant_reply must be a short, natural Chinese acknowledgement or answer, without listing follow-up questions. Put questions only in follow_up_questions. Extract only facts explicitly stated by the user; never invent a brand, platform, budget, objective, or product detail. Use low or medium confidence for inference so the application can reject it. Ask at most two high-impact questions, never ask for a field that already has a value, and distinguish business objective from target audience. Use confirm_fields only when the user explicitly confirms previously captured information.`,
+		draft.Version, mustJSON(draft.Document), mustJSON(draft.FieldStates), mustJSON(conversation), message.Content)
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: actor, Project: projectContext, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-brief"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "Extract advertising requirements. Use only allowed fields and cite the supplied conversation message."},
+			{Role: provider.TextRoleSystem, Content: `You are a calm advertising strategist helping a user clarify an initially vague requirement through conversation. Respond naturally, preserve context, and progressively build a multi-platform advertising Brief. Do not behave like a form. Allowed channel enums are xiaohongshu, douyin, taobao_tmall, and wechat_ecosystem.`},
 			{Role: provider.TextRoleUser, Content: prompt},
 		},
-		OutputJSONSchema: briefPatchOutputSchema(),
+		OutputJSONSchema: conversationDecisionOutputSchema(),
 	})
 	if err != nil {
-		return BriefPatch{}, "", "", nil, textGenerationError(err)
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, textGenerationError(err)
+	}
+	trace := SkillExecutionTrace{
+		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, PromptVersion: promptVersion,
+		SkillVersions: map[string]string{"strategy.brief.extract": "v2.1.0"},
+		Usage:         response.Usage, LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
-		return deterministicBriefPatch(draft, message), response.ProviderCode, response.ModelVersion, response.Usage, nil
+		trace.GenerationMode = "fake_template"
+		patch := deterministicBriefPatch(draft, message)
+		return sanitizeConversationDecision(draft, message, ConversationTurnDecision{
+			Intent: "provide_requirements", Patch: patch,
+			AssistantReply:    "收到，我已经把你刚才提供的信息整理进 Brief。",
+			FollowUpQuestions: conversationQuestionsFromStrings(patch.Questions),
+		}), trace, nil
 	}
-	var patch BriefPatch
-	if err := decodeStrictJSON(response.StructuredOutput, &patch); err != nil {
-		return BriefPatch{}, "", "", nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Brief patch output is invalid"}}
+	candidate := response.StructuredOutput
+	if len(candidate) == 0 {
+		candidate = normalizeJSONCandidate(response.Text)
 	}
-	patch.ContractVersion = "strategy-brief-patch/v1"
+	var modelOutput struct {
+		Intent            string                 `json:"intent"`
+		AssistantReply    string                 `json:"assistant_reply"`
+		Operations        []BriefPatchOperation  `json:"operations"`
+		ConfirmFields     []string               `json:"confirm_fields"`
+		FollowUpQuestions []ConversationQuestion `json:"follow_up_questions"`
+		Warnings          []string               `json:"warnings"`
+	}
+	if err := decodeStrictJSON(candidate, &modelOutput); err != nil {
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Conversation output is invalid"}}
+	}
+	decision := ConversationTurnDecision{
+		Intent: modelOutput.Intent, AssistantReply: modelOutput.AssistantReply,
+		Patch:         BriefPatch{BaseVersion: draft.Version, Operations: modelOutput.Operations, Warnings: modelOutput.Warnings},
+		ConfirmFields: modelOutput.ConfirmFields, FollowUpQuestions: modelOutput.FollowUpQuestions,
+		Warnings: modelOutput.Warnings,
+	}
+	decision = sanitizeConversationDecision(draft, message, decision)
+	patch := &decision.Patch
+	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
+		patch.ContractVersion = "strategy-brief-patch/v2"
+	}
+	if err := normalizeModelBriefPatch(patch); err != nil {
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch contains unsupported values"}}
+	}
+	if patch.ContractVersion == "" {
+		patch.ContractVersion = "strategy-brief-patch/v1"
+	}
 	patch.BaseVersion = draft.Version
 	for index := range patch.Operations {
 		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: message.ID}
 		patch.Operations[index].Confirmation = "unconfirmed"
 	}
-	return patch, response.ProviderCode, response.ModelVersion, response.Usage, nil
+	return decision, trace, nil
 }
 
-func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft) (StrategyDocument, string, string, *provider.TokenUsage, error) {
+func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft) (StrategyDocument, SkillExecutionTrace, error) {
+	started := time.Now()
+	generation, err := s.buildGenerationContext(ctx, task, brief, draft)
+	if err != nil {
+		return StrategyDocument{}, SkillExecutionTrace{}, err
+	}
+	versions := skillVersions(generation.Skills)
+	snapshotHashes := skillSnapshotHashes(generation.Skills)
+	contextHash, err := contract.CanonicalJSONHash(generation)
+	if err != nil {
+		return StrategyDocument{}, SkillExecutionTrace{}, err
+	}
 	if s.Text == nil {
-		return deterministicStrategy(brief, draft), "deterministic", "v1", nil, nil
+		document := deterministicStrategy(brief, draft)
+		report := evaluateStrategyQuality(document, generation)
+		return document, SkillExecutionTrace{
+			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
+			PromptVersion: generation.PromptVersion, SkillVersions: versions,
+			SkillSnapshotHashes: snapshotHashes, GenerationContextHash: contextHash,
+			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1, QualityReport: &report,
+		}, nil
 	}
 	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
-	projectContext, err := s.Projects.GetContext(ctx, actor, task.ProjectID)
-	if err != nil {
-		return StrategyDocument{}, "", "", nil, err
-	}
 	modelAlias := s.TextModelAlias
 	if strings.TrimSpace(modelAlias) == "" {
 		modelAlias = "cookies.text.standard"
 	}
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
-		Actor: actor, Project: projectContext, ModelAlias: modelAlias,
+		Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "Create a structured, evidence-linked advertising strategy for Xiaohongshu. Return JSON only."},
-			{Role: provider.TextRoleUser, Content: "Confirmed brief: " + string(mustJSON(brief))},
+			{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation)},
+			{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation)},
 		},
-		OutputJSONSchema: strategyOutputSchema(),
+		OutputJSONSchema: strategyOutputSchema(brief.Snapshot.ContractVersion == "strategy-brief-version/v2"),
 	})
 	if err != nil {
-		return StrategyDocument{}, "", "", nil, textGenerationError(err)
+		return StrategyDocument{}, SkillExecutionTrace{}, textGenerationError(err)
+	}
+	trace := SkillExecutionTrace{
+		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, PromptVersion: generation.PromptVersion,
+		SkillVersions: versions, SkillSnapshotHashes: snapshotHashes,
+		GenerationContextHash: contextHash, Usage: response.Usage, ValidationAttempts: 1,
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
-		return deterministicStrategy(brief, draft), response.ProviderCode, response.ModelVersion, response.Usage, nil
+		document := deterministicStrategy(brief, draft)
+		report := evaluateStrategyQuality(document, generation)
+		trace.GenerationMode = "fake_template"
+		trace.QualityReport = &report
+		trace.LatencyMS = time.Since(started).Milliseconds()
+		return document, trace, nil
+	}
+	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
+	if decodeErr == nil {
+		normalizeGeneratedStrategy(&document, brief, draft)
+		report = evaluateStrategyQuality(document, generation)
+	}
+	needsRepair := decodeErr != nil || (s.CriticEnabled && !report.Passed)
+	if needsRepair {
+		reasons := report.Errors
+		if decodeErr != nil {
+			reasons = append(reasons, decodeErr.Error())
+		}
+		repair, repairErr := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
+			Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
+			InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy-repair"),
+			Messages: []provider.TextMessage{
+				{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation)},
+				{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation)},
+				{Role: provider.TextRoleAssistant, Content: response.Text},
+				{Role: provider.TextRoleUser, Content: "上一个输出未通过校验。只修复这些问题并返回完整 JSON：\n- " + strings.Join(reasons, "\n- ")},
+			},
+			OutputJSONSchema: strategyOutputSchema(brief.Snapshot.ContractVersion == "strategy-brief-version/v2"),
+		})
+		if repairErr != nil {
+			return StrategyDocument{}, SkillExecutionTrace{}, textGenerationError(repairErr)
+		}
+		trace.ValidationAttempts = 2
+		trace.ProviderCode = repair.ProviderCode
+		trace.ModelVersion = repair.ModelVersion
+		trace.RouteRevisionID = repair.RouteRevisionID
+		trace.ResponseMode = repair.ResponseMode
+		trace.Usage = addUsage(trace.Usage, repair.Usage)
+		document, report, decodeErr = decodeAndEvaluateStrategy(repair, generation, brief, draft)
+		if decodeErr == nil {
+			normalizeGeneratedStrategy(&document, brief, draft)
+			report = evaluateStrategyQuality(document, generation)
+		}
+	}
+	if decodeErr != nil || !report.Passed {
+		return StrategyDocument{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Strategy output failed structural or quality validation"}}
+	}
+	trace.QualityReport = &report
+	trace.LatencyMS = time.Since(started).Milliseconds()
+	return document, trace, nil
+}
+
+func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft, current StrategyDocument, request ReviseRequest) (StrategyDocument, []string, SkillExecutionTrace, error) {
+	started := time.Now()
+	generation, err := s.buildGenerationContext(ctx, task, brief, draft)
+	if err != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, err
+	}
+	versions := skillVersions(generation.Skills)
+	snapshotHashes := skillSnapshotHashes(generation.Skills)
+	contextHash, err := contract.CanonicalJSONHash(generation)
+	if err != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, err
+	}
+	if s.Text == nil {
+		document := current
+		document.AssumptionsAndGaps = append(document.AssumptionsAndGaps, "用户修订要求："+strings.TrimSpace(request.Instruction))
+		report := evaluateStrategyQuality(document, generation)
+		return document, []string{"assumptions_and_gaps"}, SkillExecutionTrace{
+			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
+			PromptVersion: "strategy.revise.v2", SkillVersions: versions,
+			SkillSnapshotHashes: snapshotHashes, GenerationContextHash: contextHash,
+			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1, QualityReport: &report,
+		}, nil
+	}
+	actor := contract.ActorContext{OrganizationID: task.OrganizationID, Principal: task.CreatedBy, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
+	modelAlias := strings.TrimSpace(s.TextModelAlias)
+	if modelAlias == "" {
+		modelAlias = "cookies.text.standard"
+	}
+	currentJSON := string(mustJSON(current))
+	allowedSections := allowedRevisionSections(request.Instruction)
+	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
+		Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
+		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy-revise"),
+		Messages: []provider.TextMessage{
+			{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation) + "\n只修改服务端允许的章节；其他章节保持语义和数据不变。"},
+			{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation) + "\n\n<current_strategy>\n" + currentJSON + "\n</current_strategy>\n<allowed_sections>\n" + strings.Join(allowedSections, ",") + "\n</allowed_sections>\n<revision_instruction>\n" + strings.TrimSpace(request.Instruction) + "\n</revision_instruction>"},
+		},
+		OutputJSONSchema: strategyOutputSchema(brief.Snapshot.ContractVersion == "strategy-brief-version/v2"),
+	})
+	if err != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, textGenerationError(err)
+	}
+	trace := SkillExecutionTrace{
+		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, PromptVersion: "strategy.revise.v2",
+		SkillVersions: versions, SkillSnapshotHashes: snapshotHashes,
+		GenerationContextHash: contextHash, Usage: response.Usage, LatencyMS: time.Since(started).Milliseconds(),
+		ValidationAttempts: 1,
+	}
+	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
+		document := current
+		document.AssumptionsAndGaps = append(document.AssumptionsAndGaps, "用户修订要求："+strings.TrimSpace(request.Instruction))
+		report := evaluateStrategyQuality(document, generation)
+		trace.GenerationMode = "fake_template"
+		trace.QualityReport = &report
+		return document, []string{"assumptions_and_gaps"}, trace, nil
+	}
+	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
+	if decodeErr == nil {
+		retainAllowedRevisionSections(current, &document, allowedSections)
+		report = evaluateStrategyQuality(document, generation)
+	}
+	if decodeErr != nil || !report.Passed {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_OUTPUT_INVALID", Message: "Strategy revision failed structural or quality validation",
+		}}
+	}
+	changed := changedStrategySections(current, document)
+	if len(changed) == 0 {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_OUTPUT_INVALID", Message: "Strategy revision did not change any section",
+		}}
+	}
+	trace.QualityReport = &report
+	return document, changed, trace, nil
+}
+
+func decodeAndEvaluateStrategy(response provider.SynchronousResponse, generation GenerationContext, brief BriefVersion, draft Draft) (StrategyDocument, QualityReport, error) {
+	candidate := response.StructuredOutput
+	if len(candidate) == 0 {
+		candidate = normalizeJSONCandidate(response.Text)
 	}
 	var document StrategyDocument
-	if err := decodeStrictJSON(response.StructuredOutput, &document); err != nil {
-		return StrategyDocument{}, "", "", nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Strategy output is invalid"}}
+	if err := decodeStrictJSON(candidate, &document); err != nil {
+		return StrategyDocument{}, QualityReport{Errors: []string{"strategy output is not valid JSON"}}, err
 	}
 	document.ContractVersion = "strategy-draft/v1"
-	document.Lineage = StrategyLineage{BriefID: brief.BriefID, BriefVersion: brief.Version, ProjectContextVersion: draft.ProjectContextVersion, SkillVersions: draft.SkillVersions}
-	return document, response.ProviderCode, response.ModelVersion, response.Usage, nil
+	if brief.Snapshot.ContractVersion == "strategy-brief-version/v2" {
+		document.ContractVersion = "strategy-draft/v2"
+	}
+	document.Lineage = StrategyLineage{
+		BriefID: brief.BriefID, BriefVersion: brief.Version,
+		ProjectContextVersion: draft.ProjectContextVersion,
+		SkillVersions:         skillVersions(generation.Skills),
+	}
+	report := evaluateStrategyQuality(document, generation)
+	return document, report, nil
+}
+
+func normalizeGeneratedStrategy(document *StrategyDocument, brief BriefVersion, draft Draft) {
+	fallback := deterministicStrategy(brief, draft)
+	document.Objective = brief.Snapshot.Campaign.Objective
+	document.Audience.Primary = brief.Snapshot.Audience.Primary
+	document.Proposition = brief.Snapshot.Proposition
+	if !hasNonEmptyStrings(document.Audience.Insights) {
+		document.Audience.Insights = fallback.Audience.Insights
+	}
+	if len(document.ChannelStrategy) == 0 {
+		document.ChannelStrategy = fallback.ChannelStrategy
+	}
+	if brief.Snapshot.ContractVersion == "strategy-brief-version/v2" {
+		document.ContractVersion = "strategy-draft/v2"
+		if strings.TrimSpace(document.ExecutiveSummary) == "" {
+			document.ExecutiveSummary = fallback.ExecutiveSummary
+		}
+		if strings.TrimSpace(document.CrossPlatformRole) == "" {
+			document.CrossPlatformRole = fallback.CrossPlatformRole
+		}
+		document.PlatformPlans = normalizePlatformPlans(document.PlatformPlans, fallback.PlatformPlans, brief.Snapshot.Channels)
+	}
+	for index := range document.ChannelStrategy {
+		switch strings.ToLower(strings.TrimSpace(document.ChannelStrategy[index].Platform)) {
+		case "xiaohongshu", "小红书", "小红书图文", "rednote", "red note", "redbook", "red book":
+			document.ChannelStrategy[index].Platform = "xiaohongshu"
+		}
+	}
+	for _, recommendation := range fallback.CreativeRecommendations {
+		if len(document.CreativeRecommendations) >= 3 {
+			break
+		}
+		document.CreativeRecommendations = append(document.CreativeRecommendations, recommendation)
+	}
+	validExperiments := make([]Experiment, 0, len(document.ExperimentMatrix))
+	for _, experiment := range document.ExperimentMatrix {
+		if strings.TrimSpace(experiment.Hypothesis) != "" &&
+			strings.TrimSpace(experiment.Variable) != "" &&
+			strings.TrimSpace(experiment.Metric) != "" {
+			validExperiments = append(validExperiments, experiment)
+		}
+	}
+	if len(validExperiments) == 0 {
+		validExperiments = fallback.ExperimentMatrix
+	}
+	document.ExperimentMatrix = validExperiments
+	primaryKPI := strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI)
+	if primaryKPI != "" && !sliceContainsInput(document.Measurement, primaryKPI) {
+		document.Measurement = append([]string{primaryKPI}, document.Measurement...)
+	}
+	if !hasNonEmptyStrings(document.Measurement) {
+		document.Measurement = fallback.Measurement
+	}
+	if strings.TrimSpace(document.BudgetAndCadence.Budget) == "" {
+		document.BudgetAndCadence.Budget = brief.Snapshot.Budget.Total
+	}
+	if strings.TrimSpace(document.BudgetAndCadence.Cadence) == "" {
+		document.BudgetAndCadence.Cadence = fallback.BudgetAndCadence.Cadence
+	}
+}
+
+func normalizeJSONCandidate(value string) json.RawMessage {
+	content := strings.TrimSpace(value)
+	if strings.HasPrefix(content, "```") {
+		if newline := strings.IndexByte(content, '\n'); newline >= 0 {
+			content = content[newline+1:]
+		}
+		content = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(content), "```"))
+	}
+	return json.RawMessage(content)
+}
+
+func addUsage(first, second *provider.TokenUsage) *provider.TokenUsage {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return &provider.TokenUsage{
+		InputTokens:  first.InputTokens + second.InputTokens,
+		OutputTokens: first.OutputTokens + second.OutputTokens,
+		TotalTokens:  first.TotalTokens + second.TotalTokens,
+	}
 }
 
 func textGenerationError(err error) error {
@@ -702,29 +1166,43 @@ func textGenerationError(err error) error {
 	}}
 }
 
-func briefPatchOutputSchema() json.RawMessage {
-	return json.RawMessage(`{
-		"type":"object","additionalProperties":false,"required":["operations"],
-		"properties":{"operations":{"type":"array","maxItems":32,"items":{"type":"object",
-		"additionalProperties":false,"required":["op","field_path","value","confidence"],
-		"properties":{"op":{"const":"set"},"field_path":{"enum":["campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi"]},
-		"value":{"oneOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},"confidence":{"enum":["low","medium","high"]}}}}}
-	}`)
-}
-
-func strategyOutputSchema() json.RawMessage {
+func strategyOutputSchema(v2 bool) json.RawMessage {
+	if v2 {
+		return json.RawMessage(`{
+			"type":"object","additionalProperties":false,
+			"required":["contract_version","objective","audience","proposition","channel_strategy","creative_recommendations","constraints","budget_and_cadence","experiment_matrix","measurement","assumptions_and_gaps","executive_summary","cross_platform_role","platform_plans","evidence_refs"],
+			"properties":{
+				"contract_version":{"const":"strategy-draft/v2"},"objective":{"type":"string","minLength":1},
+				"audience":{"type":"object","additionalProperties":false,"required":["primary","insights"],"properties":{"primary":{"type":"string","minLength":1},"insights":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"string","maxLength":160}}}},
+				"proposition":{"type":"string","minLength":1},
+				"channel_strategy":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"object","additionalProperties":false,"required":["platform","role","formats"],"properties":{"platform":{"enum":["xiaohongshu","douyin","taobao_tmall","wechat_ecosystem"]},"role":{"type":"string","minLength":1,"maxLength":160},"formats":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"string","maxLength":80}}}}},
+				"creative_recommendations":{"type":"array","minItems":3,"maxItems":12,"items":{"type":"string","maxLength":180}},
+				"constraints":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":160}},
+				"budget_and_cadence":{"type":"object","additionalProperties":false,"required":["budget","cadence"],"properties":{"budget":{"type":"string","maxLength":120},"cadence":{"type":"string","maxLength":180}}},
+				"experiment_matrix":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["hypothesis","variable","metric"],"properties":{"hypothesis":{"type":"string","maxLength":180},"variable":{"type":"string","maxLength":100},"metric":{"type":"string","maxLength":100}}}},
+				"measurement":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"string","maxLength":120}},
+				"assumptions_and_gaps":{"type":"array","maxItems":12,"items":{"type":"string","maxLength":160}},
+				"executive_summary":{"type":"string","minLength":1,"maxLength":600},
+				"cross_platform_role":{"type":"string","minLength":1,"maxLength":400},
+				"evidence_refs":{"type":"array","maxItems":32,"items":{"type":"string","maxLength":128}},
+				"platform_plans":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"object","additionalProperties":false,
+					"required":["platform","role","audience_angle","content_pillars","formats","conversion_path","cadence","primary_kpi","creative_ideas","constraints"],
+					"properties":{"platform":{"enum":["xiaohongshu","douyin","taobao_tmall","wechat_ecosystem"]},"role":{"type":"string","minLength":1,"maxLength":160},"audience_angle":{"type":"string","minLength":1,"maxLength":180},"content_pillars":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"string","maxLength":120}},"formats":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"string","maxLength":80}},"conversion_path":{"type":"string","minLength":1,"maxLength":220},"cadence":{"type":"string","minLength":1,"maxLength":160},"primary_kpi":{"type":"string","minLength":1,"maxLength":100},"creative_ideas":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"string","maxLength":160}},"constraints":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":160}}}}}
+			}
+		}`)
+	}
 	return json.RawMessage(`{
 		"type":"object","additionalProperties":false,
 		"required":["contract_version","objective","audience","proposition","channel_strategy","creative_recommendations","constraints","budget_and_cadence","experiment_matrix","measurement","assumptions_and_gaps"],
 		"properties":{
 			"contract_version":{"type":"string"},"objective":{"type":"string","minLength":1},
-			"audience":{"type":"object","additionalProperties":false,"required":["primary","insights"],"properties":{"primary":{"type":"string","minLength":1},"insights":{"type":"array","items":{"type":"string"}}}},
+			"audience":{"type":"object","additionalProperties":false,"required":["primary","insights"],"properties":{"primary":{"type":"string","minLength":1},"insights":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string","maxLength":80}}}},
 			"proposition":{"type":"string","minLength":1},
-			"channel_strategy":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["platform","role","formats"],"properties":{"platform":{"const":"xiaohongshu"},"role":{"type":"string"},"formats":{"type":"array","minItems":1,"items":{"type":"string"}}}}},
-			"creative_recommendations":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}},
-			"budget_and_cadence":{"type":"object","additionalProperties":false,"required":["budget","cadence"],"properties":{"budget":{"type":"string"},"cadence":{"type":"string"}}},
-			"experiment_matrix":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["hypothesis","variable","metric"],"properties":{"hypothesis":{"type":"string"},"variable":{"type":"string"},"metric":{"type":"string"}}}},
-			"measurement":{"type":"array","items":{"type":"string"}},"assumptions_and_gaps":{"type":"array","items":{"type":"string"}}
+			"channel_strategy":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"object","additionalProperties":false,"required":["platform","role","formats"],"properties":{"platform":{"const":"xiaohongshu"},"role":{"type":"string","maxLength":80},"formats":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string","maxLength":50}}}}},
+			"creative_recommendations":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"string","maxLength":120}},"constraints":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":100}},
+			"budget_and_cadence":{"type":"object","additionalProperties":false,"required":["budget","cadence"],"properties":{"budget":{"type":"string","maxLength":80},"cadence":{"type":"string","maxLength":100}}},
+			"experiment_matrix":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"object","additionalProperties":false,"required":["hypothesis","variable","metric"],"properties":{"hypothesis":{"type":"string","maxLength":100},"variable":{"type":"string","maxLength":60},"metric":{"type":"string","maxLength":60}}}},
+			"measurement":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"string","maxLength":80}},"assumptions_and_gaps":{"type":"array","maxItems":5,"items":{"type":"string","maxLength":80}}
 		}}
 	`)
 }
@@ -752,6 +1230,7 @@ func deterministicBriefPatch(draft BriefDraft, message Message) BriefPatch {
 		path  string
 		label string
 	}{
+		{"brand.name", "品牌"}, {"product.name", "产品"}, {"industry", "行业"}, {"region", "地区"}, {"language", "语言"},
 		{"campaign.objective", "目标"}, {"audience.primary", "受众"}, {"proposition", "卖点"}, {"budget.total", "预算"},
 		{"schedule.window", "周期"}, {"measurement.primary_kpi", "指标"},
 	}
@@ -766,27 +1245,46 @@ func deterministicBriefPatch(draft BriefDraft, message Message) BriefPatch {
 	if draft.Document.Campaign.Objective == "" && !objectiveExtracted {
 		add("campaign.objective", content)
 	}
-	if len(draft.Document.Channels) == 0 {
-		add("channels", []string{"xiaohongshu"})
+	var channels []string
+	for _, candidate := range []struct{ keyword, value string }{
+		{"小红书", "xiaohongshu"}, {"抖音", "douyin"}, {"淘宝", "taobao_tmall"},
+		{"天猫", "taobao_tmall"}, {"微信", "wechat_ecosystem"}, {"公众号", "wechat_ecosystem"},
+		{"视频号", "wechat_ecosystem"}, {"私域", "wechat_ecosystem"},
+	} {
+		if strings.Contains(content, candidate.keyword) {
+			channels = appendUnique(channels, candidate.value)
+		}
 	}
-	return BriefPatch{ContractVersion: "strategy-brief-patch/v1", BaseVersion: draft.Version, Operations: operations}
+	if len(channels) > 0 {
+		add("channels", channels)
+	}
+	contractVersion := "strategy-brief-patch/v1"
+	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
+		contractVersion = "strategy-brief-patch/v2"
+	}
+	return BriefPatch{ContractVersion: contractVersion, BaseVersion: draft.Version, Operations: operations, Questions: suggestQuestions(draft)}
 }
 
-func briefAssistantText(draft BriefDraft) string {
-	if draft.Completeness.Ready {
-		return "Brief 已完整并通过确认规则，可以创建不可变版本。"
+func suggestQuestions(draft BriefDraft) []string {
+	result := []string{}
+	for _, field := range missingConversationFields(draft) {
+		if question := conversationFieldQuestions[field]; question != "" {
+			result = append(result, question)
+			if len(result) == 2 {
+				break
+			}
+		}
 	}
-	fields := make([]string, 0, len(draft.Completeness.Blockers))
-	for _, blocker := range draft.Completeness.Blockers {
-		fields = append(fields, blocker.Field)
-	}
-	return "我已整理本轮信息。请在右侧确认或补充这些字段：" + strings.Join(fields, "、")
+	return result
 }
 
 func deterministicStrategy(brief BriefVersion, draft Draft) StrategyDocument {
 	channels := make([]ChannelStrategy, 0, len(brief.Snapshot.Channels))
+	plans := make([]PlatformPlan, 0, len(brief.Snapshot.Channels))
 	for _, channel := range brief.Snapshot.Channels {
-		channels = append(channels, ChannelStrategy{Platform: channel, Role: "建立种草认知并承接搜索决策", Formats: []string{"图文笔记", "清单型笔记"}})
+		plan := deterministicPlatformPlan(channel, brief)
+		channels = append(channels, ChannelStrategy{Platform: channel, Role: plan.Role, Formats: plan.Formats})
+		plans = append(plans, plan)
 	}
 	gaps := []string{}
 	if brief.Snapshot.Budget.Total == "" {
@@ -795,18 +1293,95 @@ func deterministicStrategy(brief BriefVersion, draft Draft) StrategyDocument {
 	if brief.Snapshot.Schedule.Window == "" {
 		gaps = append(gaps, "排期待确认")
 	}
+	measurement := []string{brief.Snapshot.Measurement.PrimaryKPI}
+	if strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI) == "" {
+		gaps = append(gaps, "核心指标待确认")
+		measurement = []string{"核心指标待确认；生成前先定义与目标匹配的主指标"}
+	}
+	contractVersion := "strategy-draft/v1"
+	if brief.Snapshot.ContractVersion == "strategy-brief-version/v2" {
+		contractVersion = "strategy-draft/v2"
+	}
 	return StrategyDocument{
-		ContractVersion: "strategy-draft/v1", Objective: brief.Snapshot.Campaign.Objective,
+		ContractVersion: contractVersion, Objective: brief.Snapshot.Campaign.Objective,
 		Audience:    StrategyAudience{Primary: brief.Snapshot.Audience.Primary, Insights: []string{"围绕真实使用场景提供可验证信息"}},
 		Proposition: brief.Snapshot.Proposition, ChannelStrategy: channels,
 		CreativeRecommendations: []string{"用首屏问题直击目标人群", "正文用证据和场景支撑核心卖点", "结尾设置低门槛互动"},
 		Constraints:             brief.Snapshot.Constraints,
 		BudgetAndCadence:        BudgetAndCadence{Budget: brief.Snapshot.Budget.Total, Cadence: "首期 2 周验证，按周复盘"},
 		ExperimentMatrix:        []Experiment{{Hypothesis: "场景痛点开篇可提高有效阅读", Variable: "首屏表达", Metric: "阅读完成率"}},
-		Measurement:             []string{brief.Snapshot.Measurement.PrimaryKPI},
+		Measurement:             measurement,
 		AssumptionsAndGaps:      gaps,
 		Lineage:                 StrategyLineage{BriefID: brief.BriefID, BriefVersion: brief.Version, ProjectContextVersion: draft.ProjectContextVersion, SkillVersions: draft.SkillVersions},
+		ExecutiveSummary:        fmt.Sprintf("围绕%s，以%s为核心主张，在所选平台形成认知、考虑与转化协同。", brief.Snapshot.Campaign.Objective, brief.Snapshot.Proposition),
+		CrossPlatformRole:       "各平台承担差异化触达与承接角色，使用统一主张和可比较指标进行复盘。",
+		PlatformPlans:           plans,
+		EvidenceRefs:            append([]string(nil), brief.Snapshot.ReferenceIDs...),
 	}
+}
+
+func deterministicPlatformPlan(platform string, brief BriefVersion) PlatformPlan {
+	common := PlatformPlan{
+		Platform: platform, AudienceAngle: brief.Snapshot.Audience.Primary,
+		PrimaryKPI:  brief.Snapshot.Measurement.PrimaryKPI,
+		Constraints: append([]string(nil), brief.Snapshot.Constraints...),
+	}
+	switch platform {
+	case "douyin":
+		common.Role = "用短视频和直播快速验证卖点并承接即时转化"
+		common.ContentPillars = []string{"场景痛点", "产品演示", "可信证据"}
+		common.Formats = []string{"短视频", "直播切片"}
+		common.ConversionPath = "内容触达 → 互动/搜索 → 商品或直播承接 → 转化"
+		common.Cadence = "连续测试不同前三秒钩子，按日复盘"
+		common.CreativeIdeas = []string{"前三秒呈现真实痛点", "用演示和证据完成说服"}
+	case "taobao_tmall":
+		common.Role = "承接明确购物意图并提升商品决策效率"
+		common.ContentPillars = []string{"商品利益点", "使用证据", "优惠与保障"}
+		common.Formats = []string{"商品主图", "详情页内容", "店播素材"}
+		common.ConversionPath = "搜索/推荐 → 商品详情 → 咨询或加购 → 成交"
+		common.Cadence = "围绕搜索词、主图和详情卖点按周迭代"
+		common.CreativeIdeas = []string{"首屏回答核心购买理由", "用对比和证明降低决策阻力"}
+	case "wechat_ecosystem":
+		common.Role = "沉淀可信内容并通过社交关系和私域持续承接"
+		common.ContentPillars = []string{"深度解释", "用户案例", "社群互动"}
+		common.Formats = []string{"公众号文章", "视频号短视频", "社群内容"}
+		common.ConversionPath = "内容触达 → 关注/转发 → 私域咨询 → 持续转化"
+		common.Cadence = "周度主题内容配合社群连续跟进"
+		common.CreativeIdeas = []string{"用深度内容建立信任", "设计可转发的实用信息"}
+	default:
+		common.Role = "建立种草认知并承接站内搜索和口碑决策"
+		common.ContentPillars = []string{"真实场景", "使用体验", "卖点证据"}
+		common.Formats = []string{"图文笔记", "短视频笔记"}
+		common.ConversionPath = "内容种草 → 收藏/搜索 → 品牌或商品承接 → 转化"
+		common.Cadence = "以主题笔记矩阵进行两周验证"
+		common.CreativeIdeas = []string{"问题式标题命中场景", "以真实体验和证据支撑主张"}
+	}
+	if strings.TrimSpace(common.PrimaryKPI) == "" {
+		common.PrimaryKPI = "核心指标待确认"
+	}
+	return common
+}
+
+func normalizePlatformPlans(actual, fallback []PlatformPlan, channels []string) []PlatformPlan {
+	byPlatform := map[string]PlatformPlan{}
+	for _, plan := range actual {
+		if supportedPlatform(plan.Platform) {
+			byPlatform[plan.Platform] = plan
+		}
+	}
+	fallbackByPlatform := map[string]PlatformPlan{}
+	for _, plan := range fallback {
+		fallbackByPlatform[plan.Platform] = plan
+	}
+	result := make([]PlatformPlan, 0, len(channels))
+	for _, channel := range channels {
+		value, ok := byPlatform[channel]
+		if !ok || value.Role == "" || value.ConversionPath == "" || len(value.Formats) == 0 || len(value.CreativeIdeas) == 0 {
+			value = fallbackByPlatform[channel]
+		}
+		result = append(result, value)
+	}
+	return result
 }
 
 func setStrategySection(document *StrategyDocument, section string, value json.RawMessage) error {
@@ -823,6 +1398,26 @@ func setStrategySection(document *StrategyDocument, section string, value json.R
 		return decodeStringSlice(value, &document.Measurement, section)
 	case "assumptions_and_gaps":
 		return decodeStringSlice(value, &document.AssumptionsAndGaps, section)
+	case "executive_summary":
+		if document.ContractVersion != "strategy-draft/v2" {
+			return fmt.Errorf("%w: v2 strategy section is unavailable", ErrInvalidRequest)
+		}
+		return decodeString(value, &document.ExecutiveSummary, section)
+	case "cross_platform_role":
+		if document.ContractVersion != "strategy-draft/v2" {
+			return fmt.Errorf("%w: v2 strategy section is unavailable", ErrInvalidRequest)
+		}
+		return decodeString(value, &document.CrossPlatformRole, section)
+	case "platform_plans":
+		if document.ContractVersion != "strategy-draft/v2" || json.Unmarshal(value, &document.PlatformPlans) != nil {
+			return fmt.Errorf("%w: platform_plans must be a valid v2 platform plan array", ErrInvalidRequest)
+		}
+		return nil
+	case "evidence_refs":
+		if document.ContractVersion != "strategy-draft/v2" {
+			return fmt.Errorf("%w: v2 strategy section is unavailable", ErrInvalidRequest)
+		}
+		return decodeStringSlice(value, &document.EvidenceRefs, section)
 	default:
 		return fmt.Errorf("%w: strategy section %q is not writable", ErrInvalidRequest, section)
 	}

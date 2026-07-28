@@ -1,0 +1,37 @@
+{
+  "contract_version": "strategy-package/v2",
+  "package_id": "strategypackage_02",
+  "package_version": 1,
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "strategy_id": "strategy_02",
+  "strategy_revision": 1,
+  "brief": {"brief_id": "brief_01", "version": 1},
+  "strategy": {
+    "contract_version": "strategy-draft/v2",
+    "objective": "获取制造企业销售线索",
+    "audience": {"primary": "制造企业研发负责人", "insights": ["重视可验证的数据与真实落地案例"]},
+    "proposition": "用可验证的流程协作缩短研发周期",
+    "channel_strategy": [
+      {"platform": "xiaohongshu", "role": "专业认知", "formats": ["图文笔记"]},
+      {"platform": "douyin", "role": "兴趣激发", "formats": ["短视频"]}
+    ],
+    "creative_recommendations": ["问题式标题命中研发场景", "用流程前后对比建立可信度", "用明确下一步承接咨询"],
+    "constraints": ["不得承诺无法验证的结果"],
+    "budget_and_cadence": {"budget": "CNY 100000", "cadence": "两周验证"},
+    "experiment_matrix": [{"hypothesis": "案例证据提高咨询意愿", "variable": "证据形式", "metric": "有效咨询率"}],
+    "measurement": ["有效线索数"],
+    "assumptions_and_gaps": [],
+    "executive_summary": "以多平台协同完成触达和承接。",
+    "cross_platform_role": "小红书建立认知，抖音激发兴趣。",
+    "platform_plans": [
+      {"platform": "xiaohongshu", "role": "专业认知", "audience_angle": "研发效率", "content_pillars": ["场景", "证据"], "formats": ["图文笔记"], "conversion_path": "搜索到表单", "cadence": "每周三篇", "primary_kpi": "有效咨询", "creative_ideas": ["流程对比图文"], "constraints": ["不使用绝对化承诺"]},
+      {"platform": "douyin", "role": "兴趣激发", "audience_angle": "协作冲突", "content_pillars": ["钩子", "案例"], "formats": ["短视频"], "conversion_path": "视频到落地页", "cadence": "每周三条", "primary_kpi": "有效线索", "creative_ideas": ["三秒冲突钩子"], "constraints": ["不承诺播放量"]}
+    ],
+    "evidence_refs": ["knowledgedoc_01"],
+    "lineage": {"brief_id": "brief_01", "brief_version": 1, "project_context_version": 3, "skill_versions": {"channel.xiaohongshu": "v1.0.0", "channel.douyin": "v1.0.0"}},
+    "compliance": {"contract_version": "strategy-compliance-report/v1", "passed": true, "issues": [], "checked_at": "2026-07-24T08:00:00Z"}
+  },
+  "readiness": {"publish_blockers": [], "creative_ready": true, "delivery_ready": true, "insights_ready": true},
+  "approval": {"review_id": "strategyreview_02", "approved_by": "user_01", "approved_at": "2026-07-24T08:10:00Z", "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+}

@@ -84,6 +84,11 @@ type Task struct {
 
 type BriefDocument struct {
 	ContractVersion string           `json:"contract_version"`
+	Brand           BriefBrand       `json:"brand,omitempty"`
+	Product         BriefProduct     `json:"product,omitempty"`
+	Industry        string           `json:"industry,omitempty"`
+	Region          string           `json:"region,omitempty"`
+	Language        string           `json:"language,omitempty"`
 	Campaign        BriefCampaign    `json:"campaign"`
 	Audience        BriefAudience    `json:"audience"`
 	Proposition     string           `json:"proposition"`
@@ -92,13 +97,26 @@ type BriefDocument struct {
 	Schedule        BriefSchedule    `json:"schedule"`
 	Constraints     []string         `json:"constraints"`
 	Measurement     BriefMeasurement `json:"measurement"`
+	PlatformBriefs  []BriefPlatform  `json:"platform_briefs,omitempty"`
+	Creative        BriefCreative    `json:"creative,omitempty"`
+	ReferenceIDs    []string         `json:"reference_ids,omitempty"`
 }
 
+type BriefBrand struct {
+	Name string `json:"name,omitempty"`
+}
+type BriefProduct struct {
+	Name     string   `json:"name,omitempty"`
+	Evidence []string `json:"evidence,omitempty"`
+}
 type BriefCampaign struct {
 	Objective string `json:"objective"`
 }
 type BriefAudience struct {
-	Primary string `json:"primary"`
+	Primary    string   `json:"primary"`
+	PainPoints []string `json:"pain_points,omitempty"`
+	Scenarios  []string `json:"scenarios,omitempty"`
+	Exclusions []string `json:"exclusions,omitempty"`
 }
 type BriefBudget struct {
 	Total string `json:"total"`
@@ -109,12 +127,65 @@ type BriefSchedule struct {
 type BriefMeasurement struct {
 	PrimaryKPI string `json:"primary_kpi"`
 }
+type BriefPlatform struct {
+	Platform       string   `json:"platform"`
+	Role           string   `json:"role,omitempty"`
+	ContentFormats []string `json:"content_formats,omitempty"`
+	ConversionPath string   `json:"conversion_path,omitempty"`
+	Budget         string   `json:"budget,omitempty"`
+	PrimaryKPI     string   `json:"primary_kpi,omitempty"`
+}
+type BriefCreative struct {
+	Tone              []string `json:"tone,omitempty"`
+	MandatoryElements []string `json:"mandatory_elements,omitempty"`
+	ProhibitedClaims  []string `json:"prohibited_claims,omitempty"`
+}
+
+// MarshalJSON keeps the frozen v1 wire shape byte-for-byte stable while allowing
+// v2-only fields to coexist in the Go projection used by readers.
+func (d BriefDocument) MarshalJSON() ([]byte, error) {
+	if d.ContractVersion != "strategy-brief-version/v1" {
+		type alias BriefDocument
+		return json.Marshal(alias(d))
+	}
+	return json.Marshal(struct {
+		ContractVersion string           `json:"contract_version"`
+		Campaign        BriefCampaign    `json:"campaign"`
+		Audience        BriefAudience    `json:"audience"`
+		Proposition     string           `json:"proposition"`
+		Channels        []string         `json:"channels"`
+		Budget          BriefBudget      `json:"budget"`
+		Schedule        BriefSchedule    `json:"schedule"`
+		Constraints     []string         `json:"constraints"`
+		Measurement     BriefMeasurement `json:"measurement"`
+	}{
+		ContractVersion: d.ContractVersion,
+		Campaign:        d.Campaign,
+		Audience:        d.Audience,
+		Proposition:     d.Proposition,
+		Channels:        d.Channels,
+		Budget:          d.Budget,
+		Schedule:        d.Schedule,
+		Constraints:     d.Constraints,
+		Measurement:     d.Measurement,
+	})
+}
 
 func EmptyBriefDocument() BriefDocument {
 	return BriefDocument{
 		ContractVersion: "strategy-brief-version/v1",
 		Channels:        []string{},
 		Constraints:     []string{},
+	}
+}
+
+func EmptyBriefDocumentV2() BriefDocument {
+	return BriefDocument{
+		ContractVersion: "strategy-brief-version/v2",
+		Channels:        []string{},
+		Constraints:     []string{},
+		PlatformBriefs:  []BriefPlatform{},
+		ReferenceIDs:    []string{},
 	}
 }
 
@@ -188,6 +259,24 @@ type BriefPatch struct {
 	Warnings        []string              `json:"warnings,omitempty"`
 }
 
+type ConversationQuestion struct {
+	FieldPath string `json:"field_path"`
+	Text      string `json:"text"`
+}
+
+// ConversationTurnDecision is the model-facing result for one Strategy
+// conversation turn. It is deliberately separate from the frozen Brief patch
+// contract: conversational intent and copy may evolve without changing the
+// artifact exchanged with downstream systems.
+type ConversationTurnDecision struct {
+	Intent            string                 `json:"intent"`
+	AssistantReply    string                 `json:"assistant_reply"`
+	Patch             BriefPatch             `json:"patch"`
+	ConfirmFields     []string               `json:"confirm_fields"`
+	FollowUpQuestions []ConversationQuestion `json:"follow_up_questions"`
+	Warnings          []string               `json:"warnings,omitempty"`
+}
+
 type StrategyDocument struct {
 	ContractVersion         string            `json:"contract_version"`
 	Objective               string            `json:"objective"`
@@ -201,6 +290,11 @@ type StrategyDocument struct {
 	Measurement             []string          `json:"measurement"`
 	AssumptionsAndGaps      []string          `json:"assumptions_and_gaps"`
 	Lineage                 StrategyLineage   `json:"lineage"`
+	ExecutiveSummary        string            `json:"executive_summary,omitempty"`
+	CrossPlatformRole       string            `json:"cross_platform_role,omitempty"`
+	PlatformPlans           []PlatformPlan    `json:"platform_plans,omitempty"`
+	EvidenceRefs            []string          `json:"evidence_refs,omitempty"`
+	Compliance              *ComplianceReport `json:"compliance,omitempty"`
 }
 
 type StrategyAudience struct {
@@ -211,6 +305,18 @@ type ChannelStrategy struct {
 	Platform string   `json:"platform"`
 	Role     string   `json:"role"`
 	Formats  []string `json:"formats"`
+}
+type PlatformPlan struct {
+	Platform       string   `json:"platform"`
+	Role           string   `json:"role"`
+	AudienceAngle  string   `json:"audience_angle"`
+	ContentPillars []string `json:"content_pillars"`
+	Formats        []string `json:"formats"`
+	ConversionPath string   `json:"conversion_path"`
+	Cadence        string   `json:"cadence"`
+	PrimaryKPI     string   `json:"primary_kpi"`
+	CreativeIdeas  []string `json:"creative_ideas"`
+	Constraints    []string `json:"constraints"`
 }
 type BudgetAndCadence struct {
 	Budget  string `json:"budget"`
@@ -229,18 +335,80 @@ type StrategyLineage struct {
 }
 
 func (d StrategyDocument) Validate() error {
-	if d.ContractVersion != "strategy-draft/v1" || strings.TrimSpace(d.Objective) == "" ||
+	if (d.ContractVersion != "strategy-draft/v1" && d.ContractVersion != "strategy-draft/v2") ||
+		strings.TrimSpace(d.Objective) == "" ||
 		strings.TrimSpace(d.Audience.Primary) == "" || strings.TrimSpace(d.Proposition) == "" ||
 		len(d.ChannelStrategy) == 0 || d.Lineage.BriefID == "" || d.Lineage.BriefVersion < 1 ||
 		d.Lineage.ProjectContextVersion < 1 {
 		return fmt.Errorf("%w: strategy document is incomplete", ErrInvalidRequest)
 	}
 	for _, channel := range d.ChannelStrategy {
-		if strings.TrimSpace(channel.Platform) == "" || len(channel.Formats) == 0 {
+		if !supportedPlatform(channel.Platform) || len(channel.Formats) == 0 {
 			return fmt.Errorf("%w: channel strategy is invalid", ErrInvalidRequest)
 		}
 	}
+	if d.ContractVersion == "strategy-draft/v2" {
+		if len(d.PlatformPlans) == 0 || strings.TrimSpace(d.ExecutiveSummary) == "" {
+			return fmt.Errorf("%w: multi-platform strategy is incomplete", ErrInvalidRequest)
+		}
+		seen := map[string]bool{}
+		for _, plan := range d.PlatformPlans {
+			if !supportedPlatform(plan.Platform) || strings.TrimSpace(plan.Role) == "" ||
+				strings.TrimSpace(plan.ConversionPath) == "" || len(plan.Formats) == 0 ||
+				len(plan.CreativeIdeas) == 0 || seen[plan.Platform] {
+				return fmt.Errorf("%w: platform plan is invalid", ErrInvalidRequest)
+			}
+			seen[plan.Platform] = true
+		}
+	}
 	return nil
+}
+
+func supportedPlatform(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem":
+		return true
+	default:
+		return false
+	}
+}
+
+type ComplianceIssue struct {
+	RuleID   string `json:"rule_id"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+	Evidence string `json:"evidence,omitempty"`
+}
+
+type ComplianceReport struct {
+	ContractVersion string            `json:"contract_version"`
+	ContentHash     string            `json:"content_hash,omitempty"`
+	Passed          bool              `json:"passed"`
+	Issues          []ComplianceIssue `json:"issues"`
+	CheckedAt       time.Time         `json:"checked_at"`
+}
+
+type SkillRun struct {
+	ID                    string                  `json:"id"`
+	OrganizationID        contract.OrganizationID `json:"organization_id"`
+	ProjectID             contract.ProjectID      `json:"project_id"`
+	AgentTaskID           string                  `json:"agent_task_id"`
+	SkillName             string                  `json:"skill_name"`
+	SkillVersion          string                  `json:"skill_version"`
+	Status                string                  `json:"status"`
+	InputHash             string                  `json:"input_hash"`
+	OutputHash            string                  `json:"output_hash,omitempty"`
+	ProviderCode          string                  `json:"provider_code,omitempty"`
+	ModelVersion          string                  `json:"model_version,omitempty"`
+	GenerationMode        string                  `json:"generation_mode,omitempty"`
+	ModelAlias            string                  `json:"model_alias,omitempty"`
+	PromptVersion         string                  `json:"prompt_version,omitempty"`
+	GenerationContextHash string                  `json:"generation_context_hash,omitempty"`
+	LatencyMS             int64                   `json:"latency_ms"`
+	ValidationAttempts    int                     `json:"validation_attempts"`
+	QualityReport         *QualityReport          `json:"quality_report,omitempty"`
+	StartedAt             time.Time               `json:"started_at"`
+	CompletedAt           time.Time               `json:"completed_at"`
 }
 
 type DraftRevision struct {
@@ -325,6 +493,7 @@ type PackageSnapshot struct {
 	StrategyRevision int64                   `json:"strategy_revision"`
 	Brief            BriefVersion            `json:"brief"`
 	Strategy         StrategyDocument        `json:"strategy"`
+	CreativeRoutes   []CreativeRoute         `json:"creative_routes,omitempty"`
 	Readiness        Readiness               `json:"readiness"`
 	Approval         PackageApproval         `json:"approval"`
 }

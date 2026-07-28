@@ -1,15 +1,18 @@
 import { useEffect } from 'react'
 import { Shell } from './components/Shell'
-import { DashboardPage, HomePage, ModulePage } from './components/Pages'
+import { HomePage, ModulePage } from './components/Pages'
+import { ProjectFlowDashboard } from './components/ProjectWorkflow'
+import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
+import { StateBoundary } from './components/StateBoundary'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
-import { projectPath, useAppRoute } from './lib/router'
+import { projectHomePath, projectManagePath, projectPath, useAppRoute } from './lib/router'
 import type { SystemKey } from './types'
 
 export default function App() {
   const { route, navigate } = useAppRoute()
-  const { currentProject, selectProject } = useProject()
+  const { currentProject, isLoading, reloadProjects, routeDiagnostic, selectProject, targetProjectId } = useProject()
   const system = systems.find(item => item.key === route.systemKey) ?? systems[0]
   const navItem = system.nav.find(item => item.id === route.navId) ?? system.nav[0]
 
@@ -17,13 +20,73 @@ export default function App() {
     if (route.projectId) selectProject(route.projectId)
   }, [route.projectId, selectProject])
 
-  const changeSystem = (next: SystemKey) => navigate(projectPath(currentProject.id, next))
-  const openProject = (projectId: string, next: SystemKey = 'strategy', navId = 'home', objectId?: string, view?: string) => {
+  useEffect(() => {
+    if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
+    rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view))
+  }, [route])
+
+  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
+  const activeProjectId = route.projectId ?? currentProject.id
+  const changeSystem = (next: SystemKey) => navigate(projectPath(activeProjectId, next, systemLanding[next]))
+  const openProject = (projectId: string, next?: SystemKey, navId?: string, objectId?: string, view?: string) => {
     selectProject(projectId)
-    navigate(projectPath(projectId, next, navId, objectId, view))
+    const rememberedPath = next && !navId ? getRememberedProjectSystemPath(projectId, next) : undefined
+    navigate(next ? rememberedPath ?? projectPath(projectId, next, navId ?? systemLanding[next], objectId, view) : projectHomePath(projectId))
   }
 
-  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings/models')} onSystemChange={changeSystem} onProjectChange={openProject} onNavChange={id => navigate(projectPath(currentProject.id, system.key, id))}>
-    {route.isModelSettings ? <ModelSettingsPage/> : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject}/> : navItem.id === 'home' ? <DashboardPage system={system} onSystemChange={changeSystem} onOpenProject={openProject}/> : <ModulePage key={`${system.key}-${navItem.id}`} system={system} item={navItem} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>}
+  const manageProject = (projectId: string) => {
+    selectProject(projectId)
+    navigate(projectManagePath(projectId))
+  }
+  const routeNeedsProject = Boolean(route.projectId && !route.isHome && !route.isModelSettings)
+  const routeProjectReady = !route.projectId || currentProject.id === route.projectId
+  const projectRouteState = isLoading || targetProjectId !== route.projectId ? 'loading' : 'error'
+  const content = route.isModelSettings ? <ModelSettingsPage/>
+    : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject} onManageProject={manageProject}/>
+    : routeNeedsProject && !routeProjectReady ? <ProjectRouteBoundary targetProjectId={route.projectId!} diagnostic={routeDiagnostic} state={projectRouteState} onRetry={() => { void reloadProjects(route.projectId) }}/>
+    : route.isProjectHome ? <ProjectFlowDashboard onOpenProject={openProject} onManageProject={manageProject}/>
+    : route.isProjectManagement ? <ProjectManagementPage onOpenWorkbench={id => openProject(id)} onOpenProject={openProject}/>
+    : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>
+
+  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings/models')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
+    {content}
   </Shell>
+}
+
+const recentProjectSystemPathKey = 'cookies.project-system-paths.v1'
+
+function rememberProjectSystemPath(projectId: string, systemKey: SystemKey, path: string) {
+  try {
+    const current = readRememberedProjectSystemPaths()
+    current[`${projectId}:${systemKey}`] = path
+    window.localStorage.setItem(recentProjectSystemPathKey, JSON.stringify(current))
+  } catch {
+    // Navigation history is a convenience feature; storage failures should not block routing.
+  }
+}
+
+function getRememberedProjectSystemPath(projectId: string, systemKey: SystemKey): string | undefined {
+  try {
+    return readRememberedProjectSystemPaths()[`${projectId}:${systemKey}`]
+  } catch {
+    return undefined
+  }
+}
+
+function readRememberedProjectSystemPaths(): Record<string, string> {
+  const raw = window.localStorage.getItem(recentProjectSystemPathKey)
+  if (!raw) return {}
+  const parsed = JSON.parse(raw) as unknown
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, string>
+    : {}
+}
+
+function ProjectRouteBoundary({ targetProjectId, diagnostic, state, onRetry }: { targetProjectId: string; diagnostic: string | null; state: 'loading' | 'error'; onRetry: () => void }) {
+  return <div className="module-page page-frame layout-workspace">
+    <div className="page-notice" role="status">正在加载路由目标 Project：{targetProjectId}{diagnostic ? `。${diagnostic}` : ''}</div>
+    <StateBoundary state={state} onRetry={onRetry}>
+      <span/>
+    </StateBoundary>
+  </div>
 }

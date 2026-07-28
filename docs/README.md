@@ -30,6 +30,8 @@
 | [四大模块导航与信息架构](./19-module-navigation-architecture.md) | 全局壳层、四系统三级导航树、路由、状态记忆与交互规范 | 产品、设计、前端、后端、测试 |
 | [四大模块子板块分析](./20-module-submodule-analysis.md) | 每个子板块的功能、必要性、价值、优先级、角色与展示形式 | 产品、设计、研发、业务负责人 |
 | [视频素材剪辑与开源框架方案](./21-video-material-editor-spec.md) | 素材剪辑子模块、编辑器布局、OpenCut/FFmpeg 选型、数据模型与 MVP | 产品、设计、前端、后端、音视频研发 |
+| [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md) | Project 管理、唯一工作台、八阶段落点、四模块逐页问题、整改计划与全面评估 | 产品、设计、前端、后端、测试 |
+| [Strategy × Creative 并行开发契约（已废止）](./23-strategy-creative-parallel-contracts-v2.md) | 仅保留为历史记录；前端已改为单一负责人，本文不再约束职责、路由或实施顺序 | 历史资料 |
 | [广告策略库](./策略/README.md) | 素材洞察、漫剧制作、剪辑包装、商品与素材投放及全链路闭环策略 | 策略、创意、投放、数据、产品 |
 
 ## 系统划分
@@ -38,12 +40,14 @@ cookies 的四个模块按四个完整垂直系统建设：
 
 | 系统 | 路由前缀 | 自有导航 | 核心数据所有权 |
 | --- | --- | --- | --- |
-| 需求与策略 | `/strategy/*` | 工作台、策略工作区、需求中心、策略中心、研究、评审、能力运营 | StrategyWorkspace、Conversation、Brief、Strategy |
-| 创意创作 | `/creative/*` | 工作台、图文、视频、任务、评审、交付、创意运营 | CreativeTask、CreativeVersion、CreativePackage |
-| 素材洞察 | `/insights/*` | 工作台、数据接入、分析素材库、分析、实验、经验、报告 | AssetFeature、AnalysisRun、Insight、Experience |
-| 智能投放 | `/delivery/*` | 作战台、账户环境、计划、执行、监控、优化、证据 | DeliveryPlan、ChangeSet、PlatformEntity、Evidence |
+| 需求与策略 | `/projects/:projectId/strategy/*` | 需求中心、策略任务、策略工作区、策略资产、研究、评审、能力运营 | StrategyWorkspace、Conversation、Brief、Strategy |
+| 创意创作 | `/projects/:projectId/creative/*` | 创意任务、图文、视频、生成队列、评审、交付、创意运营 | CreativeTask、CreativeVersion、CreativePackage |
+| 素材洞察 | `/projects/:projectId/insight/*` | 投前洞察、投后分析、分析素材库、内容分析、实验、经验、报告 | AssetFeature、AnalysisRun、Insight、Experience |
+| 智能投放 | `/projects/:projectId/delivery/*` | 计划、执行、监控、优化、审批、证据 | DeliveryPlan、ChangeSet、PlatformEntity、Evidence |
 
 四个系统不共享业务页面、业务状态机或数据库表。它们通过全局 Project 保持同一业务上下文，只复用 [共享基座](./05-shared-foundation.md)，并通过契约 API 与领域事件传递版本化产物。
+
+Home 的 Project 列表、`/projects/:projectId/manage` 项目管理和 `/projects/:projectId/home` 项目工作台构成业务系统上层。Project 工作台是唯一总工作台；四个业务模块不再设置模块工作台，详细整改决策见 [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md)。
 
 共享知识库由 [ORAG](https://github.com/shikanon/orag) 实现，源码以 Git submodule 固定在 `third_party/orag`；四个业务系统只访问 cookies Knowledge Gateway，不直接依赖 ORAG 数据库或内部包。所有模型能力由 [统一模型 Provider](./07-unified-model-provider.md) 提供，默认使用火山引擎。
 

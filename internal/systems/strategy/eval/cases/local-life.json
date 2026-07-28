@@ -1,0 +1,11 @@
+{
+  "id": "local-life-store-visit",
+  "scenario": "本地生活到店",
+  "objective": "提升门店到店预约",
+  "audience": "门店三公里内有明确需求的人群",
+  "proposition": "提供可现场验证的专业服务",
+  "channels": ["xiaohongshu"],
+  "budget": "3万元",
+  "primary_kpi": "有效预约数",
+  "expected_signals": ["本地搜索", "到店路径", "有效预约"]
+}

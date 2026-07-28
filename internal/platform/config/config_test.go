@@ -13,8 +13,34 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
-		value.Strategy.PackageToCreativeEnabled || len(value.Strategy.OrganizationAllowlist) != 0 {
+		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
+		value.Strategy.TextModelAlias != "cookies.text.standard" ||
+		value.Strategy.PromptVersion != "strategy.generate.v2" ||
+		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
+	}
+	if !strings.Contains(value.MySQL.DSN, "127.0.0.1:3307") {
+		t.Fatalf("default MySQL DSN does not use the isolated local port: %q", value.MySQL.DSN)
+	}
+	if value.Media.FFmpegPath != "" || value.Media.FFprobePath != "" || value.Media.VideoWorkRoot != ".data/video-work" {
+		t.Fatalf("unexpected safe media defaults: %#v", value.Media)
+	}
+}
+
+func TestPasswordAuthenticationDefaultsToLocalOnly(t *testing.T) {
+	t.Parallel()
+	local, err := FromLookup(mapLookup(nil))
+	if err != nil || !local.Auth.PasswordEnabled {
+		t.Fatalf("local password authentication default = %#v, %v", local.Auth, err)
+	}
+	productionValues := secureProductionValues()
+	production, err := FromLookup(mapLookup(productionValues))
+	if err != nil || production.Auth.PasswordEnabled {
+		t.Fatalf("production password authentication default = %#v, %v", production.Auth, err)
+	}
+	productionValues["COOKIES_PASSWORD_AUTH_ENABLED"] = "true"
+	if _, err := FromLookup(mapLookup(productionValues)); err == nil {
+		t.Fatal("production accepted the local default administrator password")
 	}
 }
 
@@ -31,6 +57,14 @@ func TestStrategyRolloutRejectsInvalidBoolean(t *testing.T) {
 	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_APPROVE_ENABLED": "tru"}))
 	if err == nil {
 		t.Fatal("expected an invalid approval flag to fail closed")
+	}
+}
+
+func TestStrategyCriticRequiresRealProvider(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_CRITIC_ENABLED": "true"}))
+	if err == nil {
+		t.Fatal("expected Strategy critic without a real provider to be rejected")
 	}
 }
 
@@ -180,6 +214,162 @@ func TestArkImageAdapterIsExplicitAndLocalOnly(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected Ark adapter outside local to be rejected")
+	}
+}
+
+func TestArkVideoAdapterIsExplicitAndLocalOnly(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video"})); err == nil {
+		t.Fatal("expected Ark video configuration without credentials to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "local", "COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video",
+		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	}))
+	if err != nil || config.Provider.VideoAdapter != "ark_video" {
+		t.Fatalf("valid local Ark video configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory", "COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video",
+		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	})); err == nil {
+		t.Fatal("expected Ark video adapter outside local to be rejected")
+	}
+}
+
+func TestFromLookupUsesObjectStorageCompatibilityNamesForTOS(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_BLOB_PROVIDER":            "tos",
+		"OBJECT_STORAGE_ENDPOINT":          "tos.compat.example",
+		"OBJECT_STORAGE_REGION":            "cn-test",
+		"OBJECT_STORAGE_ACCESS_KEY":        "test-access-key",
+		"OBJECT_STORAGE_SECRET_KEY":        "test-secret-key",
+		"OBJECT_STORAGE_SECURITY_TOKEN":    "test-security-token",
+		"OBJECT_STORAGE_QUARANTINE_BUCKET": "compat-quarantine",
+		"OBJECT_STORAGE_ASSETS_BUCKET":     "compat-assets",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.Endpoint, "tos.compat.example"; got != want {
+		t.Fatalf("Endpoint = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.Region, "cn-test"; got != want {
+		t.Fatalf("Region = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AccessKey, "test-access-key"; got != want {
+		t.Fatalf("AccessKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.SecretKey, "test-secret-key"; got != want {
+		t.Fatalf("SecretKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.SecurityToken, "test-security-token"; got != want {
+		t.Fatalf("SecurityToken = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.QuarantineBucket, "compat-quarantine"; got != want {
+		t.Fatalf("QuarantineBucket = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "compat-assets"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func secureProductionValues() map[string]string {
+	return map[string]string{
+		"COOKIES_ENV":            "production",
+		"COOKIES_BLOB_PROVIDER":  "tos",
+		"COOKIES_TOS_ENDPOINT":   "tos.example.com",
+		"COOKIES_TOS_REGION":     "cn-test",
+		"COOKIES_TOS_ACCESS_KEY": "key",
+		"COOKIES_TOS_SECRET_KEY": "secret",
+		"COOKIES_SCANNER_MODE":   "clamav",
+		"COOKIES_CLAMAV_ADDRESS": "127.0.0.1:3310",
+	}
+}
+
+func TestFromLookupUsesLegacyObjectStorageNamesForTOS(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"OBJECT_STORAGE_PROVIDER":          "tos",
+		"OBJECT_STORAGE_ENDPOINT":          "tos.compat.example",
+		"OBJECT_STORAGE_REGION":            "cn-test",
+		"OBJECT_STORAGE_ACCESS_KEY_ID":     "test-access-key",
+		"OBJECT_STORAGE_ACCESS_KEY_SECRET": "test-secret-key",
+		"OBJECT_STORAGE_BUCKET_NAME":       "compat-assets",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.Provider, "tos"; got != want {
+		t.Fatalf("Provider = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AccessKey, "test-access-key"; got != want {
+		t.Fatalf("AccessKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.SecretKey, "test-secret-key"; got != want {
+		t.Fatalf("SecretKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "compat-assets"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func TestFromLookupPrefersCookiesTOSConfiguration(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_BLOB_PROVIDER":            "tos",
+		"COOKIES_TOS_ENDPOINT":             "tos.cookies.example",
+		"COOKIES_TOS_REGION":               "cn-cookies",
+		"COOKIES_TOS_ACCESS_KEY":           "cookies-access-key",
+		"COOKIES_TOS_SECRET_KEY":           "cookies-secret-key",
+		"COOKIES_TOS_QUARANTINE_BUCKET":    "cookies-quarantine",
+		"COOKIES_TOS_ASSETS_BUCKET":        "cookies-assets",
+		"OBJECT_STORAGE_ENDPOINT":          "tos.compat.example",
+		"OBJECT_STORAGE_REGION":            "cn-compat",
+		"OBJECT_STORAGE_ACCESS_KEY":        "compat-access-key",
+		"OBJECT_STORAGE_SECRET_KEY":        "compat-secret-key",
+		"OBJECT_STORAGE_QUARANTINE_BUCKET": "compat-quarantine",
+		"OBJECT_STORAGE_ASSETS_BUCKET":     "compat-assets",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.Endpoint, "tos.cookies.example"; got != want {
+		t.Fatalf("Endpoint = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AccessKey, "cookies-access-key"; got != want {
+		t.Fatalf("AccessKey = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "cookies-assets"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func TestArkTextAdapterIsExplicitAndLocalOnly(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_TEXT_ADAPTER": "ark_text"}))
+	if err == nil {
+		t.Fatal("expected Ark text configuration without credentials to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV":                   "local",
+		"COOKIES_PROVIDER_TEXT_ADAPTER": "ark_text",
+		"COOKIES_ARK_TEXT_API_KEY":      "test-key",
+		"COOKIES_ARK_TEXT_MODEL":        "doubao-test",
+	}))
+	if err != nil || config.Provider.TextAdapter != "ark_text" || config.Provider.ArkText.Model != "doubao-test" {
+		t.Fatalf("valid local Ark text configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+	_, err = FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV":                   "staging",
+		"COOKIES_BLOB_PROVIDER":         "memory",
+		"COOKIES_PROVIDER_TEXT_ADAPTER": "ark_text",
+		"COOKIES_ARK_TEXT_API_KEY":      "test-key",
+		"COOKIES_ARK_TEXT_MODEL":        "doubao-test",
+	}))
+	if err == nil {
+		t.Fatal("expected Ark text adapter outside local to be rejected")
 	}
 }
 

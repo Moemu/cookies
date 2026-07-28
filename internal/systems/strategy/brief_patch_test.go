@@ -95,3 +95,54 @@ func TestDeterministicBriefPatchSeparatesChineseLabeledFields(t *testing.T) {
 		t.Fatalf("extracted fields = %#v", values)
 	}
 }
+
+func TestNormalizeModelBriefPatchCanonicalizesXiaohongshuAliases(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"小红书", "小红书图文", "red note", "xiaohongshu"} {
+		patch := BriefPatch{Operations: []BriefPatchOperation{{
+			Op: "set", FieldPath: "channels", Value: mustJSON([]string{input}),
+		}}}
+		if err := normalizeModelBriefPatch(&patch); err != nil {
+			t.Fatalf("normalize %q: %v", input, err)
+		}
+		if got := string(patch.Operations[0].Value); got != `["xiaohongshu"]` {
+			t.Fatalf("normalize %q = %s", input, got)
+		}
+	}
+}
+
+func TestNormalizeModelBriefPatchRejectsUnsupportedChannels(t *testing.T) {
+	t.Parallel()
+	patch := BriefPatch{Operations: []BriefPatchOperation{{
+		Op: "set", FieldPath: "channels", Value: mustJSON([]string{"douyin"}),
+	}}}
+	if err := normalizeModelBriefPatch(&patch); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("error = %v, want invalid request", err)
+	}
+}
+
+func TestBriefPlatformScopeStaysVersioned(t *testing.T) {
+	t.Parallel()
+	operation := BriefPatchOperation{
+		Op: "set", FieldPath: "channels", Value: mustJSON([]string{"xiaohongshu", "douyin"}),
+	}
+	v1 := BriefDraft{
+		Status: "open", Version: 1, Document: EmptyBriefDocument(), FieldStates: map[string]FieldState{},
+	}
+	if _, err := ApplyBriefPatch(v1, BriefPatch{ExpectedVersion: 1, Operations: []BriefPatchOperation{operation}},
+		PatchFromUser, "user_1", time.Now()); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Brief v1 accepted multi-platform channels: %v", err)
+	}
+
+	v2 := BriefDraft{
+		Status: "open", Version: 1, Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	updated, err := ApplyBriefPatch(v2, BriefPatch{ExpectedVersion: 1, Operations: []BriefPatchOperation{operation}},
+		PatchFromUser, "user_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Document.PlatformBriefs) != 2 || updated.Document.PlatformBriefs[1].Platform != "douyin" {
+		t.Fatalf("Brief v2 platforms = %#v", updated.Document.PlatformBriefs)
+	}
+}

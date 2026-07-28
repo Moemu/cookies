@@ -33,6 +33,15 @@ Assert-Command npm
 
 Push-Location $repositoryRoot
 try {
+    $mysqlPort = $env:COOKIES_MYSQL_PORT
+    if ([string]::IsNullOrWhiteSpace($mysqlPort)) {
+        $mysqlPort = '3307'
+    }
+    $env:COOKIES_MYSQL_PORT = $mysqlPort
+    if ([string]::IsNullOrWhiteSpace($env:COOKIES_MYSQL_DSN)) {
+        $env:COOKIES_MYSQL_DSN = "cookies:cookies_local_development_only@tcp(127.0.0.1:$mysqlPort)/cookies?parseTime=true&multiStatements=true"
+    }
+
     Write-Host 'Starting MySQL and waiting for it to become healthy...'
     Invoke-Checked docker compose up -d --wait mysql
 
@@ -46,7 +55,6 @@ try {
 
     $env:COOKIES_ENV = 'local'
     $env:COOKIES_HTTP_ADDR = ':8080'
-    $env:COOKIES_MYSQL_DSN = 'cookies:cookies_local_development_only@tcp(127.0.0.1:3306)/cookies?parseTime=true&multiStatements=true'
     $env:COOKIES_LOCAL_ORGANIZATION_ID = 'org_local'
     $env:COOKIES_LOCAL_PRINCIPAL_KIND = 'user'
     $env:COOKIES_LOCAL_PRINCIPAL_ID = 'user_local'

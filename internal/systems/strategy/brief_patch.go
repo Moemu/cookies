@@ -70,8 +70,75 @@ func ApplyBriefPatch(draft BriefDraft, patch BriefPatch, origin PatchOrigin, act
 	return draft, nil
 }
 
+func normalizeModelBriefPatch(patch *BriefPatch) error {
+	if patch == nil {
+		return fmt.Errorf("%w: brief patch is required", ErrInvalidRequest)
+	}
+	for index := range patch.Operations {
+		operation := &patch.Operations[index]
+		if operation.FieldPath != "channels" {
+			continue
+		}
+		var values []string
+		if err := json.Unmarshal(operation.Value, &values); err != nil || len(values) == 0 {
+			return fmt.Errorf("%w: channels must be a non-empty string array", ErrInvalidRequest)
+		}
+		normalized := make([]string, 0, len(values))
+		for _, value := range values {
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "xiaohongshu", "小红书", "小红书图文", "rednote", "red note", "redbook", "red book":
+				normalized = appendUnique(normalized, "xiaohongshu")
+			case "douyin", "抖音", "抖音短视频":
+				if patch.ContractVersion != "strategy-brief-patch/v2" {
+					return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
+				}
+				normalized = appendUnique(normalized, "douyin")
+			case "taobao_tmall", "taobao", "tmall", "淘宝", "天猫", "淘宝天猫", "淘宝/天猫":
+				if patch.ContractVersion != "strategy-brief-patch/v2" {
+					return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
+				}
+				normalized = appendUnique(normalized, "taobao_tmall")
+			case "wechat_ecosystem", "wechat", "微信", "公众号", "视频号", "微信生态", "私域":
+				if patch.ContractVersion != "strategy-brief-patch/v2" {
+					return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
+				}
+				normalized = appendUnique(normalized, "wechat_ecosystem")
+			default:
+				return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
+			}
+		}
+		operation.Value = mustJSON(normalized)
+	}
+	return nil
+}
+
 func setBriefField(document *BriefDocument, path string, raw json.RawMessage) error {
 	switch path {
+	case "brand.name":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: brand.name requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeString(raw, &document.Brand.Name, path)
+	case "product.name":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: product.name requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeString(raw, &document.Product.Name, path)
+	case "industry":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: industry requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeString(raw, &document.Industry, path)
+	case "region":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: region requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeString(raw, &document.Region, path)
+	case "language":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: language requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeString(raw, &document.Language, path)
 	case "campaign.objective":
 		return decodeString(raw, &document.Campaign.Objective, path)
 	case "audience.primary":
@@ -84,11 +151,17 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 			return fmt.Errorf("%w: channels must be a non-empty string array", ErrInvalidRequest)
 		}
 		for _, value := range values {
-			if value != "xiaohongshu" {
-				return fmt.Errorf("%w: first release supports only xiaohongshu", ErrInvalidRequest)
+			if !supportedPlatform(value) {
+				return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
+			}
+			if document.ContractVersion == "strategy-brief-version/v1" && value != "xiaohongshu" {
+				return fmt.Errorf("%w: Brief v1 supports only xiaohongshu", ErrInvalidRequest)
 			}
 		}
 		document.Channels = values
+		if document.ContractVersion == "strategy-brief-version/v2" {
+			document.PlatformBriefs = syncPlatformBriefs(document.PlatformBriefs, values)
+		}
 		return nil
 	case "budget.total":
 		return decodeString(raw, &document.Budget.Total, path)
@@ -103,6 +176,11 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 		return nil
 	case "measurement.primary_kpi":
 		return decodeString(raw, &document.Measurement.PrimaryKPI, path)
+	case "reference_ids":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: reference_ids requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeStringSlice(raw, &document.ReferenceIDs, path)
 	default:
 		return fmt.Errorf("%w: field_path %q is not writable", ErrInvalidRequest, path)
 	}
@@ -128,6 +206,18 @@ func ComputeCompleteness(document BriefDocument, states map[string]FieldState) C
 		{"channels", len(document.Channels) > 0},
 	}
 	result := Completeness{Blockers: []ValidationError{}, Warnings: []ValidationError{}}
+	if document.ContractVersion == "strategy-brief-version/v2" {
+		required = append([]struct {
+			path  string
+			value bool
+		}{
+			{"brand.name", strings.TrimSpace(document.Brand.Name) != ""},
+			{"product.name", strings.TrimSpace(document.Product.Name) != ""},
+			{"industry", strings.TrimSpace(document.Industry) != ""},
+			{"region", strings.TrimSpace(document.Region) != ""},
+			{"language", strings.TrimSpace(document.Language) != ""},
+		}, required...)
+	}
 	for _, field := range required {
 		if !field.value {
 			result.Blockers = append(result.Blockers, ValidationError{Field: field.path, Reason: "必填信息缺失"})
@@ -144,5 +234,28 @@ func ComputeCompleteness(document BriefDocument, states map[string]FieldState) C
 		result.Warnings = append(result.Warnings, ValidationError{Field: "measurement.primary_kpi", Reason: "未提供核心指标，洞察准备度将为未就绪"})
 	}
 	result.Ready = len(result.Blockers) == 0
+	return result
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func syncPlatformBriefs(existing []BriefPlatform, channels []string) []BriefPlatform {
+	byPlatform := make(map[string]BriefPlatform, len(existing))
+	for _, value := range existing {
+		byPlatform[value.Platform] = value
+	}
+	result := make([]BriefPlatform, 0, len(channels))
+	for _, channel := range channels {
+		value := byPlatform[channel]
+		value.Platform = channel
+		result = append(result, value)
+	}
 	return result
 }

@@ -15,6 +15,34 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /platform/v1/auth/login:
+    post:
+      operationId: loginWithPassword
+      summary: Create an opaque HttpOnly administrator session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string, minLength: 1, maxLength: 255}
+                password: {type: string, minLength: 1, maxLength: 4096}
+              additionalProperties: false
+      responses:
+        '200': {description: Session created.}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '423': {description: Credential temporarily locked.}
+  /platform/v1/auth/logout:
+    post:
+      operationId: logoutPasswordSession
+      summary: Revoke the current session and expire its cookie.
+      security: []
+      responses:
+        '204': {description: Session revoked or already absent.}
+        '400': {description: The session cookie is malformed and has been expired.}
   /platform/v1/context:
     get:
       operationId: getRequestContext
@@ -111,6 +139,55 @@ paths:
               schema: {$ref: '#/components/schemas/Project'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
+  /platform/v1/projects/{project_id}/knowledge/documents:
+    get:
+      operationId: listKnowledgeDocuments
+      summary: List parsed Project documents without returning extracted content.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200': {description: Project document list.}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createKnowledgeDocument
+      summary: Scan, store, and parse one Markdown or DOCX document.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, contentEncoding: binary}
+      responses:
+        '201': {description: Document parsed and stored.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /platform/v1/projects/{project_id}/knowledge/research-runs:
+    post:
+      operationId: createExternalResearchRun
+      summary: Execute one explicitly confirmed web or MCP research call.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, query, document_ids, disclosed_fields, confirmed]
+              properties:
+                mode: {enum: [web, mcp]}
+                query: {type: string, minLength: 1, maxLength: 2000}
+                document_ids: {type: array, maxItems: 20, items: {type: string}}
+                disclosed_fields: {type: array, items: {type: string}}
+                confirmed: {const: true}
+              additionalProperties: false
+      responses:
+        '201': {description: Research run and any ResearchArtifacts.}
+        '400': {$ref: '#/components/responses/BadRequest'}
   /platform/v1/projects/{project_id}/assets/uploads:
     post:
       operationId: createAssetUpload

@@ -235,6 +235,37 @@ func (r MySQLRepository) FailIntake(ctx context.Context, intake GeneratedIntake,
 	return nil
 }
 
+func (r MySQLRepository) CompleteRender(ctx context.Context, renderJobID string, commit AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
+	db, err := r.db()
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if renderJobID == "" || commit.SourceType != contract.AssetSourceRendered || commit.RenderJobID != renderJobID {
+		return contract.ProjectAssetRef{}, ErrInvalidState
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	defer tx.Rollback()
+	if err := insertAssetCommit(ctx, tx, commit, now); err != nil {
+		if !isDuplicate(err) {
+			return contract.ProjectAssetRef{}, err
+		}
+		var assetID contract.AssetID
+		var version int64
+		lookupErr := tx.QueryRowContext(ctx, `SELECT asset_id, version FROM asset_versions WHERE organization_id=? AND render_job_id=?`, commit.OrganizationID, renderJobID).Scan(&assetID, &version)
+		if lookupErr != nil {
+			return contract.ProjectAssetRef{}, err
+		}
+		return contract.ProjectAssetRef{ProjectID: commit.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: assetID, Version: version}}, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	return contract.ProjectAssetRef{ProjectID: commit.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version}}, nil
+}
+
 func (r MySQLRepository) complete(ctx context.Context, source, sourceID string, intake GeneratedIntake, commit AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
 	db, err := r.db()
 	if err != nil {
@@ -318,7 +349,8 @@ func (r MySQLRepository) complete(ctx context.Context, source, sourceID string, 
 }
 
 func insertAssetCommit(ctx context.Context, tx *sql.Tx, c AssetCommit, now time.Time) error {
-	if c.Version != 1 || c.OrganizationID == "" || c.ProjectID == "" || c.AssetID == "" || c.BlobID == "" || c.SizeBytes < 1 || c.SizeBytes > MaxImageBytes || !validSHA256(c.SHA256) || c.Kind != contract.AssetImage || !allowedDeclaredImageMIME(c.MIMEType) || c.OwnerSystem != "assets" {
+	expectedKind, maxBytes, supported := generatedAssetPolicy(c.MIMEType)
+	if c.Version != 1 || c.OrganizationID == "" || c.ProjectID == "" || c.AssetID == "" || c.BlobID == "" || c.SizeBytes < 1 || c.SizeBytes > maxBytes || !validSHA256(c.SHA256) || !supported || c.Kind != expectedKind || c.OwnerSystem != "assets" {
 		return fmt.Errorf("invalid asset commit")
 	}
 	if c.Location.Provider == "" || validateObjectTarget(c.Location.Bucket, c.Location.Key) != nil {
@@ -336,8 +368,8 @@ func insertAssetCommit(ctx context.Context, tx *sql.Tx, c AssetCommit, now time.
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO asset_versions (organization_id, asset_id, version, blob_id, status, source_type, mime_type, size_bytes, sha256, width_pixels, height_pixels, provider_job_id, provider_output_id, project_context_version, created_at) VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.OrganizationID, c.AssetID, c.Version, c.BlobID, c.SourceType, c.MIMEType, c.SizeBytes, c.SHA256, nullableInt(c.WidthPixels), nullableInt(c.HeightPixels), nullable(c.ProviderJobID), nullable(c.ProviderOutputID), nullableInt64(c.ProjectContextVersion), now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO asset_versions (organization_id, asset_id, version, blob_id, status, source_type, mime_type, size_bytes, sha256, width_pixels, height_pixels, duration_ms, frame_rate, video_codec, audio_codec, render_job_id, provider_job_id, provider_output_id, project_context_version, created_at) VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.OrganizationID, c.AssetID, c.Version, c.BlobID, c.SourceType, c.MIMEType, c.SizeBytes, c.SHA256, nullableInt(c.WidthPixels), nullableInt(c.HeightPixels), nullableInt64(c.DurationMS), nullable(c.FrameRate), nullable(c.VideoCodec), nullable(c.AudioCodec), nullable(c.RenderJobID), nullable(c.ProviderJobID), nullable(c.ProviderOutputID), nullableInt64(c.ProjectContextVersion), now)
 	if err != nil {
 		return err
 	}
@@ -396,7 +428,7 @@ func (r MySQLRepository) RemoveProjectAsset(ctx context.Context, org contract.Or
 
 const uploadSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, status, original_filename, declared_mime_type, declared_size_bytes, declared_sha256, quarantine_provider, quarantine_bucket, quarantine_object_key, idempotency_key, request_hash, project_context_version, target_asset_id, target_blob_id, request_id, trace_id, asset_id, asset_version, error_code, expires_at, created_at, updated_at FROM upload_sessions`
 const intakeSelect = `SELECT id, organization_id, project_id, provider_job_id, output_id, provider_code, status, request_payload, idempotency_key, request_hash, target_asset_id, target_blob_id, asset_id, asset_version, error_code, error_message, retryable, attempt_count, max_attempts, available_at, lock_owner, request_id, trace_id, created_at, updated_at FROM generated_intakes`
-const projectAssetSelect = `SELECT pa.project_id, pa.created_at, a.id, a.organization_id, a.asset_kind, a.status, a.owner_system, a.latest_version, a.created_at, a.updated_at, av.version, av.status, av.source_type, av.mime_type, av.size_bytes, av.sha256, av.width_pixels, av.height_pixels, av.provider_job_id, av.provider_output_id, av.project_context_version, av.created_at, b.storage_provider, b.bucket_name, b.object_key, b.storage_version_id, b.etag FROM project_assets pa JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version JOIN asset_blobs b ON b.id=av.blob_id`
+const projectAssetSelect = `SELECT pa.project_id, pa.created_at, a.id, a.organization_id, a.asset_kind, a.status, a.owner_system, a.latest_version, a.created_at, a.updated_at, av.version, av.status, av.source_type, av.mime_type, av.size_bytes, av.sha256, av.width_pixels, av.height_pixels, av.duration_ms, av.frame_rate, av.video_codec, av.audio_codec, av.render_job_id, av.provider_job_id, av.provider_output_id, av.project_context_version, av.created_at, b.storage_provider, b.bucket_name, b.object_key, b.storage_version_id, b.etag FROM project_assets pa JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version JOIN asset_blobs b ON b.id=av.blob_id`
 
 type scanner interface{ Scan(...any) error }
 
@@ -451,10 +483,10 @@ func scanIntake(row scanner) (GeneratedIntake, error) {
 }
 func scanProjectAsset(row scanner) (ProjectAsset, error) {
 	var v ProjectAsset
-	var width, height sql.NullInt64
-	var job, output, versionID, etag sql.NullString
+	var width, height, duration sql.NullInt64
+	var frameRate, videoCodec, audioCodec, renderJob, job, output, versionID, etag sql.NullString
 	var contextVersion sql.NullInt64
-	err := row.Scan(&v.Ref.ProjectID, &v.CreatedAt, &v.Asset.ID, &v.Asset.OrganizationID, &v.Asset.Kind, &v.Asset.Status, &v.Asset.OwnerSystem, &v.Asset.LatestVersion, &v.Asset.CreatedAt, &v.Asset.UpdatedAt, &v.Version.Version, &v.Version.Status, &v.Version.SourceType, &v.Version.MIMEType, &v.Version.SizeBytes, &v.Version.SHA256, &width, &height, &job, &output, &contextVersion, &v.Version.CreatedAt, &v.Version.Blob.Provider, &v.Version.Blob.Bucket, &v.Version.Blob.Key, &versionID, &etag)
+	err := row.Scan(&v.Ref.ProjectID, &v.CreatedAt, &v.Asset.ID, &v.Asset.OrganizationID, &v.Asset.Kind, &v.Asset.Status, &v.Asset.OwnerSystem, &v.Asset.LatestVersion, &v.Asset.CreatedAt, &v.Asset.UpdatedAt, &v.Version.Version, &v.Version.Status, &v.Version.SourceType, &v.Version.MIMEType, &v.Version.SizeBytes, &v.Version.SHA256, &width, &height, &duration, &frameRate, &videoCodec, &audioCodec, &renderJob, &job, &output, &contextVersion, &v.Version.CreatedAt, &v.Version.Blob.Provider, &v.Version.Blob.Bucket, &v.Version.Blob.Key, &versionID, &etag)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectAsset{}, ErrNotFound
 	}
@@ -466,6 +498,11 @@ func scanProjectAsset(row scanner) (ProjectAsset, error) {
 	v.Version.AssetID = v.Asset.ID
 	v.Version.WidthPixels = int(width.Int64)
 	v.Version.HeightPixels = int(height.Int64)
+	v.Version.DurationMS = duration.Int64
+	v.Version.FrameRate = frameRate.String
+	v.Version.VideoCodec = videoCodec.String
+	v.Version.AudioCodec = audioCodec.String
+	v.Version.RenderJobID = renderJob.String
 	v.Version.ProviderJobID = job.String
 	v.Version.ProviderOutputID = output.String
 	v.Version.ProjectContextVersion = contextVersion.Int64

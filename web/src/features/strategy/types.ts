@@ -33,6 +33,8 @@ export type Message = {
   content_type: 'text' | 'business_card' | 'error_notice'
   content: string
   ai_generated: boolean
+  agent_task_id?: string
+  skill_run_ids?: string[]
   created_at: string
 }
 
@@ -44,7 +46,12 @@ export type FieldState = {
 }
 
 export type BriefDocument = {
-  contract_version: 'strategy-brief-version/v1'
+  contract_version: 'strategy-brief-version/v1' | 'strategy-brief-version/v2'
+  brand?: { name?: string }
+  product?: { name?: string; evidence?: string[] }
+  industry?: string
+  region?: string
+  language?: string
   campaign: { objective: string }
   audience: { primary: string }
   proposition: string
@@ -53,6 +60,20 @@ export type BriefDocument = {
   schedule: { window: string }
   constraints: string[]
   measurement: { primary_kpi: string }
+  platform_briefs?: Array<{
+    platform: string
+    role?: string
+    content_formats?: string[]
+    conversion_path?: string
+    budget?: string
+    primary_kpi?: string
+  }>
+  creative?: {
+    tone?: string[]
+    mandatory_elements?: string[]
+    prohibited_claims?: string[]
+  }
+  reference_ids?: string[]
 }
 
 export type BriefDraft = {
@@ -77,7 +98,7 @@ export type BriefVersion = {
 }
 
 export type StrategyDocument = {
-  contract_version: 'strategy-draft/v1'
+  contract_version: 'strategy-draft/v1' | 'strategy-draft/v2'
   objective: string
   audience: { primary: string; insights: string[] }
   proposition: string
@@ -88,6 +109,29 @@ export type StrategyDocument = {
   experiment_matrix: Array<{ hypothesis: string; variable: string; metric: string }>
   measurement: string[]
   assumptions_and_gaps: string[]
+  executive_summary?: string
+  cross_platform_role?: string
+  platform_plans?: PlatformPlan[]
+  evidence_refs?: string[]
+  compliance?: {
+    contract_version: string
+    passed: boolean
+    issues: Array<{ rule_id: string; severity: 'warning' | 'blocker'; message: string; evidence?: string }>
+    checked_at: string
+  }
+}
+
+export type PlatformPlan = {
+  platform: string
+  role: string
+  audience_angle: string
+  content_pillars: string[]
+  formats: string[]
+  conversion_path: string
+  cadence: string
+  primary_kpi: string
+  creative_ideas: string[]
+  constraints: string[]
 }
 
 export type DraftRevision = {
@@ -110,12 +154,50 @@ export type StrategyDraft = {
   revision?: DraftRevision
 }
 
+export type GenerationReadiness = {
+  ready: boolean
+  generation_mode: 'deterministic' | 'provider'
+  model_alias?: string
+  upstream_model?: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  prompt_version: string
+  reason_code?: string
+}
+
+export type GenerationMetadata = {
+  generation_mode: 'deterministic' | 'fake_template' | 'provider'
+  provider_code?: string
+  model_alias?: string
+  model_version?: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  prompt_version?: string
+  skill_versions: Record<string, string>
+  skill_snapshot_hashes: Record<string, string>
+  generation_context_hash?: string
+  output_hash?: string
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
+  latency_ms?: number
+  validation_attempts: number
+  quality_report?: { passed: boolean; score: number; errors: string[]; warnings: string[] }
+}
+
 export type Review = {
   id: string
+  project_id: string
   strategy_id: string
   candidate_revision: number
   candidate_content_hash: string
   status: 'open' | 'returned' | 'approved' | 'invalidated'
+}
+
+export type ReviewComment = {
+  id: string
+  review_id: string
+  author_id: string
+  body: string
+  created_at: string
 }
 
 export type PackageVersion = {
@@ -124,14 +206,83 @@ export type PackageVersion = {
   content_hash: string
   status: 'published' | 'superseded' | 'archived'
   snapshot: {
+    contract_version?: 'strategy-package/v1' | 'strategy-package/v2'
     strategy_id: string
     strategy_revision: number
+    strategy?: StrategyDocument
+    brief?: BriefVersion
+    creative_routes?: Array<{
+      route_type: 'pre_roll'
+      video_purpose: 'performance'
+      channels: Array<'douyin' | 'kuaishou'>
+      reason: string
+      target_duration_seconds: 5
+      aspect_ratio: '9:16'
+      source_asset_refs: Array<{ asset_id: string; version: number }>
+      evidence_refs: string[]
+      requires_human_confirmation: true
+    }>
     readiness: {
       creative_ready: boolean
       delivery_ready: boolean
       insights_ready: boolean
     }
   }
+}
+
+export type SkillRun = {
+  id: string
+  agent_task_id: string
+  skill_name: string
+  skill_version: string
+  status: string
+  input_hash: string
+  output_hash?: string
+  generation_mode?: string
+  model_version?: string
+  prompt_version?: string
+  latency_ms: number
+  validation_attempts: number
+  quality_report?: { passed: boolean; score: number; errors: string[]; warnings: string[] }
+}
+
+export type KnowledgeDocument = {
+  id: string
+  project_id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  content_sha256: string
+  text_sha256: string
+  status: 'ready'
+  created_at: string
+}
+
+export type AgentTask = {
+  id: string
+  status: 'dispatch_pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  version: number
+  error?: { code: string; message: string; retryable: boolean }
+}
+
+export type ResearchRun = {
+  id: string
+  mode: 'web' | 'mcp'
+  query: string
+  document_ids: string[]
+  disclosed_fields: string[]
+  status: 'running' | 'succeeded' | 'failed' | 'unavailable'
+  confirmed_at: string
+  error_code?: string
+  error_message?: string
+  artifacts: Array<{
+    id: string
+    title: string
+    source_url?: string
+    content: string
+    citations: string[]
+    content_hash: string
+  }>
 }
 
 export type WorkspaceDetail = {

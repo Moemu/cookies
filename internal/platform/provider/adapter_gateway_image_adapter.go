@@ -168,6 +168,8 @@ func (a *AdapterGatewayImageAdapter) Open(ctx context.Context, project contract.
 	return a.handles.Open(ctx, project, ref)
 }
 
+func (*AdapterGatewayImageAdapter) ProviderCode() string { return adapterGatewayProviderCode }
+
 func mapGatewayHTTPError(status int) error {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:

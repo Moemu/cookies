@@ -1,0 +1,8 @@
+{
+  "id": "b2b-lead-generation",
+  "objective": "获取销售线索",
+  "audience": "制造企业研发负责人",
+  "proposition": "缩短研发周期",
+  "channels": ["xiaohongshu"],
+  "expected_signals": ["资格筛选", "低摩擦 CTA", "有效线索率"]
+}

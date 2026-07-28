@@ -47,3 +47,5 @@ func (a *OpenAIImageAdapter) Poll(ctx context.Context, reference ImageTaskRefere
 func (a *OpenAIImageAdapter) Open(ctx context.Context, project contract.ProjectRef, ref contract.ProviderOutputRef) (io.ReadCloser, contract.OutputMetadata, error) {
 	return a.delegate.Open(ctx, project, ref)
 }
+
+func (a *OpenAIImageAdapter) ProviderCode() string { return a.delegate.ProviderCode() }

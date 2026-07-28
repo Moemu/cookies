@@ -35,14 +35,14 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 	if err != nil {
 		return SynchronousResult{}, err
 	}
-	if err := route.ValidateWithPolicy(a.allowInsecureHTTP); err != nil {
+	if err := route.ValidateTextWithPolicy(a.allowInsecureHTTP); err != nil {
 		return SynchronousResult{}, err
 	}
 	token, err := a.credentials.ResolveGatewayCredential(ctx, route.CredentialID, route.CredentialVersion)
 	if err != nil {
 		return SynchronousResult{}, gatewayExecutionError("MODEL_AUTH_UNAVAILABLE", "Adapter gateway credential could not be resolved")
 	}
-	messages := make([]map[string]string, 0, len(request.Messages))
+	messages := make([]map[string]string, 0, len(request.Messages)+1)
 	for _, message := range request.Messages {
 		if err := message.Validate(); err != nil {
 			return SynchronousResult{}, err
@@ -55,10 +55,41 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		if err := json.Unmarshal(request.OutputJSONSchema, &schema); err != nil {
 			return SynchronousResult{}, err
 		}
-		body["response_format"] = map[string]any{
-			"type":        "json_schema",
-			"json_schema": map[string]any{"name": "cookies_strategy_output", "strict": true, "schema": schema},
+		switch route.TextResponseMode {
+		case TextResponseJSONSchema:
+			body["response_format"] = map[string]any{
+				"type":        "json_schema",
+				"json_schema": map[string]any{"name": "cookies_strategy_output", "strict": true, "schema": schema},
+			}
+		case TextResponseJSONObject:
+			body["response_format"] = map[string]any{"type": "json_object"}
+			messages = prependSchemaInstruction(messages, request.OutputJSONSchema)
+			body["messages"] = messages
+		case TextResponsePromptJSON:
+			messages = prependSchemaInstruction(messages, request.OutputJSONSchema)
+			body["messages"] = messages
+		default:
+			return SynchronousResult{}, fmt.Errorf("adapter gateway text response mode is invalid")
 		}
+	}
+	if route.MaxOutputTokens > 0 {
+		switch route.OutputTokenParameter {
+		case "", TextOutputTokenParameterMaxTokens:
+			body["max_tokens"] = route.MaxOutputTokens
+		case TextOutputTokenParameterMaxCompletionTokens:
+			body["max_completion_tokens"] = route.MaxOutputTokens
+		default:
+			return SynchronousResult{}, fmt.Errorf("adapter gateway output token parameter is invalid")
+		}
+	}
+	if route.TemperatureSet {
+		body["temperature"] = route.Temperature
+	}
+	if route.ThinkingMode != "" {
+		body["thinking"] = map[string]string{"type": route.ThinkingMode}
+	}
+	if route.ReasoningSplit {
+		body["reasoning_split"] = true
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -123,15 +154,21 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		return SynchronousResult{}, gatewayExecutionError("MODEL_RESPONSE_INVALID", "Adapter gateway returned an invalid text response")
 	}
 	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
-	result := SynchronousResult{ProviderCode: adapterGatewayProviderCode, ModelVersion: strings.TrimSpace(decoded.Model), Text: content}
+	result := SynchronousResult{
+		ProviderCode: adapterGatewayProviderCode, ModelVersion: strings.TrimSpace(decoded.Model),
+		Text: content, RouteSnapshot: &route,
+	}
 	if result.ModelVersion == "" {
 		result.ModelVersion = route.UpstreamModel
 	}
 	if len(request.OutputJSONSchema) > 0 {
 		if !json.Valid([]byte(content)) {
-			return SynchronousResult{}, gatewayExecutionError("MODEL_OUTPUT_INVALID", "Structured text output is not valid JSON")
+			if route.TextResponseMode != TextResponsePromptJSON {
+				return SynchronousResult{}, gatewayExecutionError("MODEL_OUTPUT_INVALID", "Structured text output is not valid JSON")
+			}
+		} else {
+			result.StructuredOutput = json.RawMessage(content)
 		}
-		result.StructuredOutput = json.RawMessage(content)
 	}
 	if decoded.Usage.TotalTokens > 0 {
 		result.Usage = &TokenUsage{
@@ -140,4 +177,29 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		}
 	}
 	return result, nil
+}
+
+func (a *AdapterGatewayTextAdapter) InspectTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (TextRouteInspection, error) {
+	route, err := a.routes.ResolveTextRoute(ctx, organizationID, modelAlias)
+	if err != nil {
+		return TextRouteInspection{}, err
+	}
+	if err := route.ValidateTextWithPolicy(a.allowInsecureHTTP); err != nil {
+		return TextRouteInspection{}, err
+	}
+	if _, err := a.credentials.ResolveGatewayCredential(ctx, route.CredentialID, route.CredentialVersion); err != nil {
+		return TextRouteInspection{}, gatewayExecutionError("MODEL_AUTH_UNAVAILABLE", "Adapter gateway credential could not be resolved")
+	}
+	return TextRouteInspection{
+		ModelAlias: modelAlias, UpstreamModel: route.UpstreamModel,
+		RouteRevisionID: route.RouteRevisionID, ResponseMode: route.TextResponseMode, Ready: true,
+	}, nil
+}
+
+func prependSchemaInstruction(messages []map[string]string, schema json.RawMessage) []map[string]string {
+	instruction := map[string]string{
+		"role":    "system",
+		"content": "Return exactly one JSON object matching this JSON Schema. Do not use Markdown fences or add commentary.\n" + string(schema),
+	}
+	return append([]map[string]string{instruction}, messages...)
 }

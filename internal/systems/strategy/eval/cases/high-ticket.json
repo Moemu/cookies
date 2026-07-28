@@ -1,0 +1,11 @@
+{
+  "id": "high-ticket-consideration",
+  "scenario": "高客单、长决策链产品",
+  "objective": "获取高质量咨询",
+  "audience": "正在比较方案的企业决策者",
+  "proposition": "用可验证证据降低决策风险",
+  "channels": ["xiaohongshu"],
+  "schedule": "8周",
+  "primary_kpi": "有效咨询率",
+  "expected_signals": ["决策链", "证据", "资格筛选"]
+}

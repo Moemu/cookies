@@ -1,0 +1,15 @@
+{
+  "name": "objective.lead_generation",
+  "version": "v1.0.0",
+  "kind": "objective",
+  "match": ["lead_generation"],
+  "instructions": [
+    "明确线索人群、决策角色、资格条件和留资路径。",
+    "内容先解决信任和适配性判断，再设置低摩擦 CTA。",
+    "指标应覆盖有效线索率，不得只使用点击量。"
+  ],
+  "quality_checks": [
+    "策略包含资格筛选和 CTA。",
+    "实验指标包含有效线索或下游质量。"
+  ]
+}

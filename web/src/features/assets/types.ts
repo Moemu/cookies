@@ -1,5 +1,5 @@
 export type AssetStatus = 'processing' | 'ready' | 'quarantined' | 'failed' | 'archived'
-export type AssetSource = 'upload' | 'provider_generated' | 'imported' | 'captured'
+export type AssetSource = 'upload' | 'provider_generated' | 'rendered' | 'imported' | 'captured'
 
 export type AssetVersionRef = {
   asset_id: string
@@ -32,8 +32,13 @@ export type ProjectAsset = {
     sha256: string
     width_pixels?: number
     height_pixels?: number
+    duration_ms?: number
+    frame_rate?: string
+    video_codec?: string
+    audio_codec?: string
     provider_job_id?: string
     provider_output_id?: string
+    render_job_id?: string
     project_context_version?: number
     created_at: string
   }

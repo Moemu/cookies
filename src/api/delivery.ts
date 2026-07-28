@@ -20,7 +20,7 @@ export type DeliveryChangeSet = {
   updatedAt: string
 }
 
-const apiBase = `${import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/api`
+const apiBase = `${import.meta.env.VITE_API_BASE_URL ?? ''}/api`
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {

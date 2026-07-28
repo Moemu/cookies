@@ -8,9 +8,9 @@ export function StatePreview({ value, onChange }: { value: DataState; onChange: 
 }
 
 export function StateBoundary({ state, children, onRetry, onCreate }: { state: DataState; children: ReactNode; onRetry?: () => void; onCreate?: () => void }) {
-  if (state === 'loading') return <div className="state-surface skeleton-state" aria-busy="true" aria-label="正在加载"><span/><span/><span/><span/><span/></div>
-  if (state === 'empty') return <div className="state-surface"><FileQuestion size={28}/><h2>还没有可用内容</h2><p>先创建一个对象，系统会在这里展示版本、证据和后续动作。</p><button className="primary-button" onClick={onCreate}>创建第一项</button></div>
-  if (state === 'error') return <div className="state-surface"><CircleAlert size={28}/><h2>数据暂时无法读取</h2><p>最近一次同步失败，现有数据没有被覆盖。请重试或查看同步记录。</p><button className="secondary-button" onClick={onRetry}><RefreshCw size={15}/>重新加载</button></div>
-  if (state === 'forbidden') return <div className="state-surface"><LockKeyhole size={28}/><h2>当前角色没有访问权限</h2><p>需要 Project 管理员授予编辑或审批权限，申请不会改变现有内容。</p><button className="secondary-button">申请访问</button></div>
+  if (state === 'loading') return <div className="state-surface skeleton-state" role="status" aria-live="polite" aria-busy="true" aria-label="正在加载"><span/><span/><span/><span/><span/></div>
+  if (state === 'empty') return <div className="state-surface state-empty" role="status" aria-live="polite"><FileQuestion size={28} aria-hidden="true"/><h2>还没有可用内容</h2><p>先创建一个对象，系统会在这里展示版本、证据和后续动作。</p>{onCreate ? <button className="primary-button" onClick={onCreate}>创建第一项</button> : null}</div>
+  if (state === 'error') return <div className="state-surface state-error" role="alert"><CircleAlert size={28} aria-hidden="true"/><h2>数据暂时无法读取</h2><p>最近一次同步失败，现有数据没有被覆盖。请重试或查看同步记录。</p>{onRetry ? <button className="secondary-button" onClick={onRetry}><RefreshCw size={15} aria-hidden="true"/>重新加载</button> : null}</div>
+  if (state === 'forbidden') return <div className="state-surface state-forbidden" role="alert"><LockKeyhole size={28} aria-hidden="true"/><h2>当前角色没有访问权限</h2><p>需要 Project 管理员授予编辑或审批权限，申请不会改变现有内容。</p></div>
   return <>{children}</>
 }

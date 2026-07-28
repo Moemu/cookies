@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-version-v1.schema.json",
+  "title": "CreativeVersionV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "organization_id", "project_id", "creative_task_id", "version", "draft_version", "status", "snapshot", "content_hash", "created_by", "created_at"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "creative_task_id": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1},
+    "draft_version": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["created", "checked", "approved", "superseded"]},
+    "snapshot": {"$ref": "creative-image-text-draft-v1.schema.json"},
+    "content_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "created_by": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

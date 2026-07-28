@@ -55,55 +55,68 @@ The local MVP persists one demo project and demonstrates this controlled path:
 
 All delivery operations are **local simulations**. This MVP never connects to or writes to a real advertising platform.
 
+### Short-Drama Preroll
+
+The performance-video workspace includes a controlled short-drama preroll path:
+
+1. Start from a confirmed Brief in the current Project.
+2. Enter user-reviewed story context: title, synopsis, and at least one reviewed selling point.
+3. Generate AI candidate hooks, review their evidence and hook-relevance score, then explicitly select one candidate.
+4. Create the video task only after that human selection. The server rebuilds the prompt and persists the selected-candidate snapshot with the generated asset.
+
+The candidate score describes hook-mechanism relevance only. It is not a conversion or delivery-performance prediction. The optional opening line is used only to prevent verbatim reuse and is not stored in the persisted candidate snapshot or generated prompt.
+
+This MVP does **not** support video uploads, VLM/video understanding, production-grade video rendering, real advertising delivery, or browser-managed provider credentials. AI remix currently produces a persisted edit plan and a simulated render job; it does not emit a final encoded video. Use only story context and selling points that have already been reviewed for the intended project.
+
 ## Quick start
 
-Prerequisites: Node.js 20 or later and npm. Clone the repository, then install dependencies:
+The Kanon root frontend is now the primary product shell. Business state comes
+from the existing Go API and MySQL; the root Node demo server is not required.
 
-```bash
-git clone --recurse-submodules https://github.com/shikanon/cookies.git
-cd cookies
+Prerequisites: Go, Docker Desktop, Node.js 20 or later, and npm. In PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d mysql
+go run ./cmd/cookies-migrate
+```
+
+Start the Go API in a second terminal:
+
+```powershell
+go run ./cmd/cookies-api
+```
+
+Start the root Vite frontend in a third terminal:
+
+```powershell
 npm install
-cp .env.example .env
-```
-
-Start the API in one terminal:
-
-```bash
-set -a
-source .env
-set +a
-npm run server
-```
-
-Start the Vite frontend in a second terminal, then open the printed `http://127.0.0.1:5173` URL:
-
-```bash
 npm run dev
 ```
 
-The server stores local demo state in ignored `data/mvp-store.json`. To reset the demo, stop the server and remove that file; the next `npm run server` recreates the seeded project.
+Open `http://127.0.0.1:5173`. Vite proxies `/api`, `/platform`, `/healthz`,
+and `/readyz` to the Go API at `http://127.0.0.1:8080`, so the browser uses a
+single origin. The legacy `web/` package remains temporarily because its
+verified Strategy, Creative, Assets, Delivery, Insights, and Provider pages are
+being migrated into the Kanon shell.
 
-## Ark configuration
+## Provider configuration
 
-Copy `.env.example` to `.env`, set the value locally, then load it in the shell that starts `npm run server`:
+Provider credentials remain server-side. Configure image or video routes using
+the repository scripts and Provider Credential Broker; never place provider
+keys in frontend code, browser storage, committed `.env` files, or logs.
 
-```bash
-# Set ARK_API_KEY in .env locally, then:
-set -a && source .env && set +a
-npm run server
-```
-
-`ARK_API_KEY` is optional for browsing the seeded walkthrough, reviewing preflight, approving the demo ChangeSet, and reading audit events. When it is absent, the app exposes a clear server-derived `not_configured` status and disables new AI generation; it never asks for, stores, masks, or returns a browser API key. Do not commit `.env` or real credentials.
-
-The server maps text, image, video, and embedding capability to the documented Ark model catalog in `server/ark-provider.ts`. `ARK_BASE_URL` is optional and defaults to the Ark HTTPS endpoint.
+The frontend calls only capability aliases such as `cookies.image.standard`
+and `cookies.video.standard`. The Go Provider Gateway owns the concrete
+provider, model, credential, retry, job, and asset-intake behavior.
 
 ## Verification
 
 Run the local quality gates before changing the MVP:
 
-```bash
-npm run check:server
-npm run test:server
+```powershell
+go test ./...
+npm run check --prefix web
 npm run build
 ```
 

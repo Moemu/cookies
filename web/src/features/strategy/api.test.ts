@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { approveStrategy, listStrategyPackages, patchBriefField, sendMessage } from './api'
+import { approveStrategy, getGenerationMetadata, listStrategyPackages, patchBriefField, sendMessage } from './api'
 import type { BriefDraft, Review, StrategyDraft } from './types'
 
 const draft: BriefDraft = {
@@ -78,5 +78,19 @@ describe('Strategy API client', () => {
     vi.stubGlobal('fetch', fetchMock)
     await listStrategyPackages('project_1')
     expect(fetchMock).toHaveBeenCalledWith('/api/strategy/v1/projects/project_1/strategy-packages', expect.anything())
+  })
+
+  it('keeps legacy revisions usable when generation metadata does not exist', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'resource not found',
+        request_id: 'request_1',
+        retryable: false,
+        details: [],
+      },
+    }), { status: 404, headers: { 'Content-Type': 'application/json' } })))
+
+    await expect(getGenerationMetadata('legacy_strategy')).resolves.toBeNull()
   })
 })

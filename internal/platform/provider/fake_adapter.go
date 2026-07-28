@@ -42,6 +42,8 @@ func NewFakeImageAdapter(now func() time.Time) *FakeImageAdapter {
 	return &FakeImageAdapter{now: now, tasks: make(map[string]*fakeImageTask)}
 }
 
+func (*FakeImageAdapter) ProviderCode() string { return fakeProviderCode }
+
 func (a *FakeImageAdapter) Submit(_ context.Context, request ImageGenerationRequest) (ImageSubmission, error) {
 	if err := request.Validate(); err != nil {
 		return ImageSubmission{}, err
@@ -91,7 +93,7 @@ func (a *FakeImageAdapter) Open(_ context.Context, project contract.ProjectRef, 
 		return nil, contract.OutputMetadata{}, err
 	}
 	if ref.ProviderCode != fakeProviderCode || ref.OutputID != "output_1" {
-		return nil, contract.OutputMetadata{}, fmt.Errorf("fake output was not found")
+		return nil, contract.OutputMetadata{}, ErrOutputHandleNotFound
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

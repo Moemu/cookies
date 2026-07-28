@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -101,6 +102,147 @@ func TestAdapterGatewayTextReturnsStableRefusalCode(t *testing.T) {
 	}
 }
 
+func TestAdapterGatewayTextUsesPromptJSONForRoutesWithoutStrictSchema(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body struct {
+			ResponseFormat any `json:"response_format"`
+			Messages       []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ResponseFormat != nil {
+			t.Fatalf("prompt_json request sent response_format: %#v", body.ResponseFormat)
+		}
+		if len(body.Messages) < 2 || body.Messages[0].Role != "system" ||
+			!strings.Contains(body.Messages[0].Content, "JSON Schema") {
+			t.Fatalf("messages = %#v", body.Messages)
+		}
+		_, _ = writer.Write([]byte(`{"model":"minimax","choices":[{"message":{"content":"not-json"}}]}`))
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.TextResponseMode = TextResponsePromptJSON
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	result, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "model",
+		Messages:         []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+		OutputJSONSchema: []byte(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "not-json" || len(result.StructuredOutput) != 0 ||
+		result.RouteSnapshot == nil || result.RouteSnapshot.TextResponseMode != TextResponsePromptJSON {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestAdapterGatewayTextUsesJSONObjectMode(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		format, _ := body["response_format"].(map[string]any)
+		if format["type"] != "json_object" {
+			t.Fatalf("response_format = %#v", body["response_format"])
+		}
+		if temperature, ok := body["temperature"].(float64); !ok || temperature != 0 {
+			t.Fatalf("temperature = %#v", body["temperature"])
+		}
+		_, _ = writer.Write([]byte(`{"model":"text","choices":[{"message":{"content":"{\"ok\":true}"}}]}`))
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.TextResponseMode = TextResponseJSONObject
+	snapshot.TemperatureSet = true
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	result, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "model",
+		Messages:         []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+		OutputJSONSchema: []byte(`{"type":"object"}`),
+	})
+	if err != nil || string(result.StructuredOutput) != `{"ok":true}` {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
+func TestAdapterGatewayTextForwardsThinkingMode(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		thinking, _ := body["thinking"].(map[string]any)
+		if thinking["type"] != "disabled" {
+			t.Fatalf("thinking = %#v", body["thinking"])
+		}
+		_, _ = writer.Write([]byte(`{"model":"text","choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.ThinkingMode = "disabled"
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	if _, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "model",
+		Messages: []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdapterGatewayTextUsesMiniMaxResponseControls(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["max_completion_tokens"] != float64(2048) || body["max_tokens"] != nil || body["reasoning_split"] != true {
+			t.Fatalf("MiniMax request body = %#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"model":"MiniMax-M2.7","choices":[{"message":{"content":"{\"ok\":true}"}}]}`))
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.TextResponseMode = TextResponsePromptJSON
+	snapshot.MaxOutputTokens = 2048
+	snapshot.OutputTokenParameter = TextOutputTokenParameterMaxCompletionTokens
+	snapshot.ReasoningSplit = true
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	if _, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "cookies.text.standard",
+		Messages: []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdapterGatewayTextInspectionDoesNotInvokeModel(t *testing.T) {
+	t.Parallel()
+	snapshot := textRouteSnapshot("https://gateway.example")
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	inspection, err := adapter.InspectTextRoute(context.Background(), "org_1", "cookies.text.standard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inspection.Ready || inspection.RouteRevisionID != snapshot.RouteRevisionID ||
+		inspection.ResponseMode != TextResponseJSONSchema {
+		t.Fatalf("inspection = %#v", inspection)
+	}
+}
+
 type textRouteStub struct {
 	snapshot ImageRouteSnapshot
 	err      error
@@ -124,5 +266,6 @@ func textRouteSnapshot(baseURL string) ImageRouteSnapshot {
 		RouteID: "route_1", RouteRevisionID: "routerev_1", ConnectionID: "connection_1",
 		ConnectionRevisionID: "connectionrev_1", BaseURL: baseURL, UpstreamModel: "text-v1",
 		CredentialID: "credential_1", CredentialVersion: 1, TimeoutSeconds: 5, MaxResponseBytes: 1 << 20,
+		TextResponseMode: TextResponseJSONSchema,
 	}
 }

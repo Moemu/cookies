@@ -1,11 +1,20 @@
-import { apiRequest } from '../../shared/api/client'
+import { ApiProblem, apiRequest } from '../../shared/api/client'
+import { createClientUUID } from '../../shared/clientId'
 import type {
+  AgentTask,
   BriefDraft,
   BriefVersion,
   ConversationBundle,
+  GenerationMetadata,
+  GenerationReadiness,
   Message,
+  KnowledgeDocument,
   PackageVersion,
+  ResearchRun,
   Review,
+  ReviewComment,
+  SkillRun,
+  DraftRevision,
   StrategyDraft,
   Workspace,
   WorkspaceDetail,
@@ -14,7 +23,7 @@ import type {
 const root = '/api/strategy/v1'
 
 export function createMutationKey() {
-  return `strategy-web-${crypto.randomUUID()}`
+  return `strategy-web-${createClientUUID()}`
 }
 
 function mutationHeaders(key = createMutationKey()) {
@@ -49,8 +58,19 @@ export function listMessages(conversationId: string, signal?: AbortSignal) {
   return apiRequest<{ items: Message[] }>(`${root}/conversations/${encodeURIComponent(conversationId)}/messages?limit=100`, { signal })
 }
 
+export function getConversationMemory(conversationId: string, signal?: AbortSignal) {
+  return apiRequest<{ summary: string; open_questions: string[]; version: number }>(
+    `${root}/conversations/${encodeURIComponent(conversationId)}/memory`,
+    { signal },
+  )
+}
+
+export function getAgentTask(agentTaskId: string, signal?: AbortSignal) {
+  return apiRequest<AgentTask>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}`, { signal })
+}
+
 export function sendMessage(conversationId: string, content: string) {
-  return apiRequest(`${root}/conversations/${encodeURIComponent(conversationId)}/messages`, {
+  return apiRequest<{ message: Message; agent_task: AgentTask }>(`${root}/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',
     headers: mutationHeaders(),
     body: JSON.stringify({ content }),
@@ -92,8 +112,47 @@ export function createStrategy(taskId: string, brief: BriefVersion) {
   })
 }
 
+export function getGenerationReadiness(projectId: string, signal?: AbortSignal) {
+  return apiRequest<GenerationReadiness>(`${root}/projects/${encodeURIComponent(projectId)}/generation-readiness`, { signal })
+}
+
 export function getStrategy(strategyId: string, signal?: AbortSignal) {
   return apiRequest<StrategyDraft>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}`, { signal })
+}
+
+export function listStrategyRevisions(strategyId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: DraftRevision[] }>(
+    `${root}/strategy-drafts/${encodeURIComponent(strategyId)}/revisions`,
+    { signal },
+  )
+}
+
+export function listSkillRuns(agentTaskId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: SkillRun[] }>(
+    `${root}/agent-tasks/${encodeURIComponent(agentTaskId)}/skill-runs`,
+    { signal },
+  )
+}
+
+export async function getGenerationMetadata(strategyId: string, signal?: AbortSignal) {
+  try {
+    return await apiRequest<GenerationMetadata>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}/generation-metadata`, { signal })
+  } catch (error) {
+    if (error instanceof ApiProblem && error.problem.error.code === 'NOT_FOUND') return null
+    throw error
+  }
+}
+
+export function reviseStrategy(draft: StrategyDraft, instruction: string) {
+  return apiRequest(`${root}/strategy-drafts/${encodeURIComponent(draft.id)}:revise`, {
+    method: 'POST',
+    headers: mutationHeaders(),
+    body: JSON.stringify({
+      expected_version: draft.version,
+      base_revision: draft.current_revision,
+      instruction,
+    }),
+  })
 }
 
 export function patchStrategySection(draft: StrategyDraft, section: string, value: unknown) {
@@ -121,6 +180,27 @@ export function getReview(reviewId: string, signal?: AbortSignal) {
   return apiRequest<Review>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}`, { signal })
 }
 
+export function listReviewComments(reviewId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: ReviewComment[] }>(
+    `${root}/strategy-reviews/${encodeURIComponent(reviewId)}/comments`,
+    { signal },
+  )
+}
+
+export function addReviewComment(reviewId: string, body: string) {
+  return apiRequest<ReviewComment>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  })
+}
+
+export function returnReview(reviewId: string, reason: string) {
+  return apiRequest<Review>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}:return`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
 export function listStrategyPackages(projectId: string, signal?: AbortSignal) {
   return apiRequest<{ items: PackageVersion[] }>(`${root}/projects/${encodeURIComponent(projectId)}/strategy-packages`, { signal })
 }
@@ -134,5 +214,54 @@ export function approveStrategy(draft: StrategyDraft, review: Review, mutationKe
       candidate_content_hash: review.candidate_content_hash,
       expected_version: draft.version,
     }),
+  })
+}
+
+export function listKnowledgeDocuments(projectId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: KnowledgeDocument[] }>(
+    `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents`,
+    { signal },
+  )
+}
+
+export function uploadKnowledgeDocument(projectId: string, file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  return apiRequest<KnowledgeDocument>(
+    `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents`,
+    { method: 'POST', body },
+  )
+}
+
+export function runExternalResearch(
+  projectId: string,
+  request: {
+    mode: 'web' | 'mcp'
+    query: string
+    document_ids: string[]
+    disclosed_fields: string[]
+    confirmed: boolean
+  },
+) {
+  return apiRequest<ResearchRun>(
+    `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs`,
+    { method: 'POST', body: JSON.stringify(request) },
+  )
+}
+
+export function createStrategyFeedback(
+  projectId: string,
+  request: {
+    target_type: 'strategy_revision' | 'strategy_package'
+    target_id: string
+    target_version: number
+    rating: 'useful' | 'partly_useful' | 'not_useful'
+    comment: string
+  },
+) {
+  return apiRequest(`${root}/projects/${encodeURIComponent(projectId)}/feedback`, {
+    method: 'POST',
+    headers: mutationHeaders(),
+    body: JSON.stringify(request),
   })
 }

@@ -12,6 +12,7 @@ import { UploadDrawer } from './UploadDrawer'
 type ViewMode = 'grid' | 'list'
 
 const sourceLabels: Record<AssetSource, string> = {
+  rendered: '视频合成',
   upload: '用户上传',
   provider_generated: 'Provider 生成',
   imported: '导入',
@@ -36,6 +37,11 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
+function formatDuration(milliseconds?: number) {
+  if (!milliseconds) return ''
+  return `${(milliseconds / 1000).toFixed(1)} 秒`
+}
+
 function assetLabel(asset: ProjectAsset) {
   return `${asset.asset.id} · v${asset.version.version}`
 }
@@ -46,23 +52,25 @@ function removeErrorMessage(error: unknown) {
   return '素材删除失败，请稍后重试。'
 }
 
-function AssetCard({ asset, onRemove, previewUnavailable, previewUrl, projectId, view }: { asset: ProjectAsset; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; projectId: string; view: ViewMode }) {
+function AssetCard({ asset, editUrl, onRemove, previewUnavailable, previewUrl, projectId, view }: { asset: ProjectAsset; editUrl?: string; onRemove: () => void; previewUnavailable?: boolean; previewUrl?: string; projectId: string; view: ViewMode }) {
+  const isVideo = asset.version.mime_type === 'video/mp4'
   const dimensions = asset.version.width_pixels && asset.version.height_pixels
     ? `${asset.version.width_pixels} × ${asset.version.height_pixels}`
     : '尺寸未记录'
-  const content = previewUrl
-    ? <img alt={`${asset.asset.id} 预览`} loading="lazy" src={previewUrl} />
-    : <div className="asset-thumbnail__fallback" title={previewUnavailable ? '\u539f\u59cb\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20' : undefined}><AssetIcon name="image" size={30} /><span>{asset.version.mime_type.replace('image/', '').toUpperCase()}</span>{previewUnavailable ? <small>{'\u9884\u89c8\u4e0d\u53ef\u7528'}</small> : null}</div>
+  const fallback = <div className="asset-thumbnail__fallback" title={previewUnavailable ? '\u539f\u59cb\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20' : undefined}><AssetIcon name="image" size={30} /><span>{isVideo ? 'MP4' : asset.version.mime_type.replace('image/', '').toUpperCase()}</span>{previewUnavailable ? <small>{'\u9884\u89c8\u4e0d\u53ef\u7528'}</small> : null}</div>
 
   return <article className={view === 'list' ? 'asset-card asset-card--list' : 'asset-card'}>
+    {editUrl ? <Link aria-label={`编辑 ${assetLabel(asset)}`} className="asset-card__edit" title="基于此素材编辑图片" to={editUrl}>编辑</Link> : null}
     <button aria-label={`删除 ${assetLabel(asset)}`} className="asset-card__remove" onClick={onRemove} title="从项目中删除" type="button"><AssetIcon name="delete" size={16} /><span>删除</span></button>
-    {previewUrl
-      ? <a className="asset-thumbnail" href={previewUrl} rel="noreferrer" target="_blank" title="在新窗口查看预览">{content}</a>
-      : <div className="asset-thumbnail">{content}</div>}
+    {previewUrl && isVideo
+      ? <div className="asset-thumbnail"><video aria-label={`${asset.asset.id} 视频预览`} controls playsInline preload="metadata" src={previewUrl} /></div>
+      : previewUrl
+        ? <a className="asset-thumbnail" href={previewUrl} rel="noreferrer" target="_blank" title="在新窗口查看预览"><img alt={`${asset.asset.id} 预览`} loading="lazy" src={previewUrl} /></a>
+        : <div className="asset-thumbnail">{fallback}</div>}
     <div className="asset-card__body">
       <h3 title={asset.asset.id}>{assetLabel(asset)}</h3>
       <div className="asset-source"><span className={`source-dot source-dot--${asset.version.source_type}`} />{sourceLabels[asset.version.source_type]}</div>
-      <div className="asset-facts"><span>{dimensions}</span><span>{formatBytes(asset.version.size_bytes)}</span></div>
+      <div className="asset-facts"><span>{dimensions}</span><span>{isVideo ? formatDuration(asset.version.duration_ms) : formatBytes(asset.version.size_bytes)}</span></div>
       {asset.version.provider_job_id ? <Link className="asset-provider-link" to={`/projects/${encodeURIComponent(projectId)}/provider-jobs?job=${encodeURIComponent(asset.version.provider_job_id)}`}>查看 Provider 作业</Link> : null}
       <div className="asset-footer"><span className={`asset-status asset-status--${asset.asset.status}`}><i />{statusLabels[asset.asset.status]}</span><time dateTime={asset.created_at}>{formatDate(asset.created_at)}</time></div>
     </div>
@@ -228,6 +236,7 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
       <label className="select-control"><span className="sr-only">素材状态</span><select onChange={(event) => setStatus(event.target.value as 'all' | AssetStatus)} value={status}><option value="all">全部状态</option><option value="ready">已就绪</option><option value="processing">处理中</option><option value="quarantined">已隔离</option><option value="failed">失败</option><option value="archived">已归档</option></select></label>
       <div className="toolbar-spacer" />
       <button className="icon-button" aria-label="刷新素材" disabled={loading} onClick={() => void loadLibrary()} type="button"><AssetIcon name="refresh" /></button>
+      <Link className="button button--secondary upload-button" to={`/projects/${encodeURIComponent(projectId)}/assets/remix`}>AI 混剪</Link>
       <div className="view-toggle" aria-label="视图方式">
         <button aria-label="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')} type="button"><AssetIcon name="grid" /></button>
         <button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')} type="button"><AssetIcon name="list" /></button>
@@ -241,12 +250,12 @@ export function ProjectAssetsPage({ project }: { project?: Pick<Project, 'name' 
     {!loading && !error && filteredAssets.length === 0 ? <div className="library-empty">
       <div className="empty-image"><AssetIcon name="image" size={32} /></div>
       <h2>{assets.length === 0 ? '项目还没有素材' : '没有匹配的素材'}</h2>
-      <p>{assets.length === 0 ? '上传第一张 PNG 或 JPEG，建立项目的可复用资产库。' : '尝试清除搜索词或调整筛选条件。'}</p>
-      {assets.length === 0 && projectCanAcceptAssets ? <button className="button button--primary" onClick={() => setUploadOpen(true)} type="button">添加第一张素材</button> : null}
+      <p>{assets.length === 0 ? '上传 PNG、JPEG 或 MP4，建立项目的可复用资产库。' : '尝试清除搜索词或调整筛选条件。'}</p>
+      {assets.length === 0 && projectCanAcceptAssets ? <button className="button button--primary" onClick={() => setUploadOpen(true)} type="button">添加第一份素材</button> : null}
     </div> : null}
 
     {filteredAssets.length > 0 ? <div className={view === 'list' ? 'asset-collection asset-collection--list' : 'asset-collection'} aria-busy={loading}>
-      {filteredAssets.map((asset) => <AssetCard asset={asset} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
+      {filteredAssets.map((asset) => <AssetCard asset={asset} editUrl={asset.version.mime_type.startsWith('image/') && asset.asset.status === 'ready' && (localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]) ? `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.asset.id)}/versions/${asset.version.version}/edit` : undefined} key={`${asset.asset.id}:${asset.version.version}`} onRemove={() => {
         setRemoveError('')
         setAssetToRemove(asset)
       }} previewUnavailable={unavailablePreviewIds.has(asset.asset.id)} previewUrl={localPreviewUrls[asset.asset.id] || previewUrls[asset.asset.id]} projectId={projectId} view={view} />)}

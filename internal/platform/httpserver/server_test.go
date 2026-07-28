@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,43 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 	if response.Header().Get("X-Request-ID") == "" {
 		t.Fatal("expected response request ID")
+	}
+}
+
+func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "invalid state", err: creative.ErrInvalidState, wantStatus: http.StatusConflict, wantCode: "INVALID_STATE"},
+		{name: "stale version", err: creative.ErrVersionConflict, wantStatus: http.StatusPreconditionFailed, wantCode: "CREATIVE_VERSION_CONFLICT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/creative/v1/test", nil)
+
+			(&Server{}).writeServiceError(response, request, tt.err)
+
+			if response.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, tt.wantStatus)
+			}
+			var problem struct {
+				Error contract.Error `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&problem); err != nil {
+				t.Fatalf("decode problem: %v", err)
+			}
+			if problem.Error.Code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", problem.Error.Code, tt.wantCode)
+			}
+			if problem.Error.Retryable {
+				t.Fatal("creative domain conflict must not be retryable without refreshing state")
+			}
+		})
 	}
 }
 
@@ -377,6 +415,49 @@ func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
 	}
 }
 
+func TestCreateVideoJobUsesProviderVideoSeam(t *testing.T) {
+	t.Parallel()
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{provider.ScopeJobCreate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	jobs.job.Kind = "provider.video.generate"
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Projects: staticProjectManager{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+		ProviderJobs: jobs,
+	})
+	request := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/model/jobs", bytes.NewBufferString(`{
+		"capability":"video.generate",
+		"model_alias":"cookies.video.standard",
+		"input":{"prompt":"five-second product pre-roll","duration_seconds":5,"aspect_ratio":"9:16","resolution":"720p"},
+		"project_context_version":7,
+		"source_system":"creative",
+		"source_task_id":"creative_task_1"
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "create-video-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if jobs.videoRequest.Input.DurationSeconds != 5 || jobs.videoRequest.Input.AspectRatio != "9:16" || jobs.videoRequest.SourceTaskID != "creative_task_1" {
+		t.Fatalf("unexpected Provider video request: %+v", jobs.videoRequest)
+	}
+}
+
 func TestCreativeCoverJobKeepsCreativeTaskLineage(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate}}
@@ -412,6 +493,81 @@ func TestCreativeCoverJobKeepsCreativeTaskLineage(t *testing.T) {
 	}
 }
 
+func TestFreezeCreativeVersionUsesIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creativeManager := &creativeManagerStub{frozenVersion: creative.CreativeVersion{ID: "creative_version_1", OrganizationID: "org_1", ProjectID: "project_1", TaskID: "creative_task_1", Version: 1, DraftVersion: 1, Status: creative.CreativeVersionCreated}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: creativeManager})
+	request := httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_1:freeze-version", bytes.NewBufferString(`{"draft_version":1}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "creative-freeze-http-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if creativeManager.freezeKey != "creative-freeze-http-1" || creativeManager.freezeTaskID != "creative_task_1" {
+		t.Fatalf("freeze request was not forwarded: key=%q task=%q", creativeManager.freezeKey, creativeManager.freezeTaskID)
+	}
+}
+
+func TestReviseCreativeDraftUsesTaskActionAndExpectedVersion(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creativeManager := &creativeManagerStub{revisedDraft: creative.ImageTextDraft{TaskID: "creative_task_1", Version: 2}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: creativeManager})
+	request := httptest.NewRequest(http.MethodPatch, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_1:draft", bytes.NewBufferString(`{"expected_version":1,"title_candidates":["标题一","标题二","标题三"],"body":"正文","topics":[],"cover_copy":"封面标题","image_plan":[{"order":1,"purpose":"封面","visual_brief":"干净的产品图","caption":"封面标题"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if creativeManager.reviseTaskID != "creative_task_1" || creativeManager.reviseRequest.ExpectedVersion != 1 {
+		t.Fatalf("revision was not forwarded: task=%q request=%+v", creativeManager.reviseTaskID, creativeManager.reviseRequest)
+	}
+}
+
+func TestCreativeHistoryReadEndpointsSurviveRefresh(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{
+		versions: []creative.CreativeVersion{{ID: "creativeversion_1", TaskID: "creativetask_1"}},
+		packages: []creative.CreativePackage{{ID: "creativepackage_1", CreativeVersionID: "creativeversion_1"}},
+	}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: manager})
+
+	for _, target := range []struct {
+		path string
+		want string
+	}{
+		{"/api/creative/v1/projects/project_1/creative-versions?task_id=creativetask_1", "creativeversion_1"},
+		{"/api/creative/v1/projects/project_1/creative-packages", "creativepackage_1"},
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target.path, nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), target.want) {
+			t.Fatalf("%s status=%d body=%s", target.path, response.Code, response.Body.String())
+		}
+	}
+}
+
 type staticProjectManager struct{ context contract.ProjectContext }
 
 func (s staticProjectManager) GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
@@ -431,14 +587,23 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 }
 
 type providerJobStub struct {
-	job         contract.ProviderJob
-	request     provider.CreateImageJobRequest
-	createCalls int
+	job          contract.ProviderJob
+	request      provider.CreateImageJobRequest
+	videoRequest provider.CreateVideoJobRequest
+	createCalls  int
 }
 
 type creativeManagerStub struct {
 	detail                  creative.TaskDetail
 	registeredProviderJobID string
+	frozenVersion           creative.CreativeVersion
+	freezeKey               contract.IdempotencyKey
+	freezeTaskID            string
+	revisedDraft            creative.ImageTextDraft
+	reviseTaskID            string
+	reviseRequest           creative.ReviseDraftRequest
+	versions                []creative.CreativeVersion
+	packages                []creative.CreativePackage
 }
 
 func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
@@ -447,7 +612,10 @@ func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestCont
 func (s *creativeManagerStub) ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error) {
 	return nil, nil
 }
-func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeTask, error) {
+func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateTaskRequest) (creative.CreativeTask, error) {
+	return creative.CreativeTask{}, nil
+}
+func (s *creativeManagerStub) CreateVideoTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateVideoTaskRequest) (creative.CreativeTask, error) {
 	return creative.CreativeTask{}, nil
 }
 func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
@@ -456,14 +624,65 @@ func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, 
 func (s *creativeManagerStub) GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
+func (s *creativeManagerStub) ArchiveTask(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
+}
 func (s *creativeManagerStub) RegisterCoverImageJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) error {
 	s.registeredProviderJobID = providerJobID
 	return nil
+}
+func (s *creativeManagerStub) RegisterImagePlanJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, _ int, providerJobID string) error {
+	s.registeredProviderJobID = providerJobID
+	return nil
+}
+func (s *creativeManagerStub) RegisterVideoJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) error {
+	s.registeredProviderJobID = providerJobID
+	return nil
+}
+func (s *creativeManagerStub) CreateRenderJob(context.Context, contract.RequestContext, contract.ProjectID, string, creative.CreateRenderJobRequest, contract.IdempotencyKey) (creative.RenderJob, bool, error) {
+	return creative.RenderJob{}, false, nil
+}
+func (s *creativeManagerStub) GetRenderJob(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.RenderJob, error) {
+	return creative.RenderJob{}, nil
+}
+func (s *creativeManagerStub) FreezeVersion(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, taskID string, _ creative.FreezeVersionRequest, key contract.IdempotencyKey) (creative.CreativeVersion, bool, error) {
+	s.freezeKey = key
+	s.freezeTaskID = taskID
+	return s.frozenVersion, false, nil
+}
+func (s *creativeManagerStub) ListVersions(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]creative.CreativeVersion, error) {
+	return s.versions, nil
+}
+func (s *creativeManagerStub) ReviseDraft(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.ReviseDraftRequest) (creative.ImageTextDraft, error) {
+	s.reviseTaskID = taskID
+	s.reviseRequest = request
+	return s.revisedDraft, nil
+}
+func (s *creativeManagerStub) BindImageAsset(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BindImageAssetRequest) (creative.ImageTextDraft, error) {
+	return s.revisedDraft, nil
+}
+func (s *creativeManagerStub) CheckVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error) {
+	return s.frozenVersion, nil
+}
+func (s *creativeManagerStub) ApproveVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeVersion, error) {
+	return s.frozenVersion, nil
+}
+func (s *creativeManagerStub) DeliverVersion(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativePackage, error) {
+	return creative.CreativePackage{}, nil
+}
+func (s *creativeManagerStub) ListPackages(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativePackage, error) {
+	return s.packages, nil
 }
 
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {
 	s.createCalls++
 	s.request = request
+	return s.job, false, nil
+}
+
+func (s *providerJobStub) CreateVideoJob(_ context.Context, request provider.CreateVideoJobRequest) (contract.ProviderJob, bool, error) {
+	s.createCalls++
+	s.videoRequest = request
 	return s.job, false, nil
 }
 
