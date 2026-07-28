@@ -1,9 +1,11 @@
 import type {
   ApiArtifact,
+  ApiAuditEvent,
   ApiBusinessTask,
   ApiBusinessTaskType,
   ApiGenerationJob,
   ApiOperationalRecord,
+  ApiProjectMediaAsset,
   ApiProject,
 } from "./api";
 import type { DeliveryChangeSet } from "../api/delivery";
@@ -15,6 +17,7 @@ export type PlatformProject = {
   organization_id: string;
   name: string;
   status: "draft" | "active" | "archived";
+  industry: "short_drama" | "game" | "ecommerce" | "automotive_brand";
   primary_brand_id: string | null;
   brand_guideline_version_id?: string;
   project_context_version: number;
@@ -24,9 +27,9 @@ export type PlatformProject = {
 
 export type PlatformProjectRuntime = {
   code: string;
-  brand?: string;
-  product?: string;
-  goal?: string;
+  brand: string;
+  product: string;
+  goal: string;
   stage: string;
   progress: number;
   status: "active" | "completed" | "blocked" | string;
@@ -34,7 +37,7 @@ export type PlatformProjectRuntime = {
   budget: number;
   currency: "CNY";
   timezone: "Asia/Shanghai";
-  knowledge_count?: number;
+  knowledge_count: number;
   updated_at: string;
 };
 
@@ -72,6 +75,10 @@ export type PlatformProjectAsset = {
     status?: string;
     source_type?: string;
     mime_type?: string;
+    size_bytes?: number;
+    width_pixels?: number;
+    height_pixels?: number;
+    media?: { duration_seconds?: number };
     created_at?: string;
   };
   created_at?: string;
@@ -99,9 +106,31 @@ export type PlatformOperationalRecord = {
   title: string;
   status: string;
   occurred_at: string;
-  fields: Record<string, string | number>;
+  fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+};
+
+export type PlatformAuditEvent = {
+  id: string;
+  project_id: string;
+  actor: string;
+  action: string;
+  entity_type: ApiAuditEvent["entityType"];
+  entity_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type PlatformProjectWorkbench = {
+  organization: { id: string; code: string; name: string; owner: string; currency: string; timezone: string; updated_at: string };
+  client: { id: string; organization_id: string; code: string; name: string; industry: string; owner: string; health_status: string; updated_at: string };
+  brand: { id: string; organization_id: string; client_id: string; code: string; name: string; category: string; product_lines: string[]; owner: string; guideline_status: string; updated_at: string };
+  project: { project_id: string; organization_id: string; client_id: string; brand_id: string; stage: string; stage_label: string; stage_percent: number; task_percent: number; risk_status: string; blocker: string; updated_at: string };
+  ad_account_bindings: Array<{ id: string; organization_id: string; client_id: string; brand_id: string; platform: string; account_name: string; account_display_id: string; currency: string; timezone: string; permission_status: string; login_status: string; tracking_status: string; owner: string; bound_asset_ids: string[]; last_synced_at: string }>;
+  quality_check_runs: Array<{ id: string; organization_id: string; project_id: string; asset_id: string; asset_version: number; status: string; model: string; rule_version: string; prompt_version: string; summary: string; issues: Array<{ id: string; severity: string; rule: string; evidence: string; suggestion: string }>; created_at: string; completed_at: string | null }>;
+  material_confirmations: Array<{ id: string; organization_id: string; project_id: string; quality_check_run_id: string; asset_id: string; asset_version: number; status: string; scope: string; confirmed_by: string; note: string; created_at: string }>;
+  asset_version_pointers: Array<{ id: string; organization_id: string; project_id: string; asset_id: string; working_version: number; quality_checked_version: number | null; human_confirmed_version: number | null; delivery_version: number | null; versions: Array<{ version: number; created_by: string; source_task_id: string; source_type: string; source_label: string; created_at: string; change_summary: string }>; authorization: { platforms: string[]; regions: string[]; rights_holder: string; expires_at: string; note: string }; delivery_target: { platform: string; region: string }; owner: string; updated_at: string }>;
 };
 
 export type PlatformChangeSet = {
@@ -200,14 +229,40 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
   }
 
   return {
-    listProjects: async () => asArray((await request<ItemsResponse<PlatformProject>>("/projects")).items).map(toApiProject),
-    createProject: (input: Pick<ApiProject, "name" | "brand" | "objective">) =>
-      request<PlatformProject>("/projects", {
+    listProjects: async () => {
+      const projects = asArray((await request<ItemsResponse<PlatformProject>>("/projects")).items);
+      return Promise.all(projects.map(async project => toApiProject(await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(project.id)}`))));
+    },
+    createProject: async (input: Pick<ApiProject, "name" | "brand" | "objective" | "industry">) => {
+      const project = await request<PlatformProject>("/projects", {
         method: "POST",
-        body: JSON.stringify({ name: input.name, primary_brand_id: null, product_ids: [], activate: false }),
-      }).then(project => toApiProject(project)),
+        body: JSON.stringify({ name: input.name, brand: input.brand, goal: input.objective, industry: input.industry, primary_brand_id: null, product_ids: [], activate: false }),
+      });
+      return toApiProject(await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(project.id)}`));
+    },
+    updateProject: async (projectId: string, input: Partial<Pick<ApiProject, "name" | "brand" | "objective" | "industry">> & { expectedContextVersion?: number }) => {
+      const project = await request<PlatformProject>(`/projects/${encodeURIComponent(projectId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: input.name,
+          brand: input.brand,
+          goal: input.objective,
+          industry: input.industry,
+          expected_context_version: input.expectedContextVersion,
+        }),
+      });
+      return toApiProject(await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(project.id)}`));
+    },
     getProjectDetail: (projectId: string) =>
       request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
+    getWorkbench: async (projectId: string): Promise<PlatformProjectWorkbench | null> => {
+      try {
+        return await request<PlatformProjectWorkbench>(`/projects/${encodeURIComponent(projectId)}/workbench`);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("scoped resource does not exist")) return null;
+        throw error;
+      }
+    },
     getProjectSnapshot: async (projectId: string) => {
       const detail = await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`);
       return {
@@ -222,6 +277,9 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
     listArtifacts: (projectId: string) =>
       request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`)
         .then(detail => asArray(detail.artifacts).map(summary => toApiArtifact(summary, detail.project.id))),
+    listProjectMediaAssets: (projectId: string) =>
+      request<ItemsResponse<PlatformProjectAsset>>(`/projects/${encodeURIComponent(projectId)}/assets`)
+        .then(response => asArray(response.items).flatMap(asset => toApiProjectMediaAsset(asset, projectId))),
     listJobs: (projectId: string) =>
       request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`)
         .then(detail => asArray(detail.artifacts).map(summary => toApiGenerationJobFromArtifact(summary, detail.project.id)).filter((job): job is ApiGenerationJob => Boolean(job))),
@@ -257,6 +315,8 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
       }).then(toApiBusinessTask),
     listOperations: async (projectId: string) =>
       asArray((await request<ItemsResponse<PlatformOperationalRecord>>(`/projects/${encodeURIComponent(projectId)}/operations`)).items).map(toApiOperationalRecord),
+    listAuditEvents: async (projectId: string) =>
+      asArray((await request<ItemsResponse<PlatformAuditEvent>>(`/projects/${encodeURIComponent(projectId)}/audit-events`)).items).map(toApiAuditEvent),
     listChangeSets: async (projectId: string) =>
       asArray((await request<ItemsResponse<PlatformChangeSet>>(`/projects/${encodeURIComponent(projectId)}/change-sets`)).items).map(toDeliveryChangeSet),
     createChangeSet: (projectId: string, input: { name: string; artifactIds: string[]; budgetLimit: number }) =>
@@ -306,18 +366,18 @@ export async function readPayload<T>(response: Response): Promise<T | Record<str
   return JSON.parse(text) as T;
 }
 
-export function toApiProject(input: PlatformProject | PlatformProjectDetail): ApiProject {
-  const project = "project" in input ? input.project : input;
-  const runtime = "runtime" in input ? input.runtime : defaultRuntime(project);
+export function toApiProject(input: PlatformProjectDetail): ApiProject {
+  const { project, runtime } = input;
   const updatedAt = runtime.updated_at ?? project.updated_at;
   return {
     id: project.id,
     name: project.name,
-    brand: runtime.brand ?? "未指定品牌",
-    objective: runtime.goal ?? "",
+    industry: project.industry ?? "ecommerce",
+    brand: runtime.brand,
+    objective: runtime.goal,
     runtime: {
       code: runtime.code,
-      product: runtime.product ?? "",
+      product: runtime.product,
       stage: runtime.stage,
       progress: runtime.progress,
       status: runtime.status === "completed" ? "completed" : "active",
@@ -344,6 +404,27 @@ export function toApiArtifact(summary: PlatformProjectArtifactSummary, projectId
     createdAt: summary.updated_at,
     updatedAt: summary.updated_at,
   };
+}
+
+function toApiProjectMediaAsset(asset: PlatformProjectAsset, projectId: string): ApiProjectMediaAsset[] {
+  const id = asset.asset?.id ?? asset.ref?.asset_version.asset_id
+  const version = asset.version?.version ?? asset.ref?.asset_version.version
+  const kind = asset.asset?.asset_kind
+  const mimeType = asset.version?.mime_type ?? ''
+  if (!id || !version || (kind !== 'video' && kind !== 'image' && kind !== 'document')) return []
+  return [{
+    id,
+    projectId,
+    version,
+    kind,
+    mimeType,
+    sizeBytes: asset.version?.size_bytes ?? 0,
+    durationSeconds: asset.version?.media?.duration_seconds,
+    width: asset.version?.width_pixels,
+    height: asset.version?.height_pixels,
+    createdAt: asset.created_at ?? asset.version?.created_at ?? '',
+    contentUrl: `/platform/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(id)}/versions/${version}/content`,
+  }]
 }
 
 export function toApiBusinessTask(task: PlatformBusinessTask): ApiBusinessTask {
@@ -374,6 +455,19 @@ export function toApiOperationalRecord(record: PlatformOperationalRecord): ApiOp
     fields: record.fields,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
+  };
+}
+
+export function toApiAuditEvent(event: PlatformAuditEvent): ApiAuditEvent {
+  return {
+    id: event.id,
+    projectId: event.project_id,
+    actor: event.actor,
+    action: event.action,
+    entityType: event.entity_type,
+    entityId: event.entity_id,
+    metadata: event.metadata,
+    createdAt: event.created_at,
   };
 }
 
@@ -449,23 +543,6 @@ function toApiGenerationJobFromArtifact(summary: PlatformProjectArtifactSummary,
     version: summary.asset_ref.asset_version.version,
     createdAt: summary.updated_at,
     updatedAt: summary.updated_at,
-  };
-}
-
-function defaultRuntime(project: PlatformProject): PlatformProjectRuntime {
-  return {
-    code: project.id,
-    brand: "",
-    product: "",
-    goal: "",
-    stage: project.status === "archived" ? "已归档" : "项目初始化",
-    progress: project.status === "active" ? 10 : 0,
-    status: project.status === "archived" ? "completed" : "active",
-    owner: "服务端演示用户",
-    budget: 0,
-    currency: "CNY",
-    timezone: "Asia/Shanghai",
-    updated_at: project.updated_at,
   };
 }
 

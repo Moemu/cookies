@@ -16,11 +16,32 @@ const (
 	StatusArchived Status = "archived"
 )
 
+// Industry is deliberately owned by Project rather than Brand: the same brand
+// may run different category campaigns in different projects.
+type Industry string
+
+const (
+	IndustryShortDrama      Industry = "short_drama"
+	IndustryGame            Industry = "game"
+	IndustryEcommerce       Industry = "ecommerce"
+	IndustryAutomotiveBrand Industry = "automotive_brand"
+)
+
+func (i Industry) Valid() bool {
+	switch i {
+	case IndustryShortDrama, IndustryGame, IndustryEcommerce, IndustryAutomotiveBrand:
+		return true
+	default:
+		return false
+	}
+}
+
 type Project struct {
 	ID                      contract.ProjectID      `json:"id"`
 	OrganizationID          contract.OrganizationID `json:"organization_id"`
 	Name                    string                  `json:"name"`
 	Status                  Status                  `json:"status"`
+	Industry                Industry                `json:"industry"`
 	PrimaryBrandID          *contract.BrandID       `json:"primary_brand_id"`
 	PrimaryBrandStatus      string                  `json:"-"`
 	BrandGuidelineVersionID string                  `json:"brand_guideline_version_id,omitempty"`
@@ -40,9 +61,9 @@ type ProjectDetail struct {
 
 type ProjectRuntime struct {
 	Code           string    `json:"code"`
-	Brand          string    `json:"brand,omitempty"`
-	Product        string    `json:"product,omitempty"`
-	Goal           string    `json:"goal,omitempty"`
+	Brand          string    `json:"brand"`
+	Product        string    `json:"product"`
+	Goal           string    `json:"goal"`
 	Stage          string    `json:"stage"`
 	Progress       int       `json:"progress"`
 	Status         string    `json:"status"`
@@ -50,8 +71,153 @@ type ProjectRuntime struct {
 	Budget         float64   `json:"budget"`
 	Currency       string    `json:"currency"`
 	Timezone       string    `json:"timezone"`
-	KnowledgeCount int       `json:"knowledge_count,omitempty"`
+	KnowledgeCount int       `json:"knowledge_count"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// Workbench is the typed, project-scoped read model used by the agency
+// workbench. It intentionally does not reuse OperationalRecord.Fields.
+type Workbench struct {
+	Organization          WorkbenchOrganization           `json:"organization"`
+	Client                WorkbenchClient                 `json:"client"`
+	Brand                 WorkbenchBrand                  `json:"brand"`
+	Project               WorkbenchProject                `json:"project"`
+	AdAccountBindings     []WorkbenchAdAccountBinding     `json:"ad_account_bindings"`
+	QualityCheckRuns      []WorkbenchQualityCheckRun      `json:"quality_check_runs"`
+	MaterialConfirmations []WorkbenchMaterialConfirmation `json:"material_confirmations"`
+	AssetVersionPointers  []WorkbenchAssetVersionPointer  `json:"asset_version_pointers"`
+}
+
+type WorkbenchOrganization struct {
+	ID        string    `json:"id"`
+	Code      string    `json:"code"`
+	Name      string    `json:"name"`
+	Owner     string    `json:"owner"`
+	Currency  string    `json:"currency"`
+	Timezone  string    `json:"timezone"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+type WorkbenchClient struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	Code           string    `json:"code"`
+	Name           string    `json:"name"`
+	Industry       string    `json:"industry"`
+	Owner          string    `json:"owner"`
+	HealthStatus   string    `json:"health_status"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+type WorkbenchBrand struct {
+	ID              string    `json:"id"`
+	OrganizationID  string    `json:"organization_id"`
+	ClientID        string    `json:"client_id"`
+	Code            string    `json:"code"`
+	Name            string    `json:"name"`
+	Category        string    `json:"category"`
+	ProductLines    []string  `json:"product_lines"`
+	Owner           string    `json:"owner"`
+	GuidelineStatus string    `json:"guideline_status"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+type WorkbenchProject struct {
+	ProjectID      string    `json:"project_id"`
+	OrganizationID string    `json:"organization_id"`
+	ClientID       string    `json:"client_id"`
+	BrandID        string    `json:"brand_id"`
+	Stage          string    `json:"stage"`
+	StageLabel     string    `json:"stage_label"`
+	StagePercent   int       `json:"stage_percent"`
+	TaskPercent    int       `json:"task_percent"`
+	RiskStatus     string    `json:"risk_status"`
+	Blocker        string    `json:"blocker"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+type WorkbenchAdAccountBinding struct {
+	ID               string    `json:"id"`
+	OrganizationID   string    `json:"organization_id"`
+	ClientID         string    `json:"client_id"`
+	BrandID          string    `json:"brand_id"`
+	Platform         string    `json:"platform"`
+	AccountName      string    `json:"account_name"`
+	AccountDisplayID string    `json:"account_display_id"`
+	Currency         string    `json:"currency"`
+	Timezone         string    `json:"timezone"`
+	PermissionStatus string    `json:"permission_status"`
+	LoginStatus      string    `json:"login_status"`
+	TrackingStatus   string    `json:"tracking_status"`
+	Owner            string    `json:"owner"`
+	BoundAssetIDs    []string  `json:"bound_asset_ids"`
+	LastSyncedAt     time.Time `json:"last_synced_at"`
+}
+type WorkbenchQualityCheckRun struct {
+	ID             string                       `json:"id"`
+	OrganizationID string                       `json:"organization_id"`
+	ProjectID      string                       `json:"project_id"`
+	AssetID        string                       `json:"asset_id"`
+	AssetVersion   int                          `json:"asset_version"`
+	Status         string                       `json:"status"`
+	Model          string                       `json:"model"`
+	RuleVersion    string                       `json:"rule_version"`
+	PromptVersion  string                       `json:"prompt_version"`
+	Summary        string                       `json:"summary"`
+	Issues         []WorkbenchQualityCheckIssue `json:"issues"`
+	CreatedAt      time.Time                    `json:"created_at"`
+	CompletedAt    *time.Time                   `json:"completed_at"`
+}
+type WorkbenchQualityCheckIssue struct {
+	ID         string `json:"id"`
+	Severity   string `json:"severity"`
+	Rule       string `json:"rule"`
+	Evidence   string `json:"evidence"`
+	Suggestion string `json:"suggestion"`
+}
+type WorkbenchMaterialConfirmation struct {
+	ID                string    `json:"id"`
+	OrganizationID    string    `json:"organization_id"`
+	ProjectID         string    `json:"project_id"`
+	QualityCheckRunID string    `json:"quality_check_run_id"`
+	AssetID           string    `json:"asset_id"`
+	AssetVersion      int       `json:"asset_version"`
+	Status            string    `json:"status"`
+	Scope             string    `json:"scope"`
+	ConfirmedBy       string    `json:"confirmed_by"`
+	Note              string    `json:"note"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+type WorkbenchAssetVersionPointer struct {
+	ID                    string                      `json:"id"`
+	OrganizationID        string                      `json:"organization_id"`
+	ProjectID             string                      `json:"project_id"`
+	AssetID               string                      `json:"asset_id"`
+	WorkingVersion        int                         `json:"working_version"`
+	QualityCheckedVersion *int                        `json:"quality_checked_version"`
+	HumanConfirmedVersion *int                        `json:"human_confirmed_version"`
+	DeliveryVersion       *int                        `json:"delivery_version"`
+	Versions              []WorkbenchAssetVersion     `json:"versions"`
+	Authorization         WorkbenchAssetAuthorization `json:"authorization"`
+	DeliveryTarget        WorkbenchDeliveryTarget     `json:"delivery_target"`
+	Owner                 string                      `json:"owner"`
+	UpdatedAt             time.Time                   `json:"updated_at"`
+}
+type WorkbenchAssetVersion struct {
+	Version       int       `json:"version"`
+	CreatedBy     string    `json:"created_by"`
+	SourceTaskID  string    `json:"source_task_id"`
+	SourceType    string    `json:"source_type"`
+	SourceLabel   string    `json:"source_label"`
+	CreatedAt     time.Time `json:"created_at"`
+	ChangeSummary string    `json:"change_summary"`
+}
+type WorkbenchAssetAuthorization struct {
+	Platforms    []string  `json:"platforms"`
+	Regions      []string  `json:"regions"`
+	RightsHolder string    `json:"rights_holder"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	Note         string    `json:"note"`
+}
+type WorkbenchDeliveryTarget struct {
+	Platform string `json:"platform"`
+	Region   string `json:"region"`
 }
 
 type ProjectArtifactSummary struct {
@@ -78,6 +244,9 @@ type Brand struct {
 
 type CreateProjectRequest struct {
 	Name           string               `json:"name"`
+	Brand          string               `json:"brand,omitempty"`
+	Goal           string               `json:"goal,omitempty"`
+	Industry       Industry             `json:"industry"`
 	PrimaryBrandID *contract.BrandID    `json:"primary_brand_id"`
 	ProductIDs     []contract.ProductID `json:"product_ids"`
 	Activate       bool                 `json:"activate"`
@@ -86,6 +255,15 @@ type CreateProjectRequest struct {
 func (r CreateProjectRequest) Validate() error {
 	if strings.TrimSpace(r.Name) == "" || len(r.Name) > 255 {
 		return fmt.Errorf("project name must be between 1 and 255 characters")
+	}
+	if strings.TrimSpace(r.Brand) != "" && len(r.Brand) > 255 {
+		return fmt.Errorf("brand must be at most 255 characters")
+	}
+	if len(strings.TrimSpace(r.Goal)) > 4000 {
+		return fmt.Errorf("goal must be at most 4000 characters")
+	}
+	if r.Industry != "" && !r.Industry.Valid() {
+		return fmt.Errorf("industry must be one of short_drama, game, ecommerce, automotive_brand")
 	}
 	if r.PrimaryBrandID != nil && strings.TrimSpace(string(*r.PrimaryBrandID)) == "" {
 		return fmt.Errorf("primary_brand_id must be null or non-empty")
@@ -105,6 +283,38 @@ func (r CreateProjectRequest) Validate() error {
 			return fmt.Errorf("product_id %q is duplicated", productID)
 		}
 		seen[productID] = struct{}{}
+	}
+	return nil
+}
+
+// UpdateProjectRequest permits only Project-owned display and planning fields.
+// Brand and product bindings remain owned by their dedicated versioned APIs.
+type UpdateProjectRequest struct {
+	Name                   *string   `json:"name,omitempty"`
+	Brand                  *string   `json:"brand,omitempty"`
+	Goal                   *string   `json:"goal,omitempty"`
+	Industry               *Industry `json:"industry,omitempty"`
+	ExpectedContextVersion *int64    `json:"expected_context_version,omitempty"`
+}
+
+func (r UpdateProjectRequest) Validate() error {
+	if r.Name == nil && r.Brand == nil && r.Goal == nil && r.Industry == nil {
+		return fmt.Errorf("at least one mutable project field is required")
+	}
+	if r.Name != nil && (strings.TrimSpace(*r.Name) == "" || len(*r.Name) > 255) {
+		return fmt.Errorf("name must be between 1 and 255 characters")
+	}
+	if r.Brand != nil && (strings.TrimSpace(*r.Brand) == "" || len(*r.Brand) > 255) {
+		return fmt.Errorf("brand must be between 1 and 255 characters")
+	}
+	if r.Goal != nil && len(strings.TrimSpace(*r.Goal)) > 4000 {
+		return fmt.Errorf("goal must be at most 4000 characters")
+	}
+	if r.Industry != nil && !r.Industry.Valid() {
+		return fmt.Errorf("industry must be one of short_drama, game, ecommerce, automotive_brand")
+	}
+	if r.ExpectedContextVersion != nil && *r.ExpectedContextVersion < 1 {
+		return fmt.Errorf("expected_context_version must be positive")
 	}
 	return nil
 }

@@ -134,6 +134,43 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body project.UpdateProjectRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpdateProject(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) projectWorkbench(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.GetWorkbench(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) listProjectTasks(w http.ResponseWriter, r *http.Request) {
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := s.projects.ListBusinessTasks(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))

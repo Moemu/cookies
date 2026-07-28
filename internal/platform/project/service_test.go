@@ -34,10 +34,23 @@ func (*stubProjectStore) CreateBrand(context.Context, Brand) error { return nil 
 func (*stubProjectStore) CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error {
 	return nil
 }
+func (*stubProjectStore) UpdateProject(context.Context, Project, ProjectRuntime, int64) error {
+	return nil
+}
 func (s *stubProjectStore) GetProject(context.Context, contract.OrganizationID, contract.ProjectID) (Project, error) {
 	s.read = true
 	return Project{}, ErrNotFound
 }
+func (*stubProjectStore) GetProjectRuntime(context.Context, contract.OrganizationID, contract.ProjectID) (ProjectRuntime, error) {
+	return ProjectRuntime{}, ErrNotFound
+}
+func (*stubProjectStore) UpsertProjectRuntime(context.Context, contract.OrganizationID, contract.ProjectID, ProjectRuntime) error {
+	return nil
+}
+func (*stubProjectStore) GetWorkbench(context.Context, contract.OrganizationID, contract.ProjectID) (Workbench, error) {
+	return Workbench{}, ErrNotFound
+}
+func (*stubProjectStore) UpsertWorkbench(context.Context, Workbench) error { return nil }
 func (s *stubProjectStore) GetContext(context.Context, contract.OrganizationID, contract.ProjectID) (contract.ProjectContext, error) {
 	s.read = true
 	return contract.ProjectContext{}, ErrNotFound
@@ -63,6 +76,9 @@ func (*stubProjectStore) GetOperationalRecord(context.Context, contract.Organiza
 	return OperationalRecord{}, nil
 }
 func (*stubProjectStore) UpdateOperationalRecord(context.Context, OperationalRecord) error {
+	return nil
+}
+func (*stubProjectStore) DeleteOperationalRecord(context.Context, contract.OrganizationID, contract.ProjectID, string) error {
 	return nil
 }
 func (*stubProjectStore) CreateChangeSet(context.Context, ChangeSet) error { return nil }

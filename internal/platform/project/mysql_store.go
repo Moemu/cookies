@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -32,7 +33,7 @@ func (s MySQLStore) EnsureLocalProject(ctx context.Context, actor contract.Actor
 	if _, err := tx.ExecContext(ctx, `INSERT INTO brands (id, organization_id, name, status) VALUES (?, ?, 'Local Brand', 'active') ON DUPLICATE KEY UPDATE status='active'`, brandID, actor.OrganizationID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id, organization_id, name, status, primary_brand_id, project_context_version) VALUES (?, ?, 'Local Project', 'active', ?, 1) ON DUPLICATE KEY UPDATE status='active', primary_brand_id=VALUES(primary_brand_id)`, projectID, actor.OrganizationID, brandID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id, organization_id, name, status, industry, primary_brand_id, project_context_version) VALUES (?, ?, 'Local Project', 'active', 'ecommerce', ?, 1) ON DUPLICATE KEY UPDATE status='active', primary_brand_id=VALUES(primary_brand_id)`, projectID, actor.OrganizationID, brandID); err != nil {
 		return err
 	}
 	role := "owner"
@@ -43,6 +44,9 @@ func (s MySQLStore) EnsureLocalProject(ctx context.Context, actor contract.Actor
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO project_context_versions (organization_id, project_id, version, brand_id, product_ids) VALUES (?, ?, 1, ?, JSON_ARRAY()) ON DUPLICATE KEY UPDATE brand_id=VALUES(brand_id)`, actor.OrganizationID, projectID, brandID); err != nil {
+		return err
+	}
+	if err := upsertProjectRuntime(ctx, tx, actor.OrganizationID, projectID, ProjectRuntime{Code: string(projectID), Brand: "Local Brand", Product: "尚未关联产品", Goal: "尚未设定项目目标", Stage: "项目执行", Progress: 10, Status: "active", Owner: "系统", Budget: 0, Currency: "CNY", Timezone: "Asia/Shanghai", KnowledgeCount: 0, UpdatedAt: time.Now().UTC()}); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -126,8 +130,8 @@ func (s MySQLStore) CreateProject(ctx context.Context, project Project, principa
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO projects
-		(id, organization_id, name, status, primary_brand_id, brand_guideline_version_id, project_context_version)
-		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?)`, project.ID, project.OrganizationID, project.Name, project.Status,
+		(id, organization_id, name, status, industry, primary_brand_id, brand_guideline_version_id, project_context_version)
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)`, project.ID, project.OrganizationID, project.Name, project.Status, project.Industry,
 		nullableBrandID(project.PrimaryBrandID), project.BrandGuidelineVersionID, project.ProjectContextVersion); err != nil {
 		return err
 	}
@@ -156,7 +160,339 @@ func (s MySQLStore) CreateProject(ctx context.Context, project Project, principa
 		nullableBrandID(project.PrimaryBrandID), project.BrandGuidelineVersionID, productJSON); err != nil {
 		return err
 	}
+	brandName := "未指定品牌"
+	if project.PrimaryBrandID != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM brands WHERE organization_id=? AND id=?`, project.OrganizationID, *project.PrimaryBrandID).Scan(&brandName); err != nil {
+			return err
+		}
+	}
+	productName := "尚未关联产品"
+	if len(productIDs) > 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT GROUP_CONCAT(name ORDER BY name SEPARATOR '、') FROM products WHERE organization_id=? AND id IN (`+placeholders(len(productIDs))+`)`, append([]any{project.OrganizationID}, productIDArgs(productIDs)...)...).Scan(&productName); err != nil {
+			return err
+		}
+		if productName == "" {
+			productName = "尚未关联产品"
+		}
+	}
+	status := "active"
+	if project.Status == StatusDraft {
+		status = "blocked"
+	}
+	if project.Status == StatusArchived {
+		status = "completed"
+	}
+	if err := upsertProjectRuntime(ctx, tx, project.OrganizationID, project.ID, ProjectRuntime{Code: string(project.ID), Brand: brandName, Product: productName, Goal: "尚未设定项目目标", Stage: string(project.Status), Progress: 0, Status: status, Owner: string(principal.Kind) + ":" + principal.ID, Budget: 0, Currency: "CNY", Timezone: "Asia/Shanghai", KnowledgeCount: 0, UpdatedAt: time.Now().UTC()}); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (s MySQLStore) UpdateProject(ctx context.Context, project Project, runtime ProjectRuntime, expectedContextVersion int64) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	if expectedContextVersion < 1 {
+		return fmt.Errorf("expected project context version must be positive")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE projects SET name=?, industry=?, project_context_version=project_context_version+1
+		WHERE organization_id=? AND id=? AND project_context_version=?`,
+		project.Name, project.Industry, project.OrganizationID, project.ID, expectedContextVersion)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		var exists int
+		err = tx.QueryRowContext(ctx, `SELECT 1 FROM projects WHERE organization_id=? AND id=?`, project.OrganizationID, project.ID).Scan(&exists)
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return ErrVersionConflict
+	}
+	if err := upsertProjectRuntime(ctx, tx, project.OrganizationID, project.ID, runtime); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO project_context_versions
+		(organization_id, project_id, version, brand_id, brand_guideline_version_id, product_ids)
+		SELECT organization_id, project_id, ?, brand_id, brand_guideline_version_id, product_ids
+		FROM project_context_versions WHERE organization_id=? AND project_id=? AND version=?`,
+		expectedContextVersion+1, project.OrganizationID, project.ID, expectedContextVersion); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s MySQLStore) GetProjectRuntime(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (ProjectRuntime, error) {
+	if s.DB == nil {
+		return ProjectRuntime{}, fmt.Errorf("project database is required")
+	}
+	var runtime ProjectRuntime
+	err := s.DB.QueryRowContext(ctx, `SELECT code, brand, product, goal, stage, progress, status, owner, budget, currency, timezone, knowledge_count, updated_at FROM platform_project_runtimes WHERE organization_id=? AND project_id=?`, organizationID, projectID).Scan(&runtime.Code, &runtime.Brand, &runtime.Product, &runtime.Goal, &runtime.Stage, &runtime.Progress, &runtime.Status, &runtime.Owner, &runtime.Budget, &runtime.Currency, &runtime.Timezone, &runtime.KnowledgeCount, &runtime.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProjectRuntime{}, ErrNotFound
+	}
+	return runtime, err
+}
+
+func (s MySQLStore) UpsertProjectRuntime(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runtime ProjectRuntime) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	return upsertProjectRuntime(ctx, s.DB, organizationID, projectID, runtime)
+}
+
+func upsertProjectRuntime(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, organizationID contract.OrganizationID, projectID contract.ProjectID, runtime ProjectRuntime) error {
+	runtime.UpdatedAt = defaultTimestamp(runtime.UpdatedAt)
+	_, err := exec.ExecContext(ctx, `INSERT INTO platform_project_runtimes (organization_id, project_id, code, brand, product, goal, stage, progress, status, owner, budget, currency, timezone, knowledge_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code=VALUES(code), brand=VALUES(brand), product=VALUES(product), goal=VALUES(goal), stage=VALUES(stage), progress=VALUES(progress), status=VALUES(status), owner=VALUES(owner), budget=VALUES(budget), currency=VALUES(currency), timezone=VALUES(timezone), knowledge_count=VALUES(knowledge_count), updated_at=VALUES(updated_at)`, organizationID, projectID, runtime.Code, runtime.Brand, runtime.Product, runtime.Goal, runtime.Stage, runtime.Progress, runtime.Status, runtime.Owner, runtime.Budget, runtime.Currency, runtime.Timezone, runtime.KnowledgeCount, runtime.UpdatedAt)
+	return err
+}
+
+func (s MySQLStore) GetWorkbench(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (Workbench, error) {
+	if s.DB == nil {
+		return Workbench{}, fmt.Errorf("project database is required")
+	}
+	var value Workbench
+	var productLines []byte
+	err := s.DB.QueryRowContext(ctx, `SELECT organization_code, organization_name, organization_owner, client_id, client_code, client_name, client_industry, brand_id, brand_code, brand_name, brand_category, product_lines, guideline_status, stage, stage_label, stage_percent, task_percent, risk_status, COALESCE(blocker, ''), updated_at FROM platform_project_workbenches WHERE organization_id=? AND project_id=?`, organizationID, projectID).Scan(&value.Organization.Code, &value.Organization.Name, &value.Organization.Owner, &value.Client.ID, &value.Client.Code, &value.Client.Name, &value.Client.Industry, &value.Brand.ID, &value.Brand.Code, &value.Brand.Name, &value.Brand.Category, &productLines, &value.Brand.GuidelineStatus, &value.Project.Stage, &value.Project.StageLabel, &value.Project.StagePercent, &value.Project.TaskPercent, &value.Project.RiskStatus, &value.Project.Blocker, &value.Project.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Workbench{}, ErrNotFound
+	}
+	if err != nil {
+		return Workbench{}, err
+	}
+	if err := decodeJSON(productLines, &value.Brand.ProductLines); err != nil {
+		return Workbench{}, fmt.Errorf("decode workbench product lines: %w", err)
+	}
+	value.Organization.ID, value.Organization.Currency, value.Organization.Timezone, value.Organization.UpdatedAt = string(organizationID), "CNY", "Asia/Shanghai", value.Project.UpdatedAt
+	value.Client.OrganizationID, value.Client.Owner, value.Client.HealthStatus, value.Client.UpdatedAt = string(organizationID), value.Organization.Owner, "healthy", value.Project.UpdatedAt
+	value.Brand.OrganizationID, value.Brand.ClientID, value.Brand.Owner, value.Brand.UpdatedAt = string(organizationID), value.Client.ID, value.Organization.Owner, value.Project.UpdatedAt
+	value.Project.ProjectID, value.Project.OrganizationID, value.Project.ClientID, value.Project.BrandID = string(projectID), string(organizationID), value.Client.ID, value.Brand.ID
+
+	accounts, err := s.listWorkbenchAdAccounts(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	qualityChecks, err := s.listWorkbenchQualityChecks(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	confirmations, err := s.listWorkbenchMaterialConfirmations(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	pointers, err := s.listWorkbenchAssetPointers(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	value.AdAccountBindings, value.QualityCheckRuns, value.MaterialConfirmations, value.AssetVersionPointers = accounts, qualityChecks, confirmations, pointers
+	return value, nil
+}
+
+func (s MySQLStore) UpsertWorkbench(ctx context.Context, value Workbench) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	organizationID, projectID := contract.OrganizationID(value.Project.OrganizationID), contract.ProjectID(value.Project.ProjectID)
+	if organizationID == "" || projectID == "" {
+		return fmt.Errorf("workbench organization_id and project_id are required")
+	}
+	lines, err := jsonArray(value.Brand.ProductLines)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	updatedAt := defaultTimestamp(value.Project.UpdatedAt)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO platform_project_workbenches (organization_id, project_id, organization_code, organization_name, organization_owner, client_id, client_code, client_name, client_industry, brand_id, brand_code, brand_name, brand_category, product_lines, guideline_status, stage, stage_label, stage_percent, task_percent, risk_status, blocker, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?) ON DUPLICATE KEY UPDATE organization_code=VALUES(organization_code), organization_name=VALUES(organization_name), organization_owner=VALUES(organization_owner), client_id=VALUES(client_id), client_code=VALUES(client_code), client_name=VALUES(client_name), client_industry=VALUES(client_industry), brand_id=VALUES(brand_id), brand_code=VALUES(brand_code), brand_name=VALUES(brand_name), brand_category=VALUES(brand_category), product_lines=VALUES(product_lines), guideline_status=VALUES(guideline_status), stage=VALUES(stage), stage_label=VALUES(stage_label), stage_percent=VALUES(stage_percent), task_percent=VALUES(task_percent), risk_status=VALUES(risk_status), blocker=VALUES(blocker), updated_at=VALUES(updated_at)`, organizationID, projectID, value.Organization.Code, value.Organization.Name, value.Organization.Owner, value.Client.ID, value.Client.Code, value.Client.Name, value.Client.Industry, value.Brand.ID, value.Brand.Code, value.Brand.Name, value.Brand.Category, lines, value.Brand.GuidelineStatus, value.Project.Stage, value.Project.StageLabel, value.Project.StagePercent, value.Project.TaskPercent, value.Project.RiskStatus, value.Project.Blocker, updatedAt); err != nil {
+		return err
+	}
+	for _, account := range value.AdAccountBindings {
+		if err := upsertWorkbenchAdAccount(ctx, tx, organizationID, projectID, account); err != nil {
+			return err
+		}
+	}
+	for _, run := range value.QualityCheckRuns {
+		if err := upsertWorkbenchQualityCheck(ctx, tx, organizationID, projectID, run); err != nil {
+			return err
+		}
+	}
+	for _, confirmation := range value.MaterialConfirmations {
+		if err := upsertWorkbenchMaterialConfirmation(ctx, tx, organizationID, projectID, confirmation); err != nil {
+			return err
+		}
+	}
+	for _, pointer := range value.AssetVersionPointers {
+		if err := upsertWorkbenchAssetPointer(ctx, tx, organizationID, projectID, pointer); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func upsertWorkbenchAdAccount(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, organizationID contract.OrganizationID, projectID contract.ProjectID, value WorkbenchAdAccountBinding) error {
+	assets, err := jsonArray(value.BoundAssetIDs)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO platform_project_workbench_ad_accounts (organization_id, project_id, id, client_id, brand_id, platform, account_name, account_display_id, currency, timezone, permission_status, login_status, tracking_status, owner, bound_asset_ids, last_synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE client_id=VALUES(client_id), brand_id=VALUES(brand_id), platform=VALUES(platform), account_name=VALUES(account_name), account_display_id=VALUES(account_display_id), currency=VALUES(currency), timezone=VALUES(timezone), permission_status=VALUES(permission_status), login_status=VALUES(login_status), tracking_status=VALUES(tracking_status), owner=VALUES(owner), bound_asset_ids=VALUES(bound_asset_ids), last_synced_at=VALUES(last_synced_at)`, organizationID, projectID, value.ID, value.ClientID, value.BrandID, value.Platform, value.AccountName, value.AccountDisplayID, value.Currency, value.Timezone, value.PermissionStatus, value.LoginStatus, value.TrackingStatus, value.Owner, assets, defaultTimestamp(value.LastSyncedAt))
+	return err
+}
+func upsertWorkbenchQualityCheck(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, organizationID contract.OrganizationID, projectID contract.ProjectID, value WorkbenchQualityCheckRun) error {
+	issues, err := jsonArray(value.Issues)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO platform_project_workbench_quality_checks (organization_id, project_id, id, asset_id, asset_version, status, model, rule_version, prompt_version, summary, issues, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE asset_id=VALUES(asset_id), asset_version=VALUES(asset_version), status=VALUES(status), model=VALUES(model), rule_version=VALUES(rule_version), prompt_version=VALUES(prompt_version), summary=VALUES(summary), issues=VALUES(issues), created_at=VALUES(created_at), completed_at=VALUES(completed_at)`, organizationID, projectID, value.ID, value.AssetID, value.AssetVersion, value.Status, value.Model, value.RuleVersion, value.PromptVersion, value.Summary, issues, defaultTimestamp(value.CreatedAt), value.CompletedAt)
+	return err
+}
+func upsertWorkbenchMaterialConfirmation(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, organizationID contract.OrganizationID, projectID contract.ProjectID, value WorkbenchMaterialConfirmation) error {
+	_, err := exec.ExecContext(ctx, `INSERT INTO platform_project_workbench_material_confirmations (organization_id, project_id, id, quality_check_run_id, asset_id, asset_version, status, scope, confirmed_by, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE quality_check_run_id=VALUES(quality_check_run_id), asset_id=VALUES(asset_id), asset_version=VALUES(asset_version), status=VALUES(status), scope=VALUES(scope), confirmed_by=VALUES(confirmed_by), note=VALUES(note), created_at=VALUES(created_at)`, organizationID, projectID, value.ID, value.QualityCheckRunID, value.AssetID, value.AssetVersion, value.Status, value.Scope, value.ConfirmedBy, value.Note, defaultTimestamp(value.CreatedAt))
+	return err
+}
+func upsertWorkbenchAssetPointer(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, organizationID contract.OrganizationID, projectID contract.ProjectID, value WorkbenchAssetVersionPointer) error {
+	versions, err := jsonArray(value.Versions)
+	if err != nil {
+		return err
+	}
+	platforms, err := jsonArray(value.Authorization.Platforms)
+	if err != nil {
+		return err
+	}
+	regions, err := jsonArray(value.Authorization.Regions)
+	if err != nil {
+		return err
+	}
+	_, err = exec.ExecContext(ctx, `INSERT INTO platform_project_workbench_asset_pointers (organization_id, project_id, id, asset_id, working_version, quality_checked_version, human_confirmed_version, delivery_version, versions, authorization_platforms, authorization_regions, rights_holder, expires_at, authorization_note, delivery_platform, delivery_region, owner, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE asset_id=VALUES(asset_id), working_version=VALUES(working_version), quality_checked_version=VALUES(quality_checked_version), human_confirmed_version=VALUES(human_confirmed_version), delivery_version=VALUES(delivery_version), versions=VALUES(versions), authorization_platforms=VALUES(authorization_platforms), authorization_regions=VALUES(authorization_regions), rights_holder=VALUES(rights_holder), expires_at=VALUES(expires_at), authorization_note=VALUES(authorization_note), delivery_platform=VALUES(delivery_platform), delivery_region=VALUES(delivery_region), owner=VALUES(owner), updated_at=VALUES(updated_at)`, organizationID, projectID, value.ID, value.AssetID, value.WorkingVersion, value.QualityCheckedVersion, value.HumanConfirmedVersion, value.DeliveryVersion, versions, platforms, regions, value.Authorization.RightsHolder, defaultTimestamp(value.Authorization.ExpiresAt), value.Authorization.Note, value.DeliveryTarget.Platform, value.DeliveryTarget.Region, value.Owner, defaultTimestamp(value.UpdatedAt))
+	return err
+}
+
+func (s MySQLStore) listWorkbenchAdAccounts(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]WorkbenchAdAccountBinding, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, client_id, brand_id, platform, account_name, account_display_id, currency, timezone, permission_status, login_status, tracking_status, owner, bound_asset_ids, last_synced_at FROM platform_project_workbench_ad_accounts WHERE organization_id=? AND project_id=? ORDER BY id`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []WorkbenchAdAccountBinding{}
+	for rows.Next() {
+		var item WorkbenchAdAccountBinding
+		var ids []byte
+		if err := rows.Scan(&item.ID, &item.ClientID, &item.BrandID, &item.Platform, &item.AccountName, &item.AccountDisplayID, &item.Currency, &item.Timezone, &item.PermissionStatus, &item.LoginStatus, &item.TrackingStatus, &item.Owner, &ids, &item.LastSyncedAt); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(ids, &item.BoundAssetIDs); err != nil {
+			return nil, err
+		}
+		item.OrganizationID = string(organizationID)
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+func (s MySQLStore) listWorkbenchQualityChecks(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]WorkbenchQualityCheckRun, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, asset_id, asset_version, status, model, rule_version, prompt_version, summary, issues, created_at, completed_at FROM platform_project_workbench_quality_checks WHERE organization_id=? AND project_id=? ORDER BY created_at DESC, id`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []WorkbenchQualityCheckRun{}
+	for rows.Next() {
+		var item WorkbenchQualityCheckRun
+		var issues []byte
+		if err := rows.Scan(&item.ID, &item.AssetID, &item.AssetVersion, &item.Status, &item.Model, &item.RuleVersion, &item.PromptVersion, &item.Summary, &issues, &item.CreatedAt, &item.CompletedAt); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(issues, &item.Issues); err != nil {
+			return nil, err
+		}
+		item.OrganizationID, item.ProjectID = string(organizationID), string(projectID)
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+func (s MySQLStore) listWorkbenchMaterialConfirmations(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]WorkbenchMaterialConfirmation, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, quality_check_run_id, asset_id, asset_version, status, scope, confirmed_by, note, created_at FROM platform_project_workbench_material_confirmations WHERE organization_id=? AND project_id=? ORDER BY created_at DESC, id`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []WorkbenchMaterialConfirmation{}
+	for rows.Next() {
+		var item WorkbenchMaterialConfirmation
+		if err := rows.Scan(&item.ID, &item.QualityCheckRunID, &item.AssetID, &item.AssetVersion, &item.Status, &item.Scope, &item.ConfirmedBy, &item.Note, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		item.OrganizationID, item.ProjectID = string(organizationID), string(projectID)
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+func (s MySQLStore) listWorkbenchAssetPointers(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]WorkbenchAssetVersionPointer, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, asset_id, working_version, quality_checked_version, human_confirmed_version, delivery_version, versions, authorization_platforms, authorization_regions, rights_holder, expires_at, authorization_note, delivery_platform, delivery_region, owner, updated_at FROM platform_project_workbench_asset_pointers WHERE organization_id=? AND project_id=? ORDER BY id`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []WorkbenchAssetVersionPointer{}
+	for rows.Next() {
+		var item WorkbenchAssetVersionPointer
+		var versions, platforms, regions []byte
+		if err := rows.Scan(&item.ID, &item.AssetID, &item.WorkingVersion, &item.QualityCheckedVersion, &item.HumanConfirmedVersion, &item.DeliveryVersion, &versions, &platforms, &regions, &item.Authorization.RightsHolder, &item.Authorization.ExpiresAt, &item.Authorization.Note, &item.DeliveryTarget.Platform, &item.DeliveryTarget.Region, &item.Owner, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(versions, &item.Versions); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(platforms, &item.Authorization.Platforms); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(regions, &item.Authorization.Regions); err != nil {
+			return nil, err
+		}
+		item.OrganizationID, item.ProjectID = string(organizationID), string(projectID)
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s MySQLStore) DeleteOperationalRecord(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, recordID string) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM platform_project_operations WHERE organization_id=? AND project_id=? AND id=?`, organizationID, projectID, recordID)
+	return err
+}
+
+func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?,", count), ",") }
+func productIDArgs(ids []contract.ProductID) []any {
+	values := make([]any, len(ids))
+	for i, id := range ids {
+		values[i] = id
+	}
+	return values
 }
 
 func (s MySQLStore) GetProject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (Project, error) {
@@ -165,11 +501,11 @@ func (s MySQLStore) GetProject(ctx context.Context, organizationID contract.Orga
 	}
 	var project Project
 	var brandID, guidelineID sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT p.id, p.organization_id, p.name, p.status, p.primary_brand_id,
+	err := s.DB.QueryRowContext(ctx, `SELECT p.id, p.organization_id, p.name, p.status, p.industry, p.primary_brand_id,
 		p.brand_guideline_version_id, p.project_context_version, p.created_at, p.updated_at, COALESCE(b.status, '')
 		FROM projects p LEFT JOIN brands b ON b.organization_id=p.organization_id AND b.id=p.primary_brand_id
 		WHERE p.organization_id = ? AND p.id = ?`, organizationID, projectID).Scan(
-		&project.ID, &project.OrganizationID, &project.Name, &project.Status, &brandID,
+		&project.ID, &project.OrganizationID, &project.Name, &project.Status, &project.Industry, &brandID,
 		&guidelineID, &project.ProjectContextVersion, &project.CreatedAt, &project.UpdatedAt, &project.PrimaryBrandStatus)
 	if err == sql.ErrNoRows {
 		return Project{}, ErrNotFound
@@ -223,7 +559,7 @@ func (s MySQLStore) ListProjects(ctx context.Context, actor contract.ActorContex
 	if s.DB == nil {
 		return nil, fmt.Errorf("project database is required")
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id, p.organization_id, p.name, p.status, p.primary_brand_id,
+	rows, err := s.DB.QueryContext(ctx, `SELECT p.id, p.organization_id, p.name, p.status, p.industry, p.primary_brand_id,
 		p.brand_guideline_version_id, p.project_context_version, p.created_at, p.updated_at
 		FROM projects p JOIN project_memberships pm
 		  ON pm.organization_id = p.organization_id AND pm.project_id = p.id
@@ -237,7 +573,7 @@ func (s MySQLStore) ListProjects(ctx context.Context, actor contract.ActorContex
 	for rows.Next() {
 		var project Project
 		var brandID, guidelineID sql.NullString
-		if err := rows.Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Status, &brandID,
+		if err := rows.Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Status, &project.Industry, &brandID,
 			&guidelineID, &project.ProjectContextVersion, &project.CreatedAt, &project.UpdatedAt); err != nil {
 			return nil, err
 		}
