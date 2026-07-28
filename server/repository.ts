@@ -24,6 +24,7 @@ import {
   type PreflightResult,
   type Project,
   type ProjectRuntime,
+  type ProviderCredential,
   type PrerollType,
   type ShortDramaPrerollArtifactSnapshot,
   type SimulationEvidence,
@@ -170,6 +171,7 @@ export class FileRepository {
         generationJobs: parsed.generationJobs ?? [],
         changeSets: parsed.changeSets ?? [],
         auditEvents: parsed.auditEvents ?? [],
+        providerCredentials: parsed.providerCredentials ?? [],
       });
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -183,6 +185,31 @@ export class FileRepository {
 
   async listProjects(): Promise<Project[]> {
     return [...this.store.projects];
+  }
+
+  getProviderCredential(provider: ProviderCredential["provider"]): ProviderCredential | undefined {
+    const credential = this.store.providerCredentials.find((item) => item.provider === provider);
+    return credential ? { ...credential } : undefined;
+  }
+
+  async upsertProviderCredential(input: Omit<ProviderCredential, "updatedAt">): Promise<ProviderCredential> {
+    const now = new Date().toISOString();
+    const credential: ProviderCredential = { ...input, updatedAt: now };
+    await this.mutate(() => {
+      const existing = this.store.providerCredentials.find((item) => item.provider === input.provider);
+      if (existing) {
+        Object.assign(existing, credential);
+      } else {
+        this.store.providerCredentials.push(credential);
+      }
+    });
+    return credential;
+  }
+
+  async deleteProviderCredential(provider: ProviderCredential["provider"]): Promise<void> {
+    await this.mutate(() => {
+      this.store.providerCredentials = this.store.providerCredentials.filter((item) => item.provider !== provider);
+    });
   }
 
   async getProject(id: string): Promise<Project | undefined> {

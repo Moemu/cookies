@@ -1,0 +1,100 @@
+CREATE TABLE IF NOT EXISTS platform_project_tasks (
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  type VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  objective TEXT NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'draft',
+  source_task_ids JSON NOT NULL,
+  source_artifact_ids JSON NOT NULL,
+  output_artifact_ids JSON NOT NULL,
+  version BIGINT NOT NULL DEFAULT 1,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (organization_id, project_id, id),
+  KEY idx_platform_project_tasks_project_status (organization_id, project_id, status, updated_at),
+  CONSTRAINT fk_platform_project_tasks_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT chk_platform_project_tasks_type CHECK (type IN ('strategy', 'creative', 'video', 'brand_video', 'short_drama_preroll', 'game_preroll', 'commerce_preroll', 'viral_remake', 'video_edit')),
+  CONSTRAINT chk_platform_project_tasks_status CHECK (status IN ('draft', 'in_progress', 'ready', 'completed', 'failed')),
+  CONSTRAINT chk_platform_project_tasks_version CHECK (version > 0),
+  CONSTRAINT chk_platform_project_tasks_source_task_ids_json CHECK (JSON_VALID(source_task_ids)),
+  CONSTRAINT chk_platform_project_tasks_source_artifact_ids_json CHECK (JSON_VALID(source_artifact_ids)),
+  CONSTRAINT chk_platform_project_tasks_output_artifact_ids_json CHECK (JSON_VALID(output_artifact_ids))
+);
+
+CREATE TABLE IF NOT EXISTS platform_project_operations (
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  kind VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  status VARCHAR(64) NOT NULL,
+  occurred_at DATETIME(6) NOT NULL,
+  fields JSON NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (organization_id, project_id, id),
+  KEY idx_platform_project_operations_project_kind (organization_id, project_id, kind, occurred_at),
+  CONSTRAINT fk_platform_project_operations_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT chk_platform_project_operations_kind CHECK (kind IN ('work_item', 'evidence', 'activity', 'metric', 'performance_ad', 'audience_mix', 'method', 'delivery_diagnostic', 'delivery_action', 'unified_record')),
+  CONSTRAINT chk_platform_project_operations_fields_json CHECK (JSON_VALID(fields))
+);
+
+CREATE TABLE IF NOT EXISTS platform_change_sets (
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'draft',
+  artifact_refs JSON NOT NULL,
+  budget_limit DECIMAL(18,2) NULL,
+  preflight JSON NULL,
+  execution JSON NULL,
+  rollback JSON NULL,
+  version BIGINT NOT NULL DEFAULT 1,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (organization_id, project_id, id),
+  KEY idx_platform_change_sets_project_status (organization_id, project_id, status, updated_at),
+  CONSTRAINT fk_platform_change_sets_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT chk_platform_change_sets_status CHECK (status IN ('draft', 'preflight_passed', 'preflight_failed', 'approved', 'rejected', 'executing', 'executed', 'rolled_back')),
+  CONSTRAINT chk_platform_change_sets_version CHECK (version > 0),
+  CONSTRAINT chk_platform_change_sets_budget CHECK (budget_limit IS NULL OR budget_limit >= 0),
+  CONSTRAINT chk_platform_change_sets_artifact_refs_json CHECK (JSON_VALID(artifact_refs)),
+  CONSTRAINT chk_platform_change_sets_preflight_json CHECK (preflight IS NULL OR JSON_VALID(preflight)),
+  CONSTRAINT chk_platform_change_sets_execution_json CHECK (execution IS NULL OR JSON_VALID(execution)),
+  CONSTRAINT chk_platform_change_sets_rollback_json CHECK (rollback IS NULL OR JSON_VALID(rollback))
+);
+
+CREATE TABLE IF NOT EXISTS platform_change_set_events (
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  change_set_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  event_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor VARCHAR(255) NOT NULL,
+  payload JSON NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (organization_id, project_id, change_set_id, id),
+  KEY idx_platform_change_set_events_type (organization_id, project_id, event_type, created_at),
+  CONSTRAINT fk_platform_change_set_events_change_set FOREIGN KEY (organization_id, project_id, change_set_id) REFERENCES platform_change_sets(organization_id, project_id, id),
+  CONSTRAINT chk_platform_change_set_events_payload_json CHECK (JSON_VALID(payload))
+);
+
+CREATE TABLE IF NOT EXISTS platform_audit_events (
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor VARCHAR(255) NOT NULL,
+  action VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  entity_type VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  entity_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  metadata JSON NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (organization_id, project_id, id),
+  KEY idx_platform_audit_events_entity (organization_id, project_id, entity_type, entity_id, created_at),
+  CONSTRAINT fk_platform_audit_events_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT chk_platform_audit_events_entity_type CHECK (entity_type IN ('project', 'business_task', 'artifact', 'generation_job', 'change_set', 'operational_record')),
+  CONSTRAINT chk_platform_audit_events_metadata_json CHECK (JSON_VALID(metadata))
+);

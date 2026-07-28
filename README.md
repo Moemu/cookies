@@ -70,22 +70,21 @@ This MVP does **not** support video uploads, VLM/video understanding, mixed-vide
 
 ## Quick start
 
-Prerequisites: Node.js 20 or later and npm. Clone the repository, then install dependencies:
+Prerequisites: Node.js 20 or later, npm, Go, and Docker. Clone the repository, then install dependencies and seed the Go demo:
 
 ```bash
 git clone --recurse-submodules https://github.com/shikanon/cookies.git
 cd cookies
-npm install
 cp .env.example .env
+npm ci
+docker compose up -d --wait mysql
+npm run go:seed
 ```
 
-Start the API in one terminal:
+Start the Go `cookies-api` in one terminal:
 
 ```bash
-set -a
-source .env
-set +a
-npm run server
+go run ./cmd/cookies-api
 ```
 
 Start the Vite frontend in a second terminal, then open the printed `http://127.0.0.1:5173` URL:
@@ -94,21 +93,25 @@ Start the Vite frontend in a second terminal, then open the printed `http://127.
 npm run dev
 ```
 
-The server stores local demo state in ignored `data/mvp-store.json`. To reset the demo, stop the server and remove that file; the next `npm run server` recreates the seeded project.
+The frontend defaults to Go `/platform/v1` through the root Vite `/platform` and `/api` proxies to `http://127.0.0.1:8080`. Override `VITE_API_BASE_URL` only when you intentionally point the frontend at another API host.
+
+On macOS, `./scripts/dev.sh` runs the full local loop: start MySQL, apply migrations, seed the canonical Go investor demo, then start the Go API and Vite frontend. Use `./scripts/dev.sh --prepare-only` to run only migrations and seed.
+
+The TypeScript MVP server (`npm run server`) is kept for compatibility demos only. Its ignored `data/mvp-store.json` state is not the production-facing authority after equivalent Go `/platform/v1` endpoints are available. To run the frontend against that compatibility layer, start `npm run server` and set `VITE_API_BASE_URL=http://127.0.0.1:8787` explicitly.
 
 ## Ark configuration
 
-Copy `.env.example` to `.env`, set the value locally, then load it in the shell that starts `npm run server`:
+Copy `.env.example` to `.env`, set the value locally, then load it in the shell that starts the Go API:
 
 ```bash
 # Set ARK_API_KEY in .env locally, then:
 set -a && source .env && set +a
-npm run server
+go run ./cmd/cookies-api
 ```
 
 `ARK_API_KEY` is optional for browsing the seeded walkthrough, reviewing preflight, approving the demo ChangeSet, and reading audit events. When it is absent, the app exposes a clear server-derived `not_configured` status and disables new AI generation; it never asks for, stores, masks, or returns a browser API key. Do not commit `.env` or real credentials.
 
-The server maps text, image, video, and embedding capability to the documented Ark model catalog in `server/ark-provider.ts`. `ARK_BASE_URL` is optional and defaults to the Ark HTTPS endpoint.
+The TS MVP compatibility server maps text, image, video, and embedding capability to the documented Ark model catalog in `server/ark-provider.ts`. `ARK_BASE_URL` is optional and defaults to the Ark HTTPS endpoint.
 
 ## Verification
 

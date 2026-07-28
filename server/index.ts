@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   isArtifactKind,
   isBusinessTaskStatus,
@@ -14,7 +15,7 @@ import {
   type PrerollType,
   type VideoPurpose,
 } from "./domain.js";
-import { createArkProvider, loadArkConfig, publicCapabilities } from "./ark-provider.js";
+import { createArkProvider, loadArkConfig, maskSecret, publicCapabilities, type ArkConfig } from "./ark-provider.js";
 import { seedDemoProject } from "./demo.js";
 import { DomainError, errorStatus, isDomainError } from "./errors.js";
 import { createGenerationService, type GenerationService } from "./generation-service.js";
@@ -30,6 +31,18 @@ export interface AppOptions {
   generationService?: GenerationService;
 }
 
+interface AuthSession {
+  token: string;
+  user: AuthUser;
+  expiresAt: number;
+}
+
+interface AuthUser {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
 export async function openSeededRepository(filePath: string): Promise<FileRepository> {
   const repository = await FileRepository.open(filePath);
   await seedDemoProject(repository);
@@ -38,10 +51,22 @@ export async function openSeededRepository(filePath: string): Promise<FileReposi
 
 export function createApp({ repository, generationService }: AppOptions): Server {
   const config = loadArkConfig();
+  const sessions = new Map<string, AuthSession>();
+  const credential = repository.getProviderCredential("ark");
+  if (credential) {
+    Object.assign(config, {
+      apiKey: credential.apiKey,
+      baseUrl: credential.baseUrl ?? config.baseUrl,
+      configured: true,
+      source: "workspace",
+      maskedApiKey: maskSecret(credential.apiKey),
+      updatedAt: credential.updatedAt,
+    });
+  }
   const service = generationService ?? createGenerationService(repository, createArkProvider(config));
   return createServer(async (request, response) => {
     try {
-      await route(request, response, repository, service, () => publicCapabilities(config));
+      await route(request, response, repository, service, config, sessions);
     } catch (error) {
       sendError(response, error);
     }
@@ -53,7 +78,8 @@ async function route(
   response: ServerResponse,
   repository: FileRepository,
   generationService: GenerationService,
-  capabilities: () => Record<string, unknown>,
+  providerConfig: ArkConfig,
+  sessions: Map<string, AuthSession>,
 ): Promise<void> {
   setCorsHeaders(request, response);
   if (request.method === "OPTIONS") {
@@ -73,8 +99,16 @@ async function route(
   const resource = segments[1];
   const id = segments[2];
   const action = segments[3];
+  if (resource === "session") {
+    await sessionRoute(method, request, response, sessions);
+    return;
+  }
   if (resource === "provider" && id === "capabilities" && method === "GET") {
-    sendJson(response, 200, capabilities());
+    sendJson(response, 200, publicCapabilities(providerConfig));
+    return;
+  }
+  if (resource === "provider" && id === "configuration") {
+    await providerConfigurationRoute(method, request, response, repository, providerConfig, requireSession(request, sessions));
     return;
   }
   if (resource === "generation") {
@@ -153,6 +187,109 @@ async function route(
     return;
   }
   throw new DomainError("ROUTE_NOT_FOUND", "Route was not found");
+}
+
+async function sessionRoute(
+  method: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+  sessions: Map<string, AuthSession>,
+): Promise<void> {
+  if (method === "GET") {
+    const session = optionalSession(request, sessions);
+    sendJson(response, 200, { authenticated: Boolean(session), user: session?.user });
+    return;
+  }
+  if (method === "POST") {
+    const body = await readBody(request);
+    const email = requiredString(body, "email").toLowerCase();
+    const password = requiredString(body, "password");
+    const expectedEmail = (process.env.COOKIES_DEMO_EMAIL?.trim() || "demo@cookies.local").toLowerCase();
+    const expectedPassword = process.env.COOKIES_DEMO_PASSWORD?.trim() || "cookies-demo";
+    if (email !== expectedEmail || !safeEqual(password, expectedPassword)) {
+      throw new DomainError("UNAUTHENTICATED", "邮箱或密码不正确");
+    }
+    const session: AuthSession = {
+      token: randomBytes(32).toString("base64url"),
+      user: { id: "local-user", email, displayName: "Local Admin" },
+      expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+    };
+    sessions.set(session.token, session);
+    response.setHeader("Set-Cookie", sessionCookie(session.token, session.expiresAt));
+    sendJson(response, 200, { authenticated: true, user: session.user });
+    return;
+  }
+  if (method === "DELETE") {
+    const token = sessionToken(request);
+    if (token) sessions.delete(token);
+    response.setHeader("Set-Cookie", sessionCookie("", Date.now() - 1000));
+    sendJson(response, 200, { authenticated: false });
+    return;
+  }
+  throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
+}
+
+async function providerConfigurationRoute(
+  method: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+  repository: FileRepository,
+  providerConfig: ArkConfig,
+  session: AuthSession,
+): Promise<void> {
+  if (method === "GET") {
+    sendJson(response, 200, providerConfigurationPayload(providerConfig));
+    return;
+  }
+  if (method === "PUT") {
+    const body = await readBody(request);
+    const apiKey = requiredString(body, "apiKey");
+    const baseUrl = optionalString(body, "baseUrl") ?? providerConfig.baseUrl;
+    const url = validateProviderBaseUrl(baseUrl);
+    const credential = await repository.upsertProviderCredential({
+      provider: "ark",
+      apiKey,
+      baseUrl: url,
+      updatedBy: session.user.email,
+    });
+    Object.assign(providerConfig, {
+      apiKey: credential.apiKey,
+      baseUrl: credential.baseUrl ?? providerConfig.baseUrl,
+      configured: true,
+      source: "workspace",
+      maskedApiKey: maskSecret(credential.apiKey),
+      updatedAt: credential.updatedAt,
+    });
+    sendJson(response, 200, providerConfigurationPayload(providerConfig));
+    return;
+  }
+  if (method === "DELETE") {
+    await repository.deleteProviderCredential("ark");
+    const environmentConfig = loadArkConfig();
+    Object.assign(providerConfig, {
+      apiKey: environmentConfig.apiKey,
+      baseUrl: environmentConfig.baseUrl,
+      configured: environmentConfig.configured,
+      source: environmentConfig.configured ? "environment" : undefined,
+      maskedApiKey: environmentConfig.configured ? maskSecret(environmentConfig.apiKey) : undefined,
+      updatedAt: undefined,
+    });
+    sendJson(response, 200, providerConfigurationPayload(providerConfig));
+    return;
+  }
+  throw new DomainError("METHOD_NOT_ALLOWED", "Method is not allowed for this route");
+}
+
+function providerConfigurationPayload(config: ArkConfig): Record<string, unknown> {
+  return {
+    provider: "ark",
+    status: config.configured ? "configured" : "not_configured",
+    baseUrl: config.baseUrl,
+    source: config.configured ? config.source ?? "environment" : undefined,
+    maskedApiKey: config.configured ? config.maskedApiKey ?? maskSecret(config.apiKey) : undefined,
+    updatedAt: config.updatedAt,
+    capabilities: publicCapabilities(config),
+  };
 }
 
 async function publicInsightsRoute(
@@ -548,6 +685,60 @@ function optionalString(body: Record<string, unknown>, field: string): string | 
   return value.trim();
 }
 
+function validateProviderBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    invalidField("baseUrl", "Must be a valid HTTPS URL");
+  }
+  if (url.protocol !== "https:") invalidField("baseUrl", "Must use HTTPS");
+  return url.toString().replace(/\/+$/, "");
+}
+
+function requireSession(request: IncomingMessage, sessions: Map<string, AuthSession>): AuthSession {
+  const session = optionalSession(request, sessions);
+  if (!session) throw new DomainError("UNAUTHENTICATED", "需要登录后才能配置模型密钥");
+  return session;
+}
+
+function optionalSession(request: IncomingMessage, sessions: Map<string, AuthSession>): AuthSession | undefined {
+  const token = sessionToken(request);
+  if (!token) return undefined;
+  const session = sessions.get(token);
+  if (!session) return undefined;
+  if (session.expiresAt <= Date.now()) {
+    sessions.delete(token);
+    return undefined;
+  }
+  return session;
+}
+
+function sessionToken(request: IncomingMessage): string | undefined {
+  const cookies = String(request.headers.cookie ?? "").split(";");
+  for (const cookie of cookies) {
+    const [name, ...valueParts] = cookie.trim().split("=");
+    if (name === "cookies_session") return decodeURIComponent(valueParts.join("="));
+  }
+  return undefined;
+}
+
+function sessionCookie(token: string, expiresAt: number): string {
+  return [
+    `cookies_session=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Expires=${new Date(expiresAt).toUTCString()}`,
+  ].join("; ");
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
+
 function rawString(body: Record<string, unknown>, field: string): string | undefined {
   return typeof body[field] === "string" ? body[field] : undefined;
 }
@@ -712,6 +903,7 @@ function setCorsHeaders(request: IncomingMessage, response: ServerResponse): voi
   if (origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Credentials", "true");
   }
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");

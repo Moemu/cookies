@@ -1,3 +1,5 @@
+import { platformClient } from '../data/platformClient'
+
 export type PreflightCheck = {
   code: 'confirmed_brief' | 'ready_creative' | 'budget_boundary'
   passed: boolean
@@ -20,28 +22,12 @@ export type DeliveryChangeSet = {
   updatedAt: string
 }
 
-const apiBase = `${import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/api`
-
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const payload = await response.json() as T | { error?: { message?: string } }
-  if (!response.ok) {
-    const error = payload as { error?: { message?: string } }
-    throw new Error(error.error?.message ?? '投放模拟请求失败')
-  }
-  return payload as T
-}
-
 export const deliveryApi = {
-  listChangeSets: (projectId?: string) => request<DeliveryChangeSet[]>(`/change-sets${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
+  listChangeSets: (projectId?: string) => projectId ? platformClient.listChangeSets(projectId) : Promise.resolve([]),
   createChangeSet: (input: { projectId: string; name: string; artifactIds: string[]; budgetLimit: number }) =>
-    request<DeliveryChangeSet>('/change-sets', 'POST', input),
-  preflight: (id: string) => request<DeliveryChangeSet>(`/change-sets/${id}/preflight`, 'POST'),
-  approve: (id: string) => request<DeliveryChangeSet>(`/change-sets/${id}/approve`, 'POST', { actor: 'Amelia Meng', role: 'demo-approver' }),
-  execute: (id: string) => request<DeliveryChangeSet>(`/change-sets/${id}/execute`, 'POST', { actor: 'Amelia Meng' }),
-  rollback: (id: string, reason: string) => request<DeliveryChangeSet>(`/change-sets/${id}/rollback`, 'POST', { actor: 'Amelia Meng', reason }),
+    platformClient.createChangeSet(input.projectId, input),
+  preflight: (projectId: string, id: string) => platformClient.preflightChangeSet(projectId, id),
+  approve: (projectId: string, id: string) => platformClient.approveChangeSet(projectId, id),
+  execute: (projectId: string, id: string) => platformClient.executeChangeSet(projectId, id),
+  rollback: (projectId: string, id: string, reason: string) => platformClient.rollbackChangeSet(projectId, id, reason),
 }

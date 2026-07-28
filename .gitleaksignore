@@ -1,0 +1,5 @@
+# Historical test fixtures in server/provider.test.ts. These exact fingerprints
+# are non-production values; future findings remain blocking.
+a514c0945e6758394a975a2b2a7a7f6de80f6b1e:server/provider.test.ts:generic-api-key:224
+a514c0945e6758394a975a2b2a7a7f6de80f6b1e:server/provider.test.ts:generic-api-key:240
+a514c0945e6758394a975a2b2a7a7f6de80f6b1e:server/provider.test.ts:generic-api-key:258

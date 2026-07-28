@@ -1,10 +1,14 @@
-.PHONY: build test vet fmt check migrate contract-check web-install web-check
+.PHONY: build test vet fmt check migrate seed-demo contract-check web-install web-check
 
 build:
 	go build ./cmd/cookies-api
+	go build ./cmd/cookies-seed
 
 migrate:
 	go run ./cmd/cookies-migrate
+
+seed-demo:
+	go run ./cmd/cookies-seed
 
 test:
 	go test ./...

@@ -7,11 +7,15 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "go:migrate": "go run ./cmd/cookies-migrate",
+    "go:seed": "go run ./cmd/cookies-seed",
     "server": "tsx --env-file=.env server/index.ts",
     "test:server": "tsx --test server/*.test.* server/test/*.test.*",
     "test:media-status": "tsx --test server/test/media-status.test.ts",
     "check:server": "tsc --noEmit -p server/tsconfig.json",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test --config=playwright.platform.config.ts",
+    "test:e2e:platform": "playwright test --config=playwright.platform.config.ts",
+    "test:e2e:legacy": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "4.7.0",

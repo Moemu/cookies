@@ -96,6 +96,277 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": value})
 }
 
+func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	detail, err := s.projects.GetDetail(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	assetsValue := []assets.ProjectAsset{}
+	if s.uploads != nil {
+		assetsValue, err = s.uploads.List(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), 100)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Project    project.Project                  `json:"project"`
+		Runtime    project.ProjectRuntime           `json:"runtime"`
+		Artifacts  []project.ProjectArtifactSummary `json:"artifacts"`
+		Assets     []assets.ProjectAsset            `json:"assets"`
+		Tasks      []project.BusinessTask           `json:"tasks"`
+		Operations []project.OperationalRecord      `json:"operations"`
+		ChangeSets []project.ChangeSet              `json:"change_sets"`
+	}{
+		Project:    detail.Project,
+		Runtime:    detail.Runtime,
+		Artifacts:  detail.Artifacts,
+		Assets:     assetsValue,
+		Tasks:      detail.Tasks,
+		Operations: detail.Operations,
+		ChangeSets: detail.ChangeSets,
+	})
+}
+
+func (s *Server) listProjectTasks(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ListBusinessTasks(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createProjectTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body project.CreateBusinessTaskRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.CreateBusinessTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/tasks/%s", url.PathEscape(r.PathValue("project_id")), url.PathEscape(value.ID)))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getProjectTask(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.GetBusinessTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateProjectTask(w http.ResponseWriter, r *http.Request) {
+	var body project.UpdateBusinessTaskRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpdateBusinessTask(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listProjectOperations(w http.ResponseWriter, r *http.Request) {
+	limit, ok := boundedLimit(w, r, 100, 200)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ListOperationalRecords(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if len(value) > limit {
+		value = value[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createProjectOperation(w http.ResponseWriter, r *http.Request) {
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body project.UpsertOperationalRecordRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.CreateOperationalRecord(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/operations/%s", url.PathEscape(r.PathValue("project_id")), url.PathEscape(value.ID)))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getProjectOperation(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.GetOperationalRecord(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("operation_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) upsertProjectOperation(w http.ResponseWriter, r *http.Request) {
+	var body project.UpsertOperationalRecordRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpsertOperationalRecord(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("operation_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listProjectChangeSets(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ListChangeSets(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createProjectChangeSet(w http.ResponseWriter, r *http.Request) {
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body project.CreateChangeSetRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.CreateChangeSet(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/change-sets/%s", url.PathEscape(r.PathValue("project_id")), url.PathEscape(value.ID)))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getProjectChangeSet(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.GetChangeSet(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("change_set_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) preflightProjectChangeSet(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.PreflightChangeSet(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("change_set_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) approveProjectChangeSet(w http.ResponseWriter, r *http.Request) {
+	var body project.ChangeSetApprovalRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ApproveChangeSet(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("change_set_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) executeProjectChangeSet(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ExecuteChangeSet(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("change_set_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) rollbackProjectChangeSet(w http.ResponseWriter, r *http.Request) {
+	var body project.RollbackChangeSetRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.RollbackChangeSet(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("change_set_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listProjectAuditEvents(w http.ResponseWriter, r *http.Request) {
+	limit, ok := boundedLimit(w, r, 100, 200)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ListAuditEvents(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	entityType := r.URL.Query().Get("entity_type")
+	entityID := r.URL.Query().Get("entity_id")
+	filtered := make([]project.AuditEvent, 0, len(value))
+	for _, event := range value {
+		if entityType != "" && string(event.EntityType) != entityType {
+			continue
+		}
+		if entityID != "" && event.EntityID != entityID {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": filtered})
+}
+
 func (s *Server) createUpload(w http.ResponseWriter, r *http.Request) {
 	if s.uploads == nil {
 		s.notImplemented(w, r)
@@ -1025,6 +1296,18 @@ func idempotencyKey(w http.ResponseWriter, r *http.Request) (contract.Idempotenc
 	}
 	return key, true
 }
+func boundedLimit(w http.ResponseWriter, r *http.Request, defaultValue, maxValue int) (int, bool) {
+	limit := defaultValue
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > maxValue {
+			writeProblem(w, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "The limit query parameter is outside the supported range.", RequestID: requestIDFrom(r.Context()), Retryable: false})
+			return 0, false
+		}
+		limit = value
+	}
+	return limit, true
+}
 func (s *Server) badRequest(w http.ResponseWriter, r *http.Request, _ error) {
 	writeProblem(w, http.StatusBadRequest, contract.Error{Code: "INVALID_REQUEST", Message: "The request does not satisfy the API contract.", RequestID: requestIDFrom(r.Context()), Retryable: false})
 }
@@ -1065,6 +1348,10 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusConflict, "PREROLL_NOT_READY", "The preroll must pass quality gate before it can be applied.", false
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
+	case errors.Is(err, project.ErrVersionConflict):
+		status, code, message, retryable = http.StatusConflict, "VERSION_CONFLICT", "The submitted expected version does not match the current resource version.", false
+	case errors.Is(err, project.ErrInvalidState):
+		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The resource is not in a valid state for this operation.", false
 	case errors.Is(err, project.ErrBrandNotFound):
 		status, code, message, retryable = http.StatusBadRequest, "BRAND_NOT_FOUND", "The selected brand does not exist in this organization.", false
 	case errors.Is(err, project.ErrProductNotFound):

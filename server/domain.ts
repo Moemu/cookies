@@ -250,6 +250,14 @@ export interface AuditEvent {
   createdAt: string;
 }
 
+export interface ProviderCredential {
+  provider: "ark";
+  apiKey: string;
+  baseUrl?: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface StoreData {
   projects: Project[];
   operationalRecords: OperationalRecord[];
@@ -259,6 +267,7 @@ export interface StoreData {
   generationJobs: GenerationJob[];
   changeSets: ChangeSet[];
   auditEvents: AuditEvent[];
+  providerCredentials: ProviderCredential[];
 }
 
 export const emptyStore = (): StoreData => ({
@@ -270,6 +279,7 @@ export const emptyStore = (): StoreData => ({
   generationJobs: [],
   changeSets: [],
   auditEvents: [],
+  providerCredentials: [],
 });
 
 const generationJobTransitions: Record<GenerationJobStatus, readonly GenerationJobStatus[]> = {

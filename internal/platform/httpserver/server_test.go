@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,105 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 }
 
+func TestProjectWorkflowRoutesCoverDetailTasksOperationsChangeSetsAndAudit(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{"project.read", "project.write"},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	manager := &workflowProjectManager{projectValue: project.Project{
+		ID:                    "project_1",
+		OrganizationID:        "org_1",
+		Name:                  "Investor Demo",
+		Status:                project.StatusActive,
+		ProjectContextVersion: 1,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Projects:          manager,
+	})
+
+	taskBody := `{"type":"creative","name":"生成素材","objective":"生成首版广告素材","source_task_ids":["task_strategy"],"source_artifact_ids":["brief_v1"]}`
+	createTask := httptest.NewRecorder()
+	createTaskRequest := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/tasks", strings.NewReader(taskBody))
+	createTaskRequest.Header.Set("Idempotency-Key", "task-create-1")
+	server.ServeHTTP(createTask, createTaskRequest)
+	if createTask.Code != http.StatusCreated || createTask.Header().Get("Location") != "/platform/v1/projects/project_1/tasks/task_1" {
+		t.Fatalf("create task status=%d location=%q body=%s", createTask.Code, createTask.Header().Get("Location"), createTask.Body.String())
+	}
+
+	patchTask := httptest.NewRecorder()
+	server.ServeHTTP(patchTask, httptest.NewRequest(http.MethodPatch, "/platform/v1/projects/project_1/tasks/task_1", strings.NewReader(`{"status":"ready","output_artifact_ids":["creative_v1"],"expected_version":1}`)))
+	if patchTask.Code != http.StatusOK || !strings.Contains(patchTask.Body.String(), `"status":"ready"`) {
+		t.Fatalf("patch task status=%d body=%s", patchTask.Code, patchTask.Body.String())
+	}
+
+	operationBody := `{"kind":"metric","title":"投放健康度","status":"healthy","occurred_at":"2026-07-28T10:00:00Z","fields":{"owner":"ops","spend":120.5}}`
+	createOperation := httptest.NewRecorder()
+	createOperationRequest := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/operations", strings.NewReader(operationBody))
+	createOperationRequest.Header.Set("Idempotency-Key", "operation-create-1")
+	server.ServeHTTP(createOperation, createOperationRequest)
+	if createOperation.Code != http.StatusCreated || createOperation.Header().Get("Location") != "/platform/v1/projects/project_1/operations/operation_1" {
+		t.Fatalf("create operation status=%d location=%q body=%s", createOperation.Code, createOperation.Header().Get("Location"), createOperation.Body.String())
+	}
+	upsertOperation := httptest.NewRecorder()
+	server.ServeHTTP(upsertOperation, httptest.NewRequest(http.MethodPut, "/platform/v1/projects/project_1/operations/stable_op", strings.NewReader(operationBody)))
+	if upsertOperation.Code != http.StatusOK || !strings.Contains(upsertOperation.Body.String(), `"id":"stable_op"`) {
+		t.Fatalf("upsert operation status=%d body=%s", upsertOperation.Code, upsertOperation.Body.String())
+	}
+
+	changeSetBody := `{"name":"预算调优","artifact_refs":[{"project_id":"project_1","asset_version":{"asset_id":"asset_creative","version":1}}],"budget_limit":3000}`
+	createChangeSet := httptest.NewRecorder()
+	createChangeSetRequest := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/change-sets", strings.NewReader(changeSetBody))
+	createChangeSetRequest.Header.Set("Idempotency-Key", "changeset-create-1")
+	server.ServeHTTP(createChangeSet, createChangeSetRequest)
+	if createChangeSet.Code != http.StatusCreated || createChangeSet.Header().Get("Location") != "/platform/v1/projects/project_1/change-sets/changeset_1" {
+		t.Fatalf("create change set status=%d location=%q body=%s", createChangeSet.Code, createChangeSet.Header().Get("Location"), createChangeSet.Body.String())
+	}
+	for _, step := range []struct {
+		method string
+		path   string
+		body   string
+		want   string
+	}{
+		{http.MethodPost, "/platform/v1/projects/project_1/change-sets/changeset_1/preflight", "", `"status":"preflight_passed"`},
+		{http.MethodPost, "/platform/v1/projects/project_1/change-sets/changeset_1/approve", `{"actor":"demo-approver","role":"owner","note":"ok"}`, `"status":"approved"`},
+		{http.MethodPost, "/platform/v1/projects/project_1/change-sets/changeset_1/execute", "", `"status":"executed"`},
+		{http.MethodPost, "/platform/v1/projects/project_1/change-sets/changeset_1/rollback", `{"actor":"demo-approver","reason":"演示回滚"}`, `"status":"rolled_back"`},
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(step.method, step.path, strings.NewReader(step.body)))
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), step.want) {
+			t.Fatalf("%s status=%d want body containing %s body=%s", step.path, response.Code, step.want, response.Body.String())
+		}
+	}
+
+	audit := httptest.NewRecorder()
+	server.ServeHTTP(audit, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/audit-events?entity_type=change_set&entity_id=changeset_1", nil))
+	if audit.Code != http.StatusOK || strings.Count(audit.Body.String(), `"entity_type":"change_set"`) != 5 {
+		t.Fatalf("audit status=%d body=%s", audit.Code, audit.Body.String())
+	}
+	detail := httptest.NewRecorder()
+	server.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1", nil))
+	if detail.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", detail.Code, detail.Body.String())
+	}
+	for _, required := range []string{`"project":`, `"runtime":`, `"artifacts":[]`, `"assets":[]`, `"tasks":`, `"operations":`, `"change_sets":`} {
+		if !strings.Contains(detail.Body.String(), required) {
+			t.Fatalf("detail missing %s: %s", required, detail.Body.String())
+		}
+	}
+}
+
 func TestGeneratedIntakeRouteRequiresScopeAndReturnsLocation(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.write"}}
@@ -56,6 +156,12 @@ func TestGeneratedIntakeRouteRequiresScopeAndReturnsLocation(t *testing.T) {
 	}
 	if response.Header().Get("Location") != "/platform/v1/projects/project_1/assets/generated-intakes/intake_1" {
 		t.Fatalf("location=%q", response.Header().Get("Location"))
+	}
+	responseBody := response.Body.String()
+	for _, forbidden := range []string{"provider_code", "retrieval_expires_at", "declared_mime_type", "declared_size_bytes", "bucket", "object_key", "vendor"} {
+		if strings.Contains(responseBody, forbidden) {
+			t.Fatalf("generated intake response leaked %q: %s", forbidden, responseBody)
+		}
 	}
 
 	actor.Scopes = []contract.Scope{}
@@ -1188,6 +1294,216 @@ func SchemaVersionV2ForHTTPTest() string {
 	return remix.SchemaVersionV2
 }
 
+type workflowProjectManager struct {
+	staticProjectManager
+	projectValue project.Project
+	task         project.BusinessTask
+	operations   []project.OperationalRecord
+	changeSet    project.ChangeSet
+	auditEvents  []project.AuditEvent
+}
+
+func (m *workflowProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
+	return project.ProjectDetail{
+		Project: m.projectValue,
+		Runtime: project.ProjectRuntime{
+			Code:      string(m.projectValue.ID),
+			Stage:     string(m.projectValue.Status),
+			Progress:  60,
+			Status:    "active",
+			Owner:     "user:usr_1",
+			Budget:    0,
+			Currency:  "CNY",
+			Timezone:  "Asia/Shanghai",
+			UpdatedAt: m.projectValue.UpdatedAt,
+		},
+		Artifacts:  []project.ProjectArtifactSummary{},
+		Tasks:      m.tasks(),
+		Operations: m.operations,
+		ChangeSets: m.changeSets(),
+	}, nil
+}
+
+func (m *workflowProjectManager) CreateBusinessTask(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.CreateBusinessTaskRequest) (project.BusinessTask, error) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	m.task = project.BusinessTask{
+		ID:                "task_1",
+		OrganizationID:    actor.OrganizationID,
+		ProjectID:         projectID,
+		Type:              request.Type,
+		Name:              request.Name,
+		Objective:         request.Objective,
+		Status:            project.BusinessTaskDraft,
+		SourceTaskIDs:     request.SourceTaskIDs,
+		SourceArtifactIDs: request.SourceArtifactIDs,
+		OutputArtifactIDs: []string{},
+		Version:           1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	return m.task, nil
+}
+
+func (m *workflowProjectManager) ListBusinessTasks(context.Context, contract.ActorContext, contract.ProjectID) ([]project.BusinessTask, error) {
+	return m.tasks(), nil
+}
+
+func (m *workflowProjectManager) GetBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string) (project.BusinessTask, error) {
+	if m.task.ID == "" {
+		return project.BusinessTask{}, project.ErrNotFound
+	}
+	return m.task, nil
+}
+
+func (m *workflowProjectManager) UpdateBusinessTask(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request project.UpdateBusinessTaskRequest) (project.BusinessTask, error) {
+	if request.Status != nil {
+		m.task.Status = *request.Status
+	}
+	if request.OutputArtifactIDs != nil {
+		m.task.OutputArtifactIDs = request.OutputArtifactIDs
+	}
+	m.task.Version = 2
+	return m.task, nil
+}
+
+func (m *workflowProjectManager) CreateOperationalRecord(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	record := workflowOperation(actor.OrganizationID, projectID, "operation_1", request)
+	m.operations = append(m.operations, record)
+	return record, nil
+}
+
+func (m *workflowProjectManager) ListOperationalRecords(context.Context, contract.ActorContext, contract.ProjectID) ([]project.OperationalRecord, error) {
+	return m.operations, nil
+}
+
+func (m *workflowProjectManager) GetOperationalRecord(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (project.OperationalRecord, error) {
+	for _, record := range m.operations {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return project.OperationalRecord{}, project.ErrNotFound
+}
+
+func (m *workflowProjectManager) UpsertOperationalRecord(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, request project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	record := workflowOperation(actor.OrganizationID, projectID, id, request)
+	m.operations = append(m.operations, record)
+	return record, nil
+}
+
+func (m *workflowProjectManager) CreateChangeSet(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.CreateChangeSetRequest) (project.ChangeSet, error) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	m.changeSet = project.ChangeSet{
+		ID:             "changeset_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		Name:           request.Name,
+		Status:         project.ChangeSetDraft,
+		ArtifactRefs:   request.ArtifactRefs,
+		BudgetLimit:    request.BudgetLimit,
+		AuditEvents:    []project.AuditEvent{},
+		Version:        1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	m.appendAudit("change_set.created")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ChangeSet, error) {
+	return m.changeSets(), nil
+}
+
+func (m *workflowProjectManager) GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	if m.changeSet.ID == "" {
+		return project.ChangeSet{}, project.ErrNotFound
+	}
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) PreflightChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	m.changeSet.Status = project.ChangeSetPreflightPassed
+	m.changeSet.Preflight = &project.ChangeSetPreflight{Passed: true, Checks: []project.PreflightCheck{{Code: "ready_creative", Passed: true, Message: "ready", Repair: ""}}, CheckedAt: time.Date(2026, 7, 28, 10, 1, 0, 0, time.UTC)}
+	m.appendAudit("change_set.preflight")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ApproveChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.ChangeSetApprovalRequest) (project.ChangeSet, error) {
+	m.changeSet.Status = project.ChangeSetApproved
+	m.appendAudit("change_set.approved")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ExecuteChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	now := time.Date(2026, 7, 28, 10, 2, 0, 0, time.UTC)
+	m.changeSet.Status = project.ChangeSetExecuted
+	m.changeSet.Execution = &project.ChangeSetExecution{Simulated: true, Evidence: []project.ChangeSetEvidence{{Step: "simulate", Status: "ok", Message: "done", RecordedAt: now}}, ExecutedAt: now}
+	m.appendAudit("change_set.executed")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) RollbackChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.RollbackChangeSetRequest) (project.ChangeSet, error) {
+	m.changeSet.Status = project.ChangeSetRolledBack
+	m.changeSet.Rollback = &project.ChangeSetRollback{Simulated: true, Reason: "演示回滚", RolledBackAt: time.Date(2026, 7, 28, 10, 3, 0, 0, time.UTC)}
+	m.appendAudit("change_set.rolled_back")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ListAuditEvents(context.Context, contract.ActorContext, contract.ProjectID) ([]project.AuditEvent, error) {
+	return m.auditEvents, nil
+}
+
+func (m *workflowProjectManager) tasks() []project.BusinessTask {
+	if m.task.ID == "" {
+		return []project.BusinessTask{}
+	}
+	return []project.BusinessTask{m.task}
+}
+
+func (m *workflowProjectManager) changeSets() []project.ChangeSet {
+	if m.changeSet.ID == "" {
+		return []project.ChangeSet{}
+	}
+	m.changeSet.AuditEvents = m.auditEvents
+	return []project.ChangeSet{m.changeSet}
+}
+
+func (m *workflowProjectManager) appendAudit(action string) {
+	m.auditEvents = append(m.auditEvents, project.AuditEvent{
+		ID:             fmt.Sprintf("audit_%d", len(m.auditEvents)+1),
+		OrganizationID: "org_1",
+		ProjectID:      "project_1",
+		Actor:          "user:usr_1",
+		Action:         action,
+		EntityType:     project.AuditEntityChangeSet,
+		EntityID:       "changeset_1",
+		Metadata:       map[string]any{"source": "handler-test"},
+		CreatedAt:      time.Date(2026, 7, 28, 10, len(m.auditEvents), 0, 0, time.UTC),
+	})
+}
+
+func workflowOperation(organizationID contract.OrganizationID, projectID contract.ProjectID, id string, request project.UpsertOperationalRecordRequest) project.OperationalRecord {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	return project.OperationalRecord{
+		ID:             id,
+		OrganizationID: organizationID,
+		ProjectID:      projectID,
+		Kind:           request.Kind,
+		Title:          request.Title,
+		Status:         request.Status,
+		OccurredAt:     request.OccurredAt,
+		Fields:         request.Fields,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+}
+
 func TestContextFailsClosedWithoutTrustedIdentity(t *testing.T) {
 	t.Parallel()
 	server := New(identity.RejectingResolver{})
@@ -1362,6 +1678,74 @@ func (staticProjectManager) CreateProject(context.Context, contract.ActorContext
 }
 
 func (staticProjectManager) ListProjects(context.Context, contract.ActorContext) ([]project.Project, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
+	return project.ProjectDetail{}, nil
+}
+
+func (staticProjectManager) CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error) {
+	return project.BusinessTask{}, nil
+}
+
+func (staticProjectManager) ListBusinessTasks(context.Context, contract.ActorContext, contract.ProjectID) ([]project.BusinessTask, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string) (project.BusinessTask, error) {
+	return project.BusinessTask{}, nil
+}
+
+func (staticProjectManager) UpdateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateBusinessTaskRequest) (project.BusinessTask, error) {
+	return project.BusinessTask{}, nil
+}
+
+func (staticProjectManager) CreateOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	return project.OperationalRecord{}, nil
+}
+
+func (staticProjectManager) ListOperationalRecords(context.Context, contract.ActorContext, contract.ProjectID) ([]project.OperationalRecord, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, string) (project.OperationalRecord, error) {
+	return project.OperationalRecord{}, nil
+}
+
+func (staticProjectManager) UpsertOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	return project.OperationalRecord{}, nil
+}
+
+func (staticProjectManager) CreateChangeSet(context.Context, contract.ActorContext, contract.ProjectID, project.CreateChangeSetRequest) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ChangeSet, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) PreflightChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ApproveChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.ChangeSetApprovalRequest) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ExecuteChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) RollbackChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.RollbackChangeSetRequest) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ListAuditEvents(context.Context, contract.ActorContext, contract.ProjectID) ([]project.AuditEvent, error) {
 	return nil, nil
 }
 

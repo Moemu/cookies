@@ -23,6 +23,9 @@ export interface ArkConfig {
   readonly baseUrl: string;
   readonly configured: boolean;
   readonly models: typeof ARK_MODELS;
+  readonly source?: "environment" | "workspace";
+  readonly maskedApiKey?: string;
+  readonly updatedAt?: string;
 }
 
 export interface ArkProvider {
@@ -63,6 +66,13 @@ export function publicCapabilities(config: ArkConfig): Record<string, unknown> {
       model,
       available: config.configured,
     })),
+    credential: config.configured
+      ? {
+        source: config.source ?? "environment",
+        maskedApiKey: config.maskedApiKey ?? maskSecret(config.apiKey),
+        updatedAt: config.updatedAt,
+      }
+      : undefined,
     checkedAt: new Date().toISOString(),
   };
 }
@@ -187,4 +197,10 @@ function normalizeMediaStatus(value: string | undefined): ProviderMediaStatus {
     default:
       return "unknown";
   }
+}
+
+export function maskSecret(value: string): string {
+  const secret = value.trim();
+  if (secret.length <= 8) return "••••••••";
+  return `••••••••${secret.slice(-4)}`;
 }

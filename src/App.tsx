@@ -4,7 +4,9 @@ import { HomePage, ModulePage } from './components/Pages'
 import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
+import { LoginPage } from './components/LoginPage'
 import { StateBoundary } from './components/StateBoundary'
+import { useAuth } from './context/AuthContext'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
 import { projectHomePath, projectManagePath, projectPath, useAppRoute } from './lib/router'
@@ -12,6 +14,7 @@ import type { SystemKey } from './types'
 
 export default function App() {
   const { route, navigate } = useAppRoute()
+  const { session, isLoading: isAuthLoading } = useAuth()
   const { currentProject, isLoading, reloadProjects, routeDiagnostic, selectProject, targetProjectId } = useProject()
   const system = systems.find(item => item.key === route.systemKey) ?? systems[0]
   const navItem = system.nav.find(item => item.id === route.navId) ?? system.nav[0]
@@ -29,6 +32,9 @@ export default function App() {
     if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
     rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view))
   }, [route])
+
+  if (isAuthLoading) return <div className="login-page"><div className="page-notice">正在检查登录状态…</div></div>
+  if (!session.authenticated) return <LoginPage/>
 
   const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
   const activeProjectId = route.projectId ?? currentProject.id
