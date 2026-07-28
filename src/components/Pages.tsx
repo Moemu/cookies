@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
-import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiArtifact, type ApiAuditEvent, type ApiOperationalRecord, type ApiOperationalRecordKind } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
+import { calculateProjectProgress, progressBarWidth, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
 import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
@@ -52,6 +53,433 @@ function Status({ value }: { value: string }) {
   return <span className={`status ${kind}`}><span />{value}</span>
 }
 
+const materialFilters = ['全部素材', '待质检', '未通过', '待人工确认', '已确认'] as const
+type MaterialFilter = typeof materialFilters[number]
+
+interface MaterialQueueItem {
+  pointer: ApiAssetVersionPointer
+  title: string
+  versions: number[]
+}
+
+function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: { state: DataState; activeView: string; objectId?: string; onOpenProject: OpenProject }) {
+  const { currentProject } = useProject()
+  const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
+  const [workbenchError, setWorkbenchError] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [changeNote, setChangeNote] = useState('')
+  const filter = materialFilters.includes(activeView as MaterialFilter) ? activeView as MaterialFilter : '全部素材'
+  const routeTarget = parseMaterialTarget(objectId)
+
+  useEffect(() => {
+    let active = true
+    setWorkbenchError(false)
+    void api.listAgencyWorkbench().then(next => {
+      if (active) setWorkbench(next)
+    }).catch(() => {
+      if (active) {
+        setWorkbench(null)
+        setWorkbenchError(true)
+      }
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+
+  if (state === 'forbidden') return <MaterialCheckState title="无权限" detail="当前身份不能查看该 Project 的素材质检和人工确认记录，请联系项目负责人开通权限。" />
+  if (state === 'error' || workbenchError) return <MaterialCheckState title="服务未连接" detail="素材检查服务暂不可用，队列、质检结果和确认占位无法加载。" />
+  if (state === 'loading' || !workbench) return <MaterialCheckState title="正在加载素材检查" detail="正在同步素材版本指针、质检记录和人工确认记录。" />
+
+  const allItems = buildMaterialQueue(workbench, currentProject.id)
+  const filteredItems = allItems.filter(item => filter === '全部素材' || materialVersionState(item.pointer, item.pointer.workingVersion, workbench).filter === filter)
+  if (state === 'empty' || allItems.length === 0) return <MaterialCheckState title="暂无待检查" detail="当前 Project 还没有素材版本指针。完成制作或生成新版本后，会在这里进入素材检查队列。" />
+  if (filteredItems.length === 0) return <MaterialCheckState title="筛选无结果" detail={`当前 Project 没有“${filter}”状态的素材版本，可切换到“全部素材”查看完整队列。`} />
+
+  const selectedItem = allItems.find(item => item.pointer.assetId === routeTarget.assetId) ?? filteredItems[0]
+  const selectedVersion = routeTarget.assetId === selectedItem.pointer.assetId && routeTarget.version && selectedItem.versions.includes(routeTarget.version)
+    ? routeTarget.version
+    : selectedItem.pointer.workingVersion
+  const selectedState = materialVersionState(selectedItem.pointer, selectedVersion, workbench)
+  const selectedVersionRecord = selectedItem.pointer.versions.find(version => version.version === selectedVersion)
+  const selectedHistory = materialVersionHistory(selectedItem.pointer, selectedVersion, workbench)
+  const authorizationGate = materialAuthorizationGate(selectedItem.pointer)
+  const openMaterial = (item: MaterialQueueItem, version = item.pointer.workingVersion) => {
+    onOpenProject(currentProject.id, 'creative', 'reviews', materialTarget(item.pointer.assetId, version), filter)
+  }
+  const hasCompletedQualityRun = Boolean(selectedState.qualityRun?.completedAt)
+  const canConfirmMaterial = selectedState.qualityRun?.status === 'passed' && hasCompletedQualityRun
+  const canSetDeliveryVersion = selectedState.confirmation?.status === 'confirmed' && authorizationGate.allowed
+  const upsertWorkbenchForSelected = (updater: (current: ApiAgencyWorkbench) => ApiAgencyWorkbench) => {
+    setWorkbench(current => current ? updater(current) : current)
+  }
+  const handleRunQualityCheck = () => {
+    const now = new Date().toISOString()
+    const run: ApiQualityCheckRun = {
+      id: `qc-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
+      organizationId: selectedItem.pointer.organizationId,
+      projectId: currentProject.id,
+      assetId: selectedItem.pointer.assetId,
+      assetVersion: selectedVersion,
+      status: 'passed',
+      model: 'demo-quality-vision-v1',
+      ruleVersion: 'agency-material-rules-2026-07',
+      promptVersion: 'material-check-2026-07-27',
+      summary: '大模型已完成品牌、权益、画面安全和渠道规格检查，未发现阻断问题。',
+      issues: [],
+      createdAt: now,
+      completedAt: now,
+    }
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      qualityCheckRuns: [run, ...current.qualityCheckRuns],
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        qualityCheckedVersion: selectedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已完成 v${selectedVersion} 大模型质检，可进入人工确认。`)
+  }
+  const handleConfirmMaterial = () => {
+    const qualityRun = selectedState.qualityRun
+    if (!qualityRun?.completedAt) {
+      setNotice('人工确认前必须先完成当前素材版本的大模型质检。')
+      return
+    }
+    if (qualityRun.status !== 'passed') {
+      setNotice('当前质检未通过，不能确认素材；请先选择“需要修改”。')
+      return
+    }
+    const now = new Date().toISOString()
+    const confirmation: ApiMaterialConfirmation = {
+      id: `confirm-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
+      organizationId: selectedItem.pointer.organizationId,
+      projectId: currentProject.id,
+      qualityCheckRunId: qualityRun.id,
+      assetId: selectedItem.pointer.assetId,
+      assetVersion: selectedVersion,
+      status: 'confirmed',
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      confirmedBy: currentProject.owner,
+      note: '已确认当前版本可进入投放计划和交付预检。',
+      createdAt: now,
+    }
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      materialConfirmations: [confirmation, ...current.materialConfirmations],
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        qualityCheckedVersion: selectedVersion,
+        humanConfirmedVersion: selectedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已写入 v${selectedVersion} 人工确认，确认记录绑定质检 ${qualityRun.id}。`)
+  }
+  const handleRequestChanges = () => {
+    const qualityRun = selectedState.qualityRun
+    if (!qualityRun?.completedAt) {
+      setNotice('需要修改前必须先完成当前素材版本的大模型质检。')
+      return
+    }
+    const note = changeNote.trim()
+    if (!note) {
+      setNotice('需要修改至少要填写一条问题说明。')
+      return
+    }
+    const now = new Date().toISOString()
+    const confirmation: ApiMaterialConfirmation = {
+      id: `changes-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
+      organizationId: selectedItem.pointer.organizationId,
+      projectId: currentProject.id,
+      qualityCheckRunId: qualityRun.id,
+      assetId: selectedItem.pointer.assetId,
+      assetVersion: selectedVersion,
+      status: 'changes_requested',
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      confirmedBy: currentProject.owner,
+        note,
+      createdAt: now,
+    }
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      materialConfirmations: [confirmation, ...current.materialConfirmations],
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        humanConfirmedVersion: pointer.humanConfirmedVersion === selectedVersion ? undefined : pointer.humanConfirmedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setChangeNote('')
+    setNotice(`已将 v${selectedVersion} 标记为需要修改，并返回制作环节。`)
+  }
+  const handleCreateNewVersion = () => {
+    const nextVersion = selectedItem.pointer.workingVersion + 1
+    const now = new Date().toISOString()
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        workingVersion: nextVersion,
+        versions: [{
+          version: nextVersion,
+          createdBy: currentProject.owner,
+          sourceTaskId: `manual-${selectedItem.pointer.assetId}-v${nextVersion}`,
+          sourceType: 'manual_edit',
+          sourceLabel: '人工新增版本',
+          createdAt: now,
+          changeSummary: '在旧版本基础上新增修订版本；历史版本保持不可覆盖。',
+        }, ...pointer.versions],
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已生成 v${nextVersion}，旧质检和确认记录保留，新版本回到待质检流程。`)
+    onOpenProject(currentProject.id, 'creative', 'reviews', materialTarget(selectedItem.pointer.assetId, nextVersion), filter)
+  }
+  const handleSetDeliveryVersion = () => {
+    if (selectedState.confirmation?.status !== 'confirmed') {
+      setNotice('只有已人工确认的素材版本才能进入交付版本。')
+      return
+    }
+    if (!authorizationGate.allowed) {
+      setNotice(`授权门禁阻止交付：${authorizationGate.reason}`)
+      return
+    }
+    const now = new Date().toISOString()
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        deliveryVersion: selectedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已将 v${selectedVersion} 设为交付版本，授权覆盖 ${selectedItem.pointer.deliveryTarget.platform} / ${selectedItem.pointer.deliveryTarget.region}。`)
+  }
+
+  return <div className="material-check-workspace">
+    <aside className="material-queue-panel" aria-label="素材检查队列">
+      <div className="surface-toolbar"><h3>检查队列</h3><span>{filteredItems.length} / {allItems.length}</span></div>
+      <div className="material-filter-strip">{materialFilters.map(option => <button key={option} className={filter === option ? 'active' : ''} onClick={() => onOpenProject(currentProject.id, 'creative', 'reviews', objectId, option)}>{option}</button>)}</div>
+      {filteredItems.map(item => {
+        const rowState = materialVersionState(item.pointer, item.pointer.workingVersion, workbench)
+        return <button key={item.pointer.assetId} className={item.pointer.assetId === selectedItem.pointer.assetId ? 'material-queue-row active' : 'material-queue-row'} onClick={() => openMaterial(item)}>
+          <span className="material-thumb" aria-hidden="true">{item.title.slice(0, 2).toUpperCase()}</span>
+          <span><b>{item.title}</b><small>{item.pointer.assetId}</small></span>
+          <strong className={`material-pill ${rowState.tone}`}>v{item.pointer.workingVersion} · {rowState.label}</strong>
+          <small>{item.pointer.owner} · {new Date(item.pointer.updatedAt).toLocaleString('zh-CN', { hour12: false })}</small>
+        </button>
+      })}
+    </aside>
+    <section className="material-preview-panel" aria-label="素材预览和版本">
+      <div className="surface-toolbar">
+        <h3>{selectedItem.title}</h3>
+        <span className="material-preview-actions">
+          <button onClick={handleCreateNewVersion}><Plus size={14}/>生成新版本</button>
+          <button onClick={() => openMaterial(selectedItem, selectedVersion)}><ExternalLink size={14}/>打开深链</button>
+        </span>
+      </div>
+      <div className="material-preview-frame">
+        <div className="material-preview-card">
+          <span>ASSET</span>
+          <b>{selectedItem.pointer.assetId}</b>
+          <small>当前预览版本 v{selectedVersion}</small>
+        </div>
+      </div>
+      <div className="material-version-strip" aria-label="素材版本">
+        {selectedItem.versions.map(version => {
+          const versionState = materialVersionState(selectedItem.pointer, version, workbench)
+          return <button key={version} className={version === selectedVersion ? 'active' : ''} onClick={() => openMaterial(selectedItem, version)}>
+            <b>v{version}</b>
+            <small>{versionState.label}</small>
+          </button>
+        })}
+      </div>
+      <VersionProvenanceCard version={selectedVersionRecord} selectedVersion={selectedVersion} />
+      <div className="material-version-ledger">
+        <span><b>workingVersion</b>{`v${selectedItem.pointer.workingVersion}`}</span>
+        <span><b>qualityCheckedVersion</b>{selectedItem.pointer.qualityCheckedVersion ? `v${selectedItem.pointer.qualityCheckedVersion}` : '未产生'}</span>
+        <span><b>humanConfirmedVersion</b>{selectedItem.pointer.humanConfirmedVersion ? `v${selectedItem.pointer.humanConfirmedVersion}` : '未确认'}</span>
+        <span><b>deliveryVersion</b>{selectedItem.pointer.deliveryVersion ? `v${selectedItem.pointer.deliveryVersion}` : '未交付'}</span>
+      </div>
+    </section>
+    <aside className="material-inspector-panel" aria-label="质检结果与人工确认">
+      <div className="surface-toolbar"><h3>质检 / 确认</h3><span className={`material-pill ${selectedState.tone}`}>{selectedState.label}</span></div>
+      <QualityRunCard run={selectedState.qualityRun} />
+      <ConfirmationCard confirmation={selectedState.confirmation} />
+      <AuthorizationGateCard pointer={selectedItem.pointer} gate={authorizationGate} />
+      <MaterialHistoryCard items={selectedHistory} />
+      <div className="material-action-stack">
+        <button className="secondary-button full" onClick={handleRunQualityCheck}><ShieldCheck size={15}/>运行大模型质检</button>
+        <button className="primary-button full" disabled={!canConfirmMaterial} onClick={handleConfirmMaterial}><Check size={15}/>确认素材</button>
+        <label className="material-change-note">修改问题说明<textarea value={changeNote} onChange={event => setChangeNote(event.target.value)} placeholder="例如：画面中的 CTA 与新版 Brief 不一致"/></label>
+        <button className="secondary-button full" disabled={!hasCompletedQualityRun} onClick={handleRequestChanges}><CircleAlert size={15}/>需要修改</button>
+        <button className="primary-button full" disabled={!canSetDeliveryVersion} onClick={handleSetDeliveryVersion}><ArrowRight size={15}/>设为交付版本</button>
+      </div>
+      {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+    </aside>
+  </div>
+}
+
+function QualityRunCard({ run }: { run?: ApiQualityCheckRun }) {
+  if (!run) return <div className="material-empty-card"><Clock3 size={16}/><b>暂无大模型质检</b><small>当前版本还没有完成的 QualityCheckRun。</small></div>
+  return <div className="material-check-card">
+    <span>大模型质检</span>
+    <h4>{qualityStatusLabel(run.status)}</h4>
+    <p>{run.summary}</p>
+    <dl><div><dt>模型</dt><dd>{run.model}</dd></div><div><dt>规则</dt><dd>{run.ruleVersion}</dd></div><div><dt>Prompt</dt><dd>{run.promptVersion}</dd></div><div><dt>完成时间</dt><dd>{run.completedAt ?? '未完成'}</dd></div></dl>
+    <div className="material-issue-list">{run.issues.length ? run.issues.map(issue => <article key={issue.id}><strong>{severityLabel(issue.severity)} · {issue.rule}</strong><small>证据位置：{issue.evidence}</small><small>修复建议：{issue.suggestion}</small></article>) : <article><CircleCheck size={14}/><strong>未发现阻断问题</strong><small>当前版本可进入人工确认。</small></article>}</div>
+  </div>
+}
+
+function ConfirmationCard({ confirmation }: { confirmation?: ApiMaterialConfirmation }) {
+  if (!confirmation) return <div className="material-empty-card"><ClipboardCheck size={16}/><b>暂无人工确认</b><small>当前版本尚未写入 MaterialConfirmation，需先完成大模型质检。</small></div>
+  return <div className="material-check-card">
+    <span>人工确认</span>
+    <h4>{confirmation.status === 'confirmed' ? '已确认素材' : '需要修改'}</h4>
+    <p>{confirmation.note}</p>
+    <dl><div><dt>确认人</dt><dd>{confirmation.confirmedBy}</dd></div><div><dt>范围</dt><dd>{confirmation.scope}</dd></div><div><dt>时间</dt><dd>{confirmation.createdAt}</dd></div></dl>
+  </div>
+}
+
+function VersionProvenanceCard({ version, selectedVersion }: { version?: ApiAssetVersionPointer['versions'][number]; selectedVersion: number }) {
+  if (!version) return <div className="material-provenance-card"><b>v{selectedVersion}</b><span>该版本缺少创建元数据，请补录来源任务、创建人和修改说明。</span></div>
+  return <div className="material-provenance-card">
+    <b>v{version.version} 不可覆盖版本</b>
+    <span>{version.sourceType === 'model_generation' ? '模型生成' : '人工编辑'} · {version.sourceLabel}</span>
+    <dl>
+      <div><dt>创建人</dt><dd>{version.createdBy}</dd></div>
+      <div><dt>来源任务</dt><dd>{version.sourceTaskId}</dd></div>
+      <div><dt>创建时间</dt><dd>{new Date(version.createdAt).toLocaleString('zh-CN', { hour12: false })}</dd></div>
+      <div><dt>修改说明</dt><dd>{version.changeSummary}</dd></div>
+    </dl>
+  </div>
+}
+
+function AuthorizationGateCard({ pointer, gate }: { pointer: ApiAssetVersionPointer; gate: { allowed: boolean; reason: string } }) {
+  return <div className={gate.allowed ? 'material-gate-card allowed' : 'material-gate-card blocked'}>
+    <span>授权门禁</span>
+    <h4>{gate.allowed ? '授权覆盖交付目标' : '禁止进入交付版本'}</h4>
+    <p>{gate.reason}</p>
+    <dl>
+      <div><dt>目标平台</dt><dd>{pointer.deliveryTarget.platform}</dd></div>
+      <div><dt>目标地区</dt><dd>{pointer.deliveryTarget.region}</dd></div>
+      <div><dt>授权平台</dt><dd>{pointer.authorization.platforms.join(' / ')}</dd></div>
+      <div><dt>授权地区</dt><dd>{pointer.authorization.regions.join(' / ')}</dd></div>
+      <div><dt>权利方</dt><dd>{pointer.authorization.rightsHolder}</dd></div>
+      <div><dt>到期时间</dt><dd>{new Date(pointer.authorization.expiresAt).toLocaleDateString('zh-CN')}</dd></div>
+    </dl>
+    <small>{pointer.authorization.note}</small>
+  </div>
+}
+
+function MaterialHistoryCard({ items }: { items: Array<{ id: string; label: string; detail: string; occurredAt: string; tone: 'success' | 'warning' | 'danger' | 'info' }> }) {
+  return <div className="material-history-card">
+    <span>版本历史</span>
+    {items.map(item => <article key={item.id}>
+      <i className={`material-history-dot ${item.tone}`}/>
+      <b>{item.label}</b>
+      <small>{item.detail}</small>
+      <time>{new Date(item.occurredAt).toLocaleString('zh-CN', { hour12: false })}</time>
+    </article>)}
+    {!items.length ? <small>暂无质检、确认、返修或被新版替代历史。</small> : null}
+  </div>
+}
+
+function MaterialCheckState({ title, detail }: { title: string; detail: string }) {
+  return <div className="material-state"><Filter size={18}/><b>{title}</b><p>{detail}</p></div>
+}
+
+function buildMaterialQueue(workbench: ApiAgencyWorkbench, projectId: string): MaterialQueueItem[] {
+  return workbench.assetVersionPointers
+    .filter(pointer => pointer.projectId === projectId)
+    .map(pointer => {
+      const versions = new Set<number>([pointer.workingVersion])
+      if (pointer.qualityCheckedVersion) versions.add(pointer.qualityCheckedVersion)
+      if (pointer.humanConfirmedVersion) versions.add(pointer.humanConfirmedVersion)
+      if (pointer.deliveryVersion) versions.add(pointer.deliveryVersion)
+      pointer.versions.forEach(version => versions.add(version.version))
+      workbench.qualityCheckRuns.filter(run => run.assetId === pointer.assetId).forEach(run => versions.add(run.assetVersion))
+      workbench.materialConfirmations.filter(confirmation => confirmation.assetId === pointer.assetId).forEach(confirmation => versions.add(confirmation.assetVersion))
+      return { pointer, title: materialTitle(pointer.assetId), versions: Array.from(versions).sort((left, right) => right - left) }
+    })
+}
+
+function materialAuthorizationGate(pointer: ApiAssetVersionPointer): { allowed: boolean; reason: string } {
+  const platformCovered = pointer.authorization.platforms.includes(pointer.deliveryTarget.platform)
+  const regionCovered = pointer.authorization.regions.includes(pointer.deliveryTarget.region)
+  if (!platformCovered && !regionCovered) return { allowed: false, reason: `授权未覆盖 ${pointer.deliveryTarget.platform} 和 ${pointer.deliveryTarget.region}。` }
+  if (!platformCovered) return { allowed: false, reason: `授权未覆盖目标平台 ${pointer.deliveryTarget.platform}。` }
+  if (!regionCovered) return { allowed: false, reason: `授权未覆盖目标地区 ${pointer.deliveryTarget.region}。` }
+  return { allowed: true, reason: `授权覆盖 ${pointer.deliveryTarget.platform} / ${pointer.deliveryTarget.region}，可进入交付版本。` }
+}
+
+function materialVersionHistory(pointer: ApiAssetVersionPointer, version: number, workbench: ApiAgencyWorkbench): Array<{ id: string; label: string; detail: string; occurredAt: string; tone: 'success' | 'warning' | 'danger' | 'info' }> {
+  const versionRecord = pointer.versions.find(item => item.version === version)
+  const qualityRuns = workbench.qualityCheckRuns.filter(run => run.assetId === pointer.assetId && run.assetVersion === version).map(run => ({
+    id: run.id,
+    label: `大模型质检：${qualityStatusLabel(run.status)}`,
+    detail: run.summary,
+    occurredAt: run.completedAt ?? run.createdAt,
+    tone: run.status === 'passed' ? 'success' as const : run.status === 'failed' ? 'danger' as const : 'warning' as const,
+  }))
+  const confirmations = workbench.materialConfirmations.filter(item => item.assetId === pointer.assetId && item.assetVersion === version).map(item => ({
+    id: item.id,
+    label: item.status === 'confirmed' ? '人工确认通过' : '要求修改',
+    detail: item.note,
+    occurredAt: item.createdAt,
+    tone: item.status === 'confirmed' ? 'success' as const : 'danger' as const,
+  }))
+  const replacement = pointer.workingVersion > version ? [{
+    id: `${pointer.id}-replaced-v${version}`,
+    label: '已被新版替代',
+    detail: `当前 workingVersion 已推进至 v${pointer.workingVersion}，v${version} 仅保留历史和授权追溯。`,
+    occurredAt: pointer.updatedAt,
+    tone: 'info' as const,
+  }] : []
+  const created = versionRecord ? [{
+    id: `${pointer.id}-created-v${version}`,
+    label: '版本创建',
+    detail: `${versionRecord.sourceLabel}：${versionRecord.changeSummary}`,
+    occurredAt: versionRecord.createdAt,
+    tone: 'info' as const,
+  }] : []
+  return [...created, ...qualityRuns, ...confirmations, ...replacement].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+}
+
+function materialVersionState(pointer: ApiAssetVersionPointer, version: number, workbench: ApiAgencyWorkbench): { filter: MaterialFilter; label: string; tone: 'success' | 'warning' | 'danger' | 'info'; qualityRun?: ApiQualityCheckRun; confirmation?: ApiMaterialConfirmation } {
+  const qualityRun = workbench.qualityCheckRuns.filter(run => run.assetId === pointer.assetId && run.assetVersion === version).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+  const confirmation = workbench.materialConfirmations.filter(item => item.assetId === pointer.assetId && item.assetVersion === version).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+  if (confirmation?.status === 'confirmed') return { filter: '已确认', label: '已确认', tone: 'success', qualityRun, confirmation }
+  if (confirmation?.status === 'changes_requested') return { filter: '未通过', label: '需要修改', tone: 'danger', qualityRun, confirmation }
+  if (!qualityRun) return { filter: '待质检', label: version === pointer.workingVersion ? '待质检' : '无质检记录', tone: 'warning', qualityRun, confirmation }
+  if (qualityRun.status === 'failed') return { filter: '未通过', label: '质检未通过', tone: 'danger', qualityRun, confirmation }
+  if (qualityRun.status === 'passed') return { filter: '待人工确认', label: '待人工确认', tone: 'info', qualityRun, confirmation }
+  return { filter: '待质检', label: qualityStatusLabel(qualityRun.status), tone: 'warning', qualityRun, confirmation }
+}
+
+function parseMaterialTarget(objectId?: string): { assetId?: string; version?: number } {
+  const match = objectId?.match(/^(.+)@v(\d+)$/)
+  return match ? { assetId: match[1], version: Number(match[2]) } : { assetId: objectId }
+}
+
+function materialTarget(assetId: string, version: number) {
+  return `${assetId}@v${version}`
+}
+
+function materialTitle(assetId: string) {
+  return assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}
+
+function qualityStatusLabel(status: ApiQualityCheckRun['status']) {
+  const labels: Record<ApiQualityCheckRun['status'], string> = { queued: '排队中', running: '质检中', passed: '质检通过', failed: '质检未通过' }
+  return labels[status]
+}
+
+function severityLabel(severity: ApiQualityCheckRun['issues'][number]['severity']) {
+  const labels: Record<ApiQualityCheckRun['issues'][number]['severity'], string> = { minor: '轻微', major: '重要', critical: '严重' }
+  return labels[severity]
+}
+
 function operationRecords(records: ApiOperationalRecord[], kind: ApiOperationalRecordKind) {
   return records.filter(record => record.kind === kind)
 }
@@ -59,6 +487,28 @@ function operationRecords(records: ApiOperationalRecord[], kind: ApiOperationalR
 function operationField(record: ApiOperationalRecord, key: string): string {
   const value = record.fields[key]
   return value === undefined ? '—' : String(value)
+}
+
+function bindingStatusScore(status: ApiBindingHealthStatus): number {
+  return status === 'expired' ? 2 : status === 'warning' ? 1 : 0
+}
+
+function bindingStatusLabel(status: ApiBindingHealthStatus): string {
+  return status === 'expired' ? '已失效' : status === 'warning' ? '需复核' : '正常'
+}
+
+function BindingStatus({ value }: { value: ApiBindingHealthStatus }) {
+  const kind = value === 'expired' ? 'danger' : value === 'warning' ? 'warning' : 'success'
+  return <span className={`status ${kind}`}><span />{bindingStatusLabel(value)}</span>
+}
+
+function bindingAttentionSummary(binding: ApiAdAccountBinding): string {
+  const items = [
+    binding.permissionStatus !== 'normal' ? `权限${bindingStatusLabel(binding.permissionStatus)}` : '',
+    binding.loginStatus !== 'normal' ? `登录${bindingStatusLabel(binding.loginStatus)}` : '',
+    binding.trackingStatus !== 'normal' ? `追踪${bindingStatusLabel(binding.trackingStatus)}` : '',
+  ].filter(Boolean)
+  return items.length ? items.join(' / ') : '账户健康'
 }
 
 function projectNextStep(project: ProjectRecord): { label: string; detail: string; system: SystemKey; navId: string; blocker: string } {
@@ -82,68 +532,312 @@ function projectNextStep(project: ProjectRecord): { label: string; detail: strin
   return { label: '查看项目进展', detail: '复核当前阶段与跨模块工作', system: 'strategy', navId: 'workspaces', blocker: '当前没有阻塞项。' }
 }
 
-export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string) => void; onManageProject: (id: string) => void }) {
-  const { projects, createProject: createProjectRecord, error: projectError, isLoading } = useProject()
-  const [creating, setCreating] = useState(false)
-  const [filter, setFilter] = useState<'进行中' | '已完成' | '全部'>('进行中')
-  const [name, setName] = useState('')
-  const [brand, setBrand] = useState('白域精工')
-  const [goal, setGoal] = useState('')
+type PortfolioRecord = {
+  id: string
+  title: string
+  client: string
+  brand: string
+  project: string
+  projectId: string
+  object: string
+  priority: '高' | '中' | '低'
+  owner: string
+  dueAt: string
+  detail: string
+  system: SystemKey
+  navId: string
+  tone: 'danger' | 'warning' | 'info' | 'success'
+}
 
-  const submitProject = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!name.trim() || !goal.trim()) return
-    try {
-      const project = await createProjectRecord({ name: name.trim(), brand: brand.trim() || '未指定品牌', goal: goal.trim() })
-      setName('')
-      setGoal('')
-      setCreating(false)
-      onManageProject(project.id)
-    } catch {
-      // The provider surfaces the connection failure through the shared project state.
+function priorityTone(priority: PortfolioRecord['priority']) {
+  return priority === '高' ? 'danger' : priority === '中' ? 'warning' : 'info'
+}
+
+function healthText(status: string) {
+  if (status === 'blocked') return '阻塞'
+  if (status === 'watch') return '观察'
+  return '健康'
+}
+
+export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string) => void; onManageProject: (id: string) => void }) {
+  const { error: projectError, isLoading } = useProject()
+  const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
+  const [workbenchError, setWorkbenchError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    void api.listAgencyWorkbench().then(data => {
+      if (active) setWorkbench(data)
+    }).catch(cause => {
+      if (active) setWorkbenchError(cause instanceof Error ? cause.message : '加载代理商工作台失败')
+    })
+    return () => { active = false }
+  }, [])
+
+  const portfolio = useMemo(() => {
+    const empty = { metrics: [], today: [], checks: [], deliveries: [], health: [], load: [], recent: [] } as {
+      metrics: Array<{ label: string; value: number; detail: string; tone: PortfolioRecord['tone'] }>
+      today: PortfolioRecord[]
+      checks: PortfolioRecord[]
+      deliveries: PortfolioRecord[]
+      health: Array<{ id: string; name: string; owner: string; status: string; projects: number; issues: number }>
+      load: Array<{ owner: string; count: number; detail: string }>
+      recent: ApiAgencyWorkbench['projects']
     }
-  }
-  const visibleProjects = filter === '全部' ? projects : projects.filter(project => project.status === filter)
-  const focusProject = visibleProjects[0]
-  const focusStep = focusProject ? projectNextStep(focusProject) : null
+    if (!workbench) return empty
 
-  return <div className="home-page">
-    <section className="home-hero">
-      <div><span className="section-label">PROJECT OVERVIEW</span><h1>从一个明确的下一步，推进增长项目。</h1><p>先处理当前阶段的关键决策，再进入需求、策略、创意、洞察与受控投放的协作链路。</p></div>
-      <button className="primary-button" onClick={() => setCreating(true)}><Plus size={16}/>创建 Project</button>
+    const clients = new Map(workbench.clients.map(client => [client.id, client]))
+    const brands = new Map(workbench.brands.map(brand => [brand.id, brand]))
+    const projects = new Map(workbench.projects.map(project => [project.id, project]))
+    const confirmedAssets = new Set(workbench.materialConfirmations.filter(item => item.status === 'confirmed').map(item => `${item.projectId}:${item.assetId}:${item.assetVersion}`))
+    const ownerLoad = new Map<string, number>()
+    const addOwnerLoad = (owner: string) => ownerLoad.set(owner, (ownerLoad.get(owner) ?? 0) + 1)
+    const context = (projectId: string, fallbackBrandId?: string, fallbackClientId?: string) => {
+      const project = projects.get(projectId)
+      const brand = brands.get(project?.brandId ?? fallbackBrandId ?? '')
+      const client = clients.get(project?.clientId ?? brand?.clientId ?? fallbackClientId ?? '')
+      return {
+        client: client?.name ?? '未关联客户',
+        brand: brand?.name ?? project?.brand ?? '未关联品牌',
+        project: project?.name ?? '未关联 Project',
+        owner: project?.runtime.owner ?? brand?.owner ?? client?.owner ?? '未分配',
+      }
+    }
+    const makeRecord = (record: Omit<PortfolioRecord, 'tone'> & { tone?: PortfolioRecord['tone'] }): PortfolioRecord => ({
+      ...record,
+      tone: record.tone ?? priorityTone(record.priority),
+    })
+
+    workbench.projects.forEach(project => addOwnerLoad(project.runtime.owner))
+    workbench.assetVersionPointers.forEach(pointer => addOwnerLoad(pointer.owner))
+    workbench.adAccountBindings.forEach(binding => addOwnerLoad(binding.owner))
+
+    const accountIssues = workbench.adAccountBindings
+      .filter(binding => [binding.permissionStatus, binding.loginStatus, binding.trackingStatus].some(status => status !== 'normal'))
+      .map(binding => {
+        const projectId = binding.projectIds[0] ?? ''
+        const ctx = context(projectId, binding.brandId, binding.clientId)
+        return makeRecord({
+          id: `account-${binding.id}`,
+          title: '账户异常需检查',
+          ...ctx,
+          projectId,
+          object: `${binding.platform} · ${binding.accountName}`,
+          priority: [binding.permissionStatus, binding.loginStatus, binding.trackingStatus].includes('expired') ? '高' : '中',
+          owner: binding.owner,
+          dueAt: '今日 12:00',
+          detail: bindingAttentionSummary(binding),
+          system: 'delivery',
+          navId: 'plans',
+        })
+      })
+
+    const qualityFailures = workbench.qualityCheckRuns
+      .filter(run => run.status === 'failed')
+      .map(run => {
+        const ctx = context(run.projectId)
+        return makeRecord({
+          id: `qc-${run.id}`,
+          title: '质检问题待处理',
+          ...ctx,
+          projectId: run.projectId,
+          object: `${run.assetId} v${run.assetVersion}`,
+          priority: run.issues.some(issue => issue.severity === 'critical') ? '高' : '中',
+          owner: ctx.owner,
+          dueAt: '今日 15:00',
+          detail: run.summary,
+          system: 'creative',
+          navId: 'tasks',
+        })
+      })
+
+    const confirmationIssues = workbench.materialConfirmations
+      .filter(item => item.status === 'changes_requested')
+      .map(item => {
+        const ctx = context(item.projectId)
+        return makeRecord({
+          id: `confirm-${item.id}`,
+          title: '返修要求待跟进',
+          ...ctx,
+          projectId: item.projectId,
+          object: `${item.assetId} v${item.assetVersion}`,
+          priority: '高',
+          owner: item.confirmedBy,
+          dueAt: '今日 18:00',
+          detail: item.note,
+          system: 'creative',
+          navId: 'tasks',
+        })
+      })
+
+    const riskProjects = workbench.projects
+      .filter(project => project.progressDetail.riskStatus !== 'healthy')
+      .map(project => {
+        const ctx = context(project.id)
+        return makeRecord({
+          id: `risk-${project.id}`,
+          title: project.progressDetail.riskStatus === 'blocked' ? '阻塞 Project 待查看' : '风险 Project 待观察',
+          ...ctx,
+          projectId: project.id,
+          object: project.progressDetail.stageLabel,
+          priority: project.progressDetail.riskStatus === 'blocked' ? '高' : '中',
+          owner: project.runtime.owner,
+          dueAt: '今日内',
+          detail: project.progressDetail.blocker ?? project.objective,
+          system: project.progressDetail.stage === 'delivery' ? 'delivery' : 'creative',
+          navId: project.progressDetail.stage === 'delivery' ? 'plans' : 'tasks',
+        })
+      })
+
+    const passedChecks = workbench.qualityCheckRuns
+      .filter(run => run.status === 'passed' && !confirmedAssets.has(`${run.projectId}:${run.assetId}:${run.assetVersion}`))
+      .map(run => {
+        const ctx = context(run.projectId)
+        return makeRecord({
+          id: `human-${run.id}`,
+          title: '待人工检查',
+          ...ctx,
+          projectId: run.projectId,
+          object: `${run.assetId} v${run.assetVersion}`,
+          priority: '中',
+          owner: ctx.owner,
+          dueAt: '今日 17:00',
+          detail: run.summary,
+          system: 'creative',
+          navId: 'tasks',
+          tone: 'info',
+        })
+      })
+
+    const uncheckedPointers = workbench.assetVersionPointers
+      .filter(pointer => pointer.workingVersion > (pointer.qualityCheckedVersion ?? 0))
+      .map(pointer => {
+        const ctx = context(pointer.projectId)
+        return makeRecord({
+          id: `pointer-${pointer.id}`,
+          title: '新版本待质检',
+          ...ctx,
+          projectId: pointer.projectId,
+          object: `${pointer.assetId} v${pointer.workingVersion}`,
+          priority: '中',
+          owner: pointer.owner,
+          dueAt: '明日 10:00',
+          detail: `当前质检版本 v${pointer.qualityCheckedVersion ?? 0}，需下钻查看新版本状态。`,
+          system: 'creative',
+          navId: 'tasks',
+          tone: 'warning',
+        })
+      })
+
+    const deliveries = workbench.projects
+      .filter(project => project.runtime.status === 'active')
+      .sort((left, right) => right.runtime.progress - left.runtime.progress)
+      .map((project, index) => {
+        const ctx = context(project.id)
+        return makeRecord({
+          id: `delivery-${project.id}`,
+          title: index === 0 ? '48 小时内交付' : '本周交付节点',
+          ...ctx,
+          projectId: project.id,
+          object: project.runtime.stage,
+          priority: project.progressDetail.riskStatus === 'blocked' ? '高' : '中',
+          owner: project.runtime.owner,
+          dueAt: index === 0 ? '明日 18:00' : `7/${29 + index} 18:00`,
+          detail: `${project.objective} 当前 ${project.runtime.progress}%`,
+          system: project.progressDetail.stage === 'delivery' ? 'delivery' : 'creative',
+          navId: project.progressDetail.stage === 'delivery' ? 'plans' : 'tasks',
+          tone: project.progressDetail.riskStatus === 'blocked' ? 'danger' : 'warning',
+        })
+      })
+
+    const health = workbench.clients.map(client => {
+      const clientProjects = workbench.projects.filter(project => project.clientId === client.id)
+      const issues = clientProjects.filter(project => project.progressDetail.riskStatus !== 'healthy').length
+        + workbench.adAccountBindings.filter(binding => binding.clientId === client.id && [binding.permissionStatus, binding.loginStatus, binding.trackingStatus].some(status => status !== 'normal')).length
+      return { id: client.id, name: client.name, owner: client.owner, status: healthText(client.healthStatus), projects: clientProjects.length, issues }
+    })
+
+    const load = [...ownerLoad.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .map(([owner, count]) => ({ owner, count, detail: count >= 4 ? '负载偏高' : count >= 2 ? '正常承接' : '可承接' }))
+
+    const today = [...accountIssues, ...qualityFailures, ...confirmationIssues, ...riskProjects].slice(0, 6)
+    const checks = [...passedChecks, ...uncheckedPointers].slice(0, 5)
+    return {
+      metrics: [
+        { label: '今日待处理', value: today.length, detail: '只读下钻队列', tone: 'danger' },
+        { label: '待人工检查', value: checks.length, detail: '质检通过或新版本', tone: 'info' },
+        { label: '临期交付', value: deliveries.length, detail: '48 小时/本周节点', tone: 'warning' },
+        { label: '账户异常', value: accountIssues.length, detail: '权限、登录或追踪', tone: accountIssues.length ? 'danger' : 'success' },
+      ],
+      today,
+      checks,
+      deliveries,
+      health,
+      load,
+      recent: [...workbench.projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 4),
+    }
+  }, [workbench])
+
+  const openRecord = (record: PortfolioRecord) => onOpenProject(record.projectId, record.system, record.navId, record.id)
+
+  return <div className="home-page agency-home">
+    <section className="home-hero agency-hero">
+      <div><span className="section-label">AGENCY PORTFOLIO</span><h1>代理商客户组合工作台</h1><p>聚合跨客户待处理、待检查、临期交付、客户健康与团队负载；Home 只做下钻导航，不直接生成、确认或投放。</p></div>
+      <button className="secondary-button" onClick={() => onSystemChange('creative')}>进入创意队列<ArrowRight size={15}/></button>
     </section>
-    {projectError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{projectError}，未显示静态运营 mock 数据。</div> : null}
-    {creating && <form className="project-create" onSubmit={submitProject}>
-      <div className="create-intro"><span className="create-index">01</span><div><h2>创建新 Project</h2><p>先定义项目边界，进入系统后再完善 Brief、策略与执行配置。</p></div></div>
-      <label><span>项目名称</span><input value={name} onChange={event => setName(event.target.value)} placeholder="例如：夏季新品增长计划" autoFocus /></label>
-      <label><span>品牌或产品</span><input value={brand} onChange={event => setBrand(event.target.value)} placeholder="输入品牌或产品名称" /></label>
-      <label className="goal-field"><span>项目目标</span><input value={goal} onChange={event => setGoal(event.target.value)} placeholder="例如：获得 1,000 条高质量销售线索" /></label>
-      <div className="create-actions"><button type="button" className="secondary-button" onClick={() => setCreating(false)}>取消</button><button type="submit" className="primary-button" disabled={!name.trim() || !goal.trim()}>创建并进入项目</button></div>
-    </form>}
-    {focusProject && focusStep ? <section className="project-command-card" aria-label={`${focusProject.name}当前行动`}>
-      <div className="project-command-index"><span>NOW</span><b>{focusProject.progress}%</b></div>
-      <div className="project-command-main"><span className="section-label">当前优先项目 · {focusProject.code}</span><h2>{focusProject.name}</h2><p>{focusProject.stage} · {focusProject.goal}</p><div className="project-command-meta"><Status value={focusProject.status}/><span>负责人 {focusProject.owner}</span><span>更新于 {focusProject.updatedAt}</span></div></div>
-      <div className="project-command-decision"><small>下一步</small><b>{focusStep.label}</b><span>{focusStep.detail}</span><button className="primary-button" onClick={() => onOpenProject(focusProject.id, focusStep.system, focusStep.navId)}>继续推进<ArrowRight size={15}/></button></div>
-      <div className="project-command-blocker"><small>状态判断</small><b>{focusStep.blocker}</b><button className="text-button" onClick={() => onManageProject(focusProject.id)}>查看项目上下文<ArrowRight size={14}/></button></div>
-    </section> : null}
-    <div className="home-grid">
-      <section className="projects-section">
-        <div className="section-header"><div><span className="section-label">项目队列</span><h2>其他项目与进展</h2></div><div className="project-filters">{(['进行中', '已完成', '全部'] as const).map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} aria-pressed={filter === item}>{item}</button>)}</div></div>
-        <div className="project-list">
-          {visibleProjects.map((project, index) => <div className="project-row-shell" key={project.id}><button className="project-row" onClick={() => onOpenProject(project.id)}>
-              <span className="project-order">{String(index + 1).padStart(2, '0')}</span>
-              <span className="project-primary"><b>{project.name}</b><small>{project.brand} · {project.goal}</small></span>
-              <span className="project-stage"><small>当前阶段</small><b>{project.stage}</b></span>
-              <span className="project-progress"><i><em style={{width: `${project.progress}%`}}/></i><b>{project.progress}%</b></span>
-              <span className="project-updated">{project.updatedAt.slice(5)}</span><ArrowRight size={16}/>
-            </button><button className="project-manage-button" onClick={() => onManageProject(project.id)}>管理</button></div>)}
-          {!visibleProjects.length ? <div className="project-empty">{isLoading ? '正在恢复 Project…' : '当前筛选下没有 Project'}</div> : null}
+    {projectError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{projectError}，Home 继续展示代理商组合 mock 数据。</div> : null}
+    {workbenchError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{workbenchError}</div> : null}
+    <section className="agency-metrics" aria-label="代理商组合指标">
+      {portfolio.metrics.map(metric => <button key={metric.label} className={`agency-metric ${metric.tone}`} onClick={() => onSystemChange(metric.label === '账户异常' || metric.label === '临期交付' ? 'delivery' : 'creative')}>
+        <span>{metric.label}</span><b>{metric.value}</b><small>{metric.detail}</small>
+      </button>)}
+    </section>
+    <div className="agency-workbench-grid">
+      <section className="agency-panel agency-main-panel">
+        <div className="section-header"><div><span className="section-label">TODAY</span><h2>今日待处理</h2></div><span className="readonly-chip">只下钻</span></div>
+        <div className="agency-record-list">
+          {portfolio.today.map(record => <button key={record.id} className="agency-record" onClick={() => openRecord(record)}>
+            <span className={`record-priority ${record.tone}`}>{record.priority}</span>
+            <span className="record-main"><b>{record.title}</b><small>{record.client} / {record.brand} / {record.project}</small><em>{record.object} · {record.detail}</em></span>
+            <span className="record-meta"><small>负责人</small><b>{record.owner}</b></span>
+            <span className="record-meta"><small>截止</small><b>{record.dueAt}</b></span>
+            <ArrowRight size={16}/>
+          </button>)}
+          {!portfolio.today.length ? <div className="project-empty">{isLoading && !workbench ? '正在恢复代理商工作台…' : '今日没有需要下钻处理的事项'}</div> : null}
         </div>
       </section>
-      <aside className="home-rail">
-        <span className="section-label">四个系统</span><h2>进入当前工作</h2>
-        {systems.map((item, index) => <button key={item.key} onClick={() => onSystemChange(item.key)}><span className="home-system-index">{String(index + 1).padStart(2, '0')}</span><item.icon size={17}/><span><b>{item.label}</b><small>{item.statement}</small></span><ArrowRight size={15}/></button>)}
+      <aside className="agency-panel">
+        <div className="section-header"><div><span className="section-label">CHECK</span><h2>待检查</h2></div></div>
+        <div className="agency-mini-list">
+          {portfolio.checks.map(record => <button key={record.id} onClick={() => openRecord(record)}><span><b>{record.object}</b><small>{record.client} · {record.brand}</small></span><em>{record.dueAt}</em><ArrowRight size={14}/></button>)}
+          {!portfolio.checks.length ? <div className="panel-empty">暂无待检查素材。</div> : null}
+        </div>
       </aside>
+      <section className="agency-panel">
+        <div className="section-header"><div><span className="section-label">DELIVERY</span><h2>临期交付</h2></div></div>
+        <div className="agency-mini-list">
+          {portfolio.deliveries.map(record => <button key={record.id} onClick={() => openRecord(record)}><span><b>{record.project}</b><small>{record.object} · {record.owner}</small></span><em>{record.dueAt}</em><ArrowRight size={14}/></button>)}
+        </div>
+      </section>
+      <section className="agency-panel">
+        <div className="section-header"><div><span className="section-label">CLIENT HEALTH</span><h2>客户健康</h2></div></div>
+        <div className="agency-health-list">
+          {portfolio.health.map(client => <div key={client.id}><span><b>{client.name}</b><small>{client.owner} · {client.projects} 个 Project</small></span><Status value={client.issues ? `${client.status} · ${client.issues} 项风险` : client.status}/></div>)}
+        </div>
+      </section>
+      <section className="agency-panel">
+        <div className="section-header"><div><span className="section-label">TEAM LOAD</span><h2>团队负载</h2></div></div>
+        <div className="agency-load-list">
+          {portfolio.load.map(item => <div key={item.owner}><span><b>{item.owner}</b><small>{item.detail}</small></span><i><em style={{ width: `${Math.min(100, item.count * 20)}%` }}/></i><strong>{item.count}</strong></div>)}
+        </div>
+      </section>
+      <section className="agency-panel">
+        <div className="section-header"><div><span className="section-label">RECENT PROJECT</span><h2>最近 Project</h2></div></div>
+        <div className="agency-mini-list">
+          {portfolio.recent.map(project => <button key={project.id} onClick={() => onManageProject(project.id)}><span><b>{project.name}</b><small>{project.runtime.code} · {project.progressDetail.stageLabel}</small></span><em>{project.updatedAt.slice(5, 10)}</em><ArrowRight size={14}/></button>)}
+        </div>
+      </section>
     </div>
   </div>
 }
@@ -169,6 +863,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
   const workItems = operationRecords(currentProject.operations, 'work_item')
   const currentItem = workItems[systemIndex] ?? workItems[0]
   const journey = dashboardJourneys[system.key]
+  const projectProgress = calculateProjectProgress(currentProject)
   const dashboardAction = system.key === 'strategy' ? '新建策略任务' : system.key === 'creative' ? '新建创意任务' : system.key === 'insight' ? '查看广告数据' : '配置投放计划'
   const runDashboardAction = () => {
     if (system.key === 'strategy' || system.key === 'creative') setTaskDomain(system.key)
@@ -192,8 +887,8 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
     </section>
     <section className="focus-band">
       <div className="focus-number">01</div>
-      <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{currentProject.stage}已推进至 {currentProject.progress}%，下一步需要确认关键决策与证据边界。</p><div className="focus-meta">{currentItem ? <><Status value={currentItem.status} /><span>负责人 {operationField(currentItem, 'owner')}</span></> : <span>暂无服务端工作项</span>}<span>更新于 {currentProject.updatedAt}</span></div></div>
-      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${currentProject.progress * 3.6}deg`} as CSSProperties}><span>{currentProject.progress}<small>%</small></span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'knowledge' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
+      <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{projectProgress.available ? `${projectProgress.stageLabel}已推进至 ${progressPercentLabel(projectProgress)}，下一步需要确认关键决策与证据边界。` : progressReasonLabel(projectProgress)}</p><div className="focus-meta">{currentItem ? <><Status value={currentItem.status} /><span>负责人 {operationField(currentItem, 'owner')}</span></> : <span>暂无服务端工作项</span>}<span>更新于 {currentProject.updatedAt}</span></div></div>
+      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${projectProgress.available && projectProgress.taskPercent !== null ? projectProgress.taskPercent * 3.6 : 0}deg`} as CSSProperties}><span>{projectProgress.available && projectProgress.taskPercent !== null ? <>{projectProgress.taskPercent}<small>%</small></> : <small>无法计算</small>}</span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'knowledge' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
     </section>
     <div className="dashboard-grid">
       <section className="open-section workstream">
@@ -417,7 +1112,87 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
   </div>
 }
 
-function TableSurface({ item, activeView, onOpenRecord }: { item: NavItem; activeView: string; onOpenRecord: (id: string) => void }) {
+function TableSurface(props: { item: NavItem; activeView: string; onOpenRecord: (id: string) => void }) {
+  if (props.activeView === '广告账户') return <AdAccountBindingSurface item={props.item} activeView={props.activeView}/>
+  return <GenericTableSurface {...props}/>
+}
+
+function AdAccountBindingSurface({ item, activeView }: { item: NavItem; activeView: string }) {
+  const { currentProject } = useProject()
+  const [search, setSearch] = useState('')
+  const [attentionOnly, setAttentionOnly] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [workbench, setWorkbench] = useState<Awaited<ReturnType<typeof api.listAgencyWorkbench>> | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void api.listAgencyWorkbench().then(next => {
+      if (active) setWorkbench(next)
+    }).catch(cause => {
+      if (active) setNotice(cause instanceof Error ? cause.message : '读取账户绑定失败。')
+    })
+    return () => { active = false }
+  }, [])
+
+  const clientsById = useMemo(() => new Map(workbench?.clients.map(client => [client.id, client]) ?? []), [workbench])
+  const brandsById = useMemo(() => new Map(workbench?.brands.map(brand => [brand.id, brand]) ?? []), [workbench])
+  const projectBindings = useMemo(() => {
+    const bindings = workbench?.adAccountBindings.filter(binding => binding.projectIds.includes(currentProject.id)) ?? []
+    return bindings.sort((left, right) => {
+      const leftPriority = bindingStatusScore(left.permissionStatus) * 100 + bindingStatusScore(left.loginStatus) * 80 + bindingStatusScore(left.trackingStatus) * 60
+      const rightPriority = bindingStatusScore(right.permissionStatus) * 100 + bindingStatusScore(right.loginStatus) * 80 + bindingStatusScore(right.trackingStatus) * 60
+      return rightPriority - leftPriority || right.lastSyncedAt.localeCompare(left.lastSyncedAt)
+    })
+  }, [currentProject.id, workbench])
+  const filtered = useMemo(() => projectBindings.filter(binding => {
+    const client = clientsById.get(binding.clientId)
+    const brand = brandsById.get(binding.brandId)
+    const haystack = `${binding.platform} ${client?.name ?? ''} ${brand?.name ?? ''} ${binding.accountName} ${binding.accountDisplayId} ${binding.owner}`.toLowerCase()
+    const needsAttention = [binding.permissionStatus, binding.loginStatus, binding.trackingStatus].some(status => status !== 'normal')
+    return haystack.includes(search.toLowerCase()) && (!attentionOnly || needsAttention)
+  }), [attentionOnly, brandsById, clientsById, projectBindings, search])
+
+  const copyAccountId = async (accountId: string) => {
+    try {
+      await navigator.clipboard.writeText(accountId)
+      setNotice(`账户 ID ${accountId} 已复制。`)
+    } catch {
+      setNotice(`账户 ID ${accountId} 可在表格中手动复制。`)
+    }
+  }
+
+  return <section className="table-surface account-binding-surface">
+    <div className="table-toolbar">
+      <div className="search-field"><Search size={16}/><input aria-label="搜索广告账户绑定" value={search} onChange={event => setSearch(event.target.value)} placeholder={`搜索${item.label}`}/></div>
+      <button className={attentionOnly ? 'secondary-button active-filter' : 'secondary-button'} onClick={() => setAttentionOnly(value => !value)} aria-pressed={attentionOnly}><Filter size={15}/>异常优先</button>
+      <span className="table-count">{activeView} · 共 {filtered.length} 个绑定</span>
+    </div>
+    {projectBindings.length ? <>
+      <table>
+        <thead><tr><th>平台</th><th>客户 / 品牌</th><th>账户名称与 ID</th><th>权限</th><th>登录</th><th>追踪</th><th>绑定资产</th><th>负责人</th><th>最近同步</th></tr></thead>
+        <tbody>{filtered.map(binding => {
+          const client = clientsById.get(binding.clientId)
+          const brand = brandsById.get(binding.brandId)
+          return <tr key={binding.id}>
+            <td><span className="source-chip">{binding.platform}</span></td>
+            <td><b>{client?.name ?? '未知客户'}</b><small>{brand?.name ?? '未知品牌'}</small></td>
+            <td><b>{binding.accountName}</b><button className="account-id-copy" onClick={() => void copyAccountId(binding.accountDisplayId)} aria-label={`复制账户 ID ${binding.accountDisplayId}`}><span className="code">{binding.accountDisplayId}</span><ClipboardCheck size={14}/></button></td>
+            <td><BindingStatus value={binding.permissionStatus}/></td>
+            <td><BindingStatus value={binding.loginStatus}/></td>
+            <td><BindingStatus value={binding.trackingStatus}/></td>
+            <td><b>{binding.boundAssetIds.length} 个资产</b><small>{binding.boundAssetIds.join(' / ') || '尚未绑定资产'}</small></td>
+            <td>{binding.owner}</td>
+            <td><time>{new Date(binding.lastSyncedAt).toLocaleString('zh-CN', { hour12: false })}</time><small>{bindingAttentionSummary(binding)}</small></td>
+          </tr>
+        })}</tbody>
+      </table>
+      {!filtered.length ? <div className="table-empty">没有匹配的账户绑定，请调整搜索或关闭异常筛选。</div> : null}
+    </> : <div className="account-empty"><ShieldCheck size={22}/><h3>当前 Project 尚未绑定广告账户</h3><p>请在组织资源中连接广告平台，再将客户、品牌和广告账户绑定到当前 Project。绑定后页面会展示账户 ID、权限、登录、追踪、资产和同步状态。</p><small>安全边界：本页不返回也不展示平台 Token、密钥或登录凭据。</small></div>}
+    {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+  </section>
+}
+
+function GenericTableSurface({ item, activeView, onOpenRecord }: { item: NavItem; activeView: string; onOpenRecord: (id: string) => void }) {
   const { currentProject } = useProject()
   const [search, setSearch] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
@@ -460,6 +1235,168 @@ function AuditEvidenceSurface() {
     <aside className="audit-boundary"><ShieldCheck size={18}/><h3>模拟边界</h3><p>这些事件只记录本地 MVP 的受控投放模拟。审批、执行和回滚不会对广告账户或外部平台写入。</p></aside>
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </div>
+}
+
+function RemixMMLUEvalSurface() {
+  const { currentProject } = useProject()
+  const [cases, setCases] = useState<ApiRemixEvalCase[]>([])
+  const [run, setRun] = useState<ApiRemixEvalRun | null>(null)
+  const [notice, setNotice] = useState('')
+  const [isRunning, setIsRunning] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void api.listRemixEvalCases(currentProject.id).then(response => {
+      if (active) setCases(response.items)
+    }).catch(cause => {
+      if (active) setNotice(cause instanceof Error ? cause.message : '读取 Remix-MMLU 评测集失败')
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+
+  const runEval = async () => {
+    setIsRunning(true)
+    setNotice('')
+    try {
+      const nextRun = await api.createRemixEvalRun(currentProject.id, {
+        planner_version: 'planner.v1',
+        prompt_version: 'prompt.v1',
+        submissions: [
+          { case_id: 'remix_mmlu_hook_mcq_v1', choice_id: 'b' },
+          { case_id: 'remix_mmlu_rubric_v1', answer_text: 'authorized timeline risk' },
+        ],
+      })
+      setRun(nextRun)
+      setNotice(`评测运行 ${nextRun.id} 已完成，可复现实验分数。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '运行 Remix-MMLU 评测失败')
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  const failedCaseTitles = run?.failed_cases.map(id => cases.find(item => item.id === id)?.title ?? id) ?? []
+  return <div className="agent-eval-stack">
+    <div className="ops-layout remix-eval-surface">
+      <section className="ops-main">
+        <div className="ops-status"><span className="signal ok"><CircleCheck size={18}/></span><div><span className="section-label">REMIX-MMLU</span><h2>Planner 与 Prompt 回归评测</h2><p>保存 MCQ/rubric seed cases，使用 deterministic scorer 验证混剪 Planner 输出是否稳定。</p></div><button className="primary-button" onClick={() => void runEval()} disabled={isRunning}>{isRunning ? '运行中…' : '运行固定评测'}</button></div>
+        <div className="ops-list">
+          {cases.map(testCase => <div key={testCase.id}><span>{testCase.title}</span><b>{testCase.type.toUpperCase()} · {testCase.planner_version} / {testCase.prompt_version}</b><Status value={testCase.type === 'mcq' ? '选择题' : `Rubric ${Math.round(testCase.passing_score * 100)}分通过`}/><button aria-label={`查看${testCase.title}详情`}><ArrowRight size={15}/></button></div>)}
+          {!cases.length ? <div className="panel-empty">暂无评测 case，等待服务端 seed cases 初始化。</div> : null}
+        </div>
+      </section>
+      <aside className="ops-rail">
+        <span className="section-label">最新运行</span>
+        {run ? <>
+          <div className="activity-item"><time>{Math.round(run.score * 100)}%</time><span><b>{run.passed_cases} / {run.total_cases} cases passed</b><small>{run.planner_version} · {run.prompt_version}</small></span></div>
+          {run.results.map(result => <div className="activity-item" key={result.id}><time>{result.passed ? 'PASS' : 'FAIL'}</time><span><b>{cases.find(item => item.id === result.case_id)?.title ?? result.case_id}</b><small>{result.reason} · {Math.round(result.score * 100)}%</small></span></div>)}
+          {failedCaseTitles.length ? <div className="inline-notice" role="status">失败 case：{failedCaseTitles.join('、')}</div> : <div className="inline-notice" role="status">全部 case 通过，结果可重复。</div>}
+        </> : <div className="panel-empty">点击运行后展示总分、失败 case 和关联版本。</div>}
+        {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+      </aside>
+    </div>
+    <AgentRunTracePanel />
+  </div>
+}
+
+function AgentRunTracePanel() {
+  const { currentProject } = useProject()
+  const [renderJobId, setRenderJobId] = useState('remixrender_1')
+  const [runs, setRuns] = useState<ApiAgentRun[]>([])
+  const [selectedRunId, setSelectedRunId] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void api.listAgentRuns(currentProject.id, 10).then(response => {
+      if (!active) return
+      setRuns(response.items)
+      setSelectedRunId(current => current || response.items[0]?.id || '')
+    }).catch(cause => {
+      if (active) setNotice(cause instanceof Error ? cause.message : '读取 Agent Run 失败')
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+
+  const selectedRun = runs.find(run => run.id === selectedRunId) ?? runs[0]
+  const startDiagnosis = async () => {
+    if (!renderJobId.trim()) {
+      setNotice('请先输入 RenderJob ID。')
+      return
+    }
+    setBusy(true)
+    setNotice('')
+    try {
+      const run = await api.createAgentRun(currentProject.id, renderJobId.trim())
+      setRuns(current => [run, ...current.filter(item => item.id !== run.id)])
+      setSelectedRunId(run.id)
+      setNotice(run.status === 'failed' ? `诊断失败：${run.error_message ?? '未知错误'}` : `Agent Run ${run.id.slice(0, 8)} 已完成。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '启动 Agent Run 失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const retryDiagnosis = () => {
+    if (selectedRun?.target.render_job_id) setRenderJobId(selectedRun.target.render_job_id)
+    void startDiagnosis()
+  }
+  const cancelRun = async () => {
+    if (!selectedRun) return
+    setBusy(true)
+    try {
+      const cancelled = await api.cancelAgentRun(currentProject.id, selectedRun.id)
+      setRuns(current => current.map(item => item.id === cancelled.id ? cancelled : item))
+      setNotice('Agent Run 已取消。')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '取消 Agent Run 失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <section className="agent-trace-surface">
+    <div className="agent-trace-heading">
+      <div><span className="section-label">AGENT RUN / TRACE</span><h2>渲染诊断 Agent</h2><p>持久化展示步骤、工具调用、模型 span、错误和重试入口。</p></div>
+      <div className="agent-run-controls"><input aria-label="RenderJob ID" value={renderJobId} onChange={event => setRenderJobId(event.target.value)} placeholder="输入 remix render job id"/><button className="primary-button" disabled={busy} onClick={() => void startDiagnosis()}>{busy ? '执行中…' : '启动诊断'}</button></div>
+    </div>
+    <div className="agent-trace-grid">
+      <aside className="agent-run-list">
+        {runs.map(run => <button key={run.id} className={run.id === selectedRun?.id ? 'active' : ''} onClick={() => setSelectedRunId(run.id)}>
+          <span>{run.id.slice(0, 12)}</span><b>{run.workflow}</b><small>{run.status} · {run.target.render_job_id}</small>
+        </button>)}
+        {!runs.length ? <div className="panel-empty">暂无 Agent Run，输入 RenderJob ID 后可创建诊断。</div> : null}
+      </aside>
+      <div className="agent-run-detail">
+        {selectedRun ? <>
+          <div className="agent-run-summary"><Status value={agentStatusLabel(selectedRun.status)}/><b>{String(selectedRun.output?.diagnosis ?? selectedRun.error_message ?? '等待诊断输出')}</b><span>{String(selectedRun.output?.recommendation ?? '工具和模型 span 会在运行完成后展示。')}</span></div>
+          <div className="agent-trace-columns">
+            <TraceColumn title="步骤" items={selectedRun.steps.map(step => ({ id: step.id, title: step.label, meta: step.status, body: step.summary }))}/>
+            <TraceColumn title="工具调用" items={selectedRun.tool_calls.map(call => ({ id: call.id, title: call.name, meta: call.status, body: call.error_message ?? String(call.output?.recommendation ?? call.output?.diagnosis ?? '无输出') }))}/>
+            <TraceColumn title="模型 Span" items={selectedRun.trace_spans.map(span => ({ id: span.id, title: span.name, meta: span.parent_id ? `${span.kind} · parent ${span.parent_id.slice(0, 8)}` : span.kind, body: span.error_message ?? `${span.status}${span.model ? ` · ${span.model}` : ''}` }))}/>
+          </div>
+          <div className="agent-run-actions"><button className="secondary-button" disabled={busy || !['queued', 'running'].includes(selectedRun.status)} onClick={() => void cancelRun()}>取消</button><button className="primary-button" disabled={busy} onClick={retryDiagnosis}>重试诊断</button></div>
+        </> : <div className="panel-empty">选择 Agent Run 后查看 trace 详情。</div>}
+      </div>
+    </div>
+    {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+  </section>
+}
+
+function TraceColumn({ title, items }: { title: string; items: Array<{ id: string; title: string; meta: string; body: string }> }) {
+  return <div className="trace-column"><span className="section-label">{title}</span>{items.map(item => <article key={item.id}><small>{item.meta}</small><b>{item.title}</b><p>{item.body}</p></article>)}{!items.length ? <div className="panel-empty">暂无{title}</div> : null}</div>
+}
+
+function agentStatusLabel(status: ApiAgentRun['status']): string {
+  const labels: Record<ApiAgentRun['status'], string> = {
+    queued: '排队中',
+    running: '执行中',
+    succeeded: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  }
+  return labels[status]
 }
 
 function auditActionLabel(action: string): string {
@@ -530,9 +1467,10 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   let surface
   const taskDomain = system.key === 'strategy' || system.key === 'creative' ? system.key : null
   const taskCenter = item.id === 'tasks' && taskDomain !== null
-  const specialized = taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined}/>
+  const specialized = taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
     : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={objectId}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
+    : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetExperiencePage state={dataState} mode="assets"/>
@@ -541,6 +1479,7 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
+    : system.key === 'creative' && item.id === 'operations' ? <RemixMMLUEvalSurface/>
     : null
   if (specialized) surface = specialized
   else {
@@ -560,5 +1499,8 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     onOpenProject(currentProject.id, system.key, 'tasks', task.id)
   }
 
-  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={objectId && !taskCenter ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{objectId && !taskCenter ? <ObjectDetail system={system} item={item} objectId={objectId} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>业务任务：{currentProject.tasks.length}</span><span>更新时间：{currentProject.updatedAt}</span><span>预算：¥{currentProject.budget.toLocaleString('zh-CN')}</span><strong>状态：已同步</strong></footer>{taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
+  const projectProgress = calculateProjectProgress(currentProject)
+  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews'))
+
+  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>{taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }
