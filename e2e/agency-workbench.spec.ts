@@ -1,6 +1,15 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 
 const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8787'
+let projectListDelayMs = 0
+
+test.beforeEach(async ({ page }) => {
+  projectListDelayMs = 0
+  const response = await page.request.post(`${apiBaseURL}/api/session`, {
+    data: { email: 'demo@cookies.local', password: 'cookies-demo' },
+  })
+  expect(response.ok()).toBeTruthy()
+})
 
 const agencyProjects = [
   {
@@ -106,13 +115,11 @@ test('Project 快速切换后只展示当前 Project 数据', async ({ page }) =
 })
 
 test('Project 路由目标尚未落地时显示加载态而不是错误态', async ({ page }) => {
-  await page.route(`${apiBaseURL}/api/projects`, async route => {
-    await new Promise(resolve => setTimeout(resolve, 300))
-    await fulfillJson(route, agencyProjects)
-  }, { times: 1 })
+  projectListDelayMs = 1500
 
-  await page.goto('/projects/project-orbit-care-sleep/creative/tasks')
-  await expect(page.getByRole('status', { name: '正在加载' })).toBeVisible()
+  const navigation = page.goto('/projects/project-orbit-care-sleep/creative/tasks')
+  await expect(page.getByText('正在加载路由目标 Project')).toBeVisible()
+  await navigation
   await expect(page.getByRole('heading', { name: '数据暂时无法读取' })).toHaveCount(0)
   await expect(page.locator('.statusbar')).toContainText('Project：Orbit Care 睡眠健康线索')
 })
@@ -183,6 +190,11 @@ async function mockAgencyProjectApi(page: Page) {
     const request = route.request()
     const url = new URL(request.url())
     if (url.pathname === '/api/projects' && request.method() === 'GET') {
+      if (projectListDelayMs > 0) {
+        const delay = projectListDelayMs
+        projectListDelayMs = 0
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
       await fulfillJson(route, agencyProjects)
       return
     }
@@ -217,7 +229,8 @@ async function fulfillJson(route: Route, json: unknown) {
   await route.fulfill({
     status: 200,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': 'http://127.0.0.1:4173',
+      'Access-Control-Allow-Credentials': 'true',
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(json),

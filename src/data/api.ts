@@ -843,7 +843,31 @@ export type ApiProviderCapabilities = {
     model: string
     available: boolean
   }>
+  credential?: {
+    source?: 'environment' | 'workspace'
+    maskedApiKey?: string
+    updatedAt?: string
+  }
   checkedAt: string
+}
+
+export type ApiAuthSession = {
+  authenticated: boolean
+  user?: {
+    id: string
+    email: string
+    displayName: string
+  }
+}
+
+export type ApiProviderConfiguration = {
+  provider: 'ark'
+  status: 'configured' | 'not_configured'
+  baseUrl: string
+  source?: 'environment' | 'workspace'
+  maskedApiKey?: string
+  updatedAt?: string
+  capabilities: ApiProviderCapabilities
 }
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
@@ -1373,6 +1397,7 @@ function filterAgencyWorkbenchByProjects(projectIds: string[]): ApiAgencyWorkben
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
+    credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -1387,6 +1412,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 async function platformRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
   const response = await fetch(`${platformBase}${path}`, {
     method,
+    credentials: 'include',
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(headers ?? {}),
@@ -1641,7 +1667,14 @@ export const api = {
     if (options.includePortfolioSample) return agencyWorkbenchSample
     return filterAgencyWorkbenchByProjects(options.projectIds ?? [])
   },
+  getSession: () => request<ApiAuthSession>('/session'),
+  login: (input: { email: string; password: string }) => request<ApiAuthSession>('/session', 'POST', input),
+  logout: () => request<ApiAuthSession>('/session', 'DELETE'),
   getCapabilities: () => request<ApiProviderCapabilities>('/provider/capabilities'),
+  getProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration'),
+  updateProviderConfiguration: (input: { apiKey: string; baseUrl?: string }) =>
+    request<ApiProviderConfiguration>('/provider/configuration', 'PUT', input),
+  deleteProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration', 'DELETE'),
   getPublicInsightOverview: () => request<ApiPublicInsightOverview>('/public-insights/overview'),
   getPublicInsightFilters: () => request<ApiPublicInsightFilters>('/public-insights/filters'),
   listPublicInsightVideos: (input: {

@@ -2,6 +2,13 @@ import { expect, test, type Page } from '@playwright/test'
 
 const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8787'
 
+test.beforeEach(async ({ page }) => {
+  const response = await page.request.post(`${apiBaseURL}/api/session`, {
+    data: { email: 'demo@cookies.local', password: 'cookies-demo' },
+  })
+  expect(response.ok()).toBeTruthy()
+})
+
 async function createProjectWithBrief(page: Page, name: string) {
   const projectResponse = await page.request.post(`${apiBaseURL}/api/projects`, {
     data: { name, brand: 'E2E 隔离品牌', objective: '独立验证当前项目服务端事实来源' },

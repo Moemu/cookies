@@ -9,6 +9,9 @@ export interface ModelProviderConfig {
   name: string
   description: string
   status: ModelProviderStatus
+  baseUrl?: string
+  source?: 'environment' | 'workspace'
+  maskedApiKey?: string
   lastVerifiedAt?: string
 }
 
@@ -17,6 +20,8 @@ interface ModelConfigValue {
   configuredCount: number
   isLoading: boolean
   refresh: () => Promise<void>
+  saveProvider: (input: { apiKey: string; baseUrl?: string }) => Promise<void>
+  clearProvider: () => Promise<void>
 }
 
 const ModelConfigContext = createContext<ModelConfigValue | null>(null)
@@ -34,6 +39,8 @@ export function ModelConfigProvider({ children }: { children: ReactNode }) {
         name: '火山方舟',
         description: models,
         status: capabilities.status === 'configured' ? '已配置' : '未配置',
+        source: capabilities.credential?.source,
+        maskedApiKey: capabilities.credential?.maskedApiKey,
         lastVerifiedAt: capabilities.checkedAt,
       }])
     } catch {
@@ -43,7 +50,35 @@ export function ModelConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
-  const value = useMemo(() => ({ providers, configuredCount: providers.filter(provider => provider.status === '已配置').length, isLoading, refresh }), [providers, isLoading, refresh])
+
+  const saveProvider = useCallback(async (input: { apiKey: string; baseUrl?: string }) => {
+    const configuration = await api.updateProviderConfiguration(input)
+    const models = configuration.capabilities.capabilities.map(item => `${item.capability}: ${item.model}`).join('；')
+    setProviders([{
+      id: 'ark',
+      name: '火山方舟',
+      description: models,
+      status: configuration.status === 'configured' ? '已配置' : '未配置',
+      baseUrl: configuration.baseUrl,
+      source: configuration.source,
+      maskedApiKey: configuration.maskedApiKey,
+      lastVerifiedAt: configuration.capabilities.checkedAt,
+    }])
+  }, [])
+
+  const clearProvider = useCallback(async () => {
+    await api.deleteProviderConfiguration()
+    await refresh()
+  }, [refresh])
+
+  const value = useMemo(() => ({
+    providers,
+    configuredCount: providers.filter(provider => provider.status === '已配置').length,
+    isLoading,
+    refresh,
+    saveProvider,
+    clearProvider,
+  }), [providers, isLoading, refresh, saveProvider, clearProvider])
   return <ModelConfigContext.Provider value={value}>{children}</ModelConfigContext.Provider>
 }
 
