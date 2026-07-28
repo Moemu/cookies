@@ -178,3 +178,13 @@
 - **本地验证**: `git diff --check`、`git diff --cached --check`、`npm run test:server` 35/35、`npm run check:server`、`npx tsx --test test/agency-workbench-filter.test.ts` 1/1、`npm run build`、`npm run test:e2e` 22/22、`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 均通过；`npm run build` 仍仅提示既有 Vite chunk 大于 500 kB 警告。
 - **交付状态**: 暂存与提交范围仅包含本轮相关源码、测试和规格文档；推送后确认 PR 必需 GitHub Actions checks 覆盖最新提交且全部通过。
 - **清单状态**: Task30 与 checklist 最后一项已勾选，演示数据收拢与体验优化范围的未交付变更已被远端 CI 覆盖。
+
+## Round 4
+
+- **结论**: PASS
+- **复核范围**: 演示数据收拢到指定 demo Project、非 demo Project 隔离、核心页面体验及格线、服务端持久化与种子、真实 API E2E、前端/Go 构建测试门禁、PR #14 最新提交检查覆盖
+- **验证结果**:
+  - 构建/运行: 通过；`git diff --check`、`npm run check:server`、`npm run build`、`npm run build --prefix web`、`npm run lint --prefix web`、`CGO_ENABLED=0 GOTOOLCHAIN=auto go test ./internal/platform/provider ./internal/platform/httpserver ./cmd/cookies-api` 均退出 0；PR #14 的 `Repository quality`、`Platform CI / verify`、`Platform CI / migrations` 覆盖当前 `HEAD=5e73d095f04d07fc7d0942dc3bcf8bd3d9e474d2` 且均为 pass/SUCCESS
+  - 测试/覆盖: 通过；`npm run test:server` 35/35、`npm run test:e2e` 22/22、`npx tsx --test test/agency-workbench-filter.test.ts` 1/1 通过；对抗探针 `npx tsx --test --test-name-pattern "核心演示种子会清理误归属到非 demo Project 的旧数据" server/operations.test.ts` 命中用例 1/1 通过
+  - 清单审计: 51/51 passed, 0 failed
+- **风险和问题**: 无范围内缺陷；低风险：根构建仍有既有 Vite chunk 大于 500 kB 警告，`web` 构建在本机 Node 20.17.0 下提示低于 Vite 建议版本但退出码为 0
