@@ -56,14 +56,28 @@ test("路演运营示例以稳定 ID 幂等写入，并在重启后保留项目�
     const firstRecords = await repository.listOperationalRecords(project.id);
     const firstWorkItem = firstRecords.find((record) => record.id === "WORK-2607-01");
     const metric = firstRecords.find((record) => record.id === "METRIC-2607-01");
+    const crmMetric = firstRecords.find((record) => record.id === "METRIC-2607-02");
+    const deploymentCheck = firstRecords.find((record) => record.id === "WORK-2607-06");
+    const artifacts = await repository.listArtifacts(project.id);
+    const tasks = await repository.listBusinessTasks(project.id);
     assert.equal(project.runtime.stage, "投放审批");
     assert.equal(project.runtime.progress, 82);
     assert.equal(project.runtime.budget, 1_000_000);
-    assert.ok(firstRecords.length >= 20);
+    assert.ok(firstRecords.length >= 50);
+    assert.equal(artifacts.some((artifact) => artifact.kind === "document" && artifact.content.startsWith("[strategy]")), true);
+    assert.equal(artifacts.some((artifact) => artifact.kind === "document" && artifact.content.startsWith("[insight]")), true);
+    assert.equal(artifacts.some((artifact) => artifact.kind === "document" && artifact.content.startsWith("[delivery]")), true);
+    assert.equal(artifacts.some((artifact) => artifact.kind === "video" && artifact.content.includes("15 秒精密制造品牌片")), true);
+    assert.equal(tasks.length, 5);
+    assert.equal(tasks.some((task) => task.type === "strategy" && task.status === "ready"), true);
+    assert.equal(tasks.some((task) => task.type === "short_drama_preroll" && task.status === "ready"), true);
+    assert.equal(tasks.some((task) => task.type === "video_edit" && task.outputArtifactIds.length > 0), true);
     assert.equal(firstWorkItem?.fields.owner, "Amelia Meng");
+    assert.equal(deploymentCheck?.fields.owner, "系统");
     assert.equal(metric?.fields.summary, "证据前置版本，正在形成稳定增量。");
     assert.equal(metric?.fields.recommendation, "下一轮将证据前置版本扩大到 30% 素材覆盖，并保留纯产品特写作为对照组。");
     assert.equal(metric?.fields.points, "32,39,36,49,54,51,63,67,72,78,75,86");
+    assert.equal(crmMetric?.fields.summary, "高意向表单占比持续提升，研发负责人样本贡献最高。");
 
     await seedDemoProject(repository);
     const secondRecords = await repository.listOperationalRecords(project.id);
@@ -71,10 +85,60 @@ test("路演运营示例以稳定 ID 幂等写入，并在重启后保留项目�
     assert.equal(secondRecords.length, firstRecords.length);
     assert.equal(secondWorkItem?.createdAt, firstWorkItem?.createdAt);
     assert.equal(secondWorkItem?.updatedAt, firstWorkItem?.updatedAt);
+    assert.equal((await repository.listBusinessTasks(project.id)).length, tasks.length);
 
     const reopened = await FileRepository.open(temporary.filePath);
     assert.equal((await reopened.getProject(project.id))?.runtime.owner, "Noah Xu");
     assert.equal((await reopened.listOperationalRecords(project.id)).length, firstRecords.length);
+  } finally {
+    await temporary.dispose();
+  }
+});
+
+test("既有路演 Project 在部署启动后会迁移 runtime 并补齐完整演示包", async () => {
+  const temporary = await temporaryRepository();
+  try {
+    await writeFile(temporary.filePath, JSON.stringify({
+      projects: [{
+        id: "existing-demo",
+        name: "投资人路演：精度证据增长",
+        brand: "白域精工",
+        objective: "向采购与研发负责人展示精度证据，获取高质量销售线索。",
+        runtime: {
+          code: "PRJ",
+          product: "",
+          stage: "需求梳理",
+          progress: 0,
+          status: "active",
+          owner: "legacy-user",
+          budget: 0,
+          currency: "CNY",
+          timezone: "Asia/Shanghai",
+        },
+        version: 1,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      }],
+    }), "utf8");
+    const repository = await FileRepository.open(temporary.filePath);
+
+    const project = await seedDemoProject(repository);
+
+    assert.equal(project.id, "existing-demo");
+    assert.deepEqual(project.runtime, {
+      code: "SP",
+      product: "高精度 CNC 加工零部件",
+      stage: "投放审批",
+      progress: 82,
+      status: "active",
+      owner: "Noah Xu",
+      budget: 1_000_000,
+      currency: "CNY",
+      timezone: "Asia/Shanghai",
+    });
+    assert.equal((await repository.listArtifacts(project.id)).filter((artifact) => artifact.status === "ready").length >= 6, true);
+    assert.equal((await repository.listBusinessTasks(project.id)).length, 5);
+    assert.equal((await repository.listOperationalRecords(project.id)).some((record) => record.id === "REC-AUDIT-2607-04"), true);
   } finally {
     await temporary.dispose();
   }
@@ -111,7 +175,8 @@ test("项目运营数据 API 按项目隔离，并拒绝不存在的项目", asy
     assert.equal(demoRecords.body.some((record: { kind: string }) => record.kind === "performance_ad"), true);
     const trend = demoRecords.body.find((record: { id: string }) => record.id === "METRIC-2607-01");
     assert.equal(trend.fields.points, "32,39,36,49,54,51,63,67,72,78,75,86");
-    assert.equal(demoRecords.body[0].id, "ACTION-P0");
+    assert.equal(demoRecords.body.some((record: { id: string }) => record.id === "WORK-2607-06"), true);
+    assert.equal(demoRecords.body.some((record: { id: string }) => record.id === "METRIC-2607-02"), true);
     assert.equal(demoRecords.body.every((record: { projectId: string }) => record.projectId === demo.id), true);
     const otherRecords = await request(`/api/projects/${otherProject.id}/operations`);
     assert.deepEqual(otherRecords, { status: 200, body: [] });
