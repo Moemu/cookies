@@ -62,6 +62,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_id}/comments", server.addReviewComment)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_action}", server.reviewAction)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages", server.listPackages)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/creative-handoff", server.getCreativeHandoff)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}", server.getPackage)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md", server.exportPackage)
 	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/feedback", server.createFeedback)
@@ -511,6 +512,29 @@ func (s *Server) getPackage(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, value)
 }
 
+func (s *Server) getCreativeHandoff(writer http.ResponseWriter, request *http.Request) {
+	version, ok := positivePathInt(writer, request, "version")
+	if !ok {
+		return
+	}
+	value, err := s.Service.GetCreativeHandoff(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.PathValue("package_id"), version,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	etag := `"` + string(value.HandoffContentHash) + `"`
+	writer.Header().Set("ETag", etag)
+	writer.Header().Set("Cache-Control", "private, no-cache")
+	if matchesIfNoneMatch(request.Header.Get("If-None-Match"), etag) {
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
 func (s *Server) exportPackage(writer http.ResponseWriter, request *http.Request) {
 	value, ok := s.packageFromRequest(writer, request)
 	if !ok {
@@ -699,6 +723,16 @@ func parseIfMatch(value string) int64 {
 	value = strings.TrimPrefix(value, "v")
 	parsed, _ := strconv.ParseInt(value, 10, 64)
 	return parsed
+}
+
+func matchesIfNoneMatch(header, etag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || candidate == etag || strings.TrimPrefix(candidate, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 func positivePathInt(writer http.ResponseWriter, request *http.Request, name string) (int64, bool) {

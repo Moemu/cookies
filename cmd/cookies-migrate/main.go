@@ -9,6 +9,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/database"
 	"github.com/shikanon/cookies/internal/platform/migration"
+	"github.com/shikanon/cookies/internal/systems/strategy"
 )
 
 func main() {
@@ -26,5 +27,9 @@ func main() {
 	if err := migration.Run(ctx, db, "migrations"); err != nil {
 		log.Fatalf("apply migrations: %v", err)
 	}
-	log.Print("migrations are current")
+	backfilled, err := strategy.BackfillCreativeHandoffs(ctx, db)
+	if err != nil {
+		log.Fatalf("backfill Strategy Creative Handoffs: %v", err)
+	}
+	log.Printf("migrations are current; backfilled %d Strategy Creative Handoffs", backfilled)
 }

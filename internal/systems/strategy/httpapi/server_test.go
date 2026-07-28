@@ -39,3 +39,37 @@ func TestUnknownActionDoesNotReachService(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestCreativeHandoffRouteRejectsInvalidVersionBeforeService(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet,
+		"/api/strategy/v1/projects/project_1/strategy-packages/package_1/versions/not-a-version/creative-handoff",
+		nil,
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMatchesIfNoneMatch(t *testing.T) {
+	t.Parallel()
+	etag := `"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`
+	for _, header := range []string{
+		etag,
+		`"other", ` + etag,
+		`W/` + etag,
+		"*",
+	} {
+		if !matchesIfNoneMatch(header, etag) {
+			t.Fatalf("header %q did not match %q", header, etag)
+		}
+	}
+	for _, header := range []string{"", `"other"`, `W/"other"`} {
+		if matchesIfNoneMatch(header, etag) {
+			t.Fatalf("header %q unexpectedly matched %q", header, etag)
+		}
+	}
+}

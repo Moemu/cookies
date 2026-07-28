@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -380,6 +381,22 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`, packageID, versionNumber,
 		actor.OrganizationID, draft.ProjectID, strategyID, revision.Revision, review.ID,
 		snapshotJSONValue, contentHash, actor.Principal.ID, now); err != nil {
+		return PackageVersion{}, false, err
+	}
+	handoff, err := BuildCreativeHandoff(packageVersion, projectContext.ProductIDs)
+	if err != nil {
+		return PackageVersion{}, false, err
+	}
+	handoffSnapshot, err := json.Marshal(handoff)
+	if err != nil {
+		return PackageVersion{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_creative_handoffs
+		(organization_id, project_id, package_id, package_version, contract_version,
+		 snapshot, content_hash, published_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, actor.OrganizationID, draft.ProjectID,
+		packageID, versionNumber, handoff.ContractVersion, handoffSnapshot,
+		handoff.HandoffContentHash, now); err != nil {
 		return PackageVersion{}, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE strategy_reviews SET status = 'approved',

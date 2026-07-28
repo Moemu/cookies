@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/systems/creative"
 	"github.com/shikanon/cookies/internal/systems/strategy"
+	strategyhttp "github.com/shikanon/cookies/internal/systems/strategy/httpapi"
 )
 
 func TestStrategyMySQLVerticalSlice(t *testing.T) {
@@ -197,6 +200,89 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if !stored.ContentHash.Equal(published.ContentHash) || stored.Snapshot.StrategyRevision != 2 {
 		t.Fatalf("unexpected package: %#v", stored)
 	}
+	handoff, err := service.GetCreativeHandoff(ctx, actor, projectID, published.PackageID, published.Version)
+	if err != nil {
+		t.Fatalf("get creative handoff: %v", err)
+	}
+	if handoff.ContractVersion != strategy.CreativeHandoffContractVersion ||
+		handoff.PackageRef.PackageID != published.PackageID ||
+		handoff.PackageRef.PackageVersion != published.Version ||
+		!handoff.PackageRef.PackageContentHash.Equal(published.ContentHash) ||
+		handoff.HandoffContentHash.Validate() != nil {
+		t.Fatalf("unexpected creative handoff: %#v", handoff)
+	}
+	if _, err := service.GetCreativeHandoff(ctx, actor, contract.ProjectID("other_project"), published.PackageID, published.Version); !errors.Is(err, strategy.ErrProjectAccessDenied) {
+		t.Fatalf("cross-project handoff read error = %v", err)
+	}
+	handoffPath := fmt.Sprintf(
+		"/api/strategy/v1/projects/%s/strategy-packages/%s/versions/%d/creative-handoff",
+		projectID, published.PackageID, published.Version,
+	)
+	strategyServer := strategyhttp.New(service, agent.MySQLStore{DB: db}, jobruntime.MySQLStore{DB: db})
+	handoffRequest := httptest.NewRequest(http.MethodGet, handoffPath, nil)
+	handoffRequest = handoffRequest.WithContext(contract.WithRequestContext(handoffRequest.Context(), contract.RequestContext{
+		RequestID: "handoff_get_" + suffix, Actor: actor,
+	}))
+	handoffResponse := httptest.NewRecorder()
+	strategyServer.ServeHTTP(handoffResponse, handoffRequest)
+	if handoffResponse.Code != http.StatusOK ||
+		handoffResponse.Header().Get("ETag") != `"`+string(handoff.HandoffContentHash)+`"` {
+		t.Fatalf("handoff HTTP status=%d headers=%v body=%s", handoffResponse.Code, handoffResponse.Header(), handoffResponse.Body.String())
+	}
+	notModifiedRequest := httptest.NewRequest(http.MethodGet, handoffPath, nil)
+	notModifiedRequest.Header.Set("If-None-Match", `"other", W/"`+string(handoff.HandoffContentHash)+`"`)
+	notModifiedRequest = notModifiedRequest.WithContext(contract.WithRequestContext(notModifiedRequest.Context(), contract.RequestContext{
+		RequestID: "handoff_not_modified_" + suffix, Actor: actor,
+	}))
+	notModifiedResponse := httptest.NewRecorder()
+	strategyServer.ServeHTTP(notModifiedResponse, notModifiedRequest)
+	if notModifiedResponse.Code != http.StatusNotModified ||
+		notModifiedResponse.Header().Get("ETag") != `"`+string(handoff.HandoffContentHash)+`"` ||
+		notModifiedResponse.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("handoff 304 status=%d headers=%v", notModifiedResponse.Code, notModifiedResponse.Header())
+	}
+	limitedActor := actor
+	limitedActor.Scopes = []contract.Scope{"project.read", strategy.ScopeRead}
+	forbiddenRequest := httptest.NewRequest(http.MethodGet, handoffPath, nil)
+	forbiddenRequest = forbiddenRequest.WithContext(contract.WithRequestContext(forbiddenRequest.Context(), contract.RequestContext{
+		RequestID: "handoff_forbidden_" + suffix, Actor: limitedActor,
+	}))
+	forbiddenResponse := httptest.NewRecorder()
+	strategyServer.ServeHTTP(forbiddenResponse, forbiddenRequest)
+	if forbiddenResponse.Code != http.StatusForbidden {
+		t.Fatalf("handoff forbidden status=%d body=%s", forbiddenResponse.Code, forbiddenResponse.Body.String())
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM strategy_creative_handoffs
+		WHERE organization_id = ? AND project_id = ? AND package_id = ? AND package_version = ?`,
+		organizationID, projectID, published.PackageID, published.Version); err != nil {
+		t.Fatal(err)
+	}
+	backfilled, err := strategy.BackfillCreativeHandoffsForProject(ctx, db, organizationID, projectID)
+	if err != nil || backfilled != 1 {
+		t.Fatalf("backfill handoff: inserted=%d err=%v", backfilled, err)
+	}
+	backfilledHandoff, err := service.GetCreativeHandoff(ctx, actor, projectID, published.PackageID, published.Version)
+	if err != nil || !backfilledHandoff.HandoffContentHash.Equal(handoff.HandoffContentHash) {
+		t.Fatalf("backfilled handoff=%#v err=%v", backfilledHandoff, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE strategy_creative_handoffs
+		SET snapshot = JSON_SET(snapshot, '$.creative_view.objective.statement', 'tampered')
+		WHERE organization_id = ? AND project_id = ? AND package_id = ? AND package_version = ?`,
+		organizationID, projectID, published.PackageID, published.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetCreativeHandoff(ctx, actor, projectID, published.PackageID, published.Version); !errors.Is(err, strategy.ErrInvalidState) {
+		t.Fatalf("tampered handoff read error = %v", err)
+	}
+	restoredHandoffJSON, err := json.Marshal(backfilledHandoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE strategy_creative_handoffs SET snapshot = ?
+		WHERE organization_id = ? AND project_id = ? AND package_id = ? AND package_version = ?`,
+		restoredHandoffJSON, organizationID, projectID, published.PackageID, published.Version); err != nil {
+		t.Fatal(err)
+	}
 	feedback, duplicate, err := service.CreateFeedback(
 		ctx, actor, projectID, contract.IdempotencyKey("feedback_"+suffix),
 		strategy.CreateFeedbackRequest{
@@ -256,8 +342,43 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changedDraft, duplicate, err := service.PatchStrategy(ctx, actor, contract.IdempotencyKey("strategy_patch_v2_"+suffix), approvedDraft.ID, strategy.StrategySectionPatch{
+	invalidObjective, _ := json.Marshal(strings.Repeat("目", 1001))
+	invalidDraft, duplicate, err := service.PatchStrategy(ctx, actor, contract.IdempotencyKey("strategy_patch_invalid_handoff_"+suffix), approvedDraft.ID, strategy.StrategySectionPatch{
 		ExpectedVersion: approvedDraft.Version, BaseRevision: approvedDraft.CurrentRevision,
+		Section: "objective", Value: invalidObjective,
+	})
+	if err != nil || duplicate {
+		t.Fatalf("patch invalid handoff candidate: duplicate=%v err=%v", duplicate, err)
+	}
+	invalidReview, duplicate, err := service.SubmitStrategy(ctx, actor, contract.IdempotencyKey("submit_invalid_handoff_"+suffix), invalidDraft.ID, invalidDraft.Version, invalidDraft.CurrentRevision)
+	if err != nil || duplicate {
+		t.Fatalf("submit invalid handoff candidate: duplicate=%v err=%v", duplicate, err)
+	}
+	invalidReady, err := service.GetDraft(ctx, actor, invalidDraft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.ApproveStrategy(ctx, actor, contract.IdempotencyKey("approve_invalid_handoff_"+suffix), invalidReady.ID, strategy.ApproveRequest{
+		ReviewID: invalidReview.ID, CandidateContentHash: invalidReview.CandidateContentHash, ExpectedVersion: invalidReady.Version,
+	}); !errors.Is(err, strategy.ErrInvalidRequest) {
+		t.Fatalf("invalid handoff approval error = %v", err)
+	}
+	if _, err := service.GetPackage(ctx, actor, projectID, published.PackageID, 2); !errors.Is(err, strategy.ErrNotFound) {
+		t.Fatalf("failed handoff approval committed package v2: %v", err)
+	}
+	stillOpen, err := service.GetReview(ctx, actor, invalidReview.ID)
+	if err != nil || stillOpen.Status != "open" {
+		t.Fatalf("failed handoff approval changed review: %#v err=%v", stillOpen, err)
+	}
+	if _, err := service.ReturnReview(ctx, actor, invalidReview.ID, "修正交接字段长度"); err != nil {
+		t.Fatalf("return invalid handoff review: %v", err)
+	}
+	returnedDraft, err := service.GetDraft(ctx, actor, invalidDraft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedDraft, duplicate, err := service.PatchStrategy(ctx, actor, contract.IdempotencyKey("strategy_patch_v2_"+suffix), returnedDraft.ID, strategy.StrategySectionPatch{
+		ExpectedVersion: returnedDraft.Version, BaseRevision: returnedDraft.CurrentRevision,
 		Section: "objective", Value: json.RawMessage(`"updated objective"`),
 	})
 	if err != nil || duplicate {
@@ -283,6 +404,15 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	storedV1, err := service.GetPackage(ctx, actor, projectID, published.PackageID, 1)
 	if err != nil || storedV1.Status != "superseded" || !storedV1.ContentHash.Equal(published.ContentHash) {
 		t.Fatalf("immutable v1 after supersession: %#v err=%v", storedV1, err)
+	}
+	handoffV1, err := service.GetCreativeHandoff(ctx, actor, projectID, published.PackageID, 1)
+	if err != nil || !handoffV1.HandoffContentHash.Equal(handoff.HandoffContentHash) {
+		t.Fatalf("immutable handoff v1 after supersession: %#v err=%v", handoffV1, err)
+	}
+	handoffV2, err := service.GetCreativeHandoff(ctx, actor, projectID, published.PackageID, 2)
+	if err != nil || handoffV2.PackageRef.PackageVersion != 2 ||
+		handoffV2.HandoffContentHash.Equal(handoffV1.HandoffContentHash) {
+		t.Fatalf("isolated handoff v2: %#v err=%v", handoffV2, err)
 	}
 	var outboxCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_outbox WHERE organization_id = ?
@@ -345,7 +475,7 @@ func runAgentTaskThroughRuntime(ctx context.Context, db *sql.DB, service strateg
 		Store: runtimeStore, Handlers: map[string]jobruntime.Handler{task.Kind: handler},
 		Canceller: runtimeStore,
 	}
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		processed, err = worker.RunOnce(ctx, "strategy-integration")
 		if err != nil {
@@ -393,6 +523,7 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM strategy_compliance_reports WHERE organization_id=?",
 		"DELETE FROM strategy_conversation_memories WHERE organization_id=?",
 		"DELETE FROM strategy_review_comments WHERE organization_id=?",
+		"DELETE FROM strategy_creative_handoffs WHERE organization_id=?",
 		"DELETE FROM strategy_package_versions WHERE organization_id=?",
 		"DELETE FROM strategy_packages WHERE organization_id=?",
 		"DELETE FROM strategy_reviews WHERE organization_id=?",

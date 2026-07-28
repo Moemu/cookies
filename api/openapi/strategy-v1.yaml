@@ -463,6 +463,29 @@ paths:
                   - {$ref: '../contracts/strategy-package-v1.schema.json'}
                   - {$ref: '../contracts/strategy-package-v2.schema.json'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/creative-handoff:
+    get:
+      operationId: getStrategyCreativeHandoff
+      summary: Read the immutable Creative projection frozen with a Strategy package version.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/PackageID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Immutable Strategy to Creative handoff.
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/strategy-creative-handoff-v1.schema.json'
+        '304':
+          description: The caller already has the current immutable handoff.
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md:
     get:
       operationId: exportStrategyPackageMarkdown
