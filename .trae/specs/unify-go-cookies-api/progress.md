@@ -1,0 +1,6 @@
+## Round 1
+
+- Task(s) completed, tests passed, requirements fulfilled: 完成 Task 1-8，统一切到 Go `cookies-api` 的实体映射、DB-backed workflow store、`/platform/v1` API、Go canonical demo seed、generated intake 对象存储边界、前端主链路切流、本地 seed/dev 入口、E2E 与远程交付；checklist 22/22 项全部通过。
+- Any issues discovered or fixed: 修复并行实现中的 `httpserver` 测试缺失 import 问题；补齐 generated intake 响应脱敏、filesystem blob provider 标识、TOS 配置缺失 fail-closed、platform client 兼容映射和 platform demo E2E。
+- Key decisions made and reasoning: 以 Go `cookies-api` 和 `/platform/v1` 作为生产主链路，TS MVP 保留为 compatibility/demo-only；生成素材只返回稳定 asset/version/preview handle，避免业务层保存 vendor URL、临时路径或 bucket key。
+- Files changed: `.trae/specs/unify-go-cookies-api/*`、`api/openapi/platform-v1.yaml`、`cmd/cookies-api/main.go`、`cmd/cookies-seed/main.go`、`internal/platform/assets/*`、`internal/platform/project/*`、`internal/platform/httpserver/*`、`internal/platform/contract/*`、`internal/platform/demo/*`、`migrations/project/20260728100000_project_workflow_store.up.sql`、`src/data/*`、`src/context/ProjectContext.tsx`、`src/api/delivery.ts`、`src/components/CoreFlowPages.tsx`、`test/platform-client.test.ts`、`e2e/platform-go-demo.spec.ts`、`scripts/dev.*`、`vite.config.ts`、`package.json`、`README*`、`DEVELOPMENT.md`、`.env.example`、`Makefile`。

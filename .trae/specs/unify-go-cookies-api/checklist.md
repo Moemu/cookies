@@ -1,22 +1,22 @@
-- [ ] TS MVP 到 Go 平台的实体映射表覆盖 Project、Artifact、Task、Operation、ChangeSet、Audit、Provider media output。
-- [ ] `/platform/v1` OpenAPI 覆盖 Project detail、tasks、operations、ChangeSet/approval simulation 和 generated intake 主链路。
-- [ ] 新增 DB migrations 遵守 expand-only 规则，不删除或破坏现有表/列。
-- [ ] Task、Operation、ChangeSet 模拟数据由 DB-backed Go store 持久化，并按 project 隔离。
-- [ ] Go API 支持读取 Project runtime、ready asset refs、tasks、operations、ChangeSets 和 audit evidence。
-- [ ] Go canonical demo seed 在 fresh DB 中自动创建完整演示 Project。
-- [ ] Go canonical demo seed 对已有 demo Project 幂等补齐，不重复创建核心数据。
-- [ ] 用户项目不会被 demo seed 污染或覆盖。
-- [ ] Provider 生成媒体输出进入 generated intake / asset intake，业务 API 不返回 vendor URL、临时路径或 bucket key。
-- [ ] Filesystem blob provider 在本地开发可用，TOS 配置缺失时返回安全错误而不是静默成功。
-- [ ] 前端主 Project flow 通过 `/platform/v1` 读取项目、任务、运营记录和 ChangeSet 数据。
-- [ ] 前端创建/更新任务和 ChangeSet 操作写入 Go API，而不是 TS MVP JSON store。
-- [ ] 前端视觉、加载态、错误态、路由目标和桌面 1280px/1440px/1680px 体验不退化。
-- [ ] 本地 seed 或迁移命令可重建 canonical demo 数据。
-- [ ] TS MVP API 明确保留为兼容/demo-only，生产主链路不依赖 `data/mvp-store.json`。
-- [ ] Go 相关测试通过。
-- [ ] OpenAPI/contract 检查通过。
-- [ ] 前端构建、lint 或相关测试通过。
-- [ ] E2E 验证默认 demo Project 可见且主链路来自 `/platform/v1`。
-- [ ] `git diff --check` 通过。
-- [ ] 提交范围不包含密钥、token、私有证书或敏感连接串。
-- [ ] 推送后远程必需检查覆盖最新提交并全部通过。
+- [x] TS MVP 到 Go 平台的实体映射表覆盖 Project、Artifact、Task、Operation、ChangeSet、Audit、Provider media output。
+- [x] `/platform/v1` OpenAPI 覆盖 Project detail、tasks、operations、ChangeSet/approval simulation 和 generated intake 主链路。
+- [x] 新增 DB migrations 遵守 expand-only 规则，不删除或破坏现有表/列。
+- [x] Task、Operation、ChangeSet 模拟数据由 DB-backed Go store 持久化，并按 project 隔离。
+- [x] Go API 支持读取 Project runtime、ready asset refs、tasks、operations、ChangeSets 和 audit evidence。
+- [x] Go canonical demo seed 在 fresh DB 中自动创建完整演示 Project。
+- [x] Go canonical demo seed 对已有 demo Project 幂等补齐，不重复创建核心数据。
+- [x] 用户项目不会被 demo seed 污染或覆盖。
+- [x] Provider 生成媒体输出进入 generated intake / asset intake，业务 API 不返回 vendor URL、临时路径或 bucket key。
+- [x] Filesystem blob provider 在本地开发可用，TOS 配置缺失时返回安全错误而不是静默成功。
+- [x] 前端主 Project flow 通过 `/platform/v1` 读取项目、任务、运营记录和 ChangeSet 数据。
+- [x] 前端创建/更新任务和 ChangeSet 操作写入 Go API，而不是 TS MVP JSON store。
+- [x] 前端视觉、加载态、错误态、路由目标和桌面 1280px/1440px/1680px 体验不退化。
+- [x] 本地 seed 或迁移命令可重建 canonical demo 数据。
+- [x] TS MVP API 明确保留为兼容/demo-only，生产主链路不依赖 `data/mvp-store.json`。
+- [x] Go 相关测试通过。
+- [x] OpenAPI/contract 检查通过。
+- [x] 前端构建、lint 或相关测试通过。
+- [x] E2E 验证默认 demo Project 可见且主链路来自 `/platform/v1`。
+- [x] `git diff --check` 通过。
+- [x] 提交范围不包含密钥、token、私有证书或敏感连接串。
+- [x] 推送后远程必需检查覆盖最新提交并全部通过。
