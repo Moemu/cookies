@@ -440,6 +440,8 @@ func (s UploadService) BlobProvider() string {
 	switch s.Blobs.(type) {
 	case *TOSBlobStore:
 		return "tos"
+	case *FilesystemBlobStore:
+		return "filesystem"
 	default:
 		return "memory"
 	}

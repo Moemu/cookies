@@ -111,6 +111,312 @@ paths:
               schema: {$ref: '#/components/schemas/Project'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
+  /platform/v1/projects/{project_id}:
+    get:
+      operationId: getProjectDetail
+      summary: Return the project main-flow aggregate for frontend runtime.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project detail aggregate.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectDetail'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/tasks:
+    get:
+      operationId: listProjectTasks
+      summary: List business tasks for one project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project task list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/BusinessTask'}}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createProjectTask
+      summary: Create a business task in one project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateBusinessTaskRequest'}
+      responses:
+        '201':
+          description: Task created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessTask'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/tasks/{task_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/TaskID'
+    get:
+      operationId: getProjectTask
+      summary: Return one business task.
+      responses:
+        '200':
+          description: Business task.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessTask'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateProjectTask
+      summary: Update mutable business task fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateBusinessTaskRequest'}
+      responses:
+        '200':
+          description: Updated business task.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessTask'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/operations:
+    get:
+      operationId: listProjectOperations
+      summary: List operational records for one project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+      responses:
+        '200':
+          description: Operational record list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/OperationalRecord'}}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createProjectOperation
+      summary: Append an operational record for one project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpsertOperationalRecordRequest'}
+      responses:
+        '201':
+          description: Operational record created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationalRecord'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/operations/{operation_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/OperationID'
+    get:
+      operationId: getProjectOperation
+      summary: Return one operational record.
+      responses:
+        '200':
+          description: Operational record.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationalRecord'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      operationId: upsertProjectOperation
+      summary: Create or replace a stable operational record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpsertOperationalRecordRequest'}
+      responses:
+        '200':
+          description: Operational record upserted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationalRecord'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/change-sets:
+    get:
+      operationId: listProjectChangeSets
+      summary: List simulated delivery ChangeSets for one project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: ChangeSet list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ChangeSet'}}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createProjectChangeSet
+      summary: Create a draft delivery ChangeSet simulation.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateChangeSetRequest'}
+      responses:
+        '201':
+          description: ChangeSet created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChangeSet'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    get:
+      operationId: getProjectChangeSet
+      summary: Return one ChangeSet with simulation evidence.
+      responses:
+        '200':
+          description: ChangeSet.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChangeSet'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/preflight:
+    post:
+      operationId: preflightProjectChangeSet
+      summary: Run deterministic preflight checks for a ChangeSet.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/ChangeSetID'
+      responses:
+        '200':
+          description: ChangeSet after preflight.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChangeSet'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/approve:
+    post:
+      operationId: approveProjectChangeSet
+      summary: Record simulated approval evidence for a ChangeSet.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/ChangeSetID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChangeSetApprovalRequest'}
+      responses:
+        '200':
+          description: Approved ChangeSet.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChangeSet'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/execute:
+    post:
+      operationId: executeProjectChangeSet
+      summary: Execute a simulated ChangeSet and attach execution evidence.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/ChangeSetID'
+      responses:
+        '200':
+          description: Executed ChangeSet.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChangeSet'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/rollback:
+    post:
+      operationId: rollbackProjectChangeSet
+      summary: Roll back a simulated ChangeSet and attach rollback evidence.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/ChangeSetID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RollbackChangeSetRequest'}
+      responses:
+        '200':
+          description: Rolled-back ChangeSet.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChangeSet'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/audit-events:
+    get:
+      operationId: listProjectAuditEvents
+      summary: List append-only audit events for one project.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - {name: entity_type, in: query, schema: {type: string}}
+        - {name: entity_id, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+      responses:
+        '200':
+          description: Audit event list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/AuditEvent'}}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
   /platform/v1/projects/{project_id}/assets/uploads:
     post:
       operationId: createAssetUpload
@@ -1021,6 +1327,27 @@ components:
       schema:
         type: string
         minLength: 1
+    TaskID:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    OperationID:
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ChangeSetID:
+      name: change_set_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
   securitySchemes:
     cookiesAuth:
       type: http
@@ -1587,6 +1914,254 @@ components:
         project_context_version: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    ProjectDetail:
+      type: object
+      required: [project, runtime, artifacts, assets, tasks, operations, change_sets]
+      properties:
+        project: {$ref: '#/components/schemas/Project'}
+        runtime: {$ref: '#/components/schemas/ProjectRuntime'}
+        artifacts:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectArtifactSummary'}
+        assets:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectAsset'}
+        tasks:
+          type: array
+          items: {$ref: '#/components/schemas/BusinessTask'}
+        operations:
+          type: array
+          items: {$ref: '#/components/schemas/OperationalRecord'}
+        change_sets:
+          type: array
+          items: {$ref: '#/components/schemas/ChangeSet'}
+      additionalProperties: false
+    ProjectRuntime:
+      type: object
+      required: [code, stage, progress, status, owner, budget, currency, timezone, updated_at]
+      properties:
+        code: {type: string}
+        brand: {type: string}
+        product: {type: string}
+        goal: {type: string}
+        stage: {type: string}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        status: {type: string, enum: [active, completed, blocked]}
+        owner: {type: string}
+        budget: {type: number, minimum: 0}
+        currency: {type: string, enum: [CNY]}
+        timezone: {type: string, enum: [Asia/Shanghai]}
+        knowledge_count: {type: integer, minimum: 0}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    ProjectArtifactSummary:
+      type: object
+      required: [key, label, version, status, owner, updated_at, summary]
+      properties:
+        id: {type: string}
+        key: {type: string, enum: [brief, strategy, creative, insight, delivery]}
+        label: {type: string}
+        version: {type: string}
+        status: {type: string}
+        owner: {type: string}
+        updated_at: {type: string, format: date-time}
+        summary: {type: string}
+        source_version: {type: string}
+        asset_ref:
+          oneOf: [{$ref: '#/components/schemas/ProjectAssetRef'}, {type: 'null'}]
+      additionalProperties: false
+    BusinessTask:
+      type: object
+      required: [id, project_id, type, name, objective, status, source_task_ids, source_artifact_ids, output_artifact_ids, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        type: {$ref: '#/components/schemas/BusinessTaskType'}
+        name: {type: string}
+        objective: {type: string}
+        status: {type: string, enum: [draft, in_progress, ready, completed, failed]}
+        source_task_ids: {type: array, items: {type: string}}
+        source_artifact_ids: {type: array, items: {type: string}}
+        output_artifact_ids: {type: array, items: {type: string}}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    BusinessTaskType:
+      type: string
+      enum: [strategy, creative, video, brand_video, short_drama_preroll, game_preroll, commerce_preroll, viral_remake, video_edit]
+    CreateBusinessTaskRequest:
+      type: object
+      required: [type, name, objective]
+      properties:
+        type: {$ref: '#/components/schemas/BusinessTaskType'}
+        name: {type: string, minLength: 1, maxLength: 255}
+        objective: {type: string, minLength: 1}
+        source_task_ids: {type: array, items: {type: string}}
+        source_artifact_ids: {type: array, items: {type: string}}
+      additionalProperties: false
+    UpdateBusinessTaskRequest:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 255}
+        objective: {type: string, minLength: 1}
+        status: {type: string, enum: [draft, in_progress, ready, completed, failed]}
+        source_task_ids: {type: array, items: {type: string}}
+        source_artifact_ids: {type: array, items: {type: string}}
+        output_artifact_ids: {type: array, items: {type: string}}
+        expected_version: {type: integer, minimum: 1}
+      additionalProperties: false
+    OperationalRecord:
+      type: object
+      required: [id, project_id, kind, title, status, occurred_at, fields, created_at, updated_at]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        kind:
+          type: string
+          enum: [work_item, evidence, activity, metric, performance_ad, audience_mix, method, delivery_diagnostic, delivery_action, unified_record]
+        title: {type: string}
+        status: {type: string}
+        occurred_at: {type: string, format: date-time}
+        fields:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: number
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    UpsertOperationalRecordRequest:
+      type: object
+      required: [kind, title, status, occurred_at, fields]
+      properties:
+        kind:
+          type: string
+          enum: [work_item, evidence, activity, metric, performance_ad, audience_mix, method, delivery_diagnostic, delivery_action, unified_record]
+        title: {type: string, minLength: 1}
+        status: {type: string, minLength: 1}
+        occurred_at: {type: string, format: date-time}
+        fields:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: number
+      additionalProperties: false
+    ChangeSet:
+      type: object
+      required: [id, project_id, name, status, artifact_refs, preflight, execution, rollback, audit_events, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        name: {type: string}
+        status:
+          type: string
+          enum: [draft, preflight_passed, preflight_failed, approved, rejected, executing, executed, rolled_back]
+        artifact_refs:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectAssetRef'}
+        budget_limit: {type: number, minimum: 0}
+        preflight:
+          oneOf: [{$ref: '#/components/schemas/ChangeSetPreflight'}, {type: 'null'}]
+        execution:
+          oneOf: [{$ref: '#/components/schemas/ChangeSetExecution'}, {type: 'null'}]
+        rollback:
+          oneOf: [{$ref: '#/components/schemas/ChangeSetRollback'}, {type: 'null'}]
+        audit_events:
+          type: array
+          items: {$ref: '#/components/schemas/AuditEvent'}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateChangeSetRequest:
+      type: object
+      required: [name, artifact_refs]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 255}
+        artifact_refs:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectAssetRef'}
+        budget_limit: {type: number, minimum: 0}
+      additionalProperties: false
+    ChangeSetPreflight:
+      type: object
+      required: [passed, checks, checked_at]
+      properties:
+        passed: {type: boolean}
+        checks:
+          type: array
+          items: {$ref: '#/components/schemas/PreflightCheck'}
+        checked_at: {type: string, format: date-time}
+      additionalProperties: false
+    PreflightCheck:
+      type: object
+      required: [code, passed, message, repair]
+      properties:
+        code: {type: string, enum: [confirmed_brief, ready_creative, budget_boundary]}
+        passed: {type: boolean}
+        message: {type: string}
+        repair: {type: string}
+      additionalProperties: false
+    ChangeSetExecution:
+      type: object
+      required: [simulated, evidence, executed_at]
+      properties:
+        simulated: {type: boolean, const: true}
+        evidence:
+          type: array
+          items: {$ref: '#/components/schemas/ChangeSetEvidence'}
+        executed_at: {type: string, format: date-time}
+      additionalProperties: false
+    ChangeSetRollback:
+      type: object
+      required: [simulated, reason, rolled_back_at]
+      properties:
+        simulated: {type: boolean, const: true}
+        reason: {type: string}
+        rolled_back_at: {type: string, format: date-time}
+      additionalProperties: false
+    ChangeSetEvidence:
+      type: object
+      required: [step, status, message, recorded_at]
+      properties:
+        step: {type: string}
+        status: {type: string}
+        message: {type: string}
+        recorded_at: {type: string, format: date-time}
+      additionalProperties: false
+    ChangeSetApprovalRequest:
+      type: object
+      required: [actor, role]
+      properties:
+        actor: {type: string, minLength: 1}
+        role: {type: string, minLength: 1}
+        note: {type: string}
+      additionalProperties: false
+    RollbackChangeSetRequest:
+      type: object
+      required: [actor, reason]
+      properties:
+        actor: {type: string, minLength: 1}
+        reason: {type: string, minLength: 1}
+      additionalProperties: false
+    AuditEvent:
+      type: object
+      required: [id, project_id, actor, action, entity_type, entity_id, metadata, created_at]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        actor: {type: string}
+        action: {type: string}
+        entity_type:
+          type: string
+          enum: [project, business_task, artifact, generation_job, change_set, operational_record]
+        entity_id: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
       additionalProperties: false
     CreateUploadRequest:
       type: object

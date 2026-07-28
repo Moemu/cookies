@@ -103,7 +103,7 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
       if (target === 'creative') {
         const creativeTask = [...currentProject.tasks].reverse().find(task => task.type !== 'strategy')
         if (creativeTask) {
-          await api.updateTask(creativeTask.id, {
+          await api.updateTask(currentProject.id, creativeTask.id, {
             sourceArtifactIds: [...new Set([...creativeTask.sourceArtifactIds, reference.id])],
           })
         }

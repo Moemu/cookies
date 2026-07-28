@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -285,6 +286,81 @@ func TestGeneratedIntakeIsIdempotentAndCompletesOneOutput(t *testing.T) {
 	for _, want := range []string{"asset_version/input_asset_1/3", "remix_plan/remixplan_1/0", "remix_render_job/remixrender_1/0"} {
 		if !sources[want] {
 			t.Fatalf("missing relation source %s in %#v", want, relations)
+		}
+	}
+}
+
+func TestGeneratedIntakeUsesFilesystemBlobStoreWithoutLeakingStorageHandles(t *testing.T) {
+	now := time.Date(2026, 7, 22, 11, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	projects := fakeProjects{organization: "org_1", project: "project_1", version: 7}
+	ids := sequenceIDs()
+	service := GeneratedIntakeService{Repository: repo, Projects: projects, Now: func() time.Time { return now }, NewID: ids}
+	data := testPNG(t)
+	digest := sha256.Sum256(data)
+	hash := hex.EncodeToString(digest[:])
+	request := GeneratedAssetIntakeRequest{
+		ProviderJobID: "job_1",
+		Output: contract.ProviderOutputRef{
+			ProviderCode:       "fake",
+			ProviderJobID:      "job_1",
+			OutputID:           "output_1",
+			RetrievalExpiresAt: now.Add(time.Hour),
+			DeclaredMIMEType:   "image/png",
+			DeclaredSizeBytes:  int64(len(data)),
+			DeclaredSHA256:     &hash,
+		},
+		Provenance: GenerationProvenance{
+			Capability:            "image.generate",
+			ProviderCode:          "fake",
+			ModelAlias:            "image.standard",
+			ModelVersion:          "v1",
+			SourceAssetRefs:       []contract.AssetVersionRef{},
+			ProjectContextVersion: 7,
+			GeneratedAt:           now,
+		},
+	}
+	rc := testRequestContext("org_1", "project_1")
+	intake, err := service.Create(context.Background(), rc, "project_1", "provider-job-1-output-1", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := NewFilesystemBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload := UploadService{Repository: repo, Projects: projects, Blobs: blobs, Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets", Now: func() time.Time { return now }, NewID: ids}
+	worker := GeneratedIntakeWorker{Repository: repo, Projects: projects, Fetcher: fakeFetcher{data: data, metadata: contract.OutputMetadata{MIMEType: "image/png", SizeBytes: int64(len(data)), SHA256: hash}}, Upload: upload, Actor: rc.Actor, Now: func() time.Time { return now }}
+
+	processed, err := worker.ProcessOnce(context.Background(), "worker_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !processed {
+		t.Fatal("expected queued intake")
+	}
+	stored, err := service.Get(context.Background(), rc.Actor, "project_1", intake.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != GeneratedIntakeSucceeded || stored.ProjectAssetRef == nil {
+		t.Fatalf("unexpected intake: %#v", stored)
+	}
+	asset, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", stored.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset.Version.Blob.Provider != "filesystem" || asset.Version.Blob.Bucket != "assets" || asset.Version.Blob.Key == "" {
+		t.Fatalf("generated asset was not committed to filesystem storage: %#v", asset.Version.Blob)
+	}
+	responseJSON, err := json.Marshal(stored.Response())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := string(responseJSON)
+	for _, forbidden := range []string{"bucket", "object_key", "storage", "tos://", "filesystem://", "https://vendor.example"} {
+		if strings.Contains(response, forbidden) {
+			t.Fatalf("generated intake response leaked %q: %s", forbidden, response)
 		}
 	}
 }

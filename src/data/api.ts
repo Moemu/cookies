@@ -1,3 +1,5 @@
+import { platformClient } from './platformClient'
+
 export type ApiProject = {
   id: string
   name: string
@@ -871,8 +873,8 @@ export type ApiProviderConfiguration = {
 }
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
-const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/api`
-const platformBase = `${viteEnv?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8787'}/platform/v1`
+const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? ''}/api`
+const platformBase = `${viteEnv?.VITE_API_BASE_URL ?? ''}/platform/v1`
 
 // Task26 audit: agency workbench data is a front-end portfolio sample, not a
 // persisted Project result. Task27 should move or gate it before production use.
@@ -1662,6 +1664,13 @@ export function buildRemixPrerollInput(
 	}
 }
 
+const platformJobProjectIds = new Map<string, string>()
+
+function trackPlatformJob(job: ApiGenerationJob): ApiGenerationJob {
+  platformJobProjectIds.set(job.id, job.projectId)
+  return job
+}
+
 export const api = {
   listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
     if (options.includePortfolioSample) return agencyWorkbenchSample
@@ -1701,19 +1710,20 @@ export const api = {
   },
   getPublicInsightVideo: (itemId: string) =>
     request<ApiPublicInsightVideoDetail>(`/public-insights/videos/${encodeURIComponent(itemId)}`),
-  listProjects: () => request<ApiProject[]>('/projects'),
+  listProjects: () => platformClient.listProjects(),
+  getProjectSnapshot: (projectId: string) => platformClient.getProjectSnapshot(projectId),
   createProject: (input: Pick<ApiProject, 'name' | 'brand' | 'objective'>) =>
-    request<ApiProject>('/projects', 'POST', input),
+    platformClient.createProject(input),
   updateProject: (id: string, input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective'>>) =>
     request<ApiProject>(`/projects/${encodeURIComponent(id)}`, 'PATCH', input),
   listArtifacts: (projectId?: string) =>
-    request<ApiArtifact[]>(`/artifacts${projectQuery(projectId)}`),
+    projectId ? platformClient.listArtifacts(projectId) : Promise.resolve([]),
   listPrerollArtifacts: (scope: ApiPrerollScope) =>
-    request<ApiArtifact[]>(`/artifacts${prerollQuery(scope)}`),
+    platformClient.listArtifacts(scope.projectId),
   listAssetFeatures: (projectId: string, organizationId = 'demo-org') =>
     request<{ items: ApiAssetFeature[] }>(`/asset-features${assetFeatureQuery(projectId, organizationId)}`),
   listTasks: (projectId?: string) =>
-    request<ApiBusinessTask[]>(`/tasks${projectQuery(projectId)}`),
+    projectId ? platformClient.listTasks(projectId) : Promise.resolve([]),
   getTask: (id: string) =>
     request<ApiBusinessTask>(`/tasks/${encodeURIComponent(id)}`),
   createTask: (input: {
@@ -1723,11 +1733,12 @@ export const api = {
     objective: string
     sourceTaskIds?: string[]
     sourceArtifactIds?: string[]
-  }) => request<ApiBusinessTask>('/tasks', 'POST', input),
+  }) => platformClient.createTask(input.projectId, input),
   updateTask: (
+    projectId: string,
     id: string,
     input: Partial<Pick<ApiBusinessTask, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>,
-  ) => request<ApiBusinessTask>(`/tasks/${encodeURIComponent(id)}`, 'PATCH', input),
+  ) => platformClient.updateTask(projectId, id, input),
   createArtifact: (input: {
     projectId: string
     kind: ApiArtifact['kind']
@@ -1740,13 +1751,15 @@ export const api = {
     input: Partial<Pick<ApiArtifact, 'content' | 'status' | 'sourceJobId'>>,
   ) => request<ApiArtifact>(`/artifacts/${encodeURIComponent(id)}`, 'PATCH', input),
   listJobs: (projectId?: string) =>
-    request<ApiGenerationJob[]>(`/generation-jobs${projectQuery(projectId)}`),
+    projectId ? platformClient.listJobs(projectId) : Promise.resolve([]),
   listPrerollJobs: (scope: ApiPrerollScope) =>
     request<ApiGenerationJob[]>(`/generation-jobs${prerollQuery(scope)}`),
   getJob: (id: string) =>
-    request<ApiGenerationJob>(`/generation-jobs/${encodeURIComponent(id)}`),
+    platformJobProjectIds.has(id)
+      ? platformClient.getJob(platformJobProjectIds.get(id)!, id).then(trackPlatformJob)
+      : request<ApiGenerationJob>(`/generation-jobs/${encodeURIComponent(id)}`),
   getPrerollJob: (id: string, scope: ApiPrerollScope) =>
-    request<ApiGenerationJob>(`/generation-jobs/${encodeURIComponent(id)}${prerollQuery(scope)}`),
+    platformClient.getJob(scope.projectId, id).then(trackPlatformJob),
   cancelJob: (id: string, scope?: ApiPrerollScope) =>
     request<ApiGenerationJob>(
       `/generation-jobs/${encodeURIComponent(id)}/cancel${scope ? prerollQuery(scope) : ''}`,
@@ -1762,24 +1775,12 @@ export const api = {
     kind: 'image' | 'video',
     prompt: string,
     briefId: string,
-  ) => request<ApiGenerationJob>('/generation/media', 'POST', {
-    projectId,
-    kind,
-    prompt,
-    briefId,
-  }),
+  ) => platformClient.createMedia(projectId, kind, prompt).then(trackPlatformJob),
   createPrerollVideo: (
     scope: ApiPrerollScope,
     prompt: string,
     briefId: string,
-  ) => request<ApiGenerationJob>('/generation/media', 'POST', {
-    projectId: scope.projectId,
-    kind: 'video',
-    purpose: scope.purpose,
-    prerollType: scope.prerollType,
-    prompt,
-    briefId,
-  }),
+  ) => platformClient.createMedia(scope.projectId, 'video', prompt).then(trackPlatformJob),
   planShortDramaPreroll: (
     projectId: string,
     briefId: string,
@@ -1795,20 +1796,15 @@ export const api = {
     planVersion: ApiShortDramaPrerollPlan['version'],
     candidateId: string,
     storyContext: ApiShortDramaStoryContext,
-  ) => request<ApiGenerationJob>('/generation/media', 'POST', {
-    projectId: scope.projectId,
-    kind: 'video',
-    purpose: scope.purpose,
-    prerollType: scope.prerollType,
-    briefId,
-    shortDramaPlanVersion: planVersion,
-    shortDramaCandidateId: candidateId,
-    storyContext,
-  }),
+  ) => platformClient.createMedia(scope.projectId, 'video', [
+    `short drama plan ${planVersion}`,
+    `candidate ${candidateId}`,
+    storyContext.title,
+  ].join('\n')).then(trackPlatformJob),
   listAuditEvents: (projectId?: string) =>
     request<ApiAuditEvent[]>(`/audit-events${projectQuery(projectId)}`),
   listOperations: (projectId: string) =>
-    request<ApiOperationalRecord[]>(`/projects/${encodeURIComponent(projectId)}/operations`),
+    platformClient.listOperations(projectId),
   listRemixEvalCases: (projectId: string) =>
     platformRequest<{ items: ApiRemixEvalCase[] }>(`/projects/${encodeURIComponent(projectId)}/remix-eval-cases`),
   createRemixEvalRun: (projectId: string, input: {

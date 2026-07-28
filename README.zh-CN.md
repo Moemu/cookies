@@ -53,22 +53,21 @@ flowchart LR
 
 ## 快速开始
 
-前置条件：Node.js 20 或更高版本，以及 npm。克隆后安装依赖：
+前置条件：Node.js 20 或更高版本、npm、Go 和 Docker。克隆后安装依赖并写入 Go 演示 seed：
 
 ```bash
 git clone --recurse-submodules https://github.com/shikanon/cookies.git
 cd cookies
-npm install
 cp .env.example .env
+npm ci
+docker compose up -d --wait mysql
+npm run go:seed
 ```
 
-在第一个终端启动 API：
+在第一个终端启动 Go `cookies-api`：
 
 ```bash
-set -a
-source .env
-set +a
-npm run server
+go run ./cmd/cookies-api
 ```
 
 在第二个终端启动 Vite 前端，然后打开命令输出的 `http://127.0.0.1:5173`：
@@ -77,21 +76,25 @@ npm run server
 npm run dev
 ```
 
-服务端将本地演示状态保存到已忽略的 `data/mvp-store.json`。如需重置，停止服务后删除该文件；下次运行 `npm run server` 会重新创建预置项目。
+前端默认通过根 Vite `/platform` 和 `/api` 代理连接 `http://127.0.0.1:8080` 上的 Go `cookies-api`，项目主链路使用 Go `/platform/v1`。仅在需要指向其他 API 主机时设置 `VITE_API_BASE_URL`。
+
+在 macOS 上，可用 `./scripts/dev.sh` 一键启动完整本地链路：启动 MySQL、执行迁移、写入 canonical Go 投资人演示 seed，再启动 Go API 和 Vite 前端。只准备数据库和 seed 时运行 `./scripts/dev.sh --prepare-only`。
+
+TypeScript MVP server（`npm run server`）仅保留为兼容/demo-only 路径。它使用已忽略的 `data/mvp-store.json`，当等价 Go `/platform/v1` 端点可用后，不再作为生产化主链路权威数据源。如需让前端连接该兼容层，需启动 `npm run server` 并显式设置 `VITE_API_BASE_URL=http://127.0.0.1:8787`。
 
 ## 方舟配置
 
-将 `.env.example` 复制为 `.env` 后，在本地填写变量，并在启动 `npm run server` 的终端加载它：
+将 `.env.example` 复制为 `.env` 后，在本地填写变量，并在启动 Go API 的终端加载它：
 
 ```bash
 # 在 .env 本地填写 ARK_API_KEY 后执行：
 set -a && source .env && set +a
-npm run server
+go run ./cmd/cookies-api
 ```
 
 浏览预置项目、运行预检、审批演示 ChangeSet 和查看审计记录时，`ARK_API_KEY` 不是必需项。未配置时，应用会展示由服务端提供的 `not_configured` 状态，并禁用新的 AI 生成；浏览器不会要求输入、保存、掩码展示或接收 API Key。不要提交 `.env` 或任何真实凭据。
 
-服务端在 `server/ark-provider.ts` 中将文本、图片、视频与向量能力映射到指定方舟模型目录。`ARK_BASE_URL` 可选，未设置时使用默认方舟 HTTPS 地址。
+TS MVP 兼容服务在 `server/ark-provider.ts` 中将文本、图片、视频与向量能力映射到指定方舟模型目录。`ARK_BASE_URL` 可选，未设置时使用默认方舟 HTTPS 地址。
 
 ## 验证
 

@@ -22,6 +22,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/database"
+	"github.com/shikanon/cookies/internal/platform/demo"
 	"github.com/shikanon/cookies/internal/platform/httpserver"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/ids"
@@ -78,6 +79,11 @@ func main() {
 	assetRepository := assets.MySQLRepository{DB: db}
 	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
+	if actor != nil {
+		if _, err := demo.EnsureCanonicalInvestorDemo(context.Background(), *actor, projectStore, assetRepository); err != nil {
+			log.Fatalf("seed canonical investor demo: %v", err)
+		}
+	}
 	remixService := remix.NewServiceWithQuality(func() (string, error) { return ids.New("remixplan") }, remix.MySQLRenderJobStore{DB: db}, remix.MySQLQualityReportStore{DB: db}, nil, remix.FakeQualityEvaluator{})
 	remixService.SetRenderOutputIntake(intakeService)
 	agentStore, err := agent.NewFileStore("var/platform-agent-runs.json")
