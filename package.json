@@ -10,16 +10,19 @@
     "server": "tsx --env-file=.env server/index.ts",
     "test:server": "tsx --test server/*.test.* server/test/*.test.*",
     "test:media-status": "tsx --test server/test/media-status.test.ts",
-    "check:server": "tsc --noEmit -p server/tsconfig.json"
+    "check:server": "tsc --noEmit -p server/tsconfig.json",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "4.7.0",
     "lucide-react": "0.564.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
+    "react-router-dom": "^7.18.1",
     "vite": "6.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",

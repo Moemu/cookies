@@ -1,6 +1,7 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   ArrowRight,
+  Archive,
   Check,
   CircleCheck,
   Clock3,
@@ -9,11 +10,14 @@ import {
   Link2,
   ListChecks,
   Plus,
+  Search,
+  ShieldCheck,
   Target,
   X,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, SystemKey } from '../types'
+import type { ApiAgencyWorkbench, ApiAssetVersionPointer, ApiMaterialConfirmation, ApiQualityCheckRun } from '../data/api'
 import { StateBoundary } from './StateBoundary'
 
 export const taskTypeMeta: Record<BusinessTaskType, { label: string; domain: 'strategy' | 'creative'; detail: string }> = {
@@ -45,6 +49,44 @@ const statusLabels: Record<BusinessTaskRecord['status'], string> = {
   ready: '待评审',
   completed: '已完成',
   failed: '失败',
+}
+
+type CreativeQuickView = '全部' | '我的任务' | '今日到期' | '质检未通过' | '待人工确认' | '需要修改' | '生成失败'
+type CreativeBatchAction = 'assign' | 'add_specs' | 'start_generation' | 'run_quality' | 'human_review' | 'export_confirmed' | 'archive'
+type StatusTone = 'success' | 'warning' | 'danger' | 'info'
+
+interface CreativeOpsRow {
+  task: BusinessTaskRecord
+  projectId: string
+  projectName: string
+  clientName: string
+  brandName: string
+  assetName: string
+  channelSpec: string
+  owner: string
+  priority: '高' | '中' | '低'
+  dueLabel: string
+  qualityLabel: string
+  qualityTone: StatusTone
+  confirmationLabel: string
+  confirmationTone: StatusTone
+  deliveryLabel: string
+  deliveryTone: StatusTone
+  latestVersion: string
+  updatedLabel: string
+  supportedActions: Set<CreativeBatchAction>
+  searchText: string
+}
+
+const creativeQuickViews: CreativeQuickView[] = ['全部', '我的任务', '今日到期', '质检未通过', '待人工确认', '需要修改', '生成失败']
+const batchActionLabels: Record<CreativeBatchAction, string> = {
+  assign: '分配负责人/截止',
+  add_specs: '添加渠道规格',
+  start_generation: '开始/重新生成',
+  run_quality: '运行大模型质检',
+  human_review: '进入人工检查',
+  export_confirmed: '导出确认版本',
+  archive: '归档',
 }
 
 export function ProjectLineage({ compact = false }: { compact?: boolean }) {
@@ -144,6 +186,7 @@ export function TaskCenterPage({
   onOpenTask,
   onRequestCreate,
   onContinueTask,
+  onOpenProject,
 }: {
   state: DataState
   domain: 'strategy' | 'creative'
@@ -152,8 +195,12 @@ export function TaskCenterPage({
   onOpenTask: (id: string) => void
   onRequestCreate: () => void
   onContinueTask?: (task: BusinessTaskRecord) => void
+  onOpenProject?: (projectId: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 }) {
-  const { currentProject, updateTask } = useProject()
+  const { agencyWorkbench, currentProject, projects, updateTask } = useProject()
+  const [search, setSearch] = useState('')
+  const [quickView, setQuickView] = useState<CreativeQuickView>(() => creativeQuickViews.includes(activeView as CreativeQuickView) ? activeView as CreativeQuickView : '全部')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [notice, setNotice] = useState('')
   const allTasks = useMemo(
     () => currentProject.tasks
@@ -167,6 +214,29 @@ export function TaskCenterPage({
     [activeView, allTasks],
   )
   const selected = tasks.find(task => task.id === selectedId) ?? tasks[0]
+  const creativeRows = useMemo(
+    () => domain === 'creative' ? buildCreativeOpsRows(projects, agencyWorkbench, currentProject.id) : [],
+    [agencyWorkbench, currentProject.id, domain, projects],
+  )
+  const visibleCreativeRows = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return creativeRows.filter(row => matchesCreativeQuickView(row, quickView, currentProject.owner))
+      .filter(row => !query || row.searchText.includes(query))
+  }, [creativeRows, currentProject.owner, quickView, search])
+  const selectedCreativeRows = visibleCreativeRows.filter(row => selectedIds.includes(row.task.id))
+  const commonActions = commonBatchActions(selectedCreativeRows)
+
+  useEffect(() => {
+    if (domain !== 'creative') return
+    setSelectedIds(current => current.filter(id => visibleCreativeRows.some(row => row.task.id === id)))
+  }, [domain, visibleCreativeRows])
+
+  useEffect(() => {
+    if (domain === 'creative' && creativeQuickViews.includes(activeView as CreativeQuickView)) {
+      setQuickView(activeView as CreativeQuickView)
+    }
+  }, [activeView, domain])
+
   const advance = async () => {
     if (!selected) return
     const status = selected.status === 'draft' ? 'in_progress' : selected.status === 'in_progress' ? 'ready' : 'completed'
@@ -176,6 +246,85 @@ export function TaskCenterPage({
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '任务状态更新失败')
     }
+  }
+
+  const selectedCreative = visibleCreativeRows.find(row => row.task.id === selectedId)?.task ?? visibleCreativeRows[0]?.task
+  const toggleCreativeRow = (id: string) => {
+    setSelectedIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
+  }
+  const toggleAllVisibleCreativeRows = () => {
+    setSelectedIds(current => current.length === visibleCreativeRows.length ? [] : visibleCreativeRows.map(row => row.task.id))
+  }
+  const openCreativeRow = (row: CreativeOpsRow) => {
+    if (row.projectId === currentProject.id) {
+      onOpenTask(row.task.id)
+    } else {
+      onOpenProject?.(row.projectId, 'creative', 'tasks', row.task.id, quickView)
+    }
+  }
+  const continueCreativeTask = (task: BusinessTaskRecord) => {
+    if (task.projectId === currentProject.id) onContinueTask?.(task)
+    else onOpenProject?.(task.projectId, 'creative', 'tasks', task.id, quickView)
+  }
+  const announceBatchAction = (action: CreativeBatchAction) => {
+    setNotice(`已选择 ${selectedCreativeRows.length} 个任务，可执行“${batchActionLabels[action]}”。混合状态下只展示共同支持动作。`)
+  }
+
+  if (domain === 'creative') {
+    const selectedRow = visibleCreativeRows.find(row => row.task.id === selectedCreative?.id)
+    return <StateBoundary state={state} onCreate={onRequestCreate}><div className="business-task-center creative-ops-center">
+      <section className="creative-ops-toolbar" aria-label="创意任务批量运营筛选">
+        <div><span className="section-label">CREATIVE OPS</span><h3>创意任务批量运营</h3><p>按客户、Project、渠道规格、质检与人工确认状态筛选，批量动作只显示选中对象共同支持的操作。</p></div>
+        <label className="creative-task-search"><Search size={15}/><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索任务名称、ID 或素材名称"/></label>
+      </section>
+      <nav className="creative-quick-views" aria-label="创意任务快捷视图">
+        {creativeQuickViews.map(view => <button key={view} className={quickView === view ? 'active' : ''} onClick={() => setQuickView(view)}>{view}<small>{creativeRows.filter(row => matchesCreativeQuickView(row, view, currentProject.owner)).length}</small></button>)}
+      </nav>
+      <section className="creative-batch-toolbar" aria-live="polite" aria-label="批量工具栏">
+        <span>{selectedCreativeRows.length ? `已选择 ${selectedCreativeRows.length} 个任务` : '选择任务后显示共同批量动作'}</span>
+        <div>{(Object.keys(batchActionLabels) as CreativeBatchAction[]).map(action => <button key={action} className="secondary-button" disabled={!commonActions.includes(action)} onClick={() => announceBatchAction(action)}>{batchActionLabels[action]}</button>)}</div>
+      </section>
+      <div className="creative-ops-layout">
+        <section className="creative-task-table" aria-label="创意任务列表">
+          <div className="creative-task-head">
+            <label><input type="checkbox" checked={visibleCreativeRows.length > 0 && selectedIds.length === visibleCreativeRows.length} onChange={toggleAllVisibleCreativeRows}/></label>
+            <span>任务 / 素材</span><span>客户 / Project</span><span>渠道规格</span><span>负责人</span><span>优先级 / 截止</span><span>质检</span><span>人工确认</span><span>交付</span><span>版本</span>
+          </div>
+          {visibleCreativeRows.map(row => <div key={row.task.id} className={selectedCreative?.id === row.task.id ? 'creative-task-row active' : 'creative-task-row'}>
+            <label aria-label={`选择 ${row.task.name}`} onClick={event => event.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(row.task.id)} onChange={() => toggleCreativeRow(row.task.id)}/></label>
+            <button className="creative-task-main" onClick={() => openCreativeRow(row)}><b>{row.task.name}</b><small>{row.task.id} · {row.assetName}</small></button>
+            <button className="creative-task-context" onClick={() => openCreativeRow(row)}><b>{row.clientName}</b><small>{row.projectName}</small></button>
+            <span>{row.channelSpec}</span>
+            <span>{row.owner}</span>
+            <span><b className={`priority-dot ${priorityTone(row.priority)}`}>{row.priority}</b><small>{row.dueLabel}</small></span>
+            <StatusPill label={row.qualityLabel} tone={row.qualityTone}/>
+            <StatusPill label={row.confirmationLabel} tone={row.confirmationTone}/>
+            <StatusPill label={row.deliveryLabel} tone={row.deliveryTone}/>
+            <span><b>{row.latestVersion}</b><small>{row.updatedLabel}</small></span>
+          </div>)}
+          {!visibleCreativeRows.length ? <div className="task-list-empty"><ListChecks size={24}/><b>没有匹配的创意任务</b><p>可切换快捷视图或清空搜索条件。</p><button className="primary-button" onClick={onRequestCreate}><Plus size={15}/>新建任务</button></div> : null}
+        </section>
+        <aside className="creative-task-detail" aria-label="创意任务运营详情">
+          {selectedRow ? <>
+            <span className="section-label">{selectedRow.task.id}</span>
+            <h3>{selectedRow.task.name}</h3>
+            <p>{selectedRow.task.objective}</p>
+            <dl>
+              <div><dt>客户 / 品牌</dt><dd>{selectedRow.clientName} / {selectedRow.brandName}</dd></div>
+              <div><dt>Project</dt><dd>{selectedRow.projectName}</dd></div>
+              <div><dt>素材</dt><dd>{selectedRow.assetName} · {selectedRow.latestVersion}</dd></div>
+              <div><dt>状态链路</dt><dd>{statusLabels[selectedRow.task.status]} · {selectedRow.qualityLabel} · {selectedRow.confirmationLabel} · {selectedRow.deliveryLabel}</dd></div>
+            </dl>
+            <div className="creative-detail-actions">
+              <button className="secondary-button full" onClick={() => announceBatchAction('run_quality')} disabled={!selectedRow.supportedActions.has('run_quality')}><ShieldCheck size={15}/>运行质检</button>
+              <button className="secondary-button full" onClick={() => announceBatchAction('archive')} disabled={!selectedRow.supportedActions.has('archive')}><Archive size={15}/>归档任务</button>
+              <button className="primary-button full" onClick={() => continueCreativeTask(selectedRow.task)} disabled={!onContinueTask}>继续制作<ArrowRight size={15}/></button>
+            </div>
+            {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+          </> : <div className="task-work-empty"><ListChecks size={30}/><h2>创建第一个创意任务</h2><p>任务将绑定当前 Project，并进入批量运营视图。</p></div>}
+        </aside>
+      </div>
+    </div></StateBoundary>
   }
 
   return <StateBoundary state={state} onCreate={onRequestCreate}><div className="business-task-center">
@@ -201,9 +350,9 @@ export function TaskCenterPage({
             {(domain === 'strategy'
               ? ['校验 Brief 完整度', '组织受众与研究证据', '形成渠道和创意策略', '提交策略评审']
               : ['继承已批准策略', '配置渠道和生成规格', '制作与生成版本', '品牌检查和交付']
-            ).map((stage, index) => <div className={index === 0 || selected.status !== 'draft' ? 'done' : ''} key={stage}><span>{index === 0 || selected.status !== 'draft' ? <Check size={13}/> : String(index + 1).padStart(2, '0')}</span><b>{stage}</b><small>{index === 0 ? '已继承当前 Project 上下文' : domain === 'creative' ? '点击继续制作进入对应工作区' : '等待任务推进'}</small></div>)}
+            ).map((stage, index) => <div className={index === 0 || selected.status !== 'draft' ? 'done' : ''} key={stage}><span>{index === 0 || selected.status !== 'draft' ? <Check size={13}/> : String(index + 1).padStart(2, '0')}</span><b>{stage}</b><small>{index === 0 ? '已继承当前 Project 上下文' : '等待任务推进'}</small></div>)}
           </div>
-          <footer><span><Clock3 size={14}/>更新于 {new Date(selected.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>{domain === 'creative' && onContinueTask ? <><button className="secondary-button" onClick={() => void advance()} disabled={selected.status === 'completed'}>{selected.status === 'draft' ? '开始任务' : selected.status === 'in_progress' ? '提交评审' : selected.status === 'ready' ? '确认完成' : '任务已完成'}</button><button className="primary-button" onClick={() => onContinueTask(selected)}>继续制作<ArrowRight size={15}/></button></> : <button className="primary-button" onClick={() => void advance()} disabled={selected.status === 'completed'}>{selected.status === 'draft' ? '开始任务' : selected.status === 'in_progress' ? '提交评审' : selected.status === 'ready' ? '确认完成' : '任务已完成'}</button>}</footer>
+          <footer><span><Clock3 size={14}/>更新于 {new Date(selected.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span><button className="primary-button" onClick={() => void advance()} disabled={selected.status === 'completed'}>{selected.status === 'draft' ? '开始任务' : selected.status === 'in_progress' ? '提交评审' : selected.status === 'ready' ? '确认完成' : '任务已完成'}</button></footer>
           {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
         </> : <div className="task-work-empty"><ListChecks size={30}/><h2>创建第一个{domain === 'strategy' ? '策略' : '创意'}任务</h2><p>任务将绑定当前 Project，并成为后续模块的数据来源。</p></div>}
       </section>
@@ -227,4 +376,190 @@ function matchesTaskView(task: BusinessTaskRecord, view: string): boolean {
   if (view === '生成中') return task.status === 'in_progress' && task.type !== 'strategy'
   if (view === '归档') return false
   return true
+}
+
+function buildCreativeOpsRows(projects: ReturnType<typeof useProject>['projects'], workbench: ApiAgencyWorkbench | null, currentProjectId: string): CreativeOpsRow[] {
+  const agencyProjects = new Map(workbench?.projects.map(project => [project.id, project]) ?? [])
+  const clients = new Map(workbench?.clients.map(client => [client.id, client]) ?? [])
+  const brands = new Map(workbench?.brands.map(brand => [brand.id, brand]) ?? [])
+  const allRows = projects.flatMap(project => project.tasks
+    .filter(task => taskTypeMeta[task.type].domain === 'creative')
+    .map((task, index) => {
+      const agencyProject = agencyProjects.get(project.id)
+      const brand = brands.get(agencyProject?.brandId ?? '')
+      const client = clients.get(agencyProject?.clientId ?? brand?.clientId ?? '')
+      const pointers = workbench?.assetVersionPointers.filter(pointer => pointer.projectId === project.id) ?? []
+      const pointer = pointers.find(item => task.outputArtifactIds.includes(item.assetId)) ?? pointers[index % Math.max(pointers.length, 1)]
+      return toCreativeOpsRow(task, project, pointer, workbench, {
+        clientName: client?.name ?? '客户未分配',
+        brandName: brand?.name ?? project.brand,
+        projectName: project.name,
+        projectOwner: agencyProject?.runtime.owner ?? project.owner,
+      })
+    }))
+  return allRows.sort((left, right) => Number(right.projectId === currentProjectId) - Number(left.projectId === currentProjectId)
+    || right.task.updatedAt.localeCompare(left.task.updatedAt))
+}
+
+function toCreativeOpsRow(
+  task: BusinessTaskRecord,
+  project: ReturnType<typeof useProject>['projects'][number],
+  pointer: ApiAssetVersionPointer | undefined,
+  workbench: ApiAgencyWorkbench | null,
+  context: { clientName: string; brandName: string; projectName: string; projectOwner: string },
+): CreativeOpsRow {
+  const qualityRun = pointer ? latestQualityRun(pointer, workbench) : undefined
+  const confirmation = pointer ? latestConfirmation(pointer, workbench) : undefined
+  const quality = creativeQualityState(task, pointer, qualityRun)
+  const confirmationState = creativeConfirmationState(confirmation, quality)
+  const delivery = creativeDeliveryState(pointer, confirmation, quality)
+  const priority = creativePriority(task, quality, confirmation)
+  const dueLabel = creativeDueLabel(task, priority)
+  const latestVersion = pointer ? `v${pointer.workingVersion}` : `v${task.version}`
+  const assetName = pointer ? materialTitle(pointer.assetId) : `${taskTypeMeta[task.type].label}素材`
+  const supportedActions = creativeSupportedActions(task, quality, confirmation, delivery)
+  const searchText = [
+    task.name,
+    task.id,
+    task.objective,
+    assetName,
+    context.clientName,
+    context.brandName,
+    context.projectName,
+    context.projectOwner,
+  ].join(' ').toLowerCase()
+  return {
+    task,
+    projectId: project.id,
+    projectName: context.projectName,
+    clientName: context.clientName,
+    brandName: context.brandName,
+    assetName,
+    channelSpec: channelSpecLabel(task.type),
+    owner: pointer?.owner ?? context.projectOwner,
+    priority,
+    dueLabel,
+    qualityLabel: quality.label,
+    qualityTone: quality.tone,
+    confirmationLabel: confirmationState.label,
+    confirmationTone: confirmationState.tone,
+    deliveryLabel: delivery.label,
+    deliveryTone: delivery.tone,
+    latestVersion,
+    updatedLabel: formatTaskDate(pointer?.updatedAt ?? task.updatedAt),
+    supportedActions,
+    searchText,
+  }
+}
+
+function latestQualityRun(pointer: ApiAssetVersionPointer, workbench: ApiAgencyWorkbench | null): ApiQualityCheckRun | undefined {
+  return workbench?.qualityCheckRuns
+    .filter(run => run.projectId === pointer.projectId && run.assetId === pointer.assetId && run.assetVersion === pointer.workingVersion)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+}
+
+function latestConfirmation(pointer: ApiAssetVersionPointer, workbench: ApiAgencyWorkbench | null): ApiMaterialConfirmation | undefined {
+  return workbench?.materialConfirmations
+    .filter(item => item.projectId === pointer.projectId && item.assetId === pointer.assetId && item.assetVersion === pointer.workingVersion)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+}
+
+function creativeQualityState(task: BusinessTaskRecord, pointer: ApiAssetVersionPointer | undefined, run: ApiQualityCheckRun | undefined): { label: string; tone: StatusTone; failed: boolean; passed: boolean } {
+  if (task.status === 'failed') return { label: '生成失败', tone: 'danger', failed: true, passed: false }
+  if (!pointer) return { label: '待生成', tone: 'warning', failed: false, passed: false }
+  if (!run) return { label: pointer.workingVersion > (pointer.qualityCheckedVersion ?? 0) ? '待质检' : '无质检记录', tone: 'warning', failed: false, passed: false }
+  if (run.status === 'failed') return { label: '质检未通过', tone: 'danger', failed: true, passed: false }
+  if (run.status === 'passed') return { label: '质检通过', tone: 'success', failed: false, passed: true }
+  return { label: run.status === 'running' ? '质检中' : '排队中', tone: 'info', failed: false, passed: false }
+}
+
+function creativeConfirmationState(confirmation: ApiMaterialConfirmation | undefined, quality: ReturnType<typeof creativeQualityState>): { label: string; tone: StatusTone } {
+  if (confirmation?.status === 'confirmed') return { label: '已人工确认', tone: 'success' }
+  if (confirmation?.status === 'changes_requested') return { label: '需要修改', tone: 'danger' }
+  if (quality.passed) return { label: '待人工确认', tone: 'info' }
+  return { label: '未就绪', tone: quality.failed ? 'danger' : 'warning' }
+}
+
+function creativeDeliveryState(pointer: ApiAssetVersionPointer | undefined, confirmation: ApiMaterialConfirmation | undefined, quality: ReturnType<typeof creativeQualityState>): { label: string; tone: StatusTone; ready: boolean } {
+  if (pointer?.deliveryVersion === pointer?.workingVersion) return { label: '已交付', tone: 'success', ready: true }
+  if (confirmation?.status === 'confirmed') return { label: '可交付', tone: 'info', ready: true }
+  if (confirmation?.status === 'changes_requested' || quality.failed) return { label: '交付阻塞', tone: 'danger', ready: false }
+  return { label: '未交付', tone: 'warning', ready: false }
+}
+
+function creativeSupportedActions(
+  task: BusinessTaskRecord,
+  quality: ReturnType<typeof creativeQualityState>,
+  confirmation: ApiMaterialConfirmation | undefined,
+  delivery: ReturnType<typeof creativeDeliveryState>,
+): Set<CreativeBatchAction> {
+  const actions = new Set<CreativeBatchAction>(['assign', 'add_specs'])
+  if (task.status === 'draft' || task.status === 'failed' || confirmation?.status === 'changes_requested') actions.add('start_generation')
+  if (task.status !== 'draft' && task.status !== 'failed' && !delivery.ready) actions.add('run_quality')
+  if (quality.passed && !confirmation) actions.add('human_review')
+  if (confirmation?.status === 'confirmed') actions.add('export_confirmed')
+  if (task.status === 'completed' || confirmation?.status === 'confirmed') actions.add('archive')
+  return actions
+}
+
+function commonBatchActions(rows: CreativeOpsRow[]): CreativeBatchAction[] {
+  if (!rows.length) return []
+  return (Object.keys(batchActionLabels) as CreativeBatchAction[])
+    .filter(action => rows.every(row => row.supportedActions.has(action)))
+}
+
+function matchesCreativeQuickView(row: CreativeOpsRow, view: CreativeQuickView, currentOwner: string): boolean {
+  if (view === '我的任务') return row.owner === currentOwner
+  if (view === '今日到期') return row.dueLabel.startsWith('今日')
+  if (view === '质检未通过') return row.qualityLabel === '质检未通过'
+  if (view === '待人工确认') return row.confirmationLabel === '待人工确认'
+  if (view === '需要修改') return row.confirmationLabel === '需要修改'
+  if (view === '生成失败') return row.task.status === 'failed' || row.qualityLabel === '生成失败'
+  return true
+}
+
+function creativePriority(task: BusinessTaskRecord, quality: ReturnType<typeof creativeQualityState>, confirmation: ApiMaterialConfirmation | undefined): CreativeOpsRow['priority'] {
+  if (task.status === 'failed' || quality.failed || confirmation?.status === 'changes_requested') return '高'
+  if (task.status === 'ready' || quality.passed) return '中'
+  return '低'
+}
+
+function creativeDueLabel(task: BusinessTaskRecord, priority: CreativeOpsRow['priority']): string {
+  if (task.status === 'completed') return '已完成'
+  if (priority === '高') return '今日 18:00'
+  if (priority === '中') return '明日 12:00'
+  return '本周五 18:00'
+}
+
+function channelSpecLabel(type: BusinessTaskType): string {
+  const labels: Record<BusinessTaskType, string> = {
+    strategy: '策略输出',
+    creative: '巨量/腾讯 · 图文 3:4',
+    video: '全渠道 · 视频 9:16',
+    brand_video: '品牌广告 · 16:9 / 9:16',
+    short_drama_preroll: '短剧前贴 · 9:16 ≤6s',
+    game_preroll: '游戏前贴 · 9:16 ≤6s',
+    commerce_preroll: '电商前贴 · 9:16 ≤6s',
+    viral_remake: '爆款复刻 · 多规格',
+    video_edit: '素材剪辑 · 9:16 / 1:1',
+  }
+  return labels[type]
+}
+
+function materialTitle(assetId: string) {
+  return assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}
+
+function formatTaskDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
+function priorityTone(priority: CreativeOpsRow['priority']): StatusTone {
+  return priority === '高' ? 'danger' : priority === '中' ? 'warning' : 'info'
+}
+
+function StatusPill({ label, tone }: { label: string; tone: StatusTone }) {
+  return <span className={`status ${tone}`}><span />{label}</span>
 }

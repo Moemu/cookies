@@ -14,7 +14,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import type { BusinessTaskType, ProjectRecord, SystemKey } from '../types'
+import { calculateProjectProgress, progressPercentLabel, progressReasonLabel } from '../lib/project-progress'
+import type { BusinessTaskType, ProjectProgressStage, ProjectRecord, SystemKey } from '../types'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 type WorkflowState = 'completed' | 'active' | 'pending' | 'blocked'
@@ -57,7 +58,11 @@ const stateLabels: Record<WorkflowState, string> = {
 export function ProjectFlowDashboard({ onOpenProject, onManageProject }: { onOpenProject: OpenProject; onManageProject: (id: string) => void }) {
   const { currentProject } = useProject()
   const stages = useMemo(() => deriveWorkflow(currentProject), [currentProject])
-  const currentStage = stages.find(stage => stage.state === 'active')
+  const projectProgress = useMemo(() => calculateProjectProgress(currentProject), [currentProject])
+  const progressStageName = projectProgress.stage
+  const progressStage = progressStageName === 'unavailable' ? undefined : stages.find(stage => stage.id === workflowIdForProgressStage(progressStageName))
+  const currentStage = progressStage
+    ?? stages.find(stage => stage.state === 'active')
     ?? stages.find(stage => stage.state === 'blocked')
     ?? stages.at(-1)!
   const [selectedId, setSelectedId] = useState(currentStage.id)
@@ -70,7 +75,7 @@ export function ProjectFlowDashboard({ onOpenProject, onManageProject }: { onOpe
   return <div className="project-flow-page">
     <header className="flow-page-heading">
       <div><span>{currentProject.code} · {currentProject.brand}</span><h1>{currentProject.name}</h1><p>从需求到经验沉淀的完整广告生产闭环。每一步都显示上游输入、阶段输出和下一位接手人。</p></div>
-      <div className="flow-heading-actions"><button className="secondary-button" onClick={() => onManageProject(currentProject.id)}>项目管理</button><div className="flow-current-state"><small>当前推进到</small><b>{String(currentStage.id).padStart(2, '0')} · {currentStage.title}</b><span>{currentStage.evidence}</span></div></div>
+      <div className="flow-heading-actions"><button className="secondary-button" onClick={() => onManageProject(currentProject.id)}>项目管理</button><div className="flow-current-state"><small>{projectProgress.available ? '当前推进到' : '进度状态'}</small><b>{projectProgress.available ? `${projectProgress.stageLabel} · ${progressPercentLabel(projectProgress, 'stagePercent')}` : '无法计算'}</b><span>{progressReasonLabel(projectProgress)}</span></div></div>
     </header>
 
     <section className="workflow-map" aria-label="项目八阶段业务流程">
@@ -127,6 +132,19 @@ export function ProjectFlowDashboard({ onOpenProject, onManageProject }: { onOpe
 
     <div className="workflow-loop-note"><Archive size={16}/><span><b>经验会回到下一轮需求</b><small>数据复盘确认的经验沉淀为项目资产，新建任务时自动作为证据来源。</small></span></div>
   </div>
+}
+
+function workflowIdForProgressStage(stage: ProjectProgressStage): number {
+  const stageToWorkflowId: Record<ProjectProgressStage, number> = {
+    intake: 1,
+    strategy: 1,
+    creative: 3,
+    quality_check: 5,
+    human_review: 5,
+    delivery: 6,
+    completed: 8,
+  }
+  return stageToWorkflowId[stage]
 }
 
 function deriveWorkflow(project: ProjectRecord): WorkflowStage[] {
