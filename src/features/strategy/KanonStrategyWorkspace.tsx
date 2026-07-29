@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Archive,
   BadgeCheck,
   BookOpen,
   Bot,
@@ -68,11 +69,13 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
     </div>
   }
 
+  const lifecycleLocked = Boolean(state.detail.current_task.discarded_at || state.draft?.archived_at)
   return <div className="kanon-strategy-root">
     {state.error ? <div className="kanon-strategy-alert" role="alert">
       <AlertCircle size={15}/><span>{state.error}</span>
       <button aria-label="重新加载策略工作区" onClick={() => void actions.reload()}><RefreshCw size={14}/></button>
     </div> : null}
+    {lifecycleLocked ? <div className="kanon-lifecycle-banner" role="status"><Archive size={15}/><span><b>{state.detail.current_task.discarded_at ? '任务已废弃' : '策略已归档'}</b>当前工作区为只读，完整对话、Brief、策略版本和评审记录均已保留。请从“策略任务 → 已归档”恢复后继续操作。</span></div> : null}
     <div className="kanon-workspace-contextbar">
       <div><span>当前工作链</span><strong>{state.detail.workspace.name}</strong><small>{state.detail.current_task.status === 'completed' ? '已完成' : '持续保存'}</small></div>
       <label><span>切换工作区</span><select
@@ -87,6 +90,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
     </div>
     <div className="kanon-strategy-workspace">
       <main className="kanon-strategy-main">
+        <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
         {activeView === '概览' ? <OverviewPane state={state}/> : null}
         {activeView === '对话' ? <ConversationPane
           brief={state.brief}
@@ -143,6 +147,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
           revisions={state.revisions}
           review={state.review}
         /> : null}
+        </fieldset>
       </main>
       <SummaryRail
         brief={state.brief}

@@ -51,6 +51,9 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return CreateStrategyResult{}, false, err
 	}
+	if task.DiscardedAt != nil {
+		return CreateStrategyResult{}, false, ErrInvalidState
+	}
 	if task.BriefID != briefID {
 		return CreateStrategyResult{}, false, ErrInvalidRequest
 	}
@@ -224,6 +227,9 @@ func (s Service) PatchStrategy(ctx context.Context, actor contract.ActorContext,
 	if err != nil {
 		return Draft{}, false, err
 	}
+	if draft.ArchivedAt != nil {
+		return Draft{}, false, ErrInvalidState
+	}
 	hash, _ := contract.CanonicalJSONHash(patch)
 	var prior Draft
 	found, err := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.patch", key, hash, &prior)
@@ -331,6 +337,9 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 	draft, err := s.GetDraft(ctx, actor, strategyID)
 	if err != nil {
 		return agent.Task{}, false, err
+	}
+	if draft.ArchivedAt != nil {
+		return agent.Task{}, false, ErrInvalidState
 	}
 	if draft.Version != request.ExpectedVersion || draft.CurrentRevision != request.BaseRevision {
 		return agent.Task{}, false, ErrVersionConflict

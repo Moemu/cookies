@@ -79,6 +79,9 @@ type Task struct {
 	CurrentAgentTaskID string                  `json:"current_agent_task_id,omitempty"`
 	CurrentStrategyID  string                  `json:"current_strategy_id,omitempty"`
 	Status             string                  `json:"status"`
+	DiscardedAt        *time.Time              `json:"discarded_at,omitempty"`
+	DiscardedBy        string                  `json:"discarded_by,omitempty"`
+	DiscardReason      string                  `json:"discard_reason,omitempty"`
 	Version            int64                   `json:"version"`
 	CreatedAt          time.Time               `json:"created_at"`
 	UpdatedAt          time.Time               `json:"updated_at"`
@@ -89,14 +92,24 @@ type CreateTaskRequest struct {
 	Objective string `json:"objective"`
 }
 
+type LifecycleRequest struct {
+	ExpectedVersion int64  `json:"expected_version"`
+	Reason          string `json:"reason,omitempty"`
+}
+
 type TaskListItem struct {
-	Task           Task   `json:"task"`
-	Name           string `json:"name"`
-	Objective      string `json:"objective"`
-	BriefStatus    string `json:"brief_status"`
-	BriefReady     bool   `json:"brief_ready"`
-	StrategyStatus string `json:"strategy_status,omitempty"`
-	ReviewStatus   string `json:"review_status,omitempty"`
+	Task                  Task       `json:"task"`
+	Name                  string     `json:"name"`
+	Objective             string     `json:"objective"`
+	BriefStatus           string     `json:"brief_status"`
+	BriefReady            bool       `json:"brief_ready"`
+	StrategyStatus        string     `json:"strategy_status,omitempty"`
+	ReviewStatus          string     `json:"review_status,omitempty"`
+	StrategyRevision      int64      `json:"strategy_revision"`
+	StrategyVersion       int64      `json:"strategy_version"`
+	StrategyArchivedAt    *time.Time `json:"strategy_archived_at,omitempty"`
+	StrategyArchivedBy    string     `json:"strategy_archived_by,omitempty"`
+	StrategyArchiveReason string     `json:"strategy_archive_reason,omitempty"`
 }
 
 type TaskBundle struct {
@@ -458,6 +471,9 @@ type Draft struct {
 	BriefVersion          int64                   `json:"brief_version"`
 	ProjectContextVersion int64                   `json:"project_context_version"`
 	Status                string                  `json:"status"`
+	ArchivedAt            *time.Time              `json:"archived_at,omitempty"`
+	ArchivedBy            string                  `json:"archived_by,omitempty"`
+	ArchiveReason         string                  `json:"archive_reason,omitempty"`
 	CurrentRevision       int64                   `json:"current_revision"`
 	CurrentReviewID       string                  `json:"current_review_id,omitempty"`
 	Version               int64                   `json:"version"`
