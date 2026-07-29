@@ -437,6 +437,11 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		lockedDraft.Version); err != nil {
 		return PackageVersion{}, false, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET status = 'completed',
+		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		now, actor.OrganizationID, draft.ProjectID, lockedDraft.TaskID); err != nil {
+		return PackageVersion{}, false, err
+	}
 	eventID, err := s.newID("event")
 	if err != nil {
 		return PackageVersion{}, false, err

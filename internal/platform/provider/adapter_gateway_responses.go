@@ -191,7 +191,7 @@ func (a *AdapterGatewayTextAdapter) doResponsesRequest(
 		)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return gatewayResponsesPayload{}, mapGatewayHTTPError(response.StatusCode)
+		return gatewayResponsesPayload{}, mapGatewayTextHTTPError(response.StatusCode)
 	}
 	var payload gatewayResponsesPayload
 	if err := json.Unmarshal(responseBody, &payload); err != nil {

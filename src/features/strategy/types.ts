@@ -265,6 +265,34 @@ export type ReviewComment = {
   created_at: string
 }
 
+export type DeepReviewFinding = {
+  severity: 'blocker' | 'warning' | 'opportunity'
+  section: string
+  title: string
+  detail: string
+  recommendation: string
+}
+
+export type DeepReviewAnalysis = {
+  id: string
+  review_id: string
+  strategy_id: string
+  candidate_revision: number
+  candidate_content_hash: string
+  agent_task_id: string
+  status: 'pending' | 'succeeded' | 'failed'
+  summary?: string
+  findings: DeepReviewFinding[]
+  model_alias?: string
+  model_version?: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  api_mode?: 'chat_completions' | 'responses'
+  background?: boolean
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
+  latency_ms?: number
+}
+
 export type PackageVersion = {
   package_id: string
   version: number
@@ -331,6 +359,16 @@ export type AgentTask = {
   status: 'dispatch_pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   version: number
   error?: { code: string; message: string; retryable: boolean }
+}
+
+export type AgentTaskInspection = {
+  task: AgentTask
+  job?: {
+    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+    attempt_count: number
+    max_attempts: number
+    error?: { code: string; message: string; retryable: boolean }
+  }
 }
 
 export type ResearchArtifact = {

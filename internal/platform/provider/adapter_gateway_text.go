@@ -131,7 +131,7 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		return SynchronousResult{}, gatewayExecutionError("MODEL_RESPONSE_INVALID", "Adapter gateway response exceeded the safety limit")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return SynchronousResult{}, mapGatewayHTTPError(response.StatusCode)
+		return SynchronousResult{}, mapGatewayTextHTTPError(response.StatusCode)
 	}
 	var decoded struct {
 		Model string `json:"model"`

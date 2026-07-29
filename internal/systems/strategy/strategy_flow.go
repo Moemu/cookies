@@ -409,6 +409,8 @@ func (s Service) HandleAgentTask(ctx context.Context, task agent.Task) (*contrac
 		return s.handleDraftGenerate(ctx, task)
 	case AgentKindDraftRevise:
 		return s.handleDraftRevise(ctx, task)
+	case AgentKindReviewDeep:
+		return s.handleDeepReview(ctx, task)
 	default:
 		return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "STRATEGY_TASK_KIND_UNSUPPORTED", Message: "Strategy task kind is unsupported"}}
 	}
@@ -440,6 +442,15 @@ func (s Service) completedAgentResult(ctx context.Context, task agent.Task) (*co
 		}
 		version := draft.Version
 		return &contract.ResourceRef{Type: "strategy.brief_draft", ID: draft.ID, Version: &version}, true, nil
+	case AgentKindReviewDeep:
+		analysis, err := scanDeepReview(s.DB.QueryRowContext(ctx, deepReviewSelect+`
+			WHERE organization_id = ? AND project_id = ? AND agent_task_id = ?`,
+			task.OrganizationID, task.ProjectID, task.ID))
+		if err != nil {
+			return nil, true, err
+		}
+		version := analysis.CandidateRevision
+		return &contract.ResourceRef{Type: "strategy.review_analysis", ID: analysis.ID, Version: &version}, true, nil
 	default:
 		draft, err := scanDraft(s.DB.QueryRowContext(ctx, draftSelect+` WHERE organization_id = ?
 			AND project_id = ? AND id = ?`, task.OrganizationID, task.ProjectID, task.SourceID))

@@ -22,6 +22,7 @@ const (
 	AgentKindBriefExtract  = "strategy.brief.extract"
 	AgentKindDraftGenerate = "strategy.draft.generate"
 	AgentKindDraftRevise   = "strategy.draft.revise"
+	AgentKindReviewDeep    = "strategy.review.deep"
 )
 
 type ProjectReader interface {
@@ -39,6 +40,7 @@ type Service struct {
 	Agents               agent.TransactionalTaskWriter
 	Text                 *provider.Service
 	TextModelAlias       string
+	DeepReviewModelAlias string
 	PromptVersion        string
 	CriticEnabled        bool
 	V2Enabled            bool
@@ -929,7 +931,7 @@ func (s Service) ConfirmBrief(ctx context.Context, actor contract.ActorContext, 
 		actor.OrganizationID, task.ProjectID, version.BriefID); err != nil {
 		return BriefVersion{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET status = 'completed',
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET status = 'active',
 		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
 		now, actor.OrganizationID, task.ProjectID, task.ID); err != nil {
 		return BriefVersion{}, false, err

@@ -15,6 +15,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
 		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
+		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
 		value.Strategy.PromptVersion != "strategy.generate.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)

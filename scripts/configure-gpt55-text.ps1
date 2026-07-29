@@ -74,6 +74,29 @@ FROM provider_model_route_revisions
 WHERE route_id = '$routeID'
 ON DUPLICATE KEY UPDATE id = VALUES(id);
 UPDATE provider_model_routes SET current_revision_id = '$revisionID' WHERE id = '$routeID';
+INSERT INTO provider_model_routes (id, organization_id, capability, model_alias, current_revision_id, status)
+VALUES ('route_cookies_text_deep_review', NULL, 'text.generate', 'cookies.text.deep_review', NULL, 'enabled')
+ON DUPLICATE KEY UPDATE status = 'enabled';
+INSERT INTO provider_model_route_revisions (
+  id, route_id, revision_number, connection_id, connection_revision_id, upstream_model, constraints_json
+) VALUES (
+  'route_cookies_text_deep_review_gpt55pro_r1', 'route_cookies_text_deep_review', 1,
+  '$connectionID', '$connectionRevisionID', 'gpt-5.5-pro',
+  JSON_OBJECT(
+    'api_mode', 'responses',
+    'text_response_mode', 'json_schema',
+    'max_output_tokens', 32768,
+    'output_token_parameter', 'max_output_tokens',
+    'reasoning_effort', 'high',
+    'background', TRUE,
+    'poll_interval_ms', 1000,
+    'source_provider', 'openai'
+  )
+)
+ON DUPLICATE KEY UPDATE id = VALUES(id);
+UPDATE provider_model_routes
+SET current_revision_id = 'route_cookies_text_deep_review_gpt55pro_r1'
+WHERE id = 'route_cookies_text_deep_review';
 COMMIT;
 "@
     & docker exec -i -e "MYSQL_PWD=$mysqlPassword" $containerID mysql -u cookies cookies -e $sql
@@ -82,7 +105,9 @@ COMMIT;
     Set-DotEnvValue "COOKIES_PROVIDER_TEXT_ADAPTER" "adapter_gateway"
     Set-DotEnvValue "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" "true"
     Set-DotEnvValue "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" "cookies.text.standard"
+    Set-DotEnvValue "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" "cookies.text.deep_review"
     Write-Output "Configured cookies.text.standard -> $Model through Chat Completions."
+    Write-Output "Configured cookies.text.deep_review -> gpt-5.5-pro through background Responses."
 }
 finally {
     Pop-Location

@@ -20,6 +20,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useProject } from '../../context/ProjectContext'
 import { useStrategyWorkspace } from './useStrategyWorkspace'
 import type {
@@ -32,6 +33,7 @@ import type {
 
 export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView: string; workspaceId?: string }) {
   const { currentProject } = useProject()
+  const navigate = useNavigate()
   const { state, actions } = useStrategyWorkspace(currentProject.id, workspaceId)
 
   if (state.isLoading) {
@@ -71,6 +73,18 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
       <AlertCircle size={15}/><span>{state.error}</span>
       <button aria-label="重新加载策略工作区" onClick={() => void actions.reload()}><RefreshCw size={14}/></button>
     </div> : null}
+    <div className="kanon-workspace-contextbar">
+      <div><span>当前工作链</span><strong>{state.detail.workspace.name}</strong><small>{state.detail.current_task.status === 'completed' ? '已完成' : '持续保存'}</small></div>
+      <label><span>切换工作区</span><select
+        aria-label="切换策略工作区"
+        value={state.detail.workspace.id}
+        onChange={event => navigate({
+          pathname: `/projects/${encodeURIComponent(currentProject.id)}/strategy/workspaces/${encodeURIComponent(event.target.value)}`,
+          search: `?view=${encodeURIComponent(activeView)}`,
+        })}
+      >{state.workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}{workspace.is_primary ? ' · 主工作区' : ''}</option>)}</select></label>
+      <button className="icon-button" aria-label="刷新当前策略工作区" disabled={Boolean(state.busy)} onClick={() => void actions.reload()}><RefreshCw size={15}/></button>
+    </div>
     <div className="kanon-strategy-workspace">
       <main className="kanon-strategy-main">
         {activeView === '概览' ? <OverviewPane state={state}/> : null}
@@ -103,11 +117,13 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
         {activeView === '评审' ? <ReviewPane
           busy={state.busy}
           comments={state.comments}
+          deepReview={state.deepReview}
           draft={state.draft}
           review={state.review}
           revisions={state.revisions}
           onAddComment={actions.addComment}
           onApprove={actions.approveReview}
+          onDeepReview={actions.startDeepReview}
           onReturn={actions.returnReview}
         /> : null}
         {activeView === '研究' ? <ResearchPane
@@ -130,6 +146,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
       </main>
       <SummaryRail
         brief={state.brief}
+        briefVersion={state.briefVersion?.version}
         draft={state.draft}
         publishedVersion={state.published?.version}
         review={state.review}
@@ -351,7 +368,7 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
   readiness: WorkspaceState['readiness']
 }) {
   const [section, setSection] = useState('objective')
-  const [sectionValue, setSectionValue] = useState('')
+  const [sectionValue, setSectionValue] = useState<unknown>('')
   const [instruction, setInstruction] = useState('')
   const document = draft?.revision?.document
   useEffect(() => {
@@ -360,7 +377,7 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
       return
     }
     const value = (document as unknown as Record<string, unknown>)[section]
-    setSectionValue(typeof value === 'string' ? value : JSON.stringify(value, null, 2))
+    setSectionValue(structuredClone(value))
   }, [document, section])
 
   if (!draft) {
@@ -387,15 +404,8 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
   }
 
   const sections = Object.keys(document).filter(key => !['contract_version', 'compliance'].includes(key))
-  let parsedValue: unknown = sectionValue
   const original = (document as unknown as Record<string, unknown>)[section]
-  if (typeof original !== 'string') {
-    try {
-      parsedValue = JSON.parse(sectionValue)
-    } catch {
-      parsedValue = undefined
-    }
-  }
+  const changed = JSON.stringify(sectionValue) !== JSON.stringify(original)
   const canEdit = draft.status === 'draft' || draft.status === 'returned'
 
   return <section className="kanon-strategy-editor-pane">
@@ -407,9 +417,8 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
       <nav>{sections.map(value => <button className={value === section ? 'active' : ''} key={value} onClick={() => setSection(value)}>{strategySectionLabel(value)}</button>)}</nav>
       <div>
         <div className="surface-toolbar"><h3>{strategySectionLabel(section)}</h3><small>保存后创建新 Revision</small></div>
-        <textarea disabled={!canEdit || Boolean(busy)} rows={14} value={sectionValue} onChange={event => setSectionValue(event.target.value)}/>
-        {parsedValue === undefined ? <span className="kanon-json-error">当前内容不是有效 JSON。</span> : null}
-        <button className="secondary-button" disabled={!canEdit || Boolean(busy) || parsedValue === undefined} onClick={() => void onPatch(section, parsedValue)}>
+        <StructuredStrategyEditor disabled={!canEdit || Boolean(busy)} onChange={setSectionValue} section={section} value={sectionValue}/>
+        <button className="secondary-button" disabled={!canEdit || Boolean(busy) || !changed} onClick={() => void onPatch(section, sectionValue)}>
           {busy === `strategy:${section}` ? '保存中…' : '保存为新 Revision'}
         </button>
       </div>
@@ -426,12 +435,61 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
   </section>
 }
 
-function ReviewPane({ busy, comments, draft, onAddComment, onApprove, onReturn, review, revisions }: {
+function StructuredStrategyEditor({ disabled, onChange, section, value }: {
+  disabled: boolean
+  onChange: (value: unknown) => void
+  section: string
+  value: unknown
+}) {
+  if (typeof value === 'string') {
+    const singleLine = ['平台', '核心 KPI', '实验变量', '衡量指标', '预算', '内容节奏'].includes(section)
+    return <label className="kanon-structured-field wide"><span>{strategySectionLabel(section)}</span>{singleLine
+      ? <input disabled={disabled} value={value} onChange={event => onChange(event.target.value)}/>
+      : <textarea disabled={disabled} rows={Math.max(3, Math.min(6, Math.ceil(value.length / 70) + 2))} value={value} onChange={event => onChange(event.target.value)}/>}</label>
+  }
+  if (typeof value === 'number') return <label className="kanon-structured-field"><span>{strategySectionLabel(section)}</span><input disabled={disabled} type="number" value={value} onChange={event => onChange(Number(event.target.value))}/></label>
+  if (typeof value === 'boolean') return <label className="kanon-check"><input checked={value} disabled={disabled} type="checkbox" onChange={event => onChange(event.target.checked)}/><span>{strategySectionLabel(section)}</span></label>
+  if (Array.isArray(value)) {
+    const objectArray = ['channel_strategy', 'experiment_matrix', 'platform_plans'].includes(section) || value.some(item => Boolean(item) && typeof item === 'object')
+    if (!objectArray && value.every(item => typeof item === 'string')) {
+      return <label className="kanon-structured-field wide"><span>{strategySectionLabel(section)}<small>每行一项</small></span><textarea disabled={disabled} rows={Math.max(5, Math.min(10, value.length + 2))} value={value.join('\n')} onChange={event => onChange(event.target.value.split('\n').map(item => item.trim()).filter(Boolean))}/></label>
+    }
+    return <div className="kanon-structured-list">
+      {value.map((item, index) => <article key={`${section}-${index}`}><div className="surface-toolbar"><h4>{strategySectionLabel(section)} {index + 1}</h4><button aria-label={`删除${strategySectionLabel(section)} ${index + 1}`} className="text-button danger" disabled={disabled} onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} type="button">删除</button></div><StructuredObjectFields disabled={disabled} onChange={next => onChange(value.map((current, itemIndex) => itemIndex === index ? next : current))} section={section} value={item}/></article>)}
+      {!value.length ? <div className="panel-empty">当前没有条目，可按需新增。</div> : null}
+      <button className="secondary-button" disabled={disabled} onClick={() => onChange([...value, strategyArrayTemplate(section)])} type="button"><Plus size={14}/>新增{strategySectionLabel(section)}条目</button>
+    </div>
+  }
+  if (value && typeof value === 'object') return <StructuredObjectFields disabled={disabled} onChange={onChange} section={section} value={value}/>
+  return <label className="kanon-structured-field"><span>{strategySectionLabel(section)}</span><input disabled={disabled} value="" onChange={event => onChange(event.target.value)}/></label>
+}
+
+function StructuredObjectFields({ disabled, onChange, section, value }: {
+  disabled: boolean
+  onChange: (value: unknown) => void
+  section: string
+  value: unknown
+}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return <StructuredStrategyEditor disabled={disabled} onChange={onChange} section={section} value={value}/>
+  const record = value as Record<string, unknown>
+  return <div className="kanon-structured-grid">{Object.entries(record).map(([key, fieldValue]) => <div className={typeof fieldValue === 'string' ? '' : 'wide'} key={key}><StructuredStrategyEditor disabled={disabled} onChange={next => onChange({ ...record, [key]: next })} section={strategyFieldLabel(key)} value={fieldValue}/></div>)}</div>
+}
+
+function strategyArrayTemplate(section: string): unknown {
+  if (section === 'channel_strategy') return { platform: '', role: '', formats: [] }
+  if (section === 'experiment_matrix') return { hypothesis: '', variable: '', metric: '' }
+  if (section === 'platform_plans') return { platform: '', role: '', audience_angle: '', content_pillars: [], formats: [], conversion_path: '', cadence: '', primary_kpi: '', creative_ideas: [], constraints: [] }
+  return ''
+}
+
+function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove, onDeepReview, onReturn, review, revisions }: {
   busy: string
   comments: WorkspaceState['comments']
+  deepReview: WorkspaceState['deepReview']
   draft: StrategyDraft | null
   onAddComment: (body: string) => Promise<boolean>
   onApprove: () => Promise<boolean>
+  onDeepReview: () => Promise<boolean>
   onReturn: (reason: string) => Promise<boolean>
   review: Review | null
   revisions: DraftRevision[]
@@ -450,6 +508,10 @@ function ReviewPane({ busy, comments, draft, onAddComment, onApprove, onReturn, 
       <span className={`source-chip ${review.status === 'returned' ? 'alert' : ''}`}>{statusLabel(review.status)}</span>
     </div>
     <div className="kanon-review-proof"><span>候选哈希</span><code>{review.candidate_content_hash}</code></div>
+    <section className="kanon-deep-review">
+      <div className="surface-toolbar"><div><h3>GPT‑5.5 Pro 深度评审</h3><small>Responses · 后台运行 · 仅提供决策辅助</small></div>{deepReview?.status === 'succeeded' ? <span className="source-chip">{deepReview.model_version}</span> : null}</div>
+      {!deepReview ? <div className="kanon-deep-review-empty"><p>从证据、渠道协同、可衡量性与执行风险对候选 Revision 做第二视角检查。</p><button className="secondary-button" disabled={Boolean(busy) || review.status !== 'open'} onClick={() => void onDeepReview()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '启动深度评审'}</button></div> : deepReview.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>深度评审正在后台运行</b><small>可以离开页面，AgentTask 完成后会自动恢复结果。</small></span></div> : deepReview.status === 'failed' ? <div className="kanon-deep-review-empty"><p>本次深度评审未完成，人工评审不受影响。</p><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onDeepReview()}><RefreshCw size={14}/>重新运行</button></div> : <><p className="kanon-deep-review-summary">{deepReview.summary}</p><div className="kanon-deep-findings">{deepReview.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><small className="kanon-deep-review-meta">{deepReview.api_mode} · background={String(deepReview.background)} · {deepReview.latency_ms ?? 0} ms{deepReview.usage ? ` · ${deepReview.usage.total_tokens} tokens` : ''}</small></>}
+    </section>
     <div className="kanon-review-content">
       <div className="kanon-review-diffs">
         {!diffs.length && candidate ? <pre>{JSON.stringify(candidate.document, null, 2)}</pre> : diffs.map(diff => <article key={diff.section}>
@@ -542,8 +604,9 @@ function ChangeLogPane({ comments, review, revisions }: {
   </section>
 }
 
-function SummaryRail({ brief, draft, publishedVersion, review, workspaceName }: {
+function SummaryRail({ brief, briefVersion, draft, publishedVersion, review, workspaceName }: {
   brief: BriefDraft | null
+  briefVersion?: number
   draft: StrategyDraft | null
   publishedVersion?: number
   review: Review | null
@@ -551,8 +614,8 @@ function SummaryRail({ brief, draft, publishedVersion, review, workspaceName }: 
 }) {
   const items = [
     ['工作区', workspaceName],
-    ['Brief', brief ? `${brief.status === 'confirmed' ? '已冻结' : '草稿'} v${brief.version}` : '未创建'],
-    ['完整度', brief ? brief.completeness.ready ? '可以确认' : `${brief.completeness.blockers.length} 个阻断项` : '—'],
+    ['Brief', brief ? `${brief.status === 'confirmed' ? '已冻结' : '草稿'} v${brief.status === 'confirmed' ? briefVersion ?? 1 : brief.version}` : '未创建'],
+    ['完整度', brief ? brief.status === 'confirmed' ? '已确认' : brief.completeness.ready ? '可以确认' : `${brief.completeness.blockers.length} 个阻断项` : '—'],
     ['Strategy', draft ? `Revision ${draft.current_revision} · ${statusLabel(draft.status)}` : '未生成'],
     ['Review', review ? statusLabel(review.status) : '未提交'],
     ['Package', publishedVersion ? `已发布 v${publishedVersion}` : '未发布'],
@@ -632,6 +695,17 @@ function strategySectionLabel(value: string) {
     compliance: '合规报告',
   }
   return labels[value] ?? value
+}
+
+function strategyFieldLabel(value: string) {
+  const labels: Record<string, string> = {
+    primary: '核心人群', insights: '人群洞察', platform: '平台', role: '平台角色',
+    formats: '内容形式', audience_angle: '人群切入点', content_pillars: '内容支柱',
+    conversion_path: '转化路径', cadence: '内容节奏', primary_kpi: '核心 KPI',
+    creative_ideas: '创意方向', hypothesis: '实验假设', variable: '实验变量',
+    metric: '衡量指标', budget: '预算',
+  }
+  return labels[value] ?? strategySectionLabel(value)
 }
 
 function fieldLabel(value: string) {

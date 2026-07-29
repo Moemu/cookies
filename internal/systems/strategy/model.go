@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 const (
@@ -530,6 +532,48 @@ type ReviewComment struct {
 	AuthorID       string                  `json:"author_id"`
 	Body           string                  `json:"body"`
 	CreatedAt      time.Time               `json:"created_at"`
+}
+
+type DeepReviewFinding struct {
+	Severity       string `json:"severity"`
+	Section        string `json:"section"`
+	Title          string `json:"title"`
+	Detail         string `json:"detail"`
+	Recommendation string `json:"recommendation"`
+}
+
+type DeepReviewAnalysis struct {
+	ID                   string                    `json:"id"`
+	OrganizationID       contract.OrganizationID   `json:"organization_id"`
+	ProjectID            contract.ProjectID        `json:"project_id"`
+	ReviewID             string                    `json:"review_id"`
+	StrategyID           string                    `json:"strategy_id"`
+	CandidateRevision    int64                     `json:"candidate_revision"`
+	CandidateContentHash contract.ContentHash      `json:"candidate_content_hash"`
+	AgentTaskID          string                    `json:"agent_task_id"`
+	Status               string                    `json:"status"`
+	Summary              string                    `json:"summary,omitempty"`
+	Findings             []DeepReviewFinding       `json:"findings"`
+	ModelAlias           string                    `json:"model_alias,omitempty"`
+	ModelVersion         string                    `json:"model_version,omitempty"`
+	RouteRevisionID      string                    `json:"route_revision_id,omitempty"`
+	ResponseMode         provider.TextResponseMode `json:"response_mode,omitempty"`
+	APIMode              provider.TextAPIMode      `json:"api_mode,omitempty"`
+	Background           bool                      `json:"background,omitempty"`
+	Usage                *provider.TokenUsage      `json:"usage,omitempty"`
+	LatencyMS            int64                     `json:"latency_ms,omitempty"`
+	CreatedBy            string                    `json:"created_by"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
+}
+
+type StartDeepReviewRequest struct {
+	ExpectedReviewStatus string `json:"expected_review_status"`
+}
+
+type DeepReviewStartResult struct {
+	Analysis  DeepReviewAnalysis `json:"analysis"`
+	AgentTask agent.Task         `json:"agent_task"`
 }
 
 type Readiness struct {

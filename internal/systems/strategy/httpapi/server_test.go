@@ -54,6 +54,21 @@ func TestCreativeHandoffRouteRejectsInvalidVersionBeforeService(t *testing.T) {
 	}
 }
 
+func TestTaskAndDeepReviewRoutesRejectInvalidBodies(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	for _, path := range []string{
+		"/api/strategy/v1/projects/project_1/tasks",
+		"/api/strategy/v1/strategy-reviews/review_1/deep-analysis",
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{")))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestMatchesIfNoneMatch(t *testing.T) {
 	t.Parallel()
 	etag := `"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`

@@ -120,8 +120,9 @@ export function KanonStrategyTaskDialog({ onClose, onCreated }: {
 }
 
 function taskPhase(item: StrategyTaskListItem) {
-  if (item.review_status === 'approved' || item.task.status === 'completed') return '已完成'
+  if (item.review_status === 'approved') return '已完成'
   if (item.review_status === 'open' || item.strategy_status === 'ready_for_review') return '待评审'
+  if (item.strategy_status === 'failed') return '生成失败'
   if (item.strategy_status) return '策略形成'
   if (item.brief_status === 'confirmed') return '生成策略'
   return '完善 Brief'

@@ -227,7 +227,8 @@ func main() {
 		}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
-			TextModelAlias: cfg.Strategy.TextModelAlias, PromptVersion: cfg.Strategy.PromptVersion,
+			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			PromptVersion: cfg.Strategy.PromptVersion,
 			CriticEnabled: cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
 			DisableApproval:      !cfg.Strategy.ApproveEnabled,
 			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
@@ -251,10 +252,13 @@ func main() {
 		strategyAPI := strategyhttp.New(strategyService, agentStore, runtimeStore)
 		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 			httpserver.DomainMount{Pattern: "/api/strategy/v1/", Handler: strategyAPI})
-		strategyHandler := agent.RuntimeHandler(agentStore, strategyService.HandleAgentTask, runtimeStore)
+		strategyHandler := agent.RuntimeHandlerWithFinalFailure(
+			agentStore, strategyService.HandleAgentTask, strategyService.HandleAgentTaskFinalFailure, runtimeStore,
+		)
 		runtimeHandlers[strategysystem.AgentKindBriefExtract] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftGenerate] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftRevise] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindReviewDeep] = strategyHandler
 		agentDispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
 		startWorker(workerContext, "agent-dispatch", agentDispatcher.RunOnce)
 	}

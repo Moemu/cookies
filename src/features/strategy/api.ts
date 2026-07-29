@@ -1,10 +1,12 @@
 import { BackendApiError, apiRequest } from '../../backend/platform'
 import type {
   AgentTask,
+  AgentTaskInspection,
   BriefDraft,
   BriefVersion,
   ConversationBundle,
   ConversationMemory,
+  DeepReviewAnalysis,
   DraftRevision,
   GenerationMetadata,
   GenerationProbe,
@@ -63,10 +65,23 @@ export const strategyApi = {
   getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
     apiRequest<WorkspaceDetail>(`${root}/workspaces/${encodeURIComponent(workspaceId)}`, { signal }),
 
-  probeGeneration: (projectId: string) =>
-    apiRequest<GenerationProbe>(`${root}/projects/${encodeURIComponent(projectId)}/generation-probe`, {
+  probeGeneration: (projectId: string, profile?: 'deep_review') =>
+    apiRequest<GenerationProbe>(`${root}/projects/${encodeURIComponent(projectId)}/generation-probe${profile ? `?profile=${profile}` : ''}`, {
       method: 'POST',
     }),
+
+  getDeepReview: (reviewId: string, signal?: AbortSignal) =>
+    apiRequest<DeepReviewAnalysis>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}/deep-analysis`, { signal }),
+
+  startDeepReview: (reviewId: string, expectedReviewStatus: string, mutationKey?: string) =>
+    apiRequest<{ analysis: DeepReviewAnalysis; agent_task: AgentTask }>(
+      `${root}/strategy-reviews/${encodeURIComponent(reviewId)}/deep-analysis`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(mutationKey),
+        body: JSON.stringify({ expected_review_status: expectedReviewStatus }),
+      },
+    ),
 
   createConversation: (projectId: string, workspaceId: string, mutationKey?: string) =>
     apiRequest<ConversationBundle>(`${root}/conversations`, {
@@ -92,7 +107,7 @@ export const strategyApi = {
     ),
 
   getAgentTask: (agentTaskId: string, signal?: AbortSignal) =>
-    apiRequest<AgentTask>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}`, { signal }),
+    apiRequest<AgentTaskInspection>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}`, { signal }),
 
   listSkillRuns: (agentTaskId: string, signal?: AbortSignal) =>
     apiRequest<{ items: SkillRun[] }>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}/skill-runs`, { signal }),

@@ -69,6 +69,8 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("PUT /api/strategy/v1/projects/{project_id}/review-policy", server.updateReviewPolicy)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}/comments", server.listReviewComments)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_id}/comments", server.addReviewComment)
+	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_id}/deep-analysis", server.startDeepReview)
+	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}/deep-analysis", server.getDeepReview)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_action}", server.reviewAction)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages", server.listPackages)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/creative-handoff", server.getCreativeHandoff)
@@ -165,8 +167,9 @@ func (s *Server) getGenerationReadiness(writer http.ResponseWriter, request *htt
 }
 
 func (s *Server) probeGeneration(writer http.ResponseWriter, request *http.Request) {
-	value, err := s.Service.ProbeGeneration(
+	value, err := s.Service.ProbeGenerationProfile(
 		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("profile"),
 	)
 	writeResult(writer, value, err)
 }
@@ -174,6 +177,32 @@ func (s *Server) probeGeneration(writer http.ResponseWriter, request *http.Reque
 func (s *Server) getGenerationMetadata(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetGenerationMetadata(
 		request.Context(), mustActor(request), request.PathValue("strategy_id"),
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) startDeepReview(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.StartDeepReviewRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.StartDeepReview(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("review_id"), body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func (s *Server) getDeepReview(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetLatestDeepReview(
+		request.Context(), mustActor(request), request.PathValue("review_id"),
 	)
 	writeResult(writer, value, err)
 }

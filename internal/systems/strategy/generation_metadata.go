@@ -88,7 +88,20 @@ func (s Service) GetGenerationReadiness(ctx context.Context, actor contract.Acto
 	}, nil
 }
 
-func (s Service) ProbeGeneration(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (GenerationProbe, error) {
+func (s Service) ProbeGeneration(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+) (GenerationProbe, error) {
+	return s.ProbeGenerationProfile(ctx, actor, projectID, "")
+}
+
+func (s Service) ProbeGenerationProfile(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	profile string,
+) (GenerationProbe, error) {
 	if err := requireScope(actor, ScopeWrite); err != nil {
 		return GenerationProbe{}, err
 	}
@@ -99,9 +112,21 @@ func (s Service) ProbeGeneration(ctx context.Context, actor contract.ActorContex
 	if s.Text == nil {
 		return GenerationProbe{}, ErrGenerationUnavailable
 	}
-	modelAlias := strings.TrimSpace(s.TextModelAlias)
-	if modelAlias == "" {
-		modelAlias = "cookies.text.standard"
+	profile = strings.TrimSpace(profile)
+	var modelAlias string
+	switch profile {
+	case "":
+		modelAlias = strings.TrimSpace(s.TextModelAlias)
+		if modelAlias == "" {
+			modelAlias = "cookies.text.standard"
+		}
+	case "deep_review":
+		modelAlias = strings.TrimSpace(s.DeepReviewModelAlias)
+		if modelAlias == "" {
+			modelAlias = "cookies.text.deep_review"
+		}
+	default:
+		return GenerationProbe{}, ErrInvalidRequest
 	}
 	invocationID, err := s.newID("generationprobe")
 	if err != nil {

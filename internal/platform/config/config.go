@@ -90,6 +90,7 @@ type Strategy struct {
 	ApproveEnabled           bool
 	PackageToCreativeEnabled bool
 	TextModelAlias           string
+	DeepReviewModelAlias     string
 	PromptVersion            string
 	CriticEnabled            bool
 	OrganizationAllowlist    []string
@@ -315,6 +316,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ApproveEnabled:           strategyApproveEnabled,
 			PackageToCreativeEnabled: strategyPackageToCreativeEnabled,
 			TextModelAlias:           valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
+			DeepReviewModelAlias:     valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
 			PromptVersion:            valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", "strategy.generate.v2"),
 			CriticEnabled:            strategyCriticEnabled,
 			OrganizationAllowlist:    splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
@@ -467,6 +469,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Strategy.TextModelAlias) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_TEXT_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Strategy.DeepReviewModelAlias) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS must not be empty")
 	}
 	if strings.TrimSpace(c.Strategy.PromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION must not be empty")

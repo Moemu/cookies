@@ -6,6 +6,7 @@ import type {
   BriefDraft,
   BriefVersion,
   ConversationMemory,
+  DeepReviewAnalysis,
   DraftRevision,
   GenerationMetadata,
   GenerationProbe,
@@ -33,6 +34,7 @@ export type StrategyWorkspaceState = {
   revisions: DraftRevision[]
   review: Review | null
   comments: ReviewComment[]
+  deepReview: DeepReviewAnalysis | null
   published: PackageVersion | null
   packages: PackageVersion[]
   readiness: GenerationReadiness | null
@@ -66,6 +68,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     revisions: [],
     review: null,
     comments: [],
+    deepReview: null,
     published: null,
     packages: [],
     readiness: null,
@@ -144,6 +147,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let metadata: GenerationMetadata | null = null
     let review: Review | null = null
     let comments: ReviewComment[] = []
+    let deepReview: DeepReviewAnalysis | null = null
     let published: PackageVersion | null = null
     if (task?.current_strategy_id) {
       draft = await strategyApi.getStrategy(task.current_strategy_id, signal)
@@ -160,7 +164,12 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         .sort((left, right) => right.version - left.version)[0] ?? null
       if (draft.current_review_id) {
         review = await strategyApi.getReview(draft.current_review_id, signal)
-        comments = (await strategyApi.listReviewComments(review.id, signal)).items
+        const [commentResult, analysis] = await Promise.all([
+          strategyApi.listReviewComments(review.id, signal),
+          strategyApi.getDeepReview(review.id, signal).catch(() => null),
+        ])
+        comments = commentResult.items
+        deepReview = analysis
       }
     }
 
@@ -176,6 +185,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       revisions,
       review,
       comments,
+      deepReview,
       packages,
       published,
       readiness,
@@ -219,13 +229,15 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let timer = 0
     const inspect = async () => {
       try {
-        const task = await strategyApi.getAgentTask(agentTaskId, controller.signal)
+        const inspection = await strategyApi.getAgentTask(agentTaskId, controller.signal)
+        const task = inspection.task
         if (task.status === 'failed' || task.status === 'cancelled') {
           setState(current => ({
             ...current,
             pendingAgentTaskId: '',
-            error: task.error?.message ?? '本轮 Strategy Agent 任务未完成。',
+            error: task.error?.message ?? inspection.job?.error?.message ?? '本轮 Strategy Agent 任务未完成。',
           }))
+          await reload()
           return
         }
         if (task.status === 'succeeded') {
@@ -426,6 +438,17 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       if (!state.review) throw new Error('当前没有可评论的评审。')
       await strategyApi.addReviewComment(state.review.id, body)
     }),
+    startDeepReview: () => perform('deep-review', async () => {
+      if (!state.review || state.review.status !== 'open') throw new Error('只有进行中的评审可以启动深度分析。')
+      const result = await strategyApi.startDeepReview(
+        state.review.id, state.review.status, createMutationKey('strategy-deep-review'),
+      )
+      setState(current => ({
+        ...current,
+        deepReview: result.analysis,
+        pendingAgentTaskId: result.agent_task.id,
+      }))
+    }, false),
     returnReview: (reason: string) => perform('return-review', async () => {
       if (!state.review) throw new Error('当前没有可退回的评审。')
       await strategyApi.returnReview(state.review.id, reason)
