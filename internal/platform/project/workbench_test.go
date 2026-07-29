@@ -117,3 +117,6 @@ type allowingAuthorizer struct{}
 func (allowingAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
 	return nil
 }
+func (allowingAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
+}

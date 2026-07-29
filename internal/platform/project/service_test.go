@@ -27,6 +27,9 @@ type denyingAuthorizer struct{}
 func (denyingAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
 	return identity.ErrProjectAccessDenied
 }
+func (denyingAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return identity.ErrProjectAccessDenied
+}
 
 type stubProjectStore struct {
 	read      bool

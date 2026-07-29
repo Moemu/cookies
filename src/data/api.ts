@@ -1093,9 +1093,20 @@ export type ApiAuthSession = {
   authenticated: boolean
   user?: {
     id: string
-    email: string
+    email?: string
     displayName: string
   }
+  organization?: {
+    id: string
+    name: string
+    status: string
+  }
+  membership?: {
+    role: 'owner' | 'admin' | 'member' | 'auditor'
+    status: string
+    updatedAt: string
+  }
+  scopes?: string[]
 }
 
 export type ApiProviderConfiguration = {

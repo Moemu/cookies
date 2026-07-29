@@ -1,11 +1,20 @@
 package identity
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+)
+
+var (
+	ErrMembershipNotFound  = errors.New("organization membership not found")
+	ErrMembershipForbidden = errors.New("organization membership operation forbidden")
+	ErrLastOwner           = errors.New("organization must keep an active owner")
+	ErrMembershipConflict  = errors.New("organization membership changed")
+	ErrUserNotFound        = errors.New("user not found")
 )
 
 type Organization struct {
@@ -38,6 +47,40 @@ type CurrentIdentity struct {
 	Organization Organization            `json:"organization"`
 	User         *User                   `json:"user"`
 	Membership   *OrganizationMembership `json:"membership"`
+}
+
+type OrganizationAccess struct {
+	Organization Organization           `json:"organization"`
+	Membership   OrganizationMembership `json:"membership"`
+}
+
+type OrganizationMember struct {
+	User       User                   `json:"user"`
+	Membership OrganizationMembership `json:"membership"`
+}
+
+type UpdateOrganizationMembershipRequest struct {
+	Role              string    `json:"role"`
+	Status            string    `json:"status"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+}
+
+func ValidOrganizationRole(value string) bool {
+	switch value {
+	case "owner", "admin", "member", "auditor":
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidMembershipStatus(value string) bool {
+	switch value {
+	case "active", "suspended", "removed":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o Organization) Validate() error {

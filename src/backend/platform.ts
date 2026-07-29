@@ -28,16 +28,79 @@ export class BackendApiError extends Error {
 export type BackendIdentity = {
   actor: {
     organization_id: string
+    principal: { kind: 'user' | 'service'; id: string }
     scopes: string[]
   }
   organization: {
     id: string
     name: string
+    status: string
   }
   user: null | {
     id: string
     display_name: string
   }
+  membership: null | {
+    organization_id: string
+    user_id: string
+    role: 'owner' | 'admin' | 'member' | 'auditor'
+    status: string
+    updated_at: string
+  }
+}
+
+export type BackendOrganizationAccess = {
+  organization: BackendIdentity['organization']
+  membership: NonNullable<BackendIdentity['membership']>
+}
+
+export type BackendOrganizationMember = {
+  user: NonNullable<BackendIdentity['user']> & { status: string; updated_at: string }
+  membership: NonNullable<BackendIdentity['membership']>
+}
+
+export type BackendProjectMembership = {
+  organization_id: string
+  project_id: string
+  principal_kind: 'user' | 'service'
+  principal_id: string
+  display_name: string
+  role: 'owner' | 'editor' | 'viewer' | 'worker'
+  status: 'active' | 'suspended' | 'removed'
+  created_at: string
+  updated_at: string
+}
+
+export const accountApi = {
+  listOrganizations: () => apiRequest<ListResponse<BackendOrganizationAccess>>('/platform/v1/organizations'),
+  updateProfile: (displayName: string) => apiRequest<NonNullable<BackendIdentity['user']>>('/platform/v1/me', {
+    method: 'PATCH',
+    body: JSON.stringify({ display_name: displayName }),
+  }),
+  listOrganizationMembers: (organizationId: string) =>
+    apiRequest<ListResponse<BackendOrganizationMember>>(`/platform/v1/organizations/${encodeURIComponent(organizationId)}/members`),
+  addOrganizationMember: (organizationId: string, userId: string, role: string) =>
+    apiRequest<BackendOrganizationMember>(`/platform/v1/organizations/${encodeURIComponent(organizationId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+  updateOrganizationMember: (organizationId: string, userId: string, input: { role: string; status: string; expected_updated_at: string }) =>
+    apiRequest<BackendOrganizationMember>(`/platform/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  listProjectMembers: (projectId: string) =>
+    apiRequest<ListResponse<BackendProjectMembership>>(`/platform/v1/projects/${encodeURIComponent(projectId)}/members`),
+  addProjectMember: (projectId: string, input: { principal_kind: 'user' | 'service'; principal_id: string; role: string }) =>
+    apiRequest<BackendProjectMembership>(`/platform/v1/projects/${encodeURIComponent(projectId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateProjectMember: (projectId: string, member: BackendProjectMembership, input: { role: string; status: string }) =>
+    apiRequest<BackendProjectMembership>(`/platform/v1/projects/${encodeURIComponent(projectId)}/members/${member.principal_kind}/${encodeURIComponent(member.principal_id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...input, expected_updated_at: member.updated_at }),
+    }),
 }
 
 export type BackendProject = {
