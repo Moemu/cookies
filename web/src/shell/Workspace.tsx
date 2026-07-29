@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   activeBusinessModule,
   creativeTasksPath,
   deliveryPath,
   destinationForProject,
-  insightsPath,
+  insightEntry,
+  insightGroups,
+  insightPath,
+  insightViewPath,
   projectHomePath,
   projectManagePath,
   routeProjectId,
@@ -19,6 +22,7 @@ import { CreativeImageTextPage } from '../features/creative/CreativeImageTextPag
 import { CreativePreRollPage } from '../features/creative/CreativePreRollPage'
 import { DeliveryWorkspacePage } from '../features/delivery/DeliveryWorkspacePage'
 import { IdentityOrganizationPage } from '../features/identity/IdentityOrganizationPage'
+import { InsightPlaceholderPage } from '../features/insights/InsightPlaceholderPage'
 import { InsightsWorkspacePage } from '../features/insights/InsightsWorkspacePage'
 import { getWorkspaceBootstrap } from '../features/platform/api'
 import type { CurrentIdentity, Project } from '../features/platform/types'
@@ -29,42 +33,79 @@ import { StrategyPackagePage } from '../features/strategy/StrategyPackagePage'
 import { StrategyLanding, StrategyProjectHome } from '../features/strategy/StrategyProjectHome'
 import { StrategyReviewPage } from '../features/strategy/StrategyReviewPage'
 import { StrategyWorkspacePage } from '../features/strategy/StrategyWorkspacePage'
-import { Icon } from './Icon'
+import { Icon, type IconName } from './Icon'
 import { UserMenu } from './UserMenu'
 
 type ShellSidebarProps = {
   module: ReturnType<typeof activeBusinessModule>
+  collapsed: boolean
   currentProjectId: string
+  currentProjectName: string
   canDelivery: boolean
   canInsights: boolean
+  onToggleCollapsed: () => void
 }
 
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? 'nav-item nav-item--active' : 'nav-item'
 }
 
-function ShellSidebar({ module, currentProjectId, canDelivery, canInsights }: ShellSidebarProps) {
+const moduleLabels: Record<ReturnType<typeof activeBusinessModule>, string> = {
+  admin: '管理',
+  creative: '创意创作',
+  delivery: '智能投放',
+  insights: '素材洞察',
+  projects: '项目中心',
+  strategy: '需求与策略',
+}
+
+const projectStatusLabels: Record<Project['status'], string> = {
+  active: '进行中',
+  archived: '已归档',
+  draft: '草稿',
+}
+
+function ShellSidebar({
+  collapsed, module, currentProjectId, currentProjectName, canDelivery, canInsights, onToggleCollapsed,
+}: ShellSidebarProps) {
+  // 侧栏底部原来打的是项目主键（project_local 这种），对使用者没有意义；改成项目名。
+  const footer = <div className="sidebar__footer">
+    <span>当前项目</span><strong>{currentProjectName || currentProjectId || '未选择'}</strong>
+  </div>
   const fallback = '/projects'
   const home = currentProjectId ? projectHomePath(currentProjectId) : fallback
   const strategy = currentProjectId ? strategyPath(currentProjectId) : fallback
   const creative = currentProjectId ? creativeTasksPath(currentProjectId) : fallback
   const delivery = currentProjectId ? deliveryPath(currentProjectId) : fallback
-  const insights = currentProjectId ? insightsPath(currentProjectId) : fallback
+
+  // 收起后只留图标，宽度让给正文；标题、分组标签、项目页脚都跟着隐藏。
+  const shell = (options: { icon: IconName; label: string; navLabel?: string; showFooter?: boolean }, body: ReactNode) =>
+    <aside className="sidebar" aria-label={`${options.navLabel || options.label}导航`}>
+      <div className="sidebar__module" title={options.label}><Icon name={options.icon} /><strong>{options.label}</strong></div>
+      {body}
+      {options.showFooter === false ? null : footer}
+      <button
+        aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
+        className="sidebar__collapse"
+        onClick={onToggleCollapsed}
+        type="button"
+      >
+        <Icon name="menu" /><span>{collapsed ? '展开侧栏' : '收起侧栏'}</span>
+      </button>
+    </aside>
 
   if (module === 'admin') {
-    return <aside className="sidebar" aria-label="管理导航">
-      <div className="sidebar__module"><Icon name="settings" /><strong>管理</strong></div>
+    return shell({ icon: 'settings', label: '管理', showFooter: false }, <>
       <span className="sidebar__section-label">组织</span>
       <nav className="module-nav">
         <NavLink className={navClass} end to="/admin"><Icon name="settings" /><span>组织与访问</span></NavLink>
         <NavLink className={navClass} to="/account/profile"><Icon name="user" /><span>个人资料</span></NavLink>
       </nav>
-    </aside>
+    </>)
   }
 
   if (module === 'creative') {
-    return <aside className="sidebar" aria-label="创意创作导航">
-      <div className="sidebar__module"><Icon name="pen" /><strong>创意创作</strong></div>
+    return shell({ icon: 'pen', label: '创意创作' }, <>
       <span className="sidebar__section-label">工作</span>
       <nav className="module-nav">
         <NavLink className={navClass} end to={creative}><Icon name="list" /><span>创意任务</span></NavLink>
@@ -73,13 +114,11 @@ function ShellSidebar({ module, currentProjectId, canDelivery, canInsights }: Sh
       <nav className="module-nav">
         <NavLink className={navClass} to={home}><Icon name="home" /><span>项目进度</span></NavLink>
       </nav>
-      <div className="sidebar__footer"><span>PROJECT</span><strong>{currentProjectId || '未选择'}</strong></div>
-    </aside>
+    </>)
   }
 
   if (module === 'strategy') {
-    return <aside className="sidebar" aria-label="需求与策略导航">
-      <div className="sidebar__module"><Icon name="target" /><strong>需求与策略</strong></div>
+    return shell({ icon: 'target', label: '需求与策略' }, <>
       <span className="sidebar__section-label">工作</span>
       <nav className="module-nav">
         <NavLink className={navClass} to={strategy}><Icon name="target" /><span>策略工作区</span></NavLink>
@@ -88,13 +127,11 @@ function ShellSidebar({ module, currentProjectId, canDelivery, canInsights }: Sh
       <nav className="module-nav">
         <NavLink className={navClass} to={home}><Icon name="home" /><span>项目进度</span></NavLink>
       </nav>
-      <div className="sidebar__footer"><span>PROJECT</span><strong>{currentProjectId || '未选择'}</strong></div>
-    </aside>
+    </>)
   }
 
   if (module === 'delivery' && canDelivery) {
-    return <aside className="sidebar" aria-label="智能投放导航">
-      <div className="sidebar__module"><Icon name="send" /><strong>智能投放</strong></div>
+    return shell({ icon: 'send', label: '智能投放' }, <>
       <span className="sidebar__section-label">投放</span>
       <nav className="module-nav">
         <NavLink className={navClass} to={delivery}><Icon name="list" /><span>投放计划</span></NavLink>
@@ -102,26 +139,28 @@ function ShellSidebar({ module, currentProjectId, canDelivery, canInsights }: Sh
         <NavLink className={navClass} to={deliveryPath(currentProjectId, 'accounts')}><Icon name="user" /><span>广告账户</span></NavLink>
         <NavLink className={navClass} to={deliveryPath(currentProjectId, 'optimization')}><Icon name="target" /><span>优化建议</span></NavLink>
       </nav>
-      <div className="sidebar__footer"><span>PROJECT</span><strong>{currentProjectId || '未选择'}</strong></div>
-    </aside>
+    </>)
   }
 
   if (module === 'insights' && canInsights) {
-    return <aside className="sidebar" aria-label="素材洞察导航">
-      <div className="sidebar__module"><Icon name="chart" /><strong>素材洞察</strong></div>
-      <span className="sidebar__section-label">分析</span>
+    return shell({ icon: 'chart', label: '素材洞察' }, insightGroups.map((group) => <Fragment key={group.label}>
+      <span className="sidebar__section-label">{group.label}</span>
       <nav className="module-nav">
-        <NavLink className={navClass} to={insights}><Icon name="target" /><span>投前洞察</span></NavLink>
-        <NavLink className={navClass} to={insightsPath(currentProjectId, 'performance')}><Icon name="chart" /><span>投后分析</span></NavLink>
-        <NavLink className={navClass} to={insightsPath(currentProjectId, 'reports')}><Icon name="list" /><span>复盘报告</span></NavLink>
-        <NavLink className={navClass} to={insightsPath(currentProjectId, 'experiences')}><Icon name="database" /><span>经验沉淀</span></NavLink>
+        {group.entries.map((entry) => <NavLink
+          className={navClass}
+          key={entry.key}
+          title={collapsed ? entry.label : undefined}
+          to={currentProjectId ? insightPath(currentProjectId, entry.key) : fallback}
+        >
+          <Icon name={entry.icon} />
+          <span>{entry.label}</span>
+          {entry.built ? null : <small className="nav-item__badge">未开放</small>}
+        </NavLink>)}
       </nav>
-      <div className="sidebar__footer"><span>PROJECT</span><strong>{currentProjectId || '未选择'}</strong></div>
-    </aside>
+    </Fragment>))
   }
 
-  return <aside className="sidebar" aria-label="项目导航">
-    <div className="sidebar__module"><Icon name="home" /><strong>项目中心</strong></div>
+  return shell({ icon: 'home', label: '项目中心', navLabel: '项目' }, <>
     <span className="sidebar__section-label">项目</span>
     <nav className="module-nav">
       <NavLink className={navClass} end to="/projects"><Icon name="list" /><span>全部项目</span></NavLink>
@@ -130,8 +169,7 @@ function ShellSidebar({ module, currentProjectId, canDelivery, canInsights }: Sh
         <NavLink className={navClass} to={projectManagePath(currentProjectId)}><Icon name="settings" /><span>项目管理</span></NavLink>
       </> : null}
     </nav>
-    <div className="sidebar__footer"><span>PROJECT</span><strong>{currentProjectId || '未选择'}</strong></div>
-  </aside>
+  </>)
 }
 
 function ProjectMenu({
@@ -176,7 +214,7 @@ function ProjectMenu({
         <Link onClick={onClose} role="menuitem" to={projectManagePath(currentProjectId)}><span>项目管理</span><small>身份与共享上下文</small></Link>
         <Link onClick={onClose} role="menuitem" to={strategyPath(currentProjectId)}><span>需求与策略</span><small>Brief 与策略交付</small></Link>
         <Link onClick={onClose} role="menuitem" to={creativeTasksPath(currentProjectId)}><span>创意创作</span><small>图文任务与交付</small></Link>
-        {canInsights ? <Link onClick={onClose} role="menuitem" to={insightsPath(currentProjectId)}><span>素材洞察</span><small>投前引用与投后复盘</small></Link> : null}
+        {canInsights ? <Link onClick={onClose} role="menuitem" to={insightPath(currentProjectId)}><span>素材洞察</span><small>投前引用与投后复盘</small></Link> : null}
         {canDelivery ? <Link onClick={onClose} role="menuitem" to={deliveryPath(currentProjectId)}><span>智能投放</span><small>计划、审批与执行证据</small></Link> : null}
       </div>
     </> : null}
@@ -187,12 +225,73 @@ function ProjectMenu({
   </div>
 }
 
+/**
+ * 顶栏搜索只搜真实拿得到的东西：当前身份能看到的项目。
+ * 选中一条就带着当前页面位置切过去，不会把你踢回首页。
+ */
+function GlobalSearch({ location, projects }: { location: string; projects: Project[] }) {
+  const [keyword, setKeyword] = useState('')
+  const [open, setOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const typing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable
+      if (event.key === '/' && !typing) {
+        event.preventDefault()
+        inputRef.current?.focus()
+      }
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const query = keyword.trim().toLowerCase()
+  const results = query
+    ? projects.filter((project) => `${project.name} ${project.id}`.toLowerCase().includes(query)).slice(0, 6)
+    : []
+
+  return <div className={open ? 'global-search global-search--open' : 'global-search'}>
+    <Icon name="search" />
+    <input
+      aria-label="搜索项目"
+      onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+      onChange={(event) => {
+        setKeyword(event.target.value)
+        setOpen(true)
+      }}
+      onFocus={() => setOpen(true)}
+      placeholder="搜索项目"
+      ref={inputRef}
+      value={keyword}
+    />
+    <kbd>/</kbd>
+    {open && query ? <div aria-label="搜索结果" className="global-search__results" role="listbox">
+      {results.map((project) => <Link
+        key={project.id}
+        onClick={() => {
+          setKeyword('')
+          setOpen(false)
+        }}
+        role="option"
+        to={destinationForProject(location, project.id)}
+      >
+        <b>{project.name}</b><small>{projectStatusLabels[project.status]}</small>
+      </Link>)}
+      {results.length === 0 ? <p>没有匹配的项目</p> : null}
+    </div> : null}
+  </div>
+}
+
 export function Workspace() {
   const location = useLocation()
   const navigate = useNavigate()
   const projectId = routeProjectId(location.pathname)
   const activeModule = activeBusinessModule(location.pathname)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [identity, setIdentity] = useState<CurrentIdentity | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
@@ -214,12 +313,12 @@ export function Workspace() {
   const currentProjectId = projectId || currentProject?.id || ''
   const currentStrategyPath = currentProjectId ? strategyPath(currentProjectId) : '/projects'
   const currentCreativePath = currentProjectId ? creativeTasksPath(currentProjectId) : '/projects'
-  const currentInsightsPath = currentProjectId ? insightsPath(currentProjectId) : '/projects'
+  const currentInsightsPath = currentProjectId ? insightPath(currentProjectId) : '/projects'
   const currentDeliveryPath = currentProjectId ? deliveryPath(currentProjectId) : '/projects'
   const canInsights = Boolean(identity?.actor.scopes.includes('insights.read'))
   const canDelivery = Boolean(identity?.actor.scopes.includes('delivery.read'))
 
-  return <div className="app-shell">
+  return <div className={sidebarCollapsed ? 'app-shell app-shell--sidebar-collapsed' : 'app-shell'}>
     <header className="topbar">
       <div className="topbar__primary">
         <Link className="wordmark" to="/projects" aria-label="cookies 项目中心"><span className="wordmark__symbol" aria-hidden="true">◎</span>cookies</Link>
@@ -234,6 +333,12 @@ export function Workspace() {
           <button aria-expanded={projectMenuOpen} className="project-trigger" onClick={() => setProjectMenuOpen((open) => !open)} type="button">
             <span>{currentProject?.name || '选择项目'}</span><span className="chevron" aria-hidden="true">⌄</span>
           </button>
+          {/* 顶栏第二行说明"现在站在哪"：组织 → 项目 → 模块，只列真实拿得到的三层。 */}
+          <div className="top-context-chain" aria-label="当前组织、项目与模块">
+            <span>{identity?.organization.name || '组织未连接'}</span>
+            <span>{currentProject?.name || '未选择项目'}</span>
+            <span>{moduleLabels[activeModule]}</span>
+          </div>
           {projectMenuOpen ? <ProjectMenu
             currentProject={currentProject}
             currentProjectId={currentProjectId}
@@ -250,12 +355,21 @@ export function Workspace() {
         </div>
       </div>
       <div className="topbar__utilities">
+        <GlobalSearch location={location.pathname} projects={projects} />
         <Link aria-label="管理" className="utility-button" title="组织与访问" to="/admin"><Icon name="settings" /></Link>
         <UserMenu identity={identity} />
       </div>
     </header>
     <div className="shell-body">
-      <ShellSidebar canDelivery={canDelivery} canInsights={canInsights} currentProjectId={currentProjectId} module={activeModule} />
+      <ShellSidebar
+        canDelivery={canDelivery}
+        canInsights={canInsights}
+        collapsed={sidebarCollapsed}
+        currentProjectId={currentProjectId}
+        currentProjectName={currentProject?.name || ''}
+        module={activeModule}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+      />
       <div className="workspace-frame">
         {bootstrapError ? <div className="workspace-alert" role="alert">身份与项目列表暂不可用：{bootstrapError}</div> : null}
         <main className="workspace">
@@ -284,10 +398,9 @@ export function Workspace() {
             <Route path="/projects/:projectId/delivery/monitoring" element={canDelivery ? <DeliveryWorkspacePage project={currentProject} view="monitoring" /> : <ForbiddenPage />} />
             <Route path="/projects/:projectId/delivery/accounts" element={canDelivery ? <DeliveryWorkspacePage project={currentProject} view="accounts" /> : <ForbiddenPage />} />
             <Route path="/projects/:projectId/delivery/optimization" element={canDelivery ? <DeliveryWorkspacePage project={currentProject} view="optimization" /> : <ForbiddenPage />} />
-            <Route path="/projects/:projectId/insights/prelaunch" element={canInsights ? <InsightsWorkspacePage project={currentProject} view="prelaunch" /> : <ForbiddenPage />} />
-            <Route path="/projects/:projectId/insights/performance" element={canInsights ? <InsightsWorkspacePage project={currentProject} view="performance" /> : <ForbiddenPage />} />
-            <Route path="/projects/:projectId/insights/reports" element={canInsights ? <InsightsWorkspacePage project={currentProject} view="reports" /> : <ForbiddenPage />} />
-            <Route path="/projects/:projectId/insights/experiences" element={canInsights ? <InsightsWorkspacePage project={currentProject} view="experiences" /> : <ForbiddenPage />} />
+            <Route path="/projects/:projectId/insight" element={<InsightSectionRedirect />} />
+            <Route path="/projects/:projectId/insight/:insightSection" element={<InsightSectionRedirect />} />
+            <Route path="/projects/:projectId/insight/:insightSection/:insightView" element={canInsights ? <InsightRoute project={currentProject} /> : <ForbiddenPage />} />
             <Route path="/account/profile" element={<AccountPage identity={identity} view="profile" />} />
             <Route path="/account/security" element={<AccountPage identity={identity} view="security" />} />
             <Route path="/account/preferences" element={<AccountPage identity={identity} view="preferences" />} />
@@ -295,6 +408,13 @@ export function Workspace() {
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </main>
+        {/* 底部常驻状态条：只放项目本身真实带的字段，进度百分比要另外拉模块数据，这里不假造。 */}
+        {currentProject ? <footer className="statusbar">
+          <span>项目：{currentProject.name}</span>
+          <span>状态：{projectStatusLabels[currentProject.status]}</span>
+          <span>更新时间：{new Date(currentProject.updated_at).toLocaleString('zh-CN', { hour12: false })}</span>
+          <strong>当前模块：{moduleLabels[activeModule]}</strong>
+        </footer> : null}
       </div>
     </div>
     <NewProjectDialog
@@ -328,6 +448,25 @@ function LegacyStrategyWorkspaceRedirect() {
 function LegacyCreativeRedirect() {
   const { projectId = '' } = useParams()
   return <Navigate replace to={creativeTasksPath(projectId)} />
+}
+
+// 一级入口只是二级视图的容器，进来后落到这一组的第一个视图。
+function InsightSectionRedirect() {
+  const { insightSection = 'prelaunch', projectId = '' } = useParams()
+  const entry = insightEntry(insightSection)
+  if (!entry) return <NotFoundPage />
+  return <Navigate replace to={insightViewPath(projectId, entry.key)} />
+}
+
+// 导航规范里的视图全部可达；没做完的那些渲染「尚未开放」说明页，不放假数据。
+function InsightRoute({ project }: { project?: Project }) {
+  const { insightSection = '', insightView = '', projectId = '' } = useParams()
+  const entry = insightEntry(insightSection)
+  if (!entry) return <NotFoundPage />
+  const view = entry.views.find((item) => item.key === insightView)
+  if (!view) return <Navigate replace to={insightViewPath(projectId, entry.key)} />
+  if (!view.built) return <InsightPlaceholderPage entry={entry} project={project} view={view.key} />
+  return <InsightsWorkspacePage entry={entry} project={project} view={view.key} />
 }
 
 function NotFoundPage() {

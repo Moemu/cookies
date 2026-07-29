@@ -39,10 +39,19 @@ export type InsightReport = {
   updated_at: string
 }
 
+// 待确认 → 已确认 → 待复审 → 已失效。只有已确认的经验可以被下游引用。
+export type ExperienceStatus = 'pending' | 'confirmed' | 'needs_review' | 'retired'
+
+export type ExperienceReferenceOutcome = 'referenced' | 'adopted' | 'modified' | 'rejected'
+
 export type Experience = {
   id: string
   organization_id: string
   project_id: string
+  lineage_id: string
+  revision: number
+  supersedes_id?: string
+  superseded_by_id?: string
   report_id: string
   source_execution_id: string
   source_evidence_id: string
@@ -50,11 +59,50 @@ export type Experience = {
   conclusion: string
   conditions: string[]
   counterexamples: string[]
-  status: 'confirmed'
+  status: ExperienceStatus
+  status_reason: string
+  status_changed_by: string
+  status_changed_at?: string
+  confirmed_by?: string
+  confirmed_at?: string
   version: number
   created_by: string
   created_at: string
   updated_at: string
+}
+
+export type ExperienceAudit = {
+  id: string
+  organization_id: string
+  project_id: string
+  experience_id: string
+  from_status: ExperienceStatus | ''
+  to_status: ExperienceStatus
+  reason: string
+  actor_id: string
+  created_at: string
+}
+
+export type ExperienceReference = {
+  id: string
+  organization_id: string
+  project_id: string
+  experience_id: string
+  consumer_kind: string
+  consumer_id: string
+  outcome: ExperienceReferenceOutcome
+  note: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type RecordExperienceReferenceInput = {
+  consumer_kind: string
+  consumer_id: string
+  outcome: ExperienceReferenceOutcome
+  note?: string
 }
 
 export type PreLaunchInsight = {
