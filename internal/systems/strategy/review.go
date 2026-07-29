@@ -251,6 +251,12 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return PackageVersion{}, false, err
 	}
+	hash, _ := contract.CanonicalJSONHash(request)
+	var prior PackageVersion
+	found, err := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.approve", key, hash, &prior)
+	if found || err != nil {
+		return prior, found, err
+	}
 	reviewForAuthorization, err := s.GetReview(ctx, actor, request.ReviewID)
 	if err != nil {
 		return PackageVersion{}, false, err
@@ -262,12 +268,6 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	projectContext, err := s.project(ctx, actor, draft.ProjectID)
 	if err != nil {
 		return PackageVersion{}, false, err
-	}
-	hash, _ := contract.CanonicalJSONHash(request)
-	var prior PackageVersion
-	found, err := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.approve", key, hash, &prior)
-	if found || err != nil {
-		return prior, found, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
