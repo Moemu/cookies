@@ -32,6 +32,8 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	server := &Server{Service: service, Agents: agents, Jobs: jobs, PollPeriod: time.Second}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/strategy/v1/workspaces", server.createWorkspace)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/tasks", server.createTask)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/tasks", server.listTasks)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/workspaces", server.listWorkspaces)
 	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}", server.getWorkspace)
 	mux.HandleFunc("POST /api/strategy/v1/conversations", server.createConversation)
@@ -52,6 +54,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/generation-readiness", server.getGenerationReadiness)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/generation-probe", server.probeGeneration)
 	mux.HandleFunc("GET /api/strategy/v1/skills", server.listSkills)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}", server.getStrategy)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/generation-metadata", server.getGenerationMetadata)
@@ -106,6 +109,40 @@ func (s *Server) createWorkspace(writer http.ResponseWriter, request *http.Reque
 	writeJSON(writer, http.StatusCreated, value)
 }
 
+func (s *Server) createTask(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.CreateTaskRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.CreateTask(
+		request.Context(),
+		mustActor(request),
+		idempotencyKey(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writer.Header().Set("Location", "/api/strategy/v1/tasks/"+value.Task.ID)
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListTasks(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
 func (s *Server) listWorkspaces(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.Service.ListWorkspaces(request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")))
 	if err != nil {
@@ -122,6 +159,13 @@ func (s *Server) getWorkspace(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) getGenerationReadiness(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetGenerationReadiness(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) probeGeneration(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.ProbeGeneration(
 		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
 	)
 	writeResult(writer, value, err)

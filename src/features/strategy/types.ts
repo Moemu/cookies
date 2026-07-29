@@ -27,6 +27,23 @@ export type StrategyTask = {
   version: number
 }
 
+export type StrategyTaskListItem = {
+  task: StrategyTask & { created_at: string; updated_at: string }
+  name: string
+  objective: string
+  brief_status: BriefDraft['status']
+  brief_ready: boolean
+  strategy_status?: StrategyDraft['status']
+  review_status?: Review['status']
+}
+
+export type StrategyTaskBundle = {
+  workspace: Workspace
+  conversation: Conversation
+  task: StrategyTask
+  brief_draft: BriefDraft
+}
+
 export type Message = {
   id: string
   conversation_id: string
@@ -163,8 +180,23 @@ export type GenerationReadiness = {
   upstream_model?: string
   route_revision_id?: string
   response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  api_mode?: 'chat_completions' | 'responses'
+  background?: boolean
   prompt_version: string
   reason_code?: string
+}
+
+export type GenerationProbe = {
+  ready: boolean
+  provider_code: string
+  model_alias: string
+  model_version: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  api_mode?: 'chat_completions' | 'responses'
+  background?: boolean
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
+  latency_ms: number
 }
 
 export type GenerationMetadata = {

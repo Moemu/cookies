@@ -82,6 +82,28 @@ type Task struct {
 	UpdatedAt          time.Time               `json:"updated_at"`
 }
 
+type CreateTaskRequest struct {
+	Name      string `json:"name"`
+	Objective string `json:"objective"`
+}
+
+type TaskListItem struct {
+	Task           Task   `json:"task"`
+	Name           string `json:"name"`
+	Objective      string `json:"objective"`
+	BriefStatus    string `json:"brief_status"`
+	BriefReady     bool   `json:"brief_ready"`
+	StrategyStatus string `json:"strategy_status,omitempty"`
+	ReviewStatus   string `json:"review_status,omitempty"`
+}
+
+type TaskBundle struct {
+	Workspace    Workspace    `json:"workspace"`
+	Conversation Conversation `json:"conversation"`
+	Task         Task         `json:"task"`
+	BriefDraft   BriefDraft   `json:"brief_draft"`
+}
+
 type BriefDocument struct {
 	ContractVersion string           `json:"contract_version"`
 	Brand           BriefBrand       `json:"brand,omitempty"`

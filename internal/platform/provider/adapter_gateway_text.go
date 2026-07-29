@@ -49,6 +49,9 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		}
 		messages = append(messages, map[string]string{"role": string(message.Role), "content": message.Content})
 	}
+	if route.TextAPIMode == TextAPIResponses {
+		return a.generateResponses(ctx, request, route, token, messages)
+	}
 	body := map[string]any{"model": route.UpstreamModel, "messages": messages}
 	if len(request.OutputJSONSchema) > 0 {
 		var schema any
@@ -192,7 +195,8 @@ func (a *AdapterGatewayTextAdapter) InspectTextRoute(ctx context.Context, organi
 	}
 	return TextRouteInspection{
 		ModelAlias: modelAlias, UpstreamModel: route.UpstreamModel,
-		RouteRevisionID: route.RouteRevisionID, ResponseMode: route.TextResponseMode, Ready: true,
+		RouteRevisionID: route.RouteRevisionID, ResponseMode: route.TextResponseMode,
+		APIMode: route.TextAPIMode, Background: route.Background, Ready: true,
 	}, nil
 }
 

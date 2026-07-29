@@ -7,6 +7,7 @@ import type {
   ConversationMemory,
   DraftRevision,
   GenerationMetadata,
+  GenerationProbe,
   GenerationReadiness,
   KnowledgeDocument,
   Message,
@@ -18,6 +19,8 @@ import type {
   SkillRun,
   SkillDescriptor,
   StrategyDraft,
+  StrategyTaskBundle,
+  StrategyTaskListItem,
   Workspace,
   WorkspaceDetail,
 } from './types'
@@ -40,6 +43,16 @@ export const strategyApi = {
   listWorkspaces: (projectId: string, signal?: AbortSignal) =>
     apiRequest<{ items: Workspace[] }>(`${root}/projects/${encodeURIComponent(projectId)}/workspaces`, { signal }),
 
+  listTasks: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<{ items: StrategyTaskListItem[] }>(`${root}/projects/${encodeURIComponent(projectId)}/tasks`, { signal }),
+
+  createTask: (projectId: string, name: string, objective: string, mutationKey?: string) =>
+    apiRequest<StrategyTaskBundle>(`${root}/projects/${encodeURIComponent(projectId)}/tasks`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ name, objective }),
+    }),
+
   createWorkspace: (projectId: string, name: string, mutationKey?: string) =>
     apiRequest<Workspace>(`${root}/workspaces`, {
       method: 'POST',
@@ -49,6 +62,11 @@ export const strategyApi = {
 
   getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
     apiRequest<WorkspaceDetail>(`${root}/workspaces/${encodeURIComponent(workspaceId)}`, { signal }),
+
+  probeGeneration: (projectId: string) =>
+    apiRequest<GenerationProbe>(`${root}/projects/${encodeURIComponent(projectId)}/generation-probe`, {
+      method: 'POST',
+    }),
 
   createConversation: (projectId: string, workspaceId: string, mutationKey?: string) =>
     apiRequest<ConversationBundle>(`${root}/conversations`, {

@@ -747,7 +747,7 @@ export async function listKanonTasks(projectId: string): Promise<ApiBusinessTask
 }
 
 export function unsupportedKanonWrite(action: string): Error {
-  return new Error(`${action}尚未接入当前 Go 后端；页面入口已保留，待对应领域契约实现后启用。`)
+  return new Error(`${action}暂时无法完成。请从对应工作区继续，或稍后重试。`)
 }
 
 function mapBackendProject(project: BackendProject, objective: string): ApiProject {

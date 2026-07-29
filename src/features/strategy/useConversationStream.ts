@@ -12,9 +12,19 @@ export function useConversationStream(conversationId: string | undefined, onEven
     const controller = new AbortController()
     let lastEventId = sessionStorage.getItem(`strategy:last-event:${conversationId}`) || ''
     let retryTimer = 0
+    let invalidateTimer = 0
+    let retryAttempt = 0
 
     const retry = () => {
-      if (!controller.signal.aborted) retryTimer = window.setTimeout(connect, 1200)
+      if (!controller.signal.aborted) {
+        const delay = Math.min(10_000, 800 * (2 ** retryAttempt)) + Math.round(Math.random() * 250)
+        retryAttempt += 1
+        retryTimer = window.setTimeout(connect, delay)
+      }
+    }
+    const invalidate = () => {
+      window.clearTimeout(invalidateTimer)
+      invalidateTimer = window.setTimeout(() => callback.current(), 180)
     }
     const connect = async () => {
       try {
@@ -28,16 +38,18 @@ export function useConversationStream(conversationId: string | undefined, onEven
         if (response.status === 410) {
           lastEventId = ''
           sessionStorage.removeItem(`strategy:last-event:${conversationId}`)
-          callback.current()
+          invalidate()
           retry()
           return
         }
+        if (!response.ok) throw new Error(`Strategy event stream failed (${response.status})`)
+        retryAttempt = 0
         await readSSE(response, message => {
           if (message.id) {
             lastEventId = message.id
             sessionStorage.setItem(`strategy:last-event:${conversationId}`, lastEventId)
           }
-          callback.current()
+          invalidate()
         }, controller.signal)
         retry()
       } catch {
@@ -49,6 +61,7 @@ export function useConversationStream(conversationId: string | undefined, onEven
     return () => {
       controller.abort()
       window.clearTimeout(retryTimer)
+      window.clearTimeout(invalidateTimer)
     }
   }, [conversationId])
 }

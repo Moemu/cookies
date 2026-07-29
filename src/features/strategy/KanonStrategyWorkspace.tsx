@@ -30,9 +30,9 @@ import type {
   StrategyDraft,
 } from './types'
 
-export function KanonStrategyWorkspace({ activeView }: { activeView: string }) {
+export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView: string; workspaceId?: string }) {
   const { currentProject } = useProject()
-  const { state, actions } = useStrategyWorkspace(currentProject.id)
+  const { state, actions } = useStrategyWorkspace(currentProject.id, workspaceId)
 
   if (state.isLoading) {
     return <div className="kanon-strategy-state" role="status">
@@ -91,9 +91,11 @@ export function KanonStrategyWorkspace({ activeView }: { activeView: string }) {
           busy={state.busy}
           draft={state.draft}
           readiness={state.readiness}
+          probe={state.probe}
           briefReady={Boolean(state.briefVersion)}
           onGenerate={actions.generateStrategy}
           onPatch={actions.patchStrategySection}
+          onProbe={actions.probeGeneration}
           onRevise={actions.reviseStrategy}
           onSubmit={actions.submitStrategy}
           pending={Boolean(state.pendingAgentTaskId)}
@@ -191,7 +193,7 @@ function OverviewPane({ state }: { state: WorkspaceState }) {
     </div>
     <div className="kanon-strategy-note">
       <ShieldCheck size={18}/>
-      <div><b>当前真实文本模型保持关闭</b><p>先验证持久化、版本、SSE、评审和恢复；页面稳定后只切换服务端 Provider。</p></div>
+      <div><b>{state.probe?.ready ? `真实模型已验证：${state.probe.model_version}` : '真实模型由服务端路由管理'}</b><p>{state.probe?.ready ? `结构化输出通过，耗时 ${state.probe.latency_ms} ms；路由与用量均已记录。` : '在“策略”步骤运行真实模型探针，可验证当前路由、结构化输出与凭据状态。'}</p></div>
     </div>
   </section>
 }
@@ -210,12 +212,13 @@ function ConversationPane({ brief, busy, messages, onSend, pending }: {
     if (list) list.scrollTop = list.scrollHeight
   }, [messages, pending])
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     const value = content.trim()
     if (!value) return
     setContent('')
-    void onSend(value)
+    const sent = await onSend(value)
+    if (!sent) setContent(current => current.trim() ? current : value)
   }
 
   return <section className="kanon-conversation">
@@ -241,11 +244,17 @@ function ConversationPane({ brief, busy, messages, onSend, pending }: {
       <textarea
         id="kanon-strategy-message"
         onChange={event => setContent(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault()
+            event.currentTarget.form?.requestSubmit()
+          }
+        }}
         placeholder="例如：目标是在小红书建立新品认知，预算 30 万，首期四周……"
         rows={3}
         value={content}
       />
-      <div><small>内容会写入真实 Conversation</small><button className="primary-button" disabled={busy || !content.trim()} type="submit"><Send size={15}/>{busy ? '处理中…' : '发送'}</button></div>
+      <div><small>内容会写入真实 Conversation · Ctrl/⌘ + Enter 发送</small><button className="primary-button" disabled={busy || !content.trim()} type="submit"><Send size={15}/>{busy ? '处理中…' : '发送'}</button></div>
     </form>
   </section>
 }
@@ -328,15 +337,17 @@ function EditableField({ busy, disabled, label, multiline, onSave, state, value 
   </label>
 }
 
-function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onRevise, onSubmit, pending, readiness }: {
+function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, onRevise, onSubmit, pending, probe, readiness }: {
   briefReady: boolean
   busy: string
   draft: StrategyDraft | null
   onGenerate: () => Promise<boolean>
   onPatch: (section: string, value: unknown) => Promise<boolean>
+  onProbe: () => Promise<boolean>
   onRevise: (instruction: string) => Promise<boolean>
   onSubmit: () => Promise<boolean>
   pending: boolean
+  probe: WorkspaceState['probe']
   readiness: WorkspaceState['readiness']
 }) {
   const [section, setSection] = useState('objective')
@@ -357,7 +368,12 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onRevise, 
       <Sparkles size={28}/>
       <h2>生成第一版策略</h2>
       <p>{briefReady ? '已确认 Brief 将作为不可变输入，生成结果会保存为 Strategy revision。' : '请先完成并确认 Brief。'}</p>
-      <div className="kanon-generation-mode"><span>生成模式</span><b>{readiness?.generation_mode ?? '不可用'}</b><small>{readiness?.reason_code ?? '真实文本模型当前保持关闭'}</small></div>
+      <div className="kanon-generation-mode">
+        <span>生成模式</span>
+        <b>{probe?.ready ? probe.model_version : readiness?.generation_mode ?? '不可用'}</b>
+        <small>{probe?.ready ? `真实探针通过 · ${probe.latency_ms} ms · ${probe.api_mode ?? '默认 API'}` : readiness?.reason_code ?? '尚未执行真实模型探针'}</small>
+        {readiness?.generation_mode === 'provider' ? <button className="text-button" disabled={Boolean(busy)} onClick={() => void onProbe()}>{busy === 'generation-probe' ? '正在验证…' : '验证真实模型'}</button> : null}
+      </div>
       <button className="primary-button" disabled={!briefReady || Boolean(busy)} onClick={() => void onGenerate()}><Sparkles size={16}/>{busy === 'generate-strategy' ? '正在创建…' : '生成第一版策略'}</button>
     </section>
   }

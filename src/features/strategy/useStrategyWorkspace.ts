@@ -8,6 +8,7 @@ import type {
   ConversationMemory,
   DraftRevision,
   GenerationMetadata,
+  GenerationProbe,
   GenerationReadiness,
   KnowledgeDocument,
   Message,
@@ -35,6 +36,7 @@ export type StrategyWorkspaceState = {
   published: PackageVersion | null
   packages: PackageVersion[]
   readiness: GenerationReadiness | null
+  probe: GenerationProbe | null
   metadata: GenerationMetadata | null
   skillRuns: SkillRun[]
   documents: KnowledgeDocument[]
@@ -52,7 +54,7 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : '策略工作区操作失败。'
 }
 
-export function useStrategyWorkspace(projectId: string) {
+export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '') {
   const [state, setState] = useState<StrategyWorkspaceState>({
     workspaces: [],
     detail: null,
@@ -67,6 +69,7 @@ export function useStrategyWorkspace(projectId: string) {
     published: null,
     packages: [],
     readiness: null,
+    probe: null,
     metadata: null,
     skillRuns: [],
     documents: [],
@@ -79,11 +82,12 @@ export function useStrategyWorkspace(projectId: string) {
   const currentWorkspaceId = useRef('')
   const approvalMutationKey = useRef('')
 
-  const load = useCallback(async (signal?: AbortSignal, preferredWorkspaceId?: string) => {
+  const load = useCallback(async (signal?: AbortSignal, requestedWorkspaceId?: string) => {
     const workspaceResult = await strategyApi.listWorkspaces(projectId, signal)
     const workspaces = [...workspaceResult.items].sort((left, right) =>
       Number(right.is_primary) - Number(left.is_primary) || right.version - left.version)
-    const targetId = preferredWorkspaceId
+    const targetId = requestedWorkspaceId
+      || preferredWorkspaceId
       || currentWorkspaceId.current
       || workspaces.find(workspace => workspace.is_primary)?.id
       || workspaces[0]?.id
@@ -140,7 +144,7 @@ export function useStrategyWorkspace(projectId: string) {
     let metadata: GenerationMetadata | null = null
     let review: Review | null = null
     let comments: ReviewComment[] = []
-    let published: PackageVersion | null = packages.find(value => value.status === 'published') ?? null
+    let published: PackageVersion | null = null
     if (task?.current_strategy_id) {
       draft = await strategyApi.getStrategy(task.current_strategy_id, signal)
       if (draft.current_revision > 0) {
@@ -153,7 +157,7 @@ export function useStrategyWorkspace(projectId: string) {
       }
       published = packages
         .filter(value => value.status === 'published' && value.snapshot.strategy_id === draft?.id)
-        .sort((left, right) => right.version - left.version)[0] ?? published
+        .sort((left, right) => right.version - left.version)[0] ?? null
       if (draft.current_review_id) {
         review = await strategyApi.getReview(draft.current_review_id, signal)
         comments = (await strategyApi.listReviewComments(review.id, signal)).items
@@ -178,11 +182,13 @@ export function useStrategyWorkspace(projectId: string) {
       metadata,
       skillRuns,
       documents,
-      researchRun: researchRuns[0] ?? null,
+      researchRun: researchRuns.find(run =>
+        run.artifacts.some(artifact => brief?.document.reference_ids?.includes(artifact.id)),
+      ) ?? null,
       isLoading: false,
       error: '',
     }))
-  }, [projectId])
+  }, [preferredWorkspaceId, projectId])
 
   const reload = useCallback(async () => {
     try {
@@ -193,7 +199,7 @@ export function useStrategyWorkspace(projectId: string) {
   }, [load])
 
   useEffect(() => {
-    currentWorkspaceId.current = ''
+    currentWorkspaceId.current = preferredWorkspaceId
     setState(current => ({ ...current, isLoading: true, error: '' }))
     const controller = new AbortController()
     void load(controller.signal).catch(error => {
@@ -202,7 +208,7 @@ export function useStrategyWorkspace(projectId: string) {
       }
     })
     return () => controller.abort()
-  }, [load])
+  }, [load, preferredWorkspaceId])
 
   useConversationStream(state.detail?.current_conversation?.id, reload)
 
@@ -301,6 +307,10 @@ export function useStrategyWorkspace(projectId: string) {
 
   const actions = {
     reload,
+    probeGeneration: () => perform('generation-probe', async () => {
+      const probe = await strategyApi.probeGeneration(projectId)
+      setState(current => ({ ...current, probe }))
+    }, false),
     createWorkspace: () => perform('workspace', async () => {
       const workspace = await strategyApi.createWorkspace(
         projectId,
