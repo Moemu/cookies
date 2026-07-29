@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,21 @@ func TestConfirmedReportBecomesReusableExperienceAndPreLaunchReference(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	preLaunch, err := service.GetPreLaunch(context.Background(), actor, "project_1")
+	if experience.Status != ExperiencePending || experience.LineageID != experience.ID || experience.Revision != 1 {
+		t.Fatalf("a deposited conclusion must start as 待确认: %#v", experience)
+	}
+	pending, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.ExperienceReferences) != 0 {
+		t.Fatalf("unconfirmed experience must not be quotable: %#v", pending)
+	}
+	experience, err = service.ConfirmExperience(context.Background(), actor, "project_1", experience.ID, experience.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preLaunch, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +58,230 @@ func TestConfirmedReportBecomesReusableExperienceAndPreLaunchReference(t *testin
 		preLaunch.ExperienceReferences[0].ID != experience.ID {
 		t.Fatalf("experience=%#v prelaunch=%#v", experience, preLaunch)
 	}
+}
+
+func TestRetiredExperienceStopsBeingQuotableButStaysAuditable(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	experience := confirmedExperience(t, service, actor)
+	retired, err := service.RetireExperience(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
+		ExpectedVersion: experience.Version, Reason: "平台口径变更，结论不再成立。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preLaunch, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audits, err := service.ListExperienceAudits(context.Background(), actor, "project_1", experience.ID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.Status != ExperienceRetired || len(preLaunch.ExperienceReferences) != 0 {
+		t.Fatalf("retired=%#v prelaunch=%#v", retired, preLaunch)
+	}
+	if len(audits) != 3 || audits[2].FromStatus != ExperienceConfirmed || audits[2].ToStatus != ExperienceRetired ||
+		audits[2].Reason != "平台口径变更，结论不再成立。" {
+		t.Fatalf("retirement must leave an attributable trail: %#v", audits)
+	}
+	stored, err := service.ListExperiences(context.Background(), actor, "project_1", ExperienceRetired, 50)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("logical delete must keep the row readable: values=%#v err=%v", stored, err)
+	}
+}
+
+func TestRetiringExperienceRequiresReasonAndConfirmScope(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	experience := confirmedExperience(t, service, actor)
+	if _, err := service.RetireExperience(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
+		ExpectedVersion: experience.Version,
+	}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("error=%v", err)
+	}
+	writer := testActor()
+	writer.Scopes = []contract.Scope{ScopeRead, ScopeWrite}
+	_, err := service.RetireExperience(context.Background(), writer, "project_1", experience.ID, ExperienceTransitionRequest{
+		ExpectedVersion: experience.Version, Reason: "无确认权限也应被拒绝。",
+	})
+	if err == nil || !strings.Contains(err.Error(), string(ScopeConfirm)) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestChallengedExperienceGoesToReviewInsteadOfSilentOverwrite(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	experience := confirmedExperience(t, service, actor)
+	review, err := service.RequestExperienceReview(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
+		ExpectedVersion: experience.Version, Reason: "新一轮数据与该结论冲突。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preLaunch, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.Status != ExperienceNeedsReview || len(preLaunch.ExperienceReferences) != 0 {
+		t.Fatalf("review=%#v prelaunch=%#v", review, preLaunch)
+	}
+	back, err := service.ConfirmExperience(context.Background(), actor, "project_1", review.ID, review.Version)
+	if err != nil || back.Status != ExperienceConfirmed {
+		t.Fatalf("review must be resolvable back to confirmed: %#v err=%v", back, err)
+	}
+}
+
+func TestRevisionSupersedesPredecessorOnlyAfterItIsConfirmed(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	original := confirmedExperience(t, service, actor)
+	revision, err := service.ReviseExperience(context.Background(), actor, "project_1", original.ID, ReviseExperienceRequest{
+		ExpectedVersion: original.Version,
+		Conclusion:      "面对新品种草时，首图保持单一利益点，并在标题重复该利益点。",
+		Conditions:      []string{"小红书图文", "新品首发"},
+		Counterexamples: []string{"复杂参数对比内容"},
+		Reason:          "补充标题层面的适用条件。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision.Revision != 2 || revision.LineageID != original.LineageID || revision.SupersedesID != original.ID ||
+		revision.Status != ExperiencePending {
+		t.Fatalf("revision=%#v original=%#v", revision, original)
+	}
+	stillOriginal, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stillOriginal.ExperienceReferences) != 1 || stillOriginal.ExperienceReferences[0].ID != original.ID {
+		t.Fatalf("an unconfirmed revision must not replace the live conclusion: %#v", stillOriginal)
+	}
+	confirmed, err := service.ConfirmExperience(context.Background(), actor, "project_1", revision.ID, revision.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quotable, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quotable.ExperienceReferences) != 1 || quotable.ExperienceReferences[0].ID != confirmed.ID {
+		t.Fatalf("confirming a revision must leave exactly one quotable conclusion: %#v", quotable)
+	}
+	lineage, err := service.ListExperienceLineage(context.Background(), actor, "project_1", confirmed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	superseded, err := service.ListExperiences(context.Background(), actor, "project_1", ExperienceRetired, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lineage) != 2 || len(superseded) != 1 || superseded[0].ID != original.ID ||
+		superseded[0].SupersededByID != confirmed.ID {
+		t.Fatalf("lineage=%#v superseded=%#v", lineage, superseded)
+	}
+}
+
+func TestReferenceFeedbackOnlyAttachesToQuotableExperience(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	experience := confirmedExperience(t, service, actor)
+	reference, err := service.RecordExperienceReference(context.Background(), actor, "project_1", experience.ID, RecordExperienceReferenceRequest{
+		ConsumerKind: "creative_task", ConsumerID: "creativetask_1", Outcome: ReferenceAdopted,
+		Note: "首图按该结论收敛为单一利益点。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := service.ListExperienceReferences(context.Background(), actor, "project_1", experience.ID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].ID != reference.ID || values[0].Outcome != ReferenceAdopted {
+		t.Fatalf("references=%#v", values)
+	}
+	if _, err := service.RetireExperience(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
+		ExpectedVersion: experience.Version, Reason: "结论失效。",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RecordExperienceReference(context.Background(), actor, "project_1", experience.ID, RecordExperienceReferenceRequest{
+		ConsumerKind: "creative_task", ConsumerID: "creativetask_2", Outcome: ReferenceReferenced,
+	}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("error=%v", err)
+	}
+	kept, err := service.ListExperienceReferences(context.Background(), actor, "project_1", experience.ID, 50)
+	if err != nil || len(kept) != 1 {
+		t.Fatalf("existing reference history must survive retirement: %#v err=%v", kept, err)
+	}
+}
+
+func TestProjectReferenceListSpansAllExperiences(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	first := confirmedExperience(t, service, actor)
+	second := confirmedExperience(t, service, actor)
+	for _, item := range []struct {
+		experienceID string
+		consumerID   string
+	}{{first.ID, "creativetask_1"}, {second.ID, "creativetask_2"}} {
+		if _, err := service.RecordExperienceReference(context.Background(), actor, "project_1", item.experienceID, RecordExperienceReferenceRequest{
+			ConsumerKind: "creative_task", ConsumerID: item.consumerID, Outcome: ReferenceAdopted,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values, err := service.ListProjectExperienceReferences(context.Background(), actor, "project_1", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 {
+		t.Fatalf("引用记录视图需要一次拿到全项目的引用: %#v", values)
+	}
+}
+
+func TestExperienceTransitionRejectsStaleVersion(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	actor := testActor()
+	experience := confirmedExperience(t, service, actor)
+	if _, err := service.RetireExperience(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
+		ExpectedVersion: experience.Version - 1, Reason: "版本已过期。",
+	}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func confirmedExperience(t *testing.T, service Service, actor contract.ActorContext) Experience {
+	t.Helper()
+	report, err := service.CreateReport(context.Background(), actor, "project_1", CreateReportRequest{ExecutionID: "deliveryexecution_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err = service.ConfirmReport(context.Background(), actor, "project_1", report.ID, report.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	experience, err := service.CreateExperience(context.Background(), actor, "project_1", report.ID, report.Version, CreateExperienceRequest{
+		Conclusion:      "面对新品种草时，首图保持单一利益点。",
+		Conditions:      []string{"小红书图文"},
+		Counterexamples: []string{"复杂参数对比内容"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	experience, err = service.ConfirmExperience(context.Background(), actor, "project_1", experience.ID, experience.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return experience
 }
 
 func TestInsightsRejectsExperienceFromUnconfirmedReport(t *testing.T) {
@@ -131,6 +370,9 @@ func (testDelivery) ListExecutions(_ context.Context, _ contract.ActorContext, _
 type memoryRepository struct {
 	reports     map[string]InsightReport
 	experiences map[string]Experience
+	order       []string
+	references  []ExperienceReference
+	audits      []ExperienceAudit
 }
 
 func (r *memoryRepository) CreateReport(_ context.Context, value InsightReport) (InsightReport, error) {
@@ -169,16 +411,23 @@ func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contr
 	r.reports[id] = value
 	return value, nil
 }
-func (r *memoryRepository) CreateExperience(_ context.Context, value Experience) (Experience, error) {
+func (r *memoryRepository) CreateExperience(_ context.Context, value Experience, audit ExperienceAudit) (Experience, error) {
 	r.experiences[value.ID] = value
+	r.order = append(r.order, value.ID)
+	r.audits = append(r.audits, audit)
 	return value, nil
 }
-func (r *memoryRepository) ListExperiences(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, _ int) ([]Experience, error) {
+func (r *memoryRepository) ListExperiences(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, status ExperienceStatus, _ int) ([]Experience, error) {
 	values := make([]Experience, 0)
-	for _, value := range r.experiences {
-		if value.OrganizationID == organizationID && value.ProjectID == projectID {
-			values = append(values, value)
+	for _, id := range r.order {
+		value := r.experiences[id]
+		if value.OrganizationID != organizationID || value.ProjectID != projectID {
+			continue
 		}
+		if status != "" && value.Status != status {
+			continue
+		}
+		values = append(values, value)
 	}
 	return values, nil
 }
@@ -188,4 +437,109 @@ func (r *memoryRepository) GetExperience(_ context.Context, organizationID contr
 		return Experience{}, ErrNotFound
 	}
 	return value, nil
+}
+func (r *memoryRepository) ListExperienceLineage(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, lineageID string) ([]Experience, error) {
+	values := make([]Experience, 0)
+	for _, id := range r.order {
+		value := r.experiences[id]
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.LineageID == lineageID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
+func (r *memoryRepository) TransitionExperience(ctx context.Context, input TransitionExperienceInput) (Experience, error) {
+	value, err := r.GetExperience(ctx, input.OrganizationID, input.ProjectID, input.ID)
+	if err != nil {
+		return Experience{}, err
+	}
+	if value.Version != input.ExpectedVersion {
+		return Experience{}, ErrVersionConflict
+	}
+	if !containsStatus(input.From, value.Status) {
+		return Experience{}, ErrInvalidState
+	}
+	r.audits = append(r.audits, ExperienceAudit{
+		ID: input.AuditID, OrganizationID: input.OrganizationID, ProjectID: input.ProjectID,
+		ExperienceID: value.ID, FromStatus: value.Status, ToStatus: input.To,
+		Reason: input.Reason, ActorID: input.ActorID, CreatedAt: input.Now,
+	})
+	value.Status = input.To
+	value.StatusReason = input.Reason
+	value.StatusChangedBy = input.ActorID
+	value.StatusChangedAt = &input.Now
+	value.Version++
+	value.UpdatedAt = input.Now
+	r.experiences[value.ID] = value
+	return value, nil
+}
+func (r *memoryRepository) ConfirmExperience(ctx context.Context, input ConfirmExperienceInput) (Experience, error) {
+	value, err := r.TransitionExperience(ctx, TransitionExperienceInput{
+		OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: input.ID,
+		ExpectedVersion: input.ExpectedVersion,
+		From:            []ExperienceStatus{ExperiencePending, ExperienceNeedsReview},
+		To:              ExperienceConfirmed, ActorID: input.ActorID, Now: input.Now, AuditID: input.AuditID,
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	value.ConfirmedBy = input.ActorID
+	value.ConfirmedAt = &input.Now
+	r.experiences[value.ID] = value
+	if value.SupersedesID == "" {
+		return value, nil
+	}
+	previous, err := r.GetExperience(ctx, input.OrganizationID, input.ProjectID, value.SupersedesID)
+	if err != nil || previous.Status == ExperienceRetired {
+		return value, nil
+	}
+	superseded, err := r.TransitionExperience(ctx, TransitionExperienceInput{
+		OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: previous.ID,
+		ExpectedVersion: previous.Version,
+		From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview},
+		To:              ExperienceRetired, Reason: "已被第 " + strconv.Itoa(value.Revision) + " 版取代。",
+		ActorID: input.ActorID, Now: input.Now, AuditID: input.SupersedeAuditID,
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	superseded.SupersededByID = value.ID
+	r.experiences[superseded.ID] = superseded
+	return value, nil
+}
+func (r *memoryRepository) CreateExperienceReference(_ context.Context, value ExperienceReference) (ExperienceReference, error) {
+	r.references = append(r.references, value)
+	return value, nil
+}
+func (r *memoryRepository) ListExperienceReferences(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, experienceID string, _ int) ([]ExperienceReference, error) {
+	values := make([]ExperienceReference, 0)
+	for _, value := range r.references {
+		if value.OrganizationID != organizationID || value.ProjectID != projectID {
+			continue
+		}
+		// 空 experienceID 表示"整个项目的引用记录"，与 MySQL 实现保持一致。
+		if experienceID != "" && value.ExperienceID != experienceID {
+			continue
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+func (r *memoryRepository) ListExperienceAudits(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, experienceID string, _ int) ([]ExperienceAudit, error) {
+	values := make([]ExperienceAudit, 0)
+	for _, value := range r.audits {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.ExperienceID == experienceID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
+
+func containsStatus(values []ExperienceStatus, value ExperienceStatus) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }

@@ -140,6 +140,8 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
 	insightsService := &insights.Service{
 		Repository: insights.MySQLRepository{DB: db},
+		Assets:     insights.MySQLRepository{DB: db},
+		Connectors: insights.MySQLRepository{DB: db},
 		Projects:   projectService,
 		Delivery:   deliveryinsights.Reader{Service: deliveryService},
 	}

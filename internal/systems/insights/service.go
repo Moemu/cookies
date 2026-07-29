@@ -32,9 +32,44 @@ const (
 	ReportConfirmed ReportStatus = "confirmed"
 )
 
+// ExperienceStatus follows the lifecycle in the asset management PRD §11.1:
+// 待确认 -> 已确认 -> 待复审 -> 已失效. Retirement is logical, so a referenced
+// conclusion stays auditable after it stops being reusable.
 type ExperienceStatus string
 
-const ExperienceConfirmed ExperienceStatus = "confirmed"
+const (
+	ExperiencePending     ExperienceStatus = "pending"
+	ExperienceConfirmed   ExperienceStatus = "confirmed"
+	ExperienceNeedsReview ExperienceStatus = "needs_review"
+	ExperienceRetired     ExperienceStatus = "retired"
+)
+
+func (s ExperienceStatus) valid() bool {
+	switch s {
+	case ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview, ExperienceRetired:
+		return true
+	}
+	return false
+}
+
+// ExperienceReferenceOutcome records what a downstream consumer did with a
+// confirmed experience (AM-014).
+type ExperienceReferenceOutcome string
+
+const (
+	ReferenceReferenced ExperienceReferenceOutcome = "referenced"
+	ReferenceAdopted    ExperienceReferenceOutcome = "adopted"
+	ReferenceModified   ExperienceReferenceOutcome = "modified"
+	ReferenceRejected   ExperienceReferenceOutcome = "rejected"
+)
+
+func (o ExperienceReferenceOutcome) valid() bool {
+	switch o {
+	case ReferenceReferenced, ReferenceAdopted, ReferenceModified, ReferenceRejected:
+		return true
+	}
+	return false
+}
 
 type DeliveryExecutionSnapshot struct {
 	ID                string                  `json:"id"`
@@ -103,6 +138,27 @@ type CreateExperienceRequest struct {
 	Conclusion      string   `json:"conclusion"`
 	Conditions      []string `json:"conditions"`
 	Counterexamples []string `json:"counterexamples"`
+
+	// 洞察卡剩下的五个字段（03 §8.1）。类型和置信有默认值，是为了让老调用方
+	// 不填也能过——但默认落在最保守的一格（假设 / 方向性），不替录入的人做判断。
+	CardType          InsightCardType `json:"card_type"`
+	Confidence        ConfidenceLevel `json:"confidence"`
+	RecommendedAction string          `json:"recommended_action"`
+	Applicability     Applicability   `json:"applicability"`
+	DataBasis         DataBasis       `json:"data_basis"`
+	ContentBasis      ContentBasis    `json:"content_basis"`
+}
+
+// withCardDefaults 补上没填的类型和置信。放在这里而不是各调用点，
+// 是为了让「不填等于假设 + 方向性」只有一处定义。
+func (r CreateExperienceRequest) withCardDefaults() CreateExperienceRequest {
+	if strings.TrimSpace(string(r.CardType)) == "" {
+		r.CardType = CardHypothesis
+	}
+	if strings.TrimSpace(string(r.Confidence)) == "" {
+		r.Confidence = ConfidenceDirectional
+	}
+	return r
 }
 
 func (r CreateExperienceRequest) Validate() error {
@@ -117,13 +173,24 @@ func (r CreateExperienceRequest) Validate() error {
 			}
 		}
 	}
-	return nil
+	filled := r.withCardDefaults()
+	if err := validateApplicability(filled.Applicability); err != nil {
+		return err
+	}
+	if err := validateContentBasis(filled.ContentBasis); err != nil {
+		return err
+	}
+	return validateCard(filled.CardType, filled.Confidence, filled.RecommendedAction, filled.DataBasis)
 }
 
 type Experience struct {
 	ID                     string                  `json:"id"`
 	OrganizationID         contract.OrganizationID `json:"organization_id"`
 	ProjectID              contract.ProjectID      `json:"project_id"`
+	LineageID              string                  `json:"lineage_id"`
+	Revision               int                     `json:"revision"`
+	SupersedesID           string                  `json:"supersedes_id,omitempty"`
+	SupersededByID         string                  `json:"superseded_by_id,omitempty"`
 	ReportID               string                  `json:"report_id"`
 	SourceExecutionID      string                  `json:"source_execution_id"`
 	SourceEvidenceID       string                  `json:"source_evidence_id"`
@@ -131,18 +198,126 @@ type Experience struct {
 	Conclusion             string                  `json:"conclusion"`
 	Conditions             []string                `json:"conditions"`
 	Counterexamples        []string                `json:"counterexamples"`
+	CardType               InsightCardType         `json:"card_type"`
+	Confidence             ConfidenceLevel         `json:"confidence"`
+	RecommendedAction      string                  `json:"recommended_action"`
+	Applicability          Applicability           `json:"applicability"`
+	DataBasis              DataBasis               `json:"data_basis"`
+	ContentBasis           ContentBasis            `json:"content_basis"`
 	Status                 ExperienceStatus        `json:"status"`
+	StatusReason           string                  `json:"status_reason"`
+	StatusChangedBy        string                  `json:"status_changed_by"`
+	StatusChangedAt        *time.Time              `json:"status_changed_at,omitempty"`
+	ConfirmedBy            string                  `json:"confirmed_by,omitempty"`
+	ConfirmedAt            *time.Time              `json:"confirmed_at,omitempty"`
 	Version                int64                   `json:"version"`
 	CreatedBy              string                  `json:"created_by"`
 	CreatedAt              time.Time               `json:"created_at"`
 	UpdatedAt              time.Time               `json:"updated_at"`
 }
 
-type PreLaunchInsight struct {
-	ProjectID            contract.ProjectID `json:"project_id"`
-	ExperienceReferences []Experience       `json:"experience_references"`
-	Disclosure           string             `json:"disclosure"`
+// Reusable reports whether downstream Skills may quote this experience by
+// default (MVP acceptance §15.10): confirmed and not retired.
+func (e Experience) Reusable() bool { return e.Status == ExperienceConfirmed }
+
+// ExperienceAudit is the append-only trail behind PRD §11.2. Nothing is
+// physically deleted, so every status change stays attributable.
+type ExperienceAudit struct {
+	ID             string                  `json:"id"`
+	OrganizationID contract.OrganizationID `json:"organization_id"`
+	ProjectID      contract.ProjectID      `json:"project_id"`
+	ExperienceID   string                  `json:"experience_id"`
+	FromStatus     ExperienceStatus        `json:"from_status"`
+	ToStatus       ExperienceStatus        `json:"to_status"`
+	Reason         string                  `json:"reason"`
+	ActorID        string                  `json:"actor_id"`
+	CreatedAt      time.Time               `json:"created_at"`
 }
+
+type ExperienceReference struct {
+	ID             string                     `json:"id"`
+	OrganizationID contract.OrganizationID    `json:"organization_id"`
+	ProjectID      contract.ProjectID         `json:"project_id"`
+	ExperienceID   string                     `json:"experience_id"`
+	ConsumerKind   string                     `json:"consumer_kind"`
+	ConsumerID     string                     `json:"consumer_id"`
+	Outcome        ExperienceReferenceOutcome `json:"outcome"`
+	Note           string                     `json:"note"`
+	Version        int64                      `json:"version"`
+	CreatedBy      string                     `json:"created_by"`
+	CreatedAt      time.Time                  `json:"created_at"`
+	UpdatedAt      time.Time                  `json:"updated_at"`
+}
+
+// ExperienceTransitionRequest carries the human reason a conclusion moved
+// state. Rejection, review and retirement all require one.
+type ExperienceTransitionRequest struct {
+	ExpectedVersion int64  `json:"expected_version"`
+	Reason          string `json:"reason"`
+}
+
+func (r ExperienceTransitionRequest) validate(reasonRequired bool) error {
+	reason := strings.TrimSpace(r.Reason)
+	if len(reason) > 1000 || (reasonRequired && reason == "") {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+// ReviseExperienceRequest supersedes a conclusion instead of overwriting it
+// (PRD §7.6). The revision starts as 待确认 and only replaces its predecessor
+// once someone confirms it.
+type ReviseExperienceRequest struct {
+	ExpectedVersion int64    `json:"expected_version"`
+	Conclusion      string   `json:"conclusion"`
+	Conditions      []string `json:"conditions"`
+	Counterexamples []string `json:"counterexamples"`
+	Reason          string   `json:"reason"`
+
+	CardType          InsightCardType `json:"card_type"`
+	Confidence        ConfidenceLevel `json:"confidence"`
+	RecommendedAction string          `json:"recommended_action"`
+	Applicability     Applicability   `json:"applicability"`
+	DataBasis         DataBasis       `json:"data_basis"`
+	ContentBasis      ContentBasis    `json:"content_basis"`
+}
+
+// card 把修订请求折回创建请求，让两条路径共用同一套校验和默认值。
+func (r ReviseExperienceRequest) card() CreateExperienceRequest {
+	return CreateExperienceRequest{
+		Conclusion: r.Conclusion, Conditions: r.Conditions, Counterexamples: r.Counterexamples,
+		CardType: r.CardType, Confidence: r.Confidence, RecommendedAction: r.RecommendedAction,
+		Applicability: r.Applicability, DataBasis: r.DataBasis, ContentBasis: r.ContentBasis,
+	}.withCardDefaults()
+}
+
+func (r ReviseExperienceRequest) validate() error {
+	if err := r.card().Validate(); err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(r.Reason)) > 1000 {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+type RecordExperienceReferenceRequest struct {
+	ConsumerKind string                     `json:"consumer_kind"`
+	ConsumerID   string                     `json:"consumer_id"`
+	Outcome      ExperienceReferenceOutcome `json:"outcome"`
+	Note         string                     `json:"note"`
+}
+
+func (r RecordExperienceReferenceRequest) validate() error {
+	kind, id := strings.TrimSpace(r.ConsumerKind), strings.TrimSpace(r.ConsumerID)
+	if kind == "" || len(kind) > 32 || id == "" || len(id) > 96 ||
+		!r.Outcome.valid() || len(strings.TrimSpace(r.Note)) > 1000 {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+// PreLaunchInsight 与投前洞察的投影逻辑一起放在 prelaunch.go。
 
 type PerformanceOverview struct {
 	ProjectID  contract.ProjectID          `json:"project_id"`
@@ -160,18 +335,58 @@ type DeliveryReader interface {
 	ListExecutions(context.Context, contract.ActorContext, contract.ProjectID, int) ([]DeliveryExecutionSnapshot, error)
 }
 
+// TransitionExperienceInput moves one experience between lifecycle states and
+// appends the matching audit row in the same transaction.
+type TransitionExperienceInput struct {
+	OrganizationID  contract.OrganizationID
+	ProjectID       contract.ProjectID
+	ID              string
+	ExpectedVersion int64
+	From            []ExperienceStatus
+	To              ExperienceStatus
+	Reason          string
+	ActorID         string
+	Now             time.Time
+	AuditID         string
+}
+
+// ConfirmExperienceInput confirms a revision and, when it supersedes an older
+// one, retires the predecessor atomically so two revisions are never reusable
+// at the same time.
+type ConfirmExperienceInput struct {
+	OrganizationID   contract.OrganizationID
+	ProjectID        contract.ProjectID
+	ID               string
+	ExpectedVersion  int64
+	ActorID          string
+	Now              time.Time
+	AuditID          string
+	SupersedeAuditID string
+}
+
 type Repository interface {
 	CreateReport(context.Context, InsightReport) (InsightReport, error)
 	ListReports(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]InsightReport, error)
 	GetReport(context.Context, contract.OrganizationID, contract.ProjectID, string) (InsightReport, error)
 	ConfirmReport(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (InsightReport, error)
-	CreateExperience(context.Context, Experience) (Experience, error)
-	ListExperiences(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]Experience, error)
+	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
+	ListExperiences(context.Context, contract.OrganizationID, contract.ProjectID, ExperienceStatus, int) ([]Experience, error)
 	GetExperience(context.Context, contract.OrganizationID, contract.ProjectID, string) (Experience, error)
+	ListExperienceLineage(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]Experience, error)
+	TransitionExperience(context.Context, TransitionExperienceInput) (Experience, error)
+	ConfirmExperience(context.Context, ConfirmExperienceInput) (Experience, error)
+	CreateExperienceReference(context.Context, ExperienceReference) (ExperienceReference, error)
+	ListExperienceReferences(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]ExperienceReference, error)
+	ListExperienceAudits(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]ExperienceAudit, error)
 }
 
 type Service struct {
 	Repository Repository
+	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
+	// Repository because the two lifecycles share nothing but the module.
+	Assets AssetRepository
+	// Connectors backs 数据接入 and the Canonical daily metrics 投后分析 reads.
+	Connectors ConnectorRepository
 	Projects   ActiveProjectResolver
 	Delivery   DeliveryReader
 	NewID      ids.Generator
@@ -258,15 +473,236 @@ func (s Service) CreateExperience(ctx context.Context, actor contract.ActorConte
 	if err != nil {
 		return Experience{}, err
 	}
+	auditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
 	now := s.now()
-	return s.Repository.CreateExperience(ctx, Experience{
-		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, ReportID: report.ID,
+	card := request.withCardDefaults()
+	// A newly deposited conclusion starts as 待确认. Only an explicit confirm
+	// makes it quotable downstream.
+	value := Experience{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		LineageID: id, Revision: 1, ReportID: report.ID,
 		SourceExecutionID: report.ExecutionID, SourceEvidenceID: report.EvidenceID,
 		SourceMetricSnapshotID: report.MetricSnapshotID,
 		Conclusion:             strings.TrimSpace(request.Conclusion), Conditions: append([]string{}, request.Conditions...),
-		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperienceConfirmed,
+		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
+		CardType: card.CardType, Confidence: card.Confidence,
+		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
+		Applicability:     card.Applicability, DataBasis: card.DataBasis, ContentBasis: card.ContentBasis,
+		StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
+		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	return s.Repository.CreateExperience(ctx, value, ExperienceAudit{
+		ID: auditID, OrganizationID: actor.OrganizationID, ProjectID: projectID, ExperienceID: id,
+		FromStatus: "", ToStatus: ExperiencePending, Reason: "从已确认复盘报告沉淀，等待人工确认。",
+		ActorID: actor.Principal.ID, CreatedAt: now,
+	})
+}
+
+// ConfirmExperience promotes 待确认 or 待复审 to 已确认. Confirming a revision
+// retires the predecessor it supersedes in the same transaction.
+func (s Service) ConfirmExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, expectedVersion int64) (Experience, error) {
+	if err := s.ready(actor, projectID, ScopeConfirm); err != nil {
+		return Experience{}, err
+	}
+	current, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experienceID)
+	if err != nil {
+		return Experience{}, err
+	}
+	if current.Status != ExperiencePending && current.Status != ExperienceNeedsReview {
+		return Experience{}, ErrInvalidState
+	}
+	auditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
+	supersedeAuditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
+	return s.Repository.ConfirmExperience(ctx, ConfirmExperienceInput{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID, ID: experienceID,
+		ExpectedVersion: expectedVersion, ActorID: actor.Principal.ID, Now: s.now(),
+		AuditID: auditID, SupersedeAuditID: supersedeAuditID,
+	})
+}
+
+// RejectExperience discards a 待确认 conclusion without deleting the row.
+func (s Service) RejectExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
+	return s.transition(ctx, actor, projectID, experienceID, ScopeConfirm,
+		[]ExperienceStatus{ExperiencePending}, ExperienceRetired, request, true)
+}
+
+// RequestExperienceReview flags a confirmed conclusion as 待复审 when new data
+// challenges it, instead of silently overwriting it.
+func (s Service) RequestExperienceReview(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
+	return s.transition(ctx, actor, projectID, experienceID, ScopeWrite,
+		[]ExperienceStatus{ExperienceConfirmed}, ExperienceNeedsReview, request, true)
+}
+
+// RetireExperience is the logical delete in PRD §11.2: the row stays readable
+// and its reference history stays auditable.
+func (s Service) RetireExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
+	return s.transition(ctx, actor, projectID, experienceID, ScopeConfirm,
+		[]ExperienceStatus{ExperienceConfirmed, ExperienceNeedsReview}, ExperienceRetired, request, true)
+}
+
+func (s Service) transition(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, scope contract.Scope, from []ExperienceStatus, to ExperienceStatus, request ExperienceTransitionRequest, reasonRequired bool) (Experience, error) {
+	if err := s.ready(actor, projectID, scope); err != nil {
+		return Experience{}, err
+	}
+	if err := request.validate(reasonRequired); err != nil {
+		return Experience{}, err
+	}
+	auditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
+	return s.Repository.TransitionExperience(ctx, TransitionExperienceInput{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID, ID: experienceID,
+		ExpectedVersion: request.ExpectedVersion, From: from, To: to,
+		Reason: strings.TrimSpace(request.Reason), ActorID: actor.Principal.ID,
+		Now: s.now(), AuditID: auditID,
+	})
+}
+
+// ReviseExperience appends a new revision to the lineage rather than editing
+// the confirmed conclusion in place.
+func (s Service) ReviseExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ReviseExperienceRequest) (Experience, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return Experience{}, err
+	}
+	if err := request.validate(); err != nil {
+		return Experience{}, err
+	}
+	source, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experienceID)
+	if err != nil {
+		return Experience{}, err
+	}
+	if source.Version != request.ExpectedVersion {
+		return Experience{}, ErrVersionConflict
+	}
+	if source.Status == ExperienceRetired || source.SupersededByID != "" {
+		return Experience{}, ErrInvalidState
+	}
+	lineage, err := s.Repository.ListExperienceLineage(ctx, actor.OrganizationID, projectID, source.LineageID)
+	if err != nil {
+		return Experience{}, err
+	}
+	next := source.Revision
+	for _, item := range lineage {
+		if item.Revision > next {
+			next = item.Revision
+		}
+		// A lineage may hold only one open revision at a time.
+		if item.Status == ExperiencePending && item.ID != source.ID {
+			return Experience{}, ErrInvalidState
+		}
+	}
+	id, err := s.idGenerator()("experience")
+	if err != nil {
+		return Experience{}, err
+	}
+	auditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
+	now := s.now()
+	reason := strings.TrimSpace(request.Reason)
+	if reason == "" {
+		reason = fmt.Sprintf("修订自 %s 第 %d 版。", source.ID, source.Revision)
+	}
+	card := request.card()
+	value := Experience{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		LineageID: source.LineageID, Revision: next + 1, SupersedesID: source.ID,
+		ReportID:          source.ReportID,
+		SourceExecutionID: source.SourceExecutionID, SourceEvidenceID: source.SourceEvidenceID,
+		SourceMetricSnapshotID: source.SourceMetricSnapshotID,
+		Conclusion:             strings.TrimSpace(request.Conclusion), Conditions: append([]string{}, request.Conditions...),
+		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
+		CardType: card.CardType, Confidence: card.Confidence,
+		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
+		Applicability:     card.Applicability, DataBasis: card.DataBasis, ContentBasis: card.ContentBasis,
+		StatusReason: reason, StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
+		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	return s.Repository.CreateExperience(ctx, value, ExperienceAudit{
+		ID: auditID, OrganizationID: actor.OrganizationID, ProjectID: projectID, ExperienceID: id,
+		FromStatus: "", ToStatus: ExperiencePending, Reason: reason,
+		ActorID: actor.Principal.ID, CreatedAt: now,
+	})
+}
+
+// RecordExperienceReference closes the AM-014 loop: a downstream consumer says
+// whether it adopted, modified or rejected the quoted conclusion.
+func (s Service) RecordExperienceReference(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request RecordExperienceReferenceRequest) (ExperienceReference, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return ExperienceReference{}, err
+	}
+	if err := request.validate(); err != nil {
+		return ExperienceReference{}, err
+	}
+	experience, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experienceID)
+	if err != nil {
+		return ExperienceReference{}, err
+	}
+	if !experience.Reusable() {
+		return ExperienceReference{}, ErrInvalidState
+	}
+	id, err := s.idGenerator()("experienceref")
+	if err != nil {
+		return ExperienceReference{}, err
+	}
+	now := s.now()
+	return s.Repository.CreateExperienceReference(ctx, ExperienceReference{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, ExperienceID: experience.ID,
+		ConsumerKind: strings.TrimSpace(request.ConsumerKind), ConsumerID: strings.TrimSpace(request.ConsumerID),
+		Outcome: request.Outcome, Note: strings.TrimSpace(request.Note),
 		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	})
+}
+
+func (s Service) ListExperienceReferences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, limit int) ([]ExperienceReference, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experienceID); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListExperienceReferences(ctx, actor.OrganizationID, projectID, experienceID, normalizeLimit(limit))
+}
+
+// ListProjectExperienceReferences answers "which of our experiences were used
+// downstream, and were they adopted" without walking every experience in turn.
+func (s Service) ListProjectExperienceReferences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ExperienceReference, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListExperienceReferences(ctx, actor.OrganizationID, projectID, "", normalizeLimit(limit))
+}
+
+func (s Service) ListExperienceAudits(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, limit int) ([]ExperienceAudit, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experienceID); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListExperienceAudits(ctx, actor.OrganizationID, projectID, experienceID, normalizeLimit(limit))
+}
+
+func (s Service) ListExperienceLineage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string) ([]Experience, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	value, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experienceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Repository.ListExperienceLineage(ctx, actor.OrganizationID, projectID, value.LineageID)
 }
 
 func summarizeSimulatedMetrics(snapshot DeliveryMetricSnapshot) (string, []string) {
@@ -292,26 +728,22 @@ func ratioPercent(numerator, denominator int64) float64 {
 	return float64(numerator) / float64(denominator) * 100
 }
 
-func (s Service) ListExperiences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]Experience, error) {
+// ListExperiences returns every lifecycle state when status is empty, so the
+// experience library can show 待确认 / 已确认 / 待复审 / 已失效 side by side.
+func (s Service) ListExperiences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, status ExperienceStatus, limit int) ([]Experience, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
 		return nil, err
+	}
+	if status != "" && !status.valid() {
+		return nil, ErrInvalidRequest
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
-	return s.Repository.ListExperiences(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	return s.Repository.ListExperiences(ctx, actor.OrganizationID, projectID, status, normalizeLimit(limit))
 }
 
-func (s Service) GetPreLaunch(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (PreLaunchInsight, error) {
-	values, err := s.ListExperiences(ctx, actor, projectID, 100)
-	if err != nil {
-		return PreLaunchInsight{}, err
-	}
-	return PreLaunchInsight{
-		ProjectID: projectID, ExperienceReferences: values,
-		Disclosure: "仅引用已确认经验；是否适用于本次投放仍需人工判断。",
-	}, nil
-}
+// GetPreLaunch 在 prelaunch.go。
 
 func (s Service) GetPerformance(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (PerformanceOverview, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
