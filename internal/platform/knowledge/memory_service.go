@@ -172,6 +172,14 @@ func (s *MemoryService) RunResearch(context.Context, contract.ActorContext, cont
 	return ResearchRun{}, ErrExternalRunnerUnavailable
 }
 
+func (s *MemoryService) GetResearchRun(context.Context, contract.ActorContext, contract.ProjectID, string) (ResearchRun, error) {
+	return ResearchRun{}, ErrNotFound
+}
+
+func (s *MemoryService) ListResearchRuns(context.Context, contract.ActorContext, contract.ProjectID, int) ([]ResearchRun, error) {
+	return []ResearchRun{}, nil
+}
+
 type chunkPart struct {
 	text      string
 	section   string

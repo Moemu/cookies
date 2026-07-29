@@ -6,6 +6,7 @@ package config
 import (
 	"bufio"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -42,6 +43,7 @@ type Config struct {
 	Media         Media
 	Provider      Provider
 	Strategy      Strategy
+	Research      Research
 	LocalIdentity *LocalIdentity
 }
 
@@ -91,6 +93,18 @@ type Strategy struct {
 	PromptVersion            string
 	CriticEnabled            bool
 	OrganizationAllowlist    []string
+}
+
+// Research configures an optional backend-owned MCP stdio client. The browser
+// never receives the command or environment and cannot launch subprocesses.
+type Research struct {
+	MCPStdioCommand    string
+	MCPStdioArgs       []string
+	MCPToolName        string
+	MCPProtocolVersion string
+	MCPEnvAllowlist    []string
+	TimeoutSeconds     int
+	MaxOutputBytes     int
 }
 
 // Provider contains only local composition choices. Credentials are read from
@@ -305,6 +319,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			CriticEnabled:            strategyCriticEnabled,
 			OrganizationAllowlist:    splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
 		},
+		Research: Research{
+			MCPStdioCommand:    strings.TrimSpace(valueOr(lookup, "COOKIES_RESEARCH_MCP_STDIO_COMMAND", "")),
+			MCPToolName:        valueOr(lookup, "COOKIES_RESEARCH_MCP_TOOL_NAME", "research"),
+			MCPProtocolVersion: valueOr(lookup, "COOKIES_RESEARCH_MCP_PROTOCOL_VERSION", "2025-11-25"),
+			MCPEnvAllowlist:    splitCSV(valueOr(lookup, "COOKIES_RESEARCH_MCP_ENV_ALLOWLIST", "PATH,PATHEXT,SystemRoot,TEMP,TMP,ComSpec")),
+			TimeoutSeconds:     intValueOr(lookup, "COOKIES_RESEARCH_TIMEOUT_SECONDS", 120),
+			MaxOutputBytes:     intValueOr(lookup, "COOKIES_RESEARCH_MAX_OUTPUT_BYTES", 4*1024*1024),
+		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
 			VideoAdapter:      valueOr(lookup, "COOKIES_PROVIDER_VIDEO_ADAPTER", "fake"),
@@ -344,6 +366,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 				Model:       valueOr(lookup, "COOKIES_VOLCENGINE_ASR_MODEL", "bigmodel"),
 			},
 		},
+	}
+	if raw := strings.TrimSpace(valueOr(lookup, "COOKIES_RESEARCH_MCP_STDIO_ARGS_JSON", "")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &config.Research.MCPStdioArgs); err != nil {
+			return Config{}, fmt.Errorf("COOKIES_RESEARCH_MCP_STDIO_ARGS_JSON must be a JSON string array: %w", err)
+		}
 	}
 
 	identityValues := map[string]string{
@@ -412,6 +439,16 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Media.VideoWorkRoot) == "" {
 		return fmt.Errorf("COOKIES_VIDEO_WORK_ROOT must not be empty")
+	}
+	if c.Research.TimeoutSeconds < 1 || c.Research.TimeoutSeconds > 600 {
+		return fmt.Errorf("COOKIES_RESEARCH_TIMEOUT_SECONDS must be between 1 and 600")
+	}
+	if c.Research.MaxOutputBytes < 1024 || c.Research.MaxOutputBytes > 16*1024*1024 {
+		return fmt.Errorf("COOKIES_RESEARCH_MAX_OUTPUT_BYTES must be between 1024 and 16777216")
+	}
+	if c.Research.MCPStdioCommand != "" &&
+		(strings.TrimSpace(c.Research.MCPToolName) == "" || strings.TrimSpace(c.Research.MCPProtocolVersion) == "") {
+		return fmt.Errorf("MCP stdio research requires a tool name and protocol version")
 	}
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")

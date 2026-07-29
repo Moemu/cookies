@@ -480,7 +480,7 @@ export async function listKanonArtifacts(projectId: string): Promise<ApiArtifact
     return {
       id: item.package_id,
       projectId,
-      kind: 'brief',
+      kind: 'document',
       status: item.status === 'archived' ? 'archived' : 'ready',
       content: summarizeStrategyPackage(item),
       version: item.version,

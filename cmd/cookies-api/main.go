@@ -149,9 +149,27 @@ func main() {
 		creativeService.ViralAnalyzer = analyzer
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
+	runtimeStore := jobruntime.MySQLStore{DB: db}
+	var researchRunner knowledge.ExternalResearchRunner
+	if cfg.Research.MCPStdioCommand != "" {
+		researchRunner = knowledge.MCPStdioRunner{
+			Command: cfg.Research.MCPStdioCommand, Args: cfg.Research.MCPStdioArgs,
+			ToolName: cfg.Research.MCPToolName, ProtocolVersion: cfg.Research.MCPProtocolVersion,
+			EnvAllowlist:   cfg.Research.MCPEnvAllowlist,
+			Timeout:        time.Duration(cfg.Research.TimeoutSeconds) * time.Second,
+			MaxOutputBytes: cfg.Research.MaxOutputBytes,
+		}
+		log.Printf("Knowledge research configured: transport=mcp_stdio tool=%s timeout=%ds",
+			cfg.Research.MCPToolName, cfg.Research.TimeoutSeconds)
+	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
-		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
+		AssetsBucket: cfg.ObjectStorage.AssetsBucket, Runner: researchRunner,
+	}
+	if researchRunner != nil {
+		knowledgeService.Scheduler = knowledge.JobRuntimeResearchScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("researchjob") },
+		}
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
@@ -179,9 +197,11 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
-	runtimeStore := jobruntime.MySQLStore{DB: db}
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	if researchRunner != nil {
+		runtimeHandlers[knowledge.ResearchJobKind] = knowledgeService.HandleResearchJob
+	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
 	}

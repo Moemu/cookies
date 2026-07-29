@@ -11,6 +11,9 @@ import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPa
 import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
+import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
+import { KanonSkillsOperations } from '../features/strategy/KanonSkillsOperations'
+import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 
@@ -1602,6 +1605,9 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   const taskDomain = system.key === 'strategy' || system.key === 'creative' ? system.key : null
   const taskCenter = item.id === 'tasks' && taskDomain !== null
   const specialized = taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
+    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace activeView={activeView}/>
+    : system.key === 'strategy' && item.id === 'operations' ? <KanonSkillsOperations activeView={activeView}/>
+    : system.key === 'strategy' && item.id === 'reviews' ? <KanonReviewCenter activeView={activeView} onOpenReview={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', undefined, '评审')}/>
     : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={objectId}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>

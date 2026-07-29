@@ -460,6 +460,44 @@ type Review struct {
 	CreatedBy             string                  `json:"created_by"`
 	CreatedAt             time.Time               `json:"created_at"`
 	UpdatedAt             time.Time               `json:"updated_at"`
+	ReviewMode            string                  `json:"review_mode,omitempty"`
+	RequiredApprovals     int                     `json:"required_approvals,omitempty"`
+	ApprovalCount         int                     `json:"approval_count,omitempty"`
+	Assignments           []ReviewAssignment      `json:"assignments,omitempty"`
+}
+
+type ReviewAssignment struct {
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	ReviewID          string                  `json:"review_id"`
+	ReviewerUserID    string                  `json:"reviewer_user_id"`
+	ReviewMode        string                  `json:"review_mode"`
+	Status            string                  `json:"status"`
+	DecisionReason    string                  `json:"decision_reason,omitempty"`
+	DecidedAt         *time.Time              `json:"decided_at,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	AllowSelfApproval bool                    `json:"-"`
+}
+
+type ReviewPolicy struct {
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	Mode              string                  `json:"mode"`
+	ApproverUserIDs   []string                `json:"approver_user_ids"`
+	AllowSelfApproval bool                    `json:"allow_self_approval"`
+	Version           int64                   `json:"version"`
+	UpdatedBy         string                  `json:"updated_by,omitempty"`
+	CreatedAt         time.Time               `json:"created_at,omitempty"`
+	UpdatedAt         time.Time               `json:"updated_at,omitempty"`
+}
+
+type UpdateReviewPolicyRequest struct {
+	Mode              string   `json:"mode"`
+	ApproverUserIDs   []string `json:"approver_user_ids"`
+	AllowSelfApproval bool     `json:"allow_self_approval"`
+	ExpectedVersion   int64    `json:"expected_version"`
 }
 
 type ReviewComment struct {

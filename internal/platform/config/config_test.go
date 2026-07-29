@@ -451,6 +451,43 @@ func TestOpenAIImageAdapterRequiresCompleteLocalGatewayConfiguration(t *testing.
 	}
 }
 
+func TestFromLookupParsesMCPStdioResearchConfiguration(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_MCP_STDIO_COMMAND":    "node",
+		"COOKIES_RESEARCH_MCP_STDIO_ARGS_JSON":  `["server.js","--stdio"]`,
+		"COOKIES_RESEARCH_MCP_TOOL_NAME":        "search_evidence",
+		"COOKIES_RESEARCH_MCP_ENV_ALLOWLIST":    "PATH,SEARCH_API_KEY",
+		"COOKIES_RESEARCH_TIMEOUT_SECONDS":      "90",
+		"COOKIES_RESEARCH_MAX_OUTPUT_BYTES":     "2097152",
+		"COOKIES_RESEARCH_MCP_PROTOCOL_VERSION": "2025-11-25",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if config.Research.MCPStdioCommand != "node" ||
+		len(config.Research.MCPStdioArgs) != 2 ||
+		config.Research.MCPStdioArgs[1] != "--stdio" ||
+		config.Research.MCPToolName != "search_evidence" ||
+		config.Research.TimeoutSeconds != 90 {
+		t.Fatalf("unexpected research config: %#v", config.Research)
+	}
+}
+
+func TestFromLookupRejectsInvalidMCPArgumentsAndResearchBounds(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_MCP_STDIO_ARGS_JSON": `["unterminated"`,
+	})); err == nil {
+		t.Fatal("expected invalid MCP args JSON to be rejected")
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_TIMEOUT_SECONDS": "0",
+	})); err == nil {
+		t.Fatal("expected invalid research timeout to be rejected")
+	}
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

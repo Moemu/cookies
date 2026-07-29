@@ -31,6 +31,16 @@ type Snapshot struct {
 	QualityChecks []string `json:"quality_checks"`
 }
 
+type Descriptor struct {
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	Kind          string   `json:"kind"`
+	Match         []string `json:"match"`
+	Instructions  []string `json:"instructions,omitempty"`
+	QualityChecks []string `json:"quality_checks"`
+	ContentHash   string   `json:"content_hash"`
+}
+
 type Registry struct {
 	skills []Skill
 }
@@ -112,6 +122,27 @@ func (r Registry) Select(channels []string, objective string) []Snapshot {
 		})
 	}
 	return snapshots
+}
+
+func (r Registry) List(includeInstructions bool) []Descriptor {
+	values := make([]Descriptor, 0, len(r.skills))
+	for _, skill := range r.skills {
+		encoded, _ := json.Marshal(skill)
+		sum := sha256.Sum256(encoded)
+		value := Descriptor{
+			Name:          skill.Name,
+			Version:       skill.Version,
+			Kind:          skill.Kind,
+			Match:         append([]string(nil), skill.Match...),
+			QualityChecks: append([]string(nil), skill.QualityChecks...),
+			ContentHash:   hex.EncodeToString(sum[:]),
+		}
+		if includeInstructions {
+			value.Instructions = append([]string(nil), skill.Instructions...)
+		}
+		values = append(values, value)
+	}
+	return values
 }
 
 func objectiveKeys(objective string) []string {

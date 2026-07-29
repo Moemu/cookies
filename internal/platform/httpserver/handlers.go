@@ -1275,6 +1275,48 @@ func (s *Server) searchKnowledge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"query": request.Query, "items": value})
 }
 
+func (s *Server) listKnowledgeResearchRuns(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 100"))
+			return
+		}
+		limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ListResearchRuns(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getKnowledgeResearchRun(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetResearchRun(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("research_run_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	decoder := json.NewDecoder(r.Body)

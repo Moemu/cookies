@@ -42,6 +42,7 @@ type Service struct {
 	Scanner      assets.ContentScanner
 	AssetsBucket string
 	Runner       ExternalResearchRunner
+	Scheduler    ResearchScheduler
 	Now          func() time.Time
 	NewID        ids.Generator
 }
@@ -99,6 +100,10 @@ type ExternalResearchRunner interface {
 	Run(context.Context, ExternalResearchInput) ([]ExternalResearchResult, error)
 }
 
+type ResearchScheduler interface {
+	Schedule(context.Context, ResearchRun) error
+}
+
 type ResearchRun struct {
 	ID              string                  `json:"id"`
 	OrganizationID  contract.OrganizationID `json:"organization_id"`
@@ -113,6 +118,8 @@ type ResearchRun struct {
 	ErrorCode       string                  `json:"error_code,omitempty"`
 	ErrorMessage    string                  `json:"error_message,omitempty"`
 	Artifacts       []ResearchArtifact      `json:"artifacts"`
+	CreatedAt       time.Time               `json:"created_at"`
+	UpdatedAt       time.Time               `json:"updated_at"`
 }
 
 type ResearchArtifact struct {
@@ -378,6 +385,7 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 		Mode: request.Mode, Query: request.Query, DocumentIDs: append([]string(nil), request.DocumentIDs...),
 		DisclosedFields: append([]string(nil), request.DisclosedFields...), Status: "running",
 		ConfirmedBy: actor.Principal.ID, ConfirmedAt: now, Artifacts: []ResearchArtifact{},
+		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO platform_research_runs
 		(id, organization_id, project_id, mode, query_text, document_ids, disclosed_fields,
@@ -389,17 +397,33 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	}
 	if s.Runner == nil {
 		run.Status, run.ErrorCode, run.ErrorMessage = "unavailable", "EXTERNAL_RUNNER_UNAVAILABLE", ErrExternalRunnerUnavailable.Error()
+		run.UpdatedAt = s.now()
 		_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, error_code = ?,
 			error_message = ?, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
-			run.Status, run.ErrorCode, run.ErrorMessage, s.now(), actor.OrganizationID, projectID, run.ID)
+			run.Status, run.ErrorCode, run.ErrorMessage, run.UpdatedAt, run.OrganizationID, run.ProjectID, run.ID)
 		return run, nil
 	}
+	if s.Scheduler != nil {
+		if err := s.Scheduler.Schedule(ctx, run); err != nil {
+			run.Status, run.ErrorCode, run.ErrorMessage = "failed", "RESEARCH_SCHEDULE_FAILED", "研究任务暂时无法进入执行队列"
+			run.UpdatedAt = s.now()
+			_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, error_code = ?,
+				error_message = ?, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+				run.Status, run.ErrorCode, run.ErrorMessage, run.UpdatedAt, actor.OrganizationID, projectID, run.ID)
+		}
+		return run, nil
+	}
+	return s.executeResearch(ctx, run, documents)
+}
+
+func (s Service) executeResearch(ctx context.Context, run ResearchRun, documents []ExternalDocument) (ResearchRun, error) {
 	results, err := s.Runner.Run(ctx, ExternalResearchInput{Mode: run.Mode, Query: run.Query, Documents: documents})
 	if err != nil {
 		run.Status, run.ErrorCode, run.ErrorMessage = "failed", "EXTERNAL_RESEARCH_FAILED", "外部研究调用失败"
+		run.UpdatedAt = s.now()
 		_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, error_code = ?,
 			error_message = ?, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
-			run.Status, run.ErrorCode, run.ErrorMessage, s.now(), actor.OrganizationID, projectID, run.ID)
+			run.Status, run.ErrorCode, run.ErrorMessage, run.UpdatedAt, run.OrganizationID, run.ProjectID, run.ID)
 		return run, nil
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -415,15 +439,130 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 		run.Artifacts = append(run.Artifacts, artifact)
 	}
 	run.Status = "succeeded"
+	run.UpdatedAt = s.now()
 	if _, err := tx.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, updated_at = ?
 		WHERE organization_id = ? AND project_id = ? AND id = ?`,
-		run.Status, s.now(), actor.OrganizationID, projectID, run.ID); err != nil {
+		run.Status, run.UpdatedAt, run.OrganizationID, run.ProjectID, run.ID); err != nil {
 		return ResearchRun{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return ResearchRun{}, err
 	}
 	return run, nil
+}
+
+func (s Service) GetResearchRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ResearchRun, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return ResearchRun{}, err
+	}
+	return s.getResearchRun(ctx, actor.OrganizationID, projectID, id)
+}
+
+func (s Service) ListResearchRuns(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ResearchRun, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.DB.QueryContext(ctx, researchRunSelect+`
+		WHERE organization_id = ? AND project_id = ?
+		ORDER BY created_at DESC LIMIT ?`, actor.OrganizationID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []ResearchRun{}
+	for rows.Next() {
+		value, err := scanResearchRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].Artifacts, err = s.listResearchArtifacts(ctx, values[index].OrganizationID, values[index].ProjectID, values[index].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+const researchRunSelect = `SELECT id, organization_id, project_id, mode, query_text,
+	document_ids, disclosed_fields, status, confirmed_by, confirmed_at,
+	COALESCE(error_code, ''), COALESCE(error_message, ''), created_at, updated_at
+	FROM platform_research_runs`
+
+type researchRunScanner interface {
+	Scan(...any) error
+}
+
+func scanResearchRun(scanner researchRunScanner) (ResearchRun, error) {
+	var value ResearchRun
+	var documentIDs, disclosedFields []byte
+	err := scanner.Scan(
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Mode, &value.Query,
+		&documentIDs, &disclosedFields, &value.Status, &value.ConfirmedBy, &value.ConfirmedAt,
+		&value.ErrorCode, &value.ErrorMessage, &value.CreatedAt, &value.UpdatedAt,
+	)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	if err := json.Unmarshal(documentIDs, &value.DocumentIDs); err != nil {
+		return ResearchRun{}, err
+	}
+	if err := json.Unmarshal(disclosedFields, &value.DisclosedFields); err != nil {
+		return ResearchRun{}, err
+	}
+	value.Artifacts = []ResearchArtifact{}
+	return value, nil
+}
+
+func (s Service) getResearchRun(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (ResearchRun, error) {
+	value, err := scanResearchRun(s.DB.QueryRowContext(ctx, researchRunSelect+`
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		organizationID, projectID, strings.TrimSpace(id)))
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	value.Artifacts, err = s.listResearchArtifacts(ctx, organizationID, projectID, value.ID)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	return value, nil
+}
+
+func (s Service) listResearchArtifacts(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string) ([]ResearchArtifact, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, organization_id, project_id, research_run_id,
+		source_type, title, COALESCE(source_url, ''), content, citations, content_hash, created_at
+		FROM platform_research_artifacts
+		WHERE organization_id = ? AND project_id = ? AND research_run_id = ?
+		ORDER BY created_at ASC`, organizationID, projectID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []ResearchArtifact{}
+	for rows.Next() {
+		var value ResearchArtifact
+		var citations []byte
+		if err := rows.Scan(
+			&value.ID, &value.OrganizationID, &value.ProjectID, &value.ResearchRunID,
+			&value.SourceType, &value.Title, &value.SourceURL, &value.Content, &citations,
+			&value.ContentHash, &value.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(citations, &value.Citations); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 func validateResearchRequest(request ResearchRequest) ([]string, []string, error) {
