@@ -22,7 +22,7 @@
 | [广告数据 Connector](./10-ad-data-connectors.md) | 平台授权、同步、原始数据、统一指标、归因、对账和数据质量 | 数据、后端、投放、分析 |
 | [媒体资产平台](./11-media-asset-platform.md) | 上传、扫描、转码、生成资产、授权、分发和删除 | 后端、创意、算法、运维 |
 | [Computer Use 运行时](./12-computer-use-runtime.md) | 受控设备、浏览器会话、人工接管、页面证据和紧急停机 | 架构、投放、安全、运维 |
-| [API 与领域事件契约](./13-api-event-contracts.md) | API 命名、错误、幂等、并发、SSE、事件目录和契约治理 | 全体研发 |
+| [API 与领域事件契约](./13-api-event-contracts.md) | API 命名、错误、幂等、并发、SSE、事件目录、契约治理和已实现广告 AIGC/AI 混剪 OpenAPI 覆盖范围 | 全体研发 |
 | [工程、运维与安全基线](./14-engineering-operations-security.md) | 环境、CI/CD、多租户、SLO、RPO/RTO、可观测性与 AI 合规 | 研发、运维、安全 |
 | [PRD 通用交互与质量要求](./15-prd-cross-cutting-requirements.md) | 页面状态、并发编辑、AI 披露、可追踪性、无障碍和运营能力 | 产品、设计、研发、测试 |
 | [文档补充说明与决策清单](./16-document-gap-closure.md) | 缺口关闭映射、剩余产品/技术决策和研发前门禁 | 产品、架构、项目负责人 |

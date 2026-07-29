@@ -45,12 +45,12 @@ try {
     Write-Host 'Starting MySQL and waiting for it to become healthy...'
     Invoke-Checked docker compose up -d --wait mysql
 
-    Write-Host 'Applying database migrations...'
-    Invoke-Checked go run ./cmd/cookies-migrate
+    Write-Host 'Applying database migrations and seeding the canonical Go demo...'
+    Invoke-Checked go run ./cmd/cookies-seed
 
-    if (-not (Test-Path (Join-Path $repositoryRoot 'web\node_modules'))) {
+    if (-not (Test-Path (Join-Path $repositoryRoot 'node_modules'))) {
         Write-Host 'Installing frontend dependencies (first run only)...'
-        Invoke-Checked npm ci --prefix web
+        Invoke-Checked npm ci
     }
 
     $env:COOKIES_ENV = 'local'
@@ -58,14 +58,14 @@ try {
     $env:COOKIES_LOCAL_ORGANIZATION_ID = 'org_local'
     $env:COOKIES_LOCAL_PRINCIPAL_KIND = 'user'
     $env:COOKIES_LOCAL_PRINCIPAL_ID = 'user_local'
-    $env:COOKIES_LOCAL_PROJECT_ID = 'project_demo'
-    $env:COOKIES_LOCAL_SCOPES = 'project.read,project.write,assets.read,assets.write'
+    $env:COOKIES_LOCAL_PROJECT_ID = 'project_local'
+    $env:COOKIES_LOCAL_SCOPES = 'project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand'
     $env:COOKIES_BLOB_PROVIDER = 'filesystem'
     $env:COOKIES_FILESYSTEM_BLOB_ROOT = (Join-Path $repositoryRoot '.data\blobs')
     $env:COOKIES_SCANNER_MODE = 'noop'
 
     if ($PrepareOnly) {
-        Write-Host 'Development dependencies are ready.'
+        Write-Host 'Development dependencies and Go demo seed are ready.'
         return
     }
 
@@ -85,7 +85,7 @@ try {
 
     $frontend = Start-Process `
         -FilePath $shell.Source `
-        -ArgumentList ($shellArguments + @('npm run dev --prefix web')) `
+        -ArgumentList ($shellArguments + @('npm run dev -- --host 127.0.0.1')) `
         -WorkingDirectory $repositoryRoot `
         -PassThru
 

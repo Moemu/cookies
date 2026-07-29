@@ -32,6 +32,18 @@ export type ProjectAsset = {
     sha256: string
     width_pixels?: number
     height_pixels?: number
+    media: {
+      duration_seconds?: number
+      fps?: number
+      codec?: string
+      bitrate_bps?: number
+      audio_codec?: string
+      audio_channels?: number
+      audio_sample_rate?: number
+      poster_frame_ref?: string
+      probe_status: 'not_required' | 'succeeded' | 'failed'
+      probe_error?: string
+    }
     duration_ms?: number
     frame_rate?: string
     video_codec?: string
@@ -43,6 +55,29 @@ export type ProjectAsset = {
     created_at: string
   }
   created_at: string
+}
+
+export type AssetFeature = {
+  organization_id: string
+  project_id: string
+  asset_id: string
+  asset_version: number
+  schema_version: 'asset_feature_v1'
+  feature_version: string
+  hook_strength: number
+  product_visibility: number
+  scene_tags: string[]
+  product_tags: string[]
+  person_tags: string[]
+  action_tags: string[]
+  emotion_tags: string[]
+  selling_points: string[]
+  cta_presence: boolean
+  similarity_group?: string
+  similarity_risk: 'low' | 'medium' | 'high'
+  evidence: string[]
+  created_at: string
+  updated_at: string
 }
 
 export type SignedRequest = {

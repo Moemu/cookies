@@ -24,7 +24,7 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Local environment files may contain credentials. Keep only the empty template.
 .env
 .codex-runtime/
 
@@ -40,8 +40,10 @@ test-results/
 .tmp/
 tmp/
 
-# Local MVP backend persistence
-/data/
+# Local MVP backend persistence. Keep deployable public insight examples.
+/data/*
+!/data/insights/
+!/data/insights/**
 
 # Editor/IDE
 # .idea/

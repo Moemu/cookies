@@ -154,13 +154,14 @@ func main() {
 		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
+	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
 	dependencies := httpserver.Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
-		RemixPlans: remixService,
+		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 	}
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},

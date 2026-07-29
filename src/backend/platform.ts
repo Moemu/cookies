@@ -1,10 +1,10 @@
-import type { ApiAgencyWorkbench, ApiOperationalRecord } from '../data/api'
+import type { ApiAgencyWorkbench, ApiOperationalRecord } from '../data/api.js'
 import type {
   ArtifactKey,
   BusinessTaskRecord,
   ProjectArtifact,
   ProjectRecord,
-} from '../types'
+} from '../types.js'
 
 type Problem = {
   error?: {

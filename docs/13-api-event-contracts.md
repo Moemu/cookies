@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 四个业务系统与共享基座共同遵循的接口和事件标准 |
-| 文档版本 | v0.2 |
+| 文档版本 | v0.3 |
 | 文档状态 | 草案 |
 
 ## 1. 命名空间
@@ -129,7 +129,24 @@ SSE：
 - Provider/ORAG/平台 Connector 采用 Consumer Contract，升级前回归。
 - API/事件 Owner 对弃用公告、迁移指南和支持期限负责。
 
-## 11. MVP 验收
+## 11. 已实现平台 OpenAPI 范围
+
+当前 `api/openapi/platform-v1.yaml` 覆盖已落地的共享平台接口，包括 Project/Identity、素材上传、素材预览、生成产物回流、模型作业，以及广告 AIGC/AI 混剪相关的核心 MVP 能力：
+
+- 视频素材元数据与 `AssetFeature` 多模态标签读写，包含探测状态、poster 引用、hook 强度、商品露出、卖点、相似度风险和证据。
+- `RemixPlan` v1/v2 兼容契约，v2 使用 `segments[].shots[]` 表达 Shot List，同时保留旧 `clips[]` 兼容字段。
+- `RenderJob` 状态机、幂等创建、进度、质量报告引用、输出资产引用、预览入口和输入素材血缘摘要。
+- `QualityReport`、`HitAnalysis`、`ProductMapping`、AI 前贴 `Preroll`、反馈事件、素材表现聚合和 planner 权重快照。
+- Agent Run/ToolCall/TraceSpan、Knowledge 文档导入与关键词检索 citation、Remix-MMLU eval case/run。
+
+MVP 边界：
+
+- OpenAPI 只描述 `httpserver` 当前已注册的同步或 deterministic fake seam；未描述尚未接入的生产级视频渲染队列、外部 VLM、向量检索、飞书实时同步或投放平台写回。
+- 生成媒体输出仍必须通过 generated intake 或等价资产回流路径进入素材库，公共契约不暴露厂商临时 URL、对象存储 key 或本地路径。
+- Knowledge 搜索当前是 deterministic keyword search；后续向量检索接入必须保持 citation 响应兼容。
+- 反馈飞轮当前提供 append-only event 和 deterministic 聚合，尚不承诺在线学习或自动调权生效。
+
+## 12. MVP 验收
 
 1. 四系统 API 前缀一致，不再出现冲突命名约定。
 2. 关键写操作均通过幂等与乐观并发测试。
@@ -139,9 +156,10 @@ SSE：
 6. OpenAPI/事件破坏性变化能在 CI 阶段阻止合并。
 7. 四系统业务写入与事件均通过 Project Scope 校验，不能通过普通更新把资源移动到其他 Project。
 
-## 12. 变更记录
+## 13. 变更记录
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 统一 API 命名、错误、幂等、并发、异步任务和领域事件治理 |
 | v0.2 | 2026-07-21 | 增加 Project Scope、跨项目复用、project_id 不可变和资源索引事件约束 |
+| v0.3 | 2026-07-26 | 补齐广告 AIGC/AI 混剪 Task1-12 已实现平台接口的 OpenAPI 范围和 MVP 边界 |

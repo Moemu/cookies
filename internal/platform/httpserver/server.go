@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
@@ -39,6 +40,8 @@ type Server struct {
 	sessions          SessionManager
 	knowledge         KnowledgeManager
 	remixPlans        RemixPlanManager
+	evals             EvalManager
+	agentRuns         AgentRunManager
 	mux               *http.ServeMux
 	newID             func() (string, error)
 }
@@ -60,6 +63,8 @@ type Dependencies struct {
 	Sessions          SessionManager
 	Knowledge         KnowledgeManager
 	RemixPlans        RemixPlanManager
+	Evals             EvalManager
+	AgentRuns         AgentRunManager
 	// AuthenticatedDomainMounts allow vertical systems to share the platform
 	// listener and identity context without making this package import them.
 	// Mount handlers remain responsible for project authorization and scopes.
@@ -83,8 +88,25 @@ type SessionManager interface {
 type ProjectManager interface {
 	CreateBrand(context.Context, contract.ActorContext, string) (project.Brand, error)
 	CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error)
+	GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error)
 	GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 	ListProjects(context.Context, contract.ActorContext) ([]project.Project, error)
+	CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error)
+	ListBusinessTasks(context.Context, contract.ActorContext, contract.ProjectID) ([]project.BusinessTask, error)
+	GetBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string) (project.BusinessTask, error)
+	UpdateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateBusinessTaskRequest) (project.BusinessTask, error)
+	CreateOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, project.UpsertOperationalRecordRequest) (project.OperationalRecord, error)
+	ListOperationalRecords(context.Context, contract.ActorContext, contract.ProjectID) ([]project.OperationalRecord, error)
+	GetOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, string) (project.OperationalRecord, error)
+	UpsertOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpsertOperationalRecordRequest) (project.OperationalRecord, error)
+	CreateChangeSet(context.Context, contract.ActorContext, contract.ProjectID, project.CreateChangeSetRequest) (project.ChangeSet, error)
+	ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ChangeSet, error)
+	GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error)
+	PreflightChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error)
+	ApproveChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.ChangeSetApprovalRequest) (project.ChangeSet, error)
+	ExecuteChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error)
+	RollbackChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.RollbackChangeSetRequest) (project.ChangeSet, error)
+	ListAuditEvents(context.Context, contract.ActorContext, contract.ProjectID) ([]project.AuditEvent, error)
 }
 type AssetUploadManager interface {
 	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.CreateUploadRequest) (assets.CreateUploadResponse, error)
@@ -94,6 +116,9 @@ type AssetUploadManager interface {
 	Preview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (assets.SignedRequest, error)
 	OpenPreview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (io.ReadCloser, assets.ObjectInfo, error)
 	Remove(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) error
+	UpsertFeature(context.Context, contract.ActorContext, contract.ProjectID, assets.AssetFeature) (assets.AssetFeature, error)
+	GetFeature(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef, string) (assets.AssetFeature, error)
+	ListFeatures(context.Context, contract.ActorContext, contract.ProjectID, int) ([]assets.AssetFeature, error)
 }
 type GeneratedIntakeManager interface {
 	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.GeneratedAssetIntakeRequest) (assets.GeneratedIntake, error)
@@ -103,12 +128,41 @@ type RemixPlanManager interface {
 	Create(context.Context, contract.ActorContext, contract.ProjectID, remix.CreatePlanRequest) (remix.Plan, error)
 	Get(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.Plan, error)
 	List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]remix.Plan, error)
-	CreateRenderJob(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateRenderJobRequest) (remix.RenderJob, error)
+	CreateRenderJob(context.Context, contract.ActorContext, contract.ProjectID, contract.IdempotencyKey, remix.CreateRenderJobRequest) (remix.RenderJob, error)
 	GetRenderJob(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.RenderJob, error)
+	CreateQualityReport(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateQualityReportRequest) (remix.QualityReport, error)
+	GetQualityReport(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.QualityReport, error)
+	GetQualityReportForRenderJob(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.QualityReport, error)
+	CreateHitAnalysis(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateHitAnalysisRequest) (remix.HitAnalysis, error)
+	GetHitAnalysis(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.HitAnalysis, error)
+	CreateProductMapping(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateProductMappingRequest) (remix.ProductMapping, error)
+	GetProductMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.ProductMapping, error)
+	GeneratePlanFromProductMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.Plan, error)
+	CreatePreroll(context.Context, contract.ActorContext, contract.ProjectID, remix.CreatePrerollRequest) (remix.Preroll, error)
+	GetPreroll(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.Preroll, error)
+	ApplyPreroll(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.Plan, error)
+	CreateFeedbackEvent(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateFeedbackEventRequest) (remix.FeedbackEvent, error)
+	ListFeedbackEvents(context.Context, contract.ActorContext, contract.ProjectID, remix.FeedbackEventFilter) ([]remix.FeedbackEvent, error)
+	GetAssetPerformanceSnapshot(context.Context, contract.ActorContext, contract.ProjectID) ([]remix.AssetPerformance, error)
+	CreatePlannerWeightSnapshot(context.Context, contract.ActorContext, contract.ProjectID) (remix.PlannerWeightSnapshot, error)
+}
+type EvalManager interface {
+	CreateEvalCase(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateEvalCaseRequest) (remix.EvalCase, error)
+	ListEvalCases(context.Context, contract.ActorContext, contract.ProjectID) ([]remix.EvalCase, error)
+	CreateEvalRun(context.Context, contract.ActorContext, contract.ProjectID, remix.CreateEvalRunRequest) (remix.EvalRun, error)
+	GetEvalRun(context.Context, contract.ActorContext, contract.ProjectID, string) (remix.EvalRun, error)
+}
+type AgentRunManager interface {
+	CreateRun(context.Context, contract.ActorContext, contract.ProjectID, agent.CreateRunRequest) (agent.AgentRun, error)
+	ListRuns(context.Context, contract.ActorContext, contract.ProjectID, int) ([]agent.AgentRun, error)
+	GetRun(context.Context, contract.ActorContext, contract.ProjectID, string) (agent.AgentRun, error)
+	CancelRun(context.Context, contract.ActorContext, contract.ProjectID, string) (agent.AgentRun, error)
 }
 type KnowledgeManager interface {
+	ImportDocument(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ImportDocumentRequest) (knowledge.Document, error)
+	ListDocuments(context.Context, contract.ActorContext, contract.ProjectID, int) ([]knowledge.Document, error)
+	Search(context.Context, contract.ActorContext, contract.ProjectID, knowledge.SearchRequest) ([]knowledge.SearchResult, error)
 	CreateDocument(context.Context, contract.ActorContext, contract.ProjectID, string, string, io.Reader, int64) (knowledge.Document, error)
-	ListDocuments(context.Context, contract.ActorContext, contract.ProjectID) ([]knowledge.Document, error)
 	RunResearch(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ResearchRequest) (knowledge.ResearchRun, error)
 }
 
@@ -173,7 +227,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 		identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads,
 		intakes: dependencies.Intakes, newID: newRequestID,
 		creative: dependencies.Creative, sessions: dependencies.Sessions, knowledge: dependencies.Knowledge,
-		remixPlans: dependencies.RemixPlans,
+		remixPlans: dependencies.RemixPlans, evals: dependencies.Evals, agentRuns: dependencies.AgentRuns,
 	}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
@@ -185,24 +239,68 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /platform/v1/brands", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createBrand))))
 	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
 	server.mux.Handle("GET /platform/v1/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProjects))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectDetail))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/tasks", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.listProjectTasks))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/tasks", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.createProjectTask))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/tasks/{task_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.getProjectTask))))
+	server.mux.Handle("PATCH /platform/v1/projects/{project_id}/tasks/{task_id}", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.updateProjectTask))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/operations", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.listProjectOperations))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/operations", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.createProjectOperation))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/operations/{operation_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.getProjectOperation))))
+	server.mux.Handle("PUT /platform/v1/projects/{project_id}/operations/{operation_id}", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.upsertProjectOperation))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/change-sets", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.listProjectChangeSets))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/change-sets", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.createProjectChangeSet))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/change-sets/{change_set_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.getProjectChangeSet))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/change-sets/{change_set_id}/preflight", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.preflightProjectChangeSet))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/change-sets/{change_set_id}/approve", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.approveProjectChangeSet))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/change-sets/{change_set_id}/execute", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.executeProjectChangeSet))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/change-sets/{change_set_id}/rollback", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.rollbackProjectChangeSet))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/audit-events", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.listProjectAuditEvents))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/uploads", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.createUpload))))
 	server.mux.Handle("PUT /platform/v1/projects/{project_id}/assets/uploads/{upload_id}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.putUpload))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/uploads/{upload_action}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.finalizeUpload))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.listAssets))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/features", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.listAssetFeatures))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/preview", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.previewAsset))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/content", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.assetContent))))
 	server.mux.Handle("DELETE /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.removeAsset))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/features/{feature_version}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getAssetFeature))))
+	server.mux.Handle("PUT /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/features/{feature_version}", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.putAssetFeature))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/generated-intakes", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.createGeneratedIntake))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
-	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.createKnowledgeDocument))))
-	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope("strategy.read", http.HandlerFunc(server.listKnowledgeDocuments))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope(knowledge.ScopeWrite, http.HandlerFunc(server.knowledgeDocumentEntry))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeDocuments))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/search", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.searchKnowledge))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixPlan))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.listRemixPlans))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-plans/{plan_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixPlan))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-render-jobs", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixRenderJob))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixRenderJob))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}/quality-report", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixRenderJobQualityReport))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-quality-reports", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixQualityReport))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-quality-reports/{report_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixQualityReport))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-hit-analyses", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixHitAnalysis))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-hit-analyses/{analysis_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixHitAnalysis))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-product-mappings", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixProductMapping))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-product-mappings/{mapping_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixProductMapping))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-product-mappings/{mapping_id}/plans", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.generateRemixPlanFromProductMapping))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-prerolls", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixPreroll))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-prerolls/{preroll_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixPreroll))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-prerolls/{preroll_id}/apply", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.applyRemixPreroll))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-feedback-events", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixFeedbackEvent))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-feedback-events", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.listRemixFeedbackEvents))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-asset-performance", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixAssetPerformance))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-planner-weight-snapshots", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixPlannerWeightSnapshot))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-eval-cases", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.listRemixEvalCases))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-eval-cases", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixEvalCase))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-eval-runs", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixEvalRun))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-eval-runs/{run_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixEvalRun))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/agent-runs", server.requireProject(server.requireScope(agent.ScopeRunRead, http.HandlerFunc(server.listAgentRuns))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/agent-runs", server.requireProject(server.requireScope(agent.ScopeRunWrite, http.HandlerFunc(server.createAgentRun))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/agent-runs/{agent_run_id}", server.requireProject(server.requireScope(agent.ScopeRunRead, http.HandlerFunc(server.getAgentRun))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/agent-runs/{agent_run_id}/cancel", server.requireProject(server.requireScope(agent.ScopeRunWrite, http.HandlerFunc(server.cancelAgentRun))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/model/jobs", server.requireProject(http.HandlerFunc(server.createImageJob)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/model/jobs/{job_id}", server.requireProject(http.HandlerFunc(server.getProviderJob)))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-intakes", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listCreativeIntakes))))
@@ -430,6 +528,14 @@ func (s *Server) projectContext(writer http.ResponseWriter, request *http.Reques
 	writeJSON(writer, http.StatusOK, value)
 }
 
+func (s *Server) knowledgeDocumentEntry(writer http.ResponseWriter, request *http.Request) {
+	if strings.HasPrefix(strings.ToLower(request.Header.Get("Content-Type")), "multipart/") {
+		s.createKnowledgeDocument(writer, request)
+		return
+	}
+	s.importKnowledgeDocument(writer, request)
+}
+
 func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *http.Request) {
 	requestContext, _ := contract.RequestContextFrom(request.Context())
 	if s.knowledge == nil {
@@ -470,22 +576,6 @@ func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *ht
 	}
 	value.ExtractedText = ""
 	writeJSON(writer, http.StatusCreated, value)
-}
-
-func (s *Server) listKnowledgeDocuments(writer http.ResponseWriter, request *http.Request) {
-	requestContext, _ := contract.RequestContextFrom(request.Context())
-	if s.knowledge == nil {
-		s.notImplemented(writer, request)
-		return
-	}
-	values, err := s.knowledge.ListDocuments(
-		request.Context(), requestContext.Actor, contract.ProjectID(request.PathValue("project_id")),
-	)
-	if err != nil {
-		s.writeServiceError(writer, request, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) runKnowledgeResearch(writer http.ResponseWriter, request *http.Request) {

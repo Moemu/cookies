@@ -136,6 +136,12 @@ func TestGeneratedIntakeRouteRequiresScopeAndReturnsLocation(t *testing.T) {
 	if response.Header().Get("Location") != "/platform/v1/projects/project_1/assets/generated-intakes/intake_1" {
 		t.Fatalf("location=%q", response.Header().Get("Location"))
 	}
+	responseBody := response.Body.String()
+	for _, forbidden := range []string{"provider_code", "retrieval_expires_at", "declared_mime_type", "declared_size_bytes", "bucket", "object_key", "vendor"} {
+		if strings.Contains(responseBody, forbidden) {
+			t.Fatalf("generated intake response leaked %q: %s", forbidden, responseBody)
+		}
+	}
 
 	actor.Scopes = []contract.Scope{}
 	resolver, _ = identity.NewStaticResolver(actor)
@@ -218,10 +224,118 @@ func TestLocalAssetPreviewReturnsProtectedContentURL(t *testing.T) {
 	}
 }
 
+func TestListAssetsReturnsMediaMetadata(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.read"}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	uploads := &fakeUploadManager{items: []assets.ProjectAsset{{
+		Ref: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "asset_1", Version: 1}},
+		Asset: assets.Asset{
+			ID: "asset_1", OrganizationID: "org_1", Kind: contract.AssetVideo, Status: assets.AssetReady,
+			OwnerSystem: "assets", LatestVersion: 1, CreatedAt: now, UpdatedAt: now,
+		},
+		Version: assets.AssetVersion{
+			OrganizationID: "org_1", AssetID: "asset_1", Version: 1, Status: assets.AssetReady,
+			SourceType: contract.AssetSourceUpload, MIMEType: "video/mp4", SizeBytes: 1024, SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			Media:     assets.MediaMetadata{DurationSeconds: 9.6, FPS: 30, Codec: "h264", ProbeStatus: assets.MediaProbeSucceeded},
+			CreatedAt: now,
+		},
+		CreatedAt: now,
+	}}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: uploads})
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/assets", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Items []assets.ProjectAsset `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || body.Items[0].Version.Media.DurationSeconds != 9.6 || body.Items[0].Version.Media.ProbeStatus != assets.MediaProbeSucceeded {
+		t.Fatalf("media metadata missing from API response: %#v", body.Items)
+	}
+}
+
+func TestAssetFeatureRoutesReadWriteAndDegradeMissingFeature(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{"assets.read", "assets.write"}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploads := &fakeUploadManager{}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: uploads})
+	payload := `{"schema_version":"asset_feature_v1","hook_strength":0.86,"product_visibility":0.74,"scene_tags":["factory"],"product_tags":["cnc"],"person_tags":["engineer"],"action_tags":["cutting"],"emotion_tags":["trust"],"selling_points":["0.01mm precision"],"cta_presence":true,"similarity_group":"precision-demo-a","similarity_risk":"medium","evidence":["00:00-00:03 strong hook"]}`
+
+	put := httptest.NewRecorder()
+	server.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/platform/v1/projects/project_1/assets/asset_1/versions/2/features/vlm-2026-07-26", bytes.NewBufferString(payload)))
+	if put.Code != http.StatusOK {
+		t.Fatalf("put status=%d body=%s", put.Code, put.Body.String())
+	}
+	if uploads.feature.AssetID != "asset_1" || uploads.feature.AssetVersion != 2 || uploads.feature.ProjectID != "project_1" || uploads.feature.FeatureVersion != "vlm-2026-07-26" {
+		t.Fatalf("feature scope not set from URL: %#v", uploads.feature)
+	}
+
+	get := httptest.NewRecorder()
+	server.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/assets/asset_1/versions/2/features/vlm-2026-07-26", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", get.Code, get.Body.String())
+	}
+	var getBody struct {
+		Feature *assets.AssetFeature `json:"feature"`
+	}
+	if err := json.NewDecoder(get.Body).Decode(&getBody); err != nil {
+		t.Fatal(err)
+	}
+	if getBody.Feature == nil || getBody.Feature.HookStrength != 0.86 || getBody.Feature.SimilarityRisk != assets.AssetFeatureRiskMedium {
+		t.Fatalf("unexpected feature body: %#v", getBody.Feature)
+	}
+
+	list := httptest.NewRecorder()
+	server.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/assets/features?limit=10", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	var listBody struct {
+		Items []assets.AssetFeature `json:"items"`
+	}
+	if err := json.NewDecoder(list.Body).Decode(&listBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(listBody.Items) != 1 || listBody.Items[0].SellingPoints[0] != "0.01mm precision" {
+		t.Fatalf("unexpected list body: %#v", listBody)
+	}
+
+	missing := httptest.NewRecorder()
+	server.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/assets/asset_2/versions/1/features/missing", nil))
+	if missing.Code != http.StatusOK || !strings.Contains(missing.Body.String(), `"feature":null`) {
+		t.Fatalf("missing status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	actor.Scopes = []contract.Scope{"assets.read"}
+	resolver, _ = identity.NewStaticResolver(actor)
+	deniedServer := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Uploads: &fakeUploadManager{}})
+	denied := httptest.NewRecorder()
+	deniedServer.ServeHTTP(denied, httptest.NewRequest(http.MethodPut, "/platform/v1/projects/project_1/assets/asset_1/versions/2/features/vlm-2026-07-26", bytes.NewBufferString(payload)))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("scope denied status=%d", denied.Code)
+	}
+}
+
 type fakeUploadManager struct {
 	removed contract.AssetVersionRef
 	content []byte
+	items   []assets.ProjectAsset
 	mime    string
+	feature assets.AssetFeature
 }
 
 func (*fakeUploadManager) Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.CreateUploadRequest) (assets.CreateUploadResponse, error) {
@@ -233,8 +347,8 @@ func (*fakeUploadManager) PutContent(context.Context, contract.ActorContext, con
 func (*fakeUploadManager) Finalize(context.Context, contract.RequestContext, contract.ProjectID, string) (assets.UploadSession, error) {
 	return assets.UploadSession{}, nil
 }
-func (*fakeUploadManager) List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]assets.ProjectAsset, error) {
-	return nil, nil
+func (f *fakeUploadManager) List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]assets.ProjectAsset, error) {
+	return f.items, nil
 }
 func (*fakeUploadManager) Preview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (assets.SignedRequest, error) {
 	return assets.SignedRequest{Method: http.MethodGet}, nil
@@ -245,6 +359,26 @@ func (f *fakeUploadManager) OpenPreview(context.Context, contract.ActorContext, 
 func (f *fakeUploadManager) Remove(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, ref contract.AssetVersionRef) error {
 	f.removed = ref
 	return nil
+}
+func (f *fakeUploadManager) UpsertFeature(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, feature assets.AssetFeature) (assets.AssetFeature, error) {
+	feature.OrganizationID = actor.OrganizationID
+	feature.ProjectID = projectID
+	feature.CreatedAt = time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
+	feature.UpdatedAt = feature.CreatedAt
+	f.feature = feature
+	return feature, nil
+}
+func (f *fakeUploadManager) GetFeature(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, ref contract.AssetVersionRef, featureVersion string) (assets.AssetFeature, error) {
+	if f.feature.AssetID != ref.AssetID || f.feature.AssetVersion != ref.Version || f.feature.FeatureVersion != featureVersion {
+		return assets.AssetFeature{}, assets.ErrNotFound
+	}
+	return f.feature, nil
+}
+func (f *fakeUploadManager) ListFeatures(context.Context, contract.ActorContext, contract.ProjectID, int) ([]assets.AssetFeature, error) {
+	if f.feature.AssetID == "" {
+		return nil, nil
+	}
+	return []assets.AssetFeature{f.feature}, nil
 }
 
 type fakeIntakeManager struct{}
@@ -717,6 +851,74 @@ func (staticProjectManager) CreateProject(context.Context, contract.ActorContext
 }
 
 func (staticProjectManager) ListProjects(context.Context, contract.ActorContext) ([]project.Project, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
+	return project.ProjectDetail{}, nil
+}
+
+func (staticProjectManager) CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error) {
+	return project.BusinessTask{}, nil
+}
+
+func (staticProjectManager) ListBusinessTasks(context.Context, contract.ActorContext, contract.ProjectID) ([]project.BusinessTask, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string) (project.BusinessTask, error) {
+	return project.BusinessTask{}, nil
+}
+
+func (staticProjectManager) UpdateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateBusinessTaskRequest) (project.BusinessTask, error) {
+	return project.BusinessTask{}, nil
+}
+
+func (staticProjectManager) CreateOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	return project.OperationalRecord{}, nil
+}
+
+func (staticProjectManager) ListOperationalRecords(context.Context, contract.ActorContext, contract.ProjectID) ([]project.OperationalRecord, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, string) (project.OperationalRecord, error) {
+	return project.OperationalRecord{}, nil
+}
+
+func (staticProjectManager) UpsertOperationalRecord(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	return project.OperationalRecord{}, nil
+}
+
+func (staticProjectManager) CreateChangeSet(context.Context, contract.ActorContext, contract.ProjectID, project.CreateChangeSetRequest) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ChangeSet, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) PreflightChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ApproveChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.ChangeSetApprovalRequest) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ExecuteChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) RollbackChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.RollbackChangeSetRequest) (project.ChangeSet, error) {
+	return project.ChangeSet{}, nil
+}
+
+func (staticProjectManager) ListAuditEvents(context.Context, contract.ActorContext, contract.ProjectID) ([]project.AuditEvent, error) {
 	return nil, nil
 }
 

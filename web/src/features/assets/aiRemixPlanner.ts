@@ -1,4 +1,4 @@
-import type { ProjectAsset } from './types'
+import type { AssetFeature, ProjectAsset } from './types'
 
 export type RemixSegment = 'opening' | 'middle' | 'ending'
 export type RemixPace = 'balanced' | 'fast' | 'story'
@@ -22,16 +22,54 @@ export type RemixClip = {
   reason: string
 }
 
+export type RemixShot = {
+  id: string
+  segment: RemixSegment
+  source: 'existing_asset'
+  assetId: string
+  version: number
+  assetVersion: {
+    asset_id: string
+    version: number
+  }
+  timeline: {
+    startSeconds: number
+    durationSeconds: number
+    inPointSeconds: number
+    outPointSeconds: number
+  }
+  creative: {
+    scene: string
+    shotType: string
+    cameraAngle: string
+    dialogueOrNarration: string
+    subtitle: string
+    transition: 'cut'
+    ctaElement: string
+    aspect?: RemixClip['aspect']
+    mimeType?: string
+  }
+  planning: {
+    score: number
+    reason: string
+    reasonCodes: string[]
+    evidence: string[]
+  }
+  risks: string[]
+}
+
 export type RemixSegmentPlan = {
   segment: RemixSegment
   label: string
   targetSeconds: number
   actualSeconds: number
   clips: RemixClip[]
+  shots: RemixShot[]
 }
 
 export type BulkRemixPlan = {
   id: string
+  schemaVersion: 'remix_plan_v2'
   targetSeconds: number
   actualSeconds: number
   pace: RemixPace
@@ -50,6 +88,7 @@ export type BuildBulkRemixPlanInput = {
   targetSeconds: number
   pace: RemixPace
   maxClipsPerSegment?: number
+  assetFeatures?: AssetFeature[]
   now?: Date
 }
 
@@ -76,7 +115,8 @@ export function buildBulkRemixPlan(input: BuildBulkRemixPlanInput): BulkRemixPla
   const maxClipsPerSegment = clamp(input.maxClipsPerSegment ?? 24, 1, 80)
   const now = input.now ?? new Date()
   const segments: RemixSegmentPlan[] = []
-  const warnings: string[] = ['当前版本使用文件大小估算素材时长，接入视频 duration 字段后会自动替换为真实片长。']
+  const warnings: string[] = []
+  const features = featureMap(input.assetFeatures ?? [])
   let cursor = 0
 
   for (const segment of segmentOrder()) {
@@ -85,22 +125,27 @@ export function buildBulkRemixPlan(input: BuildBulkRemixPlanInput): BulkRemixPla
     if (candidates.length === 0) {
       warnings.push(`${segmentLabels[segment]}没有可用视频素材。`)
     }
-    const clips = pickSegmentClips(segment, candidates, target, input.pace, maxClipsPerSegment, cursor, now)
+    const clips = pickSegmentClips(segment, candidates, target, input.pace, maxClipsPerSegment, cursor, now, features)
     const actual = roundSeconds(clips.reduce((sum, clip) => sum + clip.durationSeconds, 0))
     if (actual < target * 0.65 && candidates.length > 0) {
       warnings.push(`${segmentLabels[segment]}素材不足，当前只覆盖目标时长的 ${Math.round((actual / target) * 100)}%。`)
     }
-    segments.push({ segment, label: segmentLabels[segment], targetSeconds: target, actualSeconds: actual, clips })
+    segments.push({ segment, label: segmentLabels[segment], targetSeconds: target, actualSeconds: actual, clips, shots: clips.map(clipToShot) })
     cursor = roundSeconds(cursor + actual)
   }
 
-  const selectedAssets = segmentOrder().reduce((sum, segment) => sum + dedupeAssets(input.selection[segment]).filter(isVideoAsset).length, 0)
+  const selectedVideoAssets = segmentOrder().flatMap((segment) => dedupeAssets(input.selection[segment]).filter(isVideoAsset))
+  const selectedAssets = selectedVideoAssets.length
+  if (selectedVideoAssets.some((asset) => !hasUsableDuration(asset))) {
+    warnings.unshift('部分视频缺少真实 duration，已临时使用文件大小估算素材时长。')
+  }
   const usedAssets = new Set(segments.flatMap((segment) => segment.clips.map((clip) => clip.assetId))).size
   const actualSeconds = roundSeconds(segments.reduce((sum, segment) => sum + segment.actualSeconds, 0))
   const coveragePercent = targetSeconds > 0 ? Math.min(100, Math.round((actualSeconds / targetSeconds) * 100)) : 0
 
   return {
     id: `remix_${stableHash(`${targetSeconds}:${input.pace}:${selectedAssets}:${actualSeconds}`)}`,
+    schemaVersion: 'remix_plan_v2',
     targetSeconds,
     actualSeconds,
     pace: input.pace,
@@ -115,20 +160,77 @@ export function buildBulkRemixPlan(input: BuildBulkRemixPlanInput): BulkRemixPla
   }
 }
 
+function clipToShot(clip: RemixClip): RemixShot {
+  return {
+    id: clip.id,
+    segment: clip.segment,
+    source: 'existing_asset',
+    assetId: clip.assetId,
+    version: clip.version,
+    assetVersion: { asset_id: clip.assetId, version: clip.version },
+    timeline: {
+      startSeconds: clip.startSeconds,
+      durationSeconds: clip.durationSeconds,
+      inPointSeconds: clip.inPointSeconds,
+      outPointSeconds: clip.outPointSeconds,
+    },
+    creative: {
+      scene: `${segmentLabels[clip.segment]}素材镜头`,
+      shotType: shotTypeForAspect(clip.aspect),
+      cameraAngle: '',
+      dialogueOrNarration: '',
+      subtitle: '',
+      transition: 'cut',
+      ctaElement: clip.segment === 'ending' ? 'cta' : '',
+      aspect: clip.aspect,
+      mimeType: clip.mimeType,
+    },
+    planning: {
+      score: clip.score,
+      reason: clip.reason,
+      reasonCodes: [clip.sourceType, clip.aspect].filter((value) => value !== 'unknown'),
+      evidence: [clip.reason],
+    },
+    risks: risksForClip(clip),
+  }
+}
+
+function risksForClip(clip: RemixClip) {
+  if (clip.reason.includes('相似度风险：high')) return ['similarity_risk:high']
+  if (clip.reason.includes('相似度风险：medium')) return ['similarity_risk:medium']
+  return []
+}
+
+function shotTypeForAspect(aspect: RemixClip['aspect']) {
+  if (aspect === 'vertical') return 'close_up'
+  if (aspect === 'horizontal') return 'wide'
+  if (aspect === 'square') return 'product'
+  return 'generic'
+}
+
 export function isVideoAsset(asset: ProjectAsset) {
   return asset.asset.asset_kind === 'video' || asset.version.mime_type.startsWith('video/')
 }
 
 export function estimateAssetDurationSeconds(asset: ProjectAsset, pace: RemixPace) {
+  const actualDuration = asset.version.media?.duration_seconds
+  if (typeof actualDuration === 'number' && Number.isFinite(actualDuration) && actualDuration > 0) {
+    return roundSeconds(clamp(actualDuration, 0.8, 600))
+  }
   const bounds = paceClipBounds[pace]
   const sizeMB = Math.max(0.1, asset.version.size_bytes / 1024 / 1024)
   const estimated = 1.8 + Math.log2(sizeMB + 1) * 1.25
   return roundSeconds(clamp(estimated, bounds.min, bounds.max))
 }
 
-function pickSegmentClips(segment: RemixSegment, candidates: ProjectAsset[], targetSeconds: number, pace: RemixPace, maxClips: number, startCursor: number, now: Date) {
+function hasUsableDuration(asset: ProjectAsset) {
+  const duration = asset.version.media?.duration_seconds
+  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0
+}
+
+function pickSegmentClips(segment: RemixSegment, candidates: ProjectAsset[], targetSeconds: number, pace: RemixPace, maxClips: number, startCursor: number, now: Date, features: Map<string, AssetFeature>) {
   const ranked = candidates
-    .map((asset) => ({ asset, score: scoreAssetForSegment(asset, segment, now) }))
+    .map((asset) => ({ asset, feature: features.get(assetFeatureKey(asset)), score: scoreAssetForSegment(asset, segment, now, features.get(assetFeatureKey(asset))) }))
     .sort((left, right) => right.score - left.score || left.asset.asset.id.localeCompare(right.asset.asset.id))
   const clips: RemixClip[] = []
   const usedAspects = new Set<string>()
@@ -158,7 +260,7 @@ function pickSegmentClips(segment: RemixSegment, candidates: ProjectAsset[], tar
       inPointSeconds: 0,
       outPointSeconds: roundSeconds(duration),
       score,
-      reason: explainSelection(segment, candidate.asset, score),
+      reason: explainSelection(segment, candidate.asset, score, candidate.feature),
     })
     cursor = roundSeconds(cursor + duration)
     usedAspects.add(aspect)
@@ -167,7 +269,7 @@ function pickSegmentClips(segment: RemixSegment, candidates: ProjectAsset[], tar
   return clips
 }
 
-function scoreAssetForSegment(asset: ProjectAsset, segment: RemixSegment, now: Date) {
+function scoreAssetForSegment(asset: ProjectAsset, segment: RemixSegment, now: Date, feature?: AssetFeature) {
   let score = 0.45
   const ageDays = Math.max(0, (now.getTime() - new Date(asset.created_at).getTime()) / 86400000)
   score += Math.max(0, 0.18 - ageDays * 0.006)
@@ -180,16 +282,37 @@ function scoreAssetForSegment(asset: ProjectAsset, segment: RemixSegment, now: D
   if (aspect === 'horizontal' && segment === 'middle') score += 0.08
   if (aspect === 'square' && segment === 'ending') score += 0.06
   score += Math.min(0.1, Math.log2(Math.max(1, asset.version.size_bytes / 1024 / 1024)) * 0.02)
+  if (feature) {
+    if (segment === 'opening') score += feature.hook_strength * 0.22
+    if (segment === 'middle') score += feature.product_visibility * 0.16
+    if (segment === 'ending') score += (feature.cta_presence ? 0.12 : 0) + feature.product_visibility * 0.08
+    if (feature.similarity_risk === 'high') score -= 0.22
+    if (feature.similarity_risk === 'medium') score -= 0.08
+  }
   return roundScore(clamp(score, 0, 1))
 }
 
-function explainSelection(segment: RemixSegment, asset: ProjectAsset, score: number) {
+function explainSelection(segment: RemixSegment, asset: ProjectAsset, score: number, feature?: AssetFeature) {
   const signals = [`${segmentLabels[segment]}匹配分 ${Math.round(score * 100)}`]
   const aspect = assetAspect(asset)
   if (aspect !== 'unknown') signals.push(`${aspectLabel(aspect)}画幅`)
   signals.push(sourceLabel(asset.version.source_type))
   if (asset.version.width_pixels && asset.version.height_pixels) signals.push('尺寸完整')
+  if (feature) {
+    signals.push(`Hook ${Math.round(feature.hook_strength * 100)}`)
+    signals.push(`商品露出 ${Math.round(feature.product_visibility * 100)}`)
+    if (feature.selling_points[0]) signals.push(`卖点：${feature.selling_points[0]}`)
+    if (feature.similarity_risk !== 'low') signals.push(`相似度风险：${feature.similarity_risk}`)
+  }
   return signals.join(' · ')
+}
+
+function assetFeatureKey(asset: ProjectAsset) {
+  return `${asset.asset.id}:${asset.version.version}`
+}
+
+function featureMap(features: AssetFeature[]) {
+  return new Map(features.map((feature) => [`${feature.asset_id}:${feature.asset_version}`, feature]))
 }
 
 function dedupeAssets(assets: ProjectAsset[]) {

@@ -9,7 +9,7 @@ import type {
   ApiPreparedCommercePreroll,
   ApiProject,
   ApiProviderCapabilities,
-} from '../data/api'
+} from '../data/api.js'
 import {
   apiRequest,
   buildAgencyWorkbench,
@@ -18,7 +18,7 @@ import {
   loadWorkspaceBootstrap,
   toProjectRecord,
   type BackendProject,
-} from './platform'
+} from './platform.js'
 
 type ListResponse<T> = { items: T[] }
 

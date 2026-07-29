@@ -16,7 +16,7 @@ import {
   loadKanonAgencyWorkbench,
   prepareKanonCommercePreroll,
   unsupportedKanonWrite,
-} from '../backend/kanon-api'
+} from '../backend/kanon-api.js'
 
 export type ApiProject = {
   id: string
@@ -37,6 +37,91 @@ export type ApiProject = {
   version: number
   createdAt: string
   updatedAt: string
+}
+
+export type ApiPublicInsightIndustryStat = {
+  name: string
+  count: number
+  views: number
+}
+
+export type ApiPublicInsightOverview = {
+  total_videos: number
+  total_views: number
+  average_like_rate: number
+  average_finish_rate: number
+  ai_ratio: number
+  industries: ApiPublicInsightIndustryStat[]
+  files: Array<{ filename: string; row_count: number; modified_at: string }>
+  loaded_at: string
+  data_dir: string
+}
+
+export type ApiPublicInsightFilterOption = {
+  value: string
+  count: number
+}
+
+export type ApiPublicInsightFilters = {
+  industries: ApiPublicInsightFilterOption[]
+  visual_styles: ApiPublicInsightFilterOption[]
+  ai_types: string[]
+  date_range: { min: string; max: string }
+}
+
+export type ApiPublicInsightVideoListItem = {
+  item_id: string
+  url: string
+  frame_first: string
+  item_title: string
+  item_create_day: string
+  author_cert_type: string
+  vv_all: number
+  like_cnt_all: number
+  comment_cnt_all: number
+  share_cnt_all: number
+  favourite_cnt_all: number
+  finish_vv_all: number
+  ctr: string
+  bounce_rate_map: string
+  has_ai_generated: string
+  industry: string
+  date: string
+  finish_rate: number
+  like_rate: number
+  playback_url: string
+}
+
+export type ApiPublicInsightVideoDetail = ApiPublicInsightVideoListItem & {
+  storyboard_structure: string
+  ai_creative_type: string
+  item_asr: string
+  item_ocr: string
+  first3s_visual_creative_type: string
+  main_visual_elements: string
+  shooting_scene: string
+  characters_relation: string
+  mentioned_brand: string
+  oral_product_desc: string
+  bgm_style: string
+  bgm_bpm: string
+  bgm_emotion: string
+  voice_type: string
+  speech_speed: string
+  oral_script: string
+  storyboard_prompt: string
+  visual_style: string
+  creative_highlight: string
+  source_file: string
+  storyboard: unknown[]
+}
+
+export type ApiPublicInsightVideoPage = {
+  items: ApiPublicInsightVideoListItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
 }
 
 export type ApiAgencyHealthStatus = 'healthy' | 'watch' | 'blocked'
@@ -980,7 +1065,31 @@ export type ApiProviderCapabilities = {
     model: string
     available: boolean
   }>
+  credential?: {
+    source?: 'environment' | 'workspace'
+    maskedApiKey?: string
+    updatedAt?: string
+  }
   checkedAt: string
+}
+
+export type ApiAuthSession = {
+  authenticated: boolean
+  user?: {
+    id: string
+    email: string
+    displayName: string
+  }
+}
+
+export type ApiProviderConfiguration = {
+  provider: 'ark'
+  status: 'configured' | 'not_configured'
+  baseUrl: string
+  source?: 'environment' | 'workspace'
+  maskedApiKey?: string
+  updatedAt?: string
+  capabilities: ApiProviderCapabilities
 }
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
@@ -1447,6 +1556,7 @@ export const agencyWorkbenchSample: ApiAgencyWorkbench = {
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
+    credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -1956,7 +2066,40 @@ export function buildRemixPrerollInput(
 
 export const api = {
   listAgencyWorkbench: loadKanonAgencyWorkbench,
+  getSession: () => request<ApiAuthSession>('/session'),
+  login: (input: { email: string; password: string }) => request<ApiAuthSession>('/session', 'POST', input),
+  logout: () => request<ApiAuthSession>('/session', 'DELETE'),
   getCapabilities: getKanonCapabilities,
+  getProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration'),
+  updateProviderConfiguration: (input: { apiKey: string; baseUrl?: string }) =>
+    request<ApiProviderConfiguration>('/provider/configuration', 'PUT', input),
+  deleteProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration', 'DELETE'),
+  getPublicInsightOverview: () => request<ApiPublicInsightOverview>('/public-insights/overview'),
+  getPublicInsightFilters: () => request<ApiPublicInsightFilters>('/public-insights/filters'),
+  listPublicInsightVideos: (input: {
+    page?: number
+    pageSize?: number
+    keyword?: string
+    industry?: string
+    aiGenerated?: string
+    visualStyle?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  } = {}) => {
+    const search = new URLSearchParams({
+      page: String(input.page ?? 1),
+      page_size: String(input.pageSize ?? 20),
+      keyword: input.keyword ?? '',
+      industry: input.industry ?? '',
+      ai_generated: input.aiGenerated ?? '全部',
+      visual_style: input.visualStyle ?? '',
+      sort_by: input.sortBy ?? 'vv_all',
+      sort_order: input.sortOrder ?? 'desc',
+    })
+    return request<ApiPublicInsightVideoPage>(`/public-insights/videos?${search.toString()}`)
+  },
+  getPublicInsightVideo: (itemId: string) =>
+    request<ApiPublicInsightVideoDetail>(`/public-insights/videos/${encodeURIComponent(itemId)}`),
   listProjects: listKanonProjects,
   createProject: createKanonProject,
   updateProject: async (_id: string, _input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective'>>) =>
@@ -1982,6 +2125,7 @@ export const api = {
     sourceArtifactIds?: string[]
   }) => Promise.reject<ApiBusinessTask>(unsupportedKanonWrite(`“${input.name}”任务创建`)),
   updateTask: (
+    projectId: string,
     id: string,
     input: Partial<Pick<ApiBusinessTask, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>,
   ) => Promise.reject<ApiBusinessTask>(unsupportedKanonWrite(`任务 ${id} 更新`)),

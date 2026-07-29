@@ -1,3 +1,5 @@
+import { platformClient } from '../data/platformClient'
+
 export type PreflightCheck = {
   code: 'confirmed_brief' | 'ready_creative' | 'budget_boundary'
   passed: boolean
@@ -37,11 +39,11 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 export const deliveryApi = {
-  listChangeSets: (projectId?: string) => request<DeliveryChangeSet[]>(`/change-sets${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
+  listChangeSets: (projectId?: string) => projectId ? platformClient.listChangeSets(projectId) : Promise.resolve([]),
   createChangeSet: (input: { projectId: string; name: string; artifactIds: string[]; budgetLimit: number }) =>
-    request<DeliveryChangeSet>('/change-sets', 'POST', input),
-  preflight: (id: string) => request<DeliveryChangeSet>(`/change-sets/${id}/preflight`, 'POST'),
-  approve: (id: string) => request<DeliveryChangeSet>(`/change-sets/${id}/approve`, 'POST', { actor: 'Amelia Meng', role: 'demo-approver' }),
-  execute: (id: string) => request<DeliveryChangeSet>(`/change-sets/${id}/execute`, 'POST', { actor: 'Amelia Meng' }),
-  rollback: (id: string, reason: string) => request<DeliveryChangeSet>(`/change-sets/${id}/rollback`, 'POST', { actor: 'Amelia Meng', reason }),
+    platformClient.createChangeSet(input.projectId, input),
+  preflight: (projectId: string, id: string) => platformClient.preflightChangeSet(projectId, id),
+  approve: (projectId: string, id: string) => platformClient.approveChangeSet(projectId, id),
+  execute: (projectId: string, id: string) => platformClient.executeChangeSet(projectId, id),
+  rollback: (projectId: string, id: string, reason: string) => platformClient.rollbackChangeSet(projectId, id, reason),
 }
