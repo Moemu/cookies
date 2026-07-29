@@ -180,6 +180,7 @@ func main() {
 		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
+		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},
 	}
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},

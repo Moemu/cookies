@@ -220,6 +220,24 @@ type WorkbenchDeliveryTarget struct {
 	Region   string `json:"region"`
 }
 
+type RunWorkbenchQualityCheckRequest struct {
+	AssetID      string `json:"-"`
+	AssetVersion int    `json:"-"`
+}
+
+type RecordWorkbenchMaterialConfirmationRequest struct {
+	AssetID      string `json:"-"`
+	AssetVersion int    `json:"-"`
+	Status       string `json:"status"`
+	Scope        string `json:"scope"`
+	Note         string `json:"note"`
+}
+
+type UpdateWorkbenchAssetPointerRequest struct {
+	AssetID         string `json:"-"`
+	DeliveryVersion *int   `json:"delivery_version"`
+}
+
 type ProjectArtifactSummary struct {
 	ID            string                    `json:"id,omitempty"`
 	Key           string                    `json:"key"`

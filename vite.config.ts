@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// The browser application has one backend authority: the Go product API.
+// The legacy TypeScript server remains an opt-in compatibility tool and is
+// deliberately not part of the main Vite proxy.
 const platformProxyTarget = process.env.VITE_PLATFORM_PROXY_TARGET ?? 'http://127.0.0.1:8080'
 
 export default defineConfig({

@@ -726,15 +726,31 @@ export async function createKanonPreparedCommercePrerollVideo(
 }
 
 export async function getKanonCapabilities(): Promise<ApiProviderCapabilities> {
-  await apiRequest<{ status: string }>('/readyz')
+  const response = await apiRequest<{
+    provider: string
+    status: 'configured' | 'not_configured'
+    capabilities: Array<{
+      capability: string
+      model_alias: string
+      upstream_model: string
+      available: boolean
+    }>
+    credential?: { source?: 'environment' | 'workspace'; masked_api_key?: string }
+    checked_at: string
+  }>('/platform/v1/provider/capabilities')
   return {
-    provider: 'cookies-provider-gateway',
-    status: 'configured',
-    capabilities: [
-      { capability: 'image.generate', model: 'cookies.image.standard', available: true },
-      { capability: 'video.generate', model: 'cookies.video.standard', available: true },
-    ],
-    checkedAt: new Date().toISOString(),
+    provider: response.provider,
+    status: response.status,
+    capabilities: response.capabilities.map(item => ({
+      capability: item.capability,
+      model: `${item.model_alias} → ${item.upstream_model}`,
+      available: item.available,
+    })),
+    credential: response.credential ? {
+      source: response.credential.source,
+      maskedApiKey: response.credential.masked_api_key,
+    } : undefined,
+    checkedAt: response.checked_at,
   }
 }
 

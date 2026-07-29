@@ -42,6 +42,7 @@ type Server struct {
 	remixPlans        RemixPlanManager
 	evals             EvalManager
 	agentRuns         AgentRunManager
+	providerConfig    ProviderConfigurationReader
 	mux               *http.ServeMux
 	newID             func() (string, error)
 }
@@ -65,6 +66,7 @@ type Dependencies struct {
 	RemixPlans        RemixPlanManager
 	Evals             EvalManager
 	AgentRuns         AgentRunManager
+	ProviderConfig    ProviderConfigurationReader
 	// AuthenticatedDomainMounts allow vertical systems to share the platform
 	// listener and identity context without making this package import them.
 	// Mount handlers remain responsible for project authorization and scopes.
@@ -91,6 +93,9 @@ type ProjectManager interface {
 	UpdateProject(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateProjectRequest) (project.Project, error)
 	GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error)
 	GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error)
+	RunWorkbenchQualityCheck(context.Context, contract.ActorContext, contract.ProjectID, project.RunWorkbenchQualityCheckRequest) (project.WorkbenchQualityCheckRun, error)
+	RecordWorkbenchMaterialConfirmation(context.Context, contract.ActorContext, contract.ProjectID, project.RecordWorkbenchMaterialConfirmationRequest) (project.WorkbenchMaterialConfirmation, error)
+	UpdateWorkbenchAssetPointer(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateWorkbenchAssetPointerRequest) (project.WorkbenchAssetVersionPointer, error)
 	GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 	ListProjects(context.Context, contract.ActorContext) ([]project.Project, error)
 	CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error)
@@ -212,6 +217,10 @@ type ProviderJobs interface {
 	GetJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (contract.ProviderJob, error)
 }
 
+type ProviderConfigurationReader interface {
+	ListCapabilities(context.Context, contract.OrganizationID) ([]provider.CapabilityStatus, error)
+}
+
 // New retains the bootstrap construction path for focused HTTP tests. The
 // application uses NewWithDependencies so readiness and project checks are real.
 func New(resolver identity.Resolver) *Server {
@@ -232,6 +241,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 		intakes: dependencies.Intakes, newID: newRequestID,
 		creative: dependencies.Creative, sessions: dependencies.Sessions, knowledge: dependencies.Knowledge,
 		remixPlans: dependencies.RemixPlans, evals: dependencies.Evals, agentRuns: dependencies.AgentRuns,
+		providerConfig: dependencies.ProviderConfig,
 	}
 	server.mux = http.NewServeMux()
 	server.mux.HandleFunc("GET /healthz", server.health)
@@ -240,12 +250,16 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.HandleFunc("POST /platform/v1/auth/logout", server.logout)
 	server.mux.Handle("GET /platform/v1/context", server.requireAuthentication(http.HandlerFunc(server.requestContext)))
 	server.mux.Handle("GET /platform/v1/me", server.requireAuthentication(http.HandlerFunc(server.currentIdentity)))
+	server.mux.Handle("GET /platform/v1/provider/capabilities", server.requireAuthentication(http.HandlerFunc(server.providerCapabilities)))
 	server.mux.Handle("POST /platform/v1/brands", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createBrand))))
 	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
 	server.mux.Handle("GET /platform/v1/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProjects))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectDetail))))
 	server.mux.Handle("PATCH /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.updateProject))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/workbench", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectWorkbench))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/quality-checks", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.runWorkbenchQualityCheck))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/confirmations", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.recordWorkbenchMaterialConfirmation))))
+	server.mux.Handle("PATCH /platform/v1/projects/{project_id}/assets/{asset_id}/version-pointer", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.updateWorkbenchAssetPointer))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/tasks", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.listProjectTasks))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/tasks", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.createProjectTask))))

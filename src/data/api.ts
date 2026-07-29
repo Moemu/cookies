@@ -1131,16 +1131,25 @@ const emptyAgencyWorkbench: ApiAgencyWorkbench = {
 
 async function loadPersistedAgencyWorkbench(projectIds: string[]): Promise<ApiAgencyWorkbench> {
   const results = await Promise.all([...new Set(projectIds)].map(async projectId => {
-    const [snapshot, workbench] = await Promise.all([platformClient.getProjectSnapshot(projectId), platformClient.getWorkbench(projectId)])
-    return workbench ? workbenchFromResponse(snapshot.project, workbench) : emptyAgencyWorkbench
+    const [snapshot, workbench, mediaAssets] = await Promise.all([
+      platformClient.getProjectSnapshot(projectId),
+      platformClient.getWorkbench(projectId),
+      platformClient.listProjectMediaAssets(projectId),
+    ])
+    return workbench ? workbenchFromResponse(snapshot.project, workbench, mediaAssets) : emptyAgencyWorkbench
   }))
   return results.reduce<ApiAgencyWorkbench>((all, current) => ({
     organizations: [...all.organizations, ...current.organizations], clients: [...all.clients, ...current.clients], brands: [...all.brands, ...current.brands], projects: [...all.projects, ...current.projects], adAccountBindings: [...all.adAccountBindings, ...current.adAccountBindings], qualityCheckRuns: [...all.qualityCheckRuns, ...current.qualityCheckRuns], materialConfirmations: [...all.materialConfirmations, ...current.materialConfirmations], assetVersionPointers: [...all.assetVersionPointers, ...current.assetVersionPointers],
   }), emptyAgencyWorkbench)
 }
 
-function workbenchFromResponse(project: ApiProject, response: import('./platformClient.js').PlatformProjectWorkbench): ApiAgencyWorkbench {
+function workbenchFromResponse(
+  project: ApiProject,
+  response: import('./platformClient.js').PlatformProjectWorkbench,
+  mediaAssets: ApiProjectMediaAsset[],
+): ApiAgencyWorkbench {
   const { organization, client, brand, project: progress } = response
+  const mediaByAssetVersion = new Map(mediaAssets.map(asset => [`${asset.id}:${asset.version}`, asset]))
   return {
     organizations: [{ id: organization.id, code: organization.code, name: organization.name, owner: organization.owner, currency: organization.currency as 'CNY', timezone: organization.timezone as 'Asia/Shanghai', updatedAt: organization.updated_at }],
     clients: [{ id: client.id, organizationId: client.organization_id, code: client.code, name: client.name, industry: client.industry, owner: client.owner, healthStatus: client.health_status as ApiAgencyHealthStatus, updatedAt: client.updated_at }],
@@ -1149,7 +1158,43 @@ function workbenchFromResponse(project: ApiProject, response: import('./platform
     adAccountBindings: response.ad_account_bindings.map(item => ({ id: item.id, organizationId: item.organization_id, clientId: item.client_id, brandId: item.brand_id, projectIds: [project.id], platform: item.platform as ApiAdPlatform, accountName: item.account_name, accountDisplayId: item.account_display_id, currency: item.currency as 'CNY', timezone: item.timezone as 'Asia/Shanghai', permissionStatus: item.permission_status as ApiBindingHealthStatus, loginStatus: item.login_status as ApiBindingHealthStatus, trackingStatus: item.tracking_status as ApiBindingHealthStatus, owner: item.owner, boundAssetIds: item.bound_asset_ids, lastSyncedAt: item.last_synced_at })),
     qualityCheckRuns: response.quality_check_runs.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiQualityCheckStatus, model: item.model, ruleVersion: item.rule_version, promptVersion: item.prompt_version, summary: item.summary, issues: item.issues.map(issue => ({ id: issue.id, severity: issue.severity as ApiQualityIssueSeverity, rule: issue.rule, evidence: issue.evidence, suggestion: issue.suggestion })), createdAt: item.created_at, completedAt: item.completed_at ?? undefined })),
     materialConfirmations: response.material_confirmations.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, qualityCheckRunId: item.quality_check_run_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiMaterialConfirmationStatus, scope: item.scope, confirmedBy: item.confirmed_by, note: item.note, createdAt: item.created_at })),
-    assetVersionPointers: response.asset_version_pointers.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, assetId: item.asset_id, workingVersion: item.working_version, qualityCheckedVersion: item.quality_checked_version ?? undefined, humanConfirmedVersion: item.human_confirmed_version ?? undefined, deliveryVersion: item.delivery_version ?? undefined, versions: item.versions.map(version => ({ version: version.version, createdBy: version.created_by, sourceTaskId: version.source_task_id, sourceType: version.source_type as ApiAssetVersionRecord['sourceType'], sourceLabel: version.source_label, createdAt: version.created_at, changeSummary: version.change_summary })), authorization: { platforms: item.authorization.platforms as ApiAdPlatform[], regions: item.authorization.regions, rightsHolder: item.authorization.rights_holder, expiresAt: item.authorization.expires_at, note: item.authorization.note }, deliveryTarget: { platform: item.delivery_target.platform as ApiAdPlatform, region: item.delivery_target.region }, owner: item.owner, updatedAt: item.updated_at })),
+    assetVersionPointers: response.asset_version_pointers.map(item => {
+      const media = mediaByAssetVersion.get(`${item.asset_id}:${item.working_version}`)
+      return {
+        id: item.id,
+        organizationId: item.organization_id,
+        projectId: item.project_id,
+        assetId: item.asset_id,
+        mediaKind: media?.kind === 'document' ? undefined : media?.kind,
+        contentUrl: media?.contentUrl,
+        workingVersion: item.working_version,
+        qualityCheckedVersion: item.quality_checked_version ?? undefined,
+        humanConfirmedVersion: item.human_confirmed_version ?? undefined,
+        deliveryVersion: item.delivery_version ?? undefined,
+        versions: item.versions.map(version => ({
+          version: version.version,
+          createdBy: version.created_by,
+          sourceTaskId: version.source_task_id,
+          sourceType: version.source_type as ApiAssetVersionRecord['sourceType'],
+          sourceLabel: version.source_label,
+          createdAt: version.created_at,
+          changeSummary: version.change_summary,
+        })),
+        authorization: {
+          platforms: item.authorization.platforms as ApiAdPlatform[],
+          regions: item.authorization.regions,
+          rightsHolder: item.authorization.rights_holder,
+          expiresAt: item.authorization.expires_at,
+          note: item.authorization.note,
+        },
+        deliveryTarget: {
+          platform: item.delivery_target.platform as ApiAdPlatform,
+          region: item.delivery_target.region,
+        },
+        owner: item.owner,
+        updatedAt: item.updated_at,
+      }
+    }),
   }
 }
 
@@ -1171,6 +1216,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 async function platformRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
   const response = await fetch(`${platformBase}${path}`, {
     method,
+    credentials: 'include',
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(headers ?? {}),
@@ -1666,16 +1712,12 @@ export function buildRemixPrerollInput(
 
 export const api = {
   listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
-    // Workbench data is loaded from the typed Project workbench API.
-    // The canonical demo Project is the only seeded presentation dataset.
-    const projectIds = options.includeDemoProject
-      ? ['project_investor_precision_evidence']
-      : options.projectIds ?? []
+    // Workbench data always follows the caller's accessible Project scope.
+    // includeDemoProject is retained as a compatibility hint, but it must not
+    // introduce a hard-coded Project outside the current identity.
+    const projectIds = options.projectIds ?? []
     return loadPersistedAgencyWorkbench(projectIds)
   },
-  getSession: () => request<ApiAuthSession>('/session'),
-  login: (input: { email: string; password: string }) => request<ApiAuthSession>('/session', 'POST', input),
-  logout: () => request<ApiAuthSession>('/session', 'DELETE'),
   getCapabilities: getKanonCapabilities,
   getProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration'),
   updateProviderConfiguration: (input: { apiKey: string; baseUrl?: string }) =>
@@ -1710,6 +1752,83 @@ export const api = {
   listProjects: () => platformClient.listProjects(),
   getProjectSnapshot: (projectId: string) => platformClient.getProjectSnapshot(projectId),
   listProjectMediaAssets: (projectId: string) => platformClient.listProjectMediaAssets(projectId),
+  runMaterialQualityCheck: async (projectId: string, assetId: string, version: number) => {
+    const item = await platformRequest<{
+      id: string
+      organization_id: string
+      project_id: string
+      asset_id: string
+      asset_version: number
+      status: string
+      model: string
+      rule_version: string
+      prompt_version: string
+      summary: string
+      issues: Array<{ id: string; severity: string; rule: string; evidence: string; suggestion: string }>
+      created_at: string
+      completed_at?: string
+    }>(
+      `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}/quality-checks`,
+      'POST',
+      {},
+      { 'Idempotency-Key': `material-qc-${projectId}-${assetId}-${version}` },
+    )
+    return {
+      id: item.id,
+      organizationId: item.organization_id,
+      projectId: item.project_id,
+      assetId: item.asset_id,
+      assetVersion: item.asset_version,
+      status: item.status as ApiQualityCheckStatus,
+      model: item.model,
+      ruleVersion: item.rule_version,
+      promptVersion: item.prompt_version,
+      summary: item.summary,
+      issues: item.issues.map(issue => ({ ...issue, severity: issue.severity as ApiQualityIssueSeverity })),
+      createdAt: item.created_at,
+      completedAt: item.completed_at,
+    } satisfies ApiQualityCheckRun
+  },
+  recordMaterialConfirmation: async (projectId: string, assetId: string, version: number, input: { status: ApiMaterialConfirmationStatus; scope: string; note: string }) => {
+    const item = await platformRequest<{
+      id: string
+      organization_id: string
+      project_id: string
+      quality_check_run_id: string
+      asset_id: string
+      asset_version: number
+      status: string
+      scope: string
+      confirmed_by: string
+      note: string
+      created_at: string
+    }>(
+      `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}/confirmations`,
+      'POST',
+      input,
+      { 'Idempotency-Key': `material-confirm-${projectId}-${assetId}-${version}-${input.status}` },
+    )
+    return {
+      id: item.id,
+      organizationId: item.organization_id,
+      projectId: item.project_id,
+      qualityCheckRunId: item.quality_check_run_id,
+      assetId: item.asset_id,
+      assetVersion: item.asset_version,
+      status: item.status as ApiMaterialConfirmationStatus,
+      scope: item.scope,
+      confirmedBy: item.confirmed_by,
+      note: item.note,
+      createdAt: item.created_at,
+    } satisfies ApiMaterialConfirmation
+  },
+  setMaterialDeliveryVersion: (projectId: string, assetId: string, version: number) =>
+    platformRequest(
+      `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/version-pointer`,
+      'PATCH',
+      { delivery_version: version },
+      { 'Idempotency-Key': `material-delivery-${projectId}-${assetId}-${version}` },
+    ),
   createProject: (input: Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>) =>
     platformClient.createProject(input),
   updateProject: (id: string, input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>> & { expectedContextVersion?: number }) =>

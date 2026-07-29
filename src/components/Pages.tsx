@@ -74,13 +74,14 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
   const [workbenchError, setWorkbenchError] = useState(false)
   const [notice, setNotice] = useState('')
   const [changeNote, setChangeNote] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
   const filter = materialFilters.includes(activeView as MaterialFilter) ? activeView as MaterialFilter : '全部素材'
   const routeTarget = parseMaterialTarget(objectId)
 
   useEffect(() => {
     let active = true
     setWorkbenchError(false)
-    void api.listAgencyWorkbench().then(next => {
+    void api.listAgencyWorkbench({ projectIds: [currentProject.id] }).then(next => {
       if (active) setWorkbench(next)
     }).catch(() => {
       if (active) {
@@ -114,38 +115,24 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
   const hasCompletedQualityRun = Boolean(selectedState.qualityRun?.completedAt)
   const canConfirmMaterial = selectedState.qualityRun?.status === 'passed' && hasCompletedQualityRun
   const canSetDeliveryVersion = selectedState.confirmation?.status === 'confirmed' && authorizationGate.allowed
-  const upsertWorkbenchForSelected = (updater: (current: ApiAgencyWorkbench) => ApiAgencyWorkbench) => {
-    setWorkbench(current => current ? updater(current) : current)
+  const reloadWorkbench = async () => {
+    const next = await api.listAgencyWorkbench({ projectIds: [currentProject.id] })
+    setWorkbench(next)
   }
-  const handleRunQualityCheck = () => {
-    const now = new Date().toISOString()
-    const run: ApiQualityCheckRun = {
-      id: `qc-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
-      organizationId: selectedItem.pointer.organizationId,
-      projectId: currentProject.id,
-      assetId: selectedItem.pointer.assetId,
-      assetVersion: selectedVersion,
-      status: 'passed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-27',
-      summary: '大模型已完成品牌、权益、画面安全和渠道规格检查，未发现阻断问题。',
-      issues: [],
-      createdAt: now,
-      completedAt: now,
+  const handleRunQualityCheck = async () => {
+    setReviewBusy(true)
+    setNotice('')
+    try {
+      await api.runMaterialQualityCheck(currentProject.id, selectedItem.pointer.assetId, selectedVersion)
+      await reloadWorkbench()
+      setNotice(`已在服务端完成 v${selectedVersion} 基础质检，可进入人工确认。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '运行素材质检失败。')
+    } finally {
+      setReviewBusy(false)
     }
-    upsertWorkbenchForSelected(current => ({
-      ...current,
-      qualityCheckRuns: [run, ...current.qualityCheckRuns],
-      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
-        ...pointer,
-        qualityCheckedVersion: selectedVersion,
-        updatedAt: now,
-      } : pointer),
-    }))
-    setNotice(`已完成 v${selectedVersion} 大模型质检，可进入人工确认。`)
   }
-  const handleConfirmMaterial = () => {
+  const handleConfirmMaterial = async () => {
     const qualityRun = selectedState.qualityRun
     if (!qualityRun?.completedAt) {
       setNotice('人工确认前必须先完成当前素材版本的大模型质检。')
@@ -155,33 +142,23 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       setNotice('当前质检未通过，不能确认素材；请先选择“需要修改”。')
       return
     }
-    const now = new Date().toISOString()
-    const confirmation: ApiMaterialConfirmation = {
-      id: `confirm-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
-      organizationId: selectedItem.pointer.organizationId,
-      projectId: currentProject.id,
-      qualityCheckRunId: qualityRun.id,
-      assetId: selectedItem.pointer.assetId,
-      assetVersion: selectedVersion,
-      status: 'confirmed',
-      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
-      confirmedBy: currentProject.owner,
-      note: '已确认当前版本可进入投放计划和交付预检。',
-      createdAt: now,
+    setReviewBusy(true)
+    setNotice('')
+    try {
+      await api.recordMaterialConfirmation(currentProject.id, selectedItem.pointer.assetId, selectedVersion, {
+        status: 'confirmed',
+        scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
+        note: '已确认当前版本可进入投放计划和交付预检。',
+      })
+      await reloadWorkbench()
+      setNotice(`已在服务端写入 v${selectedVersion} 人工确认，确认记录绑定质检 ${qualityRun.id}。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '确认素材失败。')
+    } finally {
+      setReviewBusy(false)
     }
-    upsertWorkbenchForSelected(current => ({
-      ...current,
-      materialConfirmations: [confirmation, ...current.materialConfirmations],
-      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
-        ...pointer,
-        qualityCheckedVersion: selectedVersion,
-        humanConfirmedVersion: selectedVersion,
-        updatedAt: now,
-      } : pointer),
-    }))
-    setNotice(`已写入 v${selectedVersion} 人工确认，确认记录绑定质检 ${qualityRun.id}。`)
   }
-  const handleRequestChanges = () => {
+  const handleRequestChanges = async () => {
     const qualityRun = selectedState.qualityRun
     if (!qualityRun?.completedAt) {
       setNotice('需要修改前必须先完成当前素材版本的大模型质检。')
@@ -192,56 +169,27 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       setNotice('需要修改至少要填写一条问题说明。')
       return
     }
-    const now = new Date().toISOString()
-    const confirmation: ApiMaterialConfirmation = {
-      id: `changes-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
-      organizationId: selectedItem.pointer.organizationId,
-      projectId: currentProject.id,
-      qualityCheckRunId: qualityRun.id,
-      assetId: selectedItem.pointer.assetId,
-      assetVersion: selectedVersion,
-      status: 'changes_requested',
-      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
-      confirmedBy: currentProject.owner,
+    setReviewBusy(true)
+    setNotice('')
+    try {
+      await api.recordMaterialConfirmation(currentProject.id, selectedItem.pointer.assetId, selectedVersion, {
+        status: 'changes_requested',
+        scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
         note,
-      createdAt: now,
+      })
+      await reloadWorkbench()
+      setChangeNote('')
+      setNotice(`已在服务端将 v${selectedVersion} 标记为需要修改。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '提交修改要求失败。')
+    } finally {
+      setReviewBusy(false)
     }
-    upsertWorkbenchForSelected(current => ({
-      ...current,
-      materialConfirmations: [confirmation, ...current.materialConfirmations],
-      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
-        ...pointer,
-        humanConfirmedVersion: pointer.humanConfirmedVersion === selectedVersion ? undefined : pointer.humanConfirmedVersion,
-        updatedAt: now,
-      } : pointer),
-    }))
-    setChangeNote('')
-    setNotice(`已将 v${selectedVersion} 标记为需要修改，并返回制作环节。`)
   }
   const handleCreateNewVersion = () => {
-    const nextVersion = selectedItem.pointer.workingVersion + 1
-    const now = new Date().toISOString()
-    upsertWorkbenchForSelected(current => ({
-      ...current,
-      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
-        ...pointer,
-        workingVersion: nextVersion,
-        versions: [{
-          version: nextVersion,
-          createdBy: currentProject.owner,
-          sourceTaskId: `manual-${selectedItem.pointer.assetId}-v${nextVersion}`,
-          sourceType: 'manual_edit',
-          sourceLabel: '人工新增版本',
-          createdAt: now,
-          changeSummary: '在旧版本基础上新增修订版本；历史版本保持不可覆盖。',
-        }, ...pointer.versions],
-        updatedAt: now,
-      } : pointer),
-    }))
-    setNotice(`已生成 v${nextVersion}，旧质检和确认记录保留，新版本回到待质检流程。`)
-    onOpenProject(currentProject.id, 'creative', 'reviews', materialTarget(selectedItem.pointer.assetId, nextVersion), filter)
+    setNotice('新版本必须先在制作环节生成并作为真实 AssetVersion 入库；素材检查不会创建仅存在于浏览器的假版本。')
   }
-  const handleSetDeliveryVersion = () => {
+  const handleSetDeliveryVersion = async () => {
     if (selectedState.confirmation?.status !== 'confirmed') {
       setNotice('只有已人工确认的素材版本才能进入交付版本。')
       return
@@ -250,16 +198,17 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       setNotice(`授权门禁阻止交付：${authorizationGate.reason}`)
       return
     }
-    const now = new Date().toISOString()
-    upsertWorkbenchForSelected(current => ({
-      ...current,
-      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
-        ...pointer,
-        deliveryVersion: selectedVersion,
-        updatedAt: now,
-      } : pointer),
-    }))
-    setNotice(`已将 v${selectedVersion} 设为交付版本，授权覆盖 ${selectedItem.pointer.deliveryTarget.platform} / ${selectedItem.pointer.deliveryTarget.region}。`)
+    setReviewBusy(true)
+    setNotice('')
+    try {
+      await api.setMaterialDeliveryVersion(currentProject.id, selectedItem.pointer.assetId, selectedVersion)
+      await reloadWorkbench()
+      setNotice(`已在服务端将 v${selectedVersion} 设为交付版本，授权覆盖 ${selectedItem.pointer.deliveryTarget.platform} / ${selectedItem.pointer.deliveryTarget.region}。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '设置交付版本失败。')
+    } finally {
+      setReviewBusy(false)
+    }
   }
 
   return <div className="material-check-workspace">
@@ -319,11 +268,11 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       <AuthorizationGateCard pointer={selectedItem.pointer} gate={authorizationGate} />
       <MaterialHistoryCard items={selectedHistory} />
       <div className="material-action-stack">
-        <button className="secondary-button full" onClick={handleRunQualityCheck}><ShieldCheck size={15}/>运行大模型质检</button>
-        <button className="primary-button full" disabled={!canConfirmMaterial} onClick={handleConfirmMaterial}><Check size={15}/>确认素材</button>
+        <button className="secondary-button full" disabled={reviewBusy} onClick={() => void handleRunQualityCheck()}><ShieldCheck size={15}/>运行大模型质检</button>
+        <button className="primary-button full" disabled={!canConfirmMaterial || reviewBusy} onClick={() => void handleConfirmMaterial()}><Check size={15}/>确认素材</button>
         <label className="material-change-note">修改问题说明<textarea value={changeNote} onChange={event => setChangeNote(event.target.value)} placeholder="例如：画面中的 CTA 与新版 Brief 不一致"/></label>
-        <button className="secondary-button full" disabled={!hasCompletedQualityRun} onClick={handleRequestChanges}><CircleAlert size={15}/>需要修改</button>
-        <button className="primary-button full" disabled={!canSetDeliveryVersion} onClick={handleSetDeliveryVersion}><ArrowRight size={15}/>设为交付版本</button>
+        <button className="secondary-button full" disabled={!hasCompletedQualityRun || reviewBusy} onClick={() => void handleRequestChanges()}><CircleAlert size={15}/>需要修改</button>
+        <button className="primary-button full" disabled={!canSetDeliveryVersion || reviewBusy} onClick={() => void handleSetDeliveryVersion()}><ArrowRight size={15}/>设为交付版本</button>
       </div>
       {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
     </aside>
@@ -574,19 +523,32 @@ function healthText(status: string) {
 }
 
 export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string) => void; onManageProject: (id: string) => void }) {
-  const { error: projectError, isLoading } = useProject()
+  const { error: projectError, isLoading, projects } = useProject()
   const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
   const [workbenchError, setWorkbenchError] = useState('')
 
   useEffect(() => {
     let active = true
-    void api.listAgencyWorkbench({ includeDemoProject: true }).then(data => {
+    if (projects.length === 0) {
+      setWorkbench({
+        organizations: [],
+        clients: [],
+        brands: [],
+        projects: [],
+        adAccountBindings: [],
+        qualityCheckRuns: [],
+        materialConfirmations: [],
+        assetVersionPointers: [],
+      })
+      return () => { active = false }
+    }
+    void api.listAgencyWorkbench({ projectIds: projects.map(project => project.id) }).then(data => {
       if (active) setWorkbench(data)
     }).catch(cause => {
       if (active) setWorkbenchError(cause instanceof Error ? cause.message : '加载代理商工作台失败')
     })
     return () => { active = false }
-  }, [])
+  }, [projects])
 
   const portfolio = useMemo(() => {
     const empty = { metrics: [], today: [], checks: [], deliveries: [], health: [], load: [], recent: [] } as {
@@ -1292,13 +1254,13 @@ function AdAccountBindingSurface({ item, activeView }: { item: NavItem; activeVi
 
   useEffect(() => {
     let active = true
-    void api.listAgencyWorkbench().then(next => {
+    void api.listAgencyWorkbench({ projectIds: [currentProject.id] }).then(next => {
       if (active) setWorkbench(next)
     }).catch(cause => {
       if (active) setNotice(cause instanceof Error ? cause.message : '读取账户绑定失败。')
     })
     return () => { active = false }
-  }, [])
+  }, [currentProject.id])
 
   const clientsById = useMemo(() => new Map(workbench?.clients.map(client => [client.id, client]) ?? []), [workbench])
   const brandsById = useMemo(() => new Map(workbench?.brands.map(brand => [brand.id, brand]) ?? []), [workbench])
