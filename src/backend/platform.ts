@@ -144,7 +144,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(path, { ...init, credentials: 'include', headers })
   if (!response.ok) {
     const problem = await response.json().catch(() => null) as Problem | null
     throw new BackendApiError(

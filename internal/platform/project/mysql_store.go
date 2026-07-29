@@ -269,13 +269,31 @@ func (s MySQLStore) GetWorkbench(ctx context.Context, organizationID contract.Or
 	var productLines []byte
 	err := s.DB.QueryRowContext(ctx, `SELECT organization_code, organization_name, organization_owner, client_id, client_code, client_name, client_industry, brand_id, brand_code, brand_name, brand_category, product_lines, guideline_status, stage, stage_label, stage_percent, task_percent, risk_status, COALESCE(blocker, ''), updated_at FROM platform_project_workbenches WHERE organization_id=? AND project_id=?`, organizationID, projectID).Scan(&value.Organization.Code, &value.Organization.Name, &value.Organization.Owner, &value.Client.ID, &value.Client.Code, &value.Client.Name, &value.Client.Industry, &value.Brand.ID, &value.Brand.Code, &value.Brand.Name, &value.Brand.Category, &productLines, &value.Brand.GuidelineStatus, &value.Project.Stage, &value.Project.StageLabel, &value.Project.StagePercent, &value.Project.TaskPercent, &value.Project.RiskStatus, &value.Project.Blocker, &value.Project.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Workbench{}, ErrNotFound
+		value, err = s.defaultWorkbench(ctx, organizationID, projectID)
+		productLines = nil
 	}
 	if err != nil {
 		return Workbench{}, err
 	}
-	if err := decodeJSON(productLines, &value.Brand.ProductLines); err != nil {
-		return Workbench{}, fmt.Errorf("decode workbench product lines: %w", err)
+	if productLines != nil {
+		if err := decodeJSON(productLines, &value.Brand.ProductLines); err != nil {
+			return Workbench{}, fmt.Errorf("decode workbench product lines: %w", err)
+		}
+	}
+	if value.Brand.ProductLines == nil {
+		value.Brand.ProductLines = []string{}
+	}
+	if value.AdAccountBindings == nil {
+		value.AdAccountBindings = []WorkbenchAdAccountBinding{}
+	}
+	if value.QualityCheckRuns == nil {
+		value.QualityCheckRuns = []WorkbenchQualityCheckRun{}
+	}
+	if value.MaterialConfirmations == nil {
+		value.MaterialConfirmations = []WorkbenchMaterialConfirmation{}
+	}
+	if value.AssetVersionPointers == nil {
+		value.AssetVersionPointers = []WorkbenchAssetVersionPointer{}
 	}
 	value.Organization.ID, value.Organization.Currency, value.Organization.Timezone, value.Organization.UpdatedAt = string(organizationID), "CNY", "Asia/Shanghai", value.Project.UpdatedAt
 	value.Client.OrganizationID, value.Client.Owner, value.Client.HealthStatus, value.Client.UpdatedAt = string(organizationID), value.Organization.Owner, "healthy", value.Project.UpdatedAt
@@ -298,8 +316,161 @@ func (s MySQLStore) GetWorkbench(ctx context.Context, organizationID contract.Or
 	if err != nil {
 		return Workbench{}, err
 	}
-	value.AdAccountBindings, value.QualityCheckRuns, value.MaterialConfirmations, value.AssetVersionPointers = accounts, qualityChecks, confirmations, pointers
+	assetPointers, err := s.listProjectAssetPointers(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	value.AdAccountBindings, value.QualityCheckRuns, value.MaterialConfirmations = accounts, qualityChecks, confirmations
+	value.AssetVersionPointers = mergeWorkbenchAssetPointers(pointers, assetPointers)
 	return value, nil
+}
+
+func (s MySQLStore) defaultWorkbench(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (Workbench, error) {
+	projectValue, err := s.GetProject(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	runtime, err := s.GetProjectRuntime(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	organizationName := string(organizationID)
+	if err := s.DB.QueryRowContext(ctx, `SELECT name FROM organizations WHERE id=?`, organizationID).Scan(&organizationName); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Workbench{}, err
+	}
+	brandID := string(projectID)
+	if projectValue.PrimaryBrandID != nil {
+		brandID = string(*projectValue.PrimaryBrandID)
+	}
+	// Until Identity owns real client records, use the Project ID as the
+	// stable fallback identity. A shared "client_unassigned" value makes
+	// unrelated projects collapse into one React list item and one apparent
+	// workbench context.
+	clientID := string(projectID)
+	stage := "intake"
+	if runtime.Progress >= 100 || runtime.Status == "completed" {
+		stage = "completed"
+	} else if runtime.Progress >= 70 {
+		stage = "delivery"
+	} else if runtime.Progress >= 45 {
+		stage = "quality_check"
+	} else if runtime.Progress >= 20 {
+		stage = "creative"
+	}
+	risk := "healthy"
+	if runtime.Status == "blocked" {
+		risk = "blocked"
+	}
+	productLines := []string{}
+	if product := strings.TrimSpace(runtime.Product); product != "" && product != "尚未关联产品" {
+		productLines = []string{product}
+	}
+	updatedAt := runtime.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = projectValue.UpdatedAt
+	}
+	return Workbench{
+		Organization:      WorkbenchOrganization{ID: string(organizationID), Code: string(organizationID), Name: organizationName, Owner: runtime.Owner, Currency: "CNY", Timezone: "Asia/Shanghai", UpdatedAt: updatedAt},
+		Client:            WorkbenchClient{ID: clientID, OrganizationID: string(organizationID), Code: clientID, Name: "客户未分配", Industry: string(projectValue.Industry), Owner: runtime.Owner, HealthStatus: "healthy", UpdatedAt: updatedAt},
+		Brand:             WorkbenchBrand{ID: brandID, OrganizationID: string(organizationID), ClientID: clientID, Code: brandID, Name: runtime.Brand, Category: string(projectValue.Industry), ProductLines: productLines, Owner: runtime.Owner, GuidelineStatus: "missing", UpdatedAt: updatedAt},
+		Project:           WorkbenchProject{ProjectID: string(projectID), OrganizationID: string(organizationID), ClientID: clientID, BrandID: brandID, Stage: stage, StageLabel: runtime.Stage, StagePercent: runtime.Progress, TaskPercent: runtime.Progress, RiskStatus: risk, UpdatedAt: updatedAt},
+		AdAccountBindings: []WorkbenchAdAccountBinding{}, QualityCheckRuns: []WorkbenchQualityCheckRun{},
+		MaterialConfirmations: []WorkbenchMaterialConfirmation{}, AssetVersionPointers: []WorkbenchAssetVersionPointer{},
+	}, nil
+}
+
+func (s MySQLStore) listProjectAssetPointers(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]WorkbenchAssetVersionPointer, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT pa.asset_id, pa.asset_version, a.owner_system, av.source_type,
+		COALESCE(av.provider_job_id, ''), COALESCE(av.render_job_id, ''), av.created_at, a.updated_at
+		FROM project_assets pa
+		JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id
+		JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version
+		WHERE pa.organization_id=? AND pa.project_id=? AND pa.status='active' AND a.status<>'archived'
+		ORDER BY pa.asset_id, pa.asset_version DESC`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byAsset := map[string]*WorkbenchAssetVersionPointer{}
+	order := []string{}
+	for rows.Next() {
+		var assetID, owner, sourceType, providerJobID, renderJobID string
+		var version int
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&assetID, &version, &owner, &sourceType, &providerJobID, &renderJobID, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		pointer := byAsset[assetID]
+		if pointer == nil {
+			pointer = &WorkbenchAssetVersionPointer{
+				ID: assetID, OrganizationID: string(organizationID), ProjectID: string(projectID), AssetID: assetID,
+				WorkingVersion: version, Versions: []WorkbenchAssetVersion{},
+				Authorization:  WorkbenchAssetAuthorization{Platforms: []string{}, Regions: []string{}},
+				DeliveryTarget: WorkbenchDeliveryTarget{}, Owner: owner, UpdatedAt: updatedAt,
+			}
+			byAsset[assetID] = pointer
+			order = append(order, assetID)
+		}
+		sourceTaskID := providerJobID
+		if sourceTaskID == "" {
+			sourceTaskID = renderJobID
+		}
+		sourceLabel := "项目素材入库"
+		versionSourceType := "manual_edit"
+		if providerJobID != "" || renderJobID != "" {
+			sourceLabel = "模型生成素材入库"
+			versionSourceType = "model_generation"
+		}
+		pointer.Versions = append(pointer.Versions, WorkbenchAssetVersion{
+			Version: version, CreatedBy: owner, SourceTaskID: sourceTaskID, SourceType: versionSourceType,
+			SourceLabel: sourceLabel, CreatedAt: createdAt, ChangeSummary: sourceType,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]WorkbenchAssetVersionPointer, 0, len(order))
+	for _, assetID := range order {
+		result = append(result, *byAsset[assetID])
+	}
+	return result, nil
+}
+
+func mergeWorkbenchAssetPointers(persisted, discovered []WorkbenchAssetVersionPointer) []WorkbenchAssetVersionPointer {
+	result := make([]WorkbenchAssetVersionPointer, 0, len(persisted)+len(discovered))
+	positions := make(map[string]int, len(persisted)+len(discovered))
+	for _, pointer := range persisted {
+		positions[pointer.AssetID] = len(result)
+		result = append(result, pointer)
+	}
+	for _, source := range discovered {
+		position, exists := positions[source.AssetID]
+		if !exists {
+			positions[source.AssetID] = len(result)
+			result = append(result, source)
+			continue
+		}
+		target := &result[position]
+		seen := make(map[int]struct{}, len(target.Versions))
+		for _, version := range target.Versions {
+			seen[version.Version] = struct{}{}
+		}
+		for _, version := range source.Versions {
+			if _, exists := seen[version.Version]; !exists {
+				target.Versions = append(target.Versions, version)
+			}
+		}
+		if source.WorkingVersion > target.WorkingVersion {
+			target.WorkingVersion = source.WorkingVersion
+		}
+		if source.UpdatedAt.After(target.UpdatedAt) {
+			target.UpdatedAt = source.UpdatedAt
+		}
+		if target.Owner == "" {
+			target.Owner = source.Owner
+		}
+	}
+	return result
 }
 
 func (s MySQLStore) UpsertWorkbench(ctx context.Context, value Workbench) error {

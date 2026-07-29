@@ -13,6 +13,17 @@ servers:
 security:
 - cookiesAuth: []
 paths:
+  /platform/v1/provider/capabilities:
+    get:
+      operationId: listProviderCapabilities
+      summary: Return enabled Provider Gateway routes without exposing credentials.
+      responses:
+        '200':
+          description: Provider route and encrypted credential availability.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderCapabilities'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
   /platform/v1/auth/login:
     post:
       operationId: loginWithPassword
@@ -227,6 +238,82 @@ paths:
         '401': {$ref: '#/components/responses/Unauthenticated'}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/quality-checks:
+    post:
+      operationId: runWorkbenchAssetQualityCheck
+      summary: Run the project-scoped baseline quality gate for one immutable asset version.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/AssetID'
+        - $ref: '#/components/parameters/AssetVersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: Quality check completed or the prior idempotent result returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkbenchQualityCheckRun'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/confirmations:
+    post:
+      operationId: recordWorkbenchMaterialConfirmation
+      summary: Confirm or request changes for a quality-checked asset version.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/AssetID'
+        - $ref: '#/components/parameters/AssetVersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecordWorkbenchMaterialConfirmationRequest'}
+      responses:
+        '201':
+          description: Confirmation recorded or the prior idempotent result returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkbenchMaterialConfirmation'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/assets/{asset_id}/version-pointer:
+    patch:
+      operationId: selectWorkbenchAssetDeliveryVersion
+      summary: Select a human-confirmed immutable asset version for delivery.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/AssetID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateWorkbenchAssetVersionPointerRequest'}
+      responses:
+        '200':
+          description: Updated asset version pointer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkbenchAssetVersionPointer'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/projects/{project_id}/knowledge/research-runs:
     post:
       operationId: createExternalResearchRun
@@ -1874,6 +1961,20 @@ components:
       schema:
         type: string
         minLength: 1
+    AssetID:
+      name: asset_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    AssetVersionNumber:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -2730,6 +2831,35 @@ components:
           type: string
           format: date-time
       additionalProperties: false
+    ProviderCapabilities:
+      type: object
+      required: [provider, status, capabilities, credential, checked_at]
+      properties:
+        provider: {type: string, const: cookies-provider-gateway}
+        status: {type: string, enum: [configured, not_configured]}
+        capabilities:
+          type: array
+          items: {$ref: '#/components/schemas/ProviderCapabilityStatus'}
+        credential:
+          type: object
+          required: [source, masked_api_key]
+          properties:
+            source: {type: string, enum: [workspace]}
+            masked_api_key: {type: string}
+          additionalProperties: false
+        checked_at: {type: string, format: date-time}
+      additionalProperties: false
+    ProviderCapabilityStatus:
+      type: object
+      required: [capability, model_alias, upstream_model, available, credential_configured, updated_at]
+      properties:
+        capability: {type: string}
+        model_alias: {type: string}
+        upstream_model: {type: string}
+        available: {type: boolean}
+        credential_configured: {type: boolean}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
     ProjectWorkbench:
       type: object
       required: [organization, client, brand, project, ad_account_bindings, quality_check_runs, material_confirmations, asset_version_pointers]
@@ -2782,6 +2912,20 @@ components:
       type: object
       required: [id, organization_id, project_id, quality_check_run_id, asset_id, asset_version, status, scope, confirmed_by, note, created_at]
       properties: {id: {type: string}, organization_id: {type: string}, project_id: {type: string}, quality_check_run_id: {type: string}, asset_id: {type: string}, asset_version: {type: integer, minimum: 1}, status: {type: string, enum: [confirmed, changes_requested]}, scope: {type: string}, confirmed_by: {type: string}, note: {type: string}, created_at: {type: string, format: date-time}}
+      additionalProperties: false
+    RecordWorkbenchMaterialConfirmationRequest:
+      type: object
+      required: [status, scope, note]
+      properties:
+        status: {type: string, enum: [confirmed, changes_requested]}
+        scope: {type: string, maxLength: 1000}
+        note: {type: string, maxLength: 4000}
+      additionalProperties: false
+    UpdateWorkbenchAssetVersionPointerRequest:
+      type: object
+      required: [delivery_version]
+      properties:
+        delivery_version: {type: integer, minimum: 1}
       additionalProperties: false
     WorkbenchAssetVersionPointer:
       type: object

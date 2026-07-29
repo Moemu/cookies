@@ -10,6 +10,7 @@ export function ModelSettingsPage() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const managedWriteAvailable = false
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -57,28 +58,29 @@ export function ModelSettingsPage() {
 
       <section className="provider-form">
         <div className="provider-form-title"><div><h2>{selected?.name ?? '正在读取能力'}</h2><p>{selected?.description ?? '等待服务端响应'}</p></div><span className={selected?.status === '已配置' ? 'config-status configured' : 'config-status'}>{selected?.status === '已配置' ? <Check size={14}/> : <CircleAlert size={14}/>} {selected?.status ?? '读取中'}</span></div>
-        <div className="secret-policy"><LockKeyhole size={18}/><div><b>服务端密钥边界</b><p>输入的 API Key 会写入本地 MVP 服务端 store，并覆盖当前进程的环境变量配置。页面永远不展示完整密钥。</p></div></div>
+        <div className="secret-policy"><LockKeyhole size={18}/><div><b>服务端密钥边界</b><p>完整 API Key 只通过仓库安全脚本写入服务端加密凭据存储；浏览器仅查询掩码状态，不读取或写入密钥。</p></div></div>
 
         <form className="provider-fields" onSubmit={submit}>
           <label>Provider API Key
-            <input value={apiKey} onChange={event => setApiKey(event.target.value)} type="password" placeholder={selected?.maskedApiKey ?? '输入新的 API Key'} autoComplete="off" required/>
+            <input value={apiKey} onChange={event => setApiKey(event.target.value)} type="password" placeholder={selected?.maskedApiKey ?? '输入新的 API Key'} autoComplete="off" required disabled={!managedWriteAvailable}/>
           </label>
           <label>Base URL
-            <input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://ark.cn-beijing.volces.com/api/v3"/>
+            <input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://ark.cn-beijing.volces.com/api/v3" disabled={!managedWriteAvailable}/>
           </label>
           <div className="provider-actions inline">
-            <button className="secondary-button danger-text" type="button" onClick={() => void clear()} disabled={isSaving}><Trash2 size={15}/>清除页面配置</button>
+            <button className="secondary-button danger-text" type="button" onClick={() => void clear()} disabled={isSaving || !managedWriteAvailable}><Trash2 size={15}/>清除页面配置</button>
             <button className="secondary-button" type="button" onClick={() => void refresh()} disabled={isLoading || isSaving}><RotateCcw size={15}/>{isLoading ? '检查中…' : '刷新状态'}</button>
-            <button className="primary-button" type="submit" disabled={isSaving}><Save size={15}/>{isSaving ? '保存中…' : '保存密钥'}</button>
+            <button className="primary-button" type="submit" disabled={isSaving || !managedWriteAvailable}><Save size={15}/>{isSaving ? '保存中…' : '保存密钥'}</button>
           </div>
         </form>
 
+        {!managedWriteAvailable ? <div className="config-notice">当前环境只开放配置状态读取；密钥新增与轮换请使用仓库中的安全配置脚本，完整密钥不会经过浏览器。</div> : null}
         {notice ? <div className="config-notice">{notice}</div> : null}
         {error ? <div className="config-notice error">{error}</div> : null}
 
         <div className="provider-metadata">
           <div><span>生效范围</span><b>服务端全部 Project</b></div>
-          <div><span>配置来源</span><b>{selected?.source === 'workspace' ? '页面工作区配置' : selected?.source === 'environment' ? '服务端环境变量' : '尚未配置'}</b></div>
+          <div><span>配置来源</span><b>{selected?.source === 'workspace' ? '服务端加密凭据' : selected?.source === 'environment' ? '服务端环境变量' : '尚未配置'}</b></div>
           <div><span>密钥状态</span><b>{selected?.maskedApiKey ?? '未保存'}</b></div>
           <div><span>最近检查</span><b>{selected?.lastVerifiedAt || '尚未连接'}</b></div>
           <div><span>调用策略</span><b>未配置时返回可诊断失败</b></div>
@@ -87,8 +89,8 @@ export function ModelSettingsPage() {
 
       <aside className="model-settings-guide">
         <h3>接入规则</h3>
-        <ol><li><span>01</span><p><b>登录后配置</b>未登录不能读取或写入密钥配置。</p></li><li><span>02</span><p><b>任务按需检查</b>生成请求由服务端统一校验 Provider 状态。</p></li><li><span>03</span><p><b>掩码返回</b>响应和本地浏览器存储都不含完整密钥。</p></li></ol>
-        <div className="model-settings-audit"><span>默认账号</span><b>本地 MVP 默认使用 demo@cookies.local / cookies-demo，可通过服务端环境变量覆盖。</b></div>
+        <ol><li><span>01</span><p><b>登录后读取</b>未登录不能查询 Provider 配置状态。</p></li><li><span>02</span><p><b>任务按需检查</b>生成请求由服务端统一校验 Provider 状态。</p></li><li><span>03</span><p><b>掩码返回</b>响应和本地浏览器存储都不含完整密钥。</p></li></ol>
+        <div className="model-settings-audit"><span>凭据维护</span><b>使用仓库安全配置脚本新增或轮换密钥，并由服务端记录配置版本。</b></div>
       </aside>
     </div>
   </div>

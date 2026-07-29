@@ -110,7 +110,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setLoadedProjectId('')
     setIsLoading(true)
     void reloadProjects(id)
-  }, [loadedProjectId, projects, reloadProjects])
+  }, [reloadProjects])
 
   const createProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal' | 'industry'>) => {
     const created = toProjectRecord(await api.createProject({ name: input.name, brand: input.brand || '未指定品牌', objective: input.goal, industry: input.industry }))

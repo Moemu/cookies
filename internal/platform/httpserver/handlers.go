@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
@@ -171,6 +172,125 @@ func (s *Server) projectWorkbench(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) providerCapabilities(w http.ResponseWriter, r *http.Request) {
+	if s.providerConfig == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	items, err := s.providerConfig.ListCapabilities(r.Context(), rc.Actor.OrganizationID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	configured := false
+	var checkedAt time.Time
+	for _, item := range items {
+		if item.Available {
+			configured = true
+		}
+		if item.UpdatedAt.After(checkedAt) {
+			checkedAt = item.UpdatedAt
+		}
+	}
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":     "cookies-provider-gateway",
+		"status":       map[bool]string{true: "configured", false: "not_configured"}[configured],
+		"capabilities": items,
+		"credential": map[string]any{
+			"source":         "workspace",
+			"masked_api_key": map[bool]string{true: "encrypted", false: ""}[configured],
+		},
+		"checked_at": checkedAt,
+	})
+}
+
+func (s *Server) runWorkbenchQualityCheck(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	version, err := positivePathVersion(r.PathValue("version"))
+	if err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.RunWorkbenchQualityCheck(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), project.RunWorkbenchQualityCheckRequest{
+		AssetID: r.PathValue("asset_id"), AssetVersion: version,
+	})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) recordWorkbenchMaterialConfirmation(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	version, err := positivePathVersion(r.PathValue("version"))
+	if err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	var body project.RecordWorkbenchMaterialConfirmationRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	body.AssetID, body.AssetVersion = r.PathValue("asset_id"), version
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.RecordWorkbenchMaterialConfirmation(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) updateWorkbenchAssetPointer(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body project.UpdateWorkbenchAssetPointerRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	body.AssetID = r.PathValue("asset_id")
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpdateWorkbenchAssetPointer(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func positivePathVersion(value string) (int, error) {
+	version, err := strconv.Atoi(value)
+	if err != nil || version < 1 {
+		return 0, fmt.Errorf("version must be a positive integer")
+	}
+	return version, nil
 }
 
 func (s *Server) listProjectTasks(w http.ResponseWriter, r *http.Request) {

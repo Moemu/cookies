@@ -36,6 +36,78 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 }
 
+func TestWorkbenchReviewWritesRequireIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{"assets.write"},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Projects:          staticProjectManager{},
+	})
+
+	missingKey := httptest.NewRecorder()
+	server.ServeHTTP(missingKey, httptest.NewRequest(
+		http.MethodPost,
+		"/platform/v1/projects/project_1/assets/asset_1/versions/1/quality-checks",
+		bytes.NewBufferString(`{}`),
+	))
+	if missingKey.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status=%d body=%s", missingKey.Code, missingKey.Body.String())
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/platform/v1/projects/project_1/assets/asset_1/versions/1/quality-checks",
+		bytes.NewBufferString(`{}`),
+	)
+	request.Header.Set("Idempotency-Key", "material-qc-project_1-asset_1-1")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestProviderCapabilitiesExposeRoutesWithoutCredentials(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver,
+		ProviderConfig: staticProviderConfigurationReader{items: []provider.CapabilityStatus{{
+			Capability: "video.generate", ModelAlias: "cookies.video.standard",
+			UpstreamModel: "doubao-seedance", Available: true, CredentialConfigured: true,
+			UpdatedAt: time.Date(2026, 7, 29, 6, 0, 0, 0, time.UTC),
+		}}},
+	})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/platform/v1/provider/capabilities", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"cookies.video.standard"`) || !strings.Contains(body, `"masked_api_key":"encrypted"`) {
+		t.Fatalf("capability response missing safe route status: %s", body)
+	}
+	if strings.Contains(body, "ark-secret") {
+		t.Fatalf("capability response leaked a credential: %s", body)
+	}
+}
+
 func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1381,6 +1453,14 @@ func TestCreativeHistoryReadEndpointsSurviveRefresh(t *testing.T) {
 
 type staticProjectManager struct{ context contract.ProjectContext }
 
+type staticProviderConfigurationReader struct {
+	items []provider.CapabilityStatus
+}
+
+func (s staticProviderConfigurationReader) ListCapabilities(context.Context, contract.OrganizationID) ([]provider.CapabilityStatus, error) {
+	return s.items, nil
+}
+
 func (s staticProjectManager) GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error) {
 	return s.context, nil
 }
@@ -1405,6 +1485,15 @@ func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, co
 }
 func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
 	return project.Workbench{}, nil
+}
+func (staticProjectManager) RunWorkbenchQualityCheck(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request project.RunWorkbenchQualityCheckRequest) (project.WorkbenchQualityCheckRun, error) {
+	return project.WorkbenchQualityCheckRun{ID: "qualitycheck_1", AssetID: request.AssetID, AssetVersion: request.AssetVersion, Status: "passed"}, nil
+}
+func (staticProjectManager) RecordWorkbenchMaterialConfirmation(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request project.RecordWorkbenchMaterialConfirmationRequest) (project.WorkbenchMaterialConfirmation, error) {
+	return project.WorkbenchMaterialConfirmation{ID: "confirmation_1", AssetID: request.AssetID, AssetVersion: request.AssetVersion, Status: request.Status}, nil
+}
+func (staticProjectManager) UpdateWorkbenchAssetPointer(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request project.UpdateWorkbenchAssetPointerRequest) (project.WorkbenchAssetVersionPointer, error) {
+	return project.WorkbenchAssetVersionPointer{ID: request.AssetID, AssetID: request.AssetID, DeliveryVersion: request.DeliveryVersion}, nil
 }
 
 func (staticProjectManager) CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error) {

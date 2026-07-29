@@ -161,6 +161,57 @@ type MySQLGatewayConfigStore struct {
 	AllowInsecureHTTP bool
 }
 
+type CapabilityStatus struct {
+	Capability           string    `json:"capability"`
+	ModelAlias           string    `json:"model_alias"`
+	UpstreamModel        string    `json:"upstream_model"`
+	Available            bool      `json:"available"`
+	CredentialConfigured bool      `json:"credential_configured"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+// ListCapabilities is the read-only Provider configuration seam used by the
+// Kanon settings surface. It reports only active route metadata and whether an
+// encrypted credential exists; plaintext credentials never cross this seam.
+func (s MySQLGatewayConfigStore) ListCapabilities(ctx context.Context, organizationID contract.OrganizationID) ([]CapabilityStatus, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("provider database is required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT r.capability, r.model_alias, rr.upstream_model,
+		EXISTS(
+			SELECT 1 FROM provider_credentials credential
+			WHERE credential.connection_id = rr.connection_id
+			  AND credential.status = 'active'
+			  AND credential.active_from <= UTC_TIMESTAMP(6)
+			  AND (credential.active_until IS NULL OR credential.active_until > UTC_TIMESTAMP(6))
+		) AS credential_configured,
+		r.updated_at
+		FROM provider_model_routes r
+		JOIN provider_model_route_revisions rr ON rr.id = r.current_revision_id
+		JOIN provider_connections connection ON connection.id = rr.connection_id
+		JOIN provider_connection_revisions connection_revision ON connection_revision.id = connection.current_revision_id
+		WHERE r.status = 'enabled' AND connection.status = 'enabled'
+		  AND (r.organization_id IS NULL OR r.organization_id = ?)
+		ORDER BY r.capability, r.model_alias`, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []CapabilityStatus{}
+	for rows.Next() {
+		var item CapabilityStatus
+		if err := rows.Scan(&item.Capability, &item.ModelAlias, &item.UpstreamModel, &item.CredentialConfigured, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.Available = item.CredentialConfigured
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (ImageRouteSnapshot, error) {
 	return s.resolveRoute(ctx, organizationID, "image.generate", modelAlias, "adapter_gateway")
 }

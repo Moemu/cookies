@@ -1332,7 +1332,7 @@ export function DeliveryPlanPage({ state }: { state: DataState }) {
   }, [currentProject.id, currentProject.budget])
   useEffect(() => {
     let active = true
-    void Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench()]).then(([records, agency]) => {
+    void Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench({ projectIds: [currentProject.id] })]).then(([records, agency]) => {
       if (!active) return
       const changeSet = records.at(-1)
       setLatest(changeSet)
@@ -1410,7 +1410,7 @@ export function ApprovalCenterPage({ state }: { state: DataState }) {
   const refresh = async () => {
     setBusy(true)
     try {
-      const [records, agency] = await Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench()])
+      const [records, agency] = await Promise.all([deliveryApi.listChangeSets(currentProject.id), api.listAgencyWorkbench({ projectIds: [currentProject.id] })])
       setChangeSets(records)
       setWorkbench(agency)
       setSelectedId(current => records.some(item => item.id === current) ? current : records[0]?.id ?? '')

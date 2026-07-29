@@ -6,7 +6,7 @@ import { AuthProvider } from './context/AuthContext'
 import { ModelConfigProvider } from './context/ModelConfigContext'
 import { ProjectProvider } from './context/ProjectContext'
 import { AuthBoundary } from './auth/AuthBoundary'
-import { LoginPage } from './auth/LoginPage'
+import { LoginPage } from './components/LoginPage'
 import './styles.css'
 
 function Root() {
