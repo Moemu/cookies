@@ -997,7 +997,21 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .prelaunch-boundary > svg { color: oklch(.55 .13 78); }
 .prelaunch-boundary span, .prelaunch-boundary small { display: block; }
 .prelaunch-actions { display: grid; gap: 8px; }
+.sample-banner { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; margin-bottom: 14px; padding: 11px 13px; border: 1px solid oklch(.82 .12 55); background: oklch(.955 .05 62); color: var(--text); }
+.sample-banner > svg { color: oklch(.55 .17 42); margin-top: 1px; }
+.sample-banner span, .sample-banner b, .sample-banner small { display: block; }
+.sample-banner b { font-size: 10px; letter-spacing: .04em; }
+.sample-banner small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.sample-tag { display: inline-block; margin-right: 6px; padding: 1px 5px; border: 1px solid oklch(.82 .12 55); background: oklch(.955 .05 62); color: oklch(.48 .16 42); font-size: 8px; font-weight: 600; letter-spacing: .06em; vertical-align: 1px; }
+.experience-reason { display: block; margin: 14px 0 10px; }
+.experience-reason small { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; }
+.experience-reason textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 10px; line-height: 1.55; resize: vertical; }
+.experience-reason textarea:focus { border-color: var(--cobalt); outline: none; }
 .prelaunch-deeplink { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 12px 0; padding: 8px 0; color: var(--cobalt-dark); font-size: 10px; }
+/* 跨渠道比较的开关长在提示里，不在工具栏里：打开它是接受一个前提，不是换个筛选。 */
+.prelaunch-crosschannel { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 9px; cursor: pointer; }
+.prelaunch-crosschannel input { width: 12px; height: 12px; accent-color: var(--cobalt); }
+.prelaunch-disclosure { margin-top: 12px; color: var(--muted); font-size: 8px; line-height: 1.6; }
 .reference-count { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding-top: 13px; border-top: 1px solid var(--line); }
 .reference-count > svg { color: var(--cobalt); }
 .reference-count span, .reference-count b, .reference-count small { display: block; }
@@ -1238,4 +1252,87 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 @media (min-width: 1520px) {
   .page-frame { padding-left: max(32px, calc((100vw - 1680px) / 2 + 32px)); padding-right: max(32px, calc((100vw - 1680px) / 2 + 32px)); }
   .project-management-page, .project-flow-page { padding-left: max(36px, calc((100vw - 1680px) / 2 + 36px)); padding-right: max(36px, calc((100vw - 1680px) / 2 + 36px)); }
+}
+
+/* 内容分析（03 §5）：多素材看矩阵，单素材看逐项拆解，两处都要能同时显示 AI 与人工两层。 */
+.content-matrix { overflow-x: auto; }
+.content-matrix-row { display: grid; grid-template-columns: minmax(170px, 240px) repeat(var(--matrix-columns, 1), minmax(150px, 1fr)); gap: 14px; align-items: start; padding: 11px 18px; border-bottom: 1px solid var(--line); }
+.content-matrix-row.header { background: var(--canvas); color: var(--muted); font-size: 9px; font-weight: 650; }
+.content-matrix-row > span { min-width: 0; font-size: 10px; line-height: 1.5; }
+.content-matrix-row > span > b { display: block; font-size: 10px; }
+.content-matrix-row > span > small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.content-matrix-group { padding: 9px 18px; background: var(--subtle); color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .07em; }
+.content-layer { margin-top: 4px; font-size: 9px; font-weight: 500; line-height: 1.5; }
+.content-layer.ai { color: var(--cobalt-dark); }
+.content-layer.human { color: var(--success); font-weight: 650; }
+.content-breakdown-row { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) 190px; gap: 14px; align-items: start; padding: 11px 18px; border-bottom: 1px solid var(--line); }
+.content-breakdown-row > span { min-width: 0; font-size: 10px; line-height: 1.5; }
+.content-breakdown-row > span > b { display: block; }
+.content-breakdown-row > span > small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.content-breakdown-row input { width: 100%; height: 30px; margin-top: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.content-breakdown-row .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.content-breakdown-row .actions .secondary-button { height: 28px; padding: 0 10px; font-size: 9px; }
+.content-asset-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--subtle); }
+.content-asset-strip button { padding: 6px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 9px; }
+.content-asset-strip button:hover { border-color: var(--cobalt); }
+.content-asset-strip button.active { border-color: var(--cobalt); background: var(--cobalt-soft); color: var(--cobalt-dark); font-weight: 650; }
+
+/* 投后分析 · 指标总览（10 §6，展示要求见 20 §4.1）：数字要大到一眼看见，
+   但窗口、样本量、口径、置信必须和数字待在同一屏，不能靠说明文档补。 */
+.insight-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 20px 0 4px; background: var(--line); border: 1px solid var(--line); }
+.insight-metric-card { padding: 15px 16px; background: var(--surface); }
+.insight-metric-card small { display: block; color: var(--muted); font-size: 9px; }
+.insight-metric-card b { display: block; margin: 7px 0 5px; font-size: 21px; letter-spacing: -.02em; }
+.insight-metric-card span { display: block; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.insight-series { margin: 18px 0; padding: 14px 16px; border: 1px solid var(--line); }
+.insight-series > .section-label { display: block; margin-bottom: 10px; }
+.insight-series-row { display: grid; grid-template-columns: 84px minmax(70px, 1fr) 96px 108px 108px; gap: 12px; align-items: center; padding: 6px 0; font-size: 10px; }
+.insight-series-track { display: block; height: 7px; background: var(--subtle); }
+.insight-series-track > i { display: block; height: 100%; background: var(--cobalt); }
+.insight-asset-row { grid-template-columns: minmax(220px, 1.3fr) 110px 96px 108px 88px; }
+.insight-asset-row > span:last-child { color: var(--text); font-weight: 500; }
+
+/* 数据质量的问题队列（20 §4.1 错误与延迟置顶）：颜色跟着严重度走，
+   而不是跟着「有没有处置」——已经有人认领的阻断问题依然是阻断问题。
+   .prelaunch-row 默认把末列涂成绿色，这里按严重度覆盖掉。 */
+.insight-issue-row { grid-template-columns: minmax(240px, 1.3fr) 72px minmax(150px, 1fr) 104px; }
+.insight-issue-row > span:nth-child(2) { font-weight: 650; }
+.insight-issue-row.blocking > span:nth-child(2), .insight-issue-row.blocking > span:last-child { color: var(--danger); }
+.insight-issue-row.warning > span:nth-child(2), .insight-issue-row.warning > span:last-child { color: var(--warning); }
+.insight-issue-row.info > span:nth-child(2), .insight-issue-row.info > span:last-child { color: var(--muted); }
+
+/* 投后分析的后五个视图（03 §一级导航）。每条结论都是「判定 + 一句为什么 + 两侧数字」，
+   所以用卡片而不是表格行：判定单独占一格，读者先看到能不能用，再看差多少。 */
+.insight-analysis-list { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.insight-analysis-card { padding: 15px 16px; border: 1px solid var(--line); background: var(--surface); }
+.insight-analysis-card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.insight-analysis-card > header > b { font-size: 12px; }
+.insight-analysis-card > header > em { flex: none; font-style: normal; font-size: 10px; font-weight: 650; }
+.insight-analysis-card > header > em.ok { color: var(--cobalt-dark); }
+.insight-analysis-card > header > em.warning { color: var(--warning); }
+.insight-analysis-card > header > em.danger { color: var(--danger); }
+.insight-analysis-card > header > em.muted { color: var(--muted); }
+.insight-analysis-card > p { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.insight-analysis-card > footer { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.6; }
+.insight-analysis-card .insight-series { margin: 12px 0 0; }
+.insight-analysis-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 12px; background: var(--line); border: 1px solid var(--line); }
+.insight-analysis-metrics > div { padding: 12px 13px; background: var(--surface); }
+.insight-analysis-metrics small { display: block; color: var(--muted); font-size: 9px; }
+.insight-analysis-metrics b { display: block; margin: 6px 0 5px; font-size: 17px; letter-spacing: -.02em; }
+.insight-analysis-metrics span { display: block; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.insight-analysis-diff { margin-top: 12px; padding: 11px 13px; border: 1px dashed var(--line); background: var(--subtle); }
+.insight-analysis-diff > span { display: block; color: var(--muted); font-size: 9px; }
+.insight-analysis-diff > b { display: block; margin-top: 6px; font-size: 10px; font-weight: 500; line-height: 1.6; }
+/* 异常用表格：五列都是可比的数字，卡片反而让人难以横向扫。说明文字换行占满整行。 */
+.insight-anomaly-row { grid-template-columns: minmax(180px, 1.1fr) 110px 104px 140px 104px; }
+.insight-anomaly-note { grid-column: 1 / -1; margin-top: 6px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+
+@media (max-width: 1180px) {
+  .insight-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insight-analysis-metrics { grid-template-columns: minmax(0, 1fr); }
+  .insight-anomaly-row { grid-template-columns: minmax(150px, 1fr) 92px 88px 118px 88px; }
+  .insight-series-row { grid-template-columns: 78px minmax(50px, 1fr) 88px 96px; }
+  .insight-series-row > span:last-child { display: none; }
+  .insight-asset-row { grid-template-columns: minmax(190px, 1.2fr) 96px 84px 96px 78px; }
+  .insight-issue-row { grid-template-columns: minmax(210px, 1.2fr) 64px minmax(130px, 1fr) 92px; }
 }

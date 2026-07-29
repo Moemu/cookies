@@ -1,0 +1,248 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowRight, BookOpenCheck, Check, CircleAlert, CircleCheck, Database, Lightbulb, Link2, RefreshCw, Search } from 'lucide-react'
+import { useProject } from '../context/ProjectContext'
+import { api, type ApiExperience, type ApiExperienceAudit, type ApiExperienceReference, type ApiExperienceStatus } from '../data/api'
+import type { DataState } from '../types'
+import { StateBoundary } from './StateBoundary'
+
+type ViewTarget = ApiExperienceStatus | 'references'
+
+const viewTargets: Record<string, ViewTarget> = {
+  候选经验: 'pending',
+  已确认: 'confirmed',
+  待复审: 'needs_review',
+  已失效: 'retired',
+  引用记录: 'references',
+}
+
+const statusLabels: Record<ApiExperienceStatus, string> = {
+  pending: '待确认',
+  confirmed: '已确认',
+  needs_review: '待复审',
+  retired: '已失效',
+}
+
+const emptyHints: Record<ViewTarget, string> = {
+  pending: '当前 Project 暂无待确认的候选经验。经验由「报告中心」确认报告后沉淀产生。',
+  confirmed: '当前 Project 暂无已确认经验。只有已确认的结论才允许被下游引用。',
+  needs_review: '当前 Project 暂无待复审经验。已确认结论出现反例时可申请复审。',
+  retired: '当前 Project 暂无已失效经验。失效是逻辑删除，记录仍可追溯。',
+  references: '当前 Project 暂无引用记录。经验被 Brief 或创意任务引用后会出现在这里。',
+}
+
+export function ExperienceLibraryPage({ state, activeView }: { state: DataState; activeView: string }) {
+  const { currentProject } = useProject()
+  const target = viewTargets[activeView] ?? 'pending'
+  const [experiences, setExperiences] = useState<ApiExperience[]>([])
+  const [projectReferences, setProjectReferences] = useState<ApiExperienceReference[]>([])
+  const [audits, setAudits] = useState<ApiExperienceAudit[]>([])
+  const [references, setReferences] = useState<ApiExperienceReference[]>([])
+  const [selectedId, setSelectedId] = useState('')
+  const [query, setQuery] = useState('')
+  const [reason, setReason] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
+
+  const loadList = useCallback(async () => {
+    if (!currentProject.id) return
+    setListState('loading')
+    try {
+      if (target === 'references') {
+        const next = await api.listProjectExperienceReferences(currentProject.id)
+        setProjectReferences(next.items)
+        setExperiences([])
+      } else {
+        const next = await api.listExperiences(currentProject.id, target)
+        setExperiences(next.items)
+        setProjectReferences([])
+      }
+      setListState('ready')
+    } catch (cause) {
+      setExperiences([])
+      setProjectReferences([])
+      setListState('error')
+      setNotice(cause instanceof Error ? cause.message : '经验库读取失败。')
+    }
+  }, [currentProject.id, target])
+
+  useEffect(() => { void loadList() }, [loadList])
+  useEffect(() => { setReason(''); setNotice('') }, [target])
+
+  const filtered = useMemo(() => experiences.filter(experience =>
+    `${experience.id} ${experience.conclusion} ${experience.conditions.join(' ')} ${experience.counterexamples.join(' ')}`
+      .toLowerCase().includes(query.trim().toLowerCase()),
+  ), [experiences, query])
+
+  const filteredReferences = useMemo(() => projectReferences.filter(reference =>
+    `${reference.id} ${reference.experience_id} ${reference.consumer_kind} ${reference.consumer_id} ${reference.note}`
+      .toLowerCase().includes(query.trim().toLowerCase()),
+  ), [projectReferences, query])
+
+  useEffect(() => {
+    setSelectedId(current => filtered.some(experience => experience.id === current) ? current : filtered[0]?.id ?? '')
+  }, [filtered])
+
+  const selected = filtered.find(experience => experience.id === selectedId)
+
+  useEffect(() => {
+    if (!selected) {
+      setAudits([])
+      setReferences([])
+      return
+    }
+    let active = true
+    void Promise.all([
+      api.listExperienceAudits(currentProject.id, selected.id),
+      api.listExperienceReferences(currentProject.id, selected.id),
+    ]).then(([auditPage, referencePage]) => {
+      if (!active) return
+      setAudits(auditPage.items)
+      setReferences(referencePage.items)
+    }).catch(() => {
+      if (!active) return
+      setAudits([])
+      setReferences([])
+    })
+    return () => { active = false }
+  }, [currentProject.id, selected])
+
+  const runAction = async (action: 'confirm' | 'reject' | 'request-review' | 'retire') => {
+    if (!selected) return
+    if (action !== 'confirm' && !reason.trim()) {
+      setNotice('请先填写理由，状态变更会写入审计记录。')
+      return
+    }
+    setBusy(true)
+    try {
+      if (action === 'confirm') await api.confirmExperience(currentProject.id, selected.id, selected.version)
+      if (action === 'reject') await api.rejectExperience(currentProject.id, selected.id, selected.version, reason.trim())
+      if (action === 'request-review') await api.requestExperienceReview(currentProject.id, selected.id, selected.version, reason.trim())
+      if (action === 'retire') await api.retireExperience(currentProject.id, selected.id, selected.version, reason.trim())
+      setReason('')
+      await loadList()
+      setNotice(`${selected.id.slice(0, 8)} 已${actionLabels[action]}，可在对应视图中查看。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '状态变更失败，请稍后重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (target === 'references') {
+    return <StateBoundary state={state} onRetry={() => { void loadList() }}>
+      <div className="prelaunch-workspace">
+        <section className="prelaunch-main">
+          <div className="core-flow-toolbar">
+            <div><span className="section-label">EXPERIENCE REFERENCES</span><h2>经验被谁用过</h2><p>当前 Project：{currentProject.name}。每条记录说明哪条经验被哪个环节引用，以及引用后的结果。</p></div>
+            <button className="secondary-button" disabled={listState === 'loading'} onClick={() => { void loadList() }}><RefreshCw size={15}/>刷新</button>
+          </div>
+          <div className="prelaunch-filterbar">
+            <div className="search-field"><Search size={15}/><input aria-label="搜索引用记录" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索经验、引用方或备注"/></div>
+            <span>{filteredReferences.length} 条引用记录</span>
+          </div>
+          <div className="prelaunch-table" role="list" aria-label="引用记录列表">
+            <div className="prelaunch-row header"><span>引用方</span><span>结果</span><span>备注</span><span>版本</span></div>
+            {listState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的引用记录…</div> : null}
+            {listState === 'error' ? <div className="panel-empty">引用记录读取失败，请重试。</div> : null}
+            {listState === 'ready' && !filteredReferences.length ? <div className="panel-empty">{emptyHints.references}</div> : null}
+            {filteredReferences.map(reference => <div role="listitem" key={reference.id} className="prelaunch-row">
+              <span><b>{reference.consumer_kind} · {reference.consumer_id.slice(0, 12)}</b><small>经验 {reference.experience_id.slice(0, 8)} · {formatTime(reference.created_at)}</small></span>
+              <span>{reference.outcome || '未记录'}</span>
+              <span>{reference.note || '无备注'}</span>
+              <span><Link2 size={14}/>v{reference.version}</span>
+            </div>)}
+          </div>
+        </section>
+        <aside className="prelaunch-detail">
+          <span className="section-label">说明</span><h3>引用记录是经验价值的唯一证据</h3>
+          <p>没有引用记录的经验，无法证明它影响过任何一次决策。</p>
+          <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>怎么产生</small><b>在投前洞察页把结论「引用到 Brief」或「引用到创意任务」，会在这里留下一条记录。</b></span></div>
+          <div className="prelaunch-fact"><Database size={17}/><span><small>为什么保留失效经验的记录</small><b>经验失效后引用历史仍然可读，便于回溯当时依据的是哪个版本的结论。</b></span></div>
+          {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+        </aside>
+      </div>
+    </StateBoundary>
+  }
+
+  return <StateBoundary state={state} onRetry={() => { void loadList() }}>
+    <div className="prelaunch-workspace">
+      <section className="prelaunch-main">
+        <div className="core-flow-toolbar">
+          <div><span className="section-label">EXPERIENCE LIBRARY</span><h2>把一次复盘的结论，变成组织能重复使用的经验</h2><p>当前 Project：{currentProject.name}。结论必须带适用条件和反例，确认后才允许被下游引用。</p></div>
+          <button className="secondary-button" disabled={listState === 'loading'} onClick={() => { void loadList() }}><RefreshCw size={15}/>刷新</button>
+        </div>
+        <div className="prelaunch-filterbar">
+          <div className="search-field"><Search size={15}/><input aria-label="搜索经验" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索结论、适用条件或反例"/></div>
+          <span>{filtered.length} 条{statusLabels[target]}经验</span>
+        </div>
+        <div className="prelaunch-table" role="list" aria-label="经验列表">
+          <div className="prelaunch-row header"><span>结论</span><span>状态</span><span>适用条件</span><span>修订</span></div>
+          {listState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的经验…</div> : null}
+          {listState === 'error' ? <div className="panel-empty">经验读取失败，请重试。</div> : null}
+          {listState === 'ready' && !filtered.length ? <div className="panel-empty">{emptyHints[target]}</div> : null}
+          {filtered.map(experience => <button role="listitem" key={experience.id} className={selectedId === experience.id ? 'prelaunch-row active' : 'prelaunch-row'} onClick={() => setSelectedId(experience.id)}>
+            <span><b>{experience.conclusion}</b><small>{experience.id.slice(0, 8)} · 来源报告 {experience.report_id.slice(0, 8)} · {formatTime(experience.updated_at)}</small></span>
+            <span>{statusLabels[experience.status]}</span>
+            <span>{experience.conditions.length ? experience.conditions.join('；') : '未填写适用条件'}</span>
+            <span><CircleCheck size={14}/>v{experience.revision}</span>
+          </button>)}
+        </div>
+      </section>
+      <aside className="prelaunch-detail">
+        {selected ? <>
+          <span className="section-label">当前经验</span><h3>{selected.conclusion}</h3>
+          <p>{selected.id.slice(0, 8)} · 第 {selected.revision} 次修订 · {statusLabels[selected.status]}</p>
+          <div className="prelaunch-fact"><CircleCheck size={17}/><span><small>适用条件</small><b>{selected.conditions.length ? selected.conditions.join('；') : '未填写。没有适用条件的结论不应被直接套用。'}</b></span></div>
+          <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>反例</small>{selected.counterexamples.length ? selected.counterexamples.join('；') : '未记录反例。'}</span></div>
+          <div className="prelaunch-fact"><Database size={17}/><span><small>来源</small><b>报告 {selected.report_id.slice(0, 8)} · 执行 {selected.source_execution_id.slice(0, 8)} · 指标快照 {selected.source_metric_snapshot_id.slice(0, 8)}</b></span></div>
+          {selected.status_reason ? <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>最近一次状态说明</small><b>{selected.status_reason}</b></span></div> : null}
+
+          {actionsFor(selected.status).length ? <>
+            <label className="experience-reason">
+              <small>理由（驳回、申请复审、失效必填，会写入审计记录）</small>
+              <textarea value={reason} onChange={event => setReason(event.target.value)} rows={3} placeholder="例如：新一批投放出现反例，结论需要重新验证。"/>
+            </label>
+            <div className="prelaunch-actions">
+              {actionsFor(selected.status).map(action => <button key={action} className={action === 'confirm' ? 'primary-button full' : 'secondary-button full'} disabled={busy} onClick={() => void runAction(action)}>
+                {action === 'confirm' ? <Check size={15}/> : <ArrowRight size={15}/>}
+                {busy ? '处理中…' : actionLabels[action]}
+              </button>)}
+            </div>
+          </> : <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>无可用动作</small>已失效经验是逻辑删除，保留可读但不再参与流转。</span></div>}
+
+          <div className="reference-count"><BookOpenCheck size={15}/><span><b>{references.length} 条引用记录</b><small>{references.length ? references.map(reference => `${reference.consumer_kind}`).join('、') : '尚未被任何环节引用'}</small></span></div>
+
+          <div className="feature-stack">
+            <span>状态变更记录</span>
+            {audits.length ? audits.map(audit => <b key={audit.id}>
+              {formatTime(audit.created_at)} · {audit.from_status ? `${statusLabels[audit.from_status as ApiExperienceStatus] ?? audit.from_status} → ` : '沉淀为 '}{statusLabels[audit.to_status]}
+              {audit.reason ? ` · ${audit.reason}` : ''}
+            </b>) : <b>暂无变更记录。</b>}
+          </div>
+
+          {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+        </> : <div className="panel-empty">选择左侧经验后查看适用条件、反例、来源链路和状态变更记录。</div>}
+      </aside>
+    </div>
+  </StateBoundary>
+}
+
+const actionLabels: Record<'confirm' | 'reject' | 'request-review' | 'retire', string> = {
+  confirm: '确认',
+  reject: '驳回',
+  'request-review': '申请复审',
+  retire: '失效',
+}
+
+function actionsFor(status: ApiExperienceStatus): Array<'confirm' | 'reject' | 'request-review' | 'retire'> {
+  if (status === 'pending') return ['confirm', 'reject']
+  if (status === 'confirmed') return ['request-review', 'retire']
+  if (status === 'needs_review') return ['confirm', 'retire']
+  return []
+}
+
+function formatTime(value: string): string {
+  const time = new Date(value)
+  return Number.isNaN(time.valueOf()) ? value : time.toLocaleString('zh-CN')
+}

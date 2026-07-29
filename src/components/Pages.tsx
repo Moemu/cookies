@@ -7,8 +7,16 @@ import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
 import { calculateProjectProgress, progressBarWidth, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
-import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
-import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
+import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
+import { PreLaunchInsightPage } from './PreLaunchInsightPage'
+import { ReportCenterPage } from './ReportCenterPage'
+import { AssetLibraryPage } from './AssetLibraryPage'
+import { ContentAnalysisPage } from './ContentAnalysisPage'
+import { DataConnectionsPage } from './DataConnectionsPage'
+import { CapabilityOperationsPage } from './CapabilityOperationsPage'
+import { DataQualityPage } from './DataQualityPage'
+import { PostLaunchAnalysisPage } from './PostLaunchAnalysisPage'
+import { ExperienceLibraryPage } from './ExperienceLibraryPage'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
 
@@ -989,7 +997,12 @@ function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: stri
   </div>
 }
 
-function MaterialInsightSurface() {
+/**
+ * 原「内容分析」页：一屏漫剧供需结构。内容分析已改为按素材类型渲染特征体系
+ * （ContentAnalysisPage），这一屏讲的是「哪类素材投放效率高」，语义上属于投放结构分析，
+ * 暂无入口。代码保留待处置，导出仅为避免未使用告警。
+ */
+export function MaterialInsightSurface() {
   const { advanceArtifact, currentProject } = useProject()
   const [notice, setNotice] = useState('')
   const manhuaMix = operationRecords(currentProject.operations, 'audience_mix')
@@ -1471,11 +1484,15 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={objectId}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'assets' ? <AssetExperiencePage state={dataState} mode="assets"/>
-    : system.key === 'insight' && item.id === 'knowledge' ? <AssetExperiencePage state={dataState} mode="knowledge"/>
-    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/>
+    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
@@ -1483,7 +1500,7 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : null
   if (specialized) surface = specialized
   else {
-    const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
+    const analysisSurface = system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
     const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : item.layout === 'settings' ? <SettingsSurface/> : <OperationsSurface item={item}/>
     surface = <StateBoundary state={dataState} onRetry={() => setDataState('ready')} onCreate={primaryAction}>{genericSurface}</StateBoundary>
   }
