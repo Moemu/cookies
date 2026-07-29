@@ -62,6 +62,14 @@ type StrategyPackage = {
   snapshot?: Record<string, unknown>
 }
 
+type StrategyBriefVersion = {
+  brief_id: string
+  version: number
+  content_hash: string
+  confirmed_at: string
+  snapshot?: Record<string, unknown>
+}
+
 type CreativeTask = {
   id: string
   project_id: string
@@ -224,6 +232,7 @@ export async function enrichProjectRecord(
     apiRequest<ListResponse<DeliveryExecution>>(`/api/delivery/v1/projects/${projectId}/executions`, { signal }),
     apiRequest<ListResponse<InsightReport>>(`/api/insights/v1/projects/${projectId}/reports`, { signal }),
     apiRequest<ListResponse<Experience>>(`/api/insights/v1/projects/${projectId}/experiences`, { signal }),
+    apiRequest<ListResponse<StrategyBriefVersion>>(`/api/strategy/v1/projects/${projectId}/brief-versions`, { signal }),
   ])
 
   const packages = fulfilled(results[0])?.items ?? []
@@ -234,8 +243,10 @@ export async function enrichProjectRecord(
   const executions = fulfilled(results[5])?.items ?? []
   const reports = fulfilled(results[6])?.items ?? []
   const experiences = fulfilled(results[7])?.items ?? []
+  const briefVersions = fulfilled(results[8])?.items ?? []
 
   const latestStrategy = packages[0]
+  const latestBrief = briefVersions[0]
   const latestCreativePackage = creativePackages[0]
   const latestAsset = assets[0]
   const latestPlan = deliveryPlans[0]
@@ -264,7 +275,7 @@ export async function enrichProjectRecord(
       latestReport?.updated_at,
     ]),
     artifacts: {
-      brief: artifact('brief', latestStrategy?.package_id, latestStrategy ? `已发布策略包 ${latestStrategy.package_id} v${latestStrategy.version}` : '尚未确认 Brief', latestStrategy ? '已确认' : '草稿', base.updatedAt),
+      brief: artifact('brief', latestBrief?.brief_id, latestBrief ? `Brief ${latestBrief.brief_id} v${latestBrief.version} · ${latestBrief.content_hash}` : '尚未确认 Brief', latestBrief ? '已确认' : '草稿', latestBrief?.confirmed_at ?? base.updatedAt),
       strategy: artifact('strategy', latestStrategy?.package_id, latestStrategy ? `StrategyPackage · ${latestStrategy.content_hash}` : '尚未发布策略版本', latestStrategy ? '已确认' : '待确认', base.updatedAt),
       creative: artifact('creative', latestCreativePackage?.id ?? latestAsset?.asset.id, latestCreativePackage ? `CreativePackage · ${latestCreativePackage.id}` : latestAsset ? `${latestAsset.version.mime_type} · ${latestAsset.asset.id}` : '尚未生成创意资产', latestCreativePackage || latestAsset ? '已完成' : creativeTasks.length ? '制作中' : '待确认', latestCreativePackage?.created_at ?? latestAsset?.asset.updated_at ?? base.updatedAt),
       delivery: artifact('delivery', latestPlan?.id, latestPlan ? `${latestPlan.name} · ${latestPlan.status}` : '尚未创建投放计划', executions.length ? '已完成' : latestPlan ? '执行中' : '待确认', latestPlan?.updated_at ?? base.updatedAt),

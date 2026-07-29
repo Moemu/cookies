@@ -26,6 +26,13 @@ const (
 	TextResponsePromptJSON TextResponseMode = "prompt_json"
 )
 
+type TextAPIMode string
+
+const (
+	TextAPIChatCompletions TextAPIMode = "chat_completions"
+	TextAPIResponses       TextAPIMode = "responses"
+)
+
 // TextOutputTokenParameter records the upstream field used to cap output
 // tokens. Most OpenAI-compatible endpoints use max_tokens, while some
 // providers, including MiniMax, require max_completion_tokens.
@@ -34,6 +41,7 @@ type TextOutputTokenParameter string
 const (
 	TextOutputTokenParameterMaxTokens           TextOutputTokenParameter = "max_tokens"
 	TextOutputTokenParameterMaxCompletionTokens TextOutputTokenParameter = "max_completion_tokens"
+	TextOutputTokenParameterMaxOutputTokens     TextOutputTokenParameter = "max_output_tokens"
 )
 
 // GatewayRouteSnapshot is copied onto an invocation when it is created. Later route
@@ -51,12 +59,16 @@ type GatewayRouteSnapshot struct {
 	TimeoutSeconds       int                      `json:"timeout_seconds"`
 	MaxResponseBytes     int64                    `json:"max_response_bytes"`
 	TextResponseMode     TextResponseMode         `json:"text_response_mode,omitempty"`
+	TextAPIMode          TextAPIMode              `json:"text_api_mode,omitempty"`
 	MaxOutputTokens      int                      `json:"max_output_tokens,omitempty"`
 	OutputTokenParameter TextOutputTokenParameter `json:"output_token_parameter,omitempty"`
 	Temperature          float64                  `json:"temperature,omitempty"`
 	TemperatureSet       bool                     `json:"-"`
 	ThinkingMode         string                   `json:"thinking_mode,omitempty"`
 	ReasoningSplit       bool                     `json:"reasoning_split,omitempty"`
+	ReasoningEffort      string                   `json:"reasoning_effort,omitempty"`
+	Background           bool                     `json:"background,omitempty"`
+	PollIntervalMS       int                      `json:"poll_interval_ms,omitempty"`
 	VideoInputModes      []VideoInputMode         `json:"video_input_modes,omitempty"`
 	VideoAudioPolicies   []VideoAudioPolicy       `json:"video_audio_policies,omitempty"`
 }
@@ -112,12 +124,17 @@ func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) err
 	default:
 		return fmt.Errorf("adapter gateway text response mode is invalid")
 	}
+	switch s.TextAPIMode {
+	case "", TextAPIChatCompletions, TextAPIResponses:
+	default:
+		return fmt.Errorf("adapter gateway text API mode is invalid")
+	}
 	if s.MaxOutputTokens < 0 || s.MaxOutputTokens > 100_000 {
 		return fmt.Errorf("adapter gateway max output tokens are invalid")
 	}
 	if s.MaxOutputTokens > 0 {
 		switch s.OutputTokenParameter {
-		case "", TextOutputTokenParameterMaxTokens, TextOutputTokenParameterMaxCompletionTokens:
+		case "", TextOutputTokenParameterMaxTokens, TextOutputTokenParameterMaxCompletionTokens, TextOutputTokenParameterMaxOutputTokens:
 		default:
 			return fmt.Errorf("adapter gateway output token parameter is invalid")
 		}
@@ -129,6 +146,22 @@ func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) err
 	case "", "auto", "enabled", "disabled":
 	default:
 		return fmt.Errorf("adapter gateway thinking mode is invalid")
+	}
+	switch s.ReasoningEffort {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh":
+	default:
+		return fmt.Errorf("adapter gateway reasoning effort is invalid")
+	}
+	if (s.TextAPIMode == "" || s.TextAPIMode == TextAPIChatCompletions) &&
+		(s.Background || s.ReasoningEffort != "" || s.OutputTokenParameter == TextOutputTokenParameterMaxOutputTokens) {
+		return fmt.Errorf("Responses-only text constraints require responses API mode")
+	}
+	if s.TextAPIMode == TextAPIResponses &&
+		(s.ThinkingMode != "" || s.ReasoningSplit || s.OutputTokenParameter == TextOutputTokenParameterMaxCompletionTokens) {
+		return fmt.Errorf("chat-completions-only text constraints cannot be used with responses API mode")
+	}
+	if s.PollIntervalMS < 0 || s.PollIntervalMS > 10_000 || (s.PollIntervalMS > 0 && s.PollIntervalMS < 100) {
+		return fmt.Errorf("adapter gateway response polling interval is invalid")
 	}
 	return nil
 }
@@ -340,11 +373,15 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 	}
 	var constraints struct {
 		ResponseMode         TextResponseMode         `json:"text_response_mode"`
+		APIMode              TextAPIMode              `json:"api_mode"`
 		MaxOutputTokens      int                      `json:"max_output_tokens"`
 		OutputTokenParameter TextOutputTokenParameter `json:"output_token_parameter"`
 		Temperature          *float64                 `json:"temperature"`
 		ThinkingMode         string                   `json:"thinking_mode"`
 		ReasoningSplit       bool                     `json:"reasoning_split"`
+		ReasoningEffort      string                   `json:"reasoning_effort"`
+		Background           bool                     `json:"background"`
+		PollIntervalMS       int                      `json:"poll_interval_ms"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &constraints); err != nil {
@@ -357,7 +394,11 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 	if constraints.ResponseMode == "" {
 		constraints.ResponseMode = TextResponsePromptJSON
 	}
+	if constraints.APIMode == "" {
+		constraints.APIMode = TextAPIChatCompletions
+	}
 	snapshot.TextResponseMode = constraints.ResponseMode
+	snapshot.TextAPIMode = constraints.APIMode
 	snapshot.MaxOutputTokens = constraints.MaxOutputTokens
 	snapshot.OutputTokenParameter = constraints.OutputTokenParameter
 	if constraints.Temperature != nil {
@@ -366,6 +407,9 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 	}
 	snapshot.ThinkingMode = constraints.ThinkingMode
 	snapshot.ReasoningSplit = constraints.ReasoningSplit
+	snapshot.ReasoningEffort = constraints.ReasoningEffort
+	snapshot.Background = constraints.Background
+	snapshot.PollIntervalMS = constraints.PollIntervalMS
 	return nil
 }
 

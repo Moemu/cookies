@@ -23,6 +23,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
 	"github.com/shikanon/cookies/internal/systems/strategy"
 	strategyhttp "github.com/shikanon/cookies/internal/systems/strategy/httpapi"
@@ -68,6 +69,25 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
 	service := strategy.Service{DB: db, Projects: projectService, Agents: agent.MySQLStore{DB: db}}
 
+	createdTask, duplicate, err := service.CreateTask(
+		ctx, actor, contract.IdempotencyKey("atomic_task_"+suffix), projectID,
+		strategy.CreateTaskRequest{Name: "原子策略任务", Objective: "验证新品认知"},
+	)
+	if err != nil || duplicate || createdTask.BriefDraft.Document.Campaign.Objective != "验证新品认知" {
+		t.Fatalf("create atomic task: duplicate=%v bundle=%#v err=%v", duplicate, createdTask, err)
+	}
+	replayedTask, duplicate, err := service.CreateTask(
+		ctx, actor, contract.IdempotencyKey("atomic_task_"+suffix), projectID,
+		strategy.CreateTaskRequest{Name: "原子策略任务", Objective: "验证新品认知"},
+	)
+	if err != nil || !duplicate || replayedTask.Task.ID != createdTask.Task.ID {
+		t.Fatalf("replay atomic task: duplicate=%v bundle=%#v err=%v", duplicate, replayedTask, err)
+	}
+	taskItems, err := service.ListTasks(ctx, actor, projectID)
+	if err != nil || len(taskItems) != 1 || taskItems[0].Name != "原子策略任务" {
+		t.Fatalf("list atomic tasks: items=%#v err=%v", taskItems, err)
+	}
+
 	workspace, duplicate, err := service.CreateWorkspace(ctx, actor, contract.IdempotencyKey("workspace_"+suffix), projectID, "Integration Workspace")
 	if err != nil || duplicate {
 		t.Fatalf("create workspace: duplicate=%v err=%v", duplicate, err)
@@ -108,6 +128,10 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("confirm brief: duplicate=%v err=%v", duplicate, err)
 	}
+	briefConfirmedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
+	if err != nil || briefConfirmedTask.Status != "active" {
+		t.Fatalf("task after brief confirmation=%#v err=%v", briefConfirmedTask, err)
+	}
 	created, duplicate, err := service.CreateStrategy(ctx, actor, contract.IdempotencyKey("strategy_"+suffix), bundle.Task.ID, briefVersion.BriefID, briefVersion.Version)
 	if err != nil || duplicate {
 		t.Fatalf("create strategy: duplicate=%v err=%v", duplicate, err)
@@ -140,6 +164,39 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("submit strategy: duplicate=%v err=%v", duplicate, err)
 	}
+	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{failFirst: true}}
+	service.DeepReviewModelAlias = "cookies.text.deep_review"
+	deep, duplicate, err := service.StartDeepReview(
+		ctx, actor, contract.IdempotencyKey("deep_review_"+suffix), review.ID,
+		strategy.StartDeepReviewRequest{ExpectedReviewStatus: "open"},
+	)
+	if err != nil || duplicate || deep.Analysis.Status != "pending" {
+		t.Fatalf("start deep review: result=%#v duplicate=%v err=%v", deep, duplicate, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, deep.AgentTask); err != nil {
+		t.Fatalf("run deep review: %v", err)
+	}
+	deepResult, err := service.GetLatestDeepReview(ctx, actor, review.ID)
+	if err != nil || deepResult.Status != "succeeded" || len(deepResult.Findings) != 1 ||
+		deepResult.APIMode != provider.TextAPIResponses || !deepResult.Background {
+		t.Fatalf("deep review result=%#v err=%v", deepResult, err)
+	}
+	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{alwaysFail: true}}
+	failedDeep, duplicate, err := service.StartDeepReview(
+		ctx, actor, contract.IdempotencyKey("deep_review_fail_"+suffix), review.ID,
+		strategy.StartDeepReviewRequest{ExpectedReviewStatus: "open"},
+	)
+	if err != nil || duplicate {
+		t.Fatalf("start failing deep review: duplicate=%v err=%v", duplicate, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, failedDeep.AgentTask); err == nil {
+		t.Fatal("failing deep review unexpectedly succeeded")
+	}
+	failedDeepResult, err := service.GetLatestDeepReview(ctx, actor, review.ID)
+	if err != nil || failedDeepResult.ID != failedDeep.Analysis.ID || failedDeepResult.Status != "failed" {
+		t.Fatalf("failed deep review result=%#v err=%v", failedDeepResult, err)
+	}
+	service.Text = nil
 	strategyDraft, err = service.GetDraft(ctx, actor, strategyDraft.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -192,6 +249,10 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	})
 	if err != nil || duplicate {
 		t.Fatalf("approve strategy: duplicate=%v err=%v", duplicate, err)
+	}
+	completedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
+	if err != nil || completedTask.Status != "completed" {
+		t.Fatalf("task after strategy approval=%#v err=%v", completedTask, err)
 	}
 	stored, err := service.GetPackage(ctx, actor, projectID, published.PackageID, published.Version)
 	if err != nil {
@@ -464,13 +525,13 @@ func runAgentTaskThroughRuntime(ctx context.Context, db *sql.DB, service strateg
 		return errors.New("agent dispatch was not processed")
 	}
 	var domainErr error
-	handler := agent.RuntimeHandler(agent.MySQLStore{DB: db}, func(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
+	handler := agent.RuntimeHandlerWithFinalFailure(agent.MySQLStore{DB: db}, func(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
 		ref, err := service.HandleAgentTask(ctx, task)
 		if err != nil {
 			domainErr = err
 		}
 		return ref, err
-	}, runtimeStore)
+	}, service.HandleAgentTaskFinalFailure, runtimeStore)
 	worker := jobruntime.Worker{
 		Store: runtimeStore, Handlers: map[string]jobruntime.Handler{task.Kind: handler},
 		Canceller: runtimeStore,
@@ -507,6 +568,43 @@ type recordingPublisher struct {
 	events []eventoutbox.Event
 }
 
+type deepReviewTextAdapter struct {
+	failFirst  bool
+	alwaysFail bool
+	calls      int
+}
+
+func (*deepReviewTextAdapter) InspectTextRoute(
+	context.Context, contract.OrganizationID, string,
+) (provider.TextRouteInspection, error) {
+	return provider.TextRouteInspection{
+		ModelAlias: "cookies.text.deep_review", UpstreamModel: "gpt-5.5-pro",
+		RouteRevisionID: "deep-review-r1", ResponseMode: provider.TextResponseJSONSchema,
+		APIMode: provider.TextAPIResponses, Background: true, Ready: true,
+	}, nil
+}
+
+func (a *deepReviewTextAdapter) GenerateText(
+	context.Context, provider.TextAdapterRequest,
+) (provider.SynchronousResult, error) {
+	a.calls++
+	if a.alwaysFail || (a.failFirst && a.calls == 1) {
+		return provider.SynchronousResult{}, provider.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_RATE_LIMITED", Message: "retry deep review", Retryable: true,
+		}}
+	}
+	output := json.RawMessage(`{"summary":"候选策略具备基础可执行性。","findings":[{"severity":"warning","section":"measurement","title":"指标需要收敛","detail":"核心指标与渠道指标的归因窗口尚未明确。","recommendation":"补充统一归因窗口与渠道分解口径。"}]}`)
+	return provider.SynchronousResult{
+		ProviderCode: "adapter_gateway", ModelVersion: "gpt-5.5-pro",
+		Text: string(output), StructuredOutput: output,
+		Usage: &provider.TokenUsage{InputTokens: 100, OutputTokens: 40, TotalTokens: 140},
+		RouteSnapshot: &provider.GatewayRouteSnapshot{
+			RouteRevisionID: "deep-review-r1", TextResponseMode: provider.TextResponseJSONSchema,
+			TextAPIMode: provider.TextAPIResponses, Background: true,
+		},
+	}, nil
+}
+
 func (p *recordingPublisher) Publish(_ context.Context, event eventoutbox.Event) error {
 	p.events = append(p.events, event)
 	return nil
@@ -523,10 +621,13 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM strategy_compliance_reports WHERE organization_id=?",
 		"DELETE FROM strategy_conversation_memories WHERE organization_id=?",
 		"DELETE FROM strategy_review_comments WHERE organization_id=?",
+		"DELETE FROM strategy_review_analyses WHERE organization_id=?",
+		"DELETE FROM strategy_review_assignments WHERE organization_id=?",
 		"DELETE FROM strategy_creative_handoffs WHERE organization_id=?",
 		"DELETE FROM strategy_package_versions WHERE organization_id=?",
 		"DELETE FROM strategy_packages WHERE organization_id=?",
 		"DELETE FROM strategy_reviews WHERE organization_id=?",
+		"DELETE FROM strategy_review_policies WHERE organization_id=?",
 		"DELETE FROM strategy_draft_revisions WHERE organization_id=?",
 		"DELETE FROM strategy_drafts WHERE organization_id=?",
 		"DELETE FROM strategy_brief_versions WHERE organization_id=?",

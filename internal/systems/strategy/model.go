@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 const (
@@ -80,6 +82,28 @@ type Task struct {
 	Version            int64                   `json:"version"`
 	CreatedAt          time.Time               `json:"created_at"`
 	UpdatedAt          time.Time               `json:"updated_at"`
+}
+
+type CreateTaskRequest struct {
+	Name      string `json:"name"`
+	Objective string `json:"objective"`
+}
+
+type TaskListItem struct {
+	Task           Task   `json:"task"`
+	Name           string `json:"name"`
+	Objective      string `json:"objective"`
+	BriefStatus    string `json:"brief_status"`
+	BriefReady     bool   `json:"brief_ready"`
+	StrategyStatus string `json:"strategy_status,omitempty"`
+	ReviewStatus   string `json:"review_status,omitempty"`
+}
+
+type TaskBundle struct {
+	Workspace    Workspace    `json:"workspace"`
+	Conversation Conversation `json:"conversation"`
+	Task         Task         `json:"task"`
+	BriefDraft   BriefDraft   `json:"brief_draft"`
 }
 
 type BriefDocument struct {
@@ -460,6 +484,44 @@ type Review struct {
 	CreatedBy             string                  `json:"created_by"`
 	CreatedAt             time.Time               `json:"created_at"`
 	UpdatedAt             time.Time               `json:"updated_at"`
+	ReviewMode            string                  `json:"review_mode,omitempty"`
+	RequiredApprovals     int                     `json:"required_approvals,omitempty"`
+	ApprovalCount         int                     `json:"approval_count,omitempty"`
+	Assignments           []ReviewAssignment      `json:"assignments,omitempty"`
+}
+
+type ReviewAssignment struct {
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	ReviewID          string                  `json:"review_id"`
+	ReviewerUserID    string                  `json:"reviewer_user_id"`
+	ReviewMode        string                  `json:"review_mode"`
+	Status            string                  `json:"status"`
+	DecisionReason    string                  `json:"decision_reason,omitempty"`
+	DecidedAt         *time.Time              `json:"decided_at,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	AllowSelfApproval bool                    `json:"-"`
+}
+
+type ReviewPolicy struct {
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	Mode              string                  `json:"mode"`
+	ApproverUserIDs   []string                `json:"approver_user_ids"`
+	AllowSelfApproval bool                    `json:"allow_self_approval"`
+	Version           int64                   `json:"version"`
+	UpdatedBy         string                  `json:"updated_by,omitempty"`
+	CreatedAt         time.Time               `json:"created_at,omitempty"`
+	UpdatedAt         time.Time               `json:"updated_at,omitempty"`
+}
+
+type UpdateReviewPolicyRequest struct {
+	Mode              string   `json:"mode"`
+	ApproverUserIDs   []string `json:"approver_user_ids"`
+	AllowSelfApproval bool     `json:"allow_self_approval"`
+	ExpectedVersion   int64    `json:"expected_version"`
 }
 
 type ReviewComment struct {
@@ -470,6 +532,48 @@ type ReviewComment struct {
 	AuthorID       string                  `json:"author_id"`
 	Body           string                  `json:"body"`
 	CreatedAt      time.Time               `json:"created_at"`
+}
+
+type DeepReviewFinding struct {
+	Severity       string `json:"severity"`
+	Section        string `json:"section"`
+	Title          string `json:"title"`
+	Detail         string `json:"detail"`
+	Recommendation string `json:"recommendation"`
+}
+
+type DeepReviewAnalysis struct {
+	ID                   string                    `json:"id"`
+	OrganizationID       contract.OrganizationID   `json:"organization_id"`
+	ProjectID            contract.ProjectID        `json:"project_id"`
+	ReviewID             string                    `json:"review_id"`
+	StrategyID           string                    `json:"strategy_id"`
+	CandidateRevision    int64                     `json:"candidate_revision"`
+	CandidateContentHash contract.ContentHash      `json:"candidate_content_hash"`
+	AgentTaskID          string                    `json:"agent_task_id"`
+	Status               string                    `json:"status"`
+	Summary              string                    `json:"summary,omitempty"`
+	Findings             []DeepReviewFinding       `json:"findings"`
+	ModelAlias           string                    `json:"model_alias,omitempty"`
+	ModelVersion         string                    `json:"model_version,omitempty"`
+	RouteRevisionID      string                    `json:"route_revision_id,omitempty"`
+	ResponseMode         provider.TextResponseMode `json:"response_mode,omitempty"`
+	APIMode              provider.TextAPIMode      `json:"api_mode,omitempty"`
+	Background           bool                      `json:"background,omitempty"`
+	Usage                *provider.TokenUsage      `json:"usage,omitempty"`
+	LatencyMS            int64                     `json:"latency_ms,omitempty"`
+	CreatedBy            string                    `json:"created_by"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
+}
+
+type StartDeepReviewRequest struct {
+	ExpectedReviewStatus string `json:"expected_review_status"`
+}
+
+type DeepReviewStartResult struct {
+	Analysis  DeepReviewAnalysis `json:"analysis"`
+	AgentTask agent.Task         `json:"agent_task"`
 }
 
 type Readiness struct {

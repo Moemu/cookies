@@ -22,6 +22,10 @@ func (s Service) SubmitStrategy(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return Review{}, false, err
 	}
+	policy, err := s.GetReviewPolicy(ctx, actor, draft.ProjectID)
+	if err != nil {
+		return Review{}, false, err
+	}
 	request := struct {
 		ExpectedVersion   int64 `json:"expected_version"`
 		CandidateRevision int64 `json:"candidate_revision"`
@@ -76,6 +80,9 @@ func (s Service) SubmitStrategy(ctx context.Context, actor contract.ActorContext
 		review.CreatedBy, now, now); err != nil {
 		return Review{}, false, err
 	}
+	if err := s.createReviewAssignments(ctx, tx, actor, &review, policy, now); err != nil {
+		return Review{}, false, err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'ready_for_review',
 		current_review_id = ?, version = version + 1, updated_at = ?
 		WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ?`,
@@ -112,7 +119,7 @@ func (s Service) GetReview(ctx context.Context, actor contract.ActorContext, rev
 	if _, err := s.project(ctx, actor, review.ProjectID); err != nil {
 		return Review{}, err
 	}
-	return review, nil
+	return s.decorateReview(ctx, review)
 }
 
 func (s Service) AddReviewComment(ctx context.Context, actor contract.ActorContext, reviewID, body string) (ReviewComment, error) {
@@ -170,13 +177,14 @@ func (s Service) ListReviewComments(ctx context.Context, actor contract.ActorCon
 }
 
 func (s Service) ReturnReview(ctx context.Context, actor contract.ActorContext, reviewID, reason string) (Review, error) {
-	if err := requireScope(actor, ScopeReview); err != nil {
-		return Review{}, err
-	}
 	if strings.TrimSpace(reason) == "" || len(reason) > 16<<10 {
 		return Review{}, ErrInvalidRequest
 	}
 	review, err := s.GetReview(ctx, actor, reviewID)
+	if err != nil {
+		return Review{}, err
+	}
+	assignment, err := s.authorizeReviewDecision(ctx, actor, review, false)
 	if err != nil {
 		return Review{}, err
 	}
@@ -204,6 +212,9 @@ func (s Service) ReturnReview(ctx context.Context, actor contract.ActorContext, 
 		review.StrategyID, review.ID); err != nil {
 		return Review{}, err
 	}
+	if err := updateReviewAssignmentDecision(ctx, tx, assignment, "returned", reason, now); err != nil {
+		return Review{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Review{}, err
 	}
@@ -212,6 +223,13 @@ func (s Service) ReturnReview(ctx context.Context, actor contract.ActorContext, 
 	review.DecidedBy = actor.Principal.ID
 	review.DecidedAt = &now
 	review.UpdatedAt = now
+	if assignment.ID != "" {
+		assignment.Status = "returned"
+		assignment.DecisionReason = strings.TrimSpace(reason)
+		assignment.DecidedAt = &now
+		assignment.UpdatedAt = now
+		review.Assignments = []ReviewAssignment{assignment}
+	}
 	return review, nil
 }
 
@@ -225,9 +243,6 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	if s.DisableApproval {
 		return PackageVersion{}, false, ErrFeatureDisabled
 	}
-	if err := requireScope(actor, ScopeApprove); err != nil {
-		return PackageVersion{}, false, err
-	}
 	if err := key.Validate(); err != nil || request.ReviewID == "" || request.ExpectedVersion < 1 ||
 		request.CandidateContentHash.Validate() != nil {
 		return PackageVersion{}, false, ErrInvalidRequest
@@ -236,15 +251,23 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return PackageVersion{}, false, err
 	}
-	projectContext, err := s.project(ctx, actor, draft.ProjectID)
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
 	hash, _ := contract.CanonicalJSONHash(request)
 	var prior PackageVersion
 	found, err := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.approve", key, hash, &prior)
 	if found || err != nil {
 		return prior, found, err
+	}
+	reviewForAuthorization, err := s.GetReview(ctx, actor, request.ReviewID)
+	if err != nil {
+		return PackageVersion{}, false, err
+	}
+	assignment, err := s.authorizeReviewDecision(ctx, actor, reviewForAuthorization, true)
+	if err != nil {
+		return PackageVersion{}, false, err
+	}
+	projectContext, err := s.project(ctx, actor, draft.ProjectID)
+	if err != nil {
+		return PackageVersion{}, false, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -405,10 +428,18 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		draft.ProjectID, review.ID); err != nil {
 		return PackageVersion{}, false, err
 	}
+	if err := updateReviewAssignmentDecision(ctx, tx, assignment, "approved", "", now); err != nil {
+		return PackageVersion{}, false, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'approved',
 		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ?
 		AND id = ? AND version = ?`, now, actor.OrganizationID, draft.ProjectID, strategyID,
 		lockedDraft.Version); err != nil {
+		return PackageVersion{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET status = 'completed',
+		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		now, actor.OrganizationID, draft.ProjectID, lockedDraft.TaskID); err != nil {
 		return PackageVersion{}, false, err
 	}
 	eventID, err := s.newID("event")

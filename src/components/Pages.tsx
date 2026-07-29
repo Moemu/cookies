@@ -11,6 +11,11 @@ import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPa
 import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
+import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
+import { KanonStrategyTaskCenter, KanonStrategyTaskDialog } from '../features/strategy/KanonStrategyTaskCenter'
+import type { StrategyTaskBundle } from '../features/strategy/types'
+import { KanonSkillsOperations } from '../features/strategy/KanonSkillsOperations'
+import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
 import { industryProfile } from '../data/industry-profiles'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
@@ -1582,7 +1587,11 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   let surface
   const taskDomain = system.key === 'strategy' || system.key === 'creative' ? system.key : null
   const taskCenter = item.id === 'tasks' && taskDomain !== null
-  const specialized = taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
+  const specialized = system.key === 'strategy' && item.id === 'tasks' ? <KanonStrategyTaskCenter activeView={activeView} onOpenWorkspace={id => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, '概览')} onRequestCreate={() => setTaskDialog({ domain: 'strategy', initialType: 'strategy' })}/>
+    : taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
+    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace activeView={activeView} workspaceId={objectId}/>
+    : system.key === 'strategy' && item.id === 'operations' ? <KanonSkillsOperations activeView={activeView}/>
+    : system.key === 'strategy' && item.id === 'reviews' ? <KanonReviewCenter activeView={activeView} onOpenReview={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', undefined, '评审')}/>
     : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={objectId}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
@@ -1621,9 +1630,14 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     setNotice(`${task.name} 已写入服务端并关联当前 Project`)
     onOpenProject(currentProject.id, system.key, 'tasks', task.id)
   }
+  const strategyTaskCreated = (bundle: StrategyTaskBundle) => {
+    setTaskDialog(null)
+    setNotice(`${bundle.workspace.name} 已创建，工作区、对话与 Brief 已持久化`)
+    onOpenProject(currentProject.id, 'strategy', 'workspaces', bundle.workspace.id, '概览')
+  }
 
   const projectProgress = calculateProjectProgress(currentProject)
-  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews'))
+  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces'))
 
-  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>{taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
+  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div>{system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }

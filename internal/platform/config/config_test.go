@@ -15,6 +15,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
 		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
+		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
 		value.Strategy.PromptVersion != "strategy.generate.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
@@ -448,6 +449,43 @@ func TestOpenAIImageAdapterRequiresCompleteLocalGatewayConfiguration(t *testing.
 	}))
 	if err != nil || config.Provider.ImageAdapter != "openai_image" {
 		t.Fatalf("valid local OpenAI-compatible configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+}
+
+func TestFromLookupParsesMCPStdioResearchConfiguration(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_MCP_STDIO_COMMAND":    "node",
+		"COOKIES_RESEARCH_MCP_STDIO_ARGS_JSON":  `["server.js","--stdio"]`,
+		"COOKIES_RESEARCH_MCP_TOOL_NAME":        "search_evidence",
+		"COOKIES_RESEARCH_MCP_ENV_ALLOWLIST":    "PATH,SEARCH_API_KEY",
+		"COOKIES_RESEARCH_TIMEOUT_SECONDS":      "90",
+		"COOKIES_RESEARCH_MAX_OUTPUT_BYTES":     "2097152",
+		"COOKIES_RESEARCH_MCP_PROTOCOL_VERSION": "2025-11-25",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if config.Research.MCPStdioCommand != "node" ||
+		len(config.Research.MCPStdioArgs) != 2 ||
+		config.Research.MCPStdioArgs[1] != "--stdio" ||
+		config.Research.MCPToolName != "search_evidence" ||
+		config.Research.TimeoutSeconds != 90 {
+		t.Fatalf("unexpected research config: %#v", config.Research)
+	}
+}
+
+func TestFromLookupRejectsInvalidMCPArgumentsAndResearchBounds(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_MCP_STDIO_ARGS_JSON": `["unterminated"`,
+	})); err == nil {
+		t.Fatal("expected invalid MCP args JSON to be rejected")
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_TIMEOUT_SECONDS": "0",
+	})); err == nil {
+		t.Fatal("expected invalid research timeout to be rejected")
 	}
 }
 
