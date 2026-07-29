@@ -1762,6 +1762,13 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   gap: 5px;
 }
 
+.kanon-brief-footer .kanon-brief-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .kanon-brief-footer span {
   display: flex;
   align-items: center;

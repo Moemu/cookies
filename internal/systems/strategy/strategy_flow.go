@@ -151,6 +151,118 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	return result, false, nil
 }
 
+func (s Service) RetryStrategy(
+	ctx context.Context,
+	actor contract.ActorContext,
+	key contract.IdempotencyKey,
+	strategyID string,
+	expectedVersion int64,
+) (CreateStrategyResult, bool, error) {
+	if err := requireScope(actor, ScopeWrite); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	if err := key.Validate(); err != nil || strategyID == "" || expectedVersion < 1 {
+		return CreateStrategyResult{}, false, ErrInvalidRequest
+	}
+	draft, err := s.GetDraft(ctx, actor, strategyID)
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	request := struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}{ExpectedVersion: expectedVersion}
+	hash, _ := contract.CanonicalJSONHash(request)
+	var prior CreateStrategyResult
+	found, err := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.retry", key, hash, &prior)
+	if found || err != nil {
+		return prior, found, err
+	}
+	if err := s.ensureConcurrencyLimit(ctx, actor.OrganizationID, draft.ProjectID, 4); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	agentTaskID, err := s.newID("agenttask")
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	now := s.now()
+	input := mustJSON(map[string]any{
+		"strategy_id": strategyID, "brief_id": draft.BriefID, "brief_version": draft.BriefVersion,
+	})
+	agentTask := agent.Task{
+		ID: agentTaskID, OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID,
+		SourceSystem: "strategy", SourceType: "strategy_draft", SourceID: strategyID,
+		Kind: AgentKindDraftGenerate, Status: agent.TaskDispatchPending, Version: 1,
+		InputSnapshot: input, CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now,
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	defer tx.Rollback()
+	locked, err := scanDraft(tx.QueryRowContext(ctx, draftSelect+`
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		actor.OrganizationID, draft.ProjectID, strategyID))
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	if locked.Version != expectedVersion {
+		return CreateStrategyResult{}, false, ErrVersionConflict
+	}
+	if locked.Status != "failed" || locked.CurrentRevision != 0 || locked.ArchivedAt != nil {
+		return CreateStrategyResult{}, false, ErrInvalidState
+	}
+	task, err := scanTask(tx.QueryRowContext(ctx, taskSelect+`
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		actor.OrganizationID, draft.ProjectID, locked.TaskID))
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	if task.DiscardedAt != nil {
+		return CreateStrategyResult{}, false, ErrInvalidState
+	}
+	writer, err := s.agentWriter()
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	if err := writer.CreateIn(ctx, tx, agent.CreateRequest{Task: agentTask}); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'generating',
+		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ?
+		AND id = ? AND version = ? AND status = 'failed' AND current_revision = 0`,
+		now, actor.OrganizationID, draft.ProjectID, strategyID, locked.Version)
+	if err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return CreateStrategyResult{}, false, ErrVersionConflict
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET current_agent_task_id = ?,
+		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		agentTask.ID, now, actor.OrganizationID, draft.ProjectID, task.ID); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	locked.Status = "generating"
+	locked.Version++
+	locked.UpdatedAt = now
+	response := CreateStrategyResult{Draft: locked, AgentTask: agentTask}
+	if err := insertReceipt(ctx, tx, actor, draft.ProjectID, "strategy.retry", key, hash, 202, response, now); err != nil {
+		if isDuplicate(err) {
+			tx.Rollback()
+			found, readErr := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.retry", key, hash, &prior)
+			return prior, found, readErr
+		}
+		return CreateStrategyResult{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CreateStrategyResult{}, false, err
+	}
+	return response, false, nil
+}
+
 func (s Service) GetDraft(ctx context.Context, actor contract.ActorContext, id string) (Draft, error) {
 	if err := requireScope(actor, ScopeRead); err != nil {
 		return Draft{}, err

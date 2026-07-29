@@ -510,9 +510,31 @@ func (s *Server) strategyAction(writer http.ResponseWriter, request *http.Reques
 	case strings.HasSuffix(value, ":restore"):
 		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":restore"))
 		s.restoreStrategy(writer, request)
+	case strings.HasSuffix(value, ":retry"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":retry"))
+		s.retryStrategy(writer, request)
 	default:
 		writeError(writer, strategy.ErrNotFound)
 	}
+}
+
+func (s *Server) retryStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RetryStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body.ExpectedVersion)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
 }
 
 func (s *Server) taskAction(writer http.ResponseWriter, request *http.Request) {

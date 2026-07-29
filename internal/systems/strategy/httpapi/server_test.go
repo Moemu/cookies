@@ -20,6 +20,7 @@ func TestActionRoutesUseFrozenColonSyntax(t *testing.T) {
 		"/api/strategy/v1/strategy-drafts/strategy_1:approve",
 		"/api/strategy/v1/strategy-drafts/strategy_1:archive",
 		"/api/strategy/v1/strategy-drafts/strategy_1:restore",
+		"/api/strategy/v1/strategy-drafts/strategy_1:retry",
 		"/api/strategy/v1/tasks/task_1:discard",
 		"/api/strategy/v1/tasks/task_1:restore",
 		"/api/strategy/v1/strategy-reviews/review_1:return",

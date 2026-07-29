@@ -133,15 +133,27 @@ export const strategyApi = {
   getBriefDraft: (taskId: string, signal?: AbortSignal) =>
     apiRequest<BriefDraft>(`${root}/tasks/${encodeURIComponent(taskId)}/brief-draft`, { signal }),
 
-  patchBriefField: (taskId: string, draft: BriefDraft, fieldPath: string, value: unknown, mutationKey?: string) =>
+  patchBriefFields: (
+    taskId: string,
+    draft: BriefDraft,
+    operations: Array<{ fieldPath: string; value: unknown }>,
+    mutationKey?: string,
+  ) =>
     apiRequest<BriefDraft>(`${root}/tasks/${encodeURIComponent(taskId)}/brief-draft`, {
       method: 'PATCH',
       headers: { ...mutationHeaders(mutationKey), 'If-Match': `"v${draft.version}"` },
       body: JSON.stringify({
         expected_version: draft.version,
-        operations: [{ op: 'set', field_path: fieldPath, value }],
+        operations: operations.map(operation => ({
+          op: 'set',
+          field_path: operation.fieldPath,
+          value: operation.value,
+        })),
       }),
     }),
+
+  patchBriefField: (taskId: string, draft: BriefDraft, fieldPath: string, value: unknown, mutationKey?: string) =>
+    strategyApi.patchBriefFields(taskId, draft, [{ fieldPath, value }], mutationKey),
 
   confirmBrief: (taskId: string, expectedVersion: number, mutationKey?: string) =>
     apiRequest<BriefVersion>(`${root}/tasks/${encodeURIComponent(taskId)}/brief:confirm`, {
@@ -160,6 +172,16 @@ export const strategyApi = {
         method: 'POST',
         headers: mutationHeaders(mutationKey),
         body: JSON.stringify({ brief_id: brief.brief_id, brief_version: brief.version }),
+      },
+    ),
+
+  retryStrategy: (draft: StrategyDraft, mutationKey?: string) =>
+    apiRequest<{ strategy_draft: StrategyDraft; agent_task: AgentTask }>(
+      `${root}/strategy-drafts/${encodeURIComponent(draft.id)}:retry`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(mutationKey),
+        body: JSON.stringify({ expected_version: draft.version }),
       },
     ),
 

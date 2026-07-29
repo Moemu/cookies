@@ -165,7 +165,33 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("create strategy: duplicate=%v err=%v", duplicate, err)
 	}
-	if err := runAgentTaskThroughRuntime(ctx, db, service, created.AgentTask); err != nil {
+	retryProblem := contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "integration retry fixture"}
+	if _, err := db.ExecContext(ctx, `UPDATE platform_agent_tasks SET status = 'failed',
+		version = version + 1, error_code = ?, error_message = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		retryProblem.Code, retryProblem.Message, time.Now().UTC(),
+		actor.OrganizationID, projectID, created.AgentTask.ID,
+	); err != nil {
+		t.Fatalf("mark initial strategy generation failed: %v", err)
+	}
+	service.HandleAgentTaskFinalFailure(created.AgentTask, retryProblem)
+	failedDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
+	if err != nil || failedDraft.Status != "failed" {
+		t.Fatalf("get failed strategy draft: draft=%#v err=%v", failedDraft, err)
+	}
+	retried, duplicate, err := service.RetryStrategy(
+		ctx, actor, contract.IdempotencyKey("strategy_retry_"+suffix), failedDraft.ID, failedDraft.Version,
+	)
+	if err != nil || duplicate || retried.Draft.Status != "generating" {
+		t.Fatalf("retry strategy: duplicate=%v result=%#v err=%v", duplicate, retried, err)
+	}
+	replayedRetry, duplicate, err := service.RetryStrategy(
+		ctx, actor, contract.IdempotencyKey("strategy_retry_"+suffix), failedDraft.ID, failedDraft.Version,
+	)
+	if err != nil || !duplicate || replayedRetry.AgentTask.ID != retried.AgentTask.ID {
+		t.Fatalf("replay strategy retry: duplicate=%v result=%#v err=%v", duplicate, replayedRetry, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, retried.AgentTask); err != nil {
 		t.Fatalf("generate strategy: %v", err)
 	}
 	strategyDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
