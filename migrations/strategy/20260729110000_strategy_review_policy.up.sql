@@ -1,6 +1,6 @@
 CREATE TABLE strategy_review_policies (
-  organization_id VARCHAR(96) NOT NULL,
-  project_id VARCHAR(96) NOT NULL,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   mode VARCHAR(32) NOT NULL,
   approver_user_ids JSON NOT NULL,
   allow_self_approval BOOLEAN NOT NULL DEFAULT FALSE,
@@ -17,10 +17,10 @@ CREATE TABLE strategy_review_policies (
 
 CREATE TABLE strategy_review_assignments (
   id VARCHAR(96) NOT NULL PRIMARY KEY,
-  organization_id VARCHAR(96) NOT NULL,
-  project_id VARCHAR(96) NOT NULL,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   review_id VARCHAR(96) NOT NULL,
-  reviewer_user_id VARCHAR(96) NOT NULL,
+  reviewer_user_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   review_mode VARCHAR(32) NOT NULL,
   status VARCHAR(24) NOT NULL,
   policy_snapshot JSON NOT NULL,
