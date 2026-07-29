@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Film, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAssetVersionRef, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAssetVersionRef, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiProjectMediaAsset, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
@@ -14,6 +14,7 @@ import { StateBoundary, StatePreview } from './StateBoundary'
 import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
 import { KanonSkillsOperations } from '../features/strategy/KanonSkillsOperations'
 import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
+import { industryProfile } from '../data/industry-profiles'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 
@@ -577,7 +578,7 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
 
   useEffect(() => {
     let active = true
-    void api.listAgencyWorkbench().then(data => {
+    void api.listAgencyWorkbench({ includeDemoProject: true }).then(data => {
       if (active) setWorkbench(data)
     }).catch(cause => {
       if (active) setWorkbenchError(cause instanceof Error ? cause.message : '加载代理商工作台失败')
@@ -921,7 +922,8 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
 }
 
 function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: string }) {
-  const { currentProject, reloadProjects } = useProject()
+  const { currentProject, reloadProjects, updateArtifact } = useProject()
+  const industry = industryProfile(currentProject.industry)
   const [briefPrompt, setBriefPrompt] = useState('')
   const [brief, setBrief] = useState<ApiArtifact | null>(null)
   const [briefModel, setBriefModel] = useState('')
@@ -1009,6 +1011,7 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
 
   return <div className="workspace-surface">
     <section className="document-panel">
+      <IndustrySchema module="需求与策略" profile={industry.strategy} industry={industry.label}/>
       <div className="surface-toolbar"><div><span className="ai-chip"><Bot size={14} />{activeView}</span><span>{currentProject.artifacts.strategy.version} · 已引用 4 条证据</span></div><button className="secondary-button"><Pencil size={14} />编辑</button></div>
       {[
         ['推荐定位', '白域精工，以精密制造的可靠性为品牌核心，为创新产品提供高精度、高一致性与稳定交付。'],
@@ -1051,6 +1054,7 @@ function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: stri
 
 function MaterialInsightSurface() {
   const { advanceArtifact, currentProject } = useProject()
+  const industry = industryProfile(currentProject.industry)
   const [notice, setNotice] = useState('')
   const [overview, setOverview] = useState<ApiPublicInsightOverview | null>(null)
   const [filters, setFilters] = useState<ApiPublicInsightFilters | null>(null)
@@ -1059,6 +1063,7 @@ function MaterialInsightSurface() {
   const [publicInsightState, setPublicInsightState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [publicQuery, setPublicQuery] = useState('')
   const [publicIndustry, setPublicIndustry] = useState('')
+  const [projectMedia, setProjectMedia] = useState<ApiProjectMediaAsset[]>([])
   const manhuaMix = operationRecords(currentProject.operations, 'audience_mix')
   const manhuaMethods = operationRecords(currentProject.operations, 'method')
   useEffect(() => {
@@ -1079,6 +1084,17 @@ function MaterialInsightSurface() {
     })
     return () => { active = false }
   }, [])
+  useEffect(() => {
+    let active = true
+    void api.listProjectMediaAssets(currentProject.id).then(items => {
+      if (active) setProjectMedia(items)
+    }).catch(() => {
+      if (active) setProjectMedia([])
+    })
+    return () => { active = false }
+  }, [currentProject.id])
+  const projectVideos = projectMedia.filter(asset => asset.kind === 'video')
+  const projectBrief = projectMedia.find(asset => asset.mimeType === 'application/pdf')
   useEffect(() => {
     let active = true
     setPublicInsightState('loading')
@@ -1118,7 +1134,9 @@ function MaterialInsightSurface() {
   }
   return <div className="strategy-analysis-layout">
     <section className="strategy-analysis-main">
+      <IndustrySchema module="素材洞察" profile={industry.insight} industry={industry.label}/>
       <div className="analysis-heading"><div><span className="section-label">公开短视频洞察样本</span><h2>部署后自动导入 data 目录作为示例展示。</h2><p>服务端默认读取 data/insights/public_data_insight_source_export/*.csv，保留公开样本的行业、播放、留存、口播和分镜字段。</p></div><span className="source-chip">{overview ? `${overview.total_videos} 条样本 · ${overview.files.length} 个文件` : '加载示例数据'}</span></div>
+      <section className="project-media-analysis" aria-label="当前 Project 视频分析输入"><div><span className="section-label">PROJECT MEDIA INPUT</span><h3>{projectVideos.length} 个视频已纳入内容分析输入</h3><p>{projectBrief ? '已关联 Guerlain KOL Brief PDF；可将其与视频元数据、时长和尺寸共同作为创作及内容分析依据。' : '尚未检测到项目 PDF Brief。'}</p></div><div>{projectVideos.slice(0, 4).map(asset => <span key={asset.id}><Film size={13}/>{asset.durationSeconds?.toFixed(0) ?? '—'}s · {asset.width}×{asset.height}</span>)}</div></section>
       <div className="public-insight-overview">
         <span><b>{overview?.total_views.toLocaleString('zh-CN') ?? '—'}</b><small>总播放</small></span>
         <span><b>{overview ? `${(overview.average_finish_rate * 100).toFixed(1)}%` : '—'}</b><small>平均完播率</small></span>
@@ -1159,6 +1177,7 @@ function MaterialInsightSurface() {
 
 function DeliveryStrategySurface() {
   const { addChangeSet, currentProject } = useProject()
+  const industry = industryProfile(currentProject.industry)
   const [notice, setNotice] = useState('')
   const deliveryDiagnostics = operationRecords(currentProject.operations, 'delivery_diagnostic')
   const deliveryActions = operationRecords(currentProject.operations, 'delivery_action')
@@ -1172,12 +1191,20 @@ function DeliveryStrategySurface() {
   }
   return <div className="strategy-analysis-layout">
     <section className="strategy-analysis-main delivery-strategy">
+      <IndustrySchema module="智能投放" profile={industry.delivery} industry={industry.label}/>
       <div className="analysis-heading"><div><span className="section-label">商品 × 素材诊断</span><h2>先减少重复，再为新素材留出探索空间。</h2><p>当前同时出现起量放缓和组合重复信号，建议生成 ChangeSet；任何暂停、删除和预算动作仍需人工审批。</p></div><span className="source-chip alert">{deliveryDiagnostics.length} 项服务端诊断</span></div>
       <div className="diagnostic-grid">{deliveryDiagnostics.map(item => <div className={`diagnostic-card ${item.status}`} key={item.id}><span>{item.id}</span><small>{item.title}</small><b>{operationField(item, 'value')}</b><p>{operationField(item, 'detail')}</p></div>)}{!deliveryDiagnostics.length ? <div className="panel-empty">暂无服务端投放诊断。</div> : null}</div>
       <div className="action-table"><div className="action-head"><span>优先级</span><span>建议动作</span><span>依据</span><span>预计影响</span></div>{deliveryActions.map(item => <div className="action-row" key={item.id}><strong>{item.status}</strong><b>{item.title}</b><span>{operationField(item, 'detail')}</span><em>{operationField(item, 'impact')}</em></div>)}{!deliveryActions.length ? <div className="panel-empty">暂无服务端建议动作。</div> : null}</div>
     </section>
     <aside className="strategy-method-rail"><span className="section-label">执行边界</span><h3>自动建议，人工决策</h3>{['准确绑定商品与资产', '统计重复组合与无消耗广告', '新素材改变核心内容', '变更进入 ChangeSet 审批'].map((item, index) => <div className="guardrail" key={item}><CircleCheck size={16}/><span><b>{String(index + 1).padStart(2, '0')}</b>{item}</span></div>)}<button className="primary-button full" onClick={() => void createChangeSet()}>生成优化 ChangeSet</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">60% / 90% 差异与 5–10% 探索预算均为来源建议，不是平台保证。</p></aside>
   </div>
+}
+
+function IndustrySchema({ module, profile, industry }: { module: string; industry: string; profile: { fields: string[]; format: string } }) {
+  return <section className="industry-schema" aria-label={`${industry}${module}配置`}>
+    <span>{industry} · {module}</span><b>{profile.format}</b>
+    <div>{profile.fields.map(field => <small key={field}>{field}</small>)}</div>
+  </section>
 }
 
 function EditorSurface({ item, activeView }: { item: NavItem; activeView: string }) {
@@ -1552,12 +1579,6 @@ function auditActionLabel(action: string): string {
   return labels[action] ?? action
 }
 
-function SettingsSurface() {
-  const [section, setSection] = useState('基础配置')
-  const [autoSave, setAutoSave] = useState(true)
-  return <div className="settings-layout"><aside className="settings-index">{['基础配置', '流程与状态', '通知规则', '权限边界', '导出与命名'].map(v => <button className={section === v ? 'active' : ''} onClick={() => setSection(v)} key={v}>{v}</button>)}</aside><section className="settings-form"><div><h2>{section}</h2><p>这些配置适用于当前组织和全部新建项目。</p></div>{[['默认项目时区', 'Asia/Shanghai'], ['默认货币', '人民币（CNY）'], ['数据保留期', '365 天'], ['自动保存', autoSave ? '开启' : '关闭']].map(([label, value], i) => <div className="setting-row" key={label}><div><b>{label}</b><small>{i === 3 ? '编辑内容后每 30 秒保存一个草稿版本。' : '用于新对象和报表的默认值。'}</small></div>{i === 3 ? <button className={autoSave ? 'switch active' : 'switch'} onClick={() => setAutoSave(value => !value)} aria-label={autoSave ? '关闭自动保存' : '开启自动保存'} aria-pressed={autoSave}><span/></button> : <button className="select-field">{value}<ChevronDown size={14}/></button>}</div>)}</section></div>
-}
-
 function ObjectDetail({ system, item, objectId, onOpenProject }: { system: SystemDefinition; item: NavItem; objectId: string; onOpenProject: OpenProject }) {
   const { currentProject } = useProject()
   const record = operationRecords(currentProject.operations, 'unified_record').find(value => value.id === objectId)
@@ -1591,8 +1612,6 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
         const change = await addChangeSet()
         setNotice(`${change.id} 已在服务端创建，已进入审批中心继续处理。`)
         onOpenProject(currentProject.id, 'delivery', 'approvals', change.id)
-      } else if (item.layout === 'settings') {
-        setNotice(`${system.label}配置已保存为新版本。`)
       }
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '保存失败，请在服务恢复后重试。')
@@ -1619,12 +1638,11 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
-    : system.key === 'creative' && item.id === 'operations' ? <RemixMMLUEvalSurface/>
     : null
   if (specialized) surface = specialized
   else {
     const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
-    const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : item.layout === 'settings' ? <SettingsSurface/> : <OperationsSurface item={item}/>
+    const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : <OperationsSurface item={item}/>
     surface = <StateBoundary
       state={dataState}
       contextLabel={`${system.label} / ${item.label}`}
@@ -1641,7 +1659,6 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'
     : system.key === 'creative' && item.id === 'tasks' ? '新建创意任务'
     : system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet'
-    : item.layout === 'settings' ? '保存配置'
     : undefined
   const taskCreated = (task: BusinessTaskRecord) => {
     setTaskDialog(null)

@@ -1,8 +1,8 @@
 # Local development
 
-The repository has one Go module at the root and one React application in
-`web/`. The vertical systems live under `internal/systems/`; shared platform
-capabilities live under `internal/platform/`.
+The repository has one Go module and one React application at the root. The
+frontend source lives in `src/`; vertical systems live under
+`internal/systems/`; shared platform capabilities live under `internal/platform/`.
 
 ## First-time setup
 
@@ -57,8 +57,8 @@ Or, in an environment with `make`:
 make check
 ```
 
-Both commands verify Go formatting, Go static checks and tests, then lint,
-test and build the React shell, and validate the OpenAPI and event schemas.
+Both commands verify Go formatting, Go static checks and tests, then test and
+build the root React application, and validate the OpenAPI and event schemas.
 
 Migrations are forward-only. Apply only schema changes with
 `go run ./cmd/cookies-migrate`; apply migrations and the canonical Go demo seed

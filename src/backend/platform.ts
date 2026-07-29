@@ -45,6 +45,7 @@ export type BackendProject = {
   organization_id: string
   name: string
   status: 'draft' | 'active' | 'archived'
+  industry?: 'short_drama' | 'game' | 'ecommerce' | 'automotive_brand'
   primary_brand_id: string | null
   project_context_version: number
   created_at: string
@@ -194,11 +195,13 @@ export async function createBackendProject(input: {
 export function toProjectRecord(project: BackendProject, identity: BackendIdentity): ProjectRecord {
   return {
     id: project.id,
+    version: project.project_context_version,
     code: project.id,
     name: project.name,
     brand: project.primary_brand_id ?? '尚未绑定品牌',
     product: '项目产品',
     goal: '在同一 ProjectContext 中完成策略、创意、投放和洞察闭环。',
+    industry: project.industry ?? 'ecommerce',
     stage: project.status === 'active' ? '进行中' : project.status === 'archived' ? '已归档' : '准备中',
     progress: 0,
     status: project.status === 'archived' ? '已完成' : '进行中',

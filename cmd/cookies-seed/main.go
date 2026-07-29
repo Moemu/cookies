@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/assets"
@@ -67,4 +69,29 @@ func main() {
 	}
 	log.Printf("canonical investor demo is ready: project_id=%s assets=%d tasks=%d operations=%d",
 		result.ProjectID, len(result.AssetRefs), result.TaskCount, result.RecordCount)
+	if directory := os.Getenv("COOKIES_DEMO_DATA_DIR"); directory != "" {
+		blobs, err := buildBlobStore(cfg)
+		if err != nil {
+			log.Fatalf("configure object storage for demo-data import: %v", err)
+		}
+		imported, err := demo.ImportLocalDemoData(ctx, actor, projectStore, assetStore, blobs, cfg.ObjectStorage.AssetsBucket, directory, result.ProjectContextVersion)
+		if err != nil {
+			log.Fatalf("import demo data: %v", err)
+		}
+		log.Printf("demo-data import is ready: project_id=%s documents=%d videos=%d bytes=%d video_seconds=%.1f",
+			imported.ProjectID, imported.DocumentCount, imported.VideoCount, imported.TotalBytes, imported.TotalVideoSeconds)
+	}
+}
+
+func buildBlobStore(cfg config.Config) (assets.BlobStore, error) {
+	switch cfg.ObjectStorage.Provider {
+	case "memory":
+		return assets.NewMemoryBlobStore(), nil
+	case "filesystem":
+		return assets.NewFilesystemBlobStore(cfg.ObjectStorage.FilesystemRoot)
+	case "tos":
+		return assets.NewTOSBlobStore(assets.TOSConfig{Endpoint: cfg.ObjectStorage.Endpoint, Region: cfg.ObjectStorage.Region, AccessKey: cfg.ObjectStorage.AccessKey, SecretKey: cfg.ObjectStorage.SecretKey, SecurityToken: cfg.ObjectStorage.SecurityToken})
+	default:
+		return nil, fmt.Errorf("unsupported object storage provider")
+	}
 }

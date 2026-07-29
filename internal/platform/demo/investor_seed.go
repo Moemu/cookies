@@ -25,18 +25,22 @@ var investorDemoProject = project.CanonicalDemoProject{
 	BrandID:     investorDemoBrandID,
 	ProductID:   investorDemoProductID,
 	Name:        "投资人路演：精度证据增长",
+	Industry:    project.IndustryAutomotiveBrand,
 	BrandName:   "白域精工",
 	ProductName: "高精度 CNC 加工零部件",
 }
 
 type InvestorDemoProjectStore interface {
 	EnsureCanonicalDemoProject(context.Context, contract.ActorContext, project.CanonicalDemoProject) (project.Project, error)
+	UpsertProjectRuntime(context.Context, contract.OrganizationID, contract.ProjectID, project.ProjectRuntime) error
+	UpsertWorkbench(context.Context, project.Workbench) error
 	CreateBusinessTask(context.Context, project.BusinessTask) error
 	ListBusinessTasks(context.Context, contract.OrganizationID, contract.ProjectID) ([]project.BusinessTask, error)
 	UpdateBusinessTask(context.Context, project.BusinessTask) error
 	CreateOperationalRecord(context.Context, project.OperationalRecord) error
 	ListOperationalRecords(context.Context, contract.OrganizationID, contract.ProjectID) ([]project.OperationalRecord, error)
 	UpdateOperationalRecord(context.Context, project.OperationalRecord) error
+	DeleteOperationalRecord(context.Context, contract.OrganizationID, contract.ProjectID, string) error
 	CreateChangeSet(context.Context, project.ChangeSet) error
 	ListChangeSets(context.Context, contract.OrganizationID, contract.ProjectID) ([]project.ChangeSet, error)
 	UpdateChangeSet(context.Context, project.ChangeSet) error
@@ -49,10 +53,11 @@ type InvestorDemoAssetStore interface {
 }
 
 type InvestorDemoSeedResult struct {
-	ProjectID   contract.ProjectID
-	AssetRefs   map[string]contract.ProjectAssetRef
-	TaskCount   int
-	RecordCount int
+	ProjectID             contract.ProjectID
+	ProjectContextVersion int64
+	AssetRefs             map[string]contract.ProjectAssetRef
+	TaskCount             int
+	RecordCount           int
 }
 
 func EnsureCanonicalInvestorDemo(ctx context.Context, actor contract.ActorContext, projects InvestorDemoProjectStore, assetStore InvestorDemoAssetStore) (InvestorDemoSeedResult, error) {
@@ -74,6 +79,9 @@ func EnsureCanonicalInvestorDemo(ctx context.Context, actor contract.ActorContex
 	if err := ensureInvestorDemoTasks(ctx, actor.OrganizationID, seededProject.ID, projects, assetRefs, now); err != nil {
 		return InvestorDemoSeedResult{}, err
 	}
+	if err := ensureInvestorDemoWorkbench(ctx, actor.OrganizationID, seededProject.ID, projects, assetRefs, now); err != nil {
+		return InvestorDemoSeedResult{}, err
+	}
 	if err := ensureInvestorDemoOperations(ctx, actor.OrganizationID, seededProject.ID, projects, now); err != nil {
 		return InvestorDemoSeedResult{}, err
 	}
@@ -88,7 +96,36 @@ func EnsureCanonicalInvestorDemo(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return InvestorDemoSeedResult{}, err
 	}
-	return InvestorDemoSeedResult{ProjectID: seededProject.ID, AssetRefs: assetRefs, TaskCount: len(tasks), RecordCount: len(records)}, nil
+	return InvestorDemoSeedResult{ProjectID: seededProject.ID, ProjectContextVersion: seededProject.ProjectContextVersion, AssetRefs: assetRefs, TaskCount: len(tasks), RecordCount: len(records)}, nil
+}
+
+func ensureInvestorDemoWorkbench(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, store InvestorDemoProjectStore, refs map[string]contract.ProjectAssetRef, now time.Time) error {
+	runtime := project.ProjectRuntime{Code: "SP", Brand: investorDemoProject.BrandName, Product: investorDemoProject.ProductName, Goal: "以精度证据驱动高意向销售线索增长", Stage: "投放审批", Progress: 82, Status: "active", Owner: "Noah Xu", Budget: 1000000, Currency: "CNY", Timezone: "Asia/Shanghai", KnowledgeCount: 6, UpdatedAt: now}
+	if err := store.UpsertProjectRuntime(ctx, organizationID, projectID, runtime); err != nil {
+		return fmt.Errorf("upsert demo project runtime: %w", err)
+	}
+	assetID := string(refs["creative_video"].AssetVersion.AssetID)
+	version := 1
+	completedAt := now
+	workbench := project.Workbench{
+		Organization:          project.WorkbenchOrganization{ID: string(organizationID), Code: "COOKIES-DEMO", Name: "Cookies 本地演示组织", Owner: "Local Admin", Currency: "CNY", Timezone: "Asia/Shanghai", UpdatedAt: now},
+		Client:                project.WorkbenchClient{ID: "client-demo-precision", OrganizationID: string(organizationID), Code: "PRECISION-DEMO", Name: "白域精工（演示）", Industry: "汽车品牌", Owner: "Noah Xu", HealthStatus: "healthy", UpdatedAt: now},
+		Brand:                 project.WorkbenchBrand{ID: "brand-demo-precision", OrganizationID: string(organizationID), ClientID: "client-demo-precision", Code: "PRECISION-DEMO", Name: investorDemoProject.BrandName, Category: "汽车零部件", ProductLines: []string{investorDemoProject.ProductName}, Owner: "Noah Xu", GuidelineStatus: "ready", UpdatedAt: now},
+		Project:               project.WorkbenchProject{ProjectID: string(projectID), OrganizationID: string(organizationID), ClientID: "client-demo-precision", BrandID: "brand-demo-precision", Stage: "delivery", StageLabel: "投放预检", StagePercent: 70, TaskPercent: 82, RiskStatus: "watch", Blocker: "仅演示本地模拟预检；真实投放仍需人工审批。", UpdatedAt: now},
+		AdAccountBindings:     []project.WorkbenchAdAccountBinding{{ID: "account-demo-precision", OrganizationID: string(organizationID), ClientID: "client-demo-precision", BrandID: "brand-demo-precision", Platform: "巨量引擎", AccountName: "本地模拟广告账户", AccountDisplayID: "JLY-LOCAL-PRECISION-001", Currency: "CNY", Timezone: "Asia/Shanghai", PermissionStatus: "normal", LoginStatus: "normal", TrackingStatus: "normal", Owner: "Noah Xu", BoundAssetIDs: []string{assetID}, LastSyncedAt: now}},
+		QualityCheckRuns:      []project.WorkbenchQualityCheckRun{{ID: "qc-demo-precision-video-v1", OrganizationID: string(organizationID), ProjectID: string(projectID), AssetID: assetID, AssetVersion: 1, Status: "passed", Model: "demo-quality-vision-v1", RuleVersion: "agency-material-rules-2026-07", PromptVersion: "material-check-2026-07-15", Summary: "视频素材质检记录", Issues: []project.WorkbenchQualityCheckIssue{}, CreatedAt: now, CompletedAt: &completedAt}},
+		MaterialConfirmations: []project.WorkbenchMaterialConfirmation{{ID: "confirm-demo-precision-video-v1", OrganizationID: string(organizationID), ProjectID: string(projectID), QualityCheckRunID: "qc-demo-precision-video-v1", AssetID: assetID, AssetVersion: 1, Status: "confirmed", Scope: investorDemoProject.Name, ConfirmedBy: "Noah Xu", Note: "仅用于本地演示预检；不连接或写入任何真实广告平台。", CreatedAt: now}},
+		AssetVersionPointers:  []project.WorkbenchAssetVersionPointer{{ID: "pointer-demo-precision-video", OrganizationID: string(organizationID), ProjectID: string(projectID), AssetID: assetID, WorkingVersion: 1, QualityCheckedVersion: &version, HumanConfirmedVersion: &version, DeliveryVersion: &version, Versions: []project.WorkbenchAssetVersion{{Version: 1, CreatedBy: "demo-seeder", SourceTaskID: "task_demo_imported_brief_to_video", SourceType: "model_generation", SourceLabel: "导入 Brief 到视频演示", CreatedAt: now, ChangeSummary: "视频交付版本指针"}}, Authorization: project.WorkbenchAssetAuthorization{Platforms: []string{"巨量引擎"}, Regions: []string{"中国大陆"}, RightsHolder: investorDemoProject.BrandName, ExpiresAt: time.Date(2026, 12, 31, 15, 59, 59, 0, time.UTC), Note: "本地演示授权范围，仅用于模拟预检，不代表真实媒体投放授权。"}, DeliveryTarget: project.WorkbenchDeliveryTarget{Platform: "巨量引擎", Region: "中国大陆"}, Owner: "Noah Xu", UpdatedAt: now}},
+	}
+	if err := store.UpsertWorkbench(ctx, workbench); err != nil {
+		return fmt.Errorf("upsert demo project workbench: %w", err)
+	}
+	for _, legacyID := range []string{"RUNTIME-2607-01", "DEMO-WORKBENCH-PROFILE-01", "DEMO-LINK-ACCOUNT-01", "DEMO-LINK-QC-01", "DEMO-LINK-CONFIRM-01", "DEMO-LINK-POINTER-01"} {
+		if err := store.DeleteOperationalRecord(ctx, organizationID, projectID, legacyID); err != nil {
+			return fmt.Errorf("remove legacy demo workbench record %s: %w", legacyID, err)
+		}
+	}
+	return nil
 }
 
 func ensureInvestorDemoAssets(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, contextVersion int64, store InvestorDemoAssetStore, now time.Time) (map[string]contract.ProjectAssetRef, error) {
@@ -463,10 +500,6 @@ type demoOperationSeed struct {
 
 func investorDemoOperations(projectID contract.ProjectID) []demoOperationSeed {
 	return []demoOperationSeed{
-		record("RUNTIME-2607-01", project.OperationalRecordUnifiedRecord, "投资人路演 Runtime", "active", "2026-07-22T09:10:00.000Z", map[string]any{
-			"code": "SP", "product": "高精度 CNC 加工零部件", "stage": "投放审批", "progress": 82,
-			"owner": "Noah Xu", "budget": 1000000, "currency": "CNY", "timezone": "Asia/Shanghai",
-		}),
 		record("WORK-2607-01", project.OperationalRecordWorkItem, "春季新品上市", "待评审", "2026-07-22T08:30:00.000Z", map[string]any{"type": "策略工作区", "owner": "Amelia Meng", "progress": 82}),
 		record("WORK-2607-02", project.OperationalRecordWorkItem, "精密制造品牌片", "生成中", "2026-07-22T05:48:00.000Z", map[string]any{"type": "创意任务", "owner": "Lin Wei", "progress": 68}),
 		record("WORK-2607-03", project.OperationalRecordWorkItem, "证据前置实验分析", "需处理", "2026-07-22T07:06:00.000Z", map[string]any{"type": "分析任务", "owner": "Sofia Chen", "progress": 86}),

@@ -15,6 +15,7 @@ type CanonicalDemoProject struct {
 	BrandID     contract.BrandID
 	ProductID   contract.ProductID
 	Name        string
+	Industry    Industry
 	BrandName   string
 	ProductName string
 }
@@ -28,7 +29,7 @@ func (s MySQLStore) EnsureCanonicalDemoProject(ctx context.Context, actor contra
 	}
 	if strings.TrimSpace(string(seed.ProjectID)) == "" || strings.TrimSpace(string(seed.BrandID)) == "" ||
 		strings.TrimSpace(string(seed.ProductID)) == "" || strings.TrimSpace(seed.Name) == "" ||
-		strings.TrimSpace(seed.BrandName) == "" || strings.TrimSpace(seed.ProductName) == "" {
+		strings.TrimSpace(seed.BrandName) == "" || strings.TrimSpace(seed.ProductName) == "" || !seed.Industry.Valid() {
 		return Project{}, fmt.Errorf("canonical demo project seed is incomplete")
 	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
@@ -49,10 +50,10 @@ func (s MySQLStore) EnsureCanonicalDemoProject(ctx context.Context, actor contra
 		return Project{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO projects
-		(id, organization_id, name, status, primary_brand_id, project_context_version)
-		VALUES (?, ?, ?, 'active', ?, 1)
-		ON DUPLICATE KEY UPDATE name=VALUES(name), status='active', primary_brand_id=VALUES(primary_brand_id), project_context_version=1`,
-		seed.ProjectID, actor.OrganizationID, seed.Name, seed.BrandID); err != nil {
+		(id, organization_id, name, status, industry, primary_brand_id, project_context_version)
+		VALUES (?, ?, ?, 'active', ?, ?, 1)
+		ON DUPLICATE KEY UPDATE name=VALUES(name), status='active', industry=VALUES(industry), primary_brand_id=VALUES(primary_brand_id), project_context_version=1`,
+		seed.ProjectID, actor.OrganizationID, seed.Name, seed.Industry, seed.BrandID); err != nil {
 		return Project{}, err
 	}
 	role := "owner"

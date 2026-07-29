@@ -197,7 +197,11 @@ function calculateBlocker(project: ProjectRecord, riskStatus: AgencyHealthStatus
 }
 
 function hasConfirmedBrief(project: ProjectRecord): boolean {
-  return Boolean(project.artifacts.brief.id) && project.artifacts.brief.status === '已确认'
+  if (Boolean(project.artifacts.brief.id) && project.artifacts.brief.status === '已确认') return true
+  // Platform snapshots can contain task-to-asset references before the compact
+  // artifact summary is materialized. A strategy task with a persisted source
+  // asset is sufficient evidence that Brief intake has completed.
+  return project.tasks.some(task => task.type === 'strategy' && task.sourceArtifactIds.length > 0)
 }
 
 function hasStrategyEvidence(project: ProjectRecord): boolean {

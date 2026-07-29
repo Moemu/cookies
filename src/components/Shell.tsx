@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { useProject } from '../context/ProjectContext'
@@ -25,8 +25,8 @@ interface ShellProps {
 }
 
 export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManagement, isGlobalSettings, onHome, onModelSettings, onSystemChange, onProjectChange, onProjectManage, onNavChange, children }: ShellProps) {
-  const { projects, currentProject, agencyWorkbench } = useProject()
   const { session, logout } = useAuth()
+  const { projects, currentProject, agencyWorkbench, createProject } = useProject()
   const { configuredCount } = useModelConfig()
   const [projectMenu, setProjectMenu] = useState(false)
   const [projectMenuSearch, setProjectMenuSearch] = useState('')
@@ -34,6 +34,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState(false)
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() => readRecentProjectIds())
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const groups = [...new Set(system.nav.map(item => item.group))]
   const projectMenuItems = useMemo(() => buildProjectMenuItems(projects, agencyWorkbench), [projects, agencyWorkbench])
   const currentContext = projectMenuItems.find(item => item.project.id === currentProject.id)
@@ -111,6 +112,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
           </div>) : <div className="project-menu-empty">没有匹配的 Project</div>}
           <button className="menu-link" role="menuitem" onClick={() => { onProjectChange(currentProject.id); setProjectMenu(false); setProjectMenuSearch('') }}>查看项目工作台</button>
           <button className="menu-link" role="menuitem" onClick={() => { onProjectManage(currentProject.id); setProjectMenu(false) }}>管理当前项目</button>
+          <button className="menu-link primary-menu-link" role="menuitem" onClick={() => { setProjectMenu(false); setNewProjectOpen(true) }}><Plus size={15}/>新建项目</button>
         </div> : null}
       </div> : <div className="top-context-label"><KeyRound size={15}/>组织级配置</div>}
       <div className="top-spacer"/>
@@ -127,6 +129,46 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
       <button className="collapse-button" aria-label={collapsed ? '展开侧栏' : '收起侧栏'} onClick={() => setCollapsed(value => !value)}><Menu size={17}/><span>{collapsed ? '展开侧栏' : '收起侧栏'}</span></button>
     </aside> : null}
     <main id="main-content" className="main-content">{children}</main>
+    {newProjectOpen ? <NewProjectDialog onClose={() => setNewProjectOpen(false)} onCreate={async input => {
+      const created = await createProject(input)
+      setNewProjectOpen(false)
+      onProjectChange(created.id, 'strategy', 'tasks')
+    }}/> : null}
+  </div>
+}
+
+function NewProjectDialog({ onClose, onCreate }: {
+  onClose: () => void
+  onCreate: (input: { name: string; brand: string; goal: string; industry: ProjectRecord['industry'] }) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [industry, setIndustry] = useState<ProjectRecord['industry']>('ecommerce')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!name.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      await onCreate({ name: name.trim(), industry, brand: '未指定品牌', goal: '请在项目管理中补充业务目标。' })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '创建项目失败，请重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <div className="task-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <form className="task-create-dialog project-create-dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title" onSubmit={submit}>
+      <header><div><span>PROJECT</span><h2 id="new-project-title">新建项目</h2><p>项目会在服务端创建，并自动进入需求与策略工作区。</p></div><button type="button" aria-label="关闭新建项目" onClick={onClose}><X size={18}/></button></header>
+      <div className="task-form-fields">
+        <label>项目名称<input aria-label="项目名称" value={name} onChange={event => setName(event.target.value)} autoFocus placeholder="例如：秋季新品增长"/></label>
+        <label>行业<select aria-label="项目行业" value={industry} onChange={event => setIndustry(event.target.value as ProjectRecord['industry'])}><option value="short_drama">短剧</option><option value="game">游戏</option><option value="ecommerce">电商</option><option value="automotive_brand">品牌（汽车）</option></select></label>
+      </div>
+      <div className="task-source-preview"><Plus size={16}/><span><b>创建后可继续配置</b><small>品牌、目标和成员可在项目管理页补充；行业将决定四个业务模块的字段和展示格式。</small></span></div>
+      {error ? <div className="inline-notice" role="alert">{error}</div> : null}
+      <footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="submit" className="primary-button" disabled={busy || !name.trim()}>{busy ? '正在创建…' : '创建并进入项目'}</button></footer>
+    </form>
   </div>
 }
 
