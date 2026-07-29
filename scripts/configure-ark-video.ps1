@@ -101,7 +101,14 @@ INSERT INTO provider_model_routes (id, organization_id, capability, model_alias,
 VALUES ('$routeID', NULL, 'video.generate', 'cookies.video.standard', NULL, 'enabled');
 INSERT INTO provider_model_route_revisions (id, route_id, revision_number, connection_id, connection_revision_id, upstream_model, constraints_json)
 VALUES ('route_ark_seedance_video_r1', '$routeID', 1, '$connectionID', 'connection_ark_seedance_r1', '$Model',
-  JSON_OBJECT('duration_seconds_min', 4, 'duration_seconds_max', 15, 'aspect_ratios', JSON_ARRAY('9:16', '16:9', '1:1'), 'resolutions', JSON_ARRAY('480p', '720p')));
+  JSON_OBJECT(
+    'duration_seconds_min', 4,
+    'duration_seconds_max', 15,
+    'aspect_ratios', JSON_ARRAY('9:16', '16:9', '1:1'),
+    'resolutions', JSON_ARRAY('480p', '720p'),
+    'video_input_modes', JSON_ARRAY('text_only', 'reference_image', 'first_last_frame'),
+    'video_audio_policies', JSON_ARRAY('silent', 'generated_audio')
+  ));
 UPDATE provider_model_routes SET current_revision_id = 'route_ark_seedance_video_r1' WHERE id = '$routeID';
 COMMIT;
 "@

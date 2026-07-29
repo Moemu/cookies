@@ -46,6 +46,14 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/brief-versions:
+    get:
+      operationId: listProjectStrategyBriefVersions
+      summary: List immutable confirmed Brief versions available to downstream Creative work.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/workspaces/{workspace_id}:
     get:
       operationId: getStrategyWorkspace

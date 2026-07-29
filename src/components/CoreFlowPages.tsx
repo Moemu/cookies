@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, BarChart3, BookOpenCheck, Check, CircleAlert, CircleCheck,
-  Database, FileInput, Filter, Layers3, Lightbulb, Link2, Play, RefreshCw,
+  Database, FileInput, Filter, Layers3, Lightbulb, Link2, RefreshCw,
   Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
@@ -103,7 +103,7 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
       if (target === 'creative') {
         const creativeTask = [...currentProject.tasks].reverse().find(task => task.type !== 'strategy')
         if (creativeTask) {
-          await api.updateTask(creativeTask.id, {
+          await api.updateTask(currentProject.id, creativeTask.id, {
             sourceArtifactIds: [...new Set([...creativeTask.sourceArtifactIds, reference.id])],
           })
         }
@@ -120,7 +120,16 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
     }
   }
 
-  return <StateBoundary state={state} onRetry={() => setNotice('投前证据已重新加载')} onCreate={() => setNotice('投前洞察无需新建任务，可直接筛选和引用')}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 投前洞察"
+    emptyTitle="当前 Project 暂无已引用的投前洞察"
+    emptyDetail="可以先筛选公开经验结论并引用到 Brief 或创意任务；引用后会保存为当前 Project 的服务端证据。"
+    errorDetail="投前洞察或引用记录暂时无法读取。请确认 API 服务可用后重新加载，已保存的 Project 内容不会被覆盖。"
+    createLabel="筛选并引用洞察"
+    onRetry={() => setNotice('投前证据已重新加载')}
+    onCreate={() => setNotice('投前洞察无需新建任务，可直接筛选和引用')}
+  >
     <div className="prelaunch-workspace">
       <section className="prelaunch-main">
         <div className="core-flow-toolbar">
@@ -261,7 +270,16 @@ export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataSt
     }
   }
 
-  return <StateBoundary state={state} onRetry={() => void refreshOperations()} onCreate={() => setNotice('数据源接入向导已打开')}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 投后分析"
+    emptyTitle="当前 Project 暂无投后运营记录"
+    emptyDetail="接入或导入广告平台运营记录后，这里会展示表现变化、原因和建议动作；不会用固定前端结论替代真实数据。"
+    errorDetail="投后运营记录读取失败。请确认服务端和数据源连接后重新拉取，已保存报告不会被覆盖。"
+    createLabel="打开数据接入向导"
+    onRetry={() => void refreshOperations()}
+    onCreate={() => setNotice('数据源接入向导已打开')}
+  >
     <div className="ad-insight-workspace">
       <section className="ad-insight-main">
         <div className="core-flow-toolbar">
@@ -458,7 +476,63 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
     </StateBoundary>
   }
 
-  return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
+  // The Kanon knowledge workspace above is the canonical view. Keep the
+  // previous current-project rendering branch unreachable until it can be
+  // removed in a dedicated UI cleanup.
+  if (false) {
+    const highlightedResult = knowledgeResults[0]
+    return <StateBoundary
+      state={state}
+      contextLabel="素材洞察 / 经验沉淀"
+      emptyTitle="当前 Project 暂无知识文档"
+      emptyDetail="导入项目 docs 或复盘报告后，系统会提供可追溯的 citation 检索结果。"
+      errorDetail="知识库读取失败，请检查平台 API 后重新加载。"
+      createLabel="导入 Project Docs"
+      onRetry={() => { void loadArtifacts() }}
+      onCreate={() => { void importProjectKnowledge() }}
+    >
+      <div className="asset-experience-workspace">
+        <section className="asset-library-panel">
+          <div className="core-flow-toolbar">
+            <div><span className="section-label">KNOWLEDGE / RAG</span><h2>项目知识策略库</h2><p>导入项目 docs 文本，使用确定性关键词检索，并在输出中保留 citation。</p></div>
+            <button className="primary-button" onClick={() => void importProjectKnowledge()}><FileInput size={15}/>导入 Project Docs</button>
+          </div>
+          <div className="asset-filterbar">
+            <div className="search-field"><Search size={15}/><input aria-label="搜索知识库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索 Hook、商品露出、质检或 citation"/></div>
+            <span>{query.trim() ? knowledgeResults.length : filteredKnowledgeDocuments.length} 项 · 当前 Project</span>
+          </div>
+          <div className="asset-card-grid">
+            {assetState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的 Knowledge/RAG 策略库…</div> : null}
+            {assetState === 'error' ? <div className="panel-empty">知识库读取失败，请检查平台 API 或重试。</div> : null}
+            {assetState === 'ready' && !query.trim() && !filteredKnowledgeDocuments.length ? <div className="panel-empty">当前 Project 暂无知识文档，可先导入项目 docs 文本。</div> : null}
+            {assetState === 'ready' && query.trim() && !knowledgeResults.length ? <div className="panel-empty">没有命中的知识片段；换一个关键词试试。</div> : null}
+            {!query.trim() ? filteredKnowledgeDocuments.map(document => <button key={document.id} className="asset-analysis-card" onClick={() => setQuery(document.title)}>
+              <span className="asset-card-preview"><BookOpenCheck size={18}/><small>{document.source_type}</small></span>
+              <span><small>{document.id.slice(0, 8)} · {document.chunk_count} chunks</small><b>{document.title}</b><em>{document.source_uri || 'project docs'}</em></span>
+            </button>) : knowledgeResults.map(result => <button key={result.chunk.id} className={highlightedResult?.chunk.id === result.chunk.id ? 'asset-analysis-card active' : 'asset-analysis-card'}>
+              <span className="asset-card-preview"><Search size={18}/><small>score {result.score}</small></span>
+              <span><small>{result.citations[0]?.title ?? result.chunk.document_id} · L{result.chunk.start_line}-L{result.chunk.end_line}</small><b>{result.citations[0]?.snippet || result.chunk.text}</b><em>{result.citations[0]?.source_uri || result.chunk.source_uri}</em></span>
+            </button>)}
+          </div>
+        </section>
+        <aside className="asset-analysis-detail">
+          {highlightedResult ? <><span className="section-label">Citation</span><h3>{highlightedResult.citations[0]?.title ?? '知识片段'}</h3><p>{highlightedResult.chunk.section} · score {highlightedResult.score}</p>
+            <div className="feature-stack"><span>引用来源</span>{highlightedResult.citations.map(citation => <b key={citation.chunk_id}>{citation.source_uri || 'project docs'} · L{citation.start_line}-L{citation.end_line}</b>)}</div>
+            <div className="experience-card"><BookOpenCheck size={18}/><span><small>可追溯片段</small><b>{highlightedResult.citations[0]?.snippet || highlightedResult.chunk.text}</b></span></div>
+          </> : <div className="panel-empty">输入关键词后查看命中的知识片段、来源文档和行号 citation；Planner 或 Agent 可携带这些引用输出。</div>}
+        </aside>
+      </div>
+    </StateBoundary>
+  }
+
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 素材管理"
+    emptyTitle="当前 Project 暂无已持久化素材"
+    emptyDetail="完成创意生成或上传素材后，这里会展示图片、视频、来源任务和多模态特征。"
+    errorDetail="素材读取失败，请确认 API 服务和资源接口可用后重新加载。"
+    onRetry={() => { void loadArtifacts() }}
+  >
     <div className="asset-experience-workspace">
       <section className="asset-library-panel">
         <div className="core-flow-toolbar">
@@ -474,7 +548,7 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
           {assetState === 'error' ? <div className="panel-empty">素材读取失败，请重试。</div> : null}
           {assetState === 'ready' && !filtered.length ? <div className="panel-empty">{mode === 'assets' ? '当前 Project 暂无已持久化的图片或视频资产。' : '当前 Project 暂无已生成并持久化的经验结论。'}</div> : null}
           {filtered.map(asset => { const feature = featureForAsset(asset, assetFeatures); return <button key={asset.id} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
-            <span className="asset-card-preview">{asset.kind === 'video' ? <Play size={18} fill="currentColor"/> : <Layers3 size={18}/>}<small>{assetType(asset)}</small></span>
+            <span className="asset-card-preview"><AssetMedia artifact={asset}/><small>{assetType(asset)}</small></span>
             <span><small>{asset.id.slice(0, 8)} · {asset.sourceJobId ? '生成任务产物' : '服务端存档'}</small><b>{assetTitle(asset)}</b><em>{feature ? featureSummary(feature) : '暂无多模态特征'}</em></span>
           </button> })}
         </div>
@@ -483,6 +557,7 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
         {selected ? <><span className="section-label">服务端产物详情</span><h3>{assetTitle(selected)}</h3><p>{assetType(selected)} · {selected.status === 'ready' ? '已持久化' : '草稿'}</p>
           <div className="feature-stack"><span>可追溯元数据</span><b>Artifact {selected.id}</b><b>版本 v{selected.version}</b><b>{selected.sourceJobId ? `来源任务 ${selected.sourceJobId}` : '非生成任务产物'}</b><b>更新时间 {new Date(selected.updatedAt).toLocaleString('zh-CN')}</b></div>
           {selectedFeature ? <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>Hook {percent(selectedFeature.hookStrength)}</b><b>商品露出 {percent(selectedFeature.productVisibility)}</b><b>相似度风险 {riskLabel(selectedFeature.similarityRisk)}</b>{selectedFeature.sellingPoints.slice(0, 2).map(point => <b key={point}>卖点：{point}</b>)}</div> : <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>暂无特征，Planner 使用基础元数据降级。</b></div>}
+          <div className="asset-detail-preview"><AssetMedia artifact={selected} controls/></div>
           <div className="experience-card"><BookOpenCheck size={18}/><span><small>产物内容</small><b>{selected.content}</b></span></div>
         </> : <div className="panel-empty">选择当前 Project 的服务端产物后查看详情；系统不会以固定 CTR 或 AI 结论替代真实结果。</div>}
       </aside>
@@ -495,7 +570,19 @@ function assetType(artifact: ApiArtifact): string {
 }
 
 function assetTitle(artifact: ApiArtifact): string {
+  if (artifact.kind === 'video') return `${artifact.sourceJobId ? 'AI 生成视频' : '项目视频'} · ${artifact.id.slice(-8)}`
+  if (artifact.kind === 'image') return `${artifact.sourceJobId ? 'AI 生成图片' : '项目图片'} · ${artifact.id.slice(-8)}`
   return artifact.content.replace(/^\[knowledge\]\s*/, '').slice(0, 48) || `${assetType(artifact)}产物`
+}
+
+function AssetMedia({ artifact, controls = false }: { artifact: ApiArtifact; controls?: boolean }) {
+  if (artifact.kind === 'video') {
+    return <video src={artifact.content} controls={controls} muted={!controls} playsInline preload="metadata" aria-label={`${assetTitle(artifact)}预览`}/>
+  }
+  if (artifact.kind === 'image') {
+    return <img src={artifact.content} alt={`${assetTitle(artifact)}预览`} loading="lazy"/>
+  }
+  return <Layers3 size={18}/>
 }
 
 function featureForAsset(asset: ApiArtifact, features: ApiAssetFeature[]): ApiAssetFeature | undefined {

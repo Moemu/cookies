@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -49,6 +50,11 @@ type Document struct {
 	ID             string                  `json:"id"`
 	OrganizationID contract.OrganizationID `json:"organization_id"`
 	ProjectID      contract.ProjectID      `json:"project_id"`
+	Title          string                  `json:"title,omitempty"`
+	SourceURI      string                  `json:"source_uri,omitempty"`
+	SourceType     string                  `json:"source_type,omitempty"`
+	ChunkCount     int                     `json:"chunk_count,omitempty"`
+	ImportedBy     contract.Principal      `json:"imported_by,omitempty"`
 	Filename       string                  `json:"filename"`
 	MIMEType       string                  `json:"mime_type"`
 	SizeBytes      int64                   `json:"size_bytes"`
@@ -194,12 +200,36 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	return document, nil
 }
 
-func (s Service) ListDocuments(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]Document, error) {
+func (s Service) ImportDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request ImportDocumentRequest) (Document, error) {
+	if err := request.Validate(); err != nil {
+		return Document{}, err
+	}
+	filename := strings.TrimSpace(request.Title)
+	if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+		filename += ".md"
+	}
+	content := []byte(request.Text)
+	document, err := s.CreateDocument(ctx, actor, projectID, filename, "text/markdown", bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return Document{}, err
+	}
+	document.Title = strings.TrimSpace(request.Title)
+	document.SourceURI = strings.TrimSpace(request.SourceURI)
+	document.SourceType = normalizedSourceType(request.SourceType)
+	document.ChunkCount = len(splitIntoChunks(request.Text))
+	document.ImportedBy = actor.Principal
+	return document, nil
+}
+
+func (s Service) ListDocuments(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]Document, error) {
 	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
+	if limit < 1 || limit > 100 {
+		limit = 100
+	}
 	rows, err := s.DB.QueryContext(ctx, documentSelect+` WHERE organization_id = ? AND project_id = ?
-		ORDER BY created_at DESC`, actor.OrganizationID, projectID)
+		ORDER BY created_at DESC LIMIT ?`, actor.OrganizationID, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +244,57 @@ func (s Service) ListDocuments(ctx context.Context, actor contract.ActorContext,
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+
+func (s Service) Search(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request SearchRequest) ([]SearchResult, error) {
+	if request.Limit == 0 {
+		request.Limit = 10
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, documentSelect+` WHERE organization_id = ? AND project_id = ?
+		ORDER BY created_at DESC LIMIT 100`, actor.OrganizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	terms := tokenize(request.Query)
+	results := make([]SearchResult, 0)
+	for rows.Next() {
+		document, err := scanDocument(rows)
+		if err != nil {
+			return nil, err
+		}
+		chunk := Chunk{
+			ID: document.ID + "_chunk_0", DocumentID: document.ID, OrganizationID: document.OrganizationID,
+			ProjectID: document.ProjectID, Text: document.ExtractedText, Section: "正文",
+			StartLine: 1, EndLine: strings.Count(document.ExtractedText, "\n") + 1, CreatedAt: document.CreatedAt,
+		}
+		score := scoreChunk(document, chunk, terms)
+		if score == 0 {
+			continue
+		}
+		title := document.Title
+		if title == "" {
+			title = document.Filename
+		}
+		results = append(results, SearchResult{
+			Chunk: chunk, Score: score,
+			Citations: []Citation{{
+				DocumentID: document.ID, ChunkID: chunk.ID, Title: title, Section: chunk.Section,
+				StartLine: chunk.StartLine, EndLine: chunk.EndLine, Snippet: snippetFor(chunk.Text, terms),
+			}},
+		})
+	}
+	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+	if len(results) > request.Limit {
+		results = results[:request.Limit]
+	}
+	return results, rows.Err()
 }
 
 func (s Service) GetDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (Document, error) {

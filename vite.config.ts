@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const apiProxyTarget = process.env.VITE_PLATFORM_PROXY_TARGET ?? 'http://127.0.0.1:8080'
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -19,10 +21,18 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:8080',
-      '/platform': 'http://127.0.0.1:8080',
-      '/healthz': 'http://127.0.0.1:8080',
-      '/readyz': 'http://127.0.0.1:8080',
+      '/api': localAPIProxy(),
+      '/platform': localAPIProxy(),
+      '/healthz': localAPIProxy(),
+      '/readyz': localAPIProxy(),
     },
   },
 })
+
+function localAPIProxy() {
+  return {
+    target: 'http://127.0.0.1:8080',
+    timeout: 180_000,
+    proxyTimeout: 180_000,
+  }
+}

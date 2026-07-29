@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 type PatchOrigin string
@@ -124,6 +126,41 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 			return fmt.Errorf("%w: product.name requires Brief v2", ErrInvalidRequest)
 		}
 		return decodeString(raw, &document.Product.Name, path)
+	case "product.category":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: product.category requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeString(raw, &document.Product.Category, path)
+	case "product.selling_points":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: product.selling_points requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeStringSlice(raw, &document.Product.SellingPoints, path)
+	case "product.evidence":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: product.evidence requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeStringSlice(raw, &document.Product.Evidence, path)
+	case "product.asset_refs":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: product.asset_refs requires Brief v2", ErrInvalidRequest)
+		}
+		var values []contract.AssetVersionRef
+		if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 || len(values) > 20 {
+			return fmt.Errorf("%w: product.asset_refs must contain 1 to 20 asset references", ErrInvalidRequest)
+		}
+		seen := make(map[contract.AssetVersionRef]struct{}, len(values))
+		for _, value := range values {
+			if err := value.Validate(); err != nil {
+				return fmt.Errorf("%w: product.asset_refs contains an invalid reference: %v", ErrInvalidRequest, err)
+			}
+			if _, exists := seen[value]; exists {
+				return fmt.Errorf("%w: product.asset_refs contains a duplicate reference", ErrInvalidRequest)
+			}
+			seen[value] = struct{}{}
+		}
+		document.Product.AssetRefs = append([]contract.AssetVersionRef(nil), values...)
+		return nil
 	case "industry":
 		if document.ContractVersion != "strategy-brief-version/v2" {
 			return fmt.Errorf("%w: industry requires Brief v2", ErrInvalidRequest)
@@ -181,6 +218,21 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 			return fmt.Errorf("%w: reference_ids requires Brief v2", ErrInvalidRequest)
 		}
 		return decodeStringSlice(raw, &document.ReferenceIDs, path)
+	case "creative.tone":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: creative.tone requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeStringSlice(raw, &document.Creative.Tone, path)
+	case "creative.mandatory_elements":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: creative.mandatory_elements requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeStringSlice(raw, &document.Creative.MandatoryElements, path)
+	case "creative.prohibited_claims":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: creative.prohibited_claims requires Brief v2", ErrInvalidRequest)
+		}
+		return decodeStringSlice(raw, &document.Creative.ProhibitedClaims, path)
 	default:
 		return fmt.Errorf("%w: field_path %q is not writable", ErrInvalidRequest, path)
 	}

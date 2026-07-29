@@ -33,6 +33,7 @@ type GenerationProvenance struct {
 	ModelVersion          string                     `json:"model_version"`
 	PromptRef             *contract.ResourceRef      `json:"prompt_ref"`
 	SourceAssetRefs       []contract.AssetVersionRef `json:"source_asset_refs"`
+	SourceResourceRefs    []contract.ResourceRef     `json:"source_resource_refs"`
 	ProjectContextVersion int64                      `json:"project_context_version"`
 	GeneratedAt           time.Time                  `json:"generated_at"`
 }
@@ -133,6 +134,11 @@ func (p GenerationProvenance) Validate() error {
 	for index, assetRef := range p.SourceAssetRefs {
 		if err := assetRef.Validate(); err != nil {
 			return fmt.Errorf("invalid source_asset_ref at index %d: %w", index, err)
+		}
+	}
+	for index, resourceRef := range p.SourceResourceRefs {
+		if err := resourceRef.Validate(); err != nil {
+			return fmt.Errorf("invalid source_resource_ref at index %d: %w", index, err)
 		}
 	}
 	return nil

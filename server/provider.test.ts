@@ -210,6 +210,58 @@ test("HTTP 契约对未配置和 Provider 失败返回安全错误，不回显�
   }
 });
 
+test("模型密钥配置需要登录且只返回掩码状态", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cookies-provider-config-"));
+  let server: Server | undefined;
+  try {
+    const repository = await FileRepository.open(join(directory, "mvp-store.json"));
+    server = createApp({ repository });
+    const url = await listen(server);
+
+    const denied = await fetch(`${url}/api/provider/configuration`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "fixture-0000" }),
+    });
+    assert.equal(denied.status, 401);
+
+    const login = await fetch(`${url}/api/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "demo@cookies.local", password: "cookies-demo" }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get("set-cookie");
+    assert.match(cookie ?? "", /cookies_session=/);
+
+    const saved = await fetch(`${url}/api/provider/configuration`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: cookie ?? "" },
+      body: JSON.stringify({ apiKey: "fixture-0000", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" }),
+    });
+    const savedBody = await saved.json() as Record<string, unknown>;
+    const serialized = JSON.stringify(savedBody);
+    assert.equal(saved.status, 200);
+    assert.equal(savedBody.status, "configured");
+    assert.equal(savedBody.source, "workspace");
+    assert.equal(serialized.includes("fixture-0000"), false);
+    assert.equal(serialized.includes("fixture"), false);
+    assert.equal(serialized.includes("0000"), true);
+
+    const capabilities = await fetch(`${url}/api/provider/capabilities`);
+    const capabilitiesBody = await capabilities.json() as { status: string; credential?: { source?: string; maskedApiKey?: string } };
+    assert.equal(capabilitiesBody.status, "configured");
+    assert.equal(capabilitiesBody.credential?.source, "workspace");
+    assert.equal(capabilitiesBody.credential?.maskedApiKey?.includes("0000"), true);
+
+    const stored = await repository.getProviderCredential("ark");
+    assert.equal(stored?.apiKey, "fixture-0000");
+  } finally {
+    if (server) await close(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function fakeProvider(): ArkProvider & {
   cancelledTaskIds: string[];
   taskResult: { status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown"; assetUrl?: string; diagnostic?: string };

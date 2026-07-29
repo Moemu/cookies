@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAssetVersionRef, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
@@ -158,7 +158,7 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       assetId: selectedItem.pointer.assetId,
       assetVersion: selectedVersion,
       status: 'confirmed',
-      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
       confirmedBy: currentProject.owner,
       note: '已确认当前版本可进入投放计划和交付预检。',
       createdAt: now,
@@ -195,7 +195,7 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       assetId: selectedItem.pointer.assetId,
       assetVersion: selectedVersion,
       status: 'changes_requested',
-      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
       confirmedBy: currentProject.owner,
         note,
       createdAt: now,
@@ -279,11 +279,15 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
         </span>
       </div>
       <div className="material-preview-frame">
-        <div className="material-preview-card">
-          <span>ASSET</span>
-          <b>{selectedItem.pointer.assetId}</b>
-          <small>当前预览版本 v{selectedVersion}</small>
-        </div>
+        {selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'video'
+          ? <video key={`${selectedItem.pointer.assetId}-v${selectedVersion}`} controls playsInline preload="metadata" src={selectedItem.pointer.contentUrl} aria-label={`${selectedItem.title}素材检查预览`}/>
+          : selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'image'
+            ? <img src={selectedItem.pointer.contentUrl} alt={`${selectedItem.title}素材检查预览`}/>
+            : <div className="material-preview-card">
+              <span>ASSET</span>
+              <b>{selectedItem.pointer.assetId}</b>
+              <small>当前预览版本 v{selectedVersion}</small>
+            </div>}
       </div>
       <div className="material-version-strip" aria-label="素材版本">
         {selectedItem.versions.map(version => {
@@ -400,8 +404,9 @@ function buildMaterialQueue(workbench: ApiAgencyWorkbench, projectId: string): M
       pointer.versions.forEach(version => versions.add(version.version))
       workbench.qualityCheckRuns.filter(run => run.assetId === pointer.assetId).forEach(run => versions.add(run.assetVersion))
       workbench.materialConfirmations.filter(confirmation => confirmation.assetId === pointer.assetId).forEach(confirmation => versions.add(confirmation.assetVersion))
-      return { pointer, title: materialTitle(pointer.assetId), versions: Array.from(versions).sort((left, right) => right - left) }
+      return { pointer, title: materialTitle(pointer), versions: Array.from(versions).sort((left, right) => right - left) }
     })
+    .sort((left, right) => right.pointer.updatedAt.localeCompare(left.pointer.updatedAt))
 }
 
 function materialAuthorizationGate(pointer: ApiAssetVersionPointer): { allowed: boolean; reason: string } {
@@ -466,8 +471,11 @@ function materialTarget(assetId: string, version: number) {
   return `${assetId}@v${version}`
 }
 
-function materialTitle(assetId: string) {
-  return assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+function materialTitle(pointer: ApiAssetVersionPointer) {
+  const suffix = pointer.assetId.replace(/^asset[_-]/, '').slice(-8)
+  if (pointer.mediaKind === 'video') return `${pointer.sourceJobId ? 'AI 生成视频' : '项目视频'} · ${suffix}`
+  if (pointer.mediaKind === 'image') return `${pointer.sourceJobId ? 'AI 生成图片' : '项目图片'} · ${suffix}`
+  return pointer.assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
 }
 
 function qualityStatusLabel(status: ApiQualityCheckRun['status']) {
@@ -910,12 +918,15 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
 }
 
 function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: string }) {
-  const { currentProject, reloadProjects, updateArtifact } = useProject()
+  const { currentProject, reloadProjects } = useProject()
   const [briefPrompt, setBriefPrompt] = useState('')
   const [brief, setBrief] = useState<ApiArtifact | null>(null)
   const [briefModel, setBriefModel] = useState('')
   const [briefNotice, setBriefNotice] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [productAsset, setProductAsset] = useState<ApiAssetVersionRef | null>(null)
+  const [productImageName, setProductImageName] = useState('')
+  const [isUploadingProduct, setIsUploadingProduct] = useState(false)
   const evidence = operationRecords(currentProject.operations, 'evidence')
 
   useEffect(() => {
@@ -938,10 +949,15 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
     setIsGenerating(true)
     try {
       const result = await api.generateBrief(currentProject.id, briefPrompt)
-      setBrief(result.artifact)
+      const nextBrief = productAsset
+        ? await api.attachBriefProductAsset(result.artifact, productAsset)
+        : result.artifact
+      setBrief(nextBrief)
       setBriefModel(result.job.model ?? '服务端默认文本模型')
       await reloadProjects()
-      setBriefNotice('策略 Brief 草稿已生成，等待人工确认。')
+      setBriefNotice(productAsset
+        ? '策略 Brief 草稿已生成，商品图已绑定，等待人工确认。'
+        : '策略 Brief 草稿已生成，等待人工确认。')
     } catch (cause) {
       setBriefNotice(cause instanceof Error ? cause.message : '生成策略 Brief 失败，请重试。')
     } finally {
@@ -949,11 +965,39 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
     }
   }
 
+  const uploadProductImage = async (file: File | undefined) => {
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setBriefNotice('商品图仅支持 JPG、PNG 或 WebP。')
+      return
+    }
+    setIsUploadingProduct(true)
+    try {
+      const asset = await api.uploadProjectAsset(currentProject.id, file)
+      setProductAsset(asset)
+      setProductImageName(file.name)
+      if (brief?.status === 'draft') {
+        const updated = await api.attachBriefProductAsset(brief, asset)
+        setBrief(updated)
+        setBriefNotice('商品高清图已上传并绑定到当前 Brief 草稿。')
+      } else if (brief?.status === 'ready') {
+        setBriefNotice('商品图已上传；当前 Brief 已确认，请生成一份新 Brief 草稿后再绑定。')
+      } else {
+        setBriefNotice('商品图已上传；生成 Brief 时会自动绑定。')
+      }
+    } catch (cause) {
+      setBriefNotice(cause instanceof Error ? cause.message : '商品图上传失败，请重试。')
+    } finally {
+      setIsUploadingProduct(false)
+    }
+  }
+
   const confirmBrief = async () => {
     if (!brief) return
     try {
-      await updateArtifact('brief', { status: '已确认', summary: brief.content.slice(0, 52) })
-      setBrief({ ...brief, status: 'ready' })
+      const confirmed = await api.confirmBrief(brief)
+      setBrief(confirmed)
+      await reloadProjects()
       setBriefNotice('Brief 已确认，可进入创意生成。')
     } catch (cause) {
       setBriefNotice(cause instanceof Error ? cause.message : '确认 Brief 失败，请重试。')
@@ -971,6 +1015,19 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
         ['成功指标', '官网表单提交量提升 ≥30%\n关键行业线索成本（CPL）降低 ≥20%'],
       ].map(([label, content], index) => <div className="strategy-row" key={label}><h3>{label}</h3><p>{content}</p><span className="citation">[{index + 1}]</span><button aria-label={`编辑${label}`}><Pencil size={15} /></button></div>)}
       <div className="prompt-box"><label htmlFor="ai-prompt">输入广告需求，生成策略 Brief</label><div><input id="ai-prompt" value={briefPrompt} onChange={event => setBriefPrompt(event.target.value)} placeholder="例如：面向研发工程师，突出新品精度与交期，获取销售线索"/><button aria-label="生成策略 Brief" onClick={() => void generateBrief()} disabled={isGenerating}>{isGenerating ? '生成中…' : <Send size={18} />}</button></div></div>
+      <div className="brief-asset-row">
+        <label className="secondary-button" htmlFor="brief-product-image">
+          <Plus size={14} />{isUploadingProduct ? '上传中…' : '添加商品高清图'}
+        </label>
+        <input
+          id="brief-product-image"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          disabled={isUploadingProduct}
+          onChange={event => void uploadProductImage(event.target.files?.[0])}
+        />
+        <span>{productImageName || '生成电商前贴前需要；会作为 Brief 的商品 Asset。'}</span>
+      </div>
       {brief ? <div className="insight-note"><span>AI 生成 Brief · {brief.status === 'ready' ? '已确认' : '草稿'}</span><p>{brief.content}</p><small>模型：{briefModel || '服务端已存档'} · 任务：{brief.sourceJobId ?? '手工创建'}</small>{brief.status !== 'ready' ? <button className="secondary-button" onClick={() => void confirmBrief()}>确认 Brief</button> : null}</div> : null}
       {briefNotice ? <div className="inline-notice" role="status">{briefNotice}</div> : null}
     </section>
@@ -992,8 +1049,62 @@ function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: stri
 function MaterialInsightSurface() {
   const { advanceArtifact, currentProject } = useProject()
   const [notice, setNotice] = useState('')
+  const [overview, setOverview] = useState<ApiPublicInsightOverview | null>(null)
+  const [filters, setFilters] = useState<ApiPublicInsightFilters | null>(null)
+  const [videos, setVideos] = useState<ApiPublicInsightVideoListItem[]>([])
+  const [detail, setDetail] = useState<ApiPublicInsightVideoDetail | null>(null)
+  const [publicInsightState, setPublicInsightState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [publicQuery, setPublicQuery] = useState('')
+  const [publicIndustry, setPublicIndustry] = useState('')
   const manhuaMix = operationRecords(currentProject.operations, 'audience_mix')
   const manhuaMethods = operationRecords(currentProject.operations, 'method')
+  useEffect(() => {
+    let active = true
+    setPublicInsightState('loading')
+    void Promise.all([
+      api.getPublicInsightOverview(),
+      api.getPublicInsightFilters(),
+    ]).then(([nextOverview, nextFilters]) => {
+      if (!active) return
+      setOverview(nextOverview)
+      setFilters(nextFilters)
+      setPublicIndustry(nextFilters.industries[0]?.value ?? '')
+    }).catch(cause => {
+      if (!active) return
+      setPublicInsightState('error')
+      setNotice(cause instanceof Error ? cause.message : '读取示例洞察数据失败。')
+    })
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
+    let active = true
+    setPublicInsightState('loading')
+    void api.listPublicInsightVideos({
+      page: 1,
+      pageSize: 6,
+      keyword: publicQuery,
+      industry: publicIndustry,
+      sortBy: 'vv_all',
+    }).then(async page => {
+      if (!active) return
+      setVideos(page.items)
+      const first = page.items[0]
+      setDetail(first ? await api.getPublicInsightVideo(first.item_id) : null)
+      if (active) setPublicInsightState('ready')
+    }).catch(cause => {
+      if (!active) return
+      setPublicInsightState('error')
+      setNotice(cause instanceof Error ? cause.message : '筛选示例洞察数据失败。')
+    })
+    return () => { active = false }
+  }, [publicIndustry, publicQuery])
+  const selectPublicVideo = async (itemId: string) => {
+    try {
+      setDetail(await api.getPublicInsightVideo(itemId))
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '读取视频洞察详情失败。')
+    }
+  }
   const createMaterials = async () => {
     try {
       await advanceArtifact('creative', '制作中')
@@ -1004,7 +1115,30 @@ function MaterialInsightSurface() {
   }
   return <div className="strategy-analysis-layout">
     <section className="strategy-analysis-main">
-      <div className="analysis-heading"><div><span className="section-label">漫剧供需结构</span><h2>供给多，不等于消耗贡献高。</h2><p>动态漫与仿真人在来源样本中仅占 14% 供给，却贡献 38.13% 消耗。当前结论是“优先补充验证”，不是直接扩量。</p></div><span className="source-chip">来源样本 · 待账户验证</span></div>
+      <div className="analysis-heading"><div><span className="section-label">公开短视频洞察样本</span><h2>部署后自动导入 data 目录作为示例展示。</h2><p>服务端默认读取 data/insights/public_data_insight_source_export/*.csv，保留公开样本的行业、播放、留存、口播和分镜字段。</p></div><span className="source-chip">{overview ? `${overview.total_videos} 条样本 · ${overview.files.length} 个文件` : '加载示例数据'}</span></div>
+      <div className="public-insight-overview">
+        <span><b>{overview?.total_views.toLocaleString('zh-CN') ?? '—'}</b><small>总播放</small></span>
+        <span><b>{overview ? `${(overview.average_finish_rate * 100).toFixed(1)}%` : '—'}</b><small>平均完播率</small></span>
+        <span><b>{overview ? `${(overview.ai_ratio * 100).toFixed(1)}%` : '—'}</b><small>AI 标记占比</small></span>
+      </div>
+      <div className="prelaunch-filterbar public-insight-filterbar">
+        <div className="search-field"><Search size={15}/><input aria-label="搜索公开短视频洞察" value={publicQuery} onChange={event => setPublicQuery(event.target.value)} placeholder="搜索标题、口播、品牌或亮点"/></div>
+        <label>行业<select aria-label="公开短视频洞察行业" value={publicIndustry} onChange={event => setPublicIndustry(event.target.value)}><option value="">全部行业</option>{filters?.industries.map(item => <option key={item.value} value={item.value}>{item.value}（{item.count}）</option>)}</select></label>
+      </div>
+      {publicInsightState === 'error' ? <div className="panel-empty">示例洞察数据暂时无法读取，请确认 data/insights/public_data_insight_source_export 下存在 CSV。</div> : null}
+      <div className="public-insight-table">
+        <div className="public-insight-row header"><span>视频</span><span>行业</span><span>播放</span><span>完播率</span></div>
+        {videos.map(item => <button key={item.item_id} className={detail?.item_id === item.item_id ? 'public-insight-row active' : 'public-insight-row'} onClick={() => void selectPublicVideo(item.item_id)}>
+          <span><b>{item.item_title}</b><small>{item.item_id} · {item.has_ai_generated === '是' ? 'AI 生成' : '真实素材'} · {item.date}</small></span>
+          <span>{item.industry}</span>
+          <span>{item.vv_all.toLocaleString('zh-CN')}</span>
+          <span>{(item.finish_rate * 100).toFixed(1)}%</span>
+        </button>)}
+        {publicInsightState === 'loading' ? <div className="panel-empty">正在读取 data 目录示例数据…</div> : null}
+        {publicInsightState === 'ready' && !videos.length ? <div className="panel-empty">当前筛选没有匹配的公开短视频样本。</div> : null}
+      </div>
+      {detail ? <div className="public-insight-detail-card"><span className="section-label">当前样本拆解</span><h3>{detail.item_title}</h3><p>{detail.creative_highlight || detail.item_asr}</p><div className="public-insight-tags"><span>{detail.first3s_visual_creative_type}</span><span>{detail.visual_style}</span><span>{detail.bgm_style}</span></div><div className="insight-note"><span>口播脚本</span><p>{detail.oral_script || detail.item_asr || '该样本未提供口播脚本。'}</p></div></div> : null}
+      <div className="analysis-heading secondary"><div><span className="section-label">当前 Project 运营记录</span><h2>供给多，不等于消耗贡献高。</h2><p>下方继续展示当前 Project 服务端运营记录，用于和公开示例样本交叉验证。</p></div><span className="source-chip">项目数据 · 待账户验证</span></div>
       <div className="mix-legend"><span><i className="supply"/>供给占比</span><span><i className="spend"/>消耗占比</span></div>
       <div className="mix-table">
         {manhuaMix.map(row => <div className="mix-row" key={row.id}>
@@ -1485,7 +1619,17 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   else {
     const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
     const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : item.layout === 'settings' ? <SettingsSurface/> : <OperationsSurface item={item}/>
-    surface = <StateBoundary state={dataState} onRetry={() => setDataState('ready')} onCreate={primaryAction}>{genericSurface}</StateBoundary>
+    surface = <StateBoundary
+      state={dataState}
+      contextLabel={`${system.label} / ${item.label}`}
+      emptyTitle={`${item.label}暂无当前 Project 数据`}
+      emptyDetail="这里不会用示例内容冒充已保存结果。请先完成上游步骤、创建业务对象，或切换到已有数据的 Project。"
+      errorDetail="页面数据读取失败，当前内容不会被覆盖。请确认本地 MVP API 正常运行后重新加载。"
+      forbiddenDetail="当前角色不能查看或操作此页面，请联系 Project 管理员授予相应权限。"
+      createLabel={system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet' : '创建业务对象'}
+      onRetry={() => setDataState('ready')}
+      onCreate={primaryAction}
+    >{genericSurface}</StateBoundary>
   }
 
   const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'

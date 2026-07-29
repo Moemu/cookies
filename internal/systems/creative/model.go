@@ -69,21 +69,25 @@ type CreateIntakeRequest struct {
 	// StrategyPackage is supplied only for the explicit, user-triggered handoff
 	// from an immutable Strategy package. The server reads and validates that
 	// package; callers never submit its content as trusted Creative input.
-	StrategyPackage *StrategyPackageReference `json:"strategy_package,omitempty"`
-	CreativeRoutes  []CreativeRouteSnapshot   `json:"creative_routes,omitempty"`
-	Channel         CreativeChannel           `json:"channel"`
-	Objective       string                    `json:"objective"`
-	Audience        string                    `json:"audience"`
-	CoreMessage     string                    `json:"core_message"`
-	CallToAction    string                    `json:"call_to_action"`
-	Concept         string                    `json:"concept"`
-	Tone            []string                  `json:"tone"`
-	VisualKeywords  []string                  `json:"visual_keywords"`
-	Mandatory       []string                  `json:"mandatory_elements"`
-	Prohibited      []string                  `json:"prohibited_claims"`
+	StrategyPackage   *StrategyPackageReference `json:"strategy_package,omitempty"`
+	CreativeRoutes    []CreativeRouteSnapshot   `json:"creative_routes,omitempty"`
+	Format            CreativeFormat            `json:"format,omitempty"`
+	PerformanceMode   string                    `json:"performance_mode,omitempty"`
+	ManualViralRemake *ManualViralRemakeInput   `json:"manual_viral_remake,omitempty"`
+	Channel           CreativeChannel           `json:"channel"`
+	Objective         string                    `json:"objective"`
+	Audience          string                    `json:"audience"`
+	CoreMessage       string                    `json:"core_message"`
+	CallToAction      string                    `json:"call_to_action"`
+	Concept           string                    `json:"concept"`
+	Tone              []string                  `json:"tone"`
+	VisualKeywords    []string                  `json:"visual_keywords"`
+	Mandatory         []string                  `json:"mandatory_elements"`
+	Prohibited        []string                  `json:"prohibited_claims"`
 }
 
 type CreativeRouteSnapshot struct {
+	RouteID                   string                     `json:"route_id,omitempty"`
 	RouteType                 string                     `json:"route_type"`
 	VideoPurpose              string                     `json:"video_purpose"`
 	Channels                  []string                   `json:"channels"`
@@ -96,10 +100,19 @@ type CreativeRouteSnapshot struct {
 }
 
 func (r CreativeRouteSnapshot) Validate() error {
-	if r.RouteType != "pre_roll" || r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
-		r.TargetDurationSeconds != 5 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
+	if r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake {
+		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
+	}
+	if r.RouteType == PerformanceModeViralRemake && r.RouteID != ManualViralRemakeRouteID {
+		return fmt.Errorf("viral remake route_id must be %q", ManualViralRemakeRouteID)
+	}
+	if r.RouteType == "pre_roll" && r.TargetDurationSeconds != 5 {
+		return fmt.Errorf("creative pre-roll route duration must be 5 seconds")
+	}
+	if r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
+		r.TargetDurationSeconds < 4 || r.TargetDurationSeconds > 60 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
 		!r.RequiresHumanConfirmation {
-		return fmt.Errorf("creative pre-roll route is incomplete")
+		return fmt.Errorf("creative video route is incomplete")
 	}
 	for _, channel := range r.Channels {
 		if channel != "douyin" && channel != "kuaishou" {
@@ -133,8 +146,14 @@ func (r CreateIntakeRequest) Validate() error {
 	}
 	switch r.Source {
 	case IntakeSourceManual:
-		if r.StrategyPackage != nil || len(r.CreativeRoutes) != 0 {
+		if r.StrategyPackage != nil {
 			return fmt.Errorf("manual intake must not include strategy_package")
+		}
+		if r.ManualViralRemake != nil {
+			return r.validateManualViralRemake()
+		}
+		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
+			return fmt.Errorf("manual image intake must not include video routing")
 		}
 	case IntakeSourceStrategyPackage:
 		if r.StrategyPackage == nil {
@@ -154,6 +173,41 @@ func (r CreateIntakeRequest) validateContent() error {
 	if r.Channel != ChannelXiaohongshu {
 		return fmt.Errorf("Creative M1 supports the xiaohongshu channel")
 	}
+	if len(r.Objective) > 500 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 || len(r.Concept) > 500 {
+		return fmt.Errorf("creative input exceeds its maximum length")
+	}
+	if err := validateStringList("tone", r.Tone, 12, 80); err != nil {
+		return err
+	}
+	if err := validateStringList("visual_keywords", r.VisualKeywords, 16, 120); err != nil {
+		return err
+	}
+	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
+		return err
+	}
+	return validateStringList("prohibited_claims", r.Prohibited, 20, 200)
+}
+
+func (r CreateIntakeRequest) validateManualViralRemake() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeViralRemake {
+		return fmt.Errorf("manual viral remake intake requires format=video and performance_mode=viral_remake")
+	}
+	if r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou {
+		return fmt.Errorf("manual viral remake supports douyin or kuaishou")
+	}
+	if len(r.CreativeRoutes) != 1 {
+		return fmt.Errorf("manual viral remake requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualViralRemake.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateVideoContent() error {
 	if len(r.Objective) > 500 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 || len(r.Concept) > 500 {
 		return fmt.Errorf("creative input exceeds its maximum length")
 	}
@@ -218,20 +272,22 @@ type CreativeTask struct {
 }
 
 type CreateVideoTaskRequest struct {
-	RouteIndex   int                      `json:"route_index"`
-	Channel      CreativeChannel          `json:"channel"`
-	SourceVideo  contract.AssetVersionRef `json:"source_video"`
-	Concept      string                   `json:"concept"`
-	Prompt       string                   `json:"prompt"`
-	CallToAction string                   `json:"call_to_action"`
-	Mandatory    []string                 `json:"mandatory_elements"`
-	Prohibited   []string                 `json:"prohibited_claims"`
-	ConfirmRoute bool                     `json:"confirm_route"`
+	SelectedRouteID string                   `json:"selected_route_id,omitempty"`
+	RouteIndex      int                      `json:"route_index"`
+	Channel         CreativeChannel          `json:"channel"`
+	SourceVideo     contract.AssetVersionRef `json:"source_video"`
+	Concept         string                   `json:"concept"`
+	Prompt          string                   `json:"prompt"`
+	CallToAction    string                   `json:"call_to_action"`
+	Mandatory       []string                 `json:"mandatory_elements"`
+	Prohibited      []string                 `json:"prohibited_claims"`
+	ConfirmRoute    bool                     `json:"confirm_route"`
 }
 
 func (r CreateVideoTaskRequest) Validate() error {
-	if r.RouteIndex < 0 || (r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
-		return fmt.Errorf("route_index, supported video channel, and explicit route confirmation are required")
+	if (strings.TrimSpace(r.SelectedRouteID) == "" && r.RouteIndex < 0) ||
+		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
+		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
 	if err := r.SourceVideo.Validate(); err != nil {
 		return fmt.Errorf("source_video: %w", err)
@@ -258,14 +314,18 @@ type VideoDraft struct {
 	Mandatory       []string                 `json:"mandatory_elements"`
 	Prohibited      []string                 `json:"prohibited_claims"`
 	CallToAction    string                   `json:"cta"`
+	ViralRemake     *ViralRemakeDraft        `json:"viral_remake,omitempty"`
 	CreatedAt       time.Time                `json:"created_at"`
 }
 
 func (d VideoDraft) Validate() error {
 	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
-		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds != 5 ||
+		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds < 4 || d.DurationSeconds > 60 ||
 		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.SourceVideo.Validate() != nil || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
+	}
+	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {
+		return fmt.Errorf("creative viral remake draft is incomplete")
 	}
 	return nil
 }
@@ -362,12 +422,28 @@ type CreateImageJobRequest struct {
 }
 
 type CreateVideoJobRequest struct {
-	ModelAlias string `json:"model_alias"`
+	ModelAlias     string                       `json:"model_alias"`
+	Prompt         *CreativeVideoPrompt         `json:"prompt,omitempty"`
+	GenerationSpec *CreativeVideoGenerationSpec `json:"generation_spec,omitempty"`
+	Approval       *VideoGenerationApproval     `json:"approval,omitempty"`
 }
 
 func (r CreateVideoJobRequest) Validate() error {
 	if len(strings.TrimSpace(r.ModelAlias)) > 128 {
 		return fmt.Errorf("model_alias is too long")
+	}
+	approvedFields := 0
+	if r.Prompt != nil {
+		approvedFields++
+	}
+	if r.GenerationSpec != nil {
+		approvedFields++
+	}
+	if r.Approval != nil {
+		approvedFields++
+	}
+	if approvedFields != 0 && approvedFields != 3 {
+		return fmt.Errorf("prompt, generation_spec, and approval must be supplied together")
 	}
 	return nil
 }

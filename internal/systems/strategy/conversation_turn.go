@@ -310,7 +310,7 @@ func briefFieldPresent(document BriefDocument, field string) bool {
 }
 
 func conversationDecisionOutputSchema() json.RawMessage {
-	fieldPaths := `["brand.name","product.name","industry","region","language","campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi","reference_ids"]`
+	fieldPaths := `["brand.name","product.name","product.category","product.selling_points","product.evidence","industry","region","language","campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi","reference_ids","creative.tone","creative.mandatory_elements","creative.prohibited_claims"]`
 	return json.RawMessage(fmt.Sprintf(`{
 		"type":"object","additionalProperties":false,
 		"required":["intent","assistant_reply","operations","confirm_fields","follow_up_questions","warnings"],

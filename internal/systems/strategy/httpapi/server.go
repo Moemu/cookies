@@ -47,6 +47,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}/brief-draft", server.getBriefDraft)
 	mux.HandleFunc("PATCH /api/strategy/v1/tasks/{task_id}/brief-draft", server.patchBriefDraft)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief:confirm", server.confirmBrief)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/brief-versions", server.listProjectBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions", server.listBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
@@ -288,6 +289,19 @@ func (s *Server) confirmBrief(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) listBriefVersions(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.Service.ListBriefVersions(request.Context(), mustActor(request), request.PathValue("brief_id"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listProjectBriefVersions(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListProjectBriefVersions(
+		request.Context(),
+		mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+	)
 	if err != nil {
 		writeError(writer, err)
 		return

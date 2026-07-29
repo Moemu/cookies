@@ -223,7 +223,30 @@ func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake Genera
 		_ = w.Upload.Blobs.Delete(ctx, commit.Location)
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_MISMATCH", Message: "validated asset does not match output metadata", Retryable: false}
 	}
+	commit.Relations = relationsForGeneratedOutput(intake, commit)
 	return commit, nil
+}
+
+func relationsForGeneratedOutput(intake GeneratedIntake, commit AssetCommit) []AssetRelation {
+	output := contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version}
+	relations := make([]AssetRelation, 0, len(intake.Request.Provenance.SourceAssetRefs)+len(intake.Request.Provenance.SourceResourceRefs))
+	add := func(source contract.ResourceRef) {
+		relations = append(relations, AssetRelation{
+			OrganizationID: commit.OrganizationID,
+			ProjectID:      commit.ProjectID,
+			OutputAsset:    output,
+			RelationType:   AssetRelationGeneratedFrom,
+			Source:         source,
+		})
+	}
+	for _, ref := range intake.Request.Provenance.SourceAssetRefs {
+		version := ref.Version
+		add(contract.ResourceRef{Type: "asset_version", ID: string(ref.AssetID), Version: &version})
+	}
+	for _, ref := range intake.Request.Provenance.SourceResourceRefs {
+		add(ref)
+	}
+	return relations
 }
 
 type retryableProviderError interface {

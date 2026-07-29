@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, Menu, Search, X } from 'lucide-react'
+import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Search, X } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { useProject } from '../context/ProjectContext'
 import { systems } from '../data/navigation'
@@ -25,6 +26,7 @@ interface ShellProps {
 
 export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManagement, isGlobalSettings, onHome, onModelSettings, onSystemChange, onProjectChange, onProjectManage, onNavChange, children }: ShellProps) {
   const { projects, currentProject, agencyWorkbench } = useProject()
+  const { session, logout } = useAuth()
   const { configuredCount } = useModelConfig()
   const [projectMenu, setProjectMenu] = useState(false)
   const [projectMenuSearch, setProjectMenuSearch] = useState('')
@@ -71,6 +73,8 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
     setProjectMenu(false)
     setProjectMenuSearch('')
   }
+  const userLabel = session.user?.displayName ?? session.user?.email ?? 'Local User'
+  const userInitials = userLabel.split(/\s+|@/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'LU'
 
   const withoutSidebar = isHome || isProjectHome || isProjectManagement || isGlobalSettings
   return <div className={`${withoutSidebar ? 'app-shell home-shell' : 'app-shell'}${collapsed && !withoutSidebar ? ' sidebar-collapsed' : ''}`}>
@@ -115,7 +119,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
         {searchOpen ? <button aria-label="关闭搜索" onClick={() => { setSearchOpen(false); setSearch('') }}><X size={15}/></button> : <kbd>/</kbd>}
         {searchOpen && search ? <div className="search-results" role="listbox" aria-label="全局搜索结果">{searchResults.length ? searchResults.map(result => <button key={result.id} role="option" onClick={() => { if ('projectHome' in result) onProjectChange(result.projectId); else onProjectChange(result.projectId, result.system, result.navId, result.objectId); setSearch(''); setSearchOpen(false) }}><b>{result.title}</b><small>{result.meta}</small></button>) : <div className="search-empty">没有匹配结果</div>}</div> : null}
       </div>
-      <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button><button className="avatar" aria-label="个人菜单">AM</button>
+      <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button><button className="avatar" aria-label={`当前用户：${userLabel}`}>{userInitials}</button><button className="icon-button" aria-label="退出登录" onClick={() => void logout()}><LogOut size={17}/></button>
     </header>
     {!withoutSidebar ? <aside className="sidebar" aria-label={`${system.label}导航`}>
       <div className="side-title"><system.icon size={18}/><span>{system.label}</span></div>

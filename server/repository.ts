@@ -5,6 +5,9 @@ import {
   type Artifact,
   type ArtifactKind,
   type ArtifactStatus,
+  type AssetFeature,
+  type AssetFeatureSimilarityRisk,
+  assertAssetFeaturePayload,
   assertVideoMetadata,
   type BusinessTask,
   type BusinessTaskType,
@@ -21,6 +24,7 @@ import {
   type PreflightResult,
   type Project,
   type ProjectRuntime,
+  type ProviderCredential,
   type PrerollType,
   type ShortDramaPrerollArtifactSnapshot,
   type SimulationEvidence,
@@ -47,6 +51,14 @@ export interface UpsertOperationalRecordInput {
   fields: Record<string, string | number>;
 }
 
+export interface DeleteSeedDataOutsideProjectInput {
+  projectId: string;
+  operationalRecordIds?: string[];
+  artifactContents?: string[];
+  changeSetNames?: string[];
+  auditActions?: string[];
+}
+
 export interface CreateArtifactInput {
   projectId: string;
   kind: ArtifactKind;
@@ -56,6 +68,36 @@ export interface CreateArtifactInput {
   content: string;
   status?: ArtifactStatus;
   sourceJobId?: string;
+  actor?: string;
+}
+
+export interface AssetFeatureScope {
+  organizationId: string;
+  projectId: string;
+  assetId?: string;
+  assetVersion?: number;
+  featureVersion?: string;
+}
+
+export interface UpsertAssetFeatureInput {
+  organizationId: string;
+  projectId: string;
+  assetId: string;
+  assetVersion: number;
+  schemaVersion: "asset_feature_v1";
+  featureVersion: string;
+  hookStrength: number;
+  productVisibility: number;
+  sceneTags: string[];
+  productTags: string[];
+  personTags: string[];
+  actionTags: string[];
+  emotionTags: string[];
+  sellingPoints: string[];
+  ctaPresence: boolean;
+  similarityGroup?: string;
+  similarityRisk: AssetFeatureSimilarityRisk;
+  evidence: string[];
   actor?: string;
 }
 
@@ -125,9 +167,11 @@ export class FileRepository {
           sourceTaskIds: task.sourceTaskIds ?? [],
         })),
         artifacts: parsed.artifacts ?? [],
+        assetFeatures: parsed.assetFeatures ?? [],
         generationJobs: parsed.generationJobs ?? [],
         changeSets: parsed.changeSets ?? [],
         auditEvents: parsed.auditEvents ?? [],
+        providerCredentials: parsed.providerCredentials ?? [],
       });
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -141,6 +185,31 @@ export class FileRepository {
 
   async listProjects(): Promise<Project[]> {
     return [...this.store.projects];
+  }
+
+  getProviderCredential(provider: ProviderCredential["provider"]): ProviderCredential | undefined {
+    const credential = this.store.providerCredentials.find((item) => item.provider === provider);
+    return credential ? { ...credential } : undefined;
+  }
+
+  async upsertProviderCredential(input: Omit<ProviderCredential, "updatedAt">): Promise<ProviderCredential> {
+    const now = new Date().toISOString();
+    const credential: ProviderCredential = { ...input, updatedAt: now };
+    await this.mutate(() => {
+      const existing = this.store.providerCredentials.find((item) => item.provider === input.provider);
+      if (existing) {
+        Object.assign(existing, credential);
+      } else {
+        this.store.providerCredentials.push(credential);
+      }
+    });
+    return credential;
+  }
+
+  async deleteProviderCredential(provider: ProviderCredential["provider"]): Promise<void> {
+    await this.mutate(() => {
+      this.store.providerCredentials = this.store.providerCredentials.filter((item) => item.provider !== provider);
+    });
   }
 
   async getProject(id: string): Promise<Project | undefined> {
@@ -212,6 +281,31 @@ export class FileRepository {
       }
     });
     return record;
+  }
+
+  async deleteSeedDataOutsideProject(input: DeleteSeedDataOutsideProjectInput): Promise<void> {
+    const operationalRecordIds = new Set(input.operationalRecordIds ?? []);
+    const artifactContents = new Set(input.artifactContents ?? []);
+    const changeSetNames = new Set(input.changeSetNames ?? []);
+    const auditActions = new Set(input.auditActions ?? []);
+    await this.mutate(() => {
+      if (operationalRecordIds.size) {
+        this.store.operationalRecords = this.store.operationalRecords
+          .filter((record) => record.projectId === input.projectId || !operationalRecordIds.has(record.id));
+      }
+      if (artifactContents.size) {
+        this.store.artifacts = this.store.artifacts
+          .filter((artifact) => artifact.projectId === input.projectId || !artifactContents.has(artifact.content));
+      }
+      if (changeSetNames.size) {
+        this.store.changeSets = this.store.changeSets
+          .filter((changeSet) => changeSet.projectId === input.projectId || !changeSetNames.has(changeSet.name));
+      }
+      if (auditActions.size) {
+        this.store.auditEvents = this.store.auditEvents
+          .filter((event) => event.projectId === input.projectId || !auditActions.has(event.action));
+      }
+    });
   }
 
   async getBusinessTask(id: string): Promise<BusinessTask | undefined> {
@@ -315,6 +409,67 @@ export class FileRepository {
       });
     });
     return artifact;
+  }
+
+  async listAssetFeatures(scope: AssetFeatureScope): Promise<AssetFeature[]> {
+    this.requireProject(scope.projectId);
+    if (scope.assetId) this.requireScopedArtifact(scope.projectId, scope.assetId);
+    return this.store.assetFeatures.filter((feature) => matchesAssetFeatureScope(feature, scope));
+  }
+
+  async getAssetFeature(scope: Required<AssetFeatureScope>): Promise<AssetFeature | undefined> {
+    this.requireProject(scope.projectId);
+    this.requireScopedArtifact(scope.projectId, scope.assetId);
+    return this.store.assetFeatures.find((feature) => matchesAssetFeatureScope(feature, scope));
+  }
+
+  async upsertAssetFeature(input: UpsertAssetFeatureInput): Promise<AssetFeature> {
+    this.requireProject(input.projectId);
+    const asset = this.requireScopedArtifact(input.projectId, input.assetId);
+    if ((asset.kind !== "image" && asset.kind !== "video") || asset.version !== input.assetVersion) {
+      throw new DomainError("NOT_FOUND", "Resource was not found");
+    }
+    assertAssetFeaturePayload(input);
+    const existing = this.store.assetFeatures.find((feature) => matchesAssetFeatureScope(feature, input));
+    const now = new Date().toISOString();
+    const feature: AssetFeature = {
+      id: existing?.id ?? randomUUID(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      assetId: input.assetId,
+      assetVersion: input.assetVersion,
+      schemaVersion: input.schemaVersion,
+      featureVersion: input.featureVersion,
+      hookStrength: input.hookStrength,
+      productVisibility: input.productVisibility,
+      sceneTags: [...input.sceneTags],
+      productTags: [...input.productTags],
+      personTags: [...input.personTags],
+      actionTags: [...input.actionTags],
+      emotionTags: [...input.emotionTags],
+      sellingPoints: [...input.sellingPoints],
+      ctaPresence: input.ctaPresence,
+      similarityGroup: input.similarityGroup,
+      similarityRisk: input.similarityRisk,
+      evidence: [...input.evidence],
+      version: existing ? existing.version + 1 : 1,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.mutate(() => {
+      if (existing) {
+        Object.assign(existing, feature);
+      } else {
+        this.store.assetFeatures.push(feature);
+      }
+      this.addAudit(feature.projectId, input.actor, "asset_feature.upserted", "asset_feature", feature.id, {
+        assetId: feature.assetId,
+        assetVersion: feature.assetVersion,
+        featureVersion: feature.featureVersion,
+        version: feature.version,
+      });
+    });
+    return feature;
   }
 
   async listGenerationJobs(scope?: string | ResourceScope): Promise<GenerationJob[]> {
@@ -611,6 +766,12 @@ export class FileRepository {
     return artifact;
   }
 
+  private requireScopedArtifact(projectId: string, id: string): Artifact {
+    const artifact = this.store.artifacts.find((item) => item.id === id && item.projectId === projectId);
+    if (!artifact) throw new DomainError("NOT_FOUND", "Resource was not found");
+    return artifact;
+  }
+
   private requireMatchingSourceJob(input: CreateArtifactInput): void {
     const job = this.requireGenerationJob(input.sourceJobId!);
     if (
@@ -783,4 +944,12 @@ function matchesResourceScope(
   return (!scope?.projectId || resource.projectId === scope.projectId)
     && (!scope?.purpose || resource.purpose === scope.purpose)
     && (!scope?.prerollType || resource.prerollType === scope.prerollType);
+}
+
+function matchesAssetFeatureScope(feature: AssetFeature, scope: AssetFeatureScope): boolean {
+  return feature.organizationId === scope.organizationId
+    && feature.projectId === scope.projectId
+    && (scope.assetId === undefined || feature.assetId === scope.assetId)
+    && (scope.assetVersion === undefined || feature.assetVersion === scope.assetVersion)
+    && (scope.featureVersion === undefined || feature.featureVersion === scope.featureVersion);
 }

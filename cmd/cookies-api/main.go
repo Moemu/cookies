@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
+	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
@@ -117,19 +118,50 @@ func main() {
 		uploadService.VideoProbe = assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 	}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
-	creativeService := &creative.Service{Repository: creative.MySQLRepository{DB: db}, Projects: projectService, Assets: creativeAssetReader{uploads: uploadService}}
+	creativeRepository := creative.MySQLRepository{DB: db}
+	creativeService := &creative.Service{
+		Repository: creativeRepository, ViralRemakes: creativeRepository,
+		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
+	}
+	if cfg.Provider.AudioAdapter == "volcengine_asr" && cfg.Provider.TextAdapter == "adapter_gateway" {
+		cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure viral analysis credential encryption: %v", cipherErr)
+		}
+		gatewayConfig := provider.MySQLGatewayConfigStore{
+			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		analyzer, analyzerErr := creativeprovider.NewViralAnalyzer(creativeprovider.ViralAnalyzerConfig{
+			Assets: uploadService, Routes: gatewayConfig, Credentials: gatewayConfig,
+			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			ModelAlias: "cookies.text.standard", PromptVersion: "viral.analyze.v1",
+			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+			ASR: creativeprovider.ASRConfig{
+				Endpoint: cfg.Provider.VolcengineASR.Endpoint, AuthMode: cfg.Provider.VolcengineASR.AuthMode,
+				AppID: cfg.Provider.VolcengineASR.AppID, AccessToken: cfg.Provider.VolcengineASR.AccessToken,
+				APIKey: cfg.Provider.VolcengineASR.APIKey, ResourceID: cfg.Provider.VolcengineASR.ResourceID,
+				Model: cfg.Provider.VolcengineASR.Model,
+			},
+		})
+		if analyzerErr != nil {
+			log.Fatalf("configure viral reference analyzer: %v", analyzerErr)
+		}
+		creativeService.ViralAnalyzer = analyzer
+		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
+	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
 		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
+	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
 	dependencies := httpserver.Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
-		RemixPlans: remixService,
+		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 	}
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},
@@ -191,8 +223,10 @@ func main() {
 		// This adapter is the only Strategy-to-Creative connection. It reads an
 		// immutable, authorized Strategy package and leaves Creative to persist
 		// its own Intake only after a user explicitly invokes the endpoint.
+		strategyCreativeReader := strategycreative.Reader{Service: strategyService}
+		creativeService.Sources = strategyCreativeReader
 		if cfg.Strategy.PackageToCreativeEnabled {
-			creativeService.StrategyPackages = strategycreative.Reader{Service: strategyService}
+			creativeService.StrategyPackages = strategyCreativeReader
 		}
 		strategyAPI := strategyhttp.New(strategyService, agentStore, runtimeStore)
 		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,

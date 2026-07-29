@@ -30,6 +30,7 @@ type UploadService struct {
 	Projects         ActiveProjectResolver
 	Blobs            BlobStore
 	Scanner          ContentScanner
+	MediaProbe       MediaProbe
 	QuarantineBucket string
 	AssetsBucket     string
 	UploadTTL        time.Duration
@@ -324,6 +325,44 @@ func (s UploadService) IngestRenderedVideo(ctx context.Context, requestContext c
 	return ref, nil
 }
 
+func (s UploadService) UpsertFeature(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, feature AssetFeature) (AssetFeature, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AssetFeature{}, err
+	}
+	feature.OrganizationID = actor.OrganizationID
+	feature.ProjectID = projectID
+	if err := feature.Validate(); err != nil {
+		return AssetFeature{}, err
+	}
+	if _, err := s.Repository.GetProjectAsset(ctx, actor.OrganizationID, projectID, feature.Ref()); err != nil {
+		return AssetFeature{}, err
+	}
+	return s.Repository.UpsertAssetFeature(ctx, feature, s.now())
+}
+
+func (s UploadService) GetFeature(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef, featureVersion string) (AssetFeature, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AssetFeature{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return AssetFeature{}, err
+	}
+	if strings.TrimSpace(featureVersion) == "" {
+		return AssetFeature{}, fmt.Errorf("feature_version is required")
+	}
+	return s.Repository.GetAssetFeature(ctx, actor.OrganizationID, projectID, ref, featureVersion)
+}
+
+func (s UploadService) ListFeatures(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]AssetFeature, error) {
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	return s.Repository.ListAssetFeatures(ctx, actor.OrganizationID, projectID, limit)
+}
+
 func (s UploadService) ingestStoredObject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, assetID contract.AssetID, blobID string, projectContextVersion int64, source contract.AssetSourceType, sourceLocation ObjectLocation, providerJobID, providerOutputID, renderJobID, traceID string) (AssetCommit, error) {
 	reader, info, err := s.Blobs.Open(ctx, sourceLocation)
 	if err != nil {
@@ -364,14 +403,15 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 		if info.MIMEType != "video/mp4" || len(data) < 12 || string(data[4:8]) != "ftyp" {
 			return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported MP4", ErrInvalidAssetContent)
 		}
-		if s.VideoProbe == nil {
-			return AssetCommit{}, fmt.Errorf("%w: FFprobe video validation is unavailable", ErrInvalidAssetContent)
+		if s.VideoProbe != nil {
+			videoMetadata, err = s.VideoProbe.Probe(ctx, data)
+			if err != nil {
+				return AssetCommit{}, fmt.Errorf("%w: %v", ErrInvalidAssetContent, err)
+			}
+			width, height = videoMetadata.WidthPixels, videoMetadata.HeightPixels
+		} else if s.MediaProbe == nil {
+			return AssetCommit{}, fmt.Errorf("%w: video metadata probe is unavailable", ErrInvalidAssetContent)
 		}
-		videoMetadata, err = s.VideoProbe.Probe(ctx, data)
-		if err != nil {
-			return AssetCommit{}, fmt.Errorf("%w: %v", ErrInvalidAssetContent, err)
-		}
-		width, height = videoMetadata.WidthPixels, videoMetadata.HeightPixels
 		mimeType = "video/mp4"
 	}
 	if err := s.Scanner.Scan(ctx, bytes.NewReader(data)); err != nil {
@@ -382,10 +422,23 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	}
 	digest := sha256.Sum256(data)
 	sha256Value := hex.EncodeToString(digest[:])
+	media := MediaMetadata{ProbeStatus: MediaProbeNotRequired}
 	durableKey := fmt.Sprintf("assets/%s/%s/versions/1/original", organizationID, assetID)
 	durable, err := s.Blobs.Put(ctx, s.AssetsBucket, durableKey, bytes.NewReader(data), int64(len(data)), mimeType)
 	if err != nil {
 		return AssetCommit{}, err
+	}
+	if assetKind == contract.AssetVideo {
+		if s.MediaProbe != nil {
+			media, err = s.MediaProbe.Probe(ctx, MediaProbeSource{Location: durable.ObjectLocation, MIMEType: mimeType, SizeBytes: int64(len(data)), SHA256: sha256Value})
+			if err != nil {
+				media = normalizeProbeFailure(err)
+			} else if media.ProbeStatus == "" {
+				media.ProbeStatus = MediaProbeSucceeded
+			}
+		} else {
+			media = mediaMetadataFromVideo(videoMetadata)
+		}
 	}
 	eventID, err := s.idGenerator()("event")
 	if err != nil {
@@ -414,11 +467,20 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	return AssetCommit{
 		BlobID: blobID, OrganizationID: organizationID, ProjectID: projectID, AssetID: assetID, Version: 1,
 		Kind: assetKind, SourceType: source, OwnerSystem: "assets", MIMEType: mimeType,
-		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: width, HeightPixels: height,
+		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: width, HeightPixels: height, Media: media,
 		DurationMS: videoMetadata.DurationMS, FrameRate: videoMetadata.FrameRate, VideoCodec: videoMetadata.VideoCodec, AudioCodec: videoMetadata.AudioCodec,
 		RenderJobID: renderJobID, ProviderJobID: providerJobID, ProviderOutputID: providerOutputID, ProjectContextVersion: projectContextVersion,
 		Location: durable.ObjectLocation, Event: event,
 	}, nil
+}
+
+func mediaMetadataFromVideo(value VideoMetadata) MediaMetadata {
+	return MediaMetadata{
+		DurationSeconds: float64(value.DurationMS) / 1000,
+		Codec:           value.VideoCodec,
+		AudioCodec:      value.AudioCodec,
+		ProbeStatus:     MediaProbeSucceeded,
+	}
 }
 
 func (s UploadService) validateDependencies() error {
@@ -442,6 +504,13 @@ func (s UploadService) idGenerator() ids.Generator {
 	return ids.New
 }
 
+func (s UploadService) mediaProbe() MediaProbe {
+	if s.MediaProbe != nil {
+		return s.MediaProbe
+	}
+	return UnconfiguredMediaProbe{}
+}
+
 func (s UploadService) uploadTTL() time.Duration {
 	if s.UploadTTL <= 0 {
 		return 15 * time.Minute
@@ -460,6 +529,8 @@ func (s UploadService) BlobProvider() string {
 	switch s.Blobs.(type) {
 	case *TOSBlobStore:
 		return "tos"
+	case *FilesystemBlobStore:
+		return "filesystem"
 	default:
 		return "memory"
 	}

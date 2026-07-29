@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ const (
 	arkVideoTaskPath             = "/contents/generations/tasks"
 	arkVideoOutputTTL            = 15 * time.Minute
 	arkVideoMaxBytes       int64 = 200 << 20
+	arkVideoMaxImageBytes  int64 = 30 << 20
 )
 
 type ArkVideoConfig struct {
@@ -76,24 +78,34 @@ func (a *ArkVideoAdapter) Submit(ctx context.Context, request VideoGenerationReq
 	if err != nil {
 		return VideoSubmission{}, err
 	}
+	if err := validateArkVideoCapabilities(request, model); err != nil {
+		return VideoSubmission{}, err
+	}
+	content, err := encodeArkVideoContent(request)
+	if err != nil {
+		return VideoSubmission{}, err
+	}
+	var generateAudio *bool
+	switch request.Input.AudioPolicy {
+	case VideoAudioSilent:
+		value := false
+		generateAudio = &value
+	case VideoAudioGenerated:
+		value := true
+		generateAudio = &value
+	}
 	payload, err := json.Marshal(struct {
-		Model   string `json:"model"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		Duration   int    `json:"duration"`
-		Ratio      string `json:"ratio"`
-		Resolution string `json:"resolution"`
-		Watermark  bool   `json:"watermark"`
+		Model         string            `json:"model"`
+		Content       []arkVideoContent `json:"content"`
+		Duration      int               `json:"duration"`
+		Ratio         string            `json:"ratio"`
+		Resolution    string            `json:"resolution"`
+		GenerateAudio *bool             `json:"generate_audio,omitempty"`
+		Watermark     bool              `json:"watermark"`
 	}{
-		Model: model,
-		Content: []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}{{Type: "text", Text: request.Input.Prompt}},
-		Duration: request.Input.DurationSeconds, Ratio: request.Input.AspectRatio,
-		Resolution: request.Input.Resolution, Watermark: false,
+		Model:   model,
+		Content: content, Duration: request.Input.DurationSeconds, Ratio: request.Input.AspectRatio,
+		Resolution: request.Input.Resolution, GenerateAudio: generateAudio, Watermark: false,
 	})
 	if err != nil {
 		return VideoSubmission{}, fmt.Errorf("encode Ark video request: %w", err)
@@ -109,7 +121,8 @@ func (a *ArkVideoAdapter) Submit(ctx context.Context, request VideoGenerationReq
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return VideoSubmission{}, arkVideoHTTPError("submission", response.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		return VideoSubmission{}, arkVideoHTTPError("submission", response.StatusCode, body)
 	}
 	var decoded arkVideoTaskResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&decoded); err != nil || strings.TrimSpace(decoded.ID) == "" {
@@ -119,6 +132,104 @@ func (a *ArkVideoAdapter) Submit(ctx context.Context, request VideoGenerationReq
 		Status: VideoSubmissionAccepted, ProviderCode: arkVideoProviderCode,
 		ModelVersion: model, ExternalTaskID: decoded.ID,
 	}, nil
+}
+
+type arkVideoContent struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	ImageURL *arkVideoImageURL `json:"image_url,omitempty"`
+	Role     string            `json:"role,omitempty"`
+}
+
+type arkVideoImageURL struct {
+	URL string `json:"url"`
+}
+
+func validateArkVideoCapabilities(request VideoGenerationRequest, model string) error {
+	model = strings.ToLower(strings.TrimSpace(model))
+	isSeedance20 := strings.Contains(model, "seedance-2-0")
+	isSeedance15 := strings.Contains(model, "seedance-1-5")
+	mode := request.Input.InputMode
+	if mode == "" {
+		mode = VideoInputTextOnly
+	}
+	if request.Route != nil {
+		allowedModes := request.Route.VideoInputModes
+		if len(allowedModes) == 0 {
+			allowedModes = []VideoInputMode{VideoInputTextOnly}
+		}
+		if !containsVideoInputMode(allowedModes, mode) {
+			return ExecutionError{JobError: contract.JobError{
+				Code: "MODEL_INPUT_UNSUPPORTED", Message: "Ark route has not declared the requested video input mode", Retryable: false,
+			}}
+		}
+		if request.Input.AudioPolicy != "" && !containsVideoAudioPolicy(request.Route.VideoAudioPolicies, request.Input.AudioPolicy) {
+			return ExecutionError{JobError: contract.JobError{
+				Code: "MODEL_INPUT_UNSUPPORTED", Message: "Ark route has not declared the requested video audio policy", Retryable: false,
+			}}
+		}
+	}
+	if (mode == VideoInputReferenceImage || mode == VideoInputFirstLastFrame) && !isSeedance20 {
+		return ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_INPUT_UNSUPPORTED", Message: "configured Ark model does not support the requested Seedance 2.0 image input mode", Retryable: false,
+		}}
+	}
+	if request.Input.AudioPolicy != "" && !isSeedance20 && !isSeedance15 {
+		return ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_INPUT_UNSUPPORTED", Message: "configured Ark model does not support explicit video audio policy", Retryable: false,
+		}}
+	}
+	return nil
+}
+
+func containsVideoInputMode(values []VideoInputMode, target VideoInputMode) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsVideoAudioPolicy(values []VideoAudioPolicy, target VideoAudioPolicy) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func encodeArkVideoContent(request VideoGenerationRequest) ([]arkVideoContent, error) {
+	content := make([]arkVideoContent, 0, 1+len(request.Sources))
+	content = append(content, arkVideoContent{Type: "text", Text: request.Input.Prompt})
+	for index, source := range request.Sources {
+		mimeType := strings.ToLower(strings.TrimSpace(source.MIMEType))
+		switch mimeType {
+		case "image/png", "image/jpeg", "image/webp":
+		default:
+			return nil, ExecutionError{JobError: contract.JobError{
+				Code: "MODEL_INPUT_UNSUPPORTED", Message: fmt.Sprintf("video conditioning image at index %d has an unsupported MIME type", index), Retryable: false,
+			}}
+		}
+		contents, err := io.ReadAll(io.LimitReader(source.Content, arkVideoMaxImageBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("read video conditioning image at index %d: %w", index, err)
+		}
+		if len(contents) == 0 || int64(len(contents)) > arkVideoMaxImageBytes {
+			return nil, ExecutionError{JobError: contract.JobError{
+				Code: "MODEL_INPUT_UNSUPPORTED", Message: fmt.Sprintf("video conditioning image at index %d must be between 1 byte and 30 MB", index), Retryable: false,
+			}}
+		}
+		content = append(content, arkVideoContent{
+			Type: "image_url",
+			ImageURL: &arkVideoImageURL{
+				URL: "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(contents),
+			},
+			Role: string(source.Role),
+		})
+	}
+	return content, nil
 }
 
 func (a *ArkVideoAdapter) Poll(ctx context.Context, reference VideoTaskReference) (VideoTaskResult, error) {
@@ -143,7 +254,8 @@ func (a *ArkVideoAdapter) Poll(ctx context.Context, reference VideoTaskReference
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		executionErr := arkVideoHTTPError("poll", response.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		executionErr := arkVideoHTTPError("poll", response.StatusCode, body)
 		if executionErr.JobError.Retryable {
 			return VideoTaskResult{}, fmt.Errorf("%s", executionErr.JobError.Message)
 		}
@@ -248,10 +360,26 @@ func newVideoOutputRef(providerJobID string, contents []byte, expiresAt time.Tim
 	return newOutputRef(arkVideoProviderCode, providerJobID, "output_1", "video/mp4", contents, expiresAt)
 }
 
-func arkVideoHTTPError(operation string, status int) ExecutionError {
+func arkVideoHTTPError(operation string, status int, body []byte) ExecutionError {
 	problem := contract.JobError{Code: "MODEL_REQUEST_REJECTED", Message: fmt.Sprintf("Ark video %s returned HTTP %d", operation, status), Retryable: false}
+	var upstream struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &upstream) == nil {
+		if value := strings.TrimSpace(upstream.Error.Code); value != "" {
+			problem.Code = value
+		}
+		if value := strings.TrimSpace(upstream.Error.Message); value != "" {
+			problem.Message = value
+		}
+	}
 	if status == http.StatusTooManyRequests || status >= 500 {
-		problem.Code = "MODEL_TEMPORARILY_UNAVAILABLE"
+		if problem.Code == "MODEL_REQUEST_REJECTED" {
+			problem.Code = "MODEL_TEMPORARILY_UNAVAILABLE"
+		}
 		problem.Retryable = true
 	}
 	return ExecutionError{JobError: problem}

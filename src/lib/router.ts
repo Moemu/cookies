@@ -7,6 +7,7 @@ export interface AppRoute {
   isProjectHome: boolean
   isProjectManagement: boolean
   isModelSettings: boolean
+  isLegacyProjectSystemRoute: boolean
   projectId?: string
   systemKey: SystemKey
   navId: string
@@ -19,19 +20,19 @@ const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'deliv
 export function parseRoute(location = `${window.location.pathname}${window.location.search}`): AppRoute {
   const url = new URL(location, window.location.origin)
   const parts = url.pathname.split('/').filter(Boolean)
-  if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, systemKey: 'strategy', navId: 'tasks' }
-  if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, systemKey: 'strategy', navId: 'tasks' }
-  if (!parts[2] || parts[2] === 'home') return { isHome: false, isProjectHome: true, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
-  if (parts[2] === 'manage') return { isHome: false, isProjectHome: false, isProjectManagement: true, isModelSettings: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
+  if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
+  if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
+  if (!parts[2] || parts[2] === 'home') return { isHome: false, isProjectHome: true, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
+  if (parts[2] === 'manage') return { isHome: false, isProjectHome: false, isProjectManagement: true, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
   if (parts[2] === 'assets') {
-    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'creative', navId: 'assets', objectId: parts[3], view: url.searchParams.get('view') ?? undefined }
+    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'creative', navId: 'assets', objectId: parts[3], view: url.searchParams.get('view') ?? undefined }
   }
   if (parts[2] === 'provider-jobs') {
-    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'creative', navId: 'production', view: url.searchParams.get('view') ?? undefined }
+    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'creative', navId: 'production', view: url.searchParams.get('view') ?? undefined }
   }
   const normalizedSystem = parts[2] === 'insights' ? 'insight' : parts[2]
   const systemKey = systemKeys.has(normalizedSystem as SystemKey) ? normalizedSystem as SystemKey : 'strategy'
-  return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey, navId: parts[3] || 'tasks', objectId: parts[4], view: url.searchParams.get('view') ?? undefined }
+  return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey, navId: parts[3] || 'tasks', objectId: parts[4], view: url.searchParams.get('view') ?? undefined }
 }
 
 export function projectHomePath(projectId: string) {

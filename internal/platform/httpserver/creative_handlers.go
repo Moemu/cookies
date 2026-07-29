@@ -11,6 +11,48 @@ import (
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
+func (s *Server) listCommercePrerollSources(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.creative.ListCommercePrerollSources(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) prepareCommercePreroll(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.PrepareCommercePrerollRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.PrepareCommercePreroll(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) createCreativeIntake(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -116,6 +158,123 @@ func (s *Server) getCreativeTask(w http.ResponseWriter, r *http.Request) {
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := s.creative.GetTaskDetail(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getViralRemakeWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetTaskDetail(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if value.Task.Format != creative.FormatVideo ||
+		value.Task.PerformanceMode != creative.PerformanceModeViralRemake ||
+		value.VideoDraft == nil ||
+		value.VideoDraft.ViralRemake == nil {
+		s.notFound(w, r)
+		return
+	}
+	if s.providerJobs != nil && rc.Actor.HasScope(creative.ScopeWrite) {
+		for _, candidate := range value.VideoDraft.ViralRemake.Candidates {
+			if candidate.Status != creative.ViralCandidateQueued && candidate.Status != creative.ViralCandidateRunning {
+				continue
+			}
+			job, jobErr := s.providerJobs.GetJob(r.Context(), rc.Actor.OrganizationID, value.Task.ProjectID, candidate.ProviderJobID)
+			if jobErr != nil {
+				continue
+			}
+			reconciled, reconcileErr := s.creative.ReconcileViralCandidate(r.Context(), rc.Actor, value.Task.ProjectID, value.Task.ID, job)
+			if reconcileErr == nil {
+				value = reconciled
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) analyzeViralRemake(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.AnalyzeViralRemake(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateViralPrompt(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.UpdateViralPromptRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateViralPrompt(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) confirmViralGeneration(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.ConfirmViralGenerationRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmViralGeneration(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) transitionViralCandidate(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("candidate_action")
+	if !strings.HasSuffix(action, ":submit-review") {
+		s.notFound(w, r)
+		return
+	}
+	candidateID := strings.TrimSuffix(action, ":submit-review")
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.SubmitViralCandidateReview(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), candidateID,
+	)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -366,12 +525,50 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 		s.writeServiceError(w, r, err)
 		return
 	}
-	requestBody := struct {
+	videoInput := provider.VideoGenerationInput{
+		Prompt: detail.VideoDraft.Prompt, DurationSeconds: detail.VideoDraft.DurationSeconds,
+		AspectRatio: detail.VideoDraft.AspectRatio, Resolution: detail.VideoDraft.Resolution,
+	}
+	var requestBody any = struct {
 		TaskID                string              `json:"task_id"`
 		ModelAlias            string              `json:"model_alias"`
 		Draft                 creative.VideoDraft `json:"draft"`
 		ProjectContextVersion int64               `json:"project_context_version"`
 	}{TaskID: taskID, ModelAlias: modelAlias, Draft: *detail.VideoDraft, ProjectContextVersion: project.ProjectContextVersion}
+	isViral := detail.Task.PerformanceMode == creative.PerformanceModeViralRemake && detail.VideoDraft.ViralRemake != nil
+	if isViral {
+		var promptHash string
+		videoInput, promptHash, err = s.creative.ViralProviderInput(r.Context(), rc.Actor, projectID, taskID)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+		requestBody = struct {
+			TaskID                string                        `json:"task_id"`
+			ModelAlias            string                        `json:"model_alias"`
+			PromptPackageHash     string                        `json:"prompt_package_hash"`
+			Input                 provider.VideoGenerationInput `json:"input"`
+			ProjectContextVersion int64                         `json:"project_context_version"`
+		}{TaskID: taskID, ModelAlias: modelAlias, PromptPackageHash: promptHash, Input: videoInput, ProjectContextVersion: project.ProjectContextVersion}
+	} else if body.GenerationSpec != nil {
+		videoInput, err = body.ProviderInput(projectID, taskID)
+		if err != nil {
+			s.badRequest(w, r, err)
+			return
+		}
+		requestBody = struct {
+			TaskID                string                               `json:"task_id"`
+			ModelAlias            string                               `json:"model_alias"`
+			PromptHash            string                               `json:"prompt_hash"`
+			GenerationSpec        creative.CreativeVideoGenerationSpec `json:"generation_spec"`
+			Approval              creative.VideoGenerationApproval     `json:"approval"`
+			ProjectContextVersion int64                                `json:"project_context_version"`
+		}{
+			TaskID: taskID, ModelAlias: modelAlias, PromptHash: body.Prompt.Hash,
+			GenerationSpec: *body.GenerationSpec, Approval: *body.Approval,
+			ProjectContextVersion: project.ProjectContextVersion,
+		}
+	}
 	hash, err := contract.CanonicalJSONHash(requestBody)
 	if err != nil {
 		s.writeServiceError(w, r, err)
@@ -380,16 +577,18 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 	job, _, err := s.providerJobs.CreateVideoJob(r.Context(), provider.CreateVideoJobRequest{
 		Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: hash,
 		ModelAlias: modelAlias, SourceSystem: "creative", SourceTaskID: taskID,
-		Input: provider.VideoGenerationInput{
-			Prompt: detail.VideoDraft.Prompt, DurationSeconds: detail.VideoDraft.DurationSeconds,
-			AspectRatio: detail.VideoDraft.AspectRatio, Resolution: detail.VideoDraft.Resolution,
-		},
+		Input: videoInput,
 	})
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
 	}
-	if err := s.creative.RegisterVideoJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+	if isViral {
+		if _, err := s.creative.RegisterViralCandidateJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	} else if err := s.creative.RegisterVideoJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
 		s.writeServiceError(w, r, err)
 		return
 	}

@@ -1,0 +1,14 @@
+{
+  "contract_version": "creative-viral-remake-workspace/v1",
+  "task_id": "creativetask_viral_similarity_blocked",
+  "revision": 4,
+  "status": "similarity_blocked",
+  "selected_route_id": "route_manual_viral_remake_v1",
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": false,
+    "production_ready": false
+  },
+  "blockers": ["protected_expression_similarity"],
+  "recoverable": true
+}

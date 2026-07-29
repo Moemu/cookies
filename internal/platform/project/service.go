@@ -22,6 +22,21 @@ type Store interface {
 	GetProject(context.Context, contract.OrganizationID, contract.ProjectID) (Project, error)
 	GetContext(context.Context, contract.OrganizationID, contract.ProjectID) (contract.ProjectContext, error)
 	ListProjects(context.Context, contract.ActorContext) ([]Project, error)
+	CreateBusinessTask(context.Context, BusinessTask) error
+	ListBusinessTasks(context.Context, contract.OrganizationID, contract.ProjectID) ([]BusinessTask, error)
+	GetBusinessTask(context.Context, contract.OrganizationID, contract.ProjectID, string) (BusinessTask, error)
+	UpdateBusinessTask(context.Context, BusinessTask) error
+	CreateOperationalRecord(context.Context, OperationalRecord) error
+	ListOperationalRecords(context.Context, contract.OrganizationID, contract.ProjectID) ([]OperationalRecord, error)
+	GetOperationalRecord(context.Context, contract.OrganizationID, contract.ProjectID, string) (OperationalRecord, error)
+	UpdateOperationalRecord(context.Context, OperationalRecord) error
+	CreateChangeSet(context.Context, ChangeSet) error
+	ListChangeSets(context.Context, contract.OrganizationID, contract.ProjectID) ([]ChangeSet, error)
+	GetChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ChangeSet, error)
+	UpdateChangeSet(context.Context, ChangeSet) error
+	AppendChangeSetEvent(context.Context, ChangeSetEvent) error
+	AppendAuditEvent(context.Context, AuditEvent) error
+	ListAuditEvents(context.Context, contract.OrganizationID, contract.ProjectID) ([]AuditEvent, error)
 }
 
 type Service struct {

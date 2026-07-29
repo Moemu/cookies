@@ -797,6 +797,38 @@ func (s Service) ListBriefVersions(ctx context.Context, actor contract.ActorCont
 	return versions, nil
 }
 
+// ListProjectBriefVersions returns the immutable, confirmed Brief versions that
+// may be selected by downstream Creative work. It deliberately excludes
+// mutable drafts and verifies project authorization before touching rows.
+func (s Service) ListProjectBriefVersions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]BriefVersion, error) {
+	if err := requireScope(actor, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.project(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, briefVersionSelect+`
+		WHERE organization_id = ? AND project_id = ?
+		ORDER BY confirmed_at DESC, brief_id ASC, version DESC`,
+		actor.OrganizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	versions := make([]BriefVersion, 0)
+	for rows.Next() {
+		version, scanErr := scanBriefVersion(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return versions, nil
+}
+
 func (s Service) GetBriefVersion(ctx context.Context, actor contract.ActorContext, briefID string, version int64) (BriefVersion, error) {
 	if err := requireScope(actor, ScopeRead); err != nil {
 		return BriefVersion{}, err

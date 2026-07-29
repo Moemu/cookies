@@ -5,15 +5,13 @@ info:
   license:
     name: Apache License 2.0
     identifier: Apache-2.0
-  description: >-
-    Shared, business-agnostic platform APIs. Vertical systems publish their own
-    contracts under /api/{system}/v1. Organization scope is resolved from
-    trusted identity. Project scope comes from the path and is re-authorized.
+  description: Shared, business-agnostic platform APIs. Vertical systems publish their own contracts under /api/{system}/v1. Organization scope
+    is resolved from trusted identity. Project scope comes from the path and is re-authorized.
 servers:
-  - url: /
-    description: Current cookies platform host
+- url: /
+  description: Current cookies platform host
 security:
-  - cookiesAuth: []
+- cookiesAuth: []
 paths:
   /platform/v1/auth/login:
     post:
@@ -26,23 +24,36 @@ paths:
           application/json:
             schema:
               type: object
-              required: [username, password]
+              required:
+              - username
+              - password
               properties:
-                username: {type: string, minLength: 1, maxLength: 255}
-                password: {type: string, minLength: 1, maxLength: 4096}
+                username:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                password:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
               additionalProperties: false
       responses:
-        '200': {description: Session created.}
-        '401': {$ref: '#/components/responses/Unauthenticated'}
-        '423': {description: Credential temporarily locked.}
+        '200':
+          description: Session created.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '423':
+          description: Credential temporarily locked.
   /platform/v1/auth/logout:
     post:
       operationId: logoutPasswordSession
       summary: Revoke the current session and expire its cookie.
       security: []
       responses:
-        '204': {description: Session revoked or already absent.}
-        '400': {description: The session cookie is malformed and has been expired.}
+        '204':
+          description: Session revoked or already absent.
+        '400':
+          description: The session cookie is malformed and has been expired.
   /platform/v1/context:
     get:
       operationId: getRequestContext
@@ -61,7 +72,7 @@ paths:
       operationId: getProjectContext
       summary: Verify project access and return the scoped request context.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ProjectID'
       responses:
         '200':
           description: The caller is authorized for the requested project.
@@ -96,18 +107,25 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              required:
+              - name
               properties:
-                name: {type: string, minLength: 1, maxLength: 255}
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
               additionalProperties: false
       responses:
         '201':
           description: Brand created.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Brand'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthenticated'}
+              schema:
+                $ref: '#/components/schemas/Brand'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /platform/v1/projects:
     get:
       operationId: listProjects
@@ -119,10 +137,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                - items
                 properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/Project'}}
-        '401': {$ref: '#/components/responses/Unauthenticated'}
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
     post:
       operationId: createProject
       summary: Create a draft or brand-bound active project.
@@ -130,123 +153,187 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/CreateProjectRequest'}
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
       responses:
         '201':
           description: Project created.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Project'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthenticated'}
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /platform/v1/projects/{project_id}/knowledge/documents:
     get:
       operationId: listKnowledgeDocuments
       summary: List parsed Project documents without returning extracted content.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ProjectID'
       responses:
-        '200': {description: Project document list.}
-        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '200':
+          description: Project document list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeDocumentList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
     post:
       operationId: createKnowledgeDocument
       summary: Scan, store, and parse one Markdown or DOCX document.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ProjectID'
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required:
+              - file
               properties:
-                file: {type: string, contentEncoding: binary}
+                file:
+                  type: string
+                  contentEncoding: binary
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportKnowledgeDocumentRequest'
       responses:
-        '201': {description: Document parsed and stored.}
-        '400': {$ref: '#/components/responses/BadRequest'}
+        '201':
+          description: Document parsed and stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeDocument'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
   /platform/v1/projects/{project_id}/knowledge/research-runs:
     post:
       operationId: createExternalResearchRun
       summary: Execute one explicitly confirmed web or MCP research call.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ProjectID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [mode, query, document_ids, disclosed_fields, confirmed]
+              required:
+              - mode
+              - query
+              - document_ids
+              - disclosed_fields
+              - confirmed
               properties:
-                mode: {enum: [web, mcp]}
-                query: {type: string, minLength: 1, maxLength: 2000}
-                document_ids: {type: array, maxItems: 20, items: {type: string}}
-                disclosed_fields: {type: array, items: {type: string}}
-                confirmed: {const: true}
+                mode:
+                  enum:
+                  - web
+                  - mcp
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                document_ids:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: string
+                disclosed_fields:
+                  type: array
+                  items:
+                    type: string
+                confirmed:
+                  const: true
               additionalProperties: false
       responses:
-        '201': {description: Research run and any ResearchArtifacts.}
-        '400': {$ref: '#/components/responses/BadRequest'}
+        '201':
+          description: Research run and any ResearchArtifacts.
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /platform/v1/projects/{project_id}/assets/uploads:
     post:
       operationId: createAssetUpload
       summary: Create an image upload session and a short-lived signed TOS PUT.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/CreateUploadRequest'}
+            schema:
+              $ref: '#/components/schemas/CreateUploadRequest'
       responses:
         '201':
           description: Upload session created.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/CreateUploadResponse'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '409': {$ref: '#/components/responses/Conflict'}
+              schema:
+                $ref: '#/components/schemas/CreateUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /platform/v1/projects/{project_id}/assets/uploads/{upload_id}:
     put:
       operationId: proxyAssetUpload
       summary: Local-development/fallback upload proxy; production clients use the signed PUT.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - $ref: '#/components/parameters/UploadID'
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/UploadID'
       requestBody:
         required: true
         content:
-          image/png: {schema: {type: string, contentEncoding: binary}}
-          image/jpeg: {schema: {type: string, contentEncoding: binary}}
+          image/png:
+            schema:
+              type: string
+              contentEncoding: binary
+          image/jpeg:
+            schema:
+              type: string
+              contentEncoding: binary
       responses:
-        '204': {description: Upload stored in quarantine.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '204':
+          description: Upload stored in quarantine.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
   /platform/v1/projects/{project_id}/assets/uploads/{upload_id}:finalize:
     post:
       operationId: finalizeAssetUpload
       summary: Validate, scan, persist, and attach an uploaded image to the project.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - $ref: '#/components/parameters/UploadID'
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/UploadID'
       responses:
         '200':
           description: Upload finalized.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/UploadSession'}
-        '409': {$ref: '#/components/responses/Conflict'}
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /platform/v1/projects/{project_id}/assets:
     get:
       operationId: listProjectAssets
       summary: List immutable asset versions attached to the project.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - name: limit
-          in: query
-          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
       responses:
         '200':
           description: Project asset list.
@@ -254,62 +341,110 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                - items
                 properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/ProjectAsset'}}
-        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProjectAsset'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
   /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}:
     delete:
       operationId: removeProjectAssetVersion
       summary: Remove an immutable asset version from the project library without deleting its durable record.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - {name: asset_id, in: path, required: true, schema: {type: string}}
-        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      - $ref: '#/components/parameters/ProjectID'
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
       responses:
         '204':
           description: Project asset relationship removed or already absent.
-        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
   /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/preview:
     get:
       operationId: previewAssetVersion
       summary: Re-authorize and return a short-lived signed preview request.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - {name: asset_id, in: path, required: true, schema: {type: string}}
-        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      - $ref: '#/components/parameters/ProjectID'
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
       responses:
         '200':
           description: Private no-store preview request.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/SignedRequest'}
-        '404': {$ref: '#/components/responses/NotFound'}
+              schema:
+                $ref: '#/components/schemas/SignedRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/content:
     get:
       operationId: streamAssetVersionContent
       summary: Stream authorized asset content when the active blob provider cannot issue an external signed URL.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - {name: asset_id, in: path, required: true, schema: {type: string}}
-        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      - $ref: '#/components/parameters/ProjectID'
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
       responses:
         '200':
           description: Private no-store asset bytes.
           headers:
-            Cache-Control: {schema: {type: string, example: 'private, no-store'}}
-            X-Content-Type-Options: {schema: {type: string, example: nosniff}}
+            Cache-Control:
+              schema:
+                type: string
+                example: private, no-store
+            X-Content-Type-Options:
+              schema:
+                type: string
+                example: nosniff
           content:
-            image/jpeg: {schema: {type: string, format: binary}}
-            image/png: {schema: {type: string, format: binary}}
-        '404': {$ref: '#/components/responses/NotFound'}
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
   /platform/v1/projects/{project_id}/model/jobs:
     post:
       operationId: createModelJob
       summary: Create an asynchronous image-generation model job.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -331,8 +466,8 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
   /platform/v1/projects/{project_id}/model/jobs/{job_id}:
     parameters:
-      - $ref: '#/components/parameters/ProjectID'
-      - $ref: '#/components/parameters/JobID'
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/JobID'
     get:
       operationId: getModelJob
       summary: Return the current public model job state.
@@ -351,16 +486,12 @@ paths:
     post:
       operationId: createGeneratedAssetIntake
       summary: Start admission of one provider output into the project asset library.
-      description: >-
-        This is the only route by which provider outputs become durable project
-        assets. Assets resolves the opaque ProviderOutputRef through an injected
-        provider adapter, verifies actual size, MIME and SHA-256, scans the
-        bytes, and persists them asynchronously. The request hash is SHA-256 of
-        the RFC 8785 JCS canonical request body. The default idempotency key is
-        provider-job-{provider_job_id}-output-{output_id}.
+      description: This is the only route by which provider outputs become durable project assets. Assets resolves the opaque ProviderOutputRef
+        through an injected provider adapter, verifies actual size, MIME and SHA-256, scans the bytes, and persists them asynchronously. The request
+        hash is SHA-256 of the RFC 8785 JCS canonical request body. The default idempotency key is provider-job-{provider_job_id}-output-{output_id}.
       parameters:
-        - $ref: '#/components/parameters/ProjectID'
-        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -389,8 +520,8 @@ paths:
           $ref: '#/components/responses/Conflict'
   /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}:
     parameters:
-      - $ref: '#/components/parameters/ProjectID'
-      - $ref: '#/components/parameters/IntakeID'
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/IntakeID'
     get:
       operationId: getGeneratedAssetIntake
       summary: Return the current state of a single-output generated intake.
@@ -407,6 +538,1290 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}:
+    get:
+      operationId: getProjectDetail
+      summary: Return the project main-flow aggregate for frontend runtime.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project detail aggregate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/tasks:
+    get:
+      operationId: listProjectTasks
+      summary: List business tasks for one project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project task list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BusinessTask'
+                additionalProperties: false
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createProjectTask
+      summary: Create a business task in one project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBusinessTaskRequest'
+      responses:
+        '201':
+          description: Task created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessTask'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/tasks/{task_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/TaskID'
+    get:
+      operationId: getProjectTask
+      summary: Return one business task.
+      responses:
+        '200':
+          description: Business task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessTask'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateProjectTask
+      summary: Update mutable business task fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBusinessTaskRequest'
+      responses:
+        '200':
+          description: Updated business task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessTask'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/operations:
+    get:
+      operationId: listProjectOperations
+      summary: List operational records for one project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+      responses:
+        '200':
+          description: Operational record list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OperationalRecord'
+                additionalProperties: false
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createProjectOperation
+      summary: Append an operational record for one project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertOperationalRecordRequest'
+      responses:
+        '201':
+          description: Operational record created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/operations/{operation_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/OperationID'
+    get:
+      operationId: getProjectOperation
+      summary: Return one operational record.
+      responses:
+        '200':
+          description: Operational record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalRecord'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: upsertProjectOperation
+      summary: Create or replace a stable operational record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertOperationalRecordRequest'
+      responses:
+        '200':
+          description: Operational record upserted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationalRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/change-sets:
+    get:
+      operationId: listProjectChangeSets
+      summary: List simulated delivery ChangeSets for one project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: ChangeSet list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChangeSet'
+                additionalProperties: false
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createProjectChangeSet
+      summary: Create a draft delivery ChangeSet simulation.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeSetRequest'
+      responses:
+        '201':
+          description: ChangeSet created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ChangeSetID'
+    get:
+      operationId: getProjectChangeSet
+      summary: Return one ChangeSet with simulation evidence.
+      responses:
+        '200':
+          description: ChangeSet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeSet'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/preflight:
+    post:
+      operationId: preflightProjectChangeSet
+      summary: Run deterministic preflight checks for a ChangeSet.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+      responses:
+        '200':
+          description: ChangeSet after preflight.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeSet'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/approve:
+    post:
+      operationId: approveProjectChangeSet
+      summary: Record simulated approval evidence for a ChangeSet.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeSetApprovalRequest'
+      responses:
+        '200':
+          description: Approved ChangeSet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/execute:
+    post:
+      operationId: executeProjectChangeSet
+      summary: Execute a simulated ChangeSet and attach execution evidence.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+      responses:
+        '200':
+          description: Executed ChangeSet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeSet'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/change-sets/{change_set_id}/rollback:
+    post:
+      operationId: rollbackProjectChangeSet
+      summary: Roll back a simulated ChangeSet and attach rollback evidence.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackChangeSetRequest'
+      responses:
+        '200':
+          description: Rolled-back ChangeSet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/audit-events:
+    get:
+      operationId: listProjectAuditEvents
+      summary: List append-only audit events for one project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: entity_type
+        in: query
+        schema:
+          type: string
+      - name: entity_id
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+      responses:
+        '200':
+          description: Audit event list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEvent'
+                additionalProperties: false
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/assets/features:
+    get:
+      operationId: listAssetFeatures
+      summary: List project-scoped multimodal asset feature payloads.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+      responses:
+        '200':
+          description: Asset feature list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetFeatureList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/features/{feature_version}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - name: asset_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    - name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: feature_version
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 96
+    get:
+      operationId: getAssetFeature
+      summary: Return one feature payload; missing payloads return feature null.
+      responses:
+        '200':
+          description: Asset feature lookup result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetFeatureLookup'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    put:
+      operationId: putAssetFeature
+      summary: Upsert one project-scoped asset feature payload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetFeature'
+      responses:
+        '200':
+          description: Asset feature saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetFeature'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-plans:
+    get:
+      operationId: listRemixPlans
+      summary: List saved AI remix plans for a project.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: Remix plan list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixPlanList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createRemixPlan
+      summary: Persist a clip-compatible or Shot-based AI remix plan.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRemixPlanRequest'
+      responses:
+        '201':
+          description: Remix plan created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixPlan'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-plans/{plan_id}:
+    get:
+      operationId: getRemixPlan
+      summary: Return one saved remix plan.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Remix plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixPlan'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-render-jobs:
+    post:
+      operationId: createRemixRenderJob
+      summary: Create an idempotent remix render job from a saved plan.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRemixRenderJobRequest'
+      responses:
+        '202':
+          description: Render job accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixRenderJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}:
+    get:
+      operationId: getRemixRenderJob
+      summary: Return current remix render job state, progress and output asset reference.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Remix render job.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixRenderJob'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-render-jobs/{job_id}/quality-report:
+    get:
+      operationId: getRemixRenderJobQualityReport
+      summary: Return the quality report attached to a render job, or quality_report null.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Render job quality report lookup result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityReportLookup'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-quality-reports:
+    post:
+      operationId: createRemixQualityReport
+      summary: Create a deterministic MVP quality report for a render output.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQualityReportRequest'
+      responses:
+        '201':
+          description: Quality report created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-quality-reports/{report_id}:
+    get:
+      operationId: getRemixQualityReport
+      summary: Return one quality report.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: report_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Quality report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityReport'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-hit-analyses:
+    post:
+      operationId: createRemixHitAnalysis
+      summary: Analyze a source video into deterministic hit-video structure.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHitAnalysisRequest'
+      responses:
+        '201':
+          description: Hit analysis created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HitAnalysis'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-hit-analyses/{analysis_id}:
+    get:
+      operationId: getRemixHitAnalysis
+      summary: Return one hit analysis.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: analysis_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Hit analysis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HitAnalysis'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-product-mappings:
+    post:
+      operationId: createRemixProductMapping
+      summary: Map a hit analysis to target product assets and constraints.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductMappingRequest'
+      responses:
+        '201':
+          description: Product mapping created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductMapping'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-product-mappings/{mapping_id}:
+    get:
+      operationId: getRemixProductMapping
+      summary: Return one product mapping.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: mapping_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Product mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductMapping'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-product-mappings/{mapping_id}/plans:
+    post:
+      operationId: generateRemixPlanFromProductMapping
+      summary: Generate a Shot-based remix plan from a product mapping.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: mapping_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '201':
+          description: Remix plan generated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixPlan'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-prerolls:
+    post:
+      operationId: createRemixPreroll
+      summary: Draft or generate a 3-10 second opening preroll hook.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePrerollRequest'
+      responses:
+        '201':
+          description: Preroll created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preroll'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-prerolls/{preroll_id}:
+    get:
+      operationId: getRemixPreroll
+      summary: Return one preroll.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: preroll_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Preroll.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preroll'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-prerolls/{preroll_id}/apply:
+    post:
+      operationId: applyRemixPreroll
+      summary: Insert a ready preroll into the opening segment and return the updated plan.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: preroll_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Updated remix plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixPlan'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-feedback-events:
+    get:
+      operationId: listRemixFeedbackEvents
+      summary: List append-only remix feedback events.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: target_type
+        in: query
+        schema:
+          $ref: '#/components/schemas/FeedbackTargetType'
+      - name: target_id
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Feedback event list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackEventList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createRemixFeedbackEvent
+      summary: Append one feedback event for a plan, render job or asset.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFeedbackEventRequest'
+      responses:
+        '201':
+          description: Feedback event appended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackEvent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-asset-performance:
+    get:
+      operationId: getRemixAssetPerformance
+      summary: Return deterministic asset performance aggregates from feedback events.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Asset performance list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetPerformanceList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-planner-weight-snapshots:
+    post:
+      operationId: createRemixPlannerWeightSnapshot
+      summary: Create planner weights from current deterministic asset performance aggregates.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '201':
+          description: Planner weight snapshot created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlannerWeightSnapshot'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-eval-cases:
+    get:
+      operationId: listRemixEvalCases
+      summary: List seeded and user-created Remix-MMLU eval cases.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Eval case list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createRemixEvalCase
+      summary: Create or replace one project-scoped eval case.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalCaseRequest'
+      responses:
+        '201':
+          description: Eval case created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCase'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/remix-eval-runs:
+    post:
+      operationId: createRemixEvalRun
+      summary: Run deterministic scoring for matching Remix-MMLU cases.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalRunRequest'
+      responses:
+        '202':
+          description: Eval run completed by the deterministic MVP scorer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/remix-eval-runs/{run_id}:
+    get:
+      operationId: getRemixEvalRun
+      summary: Return one eval run and per-case results.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Eval run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRun'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/agent-runs:
+    get:
+      operationId: listAgentRuns
+      summary: List auditable project-scoped agent runs.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: Agent run list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunList'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+    post:
+      operationId: createAgentRun
+      summary: Start the deterministic render diagnosis agent workflow.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRunRequest'
+      responses:
+        '202':
+          description: Agent run accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/agent-runs/{agent_run_id}:
+    get:
+      operationId: getAgentRun
+      summary: Return one agent run with steps, tool calls and trace spans.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: agent_run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Agent run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRun'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/agent-runs/{agent_run_id}/cancel:
+    post:
+      operationId: cancelAgentRun
+      summary: Cancel an agent run if it has not already completed.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: agent_run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Cancelled or terminal agent run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRun'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/knowledge/search:
+    get:
+      operationId: searchKnowledge
+      summary: Search imported knowledge chunks with citations.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 160
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+      responses:
+        '200':
+          description: Knowledge search results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeSearchResultList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /api/strategy/v1/projects/{project_id}/proposals:
+    post:
+      operationId: createStrategyProposal
+      summary: Create a project-scoped Volcad proposal input.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposalInput'
+      responses:
+        '201':
+          description: Proposal persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyProposal'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+  /api/strategy/v1/projects/{project_id}/proposals/{proposal_id}/generate:
+    post:
+      operationId: generateProposalStrategy
+      summary: Generate a structured strategy through the configured server-side text provider.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: proposal_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Generated strategy awaiting explicit approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyOutput'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/strategy/v1/projects/{project_id}/strategies/{strategy_id}/approve:
+    post:
+      operationId: approveProposalStrategy
+      summary: Explicitly approve a generated strategy for creative planning.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: strategy_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Approved strategy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyOutput'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/creative/v1/projects/{project_id}/plans:
+    post:
+      operationId: createCreativePlan
+      summary: Derive an image or video prompt plan from an approved strategy.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCreativePlanRequest'
+      responses:
+        '201':
+          description: Creative plan persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreativePlan'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/creative/v1/projects/{project_id}/plans/{plan_id}:
+    get:
+      operationId: getCreativePlan
+      summary: Return a project-scoped creative plan without provider handles or storage URLs.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Creative plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreativePlan'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/creative/v1/projects/{project_id}/plans/{plan_id}/image-jobs:
+    post:
+      operationId: createCreativeImageJob
+      summary: Submit an existing image plan through the Provider job boundary.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCreativeImageJobRequest'
+      responses:
+        '202':
+          description: Provider job accepted; final assets enter generated intake.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 components:
   parameters:
     ProjectID:
@@ -424,7 +1839,7 @@ components:
         type: string
         minLength: 1
         maxLength: 255
-        pattern: '^[A-Za-z0-9_-]+$'
+        pattern: ^[A-Za-z0-9_-]+$
     OptionalIdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -434,7 +1849,7 @@ components:
         type: string
         minLength: 1
         maxLength: 255
-        pattern: '^[A-Za-z0-9_-]+$'
+        pattern: ^[A-Za-z0-9_-]+$
     JobID:
       name: job_id
       in: path
@@ -451,6 +1866,27 @@ components:
         minLength: 1
     UploadID:
       name: upload_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    TaskID:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    OperationID:
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ChangeSetID:
+      name: change_set_id
       in: path
       required: true
       schema:
@@ -495,7 +1931,10 @@ components:
   schemas:
     RequestContext:
       type: object
-      required: [request_id, trace_id, actor]
+      required:
+      - request_id
+      - trace_id
+      - actor
       properties:
         request_id:
           type: string
@@ -505,17 +1944,24 @@ components:
           $ref: '#/components/schemas/ActorContext'
     ActorContext:
       type: object
-      required: [organization_id, principal, scopes]
+      required:
+      - organization_id
+      - principal
+      - scopes
       properties:
         organization_id:
           type: string
         principal:
           type: object
-          required: [kind, id]
+          required:
+          - kind
+          - id
           properties:
             kind:
               type: string
-              enum: [user, service]
+              enum:
+              - user
+              - service
             id:
               type: string
         scopes:
@@ -524,15 +1970,25 @@ components:
             type: string
     ModelJobCreateRequest:
       type: object
-      required: [capability, input, project_context_version]
+      required:
+      - capability
+      - input
+      - project_context_version
       properties:
         capability:
           type: string
-          enum: [image.generate]
+          enum:
+          - image.generate
+          - image.edit
+          - video.generate
         model_alias:
           type: string
-          examples: [cookies.image.standard]
+          examples:
+          - cookies.image.standard
         input:
+          oneOf:
+          - $ref: '#/components/schemas/ImageGenerationInput'
+          - $ref: '#/components/schemas/VideoGenerationInput'
           $ref: '#/components/schemas/ImageGenerationInput'
         project_context_version:
           type: integer
@@ -548,7 +2004,10 @@ components:
       additionalProperties: false
     ImageGenerationInput:
       type: object
-      required: [prompt, width, height]
+      required:
+      - prompt
+      - width
+      - height
       properties:
         prompt:
           type: string
@@ -560,21 +2019,78 @@ components:
         height:
           type: integer
           minimum: 1
+        source_assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectAssetRef'
       additionalProperties: false
+    VideoGenerationInput:
+      type: object
+      additionalProperties: false
+      required:
+      - prompt
+      - duration_seconds
+      - aspect_ratio
+      - resolution
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          writeOnly: true
+        duration_seconds:
+          type: integer
+          minimum: 4
+          maximum: 15
+        aspect_ratio:
+          enum:
+          - '9:16'
+          - '16:9'
+          - '1:1'
+        resolution:
+          enum:
+          - 480p
+          - 720p
+          - 1080p
+        audio_policy:
+          enum:
+          - silent
+          - generated_audio
+        input_mode:
+          enum:
+          - text_only
+          - reference_image
+          - first_last_frame
+        conditioning_assets:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - role
+            - reference
+            properties:
+              role:
+                enum:
+                - reference_image
+                - first_frame
+                - last_frame
+              reference:
+                $ref: '#/components/schemas/ProjectAssetRef'
     Job:
       type: object
       required:
-        - id
-        - kind
-        - organization_id
-        - status
-        - progress
-        - created_at
-        - updated_at
-        - cancellable
-        - attempt_count
-        - max_attempts
-        - version
+      - id
+      - kind
+      - organization_id
+      - status
+      - progress
+      - created_at
+      - updated_at
+      - cancellable
+      - attempt_count
+      - max_attempts
+      - version
       properties:
         id:
           type: string
@@ -587,11 +2103,11 @@ components:
         status:
           type: string
           enum:
-            - queued
-            - running
-            - succeeded
-            - failed
-            - cancelled
+          - queued
+          - running
+          - succeeded
+          - failed
+          - cancelled
         progress:
           type: integer
           minimum: 0
@@ -627,20 +2143,20 @@ components:
     ProviderJob:
       type: object
       required:
-        - id
-        - kind
-        - organization_id
-        - project_id
-        - execution_status
-        - provider_status
-        - progress
-        - project_asset_refs
-        - error
-        - attempt_count
-        - max_attempts
-        - version
-        - created_at
-        - updated_at
+      - id
+      - kind
+      - organization_id
+      - project_id
+      - execution_status
+      - provider_status
+      - progress
+      - project_asset_refs
+      - error
+      - attempt_count
+      - max_attempts
+      - version
+      - created_at
+      - updated_at
       properties:
         id:
           type: string
@@ -656,10 +2172,24 @@ components:
           minLength: 1
         execution_status:
           type: string
-          enum: [queued, running, succeeded, failed, cancelled]
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          - cancelled
         provider_status:
           type: string
-          enum: [submitted, running, outputs_ready, ingesting, succeeded, partially_succeeded, failed, cancelled, expired]
+          enum:
+          - submitted
+          - running
+          - outputs_ready
+          - ingesting
+          - succeeded
+          - partially_succeeded
+          - failed
+          - cancelled
+          - expired
         progress:
           type: integer
           minimum: 0
@@ -670,8 +2200,8 @@ components:
             $ref: '#/components/schemas/ProjectAssetRef'
         error:
           oneOf:
-            - $ref: '#/components/schemas/JobError'
-            - type: 'null'
+          - $ref: '#/components/schemas/JobError'
+          - type: 'null'
         attempt_count:
           type: integer
           minimum: 0
@@ -690,7 +2220,10 @@ components:
       additionalProperties: false
     JobError:
       type: object
-      required: [code, message, retryable]
+      required:
+      - code
+      - message
+      - retryable
       properties:
         code:
           type: string
@@ -701,7 +2234,9 @@ components:
       additionalProperties: false
     ResourceRef:
       type: object
-      required: [type, id]
+      required:
+      - type
+      - id
       properties:
         type:
           type: string
@@ -713,7 +2248,10 @@ components:
       additionalProperties: false
     GeneratedAssetIntakeRequest:
       type: object
-      required: [provider_job_id, output, provenance]
+      required:
+      - provider_job_id
+      - output
+      - provenance
       properties:
         provider_job_id:
           type: string
@@ -726,12 +2264,12 @@ components:
     ProviderOutputRef:
       type: object
       required:
-        - provider_code
-        - provider_job_id
-        - output_id
-        - retrieval_expires_at
-        - declared_mime_type
-        - declared_size_bytes
+      - provider_code
+      - provider_job_id
+      - output_id
+      - retrieval_expires_at
+      - declared_mime_type
+      - declared_size_bytes
       properties:
         provider_code:
           type: string
@@ -752,19 +2290,21 @@ components:
           type: integer
           minimum: 1
         declared_sha256:
-          type: [string, 'null']
-          pattern: '^[0-9a-f]{64}$'
+          type:
+          - string
+          - 'null'
+          pattern: ^[0-9a-f]{64}$
       additionalProperties: false
     GenerationProvenance:
       type: object
       required:
-        - capability
-        - provider_code
-        - model_alias
-        - model_version
-        - source_asset_refs
-        - project_context_version
-        - generated_at
+      - capability
+      - provider_code
+      - model_alias
+      - model_version
+      - source_asset_refs
+      - project_context_version
+      - generated_at
       properties:
         capability:
           type: string
@@ -776,8 +2316,8 @@ components:
           type: string
         prompt_ref:
           oneOf:
-            - $ref: '#/components/schemas/ResourceRef'
-            - type: 'null'
+          - $ref: '#/components/schemas/ResourceRef'
+          - type: 'null'
         source_asset_refs:
           type: array
           items:
@@ -791,7 +2331,13 @@ components:
       additionalProperties: false
     GeneratedAssetIntakeResponse:
       type: object
-      required: [id, provider_job_id, output_id, status, project_asset_ref, error]
+      required:
+      - id
+      - provider_job_id
+      - output_id
+      - status
+      - project_asset_ref
+      - error
       properties:
         id:
           type: string
@@ -804,19 +2350,26 @@ components:
           minLength: 1
         status:
           type: string
-          enum: [queued, running, succeeded, failed]
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
         project_asset_ref:
           oneOf:
-            - $ref: '#/components/schemas/ProjectAssetRef'
-            - type: 'null'
+          - $ref: '#/components/schemas/ProjectAssetRef'
+          - type: 'null'
         error:
           oneOf:
-            - $ref: '#/components/schemas/JobError'
-            - type: 'null'
+          - $ref: '#/components/schemas/JobError'
+          - type: 'null'
       additionalProperties: false
     ProjectRef:
       type: object
-      required: [organization_id, project_id, project_context_version]
+      required:
+      - organization_id
+      - project_id
+      - project_context_version
       properties:
         organization_id:
           type: string
@@ -830,7 +2383,12 @@ components:
       additionalProperties: false
     ProjectContext:
       type: object
-      required: [organization_id, project_id, brand_id, product_ids, project_context_version]
+      required:
+      - organization_id
+      - project_id
+      - brand_id
+      - product_ids
+      - project_context_version
       properties:
         organization_id:
           type: string
@@ -839,7 +2397,9 @@ components:
           type: string
           minLength: 1
         brand_id:
-          type: [string, 'null']
+          type:
+          - string
+          - 'null'
           minLength: 1
         product_ids:
           type: array
@@ -856,7 +2416,9 @@ components:
       additionalProperties: false
     AssetVersionRef:
       type: object
-      required: [asset_id, version]
+      required:
+      - asset_id
+      - version
       properties:
         asset_id:
           type: string
@@ -867,7 +2429,9 @@ components:
       additionalProperties: false
     ProjectAssetRef:
       type: object
-      required: [project_id, asset_version]
+      required:
+      - project_id
+      - asset_version
       properties:
         project_id:
           type: string
@@ -877,172 +2441,2931 @@ components:
       additionalProperties: false
     CurrentIdentity:
       type: object
-      required: [actor, organization, user, membership]
+      required:
+      - actor
+      - organization
+      - user
+      - membership
       properties:
-        actor: {$ref: '#/components/schemas/ActorContext'}
-        organization: {$ref: '#/components/schemas/Organization'}
+        actor:
+          $ref: '#/components/schemas/ActorContext'
+        organization:
+          $ref: '#/components/schemas/Organization'
         user:
-          oneOf: [{$ref: '#/components/schemas/User'}, {type: 'null'}]
+          oneOf:
+          - $ref: '#/components/schemas/User'
+          - type: 'null'
         membership:
-          oneOf: [{$ref: '#/components/schemas/OrganizationMembership'}, {type: 'null'}]
+          oneOf:
+          - $ref: '#/components/schemas/OrganizationMembership'
+          - type: 'null'
       additionalProperties: false
     Organization:
       type: object
-      required: [id, name, status, created_at, updated_at]
+      required:
+      - id
+      - name
+      - status
+      - created_at
+      - updated_at
       properties:
-        id: {type: string}
-        name: {type: string}
-        status: {type: string, enum: [active, suspended, archived]}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          - archived
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
       additionalProperties: false
     User:
       type: object
-      required: [id, display_name, status, created_at, updated_at]
+      required:
+      - id
+      - display_name
+      - status
+      - created_at
+      - updated_at
       properties:
-        id: {type: string}
-        display_name: {type: string}
-        status: {type: string, enum: [active, suspended, archived]}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        id:
+          type: string
+        display_name:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          - archived
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
       additionalProperties: false
     OrganizationMembership:
       type: object
-      required: [organization_id, user_id, role, status, created_at, updated_at]
+      required:
+      - organization_id
+      - user_id
+      - role
+      - status
+      - created_at
+      - updated_at
       properties:
-        organization_id: {type: string}
-        user_id: {type: string}
-        role: {type: string}
-        status: {type: string, enum: [active, suspended, removed]}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        organization_id:
+          type: string
+        user_id:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          - removed
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
       additionalProperties: false
     Brand:
       type: object
-      required: [id, organization_id, name, status]
+      required:
+      - id
+      - organization_id
+      - name
+      - status
       properties:
-        id: {type: string}
-        organization_id: {type: string}
-        name: {type: string}
-        status: {type: string, enum: [active, archived]}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - archived
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
       additionalProperties: false
     CreateProjectRequest:
       type: object
-      required: [name, product_ids, activate]
+      required:
+      - name
+      - product_ids
+      - activate
       properties:
-        name: {type: string, minLength: 1, maxLength: 255}
-        primary_brand_id: {type: [string, 'null']}
-        product_ids: {type: array, uniqueItems: true, items: {type: string}}
-        activate: {type: boolean}
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        primary_brand_id:
+          type:
+          - string
+          - 'null'
+        product_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        activate:
+          type: boolean
       additionalProperties: false
     Project:
       type: object
-      required: [id, organization_id, name, status, primary_brand_id, project_context_version]
+      required:
+      - id
+      - organization_id
+      - name
+      - status
+      - primary_brand_id
+      - project_context_version
       properties:
-        id: {type: string}
-        organization_id: {type: string}
-        name: {type: string}
-        status: {type: string, enum: [draft, active, archived]}
-        primary_brand_id: {type: [string, 'null']}
-        brand_guideline_version_id: {type: string}
-        project_context_version: {type: integer, minimum: 1}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        primary_brand_id:
+          type:
+          - string
+          - 'null'
+        brand_guideline_version_id:
+          type: string
+        project_context_version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ProjectDetail:
+      type: object
+      required:
+      - project
+      - runtime
+      - artifacts
+      - assets
+      - tasks
+      - operations
+      - change_sets
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+        runtime:
+          $ref: '#/components/schemas/ProjectRuntime'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectArtifactSummary'
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectAsset'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessTask'
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationalRecord'
+        change_sets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeSet'
+      additionalProperties: false
+    ProjectRuntime:
+      type: object
+      required:
+      - code
+      - stage
+      - progress
+      - status
+      - owner
+      - budget
+      - currency
+      - timezone
+      - updated_at
+      properties:
+        code:
+          type: string
+        brand:
+          type: string
+        product:
+          type: string
+        goal:
+          type: string
+        stage:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        status:
+          type: string
+          enum:
+          - active
+          - completed
+          - blocked
+        owner:
+          type: string
+        budget:
+          type: number
+          minimum: 0
+        currency:
+          type: string
+          enum:
+          - CNY
+        timezone:
+          type: string
+          enum:
+          - Asia/Shanghai
+        knowledge_count:
+          type: integer
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ProjectArtifactSummary:
+      type: object
+      required:
+      - key
+      - label
+      - version
+      - status
+      - owner
+      - updated_at
+      - summary
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+          enum:
+          - brief
+          - strategy
+          - creative
+          - insight
+          - delivery
+        label:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        owner:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        source_version:
+          type: string
+        asset_ref:
+          oneOf:
+          - $ref: '#/components/schemas/ProjectAssetRef'
+          - type: 'null'
+      additionalProperties: false
+    BusinessTask:
+      type: object
+      required:
+      - id
+      - project_id
+      - type
+      - name
+      - objective
+      - status
+      - source_task_ids
+      - source_artifact_ids
+      - output_artifact_ids
+      - version
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        type:
+          $ref: '#/components/schemas/BusinessTaskType'
+        name:
+          type: string
+        objective:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - in_progress
+          - ready
+          - completed
+          - failed
+        source_task_ids:
+          type: array
+          items:
+            type: string
+        source_artifact_ids:
+          type: array
+          items:
+            type: string
+        output_artifact_ids:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    BusinessTaskType:
+      type: string
+      enum:
+      - strategy
+      - creative
+      - video
+      - brand_video
+      - short_drama_preroll
+      - game_preroll
+      - commerce_preroll
+      - viral_remake
+      - video_edit
+    CreateBusinessTaskRequest:
+      type: object
+      required:
+      - type
+      - name
+      - objective
+      properties:
+        type:
+          $ref: '#/components/schemas/BusinessTaskType'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        objective:
+          type: string
+          minLength: 1
+        source_task_ids:
+          type: array
+          items:
+            type: string
+        source_artifact_ids:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    UpdateBusinessTaskRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        objective:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum:
+          - draft
+          - in_progress
+          - ready
+          - completed
+          - failed
+        source_task_ids:
+          type: array
+          items:
+            type: string
+        source_artifact_ids:
+          type: array
+          items:
+            type: string
+        output_artifact_ids:
+          type: array
+          items:
+            type: string
+        expected_version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    OperationalRecord:
+      type: object
+      required:
+      - id
+      - project_id
+      - kind
+      - title
+      - status
+      - occurred_at
+      - fields
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        kind:
+          type: string
+          enum:
+          - work_item
+          - evidence
+          - activity
+          - metric
+          - performance_ad
+          - audience_mix
+          - method
+          - delivery_diagnostic
+          - delivery_action
+          - unified_record
+        title:
+          type: string
+        status:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        fields:
+          type: object
+          additionalProperties:
+            oneOf:
+            - type: string
+            - type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    UpsertOperationalRecordRequest:
+      type: object
+      required:
+      - kind
+      - title
+      - status
+      - occurred_at
+      - fields
+      properties:
+        kind:
+          type: string
+          enum:
+          - work_item
+          - evidence
+          - activity
+          - metric
+          - performance_ad
+          - audience_mix
+          - method
+          - delivery_diagnostic
+          - delivery_action
+          - unified_record
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          minLength: 1
+        occurred_at:
+          type: string
+          format: date-time
+        fields:
+          type: object
+          additionalProperties:
+            oneOf:
+            - type: string
+            - type: number
+      additionalProperties: false
+    ChangeSet:
+      type: object
+      required:
+      - id
+      - project_id
+      - name
+      - status
+      - artifact_refs
+      - preflight
+      - execution
+      - rollback
+      - audit_events
+      - version
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - preflight_passed
+          - preflight_failed
+          - approved
+          - rejected
+          - executing
+          - executed
+          - rolled_back
+        artifact_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectAssetRef'
+        budget_limit:
+          type: number
+          minimum: 0
+        preflight:
+          oneOf:
+          - $ref: '#/components/schemas/ChangeSetPreflight'
+          - type: 'null'
+        execution:
+          oneOf:
+          - $ref: '#/components/schemas/ChangeSetExecution'
+          - type: 'null'
+        rollback:
+          oneOf:
+          - $ref: '#/components/schemas/ChangeSetRollback'
+          - type: 'null'
+        audit_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateChangeSetRequest:
+      type: object
+      required:
+      - name
+      - artifact_refs
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        artifact_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectAssetRef'
+        budget_limit:
+          type: number
+          minimum: 0
+      additionalProperties: false
+    ChangeSetPreflight:
+      type: object
+      required:
+      - passed
+      - checks
+      - checked_at
+      properties:
+        passed:
+          type: boolean
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreflightCheck'
+        checked_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    PreflightCheck:
+      type: object
+      required:
+      - code
+      - passed
+      - message
+      - repair
+      properties:
+        code:
+          type: string
+          enum:
+          - confirmed_brief
+          - ready_creative
+          - budget_boundary
+        passed:
+          type: boolean
+        message:
+          type: string
+        repair:
+          type: string
+      additionalProperties: false
+    ChangeSetExecution:
+      type: object
+      required:
+      - simulated
+      - evidence
+      - executed_at
+      properties:
+        simulated:
+          type: boolean
+          const: true
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeSetEvidence'
+        executed_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ChangeSetRollback:
+      type: object
+      required:
+      - simulated
+      - reason
+      - rolled_back_at
+      properties:
+        simulated:
+          type: boolean
+          const: true
+        reason:
+          type: string
+        rolled_back_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ChangeSetEvidence:
+      type: object
+      required:
+      - step
+      - status
+      - message
+      - recorded_at
+      properties:
+        step:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+        recorded_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ChangeSetApprovalRequest:
+      type: object
+      required:
+      - actor
+      - role
+      properties:
+        actor:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          minLength: 1
+        note:
+          type: string
+      additionalProperties: false
+    RollbackChangeSetRequest:
+      type: object
+      required:
+      - actor
+      - reason
+      properties:
+        actor:
+          type: string
+          minLength: 1
+        reason:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    AuditEvent:
+      type: object
+      required:
+      - id
+      - project_id
+      - actor
+      - action
+      - entity_type
+      - entity_id
+      - metadata
+      - created_at
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        actor:
+          type: string
+        action:
+          type: string
+        entity_type:
+          type: string
+          enum:
+          - project
+          - business_task
+          - artifact
+          - generation_job
+          - change_set
+          - operational_record
+        entity_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
       additionalProperties: false
     CreateUploadRequest:
       type: object
-      required: [filename, declared_mime_type, declared_size_bytes]
+      required:
+      - filename
+      - declared_mime_type
+      - declared_size_bytes
       properties:
-        filename: {type: string, minLength: 1, maxLength: 512}
-        declared_mime_type: {type: string, enum: [image/jpeg, image/png]}
-        declared_size_bytes: {type: integer, minimum: 1, maximum: 20971520}
-        declared_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 512
+        declared_mime_type:
+          type: string
+          pattern: ^(image/jpeg|image/png|video/.+)$
+        declared_size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 524288000
+        declared_sha256:
+          type:
+          - string
+          - 'null'
+          pattern: ^[0-9a-f]{64}$
       additionalProperties: false
     SignedRequest:
       type: object
-      required: [url, method, headers, expires_at]
+      required:
+      - url
+      - method
+      - headers
+      - expires_at
       properties:
-        url: {type: string}
-        method: {type: string, enum: [GET, PUT]}
-        headers: {type: object, additionalProperties: {type: string}}
-        expires_at: {type: string, format: date-time}
+        url:
+          type: string
+        method:
+          type: string
+          enum:
+          - GET
+          - PUT
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
       additionalProperties: false
     UploadSession:
       type: object
-      required: [id, organization_id, project_id, principal, status, filename, declared_mime_type, declared_size_bytes, project_context_version, project_asset_ref, expires_at, created_at, updated_at]
+      required:
+      - id
+      - organization_id
+      - project_id
+      - principal
+      - status
+      - filename
+      - declared_mime_type
+      - declared_size_bytes
+      - project_context_version
+      - project_asset_ref
+      - expires_at
+      - created_at
+      - updated_at
       properties:
-        id: {type: string}
-        organization_id: {type: string}
-        project_id: {type: string}
-        principal: {type: object}
-        status: {type: string, enum: [created, uploaded, processing, succeeded, failed, expired]}
-        filename: {type: string}
-        declared_mime_type: {type: string}
-        declared_size_bytes: {type: integer}
-        declared_sha256: {type: [string, 'null']}
-        project_context_version: {type: integer}
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        principal:
+          type: object
+        status:
+          type: string
+          enum:
+          - created
+          - uploaded
+          - processing
+          - succeeded
+          - failed
+          - expired
+        filename:
+          type: string
+        declared_mime_type:
+          type: string
+        declared_size_bytes:
+          type: integer
+        declared_sha256:
+          type:
+          - string
+          - 'null'
+        project_context_version:
+          type: integer
         project_asset_ref:
-          oneOf: [{$ref: '#/components/schemas/ProjectAssetRef'}, {type: 'null'}]
-        error_code: {type: string}
-        expires_at: {type: string, format: date-time}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+          oneOf:
+          - $ref: '#/components/schemas/ProjectAssetRef'
+          - type: 'null'
+        error_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
       additionalProperties: false
     CreateUploadResponse:
       type: object
-      required: [session, upload]
+      required:
+      - session
+      - upload
       properties:
-        session: {$ref: '#/components/schemas/UploadSession'}
+        session:
+          $ref: '#/components/schemas/UploadSession'
         upload:
-          oneOf: [{$ref: '#/components/schemas/SignedRequest'}, {type: 'null'}]
+          oneOf:
+          - $ref: '#/components/schemas/SignedRequest'
+          - type: 'null'
       additionalProperties: false
     ProjectAsset:
       type: object
-      required: [ref, asset, version, created_at]
+      required:
+      - ref
+      - asset
+      - version
+      - created_at
       properties:
-        ref: {$ref: '#/components/schemas/ProjectAssetRef'}
-        asset: {type: object}
-        version: {type: object}
-        created_at: {type: string, format: date-time}
+        ref:
+          $ref: '#/components/schemas/ProjectAssetRef'
+        asset:
+          $ref: '#/components/schemas/Asset'
+        version:
+          $ref: '#/components/schemas/AssetVersion'
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    Asset:
+      type: object
+      required:
+      - id
+      - organization_id
+      - asset_kind
+      - status
+      - owner_system
+      - latest_version
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        asset_kind:
+          type: string
+          enum:
+          - image
+          - video
+          - audio
+          - text
+          - data
+        status:
+          type: string
+          enum:
+          - processing
+          - ready
+          - quarantined
+          - failed
+          - archived
+        owner_system:
+          type: string
+        latest_version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AssetVersion:
+      type: object
+      required:
+      - organization_id
+      - asset_id
+      - version
+      - status
+      - source_type
+      - mime_type
+      - size_bytes
+      - sha256
+      - media
+      - created_at
+      properties:
+        organization_id:
+          type: string
+        asset_id:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - processing
+          - ready
+          - quarantined
+          - failed
+          - archived
+        source_type:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        width_pixels:
+          type: integer
+          minimum: 1
+        height_pixels:
+          type: integer
+          minimum: 1
+        media:
+          $ref: '#/components/schemas/MediaMetadata'
+        provider_job_id:
+          type: string
+        provider_output_id:
+          type: string
+        project_context_version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    MediaMetadata:
+      type: object
+      required:
+      - probe_status
+      properties:
+        duration_seconds:
+          type: number
+          minimum: 0
+        fps:
+          type: number
+          minimum: 0
+        codec:
+          type: string
+        bitrate_bps:
+          type: integer
+          minimum: 0
+        audio_codec:
+          type: string
+        audio_channels:
+          type: integer
+          minimum: 0
+        audio_sample_rate:
+          type: integer
+          minimum: 0
+        poster_frame_ref:
+          type: string
+        probe_status:
+          type: string
+          enum:
+          - not_required
+          - succeeded
+          - failed
+        probe_error:
+          type: string
+      additionalProperties: false
+    AssetFeature:
+      type: object
+      required:
+      - organization_id
+      - project_id
+      - asset_id
+      - asset_version
+      - schema_version
+      - feature_version
+      - hook_strength
+      - product_visibility
+      - scene_tags
+      - product_tags
+      - person_tags
+      - action_tags
+      - emotion_tags
+      - selling_points
+      - cta_presence
+      - similarity_risk
+      - evidence
+      - created_at
+      - updated_at
+      properties:
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        asset_id:
+          type: string
+        asset_version:
+          type: integer
+          minimum: 1
+        schema_version:
+          type: string
+          enum:
+          - asset_feature_v1
+        feature_version:
+          type: string
+          minLength: 1
+          maxLength: 96
+        hook_strength:
+          type: number
+          minimum: 0
+          maximum: 1
+        product_visibility:
+          type: number
+          minimum: 0
+          maximum: 1
+        scene_tags:
+          type: array
+          items:
+            type: string
+        product_tags:
+          type: array
+          items:
+            type: string
+        person_tags:
+          type: array
+          items:
+            type: string
+        action_tags:
+          type: array
+          items:
+            type: string
+        emotion_tags:
+          type: array
+          items:
+            type: string
+        selling_points:
+          type: array
+          items:
+            type: string
+        cta_presence:
+          type: boolean
+        similarity_group:
+          type: string
+        similarity_risk:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+        evidence:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AssetFeatureList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetFeature'
+      additionalProperties: false
+    AssetFeatureLookup:
+      type: object
+      required:
+      - feature
+      properties:
+        feature:
+          oneOf:
+          - $ref: '#/components/schemas/AssetFeature'
+          - type: 'null'
+      additionalProperties: false
+    CreateRemixPlanRequest:
+      type: object
+      required:
+      - client_plan_id
+      - target_seconds
+      - actual_seconds
+      - pace
+      - segments
+      - warnings
+      - summary
+      properties:
+        schema_version:
+          type: string
+          enum:
+          - remix_plan_v1
+          - remix_plan_v2
+        client_plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_seconds:
+          type: integer
+          minimum: 9
+          maximum: 180
+        actual_seconds:
+          type: number
+          minimum: 0
+          maximum: 360
+        pace:
+          $ref: '#/components/schemas/RemixPace'
+        segments:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/RemixSegmentPlan'
+        warnings:
+          type: array
+          items:
+            type: string
+        summary:
+          $ref: '#/components/schemas/RemixPlanSummary'
+      additionalProperties: false
+    RemixPlan:
+      allOf:
+      - $ref: '#/components/schemas/CreateRemixPlanRequest'
+      - type: object
+        required:
+        - id
+        - organization_id
+        - project_id
+        - created_by
+        - schema_version
+        - created_at
+        - updated_at
+        properties:
+          id:
+            type: string
+          organization_id:
+            type: string
+          project_id:
+            type: string
+          created_by:
+            $ref: '#/components/schemas/Principal'
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+        additionalProperties: false
+    RemixPlanList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemixPlan'
+      additionalProperties: false
+    RemixPace:
+      type: string
+      enum:
+      - fast
+      - balanced
+      - story
+    RemixSegment:
+      type: string
+      enum:
+      - opening
+      - middle
+      - ending
+    RemixSegmentPlan:
+      type: object
+      required:
+      - segment
+      - label
+      - target_seconds
+      - actual_seconds
+      - clips
+      - shots
+      properties:
+        segment:
+          $ref: '#/components/schemas/RemixSegment'
+        label:
+          type: string
+        target_seconds:
+          type: integer
+          minimum: 0
+        actual_seconds:
+          type: number
+          minimum: 0
+        clips:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemixClip'
+        shots:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemixShot'
+      additionalProperties: false
+    RemixClip:
+      type: object
+      required:
+      - id
+      - segment
+      - asset_version
+      - label
+      - source_type
+      - mime_type
+      - aspect
+      - start_seconds
+      - duration_seconds
+      - in_point_seconds
+      - out_point_seconds
+      - score
+      - reason
+      properties:
+        id:
+          type: string
+        segment:
+          $ref: '#/components/schemas/RemixSegment'
+        asset_version:
+          $ref: '#/components/schemas/AssetVersionRef'
+        label:
+          type: string
+        source_type:
+          type: string
+        mime_type:
+          type: string
+        aspect:
+          type: string
+        start_seconds:
+          type: number
+        duration_seconds:
+          type: number
+          minimum: 0
+        in_point_seconds:
+          type: number
+          minimum: 0
+        out_point_seconds:
+          type: number
+          minimum: 0
+        score:
+          type: number
+        reason:
+          type: string
+      additionalProperties: false
+    RemixShot:
+      type: object
+      required:
+      - id
+      - segment
+      - source
+      - asset_version
+      - timeline
+      - creative
+      - planning
+      - risks
+      properties:
+        id:
+          type: string
+        segment:
+          $ref: '#/components/schemas/RemixSegment'
+        source:
+          type: string
+          enum:
+          - existing_asset
+          - generated_asset
+        asset_version:
+          $ref: '#/components/schemas/AssetVersionRef'
+        timeline:
+          $ref: '#/components/schemas/ShotTimeline'
+        creative:
+          $ref: '#/components/schemas/ShotCreative'
+        planning:
+          $ref: '#/components/schemas/ShotPlanning'
+        risks:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    ShotTimeline:
+      type: object
+      required:
+      - start_seconds
+      - duration_seconds
+      - in_point_seconds
+      - out_point_seconds
+      properties:
+        start_seconds:
+          type: number
+          minimum: 0
+        duration_seconds:
+          type: number
+          minimum: 0
+        in_point_seconds:
+          type: number
+          minimum: 0
+        out_point_seconds:
+          type: number
+          minimum: 0
+      additionalProperties: false
+    ShotCreative:
+      type: object
+      required:
+      - scene
+      - shot_type
+      - camera_angle
+      - dialogue_or_narration
+      - subtitle
+      - transition
+      - cta_element
+      properties:
+        scene:
+          type: string
+        shot_type:
+          type: string
+        camera_angle:
+          type: string
+        dialogue_or_narration:
+          type: string
+        subtitle:
+          type: string
+        transition:
+          type: string
+        cta_element:
+          type: string
+      additionalProperties: false
+    ShotPlanning:
+      type: object
+      required:
+      - score
+      - reason_codes
+      - reason
+      - evidence
+      properties:
+        score:
+          type: number
+        reason_codes:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        evidence:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    RemixPlanSummary:
+      type: object
+      required:
+      - selected_assets
+      - used_assets
+      - coverage_percent
+      - strategy
+      properties:
+        selected_assets:
+          type: integer
+          minimum: 0
+        used_assets:
+          type: integer
+          minimum: 0
+        coverage_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        strategy:
+          type: string
+      additionalProperties: false
+    CreateRemixRenderJobRequest:
+      type: object
+      required:
+      - plan_id
+      - target_format
+      - target_quality
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_format:
+          type: string
+        target_quality:
+          type: string
+      additionalProperties: false
+    RemixRenderJob:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - plan_id
+      - status
+      - progress
+      - target_format
+      - target_quality
+      - input_snapshot
+      - requires_review
+      - created_by
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        plan_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - requires_review
+          - succeeded
+          - failed
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        target_format:
+          type: string
+        target_quality:
+          type: string
+        idempotency_key:
+          type: string
+        request_hash:
+          type: string
+        input_snapshot:
+          $ref: '#/components/schemas/RenderInputSnapshot'
+        requires_review:
+          type: boolean
+        quality_report_id:
+          type: string
+        output_asset:
+          $ref: '#/components/schemas/ProjectAssetRef'
+        output_preview:
+          $ref: '#/components/schemas/RenderOutputPreview'
+        provenance:
+          $ref: '#/components/schemas/RenderProvenanceSummary'
+        error_code:
+          type: string
+        error_message:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    RenderInputSnapshot:
+      type: object
+      required:
+      - plan
+      - request
+      properties:
+        plan:
+          $ref: '#/components/schemas/RemixPlan'
+        request:
+          $ref: '#/components/schemas/CreateRemixRenderJobRequest'
+      additionalProperties: false
+    RenderOutputPreview:
+      type: object
+      required:
+      - url
+      properties:
+        url:
+          type: string
+      additionalProperties: false
+    RenderProvenanceSummary:
+      type: object
+      required:
+      - plan_id
+      - render_job_id
+      - input_assets
+      properties:
+        plan_id:
+          type: string
+        render_job_id:
+          type: string
+        input_assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetVersionRef'
+      additionalProperties: false
+    CreateQualityReportRequest:
+      type: object
+      required:
+      - render_job_id
+      properties:
+        render_job_id:
+          type: string
+          minLength: 1
+        output_asset:
+          $ref: '#/components/schemas/ProjectAssetRef'
+        policy:
+          type: string
+      additionalProperties: false
+    QualityReport:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - render_job_id
+      - verdict
+      - score
+      - dimensions
+      - issues
+      - evidence
+      - repair_suggestions
+      - created_by
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        render_job_id:
+          type: string
+        output_asset:
+          $ref: '#/components/schemas/ProjectAssetRef'
+        verdict:
+          $ref: '#/components/schemas/QualityVerdict'
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        dimensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityDimension'
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityIssue'
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityEvidence'
+        repair_suggestions:
+          type: array
+          items:
+            type: string
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    QualityReportLookup:
+      type: object
+      required:
+      - quality_report
+      properties:
+        quality_report:
+          oneOf:
+          - $ref: '#/components/schemas/QualityReport'
+          - type: 'null'
+      additionalProperties: false
+    QualityVerdict:
+      type: string
+      enum:
+      - pass
+      - major
+      - critical
+    QualityDimension:
+      type: object
+      required:
+      - name
+      - score
+      - verdict
+      - summary
+      properties:
+        name:
+          type: string
+        score:
+          type: number
+        verdict:
+          type: string
+        summary:
+          type: string
+      additionalProperties: false
+    QualityIssue:
+      type: object
+      required:
+      - code
+      - severity
+      - dimension
+      - start_seconds
+      - end_seconds
+      - description
+      - repair_suggestion
+      properties:
+        code:
+          type: string
+        severity:
+          $ref: '#/components/schemas/QualityVerdict'
+        dimension:
+          type: string
+        start_seconds:
+          type: number
+          minimum: 0
+        end_seconds:
+          type: number
+          minimum: 0
+        description:
+          type: string
+        repair_suggestion:
+          type: string
+      additionalProperties: false
+    QualityEvidence:
+      type: object
+      required:
+      - kind
+      - timestamp_sec
+      - summary
+      properties:
+        kind:
+          type: string
+        timestamp_sec:
+          type: number
+          minimum: 0
+        summary:
+          type: string
+      additionalProperties: false
+    CreateHitAnalysisRequest:
+      type: object
+      required:
+      - source_asset
+      - title
+      - duration_seconds
+      properties:
+        source_asset:
+          $ref: '#/components/schemas/AssetVersionRef'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        duration_seconds:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 600
+        language:
+          type: string
+        notes:
+          type: string
+          maxLength: 2000
+      additionalProperties: false
+    HitAnalysis:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - source_asset
+      - title
+      - video_meta
+      - segments
+      - scripts
+      - visual_elements
+      - conversion_nodes
+      - replication_insights
+      - created_by
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        source_asset:
+          $ref: '#/components/schemas/AssetVersionRef'
+        title:
+          type: string
+        video_meta:
+          $ref: '#/components/schemas/HitVideoMeta'
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/HitSegment'
+        scripts:
+          type: array
+          items:
+            $ref: '#/components/schemas/HitScriptLine'
+        visual_elements:
+          type: array
+          items:
+            type: string
+        conversion_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/HitConversionNode'
+        replication_insights:
+          type: array
+          items:
+            type: string
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    HitVideoMeta:
+      type: object
+      required:
+      - duration_seconds
+      - language
+      properties:
+        duration_seconds:
+          type: number
+          minimum: 0
+        language:
+          type: string
+      additionalProperties: false
+    HitSegmentRole:
+      type: string
+      enum:
+      - hook
+      - problem
+      - proof
+      - offer
+      - cta
+    HitSegment:
+      type: object
+      required:
+      - id
+      - start_seconds
+      - end_seconds
+      - role
+      - summary
+      - script
+      - visual_element
+      - conversion_cue
+      - replication_hint
+      properties:
+        id:
+          type: string
+        start_seconds:
+          type: number
+          minimum: 0
+        end_seconds:
+          type: number
+          minimum: 0
+        role:
+          $ref: '#/components/schemas/HitSegmentRole'
+        summary:
+          type: string
+        script:
+          type: string
+        visual_element:
+          type: string
+        conversion_cue:
+          type: string
+        replication_hint:
+          type: string
+      additionalProperties: false
+    HitScriptLine:
+      type: object
+      required:
+      - segment_id
+      - text
+      properties:
+        segment_id:
+          type: string
+        text:
+          type: string
+      additionalProperties: false
+    HitConversionNode:
+      type: object
+      required:
+      - segment_id
+      - cue
+      properties:
+        segment_id:
+          type: string
+        cue:
+          type: string
+      additionalProperties: false
+    CreateProductMappingRequest:
+      type: object
+      required:
+      - hit_analysis_id
+      - target_product
+      - required_assets
+      - replacement_rules
+      properties:
+        hit_analysis_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_product:
+          $ref: '#/components/schemas/ProductProfile'
+        required_assets:
+          type: array
+          minItems: 1
+          maxItems: 80
+          items:
+            $ref: '#/components/schemas/AssetVersionRef'
+        replacement_rules:
+          type: array
+          minItems: 1
+          maxItems: 80
+          items:
+            $ref: '#/components/schemas/ReplacementRule'
+        constraints:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        target_seconds:
+          type: integer
+          minimum: 9
+          maximum: 180
+        pace:
+          $ref: '#/components/schemas/RemixPace'
+      additionalProperties: false
+    ProductMapping:
+      allOf:
+      - $ref: '#/components/schemas/CreateProductMappingRequest'
+      - type: object
+        required:
+        - id
+        - organization_id
+        - project_id
+        - created_by
+        - created_at
+        - updated_at
+        properties:
+          id:
+            type: string
+          organization_id:
+            type: string
+          project_id:
+            type: string
+          created_by:
+            $ref: '#/components/schemas/Principal'
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+        additionalProperties: false
+    ProductProfile:
+      type: object
+      required:
+      - name
+      - selling_points
+      - cta
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        selling_points:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items:
+            type: string
+            minLength: 1
+            maxLength: 160
+        cta:
+          type: string
+          minLength: 1
+          maxLength: 80
+      additionalProperties: false
+    ReplacementRule:
+      type: object
+      required:
+      - role
+      - target_asset
+      - message
+      properties:
+        role:
+          $ref: '#/components/schemas/HitSegmentRole'
+        target_asset:
+          $ref: '#/components/schemas/AssetVersionRef'
+        message:
+          type: string
+          minLength: 1
+          maxLength: 240
+      additionalProperties: false
+    CreatePrerollRequest:
+      type: object
+      required:
+      - plan_id
+      - hook_type
+      - reference_asset
+      - duration_seconds
+      properties:
+        plan_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        hook_type:
+          $ref: '#/components/schemas/HookType'
+        reference_asset:
+          $ref: '#/components/schemas/AssetVersionRef'
+        style_constraints:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        duration_seconds:
+          type: number
+          minimum: 3
+          maximum: 10
+        mode:
+          type: string
+          enum:
+          - prompt_only
+          - generate_video
+      additionalProperties: false
+    HookType:
+      type: string
+      enum:
+      - conflict
+      - reversal
+      - suspense
+      - selling_point_bridge
+      - product_demo
+      - offer
+    Preroll:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - plan_id
+      - hook_type
+      - reference_asset
+      - style_constraints
+      - duration_seconds
+      - mode
+      - prompt_draft
+      - quality_verdict
+      - status
+      - created_by
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        plan_id:
+          type: string
+        hook_type:
+          $ref: '#/components/schemas/HookType'
+        reference_asset:
+          $ref: '#/components/schemas/AssetVersionRef'
+        style_constraints:
+          type: array
+          items:
+            type: string
+        duration_seconds:
+          type: number
+          minimum: 3
+          maximum: 10
+        mode:
+          type: string
+          enum:
+          - prompt_only
+          - generate_video
+        prompt_draft:
+          type: string
+        output_asset:
+          $ref: '#/components/schemas/ProjectAssetRef'
+        quality_verdict:
+          $ref: '#/components/schemas/QualityVerdict'
+        status:
+          type: string
+          enum:
+          - draft
+          - ready
+          - failed
+          - applied
+        error_code:
+          type: string
+        error_message:
+          type: string
+        applied_plan_id:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateFeedbackEventRequest:
+      type: object
+      required:
+      - event_type
+      - target_type
+      - target_id
+      properties:
+        event_type:
+          type: string
+          enum:
+          - rating
+          - comment
+          - asset_selected
+          - render_succeeded
+        target_type:
+          $ref: '#/components/schemas/FeedbackTargetType'
+        target_id:
+          type: string
+          minLength: 1
+          maxLength: 160
+        asset_version:
+          $ref: '#/components/schemas/AssetVersionRef'
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          maxLength: 1000
+      additionalProperties: false
+    FeedbackTargetType:
+      type: string
+      enum:
+      - remix_plan
+      - render_job
+      - asset
+    FeedbackEvent:
+      allOf:
+      - $ref: '#/components/schemas/CreateFeedbackEventRequest'
+      - type: object
+        required:
+        - id
+        - organization_id
+        - project_id
+        - created_by
+        - created_at
+        properties:
+          id:
+            type: string
+          organization_id:
+            type: string
+          project_id:
+            type: string
+          created_by:
+            $ref: '#/components/schemas/Principal'
+          created_at:
+            type: string
+            format: date-time
+        additionalProperties: false
+    FeedbackEventList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedbackEvent'
+      additionalProperties: false
+    AssetPerformance:
+      type: object
+      required:
+      - asset_version
+      - selected_count
+      - render_succeeded_count
+      - feedback_count
+      - average_rating
+      - updated_at
+      properties:
+        asset_version:
+          $ref: '#/components/schemas/AssetVersionRef'
+        selected_count:
+          type: integer
+          minimum: 0
+        render_succeeded_count:
+          type: integer
+          minimum: 0
+        feedback_count:
+          type: integer
+          minimum: 0
+        average_rating:
+          type: number
+          minimum: 0
+          maximum: 5
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AssetPerformanceList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetPerformance'
+      additionalProperties: false
+    PlannerWeightSnapshot:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - asset_weights
+      - created_by
+      - created_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        asset_weights:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlannerAssetWeight'
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    PlannerAssetWeight:
+      type: object
+      required:
+      - asset_version
+      - weight
+      - reasons
+      properties:
+        asset_version:
+          $ref: '#/components/schemas/AssetVersionRef'
+        weight:
+          type: number
+        reasons:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    CreateEvalCaseRequest:
+      type: object
+      required:
+      - type
+      - title
+      - prompt
+      - planner_version
+      - prompt_version
+      - passing_score
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+          - mcq
+          - rubric
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        planner_version:
+          type: string
+          minLength: 1
+        prompt_version:
+          type: string
+          minLength: 1
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalChoice'
+        expected_choice:
+          type: string
+        rubric:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalRubricCriterion'
+        passing_score:
+          type: number
+          minimum: 0
+          maximum: 1
+      additionalProperties: false
+    EvalCase:
+      allOf:
+      - $ref: '#/components/schemas/CreateEvalCaseRequest'
+      - type: object
+        required:
+        - id
+        - organization_id
+        - project_id
+        - created_at
+        properties:
+          id:
+            type: string
+          organization_id:
+            type: string
+          project_id:
+            type: string
+          created_at:
+            type: string
+            format: date-time
+        additionalProperties: false
+    EvalCaseList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalCase'
+      additionalProperties: false
+    EvalChoice:
+      type: object
+      required:
+      - id
+      - label
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+      additionalProperties: false
+    EvalRubricCriterion:
+      type: object
+      required:
+      - id
+      - label
+      - signal
+      - weight
+      - required
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        signal:
+          type: string
+        weight:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        required:
+          type: boolean
+      additionalProperties: false
+    CreateEvalRunRequest:
+      type: object
+      required:
+      - planner_version
+      - prompt_version
+      - submissions
+      properties:
+        planner_version:
+          type: string
+          minLength: 1
+          maxLength: 128
+        prompt_version:
+          type: string
+          minLength: 1
+          maxLength: 128
+        submissions:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/EvalSubmission'
+      additionalProperties: false
+    EvalSubmission:
+      type: object
+      required:
+      - case_id
+      properties:
+        case_id:
+          type: string
+          minLength: 1
+        choice_id:
+          type: string
+        answer_text:
+          type: string
+        rubric_evidence:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    EvalRun:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - status
+      - planner_version
+      - prompt_version
+      - score
+      - total_cases
+      - passed_cases
+      - failed_cases
+      - results
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - succeeded
+        planner_version:
+          type: string
+        prompt_version:
+          type: string
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        total_cases:
+          type: integer
+          minimum: 0
+        passed_cases:
+          type: integer
+          minimum: 0
+        failed_cases:
+          type: array
+          items:
+            type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalResult'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    EvalResult:
+      type: object
+      required:
+      - id
+      - run_id
+      - case_id
+      - case_type
+      - score
+      - passed
+      - expected
+      - actual
+      - reason
+      properties:
+        id:
+          type: string
+        run_id:
+          type: string
+        case_id:
+          type: string
+        case_type:
+          type: string
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        passed:
+          type: boolean
+        expected:
+          type: string
+        actual:
+          type: string
+        reason:
+          type: string
+      additionalProperties: false
+    CreateAgentRunRequest:
+      type: object
+      required:
+      - workflow
+      - target
+      properties:
+        workflow:
+          type: string
+          enum:
+          - render_diagnosis
+        target:
+          $ref: '#/components/schemas/DiagnosisTarget'
+      additionalProperties: false
+    DiagnosisTarget:
+      type: object
+      required:
+      - render_job_id
+      properties:
+        render_job_id:
+          type: string
+          minLength: 1
+          maxLength: 160
+      additionalProperties: false
+    AgentRun:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - workflow
+      - status
+      - target
+      - steps
+      - tool_calls
+      - trace_spans
+      - created_by
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        workflow:
+          type: string
+          enum:
+          - render_diagnosis
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          - cancelled
+        target:
+          $ref: '#/components/schemas/DiagnosisTarget'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentStep'
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        trace_spans:
+          type: array
+          items:
+            $ref: '#/components/schemas/TraceSpan'
+        output:
+          type: object
+          additionalProperties: true
+        error_message:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AgentRunList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentRun'
+      additionalProperties: false
+    AgentStep:
+      type: object
+      required:
+      - id
+      - label
+      - status
+      - summary
+      - started_at
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          - cancelled
+        summary:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ToolCall:
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - input
+      - started_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - succeeded
+          - failed
+        input:
+          type: object
+          additionalProperties: true
+        output:
+          type: object
+          additionalProperties: true
+        error_message:
+          type: string
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceRef'
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    TraceSpan:
+      type: object
+      required:
+      - id
+      - name
+      - kind
+      - status
+      - started_at
+      properties:
+        id:
+          type: string
+        parent_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+          - agent
+          - tool
+          - model
+        status:
+          type: string
+          enum:
+          - running
+          - succeeded
+          - failed
+          - cancelled
+        model:
+          type: string
+        input_tokens:
+          type: integer
+          minimum: 0
+        output_tokens:
+          type: integer
+          minimum: 0
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ImportKnowledgeDocumentRequest:
+      type: object
+      required:
+      - title
+      - text
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        source_uri:
+          type: string
+          maxLength: 512
+        source_type:
+          type: string
+          enum:
+          - docs
+          - strategy
+          - retrospective
+          - feishu_summary
+        text:
+          type: string
+          minLength: 1
+          maxLength: 200000
+      additionalProperties: false
+    KnowledgeDocument:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - title
+      - source_uri
+      - source_type
+      - chunk_count
+      - imported_by
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        source_uri:
+          type: string
+        source_type:
+          type: string
+        chunk_count:
+          type: integer
+          minimum: 0
+        imported_by:
+          $ref: '#/components/schemas/Principal'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    KnowledgeDocumentList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeDocument'
+      additionalProperties: false
+    KnowledgeChunk:
+      type: object
+      required:
+      - id
+      - document_id
+      - organization_id
+      - project_id
+      - index
+      - text
+      - source_uri
+      - section
+      - start_line
+      - end_line
+      - created_at
+      properties:
+        id:
+          type: string
+        document_id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        index:
+          type: integer
+          minimum: 0
+        text:
+          type: string
+        source_uri:
+          type: string
+        section:
+          type: string
+        start_line:
+          type: integer
+          minimum: 0
+        end_line:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    KnowledgeCitation:
+      type: object
+      required:
+      - document_id
+      - chunk_id
+      - title
+      - source_uri
+      - section
+      - start_line
+      - end_line
+      - snippet
+      properties:
+        document_id:
+          type: string
+        chunk_id:
+          type: string
+        title:
+          type: string
+        source_uri:
+          type: string
+        section:
+          type: string
+        start_line:
+          type: integer
+          minimum: 0
+        end_line:
+          type: integer
+          minimum: 0
+        snippet:
+          type: string
+      additionalProperties: false
+    KnowledgeSearchResult:
+      type: object
+      required:
+      - chunk
+      - score
+      - citations
+      properties:
+        chunk:
+          $ref: '#/components/schemas/KnowledgeChunk'
+        score:
+          type: integer
+          minimum: 0
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeCitation'
+      additionalProperties: false
+    KnowledgeSearchResultList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeSearchResult'
+      additionalProperties: false
+    Principal:
+      type: object
+      required:
+      - kind
+      - id
+      properties:
+        kind:
+          type: string
+          enum:
+          - user
+          - service
+        id:
+          type: string
       additionalProperties: false
     Problem:
       type: object
-      required: [error]
+      required:
+      - error
       properties:
         error:
           type: object
-          required: [code, message, request_id, retryable, details]
+          required:
+          - code
+          - message
+          - request_id
+          - retryable
+          - details
           properties:
             code:
               type: string
               enum:
-                - UNAUTHENTICATED
-                - ORGANIZATION_ACCESS_DENIED
-                - PROJECT_ACCESS_DENIED
-                - PROJECT_NOT_ACTIVE
-                - SCOPE_REQUIRED
-                - IDEMPOTENCY_CONFLICT
-                - PROVIDER_JOB_NOT_READY
-                - PROVIDER_OUTPUT_EXPIRED
-                - PROVIDER_OUTPUT_UNAVAILABLE
-                - OUTPUT_METADATA_MISMATCH
-                - ASSET_CHECKSUM_MISMATCH
-                - ASSET_QUARANTINED
-                - ASSET_INTAKE_FAILED
-                - ASSET_NOT_READY
-                - RESOURCE_NOT_FOUND
-                - INTERNAL
-                - DEPENDENCY_UNAVAILABLE
-                - IDENTITY_UNAVAILABLE
-                - IDENTITY_CONTEXT_INVALID
-                - INVALID_REQUEST
-                - INVALID_STATE
-                - BRAND_NOT_FOUND
-                - PRODUCT_NOT_FOUND
-                - SERVICE_UNAVAILABLE
-                - PROJECT_CONTEXT_STALE
+              - UNAUTHENTICATED
+              - ORGANIZATION_ACCESS_DENIED
+              - PROJECT_ACCESS_DENIED
+              - PROJECT_NOT_ACTIVE
+              - SCOPE_REQUIRED
+              - IDEMPOTENCY_CONFLICT
+              - PROVIDER_JOB_NOT_READY
+              - PROVIDER_OUTPUT_EXPIRED
+              - PROVIDER_OUTPUT_UNAVAILABLE
+              - OUTPUT_METADATA_MISMATCH
+              - ASSET_CHECKSUM_MISMATCH
+              - ASSET_QUARANTINED
+              - ASSET_INTAKE_FAILED
+              - ASSET_NOT_READY
+              - RESOURCE_NOT_FOUND
+              - INTERNAL
+              - DEPENDENCY_UNAVAILABLE
+              - IDENTITY_UNAVAILABLE
+              - IDENTITY_CONTEXT_INVALID
+              - INVALID_REQUEST
+              - INVALID_STATE
+              - BRAND_NOT_FOUND
+              - PRODUCT_NOT_FOUND
+              - SERVICE_UNAVAILABLE
+              - PROJECT_CONTEXT_STALE
             message:
               type: string
             request_id:
@@ -1054,4 +5377,186 @@ components:
               items:
                 type: object
             help_url:
-              type: [string, 'null']
+              type:
+              - string
+              - 'null'
+    ProposalInput:
+      type: object
+      required:
+      - brand
+      - product
+      - compliance
+      - directions
+      properties:
+        brand:
+          type: string
+          minLength: 1
+        product:
+          type: string
+          minLength: 1
+        audience:
+          type: string
+        platform:
+          type: string
+        budget:
+          type: string
+        timeline:
+          type: string
+        description:
+          type: string
+        compliance:
+          type: array
+          items:
+            type: string
+        directions:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    StrategyProposal:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - input
+      - template_version
+      - status
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        input:
+          $ref: '#/components/schemas/ProposalInput'
+        template_version:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - generated
+          - approved
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    StrategyOutput:
+      type: object
+      required:
+      - id
+      - proposal_id
+      - organization_id
+      - project_id
+      - content
+      - model_alias
+      - model_version
+      - provider_code
+      - approved_at
+      - created_at
+      properties:
+        id:
+          type: string
+        proposal_id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        content:
+          type: object
+          additionalProperties: true
+        model_alias:
+          type: string
+        model_version:
+          type: string
+        provider_code:
+          type: string
+        approved_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateCreativePlanRequest:
+      type: object
+      required:
+      - strategy_output_id
+      - media_type
+      - variant
+      - model_alias
+      properties:
+        strategy_output_id:
+          type: string
+        media_type:
+          type: string
+          enum:
+          - image
+          - video
+        variant:
+          type: integer
+          minimum: 1
+        model_alias:
+          type: string
+      additionalProperties: false
+    CreativePlan:
+      type: object
+      required:
+      - id
+      - organization_id
+      - project_id
+      - strategy_output_id
+      - media_type
+      - variant
+      - prompt
+      - model_alias
+      - created_at
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        project_id:
+          type: string
+        strategy_output_id:
+          type: string
+        media_type:
+          type: string
+          enum:
+          - image
+          - video
+        variant:
+          type: integer
+          minimum: 1
+        prompt:
+          type: string
+          writeOnly: true
+        model_alias:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateCreativeImageJobRequest:
+      type: object
+      required:
+      - width
+      - height
+      properties:
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+      additionalProperties: false
