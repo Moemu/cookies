@@ -13,6 +13,7 @@ export interface AppRoute {
   navId: string
   objectId?: string
   view?: string
+  accountPage?: 'profile' | 'security' | 'organization' | 'organization-members'
 }
 
 const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'delivery'])
@@ -20,6 +21,9 @@ const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'deliv
 export function parseRoute(location = `${window.location.pathname}${window.location.search}`): AppRoute {
   const url = new URL(location, window.location.origin)
   const parts = url.pathname.split('/').filter(Boolean)
+  if (parts[0] === 'account' && parts[1] === 'profile') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks', accountPage: 'profile' }
+  if (parts[0] === 'account' && parts[1] === 'security') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks', accountPage: 'security' }
+  if (parts[0] === 'organization') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks', accountPage: parts[1] === 'members' ? 'organization-members' : 'organization' }
   if (parts[0] === 'settings') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
   if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
   if (!parts[2] || parts[2] === 'home') return { isHome: false, isProjectHome: true, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }

@@ -28,16 +28,79 @@ export class BackendApiError extends Error {
 export type BackendIdentity = {
   actor: {
     organization_id: string
+    principal: { kind: 'user' | 'service'; id: string }
     scopes: string[]
   }
   organization: {
     id: string
     name: string
+    status: string
   }
   user: null | {
     id: string
     display_name: string
   }
+  membership: null | {
+    organization_id: string
+    user_id: string
+    role: 'owner' | 'admin' | 'member' | 'auditor'
+    status: string
+    updated_at: string
+  }
+}
+
+export type BackendOrganizationAccess = {
+  organization: BackendIdentity['organization']
+  membership: NonNullable<BackendIdentity['membership']>
+}
+
+export type BackendOrganizationMember = {
+  user: NonNullable<BackendIdentity['user']> & { status: string; updated_at: string }
+  membership: NonNullable<BackendIdentity['membership']>
+}
+
+export type BackendProjectMembership = {
+  organization_id: string
+  project_id: string
+  principal_kind: 'user' | 'service'
+  principal_id: string
+  display_name: string
+  role: 'owner' | 'editor' | 'viewer' | 'worker'
+  status: 'active' | 'suspended' | 'removed'
+  created_at: string
+  updated_at: string
+}
+
+export const accountApi = {
+  listOrganizations: () => apiRequest<ListResponse<BackendOrganizationAccess>>('/platform/v1/organizations'),
+  updateProfile: (displayName: string) => apiRequest<NonNullable<BackendIdentity['user']>>('/platform/v1/me', {
+    method: 'PATCH',
+    body: JSON.stringify({ display_name: displayName }),
+  }),
+  listOrganizationMembers: (organizationId: string) =>
+    apiRequest<ListResponse<BackendOrganizationMember>>(`/platform/v1/organizations/${encodeURIComponent(organizationId)}/members`),
+  addOrganizationMember: (organizationId: string, userId: string, role: string) =>
+    apiRequest<BackendOrganizationMember>(`/platform/v1/organizations/${encodeURIComponent(organizationId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+  updateOrganizationMember: (organizationId: string, userId: string, input: { role: string; status: string; expected_updated_at: string }) =>
+    apiRequest<BackendOrganizationMember>(`/platform/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  listProjectMembers: (projectId: string) =>
+    apiRequest<ListResponse<BackendProjectMembership>>(`/platform/v1/projects/${encodeURIComponent(projectId)}/members`),
+  addProjectMember: (projectId: string, input: { principal_kind: 'user' | 'service'; principal_id: string; role: string }) =>
+    apiRequest<BackendProjectMembership>(`/platform/v1/projects/${encodeURIComponent(projectId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateProjectMember: (projectId: string, member: BackendProjectMembership, input: { role: string; status: string }) =>
+    apiRequest<BackendProjectMembership>(`/platform/v1/projects/${encodeURIComponent(projectId)}/members/${member.principal_kind}/${encodeURIComponent(member.principal_id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...input, expected_updated_at: member.updated_at }),
+    }),
 }
 
 export type BackendProject = {
@@ -59,6 +122,14 @@ type StrategyPackage = {
   version: number
   status: string
   content_hash: string
+  snapshot?: Record<string, unknown>
+}
+
+type StrategyBriefVersion = {
+  brief_id: string
+  version: number
+  content_hash: string
+  confirmed_at: string
   snapshot?: Record<string, unknown>
 }
 
@@ -224,6 +295,7 @@ export async function enrichProjectRecord(
     apiRequest<ListResponse<DeliveryExecution>>(`/api/delivery/v1/projects/${projectId}/executions`, { signal }),
     apiRequest<ListResponse<InsightReport>>(`/api/insights/v1/projects/${projectId}/reports`, { signal }),
     apiRequest<ListResponse<Experience>>(`/api/insights/v1/projects/${projectId}/experiences`, { signal }),
+    apiRequest<ListResponse<StrategyBriefVersion>>(`/api/strategy/v1/projects/${projectId}/brief-versions`, { signal }),
   ])
 
   const packages = fulfilled(results[0])?.items ?? []
@@ -234,8 +306,10 @@ export async function enrichProjectRecord(
   const executions = fulfilled(results[5])?.items ?? []
   const reports = fulfilled(results[6])?.items ?? []
   const experiences = fulfilled(results[7])?.items ?? []
+  const briefVersions = fulfilled(results[8])?.items ?? []
 
   const latestStrategy = packages[0]
+  const latestBrief = briefVersions[0]
   const latestCreativePackage = creativePackages[0]
   const latestAsset = assets[0]
   const latestPlan = deliveryPlans[0]
@@ -264,7 +338,7 @@ export async function enrichProjectRecord(
       latestReport?.updated_at,
     ]),
     artifacts: {
-      brief: artifact('brief', latestStrategy?.package_id, latestStrategy ? `已发布策略包 ${latestStrategy.package_id} v${latestStrategy.version}` : '尚未确认 Brief', latestStrategy ? '已确认' : '草稿', base.updatedAt),
+      brief: artifact('brief', latestBrief?.brief_id, latestBrief ? `Brief ${latestBrief.brief_id} v${latestBrief.version} · ${latestBrief.content_hash}` : '尚未确认 Brief', latestBrief ? '已确认' : '草稿', latestBrief?.confirmed_at ?? base.updatedAt),
       strategy: artifact('strategy', latestStrategy?.package_id, latestStrategy ? `StrategyPackage · ${latestStrategy.content_hash}` : '尚未发布策略版本', latestStrategy ? '已确认' : '待确认', base.updatedAt),
       creative: artifact('creative', latestCreativePackage?.id ?? latestAsset?.asset.id, latestCreativePackage ? `CreativePackage · ${latestCreativePackage.id}` : latestAsset ? `${latestAsset.version.mime_type} · ${latestAsset.asset.id}` : '尚未生成创意资产', latestCreativePackage || latestAsset ? '已完成' : creativeTasks.length ? '制作中' : '待确认', latestCreativePackage?.created_at ?? latestAsset?.asset.updated_at ?? base.updatedAt),
       delivery: artifact('delivery', latestPlan?.id, latestPlan ? `${latestPlan.name} · ${latestPlan.status}` : '尚未创建投放计划', executions.length ? '已完成' : latestPlan ? '执行中' : '待确认', latestPlan?.updated_at ?? base.updatedAt),

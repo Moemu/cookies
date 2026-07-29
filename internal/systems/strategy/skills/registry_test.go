@@ -62,3 +62,30 @@ func TestRegistrySelectsEverySupportedPlatformSkill(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryListsStableDescriptors(t *testing.T) {
+	t.Parallel()
+	registry, err := DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptors := registry.List(false)
+	if len(descriptors) != 7 {
+		t.Fatalf("descriptor count = %d, want 7", len(descriptors))
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.Name == "" || descriptor.Version == "" || descriptor.ContentHash == "" {
+			t.Fatalf("incomplete descriptor: %#v", descriptor)
+		}
+		if len(descriptor.Instructions) != 0 {
+			t.Fatalf("instructions must be hidden by default: %#v", descriptor)
+		}
+		if len(descriptor.Match) == 0 || len(descriptor.QualityChecks) == 0 {
+			t.Fatalf("descriptor lacks matching or quality checks: %#v", descriptor)
+		}
+	}
+	withInstructions := registry.List(true)
+	if len(withInstructions) != len(descriptors) || len(withInstructions[0].Instructions) == 0 {
+		t.Fatal("authorized descriptor listing must include instructions")
+	}
+}

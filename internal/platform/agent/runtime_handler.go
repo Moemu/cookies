@@ -11,8 +11,18 @@ import (
 )
 
 type DomainHandler func(context.Context, Task) (*contract.ResourceRef, error)
+type FinalFailureHandler func(Task, contract.JobError)
 
 func RuntimeHandler(store MySQLStore, handler DomainHandler, controls ...jobruntime.Canceller) jobruntime.Handler {
+	return RuntimeHandlerWithFinalFailure(store, handler, nil, controls...)
+}
+
+func RuntimeHandlerWithFinalFailure(
+	store MySQLStore,
+	handler DomainHandler,
+	onFinalFailure FinalFailureHandler,
+	controls ...jobruntime.Canceller,
+) jobruntime.Handler {
 	return func(ctx context.Context, claim jobruntime.Claim) (jobruntime.Result, error) {
 		var payload struct {
 			AgentTaskID string `json:"agent_task_id"`
@@ -49,7 +59,10 @@ func RuntimeHandler(store MySQLStore, handler DomainHandler, controls ...jobrunt
 				delay := time.Duration(1<<min(claim.Job.AttemptCount, 6)) * time.Second
 				return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: time.Now().UTC().Add(delay)}
 			}
-			_ = store.MarkFailed(ctx, task.OrganizationID, task.ProjectID, task.ID, problem, time.Now().UTC())
+			markErr := store.MarkFailed(ctx, task.OrganizationID, task.ProjectID, task.ID, problem, time.Now().UTC())
+			if markErr == nil && onFinalFailure != nil {
+				onFinalFailure(task, problem)
+			}
 			return jobruntime.Result{}, err
 		}
 		if len(controls) > 0 && controls[0] != nil {

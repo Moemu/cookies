@@ -12,6 +12,7 @@ var (
 	ErrIdempotencyConflict   = errors.New("strategy idempotency conflict")
 	ErrBriefBlocked          = errors.New("brief is blocked")
 	ErrReviewStale           = errors.New("strategy review is stale")
+	ErrReviewAssignment      = errors.New("strategy review assignment required")
 	ErrConcurrencyLimit      = errors.New("strategy task concurrency limit")
 	ErrEventCursorExpired    = errors.New("strategy event cursor expired")
 	ErrFeatureDisabled       = errors.New("strategy feature disabled")

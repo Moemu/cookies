@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react'
+import { LockKeyhole, ShieldCheck } from 'lucide-react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { CookiesMark } from './Icons'
@@ -37,25 +37,27 @@ export function LoginPage() {
     return <Navigate replace to={safeReturnTo(state?.returnTo)} />
   }
 
-  return <main className="login-page">
-    <section className="login-panel" aria-label="登录 cookies">
-      <div className="login-brand"><CookiesMark className="brand-mark"/><span>cookies</span></div>
-      <div className="login-copy">
-        <span>COOKIES WORKSPACE ACCESS</span>
-        <h1>登录后进入广告增长工作台。</h1>
-        <p>统一访问需求与策略、创意创作、素材洞察和智能投放；身份与项目权限由 Go 平台服务校验。</p>
+  return <main className="auth-login-page">
+    <section className="auth-login-panel" aria-label="登录 cookies">
+      <div className="auth-login-brand"><CookiesMark className="brand-mark"/><span>cookies</span></div>
+      <div className="auth-login-copy">
+        <span>ONE PROJECT · ONE DELIVERY LOOP</span>
+        <h1>把需求、决策和交付证据放回同一个项目。</h1>
+        <p>登录后继续当前 Project：从需求澄清开始，经过策略评审，衔接创意、素材和投放执行。</p>
+        <ol className="auth-login-flow">
+          <li><b>01</b><span><strong>需求澄清</strong><small>确认目标、边界与引用证据</small></span></li>
+          <li><b>02</b><span><strong>策略评审</strong><small>保留版本、意见与批准记录</small></span></li>
+          <li><b>03</b><span><strong>创意与投放</strong><small>沿用同一项目上下文完成交付</small></span></li>
+        </ol>
       </div>
-      <form className="login-form" onSubmit={submit}>
+      <form className="auth-login-form" onSubmit={submit}>
+        <header><small>WORKSPACE ACCESS</small><h2>登录工作台</h2><p>使用当前环境配置的平台账号。</p></header>
         <label>账号<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username"/></label>
         <label>密码<input value={password} onChange={event => setPassword(event.target.value)} type="password" autoComplete="current-password" autoFocus/></label>
         {error ? <div className="config-notice error">{error}</div> : null}
         <button className="primary-button full" disabled={submitting || isLoading}>{submitting ? '登录中…' : '登录工作台'}</button>
+        <div className="auth-login-security"><ShieldCheck size={15}/><span><b>安全会话</b><small>HttpOnly · SameSite=Strict</small></span><LockKeyhole size={15}/></div>
       </form>
-      <div className="login-guardrails">
-        <span><ShieldCheck size={15}/><b>HttpOnly 会话</b><small>浏览器脚本不能读取登录 cookie。</small></span>
-        <span><LockKeyhole size={15}/><b>Go 身份校验</b><small>登录由平台 API 统一验证，不依赖前端假会话。</small></span>
-        <span><KeyRound size={15}/><b>项目级权限</b><small>登录后只展示当前身份有权访问的 Project。</small></span>
-      </div>
     </section>
   </main>
 }

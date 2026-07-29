@@ -194,6 +194,8 @@ type SynchronousResponse struct {
 	Usage            *TokenUsage      `json:"usage,omitempty"`
 	RouteRevisionID  string           `json:"route_revision_id,omitempty"`
 	ResponseMode     TextResponseMode `json:"response_mode,omitempty"`
+	APIMode          TextAPIMode      `json:"api_mode,omitempty"`
+	Background       bool             `json:"background,omitempty"`
 }
 
 type TextRouteInspection struct {
@@ -201,6 +203,8 @@ type TextRouteInspection struct {
 	UpstreamModel   string           `json:"upstream_model"`
 	RouteRevisionID string           `json:"route_revision_id"`
 	ResponseMode    TextResponseMode `json:"response_mode"`
+	APIMode         TextAPIMode      `json:"api_mode"`
+	Background      bool             `json:"background"`
 	Ready           bool             `json:"ready"`
 }
 
@@ -234,6 +238,8 @@ func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) 
 	if result.RouteSnapshot != nil {
 		response.RouteRevisionID = result.RouteSnapshot.RouteRevisionID
 		response.ResponseMode = result.RouteSnapshot.TextResponseMode
+		response.APIMode = result.RouteSnapshot.TextAPIMode
+		response.Background = result.RouteSnapshot.Background
 	}
 	return response, nil
 }

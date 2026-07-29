@@ -97,6 +97,7 @@ func main() {
 		}
 		value := &identity.PasswordSessionService{
 			DB: db, Validator: identityStore,
+			UserScopes: identityStore,
 			SessionTTL: time.Duration(cfg.Auth.SessionHours) * time.Hour,
 			Secure:     cfg.Environment != config.EnvironmentLocal && cfg.Environment != config.EnvironmentTest,
 		}
@@ -149,9 +150,27 @@ func main() {
 		creativeService.ViralAnalyzer = analyzer
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
+	runtimeStore := jobruntime.MySQLStore{DB: db}
+	var researchRunner knowledge.ExternalResearchRunner
+	if cfg.Research.MCPStdioCommand != "" {
+		researchRunner = knowledge.MCPStdioRunner{
+			Command: cfg.Research.MCPStdioCommand, Args: cfg.Research.MCPStdioArgs,
+			ToolName: cfg.Research.MCPToolName, ProtocolVersion: cfg.Research.MCPProtocolVersion,
+			EnvAllowlist:   cfg.Research.MCPEnvAllowlist,
+			Timeout:        time.Duration(cfg.Research.TimeoutSeconds) * time.Second,
+			MaxOutputBytes: cfg.Research.MaxOutputBytes,
+		}
+		log.Printf("Knowledge research configured: transport=mcp_stdio tool=%s timeout=%ds",
+			cfg.Research.MCPToolName, cfg.Research.TimeoutSeconds)
+	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
-		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
+		AssetsBucket: cfg.ObjectStorage.AssetsBucket, Runner: researchRunner,
+	}
+	if researchRunner != nil {
+		knowledgeService.Scheduler = knowledge.JobRuntimeResearchScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("researchjob") },
+		}
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
@@ -159,7 +178,8 @@ func main() {
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
-		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
+		Identities:        identityStore, Accounts: identityStore, Projects: projectService, ProjectMembers: projectStore,
+		Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},
@@ -180,9 +200,11 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
-	runtimeStore := jobruntime.MySQLStore{DB: db}
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	if researchRunner != nil {
+		runtimeHandlers[knowledge.ResearchJobKind] = knowledgeService.HandleResearchJob
+	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
 	}
@@ -208,7 +230,8 @@ func main() {
 		}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
-			TextModelAlias: cfg.Strategy.TextModelAlias, PromptVersion: cfg.Strategy.PromptVersion,
+			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			PromptVersion: cfg.Strategy.PromptVersion,
 			CriticEnabled: cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
 			DisableApproval:      !cfg.Strategy.ApproveEnabled,
 			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
@@ -232,10 +255,13 @@ func main() {
 		strategyAPI := strategyhttp.New(strategyService, agentStore, runtimeStore)
 		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 			httpserver.DomainMount{Pattern: "/api/strategy/v1/", Handler: strategyAPI})
-		strategyHandler := agent.RuntimeHandler(agentStore, strategyService.HandleAgentTask, runtimeStore)
+		strategyHandler := agent.RuntimeHandlerWithFinalFailure(
+			agentStore, strategyService.HandleAgentTask, strategyService.HandleAgentTaskFinalFailure, runtimeStore,
+		)
 		runtimeHandlers[strategysystem.AgentKindBriefExtract] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftGenerate] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftRevise] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindReviewDeep] = strategyHandler
 		agentDispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
 		startWorker(workerContext, "agent-dispatch", agentDispatcher.RunOnce)
 	}

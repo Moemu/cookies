@@ -9,6 +9,7 @@ interface AuthValue {
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
+  switchOrganization: (organizationId: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthValue | null>(null)
@@ -54,7 +55,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(anonymousSession)
   }, [])
 
-  const value = useMemo(() => ({ session, isLoading, error, login, logout, refresh }), [session, isLoading, error, login, logout, refresh])
+  const switchOrganization = useCallback(async (organizationId: string) => {
+    setError(null)
+    await apiRequest('/platform/v1/auth/switch-organization', {
+      method: 'POST',
+      body: JSON.stringify({ organization_id: organizationId }),
+    })
+    setSession(toSession(await apiRequest<BackendIdentity>('/platform/v1/me')))
+    window.localStorage.removeItem('cookies.recent-project-ids.v1')
+    window.localStorage.removeItem('cookies.project-system-paths.v1')
+    window.location.replace('/')
+  }, [])
+
+  const value = useMemo(() => ({ session, isLoading, error, login, logout, refresh, switchOrganization }), [session, isLoading, error, login, logout, refresh, switchOrganization])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
@@ -70,8 +83,18 @@ function toSession(identity: BackendIdentity): ApiAuthSession {
     authenticated: true,
     user: {
       id: identity.user?.id ?? identity.actor.organization_id,
-      email: '',
       displayName,
     },
+    organization: {
+      id: identity.organization.id,
+      name: identity.organization.name,
+      status: identity.organization.status,
+    },
+    membership: identity.membership ? {
+      role: identity.membership.role,
+      status: identity.membership.status,
+      updatedAt: identity.membership.updated_at,
+    } : undefined,
+    scopes: identity.actor.scopes,
   }
 }

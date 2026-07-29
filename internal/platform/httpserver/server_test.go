@@ -36,6 +36,94 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 }
 
+func TestProjectActionClassifiesRoleSensitiveRoutes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/platform/v1/projects/p1/members", "read"},
+		{http.MethodPost, "/platform/v1/projects/p1/members", "manage"},
+		{http.MethodGet, "/platform/v1/projects/p1/assets", "read"},
+		{http.MethodPatch, "/platform/v1/projects/p1/tasks/t1", "write"},
+		{http.MethodPost, "/platform/v1/projects/p1/change-sets/c1/approve", "approve"},
+	}
+	for _, test := range tests {
+		if got := projectAction(httptest.NewRequest(test.method, test.path, nil)); got != test.want {
+			t.Fatalf("%s %s action=%q, want %q", test.method, test.path, got, test.want)
+		}
+	}
+}
+
+func TestOrganizationMemberRoutesStayInCurrentOrganization(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{"organization.members.read"},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := &staticAccountManager{members: []identity.OrganizationMember{{
+		User:       identity.User{ID: "user_1", DisplayName: "Owner"},
+		Membership: identity.OrganizationMembership{OrganizationID: "org_1", UserID: "user_1", Role: "owner", Status: "active"},
+	}}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, Accounts: accounts})
+
+	allowed := httptest.NewRecorder()
+	server.ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, "/platform/v1/organizations/org_1/members", nil))
+	if allowed.Code != http.StatusOK || !strings.Contains(allowed.Body.String(), `"user_1"`) {
+		t.Fatalf("allowed status=%d body=%s", allowed.Code, allowed.Body.String())
+	}
+	denied := httptest.NewRecorder()
+	server.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/platform/v1/organizations/org_2/members", nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("cross-organization status=%d body=%s", denied.Code, denied.Body.String())
+	}
+	if accounts.listMemberCalls != 1 {
+		t.Fatalf("ListOrganizationMembers calls=%d, want 1", accounts.listMemberCalls)
+	}
+}
+
+func TestProjectMemberWriteRequiresManageScope(t *testing.T) {
+	t.Parallel()
+	baseActor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{"project.members.read"},
+	}
+	resolver, err := identity.NewStaticResolver(baseActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := &staticProjectMembershipManager{}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		ProjectMembers: members,
+	})
+	body := `{"principal_kind":"user","principal_id":"user_2","role":"viewer"}`
+	denied := httptest.NewRecorder()
+	server.ServeHTTP(denied, httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/members", strings.NewReader(body)))
+	if denied.Code != http.StatusForbidden || members.addCalls != 0 {
+		t.Fatalf("denied status=%d addCalls=%d body=%s", denied.Code, members.addCalls, denied.Body.String())
+	}
+
+	baseActor.Scopes = []contract.Scope{"project.members.manage"}
+	resolver, _ = identity.NewStaticResolver(baseActor)
+	server = NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		ProjectMembers: members,
+	})
+	allowed := httptest.NewRecorder()
+	server.ServeHTTP(allowed, httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/members", strings.NewReader(body)))
+	if allowed.Code != http.StatusCreated || members.addCalls != 1 {
+		t.Fatalf("allowed status=%d addCalls=%d body=%s", allowed.Code, members.addCalls, allowed.Body.String())
+	}
+}
+
 func TestWorkbenchReviewWritesRequireIdempotencyKey(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{
@@ -1452,6 +1540,46 @@ func TestCreativeHistoryReadEndpointsSurviveRefresh(t *testing.T) {
 }
 
 type staticProjectManager struct{ context contract.ProjectContext }
+
+type staticAccountManager struct {
+	members         []identity.OrganizationMember
+	listMemberCalls int
+}
+
+func (s *staticAccountManager) ListOrganizations(context.Context, contract.ActorContext) ([]identity.OrganizationAccess, error) {
+	return nil, nil
+}
+func (s *staticAccountManager) UpdateCurrentUser(context.Context, contract.ActorContext, string) (identity.User, error) {
+	return identity.User{}, nil
+}
+func (s *staticAccountManager) ListOrganizationMembers(context.Context, contract.ActorContext) ([]identity.OrganizationMember, error) {
+	s.listMemberCalls++
+	return s.members, nil
+}
+func (s *staticAccountManager) AddOrganizationMember(context.Context, contract.ActorContext, string, string) (identity.OrganizationMember, error) {
+	return identity.OrganizationMember{}, nil
+}
+func (s *staticAccountManager) UpdateOrganizationMember(context.Context, contract.ActorContext, string, identity.UpdateOrganizationMembershipRequest) (identity.OrganizationMember, error) {
+	return identity.OrganizationMember{}, nil
+}
+
+type staticProjectMembershipManager struct {
+	addCalls int
+}
+
+func (s *staticProjectMembershipManager) ListProjectMembers(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectMembership, error) {
+	return nil, nil
+}
+func (s *staticProjectMembershipManager) AddProjectMember(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, principal contract.Principal, role string) (project.ProjectMembership, error) {
+	s.addCalls++
+	return project.ProjectMembership{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		PrincipalKind: principal.Kind, PrincipalID: principal.ID, Role: role, Status: "active",
+	}, nil
+}
+func (s *staticProjectMembershipManager) UpdateProjectMember(context.Context, contract.ActorContext, contract.ProjectID, contract.Principal, project.UpdateProjectMembershipRequest) (project.ProjectMembership, error) {
+	return project.ProjectMembership{}, nil
+}
 
 type staticProviderConfigurationReader struct {
 	items []provider.CapabilityStatus
