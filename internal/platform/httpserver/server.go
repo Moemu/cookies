@@ -88,7 +88,9 @@ type SessionManager interface {
 type ProjectManager interface {
 	CreateBrand(context.Context, contract.ActorContext, string) (project.Brand, error)
 	CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error)
+	UpdateProject(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateProjectRequest) (project.Project, error)
 	GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error)
+	GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error)
 	GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 	ListProjects(context.Context, contract.ActorContext) ([]project.Project, error)
 	CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error)
@@ -240,6 +242,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
 	server.mux.Handle("GET /platform/v1/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProjects))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectDetail))))
+	server.mux.Handle("PATCH /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.updateProject))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/workbench", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectWorkbench))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/context", server.requireProject(http.HandlerFunc(server.projectContext)))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/tasks", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.listProjectTasks))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/tasks", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.createProjectTask))))

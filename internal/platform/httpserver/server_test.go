@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/platform/remix"
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
@@ -388,6 +390,547 @@ func (fakeIntakeManager) Create(_ context.Context, rc contract.RequestContext, p
 }
 func (fakeIntakeManager) Get(context.Context, contract.ActorContext, contract.ProjectID, string) (assets.GeneratedIntake, error) {
 	return assets.GeneratedIntake{}, assets.ErrNotFound
+}
+
+type fakeRemixPlanManager struct {
+	plan       remix.Plan
+	render     remix.RenderJob
+	quality    remix.QualityReport
+	analysis   remix.HitAnalysis
+	mapping    remix.ProductMapping
+	preroll    remix.Preroll
+	renderKey  contract.IdempotencyKey
+	renderHash string
+}
+
+func (f *fakeRemixPlanManager) Create(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreatePlanRequest) (remix.Plan, error) {
+	f.plan = remix.Plan{
+		ID:             "remixplan_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		CreatedBy:      actor.Principal,
+		SchemaVersion:  request.SchemaVersion,
+		ClientPlanID:   request.ClientPlanID,
+		TargetSeconds:  request.TargetSeconds,
+		ActualSeconds:  request.ActualSeconds,
+		Pace:           request.Pace,
+		Segments:       request.Segments,
+		Warnings:       request.Warnings,
+		Summary:        request.Summary,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	return f.plan, nil
+}
+
+func (f *fakeRemixPlanManager) Get(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.Plan, error) {
+	if id != f.plan.ID {
+		return remix.Plan{}, remix.ErrNotFound
+	}
+	return f.plan, nil
+}
+
+func (f *fakeRemixPlanManager) List(context.Context, contract.ActorContext, contract.ProjectID, int) ([]remix.Plan, error) {
+	if f.plan.ID == "" {
+		return nil, nil
+	}
+	return []remix.Plan{f.plan}, nil
+}
+
+func (f *fakeRemixPlanManager) CreateRenderJob(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, key contract.IdempotencyKey, request remix.CreateRenderJobRequest) (remix.RenderJob, error) {
+	if request.PlanID != f.plan.ID {
+		return remix.RenderJob{}, remix.ErrNotFound
+	}
+	hash, _ := contract.CanonicalJSONHash(request)
+	if f.render.ID != "" {
+		if f.renderKey == key && f.renderHash == hash {
+			return f.render, nil
+		}
+		if f.renderKey == key {
+			return remix.RenderJob{}, remix.ErrIdempotencyConflict
+		}
+	}
+	f.renderKey = key
+	f.renderHash = hash
+	f.render = remix.RenderJob{
+		ID:             "remixrender_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		PlanID:         request.PlanID,
+		Status:         remix.RenderQueued,
+		Progress:       0,
+		TargetFormat:   "mp4",
+		TargetQuality:  request.TargetQuality,
+		IdempotencyKey: key,
+		RequestHash:    hash,
+		InputSnapshot:  remix.RenderInputSnapshot{Plan: f.plan, Request: request},
+		CreatedBy:      actor.Principal,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	return f.render, nil
+}
+
+func (f *fakeRemixPlanManager) GetRenderJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.RenderJob, error) {
+	if id != f.render.ID {
+		return remix.RenderJob{}, remix.ErrNotFound
+	}
+	return f.render, nil
+}
+
+func (f *fakeRemixPlanManager) CreateQualityReport(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreateQualityReportRequest) (remix.QualityReport, error) {
+	if request.RenderJobID != f.render.ID {
+		return remix.QualityReport{}, remix.ErrNotFound
+	}
+	now := time.Now().UTC()
+	f.quality = remix.QualityReport{
+		ID:             "qualityreport_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		RenderJobID:    request.RenderJobID,
+		OutputAsset:    request.OutputAsset,
+		Verdict:        remix.QualityVerdictMajor,
+		Score:          0.64,
+		Dimensions: []remix.QualityDimension{
+			{Name: "aesthetics", Score: 0.58, Verdict: string(remix.QualityVerdictMajor), Summary: "字幕遮挡主体"},
+		},
+		Issues: []remix.QualityIssue{{
+			Code:             "LOW_READABILITY",
+			Severity:         remix.QualityVerdictMajor,
+			Dimension:        "aesthetics",
+			StartSeconds:     5,
+			EndSeconds:       6.5,
+			Description:      "字幕和商品主体重叠，major 质检要求人工复核",
+			RepairSuggestion: "调整字幕安全区",
+		}},
+		Evidence:          []remix.QualityEvidence{{Kind: "vlm_frame", TimestampSec: 5.8, Summary: "fake VLM 检出字幕遮挡主体"}},
+		RepairSuggestions: []string{"调整字幕安全区"},
+		CreatedBy:         actor.Principal,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	f.render.Status = remix.RenderRequiresReview
+	f.render.RequiresReview = true
+	f.render.QualityReportID = f.quality.ID
+	return f.quality, nil
+}
+
+func (f *fakeRemixPlanManager) GetQualityReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.QualityReport, error) {
+	if id != f.quality.ID {
+		return remix.QualityReport{}, remix.ErrNotFound
+	}
+	return f.quality, nil
+}
+
+func (f *fakeRemixPlanManager) GetQualityReportForRenderJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.QualityReport, error) {
+	if id != f.quality.RenderJobID {
+		return remix.QualityReport{}, remix.ErrNotFound
+	}
+	return f.quality, nil
+}
+
+func (f *fakeRemixPlanManager) CreateHitAnalysis(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreateHitAnalysisRequest) (remix.HitAnalysis, error) {
+	f.analysis = remix.HitAnalysis{
+		ID:             "hitanalysis_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		SourceAsset:    request.SourceAsset,
+		Title:          request.Title,
+		VideoMeta:      remix.HitVideoMeta{DurationSeconds: request.DurationSeconds, Language: request.Language},
+		Segments:       []remix.HitSegment{{ID: "seg_1", StartSeconds: 0, EndSeconds: request.DurationSeconds, Role: remix.HitRoleHook}},
+		CreatedBy:      actor.Principal,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	return f.analysis, nil
+}
+
+func (f *fakeRemixPlanManager) GetHitAnalysis(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.HitAnalysis, error) {
+	if id != f.analysis.ID {
+		return remix.HitAnalysis{}, remix.ErrNotFound
+	}
+	return f.analysis, nil
+}
+
+func (f *fakeRemixPlanManager) CreateProductMapping(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreateProductMappingRequest) (remix.ProductMapping, error) {
+	f.mapping = remix.ProductMapping{
+		ID:               "productmapping_1",
+		OrganizationID:   actor.OrganizationID,
+		ProjectID:        projectID,
+		HitAnalysisID:    request.HitAnalysisID,
+		TargetProduct:    request.TargetProduct,
+		RequiredAssets:   request.RequiredAssets,
+		ReplacementRules: request.ReplacementRules,
+		Constraints:      request.Constraints,
+		TargetSeconds:    request.TargetSeconds,
+		Pace:             request.Pace,
+		CreatedBy:        actor.Principal,
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}
+	return f.mapping, nil
+}
+
+func (f *fakeRemixPlanManager) GetProductMapping(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.ProductMapping, error) {
+	if id != f.mapping.ID {
+		return remix.ProductMapping{}, remix.ErrNotFound
+	}
+	return f.mapping, nil
+}
+
+func (f *fakeRemixPlanManager) GeneratePlanFromProductMapping(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.Plan, error) {
+	if id != f.mapping.ID {
+		return remix.Plan{}, remix.ErrNotFound
+	}
+	return f.plan, nil
+}
+
+func (f *fakeRemixPlanManager) CreatePreroll(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreatePrerollRequest) (remix.Preroll, error) {
+	if request.PlanID != f.plan.ID {
+		return remix.Preroll{}, remix.ErrNotFound
+	}
+	now := time.Now().UTC()
+	f.preroll = remix.Preroll{
+		ID:               "preroll_1",
+		OrganizationID:   actor.OrganizationID,
+		ProjectID:        projectID,
+		PlanID:           request.PlanID,
+		HookType:         request.HookType,
+		ReferenceAsset:   request.ReferenceAsset,
+		StyleConstraints: request.StyleConstraints,
+		DurationSeconds:  request.DurationSeconds,
+		Mode:             request.Mode,
+		PromptDraft:      "为 opening 段生成冲突钩子",
+		QualityVerdict:   remix.QualityVerdictPass,
+		Status:           remix.PrerollReady,
+		OutputAsset:      &contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: contract.AssetVersionRef{AssetID: "preroll_asset", Version: 1}},
+		CreatedBy:        actor.Principal,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	return f.preroll, nil
+}
+
+func (f *fakeRemixPlanManager) GetPreroll(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.Preroll, error) {
+	if id != f.preroll.ID {
+		return remix.Preroll{}, remix.ErrNotFound
+	}
+	return f.preroll, nil
+}
+
+func (f *fakeRemixPlanManager) ApplyPreroll(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (remix.Plan, error) {
+	if id != f.preroll.ID {
+		return remix.Plan{}, remix.ErrNotFound
+	}
+	if f.preroll.Status != remix.PrerollReady {
+		return remix.Plan{}, remix.ErrPrerollNotReady
+	}
+	f.plan.Warnings = append(f.plan.Warnings, "ai_preroll_applied")
+	f.plan.ActualSeconds += f.preroll.DurationSeconds
+	f.preroll.Status = remix.PrerollApplied
+	return f.plan, nil
+}
+
+func (f *fakeRemixPlanManager) CreateFeedbackEvent(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request remix.CreateFeedbackEventRequest) (remix.FeedbackEvent, error) {
+	return remix.FeedbackEvent{ID: "feedback_1", OrganizationID: actor.OrganizationID, ProjectID: projectID, EventType: request.EventType, TargetType: request.TargetType, TargetID: request.TargetID, AssetVersion: request.AssetVersion, Rating: request.Rating, Comment: request.Comment, CreatedBy: actor.Principal, CreatedAt: time.Now().UTC()}, nil
+}
+
+func (f *fakeRemixPlanManager) ListFeedbackEvents(context.Context, contract.ActorContext, contract.ProjectID, remix.FeedbackEventFilter) ([]remix.FeedbackEvent, error) {
+	return nil, nil
+}
+
+func (f *fakeRemixPlanManager) GetAssetPerformanceSnapshot(context.Context, contract.ActorContext, contract.ProjectID) ([]remix.AssetPerformance, error) {
+	return nil, nil
+}
+
+func (f *fakeRemixPlanManager) CreatePlannerWeightSnapshot(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (remix.PlannerWeightSnapshot, error) {
+	return remix.PlannerWeightSnapshot{ID: "weights_1", OrganizationID: actor.OrganizationID, ProjectID: projectID, CreatedBy: actor.Principal, CreatedAt: time.Now().UTC()}, nil
+}
+
+func httpRemixSegment(segment remix.Segment, label string, assetID contract.AssetID) remix.SegmentPlan {
+	return remix.SegmentPlan{
+		Segment:       segment,
+		Label:         label,
+		TargetSeconds: 10,
+		ActualSeconds: 3.2,
+		Shots: []remix.Shot{{
+			ID:           string(segment) + "_shot_1",
+			Segment:      segment,
+			Source:       remix.ShotSourceExistingAsset,
+			AssetVersion: contract.AssetVersionRef{AssetID: assetID, Version: 1},
+			Timeline:     remix.ShotTimeline{StartSeconds: 0, DurationSeconds: 3.2, InPointSeconds: 0, OutPointSeconds: 3.2},
+			Creative:     remix.ShotCreative{ShotType: "close_up", Transition: "cut"},
+			Planning:     remix.ShotPlanning{Score: 0.8, ReasonCodes: []string{"test"}, Reason: "test", Evidence: []string{"fixture"}},
+			Risks:        []string{},
+		}},
+	}
+}
+
+func httpProductMappingRequest(analysisID string) remix.CreateProductMappingRequest {
+	return remix.CreateProductMappingRequest{
+		HitAnalysisID: analysisID,
+		TargetProduct: remix.ProductProfile{
+			Name:          "白域精工新品",
+			SellingPoints: []string{"±0.01mm 精度", "98% 准时交付"},
+			CTA:           "预约获取打样方案",
+		},
+		RequiredAssets: []contract.AssetVersionRef{
+			{AssetID: "target_hook", Version: 1},
+			{AssetID: "target_proof", Version: 1},
+			{AssetID: "target_cta", Version: 1},
+		},
+		ReplacementRules: []remix.ReplacementRule{
+			{Role: remix.HitRoleHook, TargetAsset: contract.AssetVersionRef{AssetID: "target_hook", Version: 1}, Message: "先展示交期风险反差"},
+			{Role: remix.HitRoleProof, TargetAsset: contract.AssetVersionRef{AssetID: "target_proof", Version: 1}, Message: "用精度和产线证据替换原证明段"},
+			{Role: remix.HitRoleCTA, TargetAsset: contract.AssetVersionRef{AssetID: "target_cta", Version: 1}, Message: "引导预约打样方案"},
+		},
+		Constraints:   []string{"不得复用原视频二进制"},
+		TargetSeconds: 30,
+		Pace:          remix.PaceBalanced,
+	}
+}
+
+func SchemaVersionV2ForHTTPTest() string {
+	return remix.SchemaVersionV2
+}
+
+type workflowProjectManager struct {
+	staticProjectManager
+	projectValue project.Project
+	runtime      project.ProjectRuntime
+	task         project.BusinessTask
+	operations   []project.OperationalRecord
+	changeSet    project.ChangeSet
+	auditEvents  []project.AuditEvent
+}
+
+func (m *workflowProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
+	runtime := m.runtime
+	if runtime.Code == "" {
+		runtime = project.ProjectRuntime{
+			Code:      string(m.projectValue.ID),
+			Stage:     string(m.projectValue.Status),
+			Progress:  60,
+			Status:    "active",
+			Owner:     "user:usr_1",
+			Budget:    0,
+			Currency:  "CNY",
+			Timezone:  "Asia/Shanghai",
+			UpdatedAt: m.projectValue.UpdatedAt,
+		}
+	}
+	return project.ProjectDetail{
+		Project:    m.projectValue,
+		Runtime:    runtime,
+		Artifacts:  []project.ProjectArtifactSummary{},
+		Tasks:      m.tasks(),
+		Operations: m.operations,
+		ChangeSets: m.changeSets(),
+	}, nil
+}
+
+func (m *workflowProjectManager) UpdateProject(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request project.UpdateProjectRequest) (project.Project, error) {
+	if request.ExpectedContextVersion != nil && *request.ExpectedContextVersion != m.projectValue.ProjectContextVersion {
+		return project.Project{}, project.ErrVersionConflict
+	}
+	if request.Name != nil {
+		m.projectValue.Name = *request.Name
+	}
+	if request.Industry != nil {
+		m.projectValue.Industry = *request.Industry
+	}
+	if request.Brand != nil {
+		m.runtime.Brand = *request.Brand
+	}
+	if request.Goal != nil {
+		m.runtime.Goal = *request.Goal
+	}
+	m.projectValue.ProjectContextVersion++
+	return m.projectValue, nil
+}
+
+func (m *workflowProjectManager) GetWorkbench(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (project.Workbench, error) {
+	return project.Workbench{Project: project.WorkbenchProject{ProjectID: string(projectID)}}, nil
+}
+
+func (m *workflowProjectManager) CreateBusinessTask(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.CreateBusinessTaskRequest) (project.BusinessTask, error) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	m.task = project.BusinessTask{
+		ID:                "task_1",
+		OrganizationID:    actor.OrganizationID,
+		ProjectID:         projectID,
+		Type:              request.Type,
+		Name:              request.Name,
+		Objective:         request.Objective,
+		Status:            project.BusinessTaskDraft,
+		SourceTaskIDs:     request.SourceTaskIDs,
+		SourceArtifactIDs: request.SourceArtifactIDs,
+		OutputArtifactIDs: []string{},
+		Version:           1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	return m.task, nil
+}
+
+func (m *workflowProjectManager) ListBusinessTasks(context.Context, contract.ActorContext, contract.ProjectID) ([]project.BusinessTask, error) {
+	return m.tasks(), nil
+}
+
+func (m *workflowProjectManager) GetBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, string) (project.BusinessTask, error) {
+	if m.task.ID == "" {
+		return project.BusinessTask{}, project.ErrNotFound
+	}
+	return m.task, nil
+}
+
+func (m *workflowProjectManager) UpdateBusinessTask(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request project.UpdateBusinessTaskRequest) (project.BusinessTask, error) {
+	if request.Status != nil {
+		m.task.Status = *request.Status
+	}
+	if request.OutputArtifactIDs != nil {
+		m.task.OutputArtifactIDs = request.OutputArtifactIDs
+	}
+	m.task.Version = 2
+	return m.task, nil
+}
+
+func (m *workflowProjectManager) CreateOperationalRecord(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	record := workflowOperation(actor.OrganizationID, projectID, "operation_1", request)
+	m.operations = append(m.operations, record)
+	return record, nil
+}
+
+func (m *workflowProjectManager) ListOperationalRecords(context.Context, contract.ActorContext, contract.ProjectID) ([]project.OperationalRecord, error) {
+	return m.operations, nil
+}
+
+func (m *workflowProjectManager) GetOperationalRecord(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (project.OperationalRecord, error) {
+	for _, record := range m.operations {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return project.OperationalRecord{}, project.ErrNotFound
+}
+
+func (m *workflowProjectManager) UpsertOperationalRecord(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, request project.UpsertOperationalRecordRequest) (project.OperationalRecord, error) {
+	record := workflowOperation(actor.OrganizationID, projectID, id, request)
+	m.operations = append(m.operations, record)
+	return record, nil
+}
+
+func (m *workflowProjectManager) CreateChangeSet(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.CreateChangeSetRequest) (project.ChangeSet, error) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	m.changeSet = project.ChangeSet{
+		ID:             "changeset_1",
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		Name:           request.Name,
+		Status:         project.ChangeSetDraft,
+		ArtifactRefs:   request.ArtifactRefs,
+		BudgetLimit:    request.BudgetLimit,
+		AuditEvents:    []project.AuditEvent{},
+		Version:        1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	m.appendAudit("change_set.created")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ChangeSet, error) {
+	return m.changeSets(), nil
+}
+
+func (m *workflowProjectManager) GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	if m.changeSet.ID == "" {
+		return project.ChangeSet{}, project.ErrNotFound
+	}
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) PreflightChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	m.changeSet.Status = project.ChangeSetPreflightPassed
+	m.changeSet.Preflight = &project.ChangeSetPreflight{Passed: true, Checks: []project.PreflightCheck{{Code: "ready_creative", Passed: true, Message: "ready", Repair: ""}}, CheckedAt: time.Date(2026, 7, 28, 10, 1, 0, 0, time.UTC)}
+	m.appendAudit("change_set.preflight")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ApproveChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.ChangeSetApprovalRequest) (project.ChangeSet, error) {
+	m.changeSet.Status = project.ChangeSetApproved
+	m.appendAudit("change_set.approved")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ExecuteChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error) {
+	now := time.Date(2026, 7, 28, 10, 2, 0, 0, time.UTC)
+	m.changeSet.Status = project.ChangeSetExecuted
+	m.changeSet.Execution = &project.ChangeSetExecution{Simulated: true, Evidence: []project.ChangeSetEvidence{{Step: "simulate", Status: "ok", Message: "done", RecordedAt: now}}, ExecutedAt: now}
+	m.appendAudit("change_set.executed")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) RollbackChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.RollbackChangeSetRequest) (project.ChangeSet, error) {
+	m.changeSet.Status = project.ChangeSetRolledBack
+	m.changeSet.Rollback = &project.ChangeSetRollback{Simulated: true, Reason: "演示回滚", RolledBackAt: time.Date(2026, 7, 28, 10, 3, 0, 0, time.UTC)}
+	m.appendAudit("change_set.rolled_back")
+	m.changeSet.AuditEvents = m.auditEvents
+	return m.changeSet, nil
+}
+
+func (m *workflowProjectManager) ListAuditEvents(context.Context, contract.ActorContext, contract.ProjectID) ([]project.AuditEvent, error) {
+	return m.auditEvents, nil
+}
+
+func (m *workflowProjectManager) tasks() []project.BusinessTask {
+	if m.task.ID == "" {
+		return []project.BusinessTask{}
+	}
+	return []project.BusinessTask{m.task}
+}
+
+func (m *workflowProjectManager) changeSets() []project.ChangeSet {
+	if m.changeSet.ID == "" {
+		return []project.ChangeSet{}
+	}
+	m.changeSet.AuditEvents = m.auditEvents
+	return []project.ChangeSet{m.changeSet}
+}
+
+func (m *workflowProjectManager) appendAudit(action string) {
+	m.auditEvents = append(m.auditEvents, project.AuditEvent{
+		ID:             fmt.Sprintf("audit_%d", len(m.auditEvents)+1),
+		OrganizationID: "org_1",
+		ProjectID:      "project_1",
+		Actor:          "user:usr_1",
+		Action:         action,
+		EntityType:     project.AuditEntityChangeSet,
+		EntityID:       "changeset_1",
+		Metadata:       map[string]any{"source": "handler-test"},
+		CreatedAt:      time.Date(2026, 7, 28, 10, len(m.auditEvents), 0, 0, time.UTC),
+	})
+}
+
+func workflowOperation(organizationID contract.OrganizationID, projectID contract.ProjectID, id string, request project.UpsertOperationalRecordRequest) project.OperationalRecord {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	return project.OperationalRecord{
+		ID:             id,
+		OrganizationID: organizationID,
+		ProjectID:      projectID,
+		Kind:           request.Kind,
+		Title:          request.Title,
+		Status:         request.Status,
+		OccurredAt:     request.OccurredAt,
+		Fields:         request.Fields,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
 }
 
 func TestContextFailsClosedWithoutTrustedIdentity(t *testing.T) {
@@ -849,6 +1392,9 @@ func (staticProjectManager) CreateBrand(context.Context, contract.ActorContext, 
 func (staticProjectManager) CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error) {
 	return project.Project{}, nil
 }
+func (staticProjectManager) UpdateProject(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateProjectRequest) (project.Project, error) {
+	return project.Project{}, nil
+}
 
 func (staticProjectManager) ListProjects(context.Context, contract.ActorContext) ([]project.Project, error) {
 	return nil, nil
@@ -856,6 +1402,9 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 
 func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
 	return project.ProjectDetail{}, nil
+}
+func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
+	return project.Workbench{}, nil
 }
 
 func (staticProjectManager) CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error) {

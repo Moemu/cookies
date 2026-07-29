@@ -16,6 +16,8 @@ func TestProjectWorkflowOpenAPIContractIncludesTask3Routes(t *testing.T) {
 	for _, required := range []string{
 		"/platform/v1/projects/{project_id}:",
 		"operationId: getProjectDetail",
+		"/platform/v1/projects/{project_id}/workbench:",
+		"operationId: getProjectWorkbench",
 		"/platform/v1/projects/{project_id}/tasks:",
 		"operationId: createProjectTask",
 		"/platform/v1/projects/{project_id}/tasks/{task_id}:",
@@ -37,6 +39,7 @@ func TestProjectWorkflowOpenAPIContractIncludesTask3Routes(t *testing.T) {
 		"/platform/v1/projects/{project_id}/audit-events:",
 		"operationId: listProjectAuditEvents",
 		"ProjectDetail:",
+		"ProjectWorkbench:",
 		"BusinessTask:",
 		"OperationalRecord:",
 		"ChangeSet:",

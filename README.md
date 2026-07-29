@@ -81,13 +81,31 @@ docker compose up -d mysql
 go run ./cmd/cookies-migrate
 ```
 
-Start the Go API in a second terminal:
+### Importing a complete local demo dataset
+
+To make reviewed local media part of the demo, set `COOKIES_DEMO_DATA_DIR` to
+a directory containing `.pdf` briefs and `.mp4` videos before seeding. The
+seeder content-addresses every file, writes it to the configured object store,
+and injects the corresponding project assets, video metadata, brief-to-video
+walkthrough task, and aggregate media insight into MySQL. It is safe to rerun.
+
+```bash
+COOKIES_DEMO_DATA_DIR=/absolute/path/to/data npm run go:seed
+```
+
+For the supplied local dataset, use `COOKIES_DEMO_DATA_DIR=/Users/bytedance/data`.
+When `COOKIES_BLOB_PROVIDER=filesystem`, the objects are stored under
+`COOKIES_FILESYSTEM_BLOB_ROOT/<COOKIES_TOS_ASSETS_BUCKET>/demo/investor/local-data/`;
+use TOS configuration for a deployed environment. The source data itself is
+not copied into the repository.
+
+Start the Go `cookies-api` in a second terminal:
 
 ```powershell
 go run ./cmd/cookies-api
 ```
 
-Start the root Vite frontend in a third terminal:
+Start the Vite frontend in a third terminal, then open the printed `http://127.0.0.1:5173` URL:
 
 ```powershell
 npm install
@@ -96,9 +114,7 @@ npm run dev
 
 Open `http://127.0.0.1:5173`. Vite proxies `/api`, `/platform`, `/healthz`,
 and `/readyz` to the Go API at `http://127.0.0.1:8080`, so the browser uses a
-single origin. The legacy `web/` package remains temporarily because its
-verified Strategy, Creative, Assets, Delivery, Insights, and Provider pages are
-being migrated into the Kanon shell.
+single origin. The root frontend is the only maintained React application.
 
 ## Provider configuration
 
@@ -116,7 +132,6 @@ Run the local quality gates before changing the MVP:
 
 ```powershell
 go test ./...
-npm run check --prefix web
 npm run build
 ```
 

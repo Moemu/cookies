@@ -1,4 +1,4 @@
-import { platformClient } from '../data/platformClient'
+import { platformClient } from '../data/platformClient.js'
 
 export type PreflightCheck = {
   code: 'confirmed_brief' | 'ready_creative' | 'budget_boundary'
@@ -22,7 +22,8 @@ export type DeliveryChangeSet = {
   updatedAt: string
 }
 
-const apiBase = `${import.meta.env.VITE_API_BASE_URL ?? ''}/api`
+const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
+const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? ''}/api`
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {

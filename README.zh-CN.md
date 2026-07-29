@@ -64,23 +64,31 @@ docker compose up -d --wait mysql
 npm run go:seed
 ```
 
-在第一个终端启动 Go `cookies-api`：
+在第一个终端启动 TypeScript 兼容登录 API：
+
+```bash
+npm run server
+```
+
+在第二个终端启动 Go `cookies-api`：
 
 ```bash
 go run ./cmd/cookies-api
 ```
 
-在第二个终端启动 Vite 前端，然后打开命令输出的 `http://127.0.0.1:5173`：
+在第三个终端启动 Vite 前端，然后打开命令输出的 `http://127.0.0.1:5173`：
 
 ```bash
 npm run dev
 ```
 
-前端默认通过根 Vite `/platform` 和 `/api` 代理连接 `http://127.0.0.1:8080` 上的 Go `cookies-api`，项目主链路使用 Go `/platform/v1`。仅在需要指向其他 API 主机时设置 `VITE_API_BASE_URL`。
+前端保持同源请求：Vite 将本地演示登录的 `/api` 代理到 `http://127.0.0.1:8787` 上的 TypeScript 兼容服务，将项目工作台的 `/platform` 代理到 `http://127.0.0.1:8080` 上的 Go `cookies-api`。端口变化时分别设置 `VITE_COMPAT_API_PROXY_TARGET` 和 `VITE_PLATFORM_PROXY_TARGET`；此模式下保持 `VITE_API_BASE_URL` 为空。
 
 在 macOS 上，可用 `./scripts/dev.sh` 一键启动完整本地链路：启动 MySQL、执行迁移、写入 canonical Go 投资人演示 seed，再启动 Go API 和 Vite 前端。只准备数据库和 seed 时运行 `./scripts/dev.sh --prepare-only`。
 
-TypeScript MVP server（`npm run server`）仅保留为兼容/demo-only 路径。它使用已忽略的 `data/mvp-store.json`，当等价 Go `/platform/v1` 端点可用后，不再作为生产化主链路权威数据源。如需让前端连接该兼容层，需启动 `npm run server` 并显式设置 `VITE_API_BASE_URL=http://127.0.0.1:8787`。
+TypeScript MVP 兼容服务（`npm run server`）负责本地演示登录会话。它使用已忽略的 `data/mvp-store.json`，当等价 Go `/platform/v1` 端点可用后，不再作为项目工作台的数据权威；演示登录到工作台时需与 Go API 同时启动。
+
+本地默认测试身份、兼容服务登录配置和完整演示数据导入步骤见[本地演示与测试数据手册](./docs/25-local-demo-runbook.md)。兼容服务的登录密码仅应写在本机未提交的 `COOKIES_DEMO_PASSWORD`；Go 主链路则通过本地身份注入运行，不使用密码登录。
 
 ## 方舟配置
 

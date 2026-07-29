@@ -1104,7 +1104,7 @@ RenderJob 在 `composition` 前必须通过 gate：
 | `internal/platform/remix` | RemixPlan、Shot、RenderJob、HitAnalysis、Preroll |
 | `internal/platform/provider` | video/image/audio/VLM capability 和 generated intake |
 | `internal/platform/httpserver` | REST API、scope、error mapping |
-| `web/src/features/assets` | AI 混剪页面、素材详情、质量报告、渲染进度 |
+| `src/components/SpecializedPages.tsx` | AI 混剪页面、素材详情、质量报告、渲染进度 |
 
 ## 17. 变更记录
 

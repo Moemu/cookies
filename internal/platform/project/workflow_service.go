@@ -24,6 +24,10 @@ func (s Service) GetDetail(ctx context.Context, actor contract.ActorContext, pro
 	if err != nil {
 		return ProjectDetail{}, err
 	}
+	runtime, err := s.Store.GetProjectRuntime(ctx, actor.OrganizationID, projectID)
+	if err != nil {
+		return ProjectDetail{}, err
+	}
 	tasks, err := s.Store.ListBusinessTasks(ctx, actor.OrganizationID, projectID)
 	if err != nil {
 		return ProjectDetail{}, err
@@ -38,12 +42,19 @@ func (s Service) GetDetail(ctx context.Context, actor contract.ActorContext, pro
 	}
 	return ProjectDetail{
 		Project:    projectValue,
-		Runtime:    runtimeForProject(projectValue, actor),
+		Runtime:    runtime,
 		Artifacts:  []ProjectArtifactSummary{},
 		Tasks:      tasks,
 		Operations: operations,
 		ChangeSets: changeSets,
 	}, nil
+}
+
+func (s Service) GetWorkbench(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (Workbench, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return Workbench{}, err
+	}
+	return s.Store.GetWorkbench(ctx, actor.OrganizationID, projectID)
 }
 
 func (s Service) CreateBusinessTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreateBusinessTaskRequest) (BusinessTask, error) {
@@ -436,34 +447,6 @@ func (s Service) appendChangeSetAudit(ctx context.Context, actor contract.ActorC
 		Metadata:       metadata,
 		CreatedAt:      time.Now().UTC(),
 	})
-}
-
-func runtimeForProject(projectValue Project, actor contract.ActorContext) ProjectRuntime {
-	status := "active"
-	if projectValue.Status == StatusArchived {
-		status = "completed"
-	}
-	if projectValue.Status == StatusDraft {
-		status = "blocked"
-	}
-	progress := 60
-	if projectValue.Status == StatusDraft {
-		progress = 10
-	}
-	if projectValue.Status == StatusArchived {
-		progress = 100
-	}
-	return ProjectRuntime{
-		Code:      string(projectValue.ID),
-		Stage:     string(projectValue.Status),
-		Progress:  progress,
-		Status:    status,
-		Owner:     actorLabel(actor),
-		Budget:    0,
-		Currency:  "CNY",
-		Timezone:  "Asia/Shanghai",
-		UpdatedAt: projectValue.UpdatedAt,
-	}
 }
 
 func operationalRecordFromRequest(organizationID contract.OrganizationID, projectID contract.ProjectID, id string, request UpsertOperationalRecordRequest) OperationalRecord {

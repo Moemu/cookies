@@ -20,6 +20,7 @@ test("platform adapters preserve legacy Project, Task, ChangeSet and Job models"
   assert.deepEqual(toApiProject(detail), {
     id: "project_demo",
     name: "Go Seed Demo",
+    industry: "ecommerce",
     brand: "Seed Brand",
     objective: "Use Go platform data",
     runtime: {
@@ -125,17 +126,87 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
   assert.deepEqual(calls.map(call => call.url), [
     "https://cookies.example/platform/v1/projects",
     "https://cookies.example/platform/v1/projects/project_demo",
+    "https://cookies.example/platform/v1/projects/project_demo",
     "https://cookies.example/platform/v1/projects/project_demo/tasks",
     "https://cookies.example/platform/v1/projects/project_demo/change-sets",
     "https://cookies.example/platform/v1/projects/project_demo/model/jobs",
   ]);
-  assert.equal(calls[2].init.method, "POST");
-  assert.equal(new Headers(calls[2].init.headers).get("Idempotency-Key"), "test-key");
-  assert.equal(JSON.parse(calls[2].init.body as string).source_task_ids.length, 0);
-  assert.deepEqual(JSON.parse(calls[3].init.body as string).artifact_refs, [
+  assert.equal(calls[3].init.method, "POST");
+  assert.equal(new Headers(calls[3].init.headers).get("Idempotency-Key"), "test-key");
+  assert.equal(JSON.parse(calls[3].init.body as string).source_task_ids.length, 0);
+  assert.deepEqual(JSON.parse(calls[4].init.body as string).artifact_refs, [
     { project_id: "project_demo", asset_version: { asset_id: "asset_1", version: 1 } },
   ]);
-  assert.equal(JSON.parse(calls[4].init.body as string).capability, "image.generate");
+  assert.equal(JSON.parse(calls[5].init.body as string).capability, "image.generate");
+});
+
+test("platform client updates a Project through the Go authority with its context version", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const detail = sampleProjectDetail();
+  detail.project.project_context_version = 4;
+  detail.project.name = "Updated Project";
+  detail.runtime.brand = "Updated Brand";
+  detail.runtime.goal = "Updated Goal";
+  const client = createPlatformClient({
+    baseUrl: "https://cookies.example/platform/v1",
+    fetcher: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (init.method === "PATCH") return jsonResponse(detail.project);
+      return jsonResponse(detail);
+    },
+  });
+
+  const updated = await client.updateProject("project_demo", {
+    name: "Updated Project",
+    brand: "Updated Brand",
+    objective: "Updated Goal",
+    expectedContextVersion: 3,
+  });
+
+  assert.equal(updated.name, "Updated Project");
+  assert.equal(updated.brand, "Updated Brand");
+  assert.equal(updated.objective, "Updated Goal");
+  assert.equal(updated.version, 4);
+  assert.equal(calls[0].url, "https://cookies.example/platform/v1/projects/project_demo");
+  assert.equal(calls[0].init.method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[0].init.body as string), {
+    name: "Updated Project",
+    brand: "Updated Brand",
+    goal: "Updated Goal",
+    expected_context_version: 3,
+  });
+});
+
+test("platform client maps Project-scoped audit events from the Go authority", async () => {
+  const client = createPlatformClient({
+    baseUrl: "https://cookies.example/platform/v1",
+    fetcher: async (url) => {
+      assert.equal(String(url), "https://cookies.example/platform/v1/projects/project_demo/audit-events");
+      return jsonResponse({
+        items: [{
+          id: "audit_1",
+          project_id: "project_demo",
+          actor: "user:usr_1",
+          action: "change_set.approved",
+          entity_type: "change_set",
+          entity_id: "changeset_1",
+          metadata: { role: "owner" },
+          created_at: now,
+        }],
+      });
+    },
+  });
+
+  assert.deepEqual(await client.listAuditEvents("project_demo"), [{
+    id: "audit_1",
+    projectId: "project_demo",
+    actor: "user:usr_1",
+    action: "change_set.approved",
+    entityType: "change_set",
+    entityId: "changeset_1",
+    metadata: { role: "owner" },
+    createdAt: now,
+  }]);
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

@@ -17,12 +17,14 @@ import {
   prepareKanonCommercePreroll,
   unsupportedKanonWrite,
 } from '../backend/kanon-api.js'
+import { platformClient } from './platformClient.js'
 
 export type ApiProject = {
   id: string
   name: string
   brand: string
   objective: string
+  industry?: 'short_drama' | 'game' | 'ecommerce' | 'automotive_brand'
   runtime: {
     code: string
     product: string
@@ -308,6 +310,20 @@ export type ApiArtifact = {
   updatedAt: string
 }
 
+export type ApiProjectMediaAsset = {
+  id: string
+  projectId: string
+  version: number
+  kind: 'video' | 'image' | 'document'
+  mimeType: string
+  sizeBytes: number
+  durationSeconds?: number
+  width?: number
+  height?: number
+  createdAt: string
+  contentUrl: string
+}
+
 export type ApiAssetFeature = {
   id: string
   organizationId: string
@@ -490,7 +506,7 @@ export type ApiAuditEvent = {
   projectId: string
   actor: string
   action: string
-  entityType: 'project' | 'business_task' | 'artifact' | 'generation_job' | 'change_set'
+  entityType: 'project' | 'business_task' | 'artifact' | 'generation_job' | 'change_set' | 'operational_record'
   entityId: string
   metadata: Record<string, unknown>
   createdAt: string
@@ -515,7 +531,7 @@ export type ApiOperationalRecord = {
   title: string
   status: string
   occurredAt: string
-  fields: Record<string, string | number>
+  fields: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -1097,460 +1113,44 @@ const backendOrigin = viteEnv?.VITE_API_BASE_URL ?? ''
 const apiBase = `${backendOrigin}/api`
 const platformBase = `${backendOrigin}/platform/v1`
 
-export const agencyWorkbenchSample: ApiAgencyWorkbench = {
-  organizations: [{
-    id: 'org-demo-agency',
-    code: 'AGY',
-    name: '星河增长代理商',
-    owner: 'Mia Chen',
-    currency: 'CNY',
-    timezone: 'Asia/Shanghai',
-    updatedAt: '2026-07-27T08:00:00.000Z',
-  }],
-  clients: [
-    {
-      id: 'client-nova-lifestyle',
-      organizationId: 'org-demo-agency',
-      code: 'NOVA',
-      name: '诺瓦生活科技',
-      industry: '智能家居',
-      owner: 'Amelia Meng',
-      healthStatus: 'healthy',
-      updatedAt: '2026-07-27T07:40:00.000Z',
-    },
-    {
-      id: 'client-orbit-health',
-      organizationId: 'org-demo-agency',
-      code: 'ORBIT',
-      name: '环域健康',
-      industry: '消费医疗',
-      owner: 'Noah Xu',
-      healthStatus: 'watch',
-      updatedAt: '2026-07-27T07:35:00.000Z',
-    },
-  ],
-  brands: [
-    {
-      id: 'brand-nova-home',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      code: 'NOVA-HOME',
-      name: 'Nova Home',
-      category: '智能清洁',
-      productLines: ['扫拖机器人', '空气护理'],
-      owner: 'Lin Wei',
-      guidelineStatus: 'ready',
-      updatedAt: '2026-07-27T07:20:00.000Z',
-    },
-    {
-      id: 'brand-nova-kids',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      code: 'NOVA-KIDS',
-      name: 'Nova Kids',
-      category: '儿童陪伴硬件',
-      productLines: ['学习灯', '陪伴音箱'],
-      owner: 'Sofia Chen',
-      guidelineStatus: 'outdated',
-      updatedAt: '2026-07-26T09:10:00.000Z',
-    },
-    {
-      id: 'brand-orbit-care',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-orbit-health',
-      code: 'ORBIT-CARE',
-      name: 'Orbit Care',
-      category: '健康管理',
-      productLines: ['睡眠监测', '康复训练'],
-      owner: 'Noah Xu',
-      guidelineStatus: 'ready',
-      updatedAt: '2026-07-27T06:50:00.000Z',
-    },
-  ],
-  projects: [
-    {
-      id: 'project-nova-home-launch',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-home',
-      name: 'Nova Home 夏季清洁增长',
-      brand: 'Nova Home',
-      objective: '验证家庭清洁痛点素材，提升搜索与信息流线索效率。',
-      runtime: {
-        code: 'NOVA-HOME-2607',
-        product: '全屋扫拖机器人 S8',
-        stage: '素材人工确认',
-        progress: 64,
-        status: 'active',
-        owner: 'Lin Wei',
-        budget: 260000,
-        currency: 'CNY',
-        timezone: 'Asia/Shanghai',
-      },
-      progressDetail: {
-        stage: 'human_review',
-        stageLabel: '素材人工确认',
-        stagePercent: 60,
-        taskPercent: 64,
-        riskStatus: 'watch',
-        blocker: '2 条视频素材仍需处理质检问题',
-        updatedAt: '2026-07-27T07:50:00.000Z',
-      },
-      version: 3,
-      createdAt: '2026-07-18T02:00:00.000Z',
-      updatedAt: '2026-07-27T07:50:00.000Z',
-    },
-    {
-      id: 'project-nova-kids-presale',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-kids',
-      name: 'Nova Kids 开学季预售',
-      brand: 'Nova Kids',
-      objective: '围绕护眼与陪伴场景准备预售素材和账户测试计划。',
-      runtime: {
-        code: 'NOVA-KIDS-2608',
-        product: 'AI 学习灯 L2',
-        stage: '创意制作',
-        progress: 38,
-        status: 'active',
-        owner: 'Sofia Chen',
-        budget: 180000,
-        currency: 'CNY',
-        timezone: 'Asia/Shanghai',
-      },
-      progressDetail: {
-        stage: 'creative',
-        stageLabel: '创意制作',
-        stagePercent: 45,
-        taskPercent: 38,
-        riskStatus: 'healthy',
-        updatedAt: '2026-07-27T06:20:00.000Z',
-      },
-      version: 2,
-      createdAt: '2026-07-20T03:10:00.000Z',
-      updatedAt: '2026-07-27T06:20:00.000Z',
-    },
-    {
-      id: 'project-orbit-care-sleep',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-orbit-health',
-      brandId: 'brand-orbit-care',
-      name: 'Orbit Care 睡眠健康线索',
-      brand: 'Orbit Care',
-      objective: '验证睡眠监测教育素材，建立可扩量的获客计划。',
-      runtime: {
-        code: 'ORBIT-SLEEP-2607',
-        product: '睡眠监测贴片 Pro',
-        stage: '投放预检',
-        progress: 76,
-        status: 'active',
-        owner: 'Noah Xu',
-        budget: 320000,
-        currency: 'CNY',
-        timezone: 'Asia/Shanghai',
-      },
-      progressDetail: {
-        stage: 'delivery',
-        stageLabel: '投放预检',
-        stagePercent: 35,
-        taskPercent: 76,
-        riskStatus: 'blocked',
-        blocker: '腾讯广告账户追踪状态异常',
-        updatedAt: '2026-07-27T07:10:00.000Z',
-      },
-      version: 4,
-      createdAt: '2026-07-12T01:30:00.000Z',
-      updatedAt: '2026-07-27T07:10:00.000Z',
-    },
-  ],
-  adAccountBindings: [
-    {
-      id: 'binding-nova-home-juliang',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-home',
-      projectIds: ['project-nova-home-launch'],
-      platform: '巨量引擎',
-      accountName: 'Nova Home 巨量演示账户',
-      accountDisplayId: 'JLY-DEMO-NOVA-001',
-      currency: 'CNY',
-      timezone: 'Asia/Shanghai',
-      permissionStatus: 'normal',
-      loginStatus: 'normal',
-      trackingStatus: 'normal',
-      owner: 'Noah Xu',
-      boundAssetIds: ['asset-nova-home-hook', 'asset-nova-home-proof'],
-      lastSyncedAt: '2026-07-27T07:55:00.000Z',
-    },
-    {
-      id: 'binding-nova-kids-kuaishou',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-kids',
-      projectIds: ['project-nova-kids-presale'],
-      platform: '快手磁力',
-      accountName: 'Nova Kids 快手演示账户',
-      accountDisplayId: 'KS-DEMO-NOVA-018',
-      currency: 'CNY',
-      timezone: 'Asia/Shanghai',
-      permissionStatus: 'normal',
-      loginStatus: 'warning',
-      trackingStatus: 'normal',
-      owner: 'Sofia Chen',
-      boundAssetIds: ['asset-nova-kids-scene'],
-      lastSyncedAt: '2026-07-27T06:05:00.000Z',
-    },
-    {
-      id: 'binding-orbit-care-tencent',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-orbit-health',
-      brandId: 'brand-orbit-care',
-      projectIds: ['project-orbit-care-sleep'],
-      platform: '腾讯广告',
-      accountName: 'Orbit Care 腾讯演示账户',
-      accountDisplayId: 'TX-DEMO-ORBIT-026',
-      currency: 'CNY',
-      timezone: 'Asia/Shanghai',
-      permissionStatus: 'normal',
-      loginStatus: 'normal',
-      trackingStatus: 'expired',
-      owner: 'Noah Xu',
-      boundAssetIds: ['asset-orbit-sleep-education', 'asset-orbit-sleep-proof'],
-      lastSyncedAt: '2026-07-26T23:30:00.000Z',
-    },
-  ],
-  qualityCheckRuns: [
-    {
-      id: 'qc-nova-home-hook-v2',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-hook',
-      assetVersion: 2,
-      status: 'failed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-15',
-      summary: '画面卖点清晰，但价格权益口径与 Brief 不一致，需要修改。',
-      issues: [{
-        id: 'issue-nova-home-price',
-        severity: 'major',
-        rule: '价格权益一致性',
-        evidence: '第 6 秒字幕出现未在 Brief 中确认的限时优惠。',
-        suggestion: '删除价格承诺，改为“预约领取清洁方案”。',
-      }],
-      createdAt: '2026-07-27T05:10:00.000Z',
-      completedAt: '2026-07-27T05:12:00.000Z',
-    },
-    {
-      id: 'qc-nova-home-proof-v1',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-proof',
-      assetVersion: 1,
-      status: 'passed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-15',
-      summary: '品牌露出、产品画面和 CTA 均满足当前项目要求。',
-      issues: [],
-      createdAt: '2026-07-26T09:00:00.000Z',
-      completedAt: '2026-07-26T09:02:00.000Z',
-    },
-    {
-      id: 'qc-orbit-sleep-proof-v3',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-orbit-care-sleep',
-      assetId: 'asset-orbit-sleep-proof',
-      assetVersion: 3,
-      status: 'passed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-15',
-      summary: '医学表述使用“辅助观察”，未出现诊断承诺。',
-      issues: [],
-      createdAt: '2026-07-27T03:40:00.000Z',
-      completedAt: '2026-07-27T03:44:00.000Z',
-    },
-  ],
-  materialConfirmations: [
-    {
-      id: 'confirm-nova-home-proof-v1',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      qualityCheckRunId: 'qc-nova-home-proof-v1',
-      assetId: 'asset-nova-home-proof',
-      assetVersion: 1,
-      status: 'confirmed',
-      scope: 'Nova Home 夏季清洁增长 / 信息流素材',
-      confirmedBy: 'Lin Wei',
-      note: '可进入投放计划，需保留当前字幕版本。',
-      createdAt: '2026-07-26T09:30:00.000Z',
-    },
-    {
-      id: 'confirm-nova-home-hook-v2',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      qualityCheckRunId: 'qc-nova-home-hook-v2',
-      assetId: 'asset-nova-home-hook',
-      assetVersion: 2,
-      status: 'changes_requested',
-      scope: 'Nova Home 夏季清洁增长 / 短视频钩子',
-      confirmedBy: 'Amelia Meng',
-      note: '请移除未经确认的优惠口径后再提交新版本。',
-      createdAt: '2026-07-27T05:40:00.000Z',
-    },
-    {
-      id: 'confirm-orbit-sleep-proof-v3',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-orbit-care-sleep',
-      qualityCheckRunId: 'qc-orbit-sleep-proof-v3',
-      assetId: 'asset-orbit-sleep-proof',
-      assetVersion: 3,
-      status: 'confirmed',
-      scope: 'Orbit Care 睡眠健康线索 / 腾讯广告教育素材',
-      confirmedBy: 'Noah Xu',
-      note: '允许用于预检，但需先修复账户追踪异常。',
-      createdAt: '2026-07-27T04:10:00.000Z',
-    },
-  ],
-  assetVersionPointers: [
-    {
-      id: 'pointer-nova-home-hook',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-hook',
-      workingVersion: 3,
-      qualityCheckedVersion: 2,
-      versions: [
-        {
-          version: 3,
-          createdBy: 'Lin Wei',
-          sourceTaskId: 'creative-nova-home-hook-fix',
-          sourceType: 'manual_edit',
-          sourceLabel: '人工字幕返修',
-          createdAt: '2026-07-27T06:00:00.000Z',
-          changeSummary: '移除未经确认的限时优惠口径，保留清洁痛点钩子。',
-        },
-        {
-          version: 2,
-          createdBy: 'demo-quality-vision-v1',
-          sourceTaskId: 'creative-nova-home-hook-gen',
-          sourceType: 'model_generation',
-          sourceLabel: 'AI 生成短视频钩子',
-          createdAt: '2026-07-27T05:00:00.000Z',
-          changeSummary: '生成 9:16 钩子视频，新增权益字幕。',
-        },
-        {
-          version: 1,
-          createdBy: 'Lin Wei',
-          sourceTaskId: 'creative-nova-home-hook-draft',
-          sourceType: 'manual_edit',
-          sourceLabel: '脚本初稿',
-          createdAt: '2026-07-26T10:30:00.000Z',
-          changeSummary: '建立家庭清洁痛点开场与产品露出。',
-        },
-      ],
-      authorization: {
-        platforms: ['巨量引擎'],
-        regions: ['中国大陆'],
-        rightsHolder: 'Nova Home',
-        expiresAt: '2026-09-30T15:59:59.000Z',
-        note: '仅限 Nova Home 夏季清洁增长项目的信息流素材测试。',
-      },
-      deliveryTarget: {
-        platform: '巨量引擎',
-        region: '中国大陆',
-      },
-      owner: 'Lin Wei',
-      updatedAt: '2026-07-27T06:00:00.000Z',
-    },
-    {
-      id: 'pointer-nova-home-proof',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-proof',
-      workingVersion: 1,
-      qualityCheckedVersion: 1,
-      humanConfirmedVersion: 1,
-      deliveryVersion: 1,
-      versions: [
-        {
-          version: 1,
-          createdBy: 'Lin Wei',
-          sourceTaskId: 'creative-nova-home-proof-edit',
-          sourceType: 'manual_edit',
-          sourceLabel: '产品证明段剪辑',
-          createdAt: '2026-07-26T08:40:00.000Z',
-          changeSummary: '保留产品清洁前后对比和标准 CTA。',
-        },
-      ],
-      authorization: {
-        platforms: ['巨量引擎', '腾讯广告'],
-        regions: ['中国大陆', '中国香港'],
-        rightsHolder: 'Nova Home',
-        expiresAt: '2026-10-31T15:59:59.000Z',
-        note: '授权覆盖清洁产品证明段，可用于当前项目交付包。',
-      },
-      deliveryTarget: {
-        platform: '巨量引擎',
-        region: '中国大陆',
-      },
-      owner: 'Lin Wei',
-      updatedAt: '2026-07-26T09:30:00.000Z',
-    },
-    {
-      id: 'pointer-orbit-sleep-proof',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-orbit-care-sleep',
-      assetId: 'asset-orbit-sleep-proof',
-      workingVersion: 3,
-      qualityCheckedVersion: 3,
-      humanConfirmedVersion: 3,
-      versions: [
-        {
-          version: 3,
-          createdBy: 'Noah Xu',
-          sourceTaskId: 'creative-orbit-proof-medical-copy',
-          sourceType: 'manual_edit',
-          sourceLabel: '医学口径人工修订',
-          createdAt: '2026-07-27T03:30:00.000Z',
-          changeSummary: '将诊断承诺改为辅助观察表述。',
-        },
-        {
-          version: 2,
-          createdBy: 'demo-quality-vision-v1',
-          sourceTaskId: 'creative-orbit-proof-gen',
-          sourceType: 'model_generation',
-          sourceLabel: 'AI 生成教育素材',
-          createdAt: '2026-07-26T11:20:00.000Z',
-          changeSummary: '生成睡眠监测教育素材初版。',
-        },
-        {
-          version: 1,
-          createdBy: 'Noah Xu',
-          sourceTaskId: 'creative-orbit-proof-script',
-          sourceType: 'manual_edit',
-          sourceLabel: '脚本导入',
-          createdAt: '2026-07-25T09:00:00.000Z',
-          changeSummary: '导入客户提供的睡眠健康教育脚本。',
-        },
-      ],
-      authorization: {
-        platforms: ['巨量引擎'],
-        regions: ['中国大陆'],
-        rightsHolder: 'Orbit Care',
-        expiresAt: '2026-08-31T15:59:59.000Z',
-        note: '当前授权未覆盖腾讯广告，因此不可设为腾讯广告交付版本。',
-      },
-      deliveryTarget: {
-        platform: '腾讯广告',
-        region: '中国大陆',
-      },
-      owner: 'Noah Xu',
-      updatedAt: '2026-07-27T04:10:00.000Z',
-    },
-  ],
+type AgencyWorkbenchOptions = {
+  projectIds?: string[]
+  includeDemoProject?: boolean
+}
+
+const emptyAgencyWorkbench: ApiAgencyWorkbench = {
+  organizations: [],
+  clients: [],
+  brands: [],
+  projects: [],
+  adAccountBindings: [],
+  qualityCheckRuns: [],
+  materialConfirmations: [],
+  assetVersionPointers: [],
+}
+
+async function loadPersistedAgencyWorkbench(projectIds: string[]): Promise<ApiAgencyWorkbench> {
+  const results = await Promise.all([...new Set(projectIds)].map(async projectId => {
+    const [snapshot, workbench] = await Promise.all([platformClient.getProjectSnapshot(projectId), platformClient.getWorkbench(projectId)])
+    return workbench ? workbenchFromResponse(snapshot.project, workbench) : emptyAgencyWorkbench
+  }))
+  return results.reduce<ApiAgencyWorkbench>((all, current) => ({
+    organizations: [...all.organizations, ...current.organizations], clients: [...all.clients, ...current.clients], brands: [...all.brands, ...current.brands], projects: [...all.projects, ...current.projects], adAccountBindings: [...all.adAccountBindings, ...current.adAccountBindings], qualityCheckRuns: [...all.qualityCheckRuns, ...current.qualityCheckRuns], materialConfirmations: [...all.materialConfirmations, ...current.materialConfirmations], assetVersionPointers: [...all.assetVersionPointers, ...current.assetVersionPointers],
+  }), emptyAgencyWorkbench)
+}
+
+function workbenchFromResponse(project: ApiProject, response: import('./platformClient.js').PlatformProjectWorkbench): ApiAgencyWorkbench {
+  const { organization, client, brand, project: progress } = response
+  return {
+    organizations: [{ id: organization.id, code: organization.code, name: organization.name, owner: organization.owner, currency: organization.currency as 'CNY', timezone: organization.timezone as 'Asia/Shanghai', updatedAt: organization.updated_at }],
+    clients: [{ id: client.id, organizationId: client.organization_id, code: client.code, name: client.name, industry: client.industry, owner: client.owner, healthStatus: client.health_status as ApiAgencyHealthStatus, updatedAt: client.updated_at }],
+    brands: [{ id: brand.id, organizationId: brand.organization_id, clientId: brand.client_id, code: brand.code, name: brand.name, category: brand.category, productLines: brand.product_lines, owner: brand.owner, guidelineStatus: brand.guideline_status as ApiBrand['guidelineStatus'], updatedAt: brand.updated_at }],
+    projects: [{ ...project, organizationId: progress.organization_id, clientId: progress.client_id, brandId: progress.brand_id, progressDetail: { stage: progress.stage as ApiProjectProgressStage, stageLabel: progress.stage_label, stagePercent: progress.stage_percent, taskPercent: progress.task_percent, riskStatus: progress.risk_status as ApiAgencyHealthStatus, blocker: progress.blocker || undefined, updatedAt: progress.updated_at } }],
+    adAccountBindings: response.ad_account_bindings.map(item => ({ id: item.id, organizationId: item.organization_id, clientId: item.client_id, brandId: item.brand_id, projectIds: [project.id], platform: item.platform as ApiAdPlatform, accountName: item.account_name, accountDisplayId: item.account_display_id, currency: item.currency as 'CNY', timezone: item.timezone as 'Asia/Shanghai', permissionStatus: item.permission_status as ApiBindingHealthStatus, loginStatus: item.login_status as ApiBindingHealthStatus, trackingStatus: item.tracking_status as ApiBindingHealthStatus, owner: item.owner, boundAssetIds: item.bound_asset_ids, lastSyncedAt: item.last_synced_at })),
+    qualityCheckRuns: response.quality_check_runs.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiQualityCheckStatus, model: item.model, ruleVersion: item.rule_version, promptVersion: item.prompt_version, summary: item.summary, issues: item.issues.map(issue => ({ id: issue.id, severity: issue.severity as ApiQualityIssueSeverity, rule: issue.rule, evidence: issue.evidence, suggestion: issue.suggestion })), createdAt: item.created_at, completedAt: item.completed_at ?? undefined })),
+    materialConfirmations: response.material_confirmations.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, qualityCheckRunId: item.quality_check_run_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiMaterialConfirmationStatus, scope: item.scope, confirmedBy: item.confirmed_by, note: item.note, createdAt: item.created_at })),
+    assetVersionPointers: response.asset_version_pointers.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, assetId: item.asset_id, workingVersion: item.working_version, qualityCheckedVersion: item.quality_checked_version ?? undefined, humanConfirmedVersion: item.human_confirmed_version ?? undefined, deliveryVersion: item.delivery_version ?? undefined, versions: item.versions.map(version => ({ version: version.version, createdBy: version.created_by, sourceTaskId: version.source_task_id, sourceType: version.source_type as ApiAssetVersionRecord['sourceType'], sourceLabel: version.source_label, createdAt: version.created_at, changeSummary: version.change_summary })), authorization: { platforms: item.authorization.platforms as ApiAdPlatform[], regions: item.authorization.regions, rightsHolder: item.authorization.rights_holder, expiresAt: item.authorization.expires_at, note: item.authorization.note }, deliveryTarget: { platform: item.delivery_target.platform as ApiAdPlatform, region: item.delivery_target.region }, owner: item.owner, updatedAt: item.updated_at })),
+  }
 }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -2065,7 +1665,14 @@ export function buildRemixPrerollInput(
 }
 
 export const api = {
-  listAgencyWorkbench: loadKanonAgencyWorkbench,
+  listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
+    // Workbench data is loaded from the typed Project workbench API.
+    // The canonical demo Project is the only seeded presentation dataset.
+    const projectIds = options.includeDemoProject
+      ? ['project_investor_precision_evidence']
+      : options.projectIds ?? []
+    return loadPersistedAgencyWorkbench(projectIds)
+  },
   getSession: () => request<ApiAuthSession>('/session'),
   login: (input: { email: string; password: string }) => request<ApiAuthSession>('/session', 'POST', input),
   logout: () => request<ApiAuthSession>('/session', 'DELETE'),
@@ -2100,10 +1707,13 @@ export const api = {
   },
   getPublicInsightVideo: (itemId: string) =>
     request<ApiPublicInsightVideoDetail>(`/public-insights/videos/${encodeURIComponent(itemId)}`),
-  listProjects: listKanonProjects,
-  createProject: createKanonProject,
-  updateProject: async (_id: string, _input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective'>>) =>
-    Promise.reject<ApiProject>(unsupportedKanonWrite('项目编辑')),
+  listProjects: () => platformClient.listProjects(),
+  getProjectSnapshot: (projectId: string) => platformClient.getProjectSnapshot(projectId),
+  listProjectMediaAssets: (projectId: string) => platformClient.listProjectMediaAssets(projectId),
+  createProject: (input: Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>) =>
+    platformClient.createProject(input),
+  updateProject: (id: string, input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>> & { expectedContextVersion?: number }) =>
+    platformClient.updateProject(id, input),
   listArtifacts: (projectId?: string) =>
     projectId ? listKanonArtifacts(projectId) : Promise.resolve([]),
   listPrerollArtifacts: async (scope: ApiPrerollScope) =>
@@ -2216,7 +1826,7 @@ export const api = {
     briefId,
   ).then(job => ({ ...job, purpose: scope.purpose, prerollType: scope.prerollType })),
   listAuditEvents: (projectId?: string) =>
-    request<ApiAuditEvent[]>(`/audit-events${projectQuery(projectId)}`),
+    projectId ? platformClient.listAuditEvents(projectId) : Promise.resolve([]),
   listOperations: (projectId: string) =>
     request<ApiOperationalRecord[]>(`/projects/${encodeURIComponent(projectId)}/operations`),
   listRemixEvalCases: (projectId: string) =>
