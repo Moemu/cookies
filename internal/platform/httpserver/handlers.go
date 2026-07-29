@@ -15,6 +15,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/remix"
@@ -30,6 +31,168 @@ func (s *Server) currentIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := s.identities.GetCurrent(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var body struct {
+		DisplayName string `json:"display_name"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.accounts.UpdateCurrentUser(r.Context(), rc.Actor, body.DisplayName)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.accounts.ListOrganizations(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listOrganizationMembers(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if string(rc.Actor.OrganizationID) != r.PathValue("organization_id") {
+		s.writeServiceError(w, r, identity.ErrMembershipForbidden)
+		return
+	}
+	values, err := s.accounts.ListOrganizationMembers(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) addOrganizationMember(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if string(rc.Actor.OrganizationID) != r.PathValue("organization_id") {
+		s.writeServiceError(w, r, identity.ErrMembershipForbidden)
+		return
+	}
+	var body struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.accounts.AddOrganizationMember(r.Context(), rc.Actor, body.UserID, body.Role)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) updateOrganizationMember(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if string(rc.Actor.OrganizationID) != r.PathValue("organization_id") {
+		s.writeServiceError(w, r, identity.ErrMembershipForbidden)
+		return
+	}
+	var body identity.UpdateOrganizationMembershipRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.accounts.UpdateOrganizationMember(r.Context(), rc.Actor, r.PathValue("user_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listProjectMembers(w http.ResponseWriter, r *http.Request) {
+	if s.projectMembers == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.projectMembers.ListProjectMembers(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) addProjectMember(w http.ResponseWriter, r *http.Request) {
+	if s.projectMembers == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var body struct {
+		PrincipalKind contract.PrincipalKind `json:"principal_kind"`
+		PrincipalID   string                 `json:"principal_id"`
+		Role          string                 `json:"role"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.projectMembers.AddProjectMember(r.Context(), rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		contract.Principal{Kind: body.PrincipalKind, ID: body.PrincipalID}, body.Role)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) updateProjectMember(w http.ResponseWriter, r *http.Request) {
+	if s.projectMembers == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var body project.UpdateProjectMembershipRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.projectMembers.UpdateProjectMember(r.Context(), rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		contract.Principal{Kind: contract.PrincipalKind(r.PathValue("principal_kind")), ID: r.PathValue("principal_id")}, body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -1519,6 +1682,22 @@ func writerHeaderNoStore(w http.ResponseWriter) { w.Header().Set("Cache-Control"
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, message, retryable := http.StatusInternalServerError, "INTERNAL", "The service could not complete the request.", true
 	switch {
+	case errors.Is(err, identity.ErrMembershipForbidden):
+		status, code, message, retryable = http.StatusForbidden, "MEMBERSHIP_OPERATION_FORBIDDEN", "当前身份无权执行该成员操作。", false
+	case errors.Is(err, identity.ErrMembershipNotFound), errors.Is(err, identity.ErrUserNotFound):
+		status, code, message, retryable = http.StatusNotFound, "IDENTITY_RESOURCE_NOT_FOUND", "指定的用户或成员关系不存在。", false
+	case errors.Is(err, identity.ErrLastOwner):
+		status, code, message, retryable = http.StatusConflict, "LAST_OWNER_REQUIRED", "组织必须保留至少一名有效 owner。", false
+	case errors.Is(err, identity.ErrMembershipConflict):
+		status, code, message, retryable = http.StatusConflict, "MEMBERSHIP_CHANGED", "成员信息已发生变化，请刷新后重试。", false
+	case errors.Is(err, project.ErrMembershipForbidden):
+		status, code, message, retryable = http.StatusForbidden, "PROJECT_MEMBERSHIP_OPERATION_FORBIDDEN", "当前身份无权管理该项目成员。", false
+	case errors.Is(err, project.ErrMembershipNotFound):
+		status, code, message, retryable = http.StatusNotFound, "PROJECT_MEMBERSHIP_NOT_FOUND", "指定的项目成员关系不存在。", false
+	case errors.Is(err, project.ErrLastOwner):
+		status, code, message, retryable = http.StatusConflict, "PROJECT_LAST_OWNER_REQUIRED", "项目必须保留至少一名有效 owner。", false
+	case errors.Is(err, project.ErrMembershipConflict):
+		status, code, message, retryable = http.StatusConflict, "PROJECT_MEMBERSHIP_CHANGED", "项目成员信息已发生变化，请刷新后重试。", false
 	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound), errors.Is(err, knowledge.ErrNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, agent.ErrRunNotFound):
 		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "The scoped resource does not exist.", false
 	case errors.Is(err, assets.ErrIdempotencyConflict), errors.Is(err, remix.ErrIdempotencyConflict):

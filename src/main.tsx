@@ -10,12 +10,12 @@ import { LoginPage } from './components/LoginPage'
 import './styles.css'
 
 function Root() {
-  return <AuthProvider><BrowserRouter><Routes>
+  return <BrowserRouter><Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/*" element={<AuthBoundary>
       <ModelConfigProvider><ProjectProvider><App /></ProjectProvider></ModelConfigProvider>
     </AuthBoundary>} />
-  </Routes></BrowserRouter></AuthProvider>
+  </Routes></BrowserRouter>
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

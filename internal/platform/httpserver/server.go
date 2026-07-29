@@ -33,7 +33,9 @@ type Server struct {
 	providerJobs      ProviderJobs
 	readiness         ReadinessChecker
 	identities        CurrentIdentityReader
+	accounts          AccountManager
 	projects          ProjectManager
+	projectMembers    ProjectMembershipManager
 	uploads           AssetUploadManager
 	intakes           GeneratedIntakeManager
 	creative          CreativeManager
@@ -57,7 +59,9 @@ type Dependencies struct {
 	ProviderJobs      ProviderJobs
 	Readiness         ReadinessChecker
 	Identities        CurrentIdentityReader
+	Accounts          AccountManager
 	Projects          ProjectManager
+	ProjectMembers    ProjectMembershipManager
 	Uploads           AssetUploadManager
 	Intakes           GeneratedIntakeManager
 	Creative          CreativeManager
@@ -81,9 +85,17 @@ type DomainMount struct {
 type CurrentIdentityReader interface {
 	GetCurrent(context.Context, contract.ActorContext) (identity.CurrentIdentity, error)
 }
+type AccountManager interface {
+	ListOrganizations(context.Context, contract.ActorContext) ([]identity.OrganizationAccess, error)
+	UpdateCurrentUser(context.Context, contract.ActorContext, string) (identity.User, error)
+	ListOrganizationMembers(context.Context, contract.ActorContext) ([]identity.OrganizationMember, error)
+	AddOrganizationMember(context.Context, contract.ActorContext, string, string) (identity.OrganizationMember, error)
+	UpdateOrganizationMember(context.Context, contract.ActorContext, string, identity.UpdateOrganizationMembershipRequest) (identity.OrganizationMember, error)
+}
 type SessionManager interface {
 	Login(context.Context, string, string) (identity.LoginResult, error)
 	Logout(context.Context, string) error
+	SwitchOrganization(context.Context, string, contract.OrganizationID) (identity.LoginResult, error)
 	Cookie(string, time.Time) *http.Cookie
 	ExpiredCookie() *http.Cookie
 }
@@ -114,6 +126,11 @@ type ProjectManager interface {
 	ExecuteChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ChangeSet, error)
 	RollbackChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, project.RollbackChangeSetRequest) (project.ChangeSet, error)
 	ListAuditEvents(context.Context, contract.ActorContext, contract.ProjectID) ([]project.AuditEvent, error)
+}
+type ProjectMembershipManager interface {
+	ListProjectMembers(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectMembership, error)
+	AddProjectMember(context.Context, contract.ActorContext, contract.ProjectID, contract.Principal, string) (project.ProjectMembership, error)
+	UpdateProjectMember(context.Context, contract.ActorContext, contract.ProjectID, contract.Principal, project.UpdateProjectMembershipRequest) (project.ProjectMembership, error)
 }
 type AssetUploadManager interface {
 	Create(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, assets.CreateUploadRequest) (assets.CreateUploadResponse, error)
@@ -237,7 +254,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server := &Server{
 		resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer,
 		providerJobs: dependencies.ProviderJobs, readiness: dependencies.Readiness,
-		identities: dependencies.Identities, projects: dependencies.Projects, uploads: dependencies.Uploads,
+		identities: dependencies.Identities, accounts: dependencies.Accounts, projects: dependencies.Projects,
+		projectMembers: dependencies.ProjectMembers, uploads: dependencies.Uploads,
 		intakes: dependencies.Intakes, newID: newRequestID,
 		creative: dependencies.Creative, sessions: dependencies.Sessions, knowledge: dependencies.Knowledge,
 		remixPlans: dependencies.RemixPlans, evals: dependencies.Evals, agentRuns: dependencies.AgentRuns,
@@ -248,8 +266,14 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.HandleFunc("GET /readyz", server.ready)
 	server.mux.HandleFunc("POST /platform/v1/auth/login", server.login)
 	server.mux.HandleFunc("POST /platform/v1/auth/logout", server.logout)
+	server.mux.Handle("POST /platform/v1/auth/switch-organization", server.requireAuthentication(http.HandlerFunc(server.switchOrganization)))
 	server.mux.Handle("GET /platform/v1/context", server.requireAuthentication(http.HandlerFunc(server.requestContext)))
 	server.mux.Handle("GET /platform/v1/me", server.requireAuthentication(http.HandlerFunc(server.currentIdentity)))
+	server.mux.Handle("PATCH /platform/v1/me", server.requireAuthentication(server.requireScope("identity.profile.write", http.HandlerFunc(server.updateCurrentIdentity))))
+	server.mux.Handle("GET /platform/v1/organizations", server.requireAuthentication(server.requireScope("organization.read", http.HandlerFunc(server.listOrganizations))))
+	server.mux.Handle("GET /platform/v1/organizations/{organization_id}/members", server.requireAuthentication(server.requireScope("organization.members.read", http.HandlerFunc(server.listOrganizationMembers))))
+	server.mux.Handle("POST /platform/v1/organizations/{organization_id}/members", server.requireAuthentication(server.requireScope("organization.members.manage", http.HandlerFunc(server.addOrganizationMember))))
+	server.mux.Handle("PATCH /platform/v1/organizations/{organization_id}/members/{user_id}", server.requireAuthentication(server.requireScope("organization.members.manage", http.HandlerFunc(server.updateOrganizationMember))))
 	server.mux.Handle("GET /platform/v1/provider/capabilities", server.requireAuthentication(http.HandlerFunc(server.providerCapabilities)))
 	server.mux.Handle("POST /platform/v1/brands", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createBrand))))
 	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
@@ -257,6 +281,9 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectDetail))))
 	server.mux.Handle("PATCH /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.write", http.HandlerFunc(server.updateProject))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/workbench", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectWorkbench))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/members", server.requireProject(server.requireScope("project.members.read", http.HandlerFunc(server.listProjectMembers))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/members", server.requireProject(server.requireScope("project.members.manage", http.HandlerFunc(server.addProjectMember))))
+	server.mux.Handle("PATCH /platform/v1/projects/{project_id}/members/{principal_kind}/{principal_id}", server.requireProject(server.requireScope("project.members.manage", http.HandlerFunc(server.updateProjectMember))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/quality-checks", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.runWorkbenchQualityCheck))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/confirmations", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.recordWorkbenchMaterialConfirmation))))
 	server.mux.Handle("PATCH /platform/v1/projects/{project_id}/assets/{asset_id}/version-pointer", server.requireProject(server.requireScope("assets.write", http.HandlerFunc(server.updateWorkbenchAssetPointer))))
@@ -428,6 +455,44 @@ func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) switchOrganization(writer http.ResponseWriter, request *http.Request) {
+	if s.sessions == nil {
+		s.notImplemented(writer, request)
+		return
+	}
+	var body struct {
+		OrganizationID contract.OrganizationID `json:"organization_id"`
+	}
+	if err := decodeJSON(writer, request, &body); err != nil || strings.TrimSpace(string(body.OrganizationID)) == "" {
+		s.badRequest(writer, request, err)
+		return
+	}
+	cookie, err := request.Cookie(identity.SessionCookieName)
+	if err != nil || len(cookie.Value) > 128 {
+		writeProblem(writer, http.StatusUnauthorized, contract.Error{
+			Code: "UNAUTHENTICATED", Message: "当前会话无效",
+			RequestID: requestIDFrom(request.Context()), Retryable: false,
+		})
+		return
+	}
+	result, err := s.sessions.SwitchOrganization(request.Context(), cookie.Value, body.OrganizationID)
+	if err != nil {
+		status, code := http.StatusForbidden, "ORGANIZATION_ACCESS_DENIED"
+		if errors.Is(err, identity.ErrUnauthenticated) {
+			status, code = http.StatusUnauthorized, "UNAUTHENTICATED"
+		} else if !errors.Is(err, identity.ErrActorInactive) {
+			status, code = http.StatusServiceUnavailable, "IDENTITY_UNAVAILABLE"
+		}
+		writeProblem(writer, status, contract.Error{
+			Code: code, Message: "无法切换到指定组织",
+			RequestID: requestIDFrom(request.Context()), Retryable: status >= 500,
+		})
+		return
+	}
+	http.SetCookie(writer, s.sessions.Cookie(result.Token, result.ExpiresAt))
+	writeJSON(writer, http.StatusOK, map[string]any{"actor": result.Actor, "expires_at": result.ExpiresAt})
+}
+
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	requestID := validOpaqueID(request.Header.Get("X-Request-ID"))
 	if requestID == "" {
@@ -512,12 +577,28 @@ func (s *Server) requireProject(next http.Handler) http.Handler {
 	return s.requireAuthentication(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requestContext, ok := contract.RequestContextFrom(request.Context())
 		projectID := contract.ProjectID(request.PathValue("project_id"))
-		if !ok || projectID == "" || s.projectAuthorizer.AuthorizeProject(request.Context(), requestContext.Actor, projectID) != nil {
+		action := projectAction(request)
+		if !ok || projectID == "" || s.projectAuthorizer.AuthorizeProjectAction(request.Context(), requestContext.Actor, projectID, action) != nil {
 			writeProblem(writer, http.StatusForbidden, contract.Error{Code: "PROJECT_ACCESS_DENIED", Message: "当前身份无权访问该项目", RequestID: requestContext.RequestID, Retryable: false})
 			return
 		}
 		next.ServeHTTP(writer, request)
 	}))
+}
+
+func projectAction(request *http.Request) string {
+	path := request.URL.Path
+	if strings.Contains(path, "/members") && request.Method != http.MethodGet && request.Method != http.MethodHead {
+		return "manage"
+	}
+	if strings.Contains(path, "/approve") || strings.Contains(path, "/execute") ||
+		strings.Contains(path, "/rollback") || strings.Contains(path, "/confirmations") {
+		return "approve"
+	}
+	if request.Method == http.MethodGet || request.Method == http.MethodHead {
+		return "read"
+	}
+	return "write"
 }
 
 func (s *Server) requireScope(scope contract.Scope, next http.Handler) http.Handler {

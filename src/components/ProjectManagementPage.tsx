@@ -10,6 +10,8 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
+import { useAuth } from '../context/AuthContext'
+import { accountApi, type BackendProjectMembership } from '../backend/platform'
 import { calculateProjectProgress, progressBarWidth, progressPercentLabel, progressReasonLabel } from '../lib/project-progress'
 import type { BusinessTaskType, SystemKey } from '../types'
 
@@ -61,12 +63,24 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
   onOpenProject: OpenProject
 }) {
   const { currentProject, updateProject } = useProject()
+  const { session } = useAuth()
   const [activeTab, setActiveTab] = useState<ManagementTab>('overview')
   const [name, setName] = useState(currentProject.name)
   const [brand, setBrand] = useState(currentProject.brand)
   const [goal, setGoal] = useState(currentProject.goal)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
+  const [members, setMembers] = useState<BackendProjectMembership[]>([])
+  const [memberError, setMemberError] = useState('')
+  const [newPrincipalId, setNewPrincipalId] = useState('')
+  const [newProjectRole, setNewProjectRole] = useState('viewer')
+  const currentProjectMembership = members.find(member =>
+    member.principal_kind === 'user' &&
+    member.principal_id === session.user?.id &&
+    member.status === 'active',
+  )
+  const canManageMembers = (session.scopes?.includes('project.members.manage') ?? false) &&
+    currentProjectMembership?.role === 'owner'
 
   useEffect(() => {
     setName(currentProject.name)
@@ -74,6 +88,52 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
     setGoal(currentProject.goal)
     setNotice('')
   }, [currentProject.id, currentProject.name, currentProject.brand, currentProject.goal])
+
+  useEffect(() => {
+    if (activeTab !== 'members' || !currentProject.id) return
+    void reloadMembers()
+  }, [activeTab, currentProject.id])
+
+  const reloadMembers = async () => {
+    try {
+      setMemberError('')
+      setMembers((await accountApi.listProjectMembers(currentProject.id)).items)
+    } catch (cause) {
+      setMemberError(cause instanceof Error ? cause.message : '项目成员加载失败。')
+    }
+  }
+
+  const addMember = async (event: FormEvent) => {
+    event.preventDefault()
+    setSaving(true)
+    setMemberError('')
+    setNotice('')
+    try {
+      await accountApi.addProjectMember(currentProject.id, { principal_kind: 'user', principal_id: newPrincipalId.trim(), role: newProjectRole })
+      setNewPrincipalId('')
+      setNotice('项目成员已添加。')
+      await reloadMembers()
+    } catch (cause) {
+      setMemberError(cause instanceof Error ? cause.message : '项目成员添加失败。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const updateMember = async (member: BackendProjectMembership, role: string, status: string) => {
+    setSaving(true)
+    setMemberError('')
+    setNotice('')
+    try {
+      await accountApi.updateProjectMember(currentProject.id, member, { role, status })
+      setNotice('项目成员权限已更新。')
+      await reloadMembers()
+    } catch (cause) {
+      setMemberError(cause instanceof Error ? cause.message : '项目成员更新失败。')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const readyArtifacts = Object.values(currentProject.artifacts).filter(artifact =>
     artifact.id && ['已确认', '已完成'].includes(artifact.status),
@@ -163,8 +223,10 @@ export function ProjectManagementPage({ onOpenWorkbench, onOpenProject }: {
     </form> : null}
 
     {activeTab === 'members' ? <section className="project-responsibility-page">
-      <header><UsersRound size={20}/><div><h2>成员与职责</h2><p>职责按流程阶段编排；同一个项目内的交接不会改变数据归属。</p></div></header>
-      {moduleDefinitions.map((module, index) => <article key={module.system}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{module.label}</b><small>{module.responsibility}</small></div><div><small>默认职责</small><strong>{module.owner}</strong></div><em><Check size={12}/>已纳入项目</em></article>)}
+      <header><UsersRound size={20}/><div><h2>项目成员与角色</h2><p>这里管理真实 project_memberships；业务阶段职责不再冒充权限成员。</p></div></header>
+      {canManageMembers ? <form className="member-add-form" onSubmit={addMember}><label>组织成员用户 ID<input value={newPrincipalId} onChange={event => setNewPrincipalId(event.target.value)} placeholder="usr_…" required/></label><label>项目角色<select value={newProjectRole} onChange={event => setNewProjectRole(event.target.value)}><option value="viewer">viewer</option><option value="editor">editor</option><option value="owner">owner</option></select></label><button className="primary-button" disabled={saving || !newPrincipalId.trim()}>添加成员</button></form> : null}
+      <div className="member-table">{members.map(member => <article key={`${member.principal_kind}:${member.principal_id}`}><div><b>{member.display_name || member.principal_id}</b><small>{member.principal_kind} · {member.principal_id}</small></div><select value={member.role} disabled={!canManageMembers || saving || member.principal_kind === 'service'} onChange={event => void updateMember(member, event.target.value, member.status)}>{member.principal_kind === 'service' ? <option value="worker">worker</option> : ['owner', 'editor', 'viewer'].map(role => <option key={role}>{role}</option>)}</select><button className="secondary-button" disabled={!canManageMembers || saving} onClick={() => void updateMember(member, member.role, member.status === 'active' ? 'suspended' : 'active')}>{member.status === 'active' ? '停用' : '启用'}</button><span className={`member-status ${member.status}`}>{member.status}</span></article>)}{!members.length && !memberError ? <div className="project-management-empty">当前项目暂无可显示成员。</div> : null}</div>
+      {memberError ? <div className="config-notice error" role="alert">{memberError}</div> : null}
       <div className="project-governance-note"><CircleAlert size={16}/><span><b>权限原则</b><small>成员只读取当前 Project 的任务、产物和 ChangeSet；跨项目引用必须经过来源校验。</small></span></div>
     </section> : null}
 

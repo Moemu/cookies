@@ -5,6 +5,7 @@ import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
 import { StateBoundary } from './components/StateBoundary'
+import { AccountSettingsPage } from './components/AccountSettingsPage'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
 import { projectHomePath, projectManagePath, projectPath, useAppRoute } from './lib/router'
@@ -38,17 +39,18 @@ export default function App() {
     selectProject(projectId)
     navigate(projectManagePath(projectId))
   }
-  const routeNeedsProject = Boolean(route.projectId && !route.isHome && !route.isModelSettings)
+  const routeNeedsProject = Boolean(route.projectId && !route.isHome && !route.isModelSettings && !route.accountPage)
   const routeProjectReady = !route.projectId || currentProject.id === route.projectId
   const projectRouteState = isLoading || targetProjectId !== route.projectId ? 'loading' : 'error'
-  const content = route.isModelSettings ? <ModelSettingsPage/>
+  const content = route.accountPage ? <AccountSettingsPage page={route.accountPage}/>
+    : route.isModelSettings ? <ModelSettingsPage/>
     : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject} onManageProject={manageProject}/>
     : routeNeedsProject && !routeProjectReady ? <ProjectRouteBoundary targetProjectId={route.projectId!} diagnostic={routeDiagnostic} state={projectRouteState} onRetry={() => { void reloadProjects(route.projectId) }}/>
     : route.isProjectHome ? <ProjectFlowDashboard onOpenProject={openProject} onManageProject={manageProject}/>
     : route.isProjectManagement ? <ProjectManagementPage onOpenWorkbench={id => openProject(id)} onOpenProject={openProject}/>
     : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>
 
-  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
+  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings || Boolean(route.accountPage)} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onAccountNavigate={navigate} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
     {content}
   </Shell>
 }

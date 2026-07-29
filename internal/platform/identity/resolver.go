@@ -51,6 +51,7 @@ func (r ValidatingResolver) Authenticate(ctx context.Context, request *http.Requ
 // never queries Project tables directly.
 type ProjectAuthorizer interface {
 	AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error
+	AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error
 }
 
 type RejectingResolver struct{}
@@ -82,6 +83,9 @@ type RejectingProjectAuthorizer struct{}
 func (RejectingProjectAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
 	return ErrProjectAccessDenied
 }
+func (RejectingProjectAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return ErrProjectAccessDenied
+}
 
 // StaticProjectAuthorizer is local-development-only support. Production is
 // expected to receive an authorizer backed by the Project module.
@@ -94,4 +98,8 @@ func (a StaticProjectAuthorizer) AuthorizeProject(_ context.Context, actor contr
 		return nil
 	}
 	return ErrProjectAccessDenied
+}
+
+func (a StaticProjectAuthorizer) AuthorizeProjectAction(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, _ string) error {
+	return a.AuthorizeProject(ctx, actor, projectID)
 }

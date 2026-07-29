@@ -13,9 +13,222 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/ids"
 )
 
 type MySQLStore struct{ DB *sql.DB }
+
+func (s MySQLStore) ListProjectMembers(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]ProjectMembership, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("project database is required")
+	}
+	if err := s.AuthorizeProject(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT pm.organization_id, pm.project_id, pm.principal_kind,
+		pm.principal_id, COALESCE(u.display_name, si.name, pm.principal_id), pm.role, pm.status,
+		pm.created_at, pm.updated_at
+		FROM project_memberships pm
+		LEFT JOIN users u ON pm.principal_kind = 'user' AND u.id = pm.principal_id
+		LEFT JOIN service_identities si ON pm.principal_kind = 'service'
+		  AND si.organization_id = pm.organization_id AND si.id = pm.principal_id
+		WHERE pm.organization_id = ? AND pm.project_id = ? ORDER BY pm.created_at`,
+		actor.OrganizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]ProjectMembership, 0)
+	for rows.Next() {
+		var value ProjectMembership
+		if err := rows.Scan(&value.OrganizationID, &value.ProjectID, &value.PrincipalKind,
+			&value.PrincipalID, &value.DisplayName, &value.Role, &value.Status,
+			&value.CreatedAt, &value.UpdatedAt); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s MySQLStore) AddProjectMember(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, principal contract.Principal, role string) (ProjectMembership, error) {
+	if s.DB == nil {
+		return ProjectMembership{}, fmt.Errorf("project database is required")
+	}
+	if projectID == "" || strings.TrimSpace(principal.ID) == "" ||
+		!ValidProjectRoleForPrincipal(principal.Kind, role) {
+		return ProjectMembership{}, fmt.Errorf("valid principal and compatible project role are required")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	defer tx.Rollback()
+	if err := requireProjectOwner(ctx, tx, actor, projectID); err != nil {
+		return ProjectMembership{}, err
+	}
+	var displayName string
+	switch principal.Kind {
+	case contract.PrincipalUser:
+		err = tx.QueryRowContext(ctx, `SELECT u.display_name FROM users u
+			JOIN organization_memberships om ON om.user_id = u.id
+			WHERE om.organization_id = ? AND om.user_id = ? AND om.status = 'active' AND u.status = 'active'`,
+			actor.OrganizationID, principal.ID).Scan(&displayName)
+	case contract.PrincipalService:
+		err = tx.QueryRowContext(ctx, `SELECT name FROM service_identities
+			WHERE organization_id = ? AND id = ? AND status = 'active'`,
+			actor.OrganizationID, principal.ID).Scan(&displayName)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProjectMembership{}, identity.ErrActorInactive
+	}
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO project_memberships
+		(organization_id, project_id, principal_kind, principal_id, role, status)
+		VALUES (?, ?, ?, ?, ?, 'active')`,
+		actor.OrganizationID, projectID, principal.Kind, principal.ID, role); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return ProjectMembership{}, ErrMembershipConflict
+		}
+		return ProjectMembership{}, err
+	}
+	value, err := scanProjectMembership(ctx, tx, actor.OrganizationID, projectID, principal)
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	value.DisplayName = displayName
+	if err := writeProjectMembershipAudit(ctx, tx, actor, projectID, value, "project_member.added"); err != nil {
+		return ProjectMembership{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProjectMembership{}, err
+	}
+	return value, nil
+}
+
+func (s MySQLStore) UpdateProjectMember(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, principal contract.Principal, request UpdateProjectMembershipRequest) (ProjectMembership, error) {
+	if s.DB == nil {
+		return ProjectMembership{}, fmt.Errorf("project database is required")
+	}
+	if projectID == "" || strings.TrimSpace(principal.ID) == "" ||
+		!ValidProjectRoleForPrincipal(principal.Kind, request.Role) ||
+		!identity.ValidMembershipStatus(request.Status) ||
+		request.ExpectedUpdatedAt.IsZero() {
+		return ProjectMembership{}, fmt.Errorf("valid principal, compatible role, status, and expected_updated_at are required")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	defer tx.Rollback()
+	if err := requireProjectOwner(ctx, tx, actor, projectID); err != nil {
+		return ProjectMembership{}, err
+	}
+	before, err := scanProjectMembership(ctx, tx, actor.OrganizationID, projectID, principal)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProjectMembership{}, ErrMembershipNotFound
+	}
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	if !before.UpdatedAt.Equal(request.ExpectedUpdatedAt) {
+		return ProjectMembership{}, ErrMembershipConflict
+	}
+	removesOwner := before.Role == "owner" && before.Status == "active" &&
+		(request.Role != "owner" || request.Status != "active")
+	if removesOwner {
+		rows, err := tx.QueryContext(ctx, `SELECT principal_id FROM project_memberships
+			WHERE organization_id = ? AND project_id = ? AND principal_kind = 'user'
+			  AND role = 'owner' AND status = 'active' FOR UPDATE`, actor.OrganizationID, projectID)
+		if err != nil {
+			return ProjectMembership{}, err
+		}
+		count := 0
+		for rows.Next() {
+			count++
+		}
+		if err := rows.Close(); err != nil {
+			return ProjectMembership{}, err
+		}
+		if count <= 1 {
+			return ProjectMembership{}, ErrLastOwner
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE project_memberships SET role = ?, status = ?
+		WHERE organization_id = ? AND project_id = ? AND principal_kind = ?
+		  AND principal_id = ? AND updated_at = ?`,
+		request.Role, request.Status, actor.OrganizationID, projectID, principal.Kind,
+		principal.ID, request.ExpectedUpdatedAt)
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		return ProjectMembership{}, ErrMembershipConflict
+	}
+	value, err := scanProjectMembership(ctx, tx, actor.OrganizationID, projectID, principal)
+	if err != nil {
+		return ProjectMembership{}, err
+	}
+	if err := writeProjectMembershipAudit(ctx, tx, actor, projectID, value, "project_member.updated"); err != nil {
+		return ProjectMembership{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProjectMembership{}, err
+	}
+	return value, nil
+}
+
+func requireProjectOwner(ctx context.Context, tx *sql.Tx, actor contract.ActorContext, projectID contract.ProjectID) error {
+	if actor.Principal.Kind != contract.PrincipalUser {
+		return ErrMembershipForbidden
+	}
+	var role string
+	err := tx.QueryRowContext(ctx, `SELECT role FROM project_memberships
+		WHERE organization_id = ? AND project_id = ? AND principal_kind = 'user'
+		  AND principal_id = ? AND status = 'active' FOR UPDATE`,
+		actor.OrganizationID, projectID, actor.Principal.ID).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) || role != "owner" {
+		return ErrMembershipForbidden
+	}
+	return err
+}
+
+func scanProjectMembership(ctx context.Context, tx *sql.Tx, organizationID contract.OrganizationID, projectID contract.ProjectID, principal contract.Principal) (ProjectMembership, error) {
+	var value ProjectMembership
+	err := tx.QueryRowContext(ctx, `SELECT pm.organization_id, pm.project_id, pm.principal_kind,
+		pm.principal_id, COALESCE(u.display_name, si.name, pm.principal_id), pm.role, pm.status,
+		pm.created_at, pm.updated_at
+		FROM project_memberships pm
+		LEFT JOIN users u ON pm.principal_kind = 'user' AND u.id = pm.principal_id
+		LEFT JOIN service_identities si ON pm.principal_kind = 'service'
+		  AND si.organization_id = pm.organization_id AND si.id = pm.principal_id
+		WHERE pm.organization_id = ? AND pm.project_id = ?
+		  AND pm.principal_kind = ? AND pm.principal_id = ?`,
+		organizationID, projectID, principal.Kind, principal.ID).Scan(
+		&value.OrganizationID, &value.ProjectID, &value.PrincipalKind, &value.PrincipalID,
+		&value.DisplayName, &value.Role, &value.Status, &value.CreatedAt, &value.UpdatedAt)
+	return value, err
+}
+
+func writeProjectMembershipAudit(ctx context.Context, tx *sql.Tx, actor contract.ActorContext, projectID contract.ProjectID, value ProjectMembership, action string) error {
+	id, err := ids.New("identity_audit")
+	if err != nil {
+		return err
+	}
+	after, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO identity_audit_events
+		(id, organization_id, actor_user_id, target_kind, target_id, action, after_state)
+		VALUES (?, ?, ?, 'project_membership', ?, ?, ?)`,
+		id, actor.OrganizationID, actor.Principal.ID,
+		fmt.Sprintf("%s:%s:%s", projectID, value.PrincipalKind, value.PrincipalID), action, after)
+	return err
+}
 
 // EnsureLocalProject creates deterministic local-development seed data after
 // migrations have run. It is never called outside the local environment.
@@ -90,6 +303,37 @@ func (s MySQLStore) AuthorizeProject(ctx context.Context, actor contract.ActorCo
 		return fmt.Errorf("authorize project: %w", err)
 	}
 	return nil
+}
+
+func (s MySQLStore) AuthorizeProjectAction(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, action string) error {
+	if err := s.AuthorizeProject(ctx, actor, projectID); err != nil {
+		return err
+	}
+	var role string
+	err := s.DB.QueryRowContext(ctx, `SELECT role FROM project_memberships
+		WHERE organization_id = ? AND project_id = ? AND principal_kind = ?
+		  AND principal_id = ? AND status = 'active'`,
+		actor.OrganizationID, projectID, actor.Principal.Kind, actor.Principal.ID).Scan(&role)
+	if err != nil {
+		return identity.ErrProjectAccessDenied
+	}
+	if !projectRoleAllowsAction(actor.Principal.Kind, role, action) {
+		return identity.ErrProjectAccessDenied
+	}
+	return nil
+}
+
+func projectRoleAllowsAction(kind contract.PrincipalKind, role, action string) bool {
+	switch kind {
+	case contract.PrincipalUser:
+		return role == "owner" ||
+			(role == "editor" && (action == "read" || action == "write")) ||
+			(role == "viewer" && action == "read")
+	case contract.PrincipalService:
+		return role == "worker" && (action == "read" || action == "write")
+	default:
+		return false
+	}
 }
 
 func (s MySQLStore) CreateBrand(ctx context.Context, brand Brand) error {

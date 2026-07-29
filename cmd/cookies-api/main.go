@@ -97,6 +97,7 @@ func main() {
 		}
 		value := &identity.PasswordSessionService{
 			DB: db, Validator: identityStore,
+			UserScopes: identityStore,
 			SessionTTL: time.Duration(cfg.Auth.SessionHours) * time.Hour,
 			Secure:     cfg.Environment != config.EnvironmentLocal && cfg.Environment != config.EnvironmentTest,
 		}
@@ -177,7 +178,8 @@ func main() {
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
-		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
+		Identities:        identityStore, Accounts: identityStore, Projects: projectService, ProjectMembers: projectStore,
+		Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},

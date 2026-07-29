@@ -27,7 +27,7 @@ paths:
   /platform/v1/auth/login:
     post:
       operationId: loginWithPassword
-      summary: Create an opaque HttpOnly administrator session.
+      summary: Create an opaque HttpOnly organization-scoped user session.
       security: []
       requestBody:
         required: true
@@ -53,7 +53,7 @@ paths:
           description: Session created.
         '401':
           $ref: '#/components/responses/Unauthenticated'
-        '423':
+        '429':
           description: Credential temporarily locked.
   /platform/v1/auth/logout:
     post:
@@ -65,6 +65,24 @@ paths:
           description: Session revoked or already absent.
         '400':
           description: The session cookie is malformed and has been expired.
+  /platform/v1/auth/switch-organization:
+    post:
+      operationId: switchOrganizationSession
+      summary: Rotate the current session into another active organization membership.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organization_id]
+              properties:
+                organization_id: {type: string, minLength: 1}
+              additionalProperties: false
+      responses:
+        '200': {description: Organization-scoped session rotated.}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {description: The user has no active membership in the target organization.}
   /platform/v1/context:
     get:
       operationId: getRequestContext
@@ -95,6 +113,67 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/members:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listProjectMembers
+      responses:
+        '200':
+          description: Project memberships.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProjectMembership'}
+    post:
+      operationId: addProjectMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [principal_kind, principal_id, role]
+              properties:
+                principal_kind: {type: string, enum: [user, service]}
+                principal_id: {type: string, minLength: 1}
+                role: {$ref: '#/components/schemas/ProjectRole'}
+              additionalProperties: false
+      responses:
+        '201':
+          description: Project member added.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectMembership'}
+  /platform/v1/projects/{project_id}/members/{principal_kind}/{principal_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - name: principal_kind
+      in: path
+      required: true
+      schema: {type: string, enum: [user, service]}
+    - name: principal_id
+      in: path
+      required: true
+      schema: {type: string}
+    patch:
+      operationId: updateProjectMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateProjectMembershipRequest'}
+      responses:
+        '200':
+          description: Project membership updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectMembership'}
   /platform/v1/me:
     get:
       operationId: getCurrentIdentity
@@ -108,6 +187,103 @@ paths:
                 $ref: '#/components/schemas/CurrentIdentity'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+    patch:
+      operationId: updateCurrentUser
+      summary: Update editable fields of the global user profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                display_name: {type: string, minLength: 1, maxLength: 80}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+  /platform/v1/organizations:
+    get:
+      operationId: listMyOrganizations
+      summary: List active organizations for the current user.
+      responses:
+        '200':
+          description: Organization memberships.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/OrganizationAccess'}
+  /platform/v1/organizations/{organization_id}/members:
+    parameters:
+    - name: organization_id
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      operationId: listOrganizationMembers
+      responses:
+        '200':
+          description: Organization members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/OrganizationMember'}
+    post:
+      operationId: addExistingOrganizationUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role]
+              properties:
+                user_id: {type: string, minLength: 1}
+                role: {$ref: '#/components/schemas/OrganizationRole'}
+              additionalProperties: false
+      responses:
+        '201':
+          description: Existing user added.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrganizationMember'}
+  /platform/v1/organizations/{organization_id}/members/{user_id}:
+    parameters:
+    - name: organization_id
+      in: path
+      required: true
+      schema: {type: string}
+    - name: user_id
+      in: path
+      required: true
+      schema: {type: string}
+    patch:
+      operationId: updateOrganizationMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateOrganizationMembershipRequest'}
+      responses:
+        '200':
+          description: Membership updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrganizationMember'}
   /platform/v1/brands:
     post:
       operationId: createBrand
@@ -2648,7 +2824,7 @@ components:
           enum:
           - active
           - suspended
-          - archived
+          - deleted
         created_at:
           type: string
           format: date-time
@@ -2671,7 +2847,7 @@ components:
         user_id:
           type: string
         role:
-          type: string
+          $ref: '#/components/schemas/OrganizationRole'
         status:
           type: string
           enum:
@@ -2684,6 +2860,56 @@ components:
         updated_at:
           type: string
           format: date-time
+      additionalProperties: false
+    OrganizationRole:
+      type: string
+      enum: [owner, admin, member, auditor]
+    OrganizationAccess:
+      type: object
+      required: [organization, membership]
+      properties:
+        organization: {$ref: '#/components/schemas/Organization'}
+        membership: {$ref: '#/components/schemas/OrganizationMembership'}
+      additionalProperties: false
+    OrganizationMember:
+      type: object
+      required: [user, membership]
+      properties:
+        user: {$ref: '#/components/schemas/User'}
+        membership: {$ref: '#/components/schemas/OrganizationMembership'}
+      additionalProperties: false
+    UpdateOrganizationMembershipRequest:
+      type: object
+      required: [role, status, expected_updated_at]
+      properties:
+        role: {$ref: '#/components/schemas/OrganizationRole'}
+        status: {type: string, enum: [active, suspended, removed]}
+        expected_updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    ProjectRole:
+      type: string
+      enum: [owner, editor, viewer, worker]
+    ProjectMembership:
+      type: object
+      required: [organization_id, project_id, principal_kind, principal_id, display_name, role, status, created_at, updated_at]
+      properties:
+        organization_id: {type: string}
+        project_id: {type: string}
+        principal_kind: {type: string, enum: [user, service]}
+        principal_id: {type: string}
+        display_name: {type: string}
+        role: {$ref: '#/components/schemas/ProjectRole'}
+        status: {type: string, enum: [active, suspended, removed]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    UpdateProjectMembershipRequest:
+      type: object
+      required: [role, status, expected_updated_at]
+      properties:
+        role: {$ref: '#/components/schemas/ProjectRole'}
+        status: {type: string, enum: [active, suspended, removed]}
+        expected_updated_at: {type: string, format: date-time}
       additionalProperties: false
     Brand:
       type: object

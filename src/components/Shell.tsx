@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, X } from 'lucide-react'
+import { Bell, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, UserRound, UsersRound, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { useProject } from '../context/ProjectContext'
@@ -17,6 +17,7 @@ interface ShellProps {
   isGlobalSettings: boolean
   onHome: () => void
   onModelSettings: () => void
+  onAccountNavigate: (path: string) => void
   onSystemChange: (key: SystemKey) => void
   onProjectChange: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
   onProjectManage: (id: string) => void
@@ -24,7 +25,7 @@ interface ShellProps {
   children: ReactNode
 }
 
-export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManagement, isGlobalSettings, onHome, onModelSettings, onSystemChange, onProjectChange, onProjectManage, onNavChange, children }: ShellProps) {
+export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManagement, isGlobalSettings, onHome, onModelSettings, onAccountNavigate, onSystemChange, onProjectChange, onProjectManage, onNavChange, children }: ShellProps) {
   const { session, logout } = useAuth()
   const { projects, currentProject, agencyWorkbench, createProject } = useProject()
   const { configuredCount } = useModelConfig()
@@ -35,6 +36,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
   const [collapsed, setCollapsed] = useState(false)
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() => readRecentProjectIds())
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const [accountMenu, setAccountMenu] = useState(false)
   const groups = [...new Set(system.nav.map(item => item.group))]
   const projectMenuItems = useMemo(() => buildProjectMenuItems(projects, agencyWorkbench), [projects, agencyWorkbench])
   const currentContext = projectMenuItems.find(item => item.project.id === currentProject.id)
@@ -84,7 +86,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
       <button className="brand" onClick={onHome} aria-label="返回 Home 首页"><CookiesMark className="brand-mark"/><span>cookies</span></button>
       <nav className="system-nav" aria-label="业务系统">
         <button className={isHome || isProjectHome || isProjectManagement ? 'system-nav-item active' : 'system-nav-item'} onClick={onHome}><Home size={15}/><span>Home</span></button>
-        {systems.map(item => <button key={item.key} className={!isHome && !isProjectHome && !isProjectManagement && item.key === system.key ? 'system-nav-item active' : 'system-nav-item'} onClick={() => onSystemChange(item.key)}><item.icon size={15}/><span>{item.label}</span></button>)}
+        {systems.map(item => <button key={item.key} className={!isHome && !isProjectHome && !isProjectManagement && !isGlobalSettings && item.key === system.key ? 'system-nav-item active' : 'system-nav-item'} onClick={() => onSystemChange(item.key)}><item.icon size={15}/><span>{item.label}</span></button>)}
       </nav>
       <span className="top-divider"/>
       {!isGlobalSettings ? <div className="top-switcher-wrap">
@@ -121,7 +123,23 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
         {searchOpen ? <button aria-label="关闭搜索" onClick={() => { setSearchOpen(false); setSearch('') }}><X size={15}/></button> : <kbd>/</kbd>}
         {searchOpen && search ? <div className="search-results" role="listbox" aria-label="全局搜索结果">{searchResults.length ? searchResults.map(result => <button key={result.id} role="option" onClick={() => { if ('projectHome' in result) onProjectChange(result.projectId); else onProjectChange(result.projectId, result.system, result.navId, result.objectId); setSearch(''); setSearchOpen(false) }}><b>{result.title}</b><small>{result.meta}</small></button>) : <div className="search-empty">没有匹配结果</div>}</div> : null}
       </div>
-      <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button><button className="avatar" aria-label={`当前用户：${userLabel}`}>{userInitials}</button><button className="icon-button" aria-label="退出登录" onClick={() => void logout()}><LogOut size={17}/></button>
+      <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button>
+      <div className="account-menu-wrap">
+        <button className="avatar" aria-label={`当前用户：${userLabel}`} aria-expanded={accountMenu} aria-haspopup="menu" onClick={() => setAccountMenu(value => !value)}>{userInitials}</button>
+        {accountMenu ? <div className="account-menu" role="menu">
+          <header><span>{userInitials}</span><div><b>{userLabel}</b><small>{session.organization?.name ?? '组织未连接'} · {session.membership?.role ?? '无角色'}</small></div></header>
+          <div className="account-menu-group">
+            <button role="menuitem" onClick={() => { setAccountMenu(false); onAccountNavigate('/account/profile') }}><UserRound size={16}/><span>个人资料</span></button>
+            <button role="menuitem" onClick={() => { setAccountMenu(false); onAccountNavigate('/account/security') }}><KeyRound size={16}/><span>安全与登录</span></button>
+          </div>
+          <div className="account-menu-group">
+            <button role="menuitem" onClick={() => { setAccountMenu(false); onAccountNavigate('/organization') }}><Building2 size={16}/><span>组织管理与切换</span></button>
+            <button role="menuitem" onClick={() => { setAccountMenu(false); onAccountNavigate('/organization/members') }}><UsersRound size={16}/><span>组织成员</span></button>
+            {currentProject.id ? <button role="menuitem" onClick={() => { setAccountMenu(false); onProjectManage(currentProject.id) }}><CheckCircle2 size={16}/><span>当前项目管理</span></button> : null}
+          </div>
+          <button className="account-menu-logout" role="menuitem" onClick={() => void logout()}><LogOut size={16}/><span>退出登录</span></button>
+        </div> : null}
+      </div>
     </header>
     {!withoutSidebar ? <aside className="sidebar" aria-label={`${system.label}导航`}>
       <div className="side-title"><system.icon size={18}/><span>{system.label}</span></div>
