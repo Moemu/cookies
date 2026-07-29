@@ -224,11 +224,13 @@ export interface AssetVersionPointer {
 
 export interface ProjectRecord {
   id: string
+  version: number
   code: string
   name: string
   brand: string
   product: string
   goal: string
+  industry: 'short_drama' | 'game' | 'ecommerce' | 'automotive_brand'
   stage: string
   progress: number
   status: '进行中' | '已完成'

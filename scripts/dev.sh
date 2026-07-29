@@ -48,6 +48,9 @@ cleanup() {
   if [[ -n "${backend_pid:-}" ]]; then
     kill "$backend_pid" 2>/dev/null || true
   fi
+  if [[ -n "${compatibility_pid:-}" ]]; then
+    kill "$compatibility_pid" 2>/dev/null || true
+  fi
   if [[ -n "${frontend_pid:-}" ]]; then
     kill "$frontend_pid" 2>/dev/null || true
   fi
@@ -58,8 +61,12 @@ echo "Starting Go cookies-api on http://127.0.0.1:8080..."
 go run ./cmd/cookies-api &
 backend_pid=$!
 
+echo "Starting TypeScript compatibility login API on http://127.0.0.1:8787..."
+npm run server &
+compatibility_pid=$!
+
 echo "Starting Vite frontend on http://127.0.0.1:5173..."
 npm run dev -- --host 127.0.0.1 &
 frontend_pid=$!
 
-wait "$backend_pid" "$frontend_pid"
+wait "$backend_pid" "$compatibility_pid" "$frontend_pid"

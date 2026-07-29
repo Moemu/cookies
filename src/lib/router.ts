@@ -19,7 +19,7 @@ const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'deliv
 export function parseRoute(location = `${window.location.pathname}${window.location.search}`): AppRoute {
   const url = new URL(location, window.location.origin)
   const parts = url.pathname.split('/').filter(Boolean)
-  if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
+  if (parts[0] === 'settings') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
   if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
   if (systemKeys.has(parts[1] as SystemKey)) {
     const systemKey = parts[1] as SystemKey

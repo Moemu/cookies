@@ -126,6 +126,42 @@ paths:
         '401': {$ref: '#/components/responses/Unauthenticated'}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
         '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateProject
+      summary: Update mutable project display and planning fields.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateProjectRequest'}
+      responses:
+        '200':
+          description: Updated project.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/workbench:
+    get:
+      operationId: getProjectWorkbench
+      summary: Return the typed, project-scoped agency workbench read model.
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project workbench read model.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectWorkbench'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /platform/v1/projects/{project_id}/tasks:
     get:
       operationId: listProjectTasks
@@ -1897,18 +1933,32 @@ components:
       required: [name, product_ids, activate]
       properties:
         name: {type: string, minLength: 1, maxLength: 255}
+        brand: {type: string, minLength: 1, maxLength: 255}
+        goal: {type: string, maxLength: 4000}
+        industry: {type: string, enum: [short_drama, game, ecommerce, automotive_brand]}
         primary_brand_id: {type: [string, 'null']}
         product_ids: {type: array, uniqueItems: true, items: {type: string}}
         activate: {type: boolean}
       additionalProperties: false
+    UpdateProjectRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 255}
+        brand: {type: string, minLength: 1, maxLength: 255}
+        goal: {type: string, maxLength: 4000}
+        industry: {type: string, enum: [short_drama, game, ecommerce, automotive_brand]}
+        expected_context_version: {type: integer, minimum: 1}
+      additionalProperties: false
     Project:
       type: object
-      required: [id, organization_id, name, status, primary_brand_id, project_context_version]
+      required: [id, organization_id, name, status, industry, primary_brand_id, project_context_version]
       properties:
         id: {type: string}
         organization_id: {type: string}
         name: {type: string}
         status: {type: string, enum: [draft, active, archived]}
+        industry: {type: string, enum: [short_drama, game, ecommerce, automotive_brand]}
         primary_brand_id: {type: [string, 'null']}
         brand_guideline_version_id: {type: string}
         project_context_version: {type: integer, minimum: 1}
@@ -1939,7 +1989,7 @@ components:
       additionalProperties: false
     ProjectRuntime:
       type: object
-      required: [code, stage, progress, status, owner, budget, currency, timezone, updated_at]
+      required: [code, brand, product, goal, stage, progress, status, owner, budget, currency, timezone, knowledge_count, updated_at]
       properties:
         code: {type: string}
         brand: {type: string}
@@ -1954,6 +2004,79 @@ components:
         timezone: {type: string, enum: [Asia/Shanghai]}
         knowledge_count: {type: integer, minimum: 0}
         updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    ProjectWorkbench:
+      type: object
+      required: [organization, client, brand, project, ad_account_bindings, quality_check_runs, material_confirmations, asset_version_pointers]
+      properties:
+        organization: {$ref: '#/components/schemas/WorkbenchOrganization'}
+        client: {$ref: '#/components/schemas/WorkbenchClient'}
+        brand: {$ref: '#/components/schemas/WorkbenchBrand'}
+        project: {$ref: '#/components/schemas/WorkbenchProject'}
+        ad_account_bindings: {type: array, items: {$ref: '#/components/schemas/WorkbenchAdAccountBinding'}}
+        quality_check_runs: {type: array, items: {$ref: '#/components/schemas/WorkbenchQualityCheckRun'}}
+        material_confirmations: {type: array, items: {$ref: '#/components/schemas/WorkbenchMaterialConfirmation'}}
+        asset_version_pointers: {type: array, items: {$ref: '#/components/schemas/WorkbenchAssetVersionPointer'}}
+      additionalProperties: false
+    WorkbenchOrganization:
+      type: object
+      required: [id, code, name, owner, currency, timezone, updated_at]
+      properties: {id: {type: string}, code: {type: string}, name: {type: string}, owner: {type: string}, currency: {type: string, enum: [CNY]}, timezone: {type: string, enum: [Asia/Shanghai]}, updated_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchClient:
+      type: object
+      required: [id, organization_id, code, name, industry, owner, health_status, updated_at]
+      properties: {id: {type: string}, organization_id: {type: string}, code: {type: string}, name: {type: string}, industry: {type: string}, owner: {type: string}, health_status: {type: string, enum: [healthy, watch, blocked]}, updated_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchBrand:
+      type: object
+      required: [id, organization_id, client_id, code, name, category, product_lines, owner, guideline_status, updated_at]
+      properties: {id: {type: string}, organization_id: {type: string}, client_id: {type: string}, code: {type: string}, name: {type: string}, category: {type: string}, product_lines: {type: array, items: {type: string}}, owner: {type: string}, guideline_status: {type: string, enum: [ready, missing, outdated]}, updated_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchProject:
+      type: object
+      required: [project_id, organization_id, client_id, brand_id, stage, stage_label, stage_percent, task_percent, risk_status, blocker, updated_at]
+      properties: {project_id: {type: string}, organization_id: {type: string}, client_id: {type: string}, brand_id: {type: string}, stage: {type: string, enum: [intake, strategy, creative, quality_check, human_review, delivery, completed]}, stage_label: {type: string}, stage_percent: {type: integer, minimum: 0, maximum: 100}, task_percent: {type: integer, minimum: 0, maximum: 100}, risk_status: {type: string, enum: [healthy, watch, blocked]}, blocker: {type: string}, updated_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchAdAccountBinding:
+      type: object
+      required: [id, organization_id, client_id, brand_id, platform, account_name, account_display_id, currency, timezone, permission_status, login_status, tracking_status, owner, bound_asset_ids, last_synced_at]
+      properties: {id: {type: string}, organization_id: {type: string}, client_id: {type: string}, brand_id: {type: string}, platform: {type: string, enum: [巨量引擎, 腾讯广告, 快手磁力]}, account_name: {type: string}, account_display_id: {type: string}, currency: {type: string, enum: [CNY]}, timezone: {type: string, enum: [Asia/Shanghai]}, permission_status: {type: string, enum: [normal, warning, expired]}, login_status: {type: string, enum: [normal, warning, expired]}, tracking_status: {type: string, enum: [normal, warning, expired]}, owner: {type: string}, bound_asset_ids: {type: array, items: {type: string}}, last_synced_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchQualityCheckRun:
+      type: object
+      required: [id, organization_id, project_id, asset_id, asset_version, status, model, rule_version, prompt_version, summary, issues, created_at, completed_at]
+      properties: {id: {type: string}, organization_id: {type: string}, project_id: {type: string}, asset_id: {type: string}, asset_version: {type: integer, minimum: 1}, status: {type: string, enum: [queued, running, passed, failed]}, model: {type: string}, rule_version: {type: string}, prompt_version: {type: string}, summary: {type: string}, issues: {type: array, items: {$ref: '#/components/schemas/WorkbenchQualityCheckIssue'}}, created_at: {type: string, format: date-time}, completed_at: {type: [string, 'null'], format: date-time}}
+      additionalProperties: false
+    WorkbenchQualityCheckIssue:
+      type: object
+      required: [id, severity, rule, evidence, suggestion]
+      properties: {id: {type: string}, severity: {type: string, enum: [minor, major, critical]}, rule: {type: string}, evidence: {type: string}, suggestion: {type: string}}
+      additionalProperties: false
+    WorkbenchMaterialConfirmation:
+      type: object
+      required: [id, organization_id, project_id, quality_check_run_id, asset_id, asset_version, status, scope, confirmed_by, note, created_at]
+      properties: {id: {type: string}, organization_id: {type: string}, project_id: {type: string}, quality_check_run_id: {type: string}, asset_id: {type: string}, asset_version: {type: integer, minimum: 1}, status: {type: string, enum: [confirmed, changes_requested]}, scope: {type: string}, confirmed_by: {type: string}, note: {type: string}, created_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchAssetVersionPointer:
+      type: object
+      required: [id, organization_id, project_id, asset_id, working_version, quality_checked_version, human_confirmed_version, delivery_version, versions, authorization, delivery_target, owner, updated_at]
+      properties: {id: {type: string}, organization_id: {type: string}, project_id: {type: string}, asset_id: {type: string}, working_version: {type: integer, minimum: 1}, quality_checked_version: {type: [integer, 'null']}, human_confirmed_version: {type: [integer, 'null']}, delivery_version: {type: [integer, 'null']}, versions: {type: array, items: {$ref: '#/components/schemas/WorkbenchAssetVersion'}}, authorization: {$ref: '#/components/schemas/WorkbenchAssetAuthorization'}, delivery_target: {$ref: '#/components/schemas/WorkbenchDeliveryTarget'}, owner: {type: string}, updated_at: {type: string, format: date-time}}
+      additionalProperties: false
+    WorkbenchAssetVersion:
+      type: object
+      required: [version, created_by, source_task_id, source_type, source_label, created_at, change_summary]
+      properties: {version: {type: integer, minimum: 1}, created_by: {type: string}, source_task_id: {type: string}, source_type: {type: string, enum: [model_generation, manual_edit]}, source_label: {type: string}, created_at: {type: string, format: date-time}, change_summary: {type: string}}
+      additionalProperties: false
+    WorkbenchAssetAuthorization:
+      type: object
+      required: [platforms, regions, rights_holder, expires_at, note]
+      properties: {platforms: {type: array, items: {type: string, enum: [巨量引擎, 腾讯广告, 快手磁力]}}, regions: {type: array, items: {type: string}}, rights_holder: {type: string}, expires_at: {type: string, format: date-time}, note: {type: string}}
+      additionalProperties: false
+    WorkbenchDeliveryTarget:
+      type: object
+      required: [platform, region]
+      properties: {platform: {type: string, enum: [巨量引擎, 腾讯广告, 快手磁力]}, region: {type: string}}
       additionalProperties: false
     ProjectArtifactSummary:
       type: object
@@ -2026,10 +2149,7 @@ components:
         occurred_at: {type: string, format: date-time}
         fields:
           type: object
-          additionalProperties:
-            oneOf:
-              - type: string
-              - type: number
+          additionalProperties: {}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
       additionalProperties: false
@@ -2045,10 +2165,7 @@ components:
         occurred_at: {type: string, format: date-time}
         fields:
           type: object
-          additionalProperties:
-            oneOf:
-              - type: string
-              - type: number
+          additionalProperties: {}
       additionalProperties: false
     ChangeSet:
       type: object

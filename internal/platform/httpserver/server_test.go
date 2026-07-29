@@ -135,6 +135,21 @@ func TestProjectWorkflowRoutesCoverDetailTasksOperationsChangeSetsAndAudit(t *te
 			t.Fatalf("detail missing %s: %s", required, detail.Body.String())
 		}
 	}
+	updated := httptest.NewRecorder()
+	server.ServeHTTP(updated, httptest.NewRequest(http.MethodPatch, "/platform/v1/projects/project_1", strings.NewReader(`{"name":"Precision Evidence","brand":"White Precision","goal":"Create verified production leads","expected_context_version":1}`)))
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Precision Evidence"`) || !strings.Contains(updated.Body.String(), `"project_context_version":2`) {
+		t.Fatalf("update project status=%d body=%s", updated.Code, updated.Body.String())
+	}
+	stale := httptest.NewRecorder()
+	server.ServeHTTP(stale, httptest.NewRequest(http.MethodPatch, "/platform/v1/projects/project_1", strings.NewReader(`{"name":"stale","expected_context_version":1}`)))
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale update status=%d body=%s", stale.Code, stale.Body.String())
+	}
+	workbench := httptest.NewRecorder()
+	server.ServeHTTP(workbench, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/workbench", nil))
+	if workbench.Code != http.StatusOK || !strings.Contains(workbench.Body.String(), `"project_id":"project_1"`) {
+		t.Fatalf("workbench status=%d body=%s", workbench.Code, workbench.Body.String())
+	}
 }
 
 func TestGeneratedIntakeRouteRequiresScopeAndReturnsLocation(t *testing.T) {
@@ -1297,6 +1312,7 @@ func SchemaVersionV2ForHTTPTest() string {
 type workflowProjectManager struct {
 	staticProjectManager
 	projectValue project.Project
+	runtime      project.ProjectRuntime
 	task         project.BusinessTask
 	operations   []project.OperationalRecord
 	changeSet    project.ChangeSet
@@ -1304,9 +1320,9 @@ type workflowProjectManager struct {
 }
 
 func (m *workflowProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
-	return project.ProjectDetail{
-		Project: m.projectValue,
-		Runtime: project.ProjectRuntime{
+	runtime := m.runtime
+	if runtime.Code == "" {
+		runtime = project.ProjectRuntime{
 			Code:      string(m.projectValue.ID),
 			Stage:     string(m.projectValue.Status),
 			Progress:  60,
@@ -1316,12 +1332,40 @@ func (m *workflowProjectManager) GetDetail(context.Context, contract.ActorContex
 			Currency:  "CNY",
 			Timezone:  "Asia/Shanghai",
 			UpdatedAt: m.projectValue.UpdatedAt,
-		},
+		}
+	}
+	return project.ProjectDetail{
+		Project:    m.projectValue,
+		Runtime:    runtime,
 		Artifacts:  []project.ProjectArtifactSummary{},
 		Tasks:      m.tasks(),
 		Operations: m.operations,
 		ChangeSets: m.changeSets(),
 	}, nil
+}
+
+func (m *workflowProjectManager) UpdateProject(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request project.UpdateProjectRequest) (project.Project, error) {
+	if request.ExpectedContextVersion != nil && *request.ExpectedContextVersion != m.projectValue.ProjectContextVersion {
+		return project.Project{}, project.ErrVersionConflict
+	}
+	if request.Name != nil {
+		m.projectValue.Name = *request.Name
+	}
+	if request.Industry != nil {
+		m.projectValue.Industry = *request.Industry
+	}
+	if request.Brand != nil {
+		m.runtime.Brand = *request.Brand
+	}
+	if request.Goal != nil {
+		m.runtime.Goal = *request.Goal
+	}
+	m.projectValue.ProjectContextVersion++
+	return m.projectValue, nil
+}
+
+func (m *workflowProjectManager) GetWorkbench(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (project.Workbench, error) {
+	return project.Workbench{Project: project.WorkbenchProject{ProjectID: string(projectID)}}, nil
 }
 
 func (m *workflowProjectManager) CreateBusinessTask(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.CreateBusinessTaskRequest) (project.BusinessTask, error) {
@@ -1676,6 +1720,9 @@ func (staticProjectManager) CreateBrand(context.Context, contract.ActorContext, 
 func (staticProjectManager) CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error) {
 	return project.Project{}, nil
 }
+func (staticProjectManager) UpdateProject(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateProjectRequest) (project.Project, error) {
+	return project.Project{}, nil
+}
 
 func (staticProjectManager) ListProjects(context.Context, contract.ActorContext) ([]project.Project, error) {
 	return nil, nil
@@ -1683,6 +1730,9 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 
 func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
 	return project.ProjectDetail{}, nil
+}
+func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
+	return project.Workbench{}, nil
 }
 
 func (staticProjectManager) CreateBusinessTask(context.Context, contract.ActorContext, contract.ProjectID, project.CreateBusinessTaskRequest) (project.BusinessTask, error) {

@@ -81,23 +81,47 @@ docker compose up -d --wait mysql
 npm run go:seed
 ```
 
-Start the Go `cookies-api` in one terminal:
+### Importing a complete local demo dataset
+
+To make reviewed local media part of the demo, set `COOKIES_DEMO_DATA_DIR` to
+a directory containing `.pdf` briefs and `.mp4` videos before seeding. The
+seeder content-addresses every file, writes it to the configured object store,
+and injects the corresponding project assets, video metadata, brief-to-video
+walkthrough task, and aggregate media insight into MySQL. It is safe to rerun.
+
+```bash
+COOKIES_DEMO_DATA_DIR=/absolute/path/to/data npm run go:seed
+```
+
+For the supplied local dataset, use `COOKIES_DEMO_DATA_DIR=/Users/bytedance/data`.
+When `COOKIES_BLOB_PROVIDER=filesystem`, the objects are stored under
+`COOKIES_FILESYSTEM_BLOB_ROOT/<COOKIES_TOS_ASSETS_BUCKET>/demo/investor/local-data/`;
+use TOS configuration for a deployed environment. The source data itself is
+not copied into the repository.
+
+Start the TypeScript compatibility login API in one terminal:
+
+```bash
+npm run server
+```
+
+Start the Go `cookies-api` in a second terminal:
 
 ```bash
 go run ./cmd/cookies-api
 ```
 
-Start the Vite frontend in a second terminal, then open the printed `http://127.0.0.1:5173` URL:
+Start the Vite frontend in a third terminal, then open the printed `http://127.0.0.1:5173` URL:
 
 ```bash
 npm run dev
 ```
 
-The frontend defaults to Go `/platform/v1` through the root Vite `/platform` and `/api` proxies to `http://127.0.0.1:8080`. Override `VITE_API_BASE_URL` only when you intentionally point the frontend at another API host.
+The frontend keeps browser requests same-origin: Vite proxies `/api` to the TypeScript compatibility service at `http://127.0.0.1:8787` for the demo session, and `/platform` to Go at `http://127.0.0.1:8080` for the product workspace. Configure `VITE_COMPAT_API_PROXY_TARGET` and `VITE_PLATFORM_PROXY_TARGET` when either local service uses another port; leave `VITE_API_BASE_URL` empty for this setup.
 
 On macOS, `./scripts/dev.sh` runs the full local loop: start MySQL, apply migrations, seed the canonical Go investor demo, then start the Go API and Vite frontend. Use `./scripts/dev.sh --prepare-only` to run only migrations and seed.
 
-The TypeScript MVP server (`npm run server`) is kept for compatibility demos only. Its ignored `data/mvp-store.json` state is not the production-facing authority after equivalent Go `/platform/v1` endpoints are available. To run the frontend against that compatibility layer, start `npm run server` and set `VITE_API_BASE_URL=http://127.0.0.1:8787` explicitly.
+The TypeScript MVP compatibility server (`npm run server`) owns the local demo-login session. Its ignored `data/mvp-store.json` state is not the product workspace authority after equivalent Go `/platform/v1` endpoints are available. Run it alongside the Go API for the local login-to-workspace walkthrough.
 
 ## Ark configuration
 

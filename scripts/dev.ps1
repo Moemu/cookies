@@ -75,6 +75,12 @@ try {
 
     Start-Sleep -Seconds 1
 
+    $compatibility = Start-Process `
+        -FilePath $shell.Source `
+        -ArgumentList ($shellArguments + @('npm run server')) `
+        -WorkingDirectory $repositoryRoot `
+        -PassThru
+
     $frontend = Start-Process `
         -FilePath $shell.Source `
         -ArgumentList ($shellArguments + @('npm run dev -- --host 127.0.0.1')) `
@@ -83,6 +89,7 @@ try {
 
     Write-Host ''
     Write-Host "Backend started in a new window (PID $($backend.Id)): http://127.0.0.1:8080"
+    Write-Host "Compatibility login API started in a new window (PID $($compatibility.Id)): http://127.0.0.1:8787"
     Write-Host "Frontend started in a new window (PID $($frontend.Id)): http://localhost:5173"
     Write-Host 'Close those windows or press Ctrl+C in each one to stop the application.'
     Write-Host 'Run "docker compose stop mysql" when you also want to stop MySQL.'

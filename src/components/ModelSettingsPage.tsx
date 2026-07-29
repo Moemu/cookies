@@ -40,7 +40,7 @@ export function ModelSettingsPage() {
 
   return <div className="model-settings-page">
     <header className="model-settings-heading">
-      <div><span>组织级能力</span><h1>模型密钥与能力</h1><p>登录后可在页面直接配置模型 API Key。明文只提交到服务端一次，浏览器响应只展示掩码。</p></div>
+      <div><span>组织级配置</span><h1>系统设置</h1><p>模型能力、默认规则和通知配置统一在此处管理；不会分散在策略、创意、洞察或投放模块。</p></div>
       <div className="provider-summary"><b>{configuredCount} / {providers.length || 1}</b><span>服务已配置</span></div>
     </header>
 
@@ -52,6 +52,7 @@ export function ModelSettingsPage() {
           <span><b>{provider.name}</b><small>{provider.status}</small></span>
         </div>)}
         <div className="provider-index-note"><ShieldCheck size={16}/><span><b>凭据隔离</b><small>保存后只返回掩码；Project、导出包和审计事件不包含密钥。</small></span></div>
+        <div className="provider-index-note"><ShieldCheck size={16}/><span><b>通用规则</b><small>通知、命名、审批、导出和默认规格均在本页维护。</small></span></div>
       </aside>
 
       <section className="provider-form">

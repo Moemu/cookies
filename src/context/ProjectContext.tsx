@@ -15,7 +15,7 @@ interface ProjectContextValue {
   routeDiagnostic: string | null
   reloadProjects: (expectedProjectId?: string) => Promise<void>
   selectProject: (id: string) => void
-  createProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => Promise<ProjectRecord>
+  createProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal' | 'industry'>) => Promise<ProjectRecord>
   updateProject: (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => Promise<void>
   createTask: (input: { type: ApiBusinessTaskType; name: string; objective: string }) => Promise<BusinessTaskRecord>
   updateTask: (id: string, patch: Partial<Pick<BusinessTaskRecord, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>) => Promise<BusinessTaskRecord>
@@ -112,8 +112,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     void reloadProjects(id)
   }, [loadedProjectId, projects, reloadProjects])
 
-  const createProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => {
-    const created = toProjectRecord(await api.createProject({ name: input.name, brand: input.brand || '未指定品牌', objective: input.goal }))
+  const createProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal' | 'industry'>) => {
+    const created = toProjectRecord(await api.createProject({ name: input.name, brand: input.brand || '未指定品牌', objective: input.goal, industry: input.industry }))
     setProjects(current => {
       const nextProjects = [created, ...current]
       projectsRef.current = nextProjects
@@ -130,7 +130,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const updateProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal'>) => {
     const project = projects.find(candidate => candidate.id === loadedProjectId)
     if (!project) throw new Error('请先选择已保存的 Project。')
-    await api.updateProject(project.id, { name: input.name, brand: input.brand, objective: input.goal })
+    await api.updateProject(project.id, { name: input.name, brand: input.brand, objective: input.goal, expectedContextVersion: project.version })
     await reloadProjects()
   }, [loadedProjectId, projects, reloadProjects])
 
@@ -238,19 +238,25 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
     : latestMainCreativeArtifact(artifacts)
   const updatedAt = formatDate(project.updatedAt)
   const documents = artifacts.filter(artifact => artifact.kind === 'document')
+  const seededBudget = Math.max(0, ...changeSets.map(changeSet => changeSet.budgetLimit ?? 0))
   return {
     id: project.id,
+    version: project.version,
     code: project.runtime.code,
     name: project.name,
     brand: project.brand,
     product: project.runtime.product,
     goal: project.objective,
+    industry: project.industry ?? 'ecommerce',
     stage: project.runtime.stage,
     progress: project.runtime.progress,
     status: project.runtime.status === 'completed' ? '已完成' : '进行中',
     owner: project.runtime.owner,
     updatedAt,
-    budget: project.runtime.budget,
+    // The platform runtime deliberately has no mutable budget field yet. For
+    // seeded and persisted projects, the ChangeSet boundary is the source of
+    // truth that lets the delivery preflight run with its configured guardrail.
+    budget: project.runtime.budget > 0 ? project.runtime.budget : seededBudget,
     currency: project.runtime.currency,
     timezone: project.runtime.timezone,
     artifacts: {
@@ -268,7 +274,7 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
 }
 
 const emptyProject: ProjectRecord = {
-  id: '', code: '—', name: '尚未连接到服务端', brand: '—', product: '—', goal: '请启动本地 MVP API 后重试。',
+  id: '', version: 0, code: '—', name: '尚未连接到服务端', brand: '—', product: '—', goal: '请启动本地 MVP API 后重试。', industry: 'ecommerce',
   stage: '等待恢复', progress: 0, status: '进行中', owner: '—', updatedAt: '—', budget: 0, currency: 'CNY', timezone: 'Asia/Shanghai',
   artifacts: Object.fromEntries((['brief', 'strategy', 'creative', 'insight', 'delivery'] as ArtifactKey[]).map(key => [key, toArtifactRecord(key, undefined, '')])) as ProjectRecord['artifacts'],
   tasks: [],

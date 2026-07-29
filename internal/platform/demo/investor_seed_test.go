@@ -2,6 +2,8 @@ package demo
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -52,6 +54,47 @@ func TestEnsureCanonicalInvestorDemoSeedsFreshStore(t *testing.T) {
 				t.Fatalf("task %s has non-stable asset ref id %q", task.ID, id)
 			}
 		}
+	}
+}
+
+func TestImportLocalDemoDataStoresEveryFileAndSeedsWalkthrough(t *testing.T) {
+	ctx := context.Background()
+	actor := demoActor()
+	projects := newFakeInvestorProjectStore()
+	assetStore := &fakeInvestorAssetStore{}
+	if _, err := EnsureCanonicalInvestorDemo(ctx, actor, projects, assetStore); err != nil {
+		t.Fatalf("seed base demo: %v", err)
+	}
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "brief.pdf"), []byte("demo brief"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "video.mp4"), []byte("demo video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ImportLocalDemoData(ctx, actor, projects, assetStore, assets.NewMemoryBlobStore(), "assets", directory, 1)
+	if err != nil {
+		t.Fatalf("import demo data: %v", err)
+	}
+	if result.DocumentCount != 1 || result.VideoCount != 1 || len(result.AssetRefs) != 2 {
+		t.Fatalf("unexpected import result: %#v", result)
+	}
+	if len(assetStore.assets) != len(investorDemoAssets)+2 {
+		t.Fatalf("imported assets were not recorded: %d", len(assetStore.assets))
+	}
+	if _, ok := projects.tasks[InvestorDemoProjectID]["task_demo_imported_brief_to_video"]; !ok {
+		t.Fatalf("brief-to-video walkthrough task was not seeded: %#v", projects.tasks[InvestorDemoProjectID])
+	}
+	if _, ok := projects.operations[InvestorDemoProjectID]["INSIGHT-DEMO-DATA-01"]; !ok {
+		t.Fatalf("demo-data insight was not seeded: %#v", projects.operations[InvestorDemoProjectID])
+	}
+	firstCounts := projects.counts()
+	if _, err := ImportLocalDemoData(ctx, actor, projects, assetStore, assets.NewMemoryBlobStore(), "assets", directory, 1); err != nil {
+		t.Fatalf("rerun import: %v", err)
+	}
+	if !reflect.DeepEqual(firstCounts, projects.counts()) {
+		t.Fatalf("import is not idempotent: first=%#v second=%#v", firstCounts, projects.counts())
 	}
 }
 
@@ -122,6 +165,8 @@ func (s *fakeInvestorAssetStore) EnsureSeedAsset(_ context.Context, seed assets.
 type fakeInvestorProjectStore struct {
 	ensureProjectCalls int
 	project            project.Project
+	runtime            project.ProjectRuntime
+	workbench          project.Workbench
 	tasks              map[contract.ProjectID]map[string]project.BusinessTask
 	operations         map[contract.ProjectID]map[string]project.OperationalRecord
 	changeSets         map[contract.ProjectID]map[string]project.ChangeSet
@@ -144,6 +189,15 @@ func (s *fakeInvestorProjectStore) EnsureCanonicalDemoProject(_ context.Context,
 		PrimaryBrandID: &seed.BrandID, PrimaryBrandStatus: "active", ProjectContextVersion: 1,
 	}
 	return s.project, nil
+}
+
+func (s *fakeInvestorProjectStore) UpsertProjectRuntime(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, runtime project.ProjectRuntime) error {
+	s.runtime = runtime
+	return nil
+}
+func (s *fakeInvestorProjectStore) UpsertWorkbench(_ context.Context, workbench project.Workbench) error {
+	s.workbench = workbench
+	return nil
 }
 
 func (s *fakeInvestorProjectStore) CreateBusinessTask(_ context.Context, task project.BusinessTask) error {
@@ -184,6 +238,11 @@ func (s *fakeInvestorProjectStore) ListOperationalRecords(_ context.Context, _ c
 func (s *fakeInvestorProjectStore) UpdateOperationalRecord(_ context.Context, record project.OperationalRecord) error {
 	s.ensureOperationMap(record.ProjectID)
 	s.operations[record.ProjectID][record.ID] = record
+	return nil
+}
+
+func (s *fakeInvestorProjectStore) DeleteOperationalRecord(_ context.Context, _ contract.OrganizationID, projectID contract.ProjectID, recordID string) error {
+	delete(s.operations[projectID], recordID)
 	return nil
 }
 
