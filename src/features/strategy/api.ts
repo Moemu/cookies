@@ -21,6 +21,7 @@ import type {
   SkillRun,
   SkillDescriptor,
   StrategyDraft,
+  StrategyTask,
   StrategyTaskBundle,
   StrategyTaskListItem,
   Workspace,
@@ -45,14 +46,31 @@ export const strategyApi = {
   listWorkspaces: (projectId: string, signal?: AbortSignal) =>
     apiRequest<{ items: Workspace[] }>(`${root}/projects/${encodeURIComponent(projectId)}/workspaces`, { signal }),
 
-  listTasks: (projectId: string, signal?: AbortSignal) =>
-    apiRequest<{ items: StrategyTaskListItem[] }>(`${root}/projects/${encodeURIComponent(projectId)}/tasks`, { signal }),
+  listTasks: (projectId: string, lifecycle: 'active' | 'archived' | 'all' = 'active', signal?: AbortSignal) =>
+    apiRequest<{ items: StrategyTaskListItem[] }>(
+      `${root}/projects/${encodeURIComponent(projectId)}/tasks?lifecycle=${lifecycle}`,
+      { signal },
+    ),
 
   createTask: (projectId: string, name: string, objective: string, mutationKey?: string) =>
     apiRequest<StrategyTaskBundle>(`${root}/projects/${encodeURIComponent(projectId)}/tasks`, {
       method: 'POST',
       headers: mutationHeaders(mutationKey),
       body: JSON.stringify({ name, objective }),
+    }),
+
+  discardTask: (taskId: string, expectedVersion: number, reason: string, mutationKey?: string) =>
+    apiRequest<StrategyTask>(`${root}/tasks/${encodeURIComponent(taskId)}:discard`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ expected_version: expectedVersion, reason }),
+    }),
+
+  restoreTask: (taskId: string, expectedVersion: number, mutationKey?: string) =>
+    apiRequest<StrategyTask>(`${root}/tasks/${encodeURIComponent(taskId)}:restore`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   createWorkspace: (projectId: string, name: string, mutationKey?: string) =>
@@ -115,15 +133,27 @@ export const strategyApi = {
   getBriefDraft: (taskId: string, signal?: AbortSignal) =>
     apiRequest<BriefDraft>(`${root}/tasks/${encodeURIComponent(taskId)}/brief-draft`, { signal }),
 
-  patchBriefField: (taskId: string, draft: BriefDraft, fieldPath: string, value: unknown, mutationKey?: string) =>
+  patchBriefFields: (
+    taskId: string,
+    draft: BriefDraft,
+    operations: Array<{ fieldPath: string; value: unknown }>,
+    mutationKey?: string,
+  ) =>
     apiRequest<BriefDraft>(`${root}/tasks/${encodeURIComponent(taskId)}/brief-draft`, {
       method: 'PATCH',
       headers: { ...mutationHeaders(mutationKey), 'If-Match': `"v${draft.version}"` },
       body: JSON.stringify({
         expected_version: draft.version,
-        operations: [{ op: 'set', field_path: fieldPath, value }],
+        operations: operations.map(operation => ({
+          op: 'set',
+          field_path: operation.fieldPath,
+          value: operation.value,
+        })),
       }),
     }),
+
+  patchBriefField: (taskId: string, draft: BriefDraft, fieldPath: string, value: unknown, mutationKey?: string) =>
+    strategyApi.patchBriefFields(taskId, draft, [{ fieldPath, value }], mutationKey),
 
   confirmBrief: (taskId: string, expectedVersion: number, mutationKey?: string) =>
     apiRequest<BriefVersion>(`${root}/tasks/${encodeURIComponent(taskId)}/brief:confirm`, {
@@ -145,11 +175,35 @@ export const strategyApi = {
       },
     ),
 
+  retryStrategy: (draft: StrategyDraft, mutationKey?: string) =>
+    apiRequest<{ strategy_draft: StrategyDraft; agent_task: AgentTask }>(
+      `${root}/strategy-drafts/${encodeURIComponent(draft.id)}:retry`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(mutationKey),
+        body: JSON.stringify({ expected_version: draft.version }),
+      },
+    ),
+
   getGenerationReadiness: (projectId: string, signal?: AbortSignal) =>
     apiRequest<GenerationReadiness>(`${root}/projects/${encodeURIComponent(projectId)}/generation-readiness`, { signal }),
 
   getStrategy: (strategyId: string, signal?: AbortSignal) =>
     apiRequest<StrategyDraft>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}`, { signal }),
+
+  archiveStrategy: (strategyId: string, expectedVersion: number, reason: string, mutationKey?: string) =>
+    apiRequest<StrategyDraft>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}:archive`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ expected_version: expectedVersion, reason }),
+    }),
+
+  restoreStrategy: (strategyId: string, expectedVersion: number, mutationKey?: string) =>
+    apiRequest<StrategyDraft>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}:restore`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
 
   listStrategyRevisions: (strategyId: string, signal?: AbortSignal) =>
     apiRequest<{ items: DraftRevision[] }>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}/revisions`, { signal }),

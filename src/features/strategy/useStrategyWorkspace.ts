@@ -56,6 +56,13 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : '策略工作区操作失败。'
 }
 
+function agentFailureMessage(code?: string, message?: string) {
+  if (code === 'MODEL_RATE_LIMITED') return '文本模型请求频率受限，请稍后再点击“重新生成策略”。'
+  if (code === 'MODEL_OUTPUT_INVALID') return '模型输出未通过策略结构校验，可以重新生成。'
+  if (code === 'MODEL_UNAVAILABLE') return '文本模型当前不可用，请检查模型配置后重试。'
+  return message || '本轮 Strategy Agent 任务未完成。'
+}
+
 export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '') {
   const [state, setState] = useState<StrategyWorkspaceState>({
     workspaces: [],
@@ -149,8 +156,14 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let comments: ReviewComment[] = []
     let deepReview: DeepReviewAnalysis | null = null
     let published: PackageVersion | null = null
+    let agentFailure = ''
     if (task?.current_strategy_id) {
       draft = await strategyApi.getStrategy(task.current_strategy_id, signal)
+      if (draft.status === 'failed' && task.current_agent_task_id) {
+        const inspection = await strategyApi.getAgentTask(task.current_agent_task_id, signal).catch(() => null)
+        const problem = inspection?.task.error ?? inspection?.job?.error
+        agentFailure = agentFailureMessage(problem?.code, problem?.message)
+      }
       if (draft.current_revision > 0) {
         const [revisionResult, generationMetadata] = await Promise.all([
           strategyApi.listStrategyRevisions(draft.id, signal),
@@ -196,7 +209,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         run.artifacts.some(artifact => brief?.document.reference_ids?.includes(artifact.id)),
       ) ?? null,
       isLoading: false,
-      error: '',
+      error: agentFailure,
     }))
   }, [preferredWorkspaceId, projectId])
 
@@ -232,12 +245,14 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         const inspection = await strategyApi.getAgentTask(agentTaskId, controller.signal)
         const task = inspection.task
         if (task.status === 'failed' || task.status === 'cancelled') {
+          const problem = task.error ?? inspection.job?.error
+          const failureMessage = agentFailureMessage(problem?.code, problem?.message)
+          await reload()
           setState(current => ({
             ...current,
             pendingAgentTaskId: '',
-            error: task.error?.message ?? inspection.job?.error?.message ?? '本轮 Strategy Agent 任务未完成。',
+            error: failureMessage,
           }))
-          await reload()
           return
         }
         if (task.status === 'succeeded') {
@@ -379,6 +394,18 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       )
       setState(current => ({ ...current, brief }))
     }, false),
+    confirmBriefFields: (operations: Array<{ fieldPath: string; value: unknown }>) => perform('confirm-brief-fields', async () => {
+      const task = state.detail?.current_task
+      if (!task || !state.brief) throw new Error('Brief 草稿尚未创建。')
+      if (!operations.length) return
+      const brief = await strategyApi.patchBriefFields(
+        task.id,
+        state.brief,
+        operations,
+        createMutationKey('strategy-brief-confirm-fields'),
+      )
+      setState(current => ({ ...current, brief }))
+    }, false),
     confirmBrief: () => perform('confirm-brief', async () => {
       const task = state.detail?.current_task
       if (!task || !state.brief) throw new Error('Brief 草稿尚未创建。')
@@ -395,6 +422,18 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         task.id,
         state.briefVersion,
         createMutationKey('strategy-create'),
+      )
+      setState(current => ({
+        ...current,
+        draft: result.strategy_draft,
+        pendingAgentTaskId: result.agent_task.id,
+      }))
+    }, false),
+    retryStrategy: () => perform('retry-strategy', async () => {
+      if (!state.draft) throw new Error('失败的策略草稿不存在。')
+      const result = await strategyApi.retryStrategy(
+        state.draft,
+        createMutationKey('strategy-retry'),
       )
       setState(current => ({
         ...current,

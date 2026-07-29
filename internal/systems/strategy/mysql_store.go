@@ -38,14 +38,20 @@ func scanConversation(row rowScanner) (Conversation, error) {
 
 const taskSelect = `SELECT id, organization_id, project_id, workspace_id, conversation_id,
 	brief_id, COALESCE(current_agent_task_id, ''), COALESCE(current_strategy_id, ''),
-	status, version, created_at, updated_at FROM strategy_tasks`
+	status, discarded_at, COALESCE(discarded_by, ''), COALESCE(discard_reason, ''),
+	version, created_at, updated_at FROM strategy_tasks`
 
 func scanTask(row rowScanner) (Task, error) {
 	var value Task
+	var discardedAt sql.NullTime
 	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.WorkspaceID,
 		&value.ConversationID, &value.BriefID, &value.CurrentAgentTaskID, &value.CurrentStrategyID,
-		&value.Status, &value.Version, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		&value.Status, &discardedAt, &value.DiscardedBy, &value.DiscardReason,
+		&value.Version, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return Task{}, mapNotFound(err)
+	}
+	if discardedAt.Valid {
+		value.DiscardedAt = &discardedAt.Time
 	}
 	return value, nil
 }
@@ -188,17 +194,23 @@ func mapNotFound(err error) error {
 }
 
 const draftSelect = `SELECT id, organization_id, project_id, task_id, brief_id, brief_version,
-	project_context_version, status, current_revision, COALESCE(current_review_id, ''),
+	project_context_version, status, archived_at, COALESCE(archived_by, ''),
+	COALESCE(archive_reason, ''), current_revision, COALESCE(current_review_id, ''),
 	version, skill_versions, created_at, updated_at FROM strategy_drafts`
 
 func scanDraft(row rowScanner) (Draft, error) {
 	var value Draft
 	var skills json.RawMessage
+	var archivedAt sql.NullTime
 	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.TaskID,
 		&value.BriefID, &value.BriefVersion, &value.ProjectContextVersion, &value.Status,
+		&archivedAt, &value.ArchivedBy, &value.ArchiveReason,
 		&value.CurrentRevision, &value.CurrentReviewID, &value.Version, &skills,
 		&value.CreatedAt, &value.UpdatedAt); err != nil {
 		return Draft{}, mapNotFound(err)
+	}
+	if archivedAt.Valid {
+		value.ArchivedAt = &archivedAt.Time
 	}
 	if err := json.Unmarshal(skills, &value.SkillVersions); err != nil {
 		return Draft{}, err

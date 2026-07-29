@@ -46,6 +46,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/agent-tasks/{agent_task_id}/skill-runs", server.listSkillRuns)
 	mux.HandleFunc("POST /api/strategy/v1/agent-tasks/{agent_task_action}", server.cancelAgentTask)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}", server.getTask)
+	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_action}", server.taskAction)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}/brief-draft", server.getBriefDraft)
 	mux.HandleFunc("PATCH /api/strategy/v1/tasks/{task_id}/brief-draft", server.patchBriefDraft)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief:confirm", server.confirmBrief)
@@ -135,8 +136,9 @@ func (s *Server) createTask(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
-	values, err := s.Service.ListTasks(
+	values, err := s.Service.ListTasksByLifecycle(
 		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("lifecycle"),
 	)
 	if err != nil {
 		writeError(writer, err)
@@ -502,9 +504,102 @@ func (s *Server) strategyAction(writer http.ResponseWriter, request *http.Reques
 	case strings.HasSuffix(value, ":approve"):
 		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":approve"))
 		s.approveStrategy(writer, request)
+	case strings.HasSuffix(value, ":archive"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":archive"))
+		s.archiveStrategy(writer, request)
+	case strings.HasSuffix(value, ":restore"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":restore"))
+		s.restoreStrategy(writer, request)
+	case strings.HasSuffix(value, ":retry"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":retry"))
+		s.retryStrategy(writer, request)
 	default:
 		writeError(writer, strategy.ErrNotFound)
 	}
+}
+
+func (s *Server) retryStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RetryStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body.ExpectedVersion)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func (s *Server) taskAction(writer http.ResponseWriter, request *http.Request) {
+	value := request.PathValue("task_action")
+	switch {
+	case strings.HasSuffix(value, ":discard"):
+		request.SetPathValue("task_id", strings.TrimSuffix(value, ":discard"))
+		s.discardTask(writer, request)
+	case strings.HasSuffix(value, ":restore"):
+		request.SetPathValue("task_id", strings.TrimSuffix(value, ":restore"))
+		s.restoreTask(writer, request)
+	default:
+		writeError(writer, strategy.ErrNotFound)
+	}
+}
+
+func (s *Server) discardTask(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.DiscardTask(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("task_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func (s *Server) restoreTask(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RestoreTask(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("task_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func (s *Server) archiveStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.ArchiveStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func (s *Server) restoreStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RestoreStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func writeLifecycleResult(writer http.ResponseWriter, value any, duplicate bool, err error) {
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) submitStrategy(writer http.ResponseWriter, request *http.Request) {

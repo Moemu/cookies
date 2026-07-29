@@ -228,6 +228,8 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .primary-button:hover { background: var(--cobalt-dark); }
 .secondary-button { background: var(--surface); border: 1px solid var(--line); }
 .secondary-button:hover { border-color: var(--line-strong); background: var(--subtle); }
+.danger-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 14px; color: white; border-radius: 6px; background: var(--danger); font-size: 12px; font-weight: 650; }
+.danger-button:hover { filter: brightness(.92); }.danger-button:disabled { opacity: .48; cursor: not-allowed; }
 .text-button { padding: 0; background: transparent; color: var(--cobalt-dark); }
 .full { width: 100%; }
 
@@ -1397,6 +1399,20 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   cursor: pointer;
 }
 
+.kanon-lifecycle-banner {
+  min-height: 44px;
+  padding: 9px 16px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #69520b;
+  border-bottom: 1px solid #eadca7;
+  background: #fff9df;
+  font-size: 11px;
+}
+
+.kanon-lifecycle-banner svg { flex: none; }.kanon-lifecycle-banner span { display: flex; gap: 7px; line-height: 1.55; }
+
 .kanon-strategy-workspace {
   min-height: 0;
   flex: 1;
@@ -1416,6 +1432,8 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .kanon-strategy-main {
   padding: 24px 26px 32px;
 }
+
+.kanon-lifecycle-lock { min-width: 0; min-height: 100%; margin: 0; padding: 0; border: 0; }.kanon-lifecycle-lock:disabled { opacity: .82; }
 
 .kanon-summary-rail,
 .kanon-evidence-rail {
@@ -1785,6 +1803,13 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .kanon-brief-footer > div {
   display: grid;
   gap: 5px;
+}
+
+.kanon-brief-footer .kanon-brief-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .kanon-brief-footer span {
@@ -2316,6 +2341,7 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .kanon-task-stages li > span { width: 27px; height: 27px; display: grid; flex: none; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface); font-size: 9px; }
 .kanon-task-stages li.active { color: var(--cobalt-700); font-weight: 700; }.kanon-task-stages li.active > span { color: white; border-color: var(--cobalt); background: var(--cobalt); }
 .kanon-task-detail > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: auto; }.kanon-task-detail > footer small { color: var(--text-3); font-size: 9px; }
+.kanon-task-actions { display: flex; align-items: center; gap: 8px; }
 .kanon-task-state, .kanon-task-empty { min-height: 390px; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--text-2); text-align: center; }.kanon-task-state p, .kanon-task-empty p { max-width: 460px; color: var(--text-3); font-size: 11px; line-height: 1.7; }
 .kanon-dialog-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 28px; background: rgb(18 28 42 / 48%); backdrop-filter: blur(3px); }
 .kanon-task-dialog { width: min(620px, calc(100vw - 56px)); border: 1px solid var(--line); background: var(--surface); box-shadow: 0 24px 80px rgb(18 28 42 / 22%); }
@@ -2324,6 +2350,7 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .kanon-task-dialog-note { display: flex; gap: 11px; margin: 18px 28px 0; padding: 14px; color: var(--cobalt-700); border-left: 2px solid var(--cobalt); background: var(--cobalt-50); }.kanon-task-dialog-note div { display: grid; gap: 5px; }.kanon-task-dialog-note b { font-size: 10px; }.kanon-task-dialog-note small { color: var(--text-2); font-size: 9px; }
 .kanon-task-dialog-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 18px 28px 8px; }.kanon-task-dialog-fields label { display: grid; align-content: start; gap: 7px; color: var(--text-2); font-size: 10px; font-weight: 700; }.kanon-task-dialog-fields input, .kanon-task-dialog-fields textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); outline: none; resize: vertical; }.kanon-task-dialog-fields input:focus, .kanon-task-dialog-fields textarea:focus { border-color: var(--cobalt); box-shadow: 0 0 0 3px color-mix(in oklch, var(--cobalt) 10%, transparent); }
 .kanon-dialog-error { margin: 6px 28px; color: var(--danger); font-size: 10px; }.kanon-task-dialog > footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 12px; padding: 16px 28px; border-top: 1px solid var(--line); }
+.kanon-lifecycle-dialog { width: min(540px, calc(100vw - 56px)); }.kanon-lifecycle-reason { padding: 18px 28px 4px; }.kanon-lifecycle-reason label { display: grid; gap: 7px; color: var(--text-2); font-size: 10px; font-weight: 700; }.kanon-lifecycle-reason textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); outline: none; resize: vertical; line-height: 1.6; }.kanon-lifecycle-reason textarea:focus { border-color: var(--cobalt); box-shadow: 0 0 0 3px color-mix(in oklch, var(--cobalt) 10%, transparent); }.kanon-lifecycle-reason small { justify-self: end; color: var(--text-3); font-size: 9px; font-weight: 500; }
 
 .kanon-workspace-contextbar { min-height: 52px; display: flex; align-items: center; gap: 14px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: color-mix(in oklch, var(--surface) 92%, var(--cobalt-50)); }
 .kanon-workspace-contextbar > div { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 9px; }

@@ -87,6 +87,35 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || len(taskItems) != 1 || taskItems[0].Name != "原子策略任务" {
 		t.Fatalf("list atomic tasks: items=%#v err=%v", taskItems, err)
 	}
+	discardedTask, duplicate, err := service.DiscardTask(
+		ctx, actor, contract.IdempotencyKey("discard_task_"+suffix), createdTask.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: createdTask.Task.Version, Reason: "集成测试废弃"},
+	)
+	if err != nil || duplicate || discardedTask.DiscardedAt == nil {
+		t.Fatalf("discard task: duplicate=%v task=%#v err=%v", duplicate, discardedTask, err)
+	}
+	replayedDiscard, duplicate, err := service.DiscardTask(
+		ctx, actor, contract.IdempotencyKey("discard_task_"+suffix), createdTask.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: createdTask.Task.Version, Reason: "集成测试废弃"},
+	)
+	if err != nil || !duplicate || replayedDiscard.Version != discardedTask.Version {
+		t.Fatalf("replay discard task: duplicate=%v task=%#v err=%v", duplicate, replayedDiscard, err)
+	}
+	taskItems, err = service.ListTasks(ctx, actor, projectID)
+	if err != nil || len(taskItems) != 0 {
+		t.Fatalf("discarded task leaked into active list: items=%#v err=%v", taskItems, err)
+	}
+	archivedTaskItems, err := service.ListTasksByLifecycle(ctx, actor, projectID, "archived")
+	if err != nil || len(archivedTaskItems) != 1 || archivedTaskItems[0].Task.ID != createdTask.Task.ID {
+		t.Fatalf("list discarded tasks: items=%#v err=%v", archivedTaskItems, err)
+	}
+	restoredTask, duplicate, err := service.RestoreTask(
+		ctx, actor, contract.IdempotencyKey("restore_task_"+suffix), createdTask.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: discardedTask.Version},
+	)
+	if err != nil || duplicate || restoredTask.DiscardedAt != nil {
+		t.Fatalf("restore task: duplicate=%v task=%#v err=%v", duplicate, restoredTask, err)
+	}
 
 	workspace, duplicate, err := service.CreateWorkspace(ctx, actor, contract.IdempotencyKey("workspace_"+suffix), projectID, "Integration Workspace")
 	if err != nil || duplicate {
@@ -136,12 +165,73 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("create strategy: duplicate=%v err=%v", duplicate, err)
 	}
-	if err := runAgentTaskThroughRuntime(ctx, db, service, created.AgentTask); err != nil {
+	retryProblem := contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "integration retry fixture"}
+	if _, err := db.ExecContext(ctx, `UPDATE platform_agent_tasks SET status = 'failed',
+		version = version + 1, error_code = ?, error_message = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		retryProblem.Code, retryProblem.Message, time.Now().UTC(),
+		actor.OrganizationID, projectID, created.AgentTask.ID,
+	); err != nil {
+		t.Fatalf("mark initial strategy generation failed: %v", err)
+	}
+	service.HandleAgentTaskFinalFailure(created.AgentTask, retryProblem)
+	failedDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
+	if err != nil || failedDraft.Status != "failed" {
+		t.Fatalf("get failed strategy draft: draft=%#v err=%v", failedDraft, err)
+	}
+	retried, duplicate, err := service.RetryStrategy(
+		ctx, actor, contract.IdempotencyKey("strategy_retry_"+suffix), failedDraft.ID, failedDraft.Version,
+	)
+	if err != nil || duplicate || retried.Draft.Status != "generating" {
+		t.Fatalf("retry strategy: duplicate=%v result=%#v err=%v", duplicate, retried, err)
+	}
+	replayedRetry, duplicate, err := service.RetryStrategy(
+		ctx, actor, contract.IdempotencyKey("strategy_retry_"+suffix), failedDraft.ID, failedDraft.Version,
+	)
+	if err != nil || !duplicate || replayedRetry.AgentTask.ID != retried.AgentTask.ID {
+		t.Fatalf("replay strategy retry: duplicate=%v result=%#v err=%v", duplicate, replayedRetry, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, retried.AgentTask); err != nil {
 		t.Fatalf("generate strategy: %v", err)
 	}
 	strategyDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
 	if err != nil || strategyDraft.CurrentRevision != 1 {
 		t.Fatalf("get generated draft: revision=%d err=%v", strategyDraft.CurrentRevision, err)
+	}
+	versionedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.DiscardTask(
+		ctx, actor, contract.IdempotencyKey("discard_versioned_task_"+suffix), bundle.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: versionedTask.Version, Reason: "已有版本不可废弃"},
+	); !errors.Is(err, strategy.ErrInvalidState) {
+		t.Fatalf("discard task with strategy revision error=%v", err)
+	}
+	archivedDraft, duplicate, err := service.ArchiveStrategy(
+		ctx, actor, contract.IdempotencyKey("archive_strategy_"+suffix), strategyDraft.ID,
+		strategy.LifecycleRequest{ExpectedVersion: strategyDraft.Version, Reason: "集成测试归档"},
+	)
+	if err != nil || duplicate || archivedDraft.ArchivedAt == nil {
+		t.Fatalf("archive strategy: duplicate=%v draft=%#v err=%v", duplicate, archivedDraft, err)
+	}
+	replayedArchive, duplicate, err := service.ArchiveStrategy(
+		ctx, actor, contract.IdempotencyKey("archive_strategy_"+suffix), strategyDraft.ID,
+		strategy.LifecycleRequest{ExpectedVersion: strategyDraft.Version, Reason: "集成测试归档"},
+	)
+	if err != nil || !duplicate || replayedArchive.Version != archivedDraft.Version {
+		t.Fatalf("replay archive strategy: duplicate=%v draft=%#v err=%v", duplicate, replayedArchive, err)
+	}
+	activeItems, err := service.ListTasks(ctx, actor, projectID)
+	if err != nil || len(activeItems) != 1 || activeItems[0].Task.ID != createdTask.Task.ID {
+		t.Fatalf("archived strategy leaked into active list: items=%#v err=%v", activeItems, err)
+	}
+	strategyDraft, duplicate, err = service.RestoreStrategy(
+		ctx, actor, contract.IdempotencyKey("restore_strategy_"+suffix), strategyDraft.ID,
+		strategy.LifecycleRequest{ExpectedVersion: archivedDraft.Version},
+	)
+	if err != nil || duplicate || strategyDraft.ArchivedAt != nil {
+		t.Fatalf("restore strategy: duplicate=%v draft=%#v err=%v", duplicate, strategyDraft, err)
 	}
 	readiness, err := service.GetGenerationReadiness(ctx, actor, projectID)
 	if err != nil || !readiness.Ready || readiness.GenerationMode != "deterministic" {

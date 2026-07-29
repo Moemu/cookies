@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Archive,
   BadgeCheck,
   BookOpen,
   Bot,
@@ -68,11 +69,13 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
     </div>
   }
 
+  const lifecycleLocked = Boolean(state.detail.current_task.discarded_at || state.draft?.archived_at)
   return <div className="kanon-strategy-root">
     {state.error ? <div className="kanon-strategy-alert" role="alert">
       <AlertCircle size={15}/><span>{state.error}</span>
       <button aria-label="重新加载策略工作区" onClick={() => void actions.reload()}><RefreshCw size={14}/></button>
     </div> : null}
+    {lifecycleLocked ? <div className="kanon-lifecycle-banner" role="status"><Archive size={15}/><span><b>{state.detail.current_task.discarded_at ? '任务已废弃' : '策略已归档'}</b>当前工作区为只读，完整对话、Brief、策略版本和评审记录均已保留。请从“策略任务 → 已归档”恢复后继续操作。</span></div> : null}
     <div className="kanon-workspace-contextbar">
       <div><span>当前工作链</span><strong>{state.detail.workspace.name}</strong><small>{state.detail.current_task.status === 'completed' ? '已完成' : '持续保存'}</small></div>
       <label><span>切换工作区</span><select
@@ -87,6 +90,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
     </div>
     <div className="kanon-strategy-workspace">
       <main className="kanon-strategy-main">
+        <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
         {activeView === '概览' ? <OverviewPane state={state}/> : null}
         {activeView === '对话' ? <ConversationPane
           brief={state.brief}
@@ -99,6 +103,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
           brief={state.brief}
           busy={state.busy}
           onConfirm={actions.confirmBrief}
+          onConfirmFields={actions.confirmBriefFields}
           onField={actions.patchBriefField}
         /> : null}
         {activeView === '策略' ? <StrategyPane
@@ -110,6 +115,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
           onGenerate={actions.generateStrategy}
           onPatch={actions.patchStrategySection}
           onProbe={actions.probeGeneration}
+          onRetry={actions.retryStrategy}
           onRevise={actions.reviseStrategy}
           onSubmit={actions.submitStrategy}
           pending={Boolean(state.pendingAgentTaskId)}
@@ -143,6 +149,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
           revisions={state.revisions}
           review={state.review}
         /> : null}
+        </fieldset>
       </main>
       <SummaryRail
         brief={state.brief}
@@ -286,6 +293,8 @@ const briefFields: Array<{
   { path: 'brand.name', label: '品牌', value: brief => brief.document.brand?.name ?? '' },
   { path: 'product.name', label: '产品', value: brief => brief.document.product?.name ?? '' },
   { path: 'industry', label: '行业', value: brief => brief.document.industry ?? '' },
+  { path: 'region', label: '地区', value: brief => brief.document.region ?? '' },
+  { path: 'language', label: '语言', value: brief => brief.document.language ?? '' },
   { path: 'campaign.objective', label: '推广目标', value: brief => brief.document.campaign.objective, multiline: true },
   { path: 'audience.primary', label: '核心受众', value: brief => brief.document.audience.primary, multiline: true },
   { path: 'proposition', label: '核心主张', value: brief => brief.document.proposition, multiline: true },
@@ -296,14 +305,20 @@ const briefFields: Array<{
   { path: 'constraints', label: '约束条件', value: brief => brief.document.constraints.join('\n'), parse: splitValues, multiline: true },
 ]
 
-function BriefPane({ brief, busy, onConfirm, onField }: {
+function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField }: {
   brief: BriefDraft | null
   busy: string
   onConfirm: () => Promise<boolean>
+  onConfirmFields: (operations: Array<{ fieldPath: string; value: unknown }>) => Promise<boolean>
   onField: (path: string, value: unknown) => Promise<boolean>
 }) {
   if (!brief) return <UnavailablePane title="Brief 尚未创建" detail="请先进入对话并发送第一条需求信息。"/>
   const frozen = brief.status === 'confirmed'
+  const unconfirmedFields = briefFields.flatMap(field => {
+    const value = field.value(brief)
+    if (!value.trim() || brief.field_states[field.path]?.confirmation === 'confirmed') return []
+    return [{ fieldPath: field.path, value: field.parse ? field.parse(value) : value }]
+  })
   return <section className="kanon-brief-pane">
     <div className="kanon-strategy-heading">
       <div><span className="section-label">BRIEF DRAFT v{brief.version}</span><h2>确认策略输入</h2><p>字段修改使用服务端版本校验，确认后冻结为不可变 BriefVersion。</p></div>
@@ -326,9 +341,14 @@ function BriefPane({ brief, busy, onConfirm, onField }: {
         {brief.completeness.blockers.map(blocker => <span key={`${blocker.field}-${blocker.reason}`}><AlertCircle size={13}/>{fieldLabel(blocker.field)}：{blocker.reason}</span>)}
         {!brief.completeness.blockers.length ? <span><CircleCheck size={13}/>必填信息与确认状态满足冻结条件</span> : null}
       </div>
-      <button className="primary-button" disabled={frozen || !brief.completeness.ready || Boolean(busy)} onClick={() => void onConfirm()}>
-        <BadgeCheck size={16}/>{busy === 'confirm-brief' ? '确认中…' : frozen ? 'Brief 已冻结' : '确认并冻结 Brief'}
-      </button>
+      <div className="kanon-brief-actions">
+        {!frozen && unconfirmedFields.length ? <button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onConfirmFields(unconfirmedFields)}>
+          <Check size={15}/>{busy === 'confirm-brief-fields' ? '确认中…' : `确认全部已填写字段（${unconfirmedFields.length}）`}
+        </button> : null}
+        <button className="primary-button" disabled={frozen || !brief.completeness.ready || Boolean(busy)} onClick={() => void onConfirm()}>
+          <BadgeCheck size={16}/>{busy === 'confirm-brief' ? '确认中…' : frozen ? 'Brief 已冻结' : '确认并冻结 Brief'}
+        </button>
+      </div>
     </div>
   </section>
 }
@@ -345,22 +365,24 @@ function EditableField({ busy, disabled, label, multiline, onSave, state, value 
   const [draftValue, setDraftValue] = useState(value)
   useEffect(() => setDraftValue(value), [value])
   const changed = draftValue.trim() !== value.trim()
+  const needsConfirmation = Boolean(value.trim()) && state?.confirmation !== 'confirmed'
   return <label className={`kanon-field ${multiline ? 'wide' : ''}`}>
     <span>{label}<small>{state?.confirmation === 'confirmed' ? '已确认' : state ? `${state.confidence} 置信度` : '待补充'}</small></span>
     {multiline
       ? <textarea disabled={disabled} rows={3} value={draftValue} onChange={event => setDraftValue(event.target.value)}/>
       : <input disabled={disabled} value={draftValue} onChange={event => setDraftValue(event.target.value)}/>}
-    {changed && !disabled ? <button disabled={busy} type="button" onClick={() => void onSave(draftValue)}>{busy ? '保存中…' : '保存'}</button> : null}
+    {(changed || needsConfirmation) && !disabled ? <button disabled={busy} type="button" onClick={() => void onSave(draftValue)}>{busy ? '处理中…' : changed ? '保存并确认' : '确认此字段'}</button> : null}
   </label>
 }
 
-function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, onRevise, onSubmit, pending, probe, readiness }: {
+function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, onRetry, onRevise, onSubmit, pending, probe, readiness }: {
   briefReady: boolean
   busy: string
   draft: StrategyDraft | null
   onGenerate: () => Promise<boolean>
   onPatch: (section: string, value: unknown) => Promise<boolean>
   onProbe: () => Promise<boolean>
+  onRetry: () => Promise<boolean>
   onRevise: (instruction: string) => Promise<boolean>
   onSubmit: () => Promise<boolean>
   pending: boolean
@@ -400,6 +422,16 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
   }
 
   if (!document) {
+    if (draft.status === 'failed') {
+      return <section className="kanon-strategy-generate">
+        <AlertCircle size={28}/>
+        <h2>策略生成未完成</h2>
+        <p>失败 Draft 和 AgentTask 记录已保留，可以基于同一份已冻结 Brief 重新生成。</p>
+        <button className="primary-button" disabled={Boolean(busy)} onClick={() => void onRetry()}>
+          <RefreshCw size={16}/>{busy === 'retry-strategy' ? '正在重新生成…' : '重新生成策略'}
+        </button>
+      </section>
+    }
     return <UnavailablePane title="策略没有可用 Revision" detail={`当前状态：${statusLabel(draft.status)}。请重新加载或检查 AgentTask。`}/>
   }
 

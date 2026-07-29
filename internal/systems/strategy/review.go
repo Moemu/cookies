@@ -22,6 +22,9 @@ func (s Service) SubmitStrategy(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return Review{}, false, err
 	}
+	if draft.ArchivedAt != nil {
+		return Review{}, false, ErrInvalidState
+	}
 	policy, err := s.GetReviewPolicy(ctx, actor, draft.ProjectID)
 	if err != nil {
 		return Review{}, false, err
@@ -250,6 +253,9 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	draft, err := s.GetDraft(ctx, actor, strategyID)
 	if err != nil {
 		return PackageVersion{}, false, err
+	}
+	if draft.ArchivedAt != nil {
+		return PackageVersion{}, false, ErrInvalidState
 	}
 	hash, _ := contract.CanonicalJSONHash(request)
 	var prior PackageVersion

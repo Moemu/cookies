@@ -24,6 +24,9 @@ export type StrategyTask = {
   current_agent_task_id?: string
   current_strategy_id?: string
   status: 'active' | 'waiting_user' | 'ready_to_confirm' | 'completed' | 'cancelled'
+  discarded_at?: string
+  discarded_by?: string
+  discard_reason?: string
   version: number
 }
 
@@ -35,6 +38,11 @@ export type StrategyTaskListItem = {
   brief_ready: boolean
   strategy_status?: StrategyDraft['status']
   review_status?: Review['status']
+  strategy_revision: number
+  strategy_version: number
+  strategy_archived_at?: string
+  strategy_archived_by?: string
+  strategy_archive_reason?: string
 }
 
 export type StrategyTaskBundle = {
@@ -166,6 +174,9 @@ export type StrategyDraft = {
   brief_id: string
   brief_version: number
   status: 'generating' | 'draft' | 'ready_for_review' | 'returned' | 'approved' | 'failed' | 'cancelled'
+  archived_at?: string
+  archived_by?: string
+  archive_reason?: string
   current_revision: number
   current_review_id?: string
   version: number

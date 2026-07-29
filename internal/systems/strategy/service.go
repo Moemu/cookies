@@ -329,22 +329,39 @@ func (s Service) CreateTask(
 }
 
 func (s Service) ListTasks(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]TaskListItem, error) {
+	return s.ListTasksByLifecycle(ctx, actor, projectID, "active")
+}
+
+func (s Service) ListTasksByLifecycle(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, lifecycle string) ([]TaskListItem, error) {
 	if err := requireScope(actor, ScopeRead); err != nil {
 		return nil, err
 	}
 	if _, err := s.project(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
+	lifecycleClause := ""
+	switch lifecycle {
+	case "", "active":
+		lifecycleClause = " AND t.discarded_at IS NULL AND sd.archived_at IS NULL"
+	case "archived":
+		lifecycleClause = " AND (t.discarded_at IS NOT NULL OR sd.archived_at IS NOT NULL)"
+	case "all":
+	default:
+		return nil, ErrInvalidRequest
+	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT
 		t.id, t.organization_id, t.project_id, t.workspace_id, t.conversation_id, t.brief_id,
 		COALESCE(t.current_agent_task_id, ''), COALESCE(t.current_strategy_id, ''),
-		t.status, t.version, t.created_at, t.updated_at,
+		t.status, t.discarded_at, COALESCE(t.discarded_by, ''), COALESCE(t.discard_reason, ''),
+		t.version, t.created_at, t.updated_at,
 		w.name,
 		COALESCE(JSON_UNQUOTE(JSON_EXTRACT(bd.document, '$.campaign.objective')), ''),
 		bd.status,
 		COALESCE(JSON_EXTRACT(bd.completeness, '$.ready'), FALSE),
 		COALESCE(sd.status, ''),
-		COALESCE(sr.status, '')
+		COALESCE(sr.status, ''), sd.archived_at, COALESCE(sd.archived_by, ''),
+		COALESCE(sd.archive_reason, ''), COALESCE(sd.current_revision, 0),
+		COALESCE(sd.version, 0)
 		FROM strategy_tasks t
 		JOIN strategy_workspaces w ON w.organization_id = t.organization_id AND w.project_id = t.project_id
 			AND w.id = t.workspace_id
@@ -356,7 +373,7 @@ func (s Service) ListTasks(ctx context.Context, actor contract.ActorContext, pro
 			AND sd.id = t.current_strategy_id
 		LEFT JOIN strategy_reviews sr ON sr.organization_id = sd.organization_id AND sr.project_id = sd.project_id
 			AND sr.id = sd.current_review_id
-		WHERE t.organization_id = ? AND t.project_id = ?
+		WHERE t.organization_id = ? AND t.project_id = ?`+lifecycleClause+`
 		ORDER BY t.updated_at DESC, t.created_at DESC`, actor.OrganizationID, projectID)
 	if err != nil {
 		return nil, err
@@ -365,14 +382,24 @@ func (s Service) ListTasks(ctx context.Context, actor contract.ActorContext, pro
 	result := make([]TaskListItem, 0)
 	for rows.Next() {
 		var item TaskListItem
+		var discardedAt, archivedAt sql.NullTime
 		if err := rows.Scan(
 			&item.Task.ID, &item.Task.OrganizationID, &item.Task.ProjectID, &item.Task.WorkspaceID,
 			&item.Task.ConversationID, &item.Task.BriefID, &item.Task.CurrentAgentTaskID,
-			&item.Task.CurrentStrategyID, &item.Task.Status, &item.Task.Version,
+			&item.Task.CurrentStrategyID, &item.Task.Status, &discardedAt,
+			&item.Task.DiscardedBy, &item.Task.DiscardReason, &item.Task.Version,
 			&item.Task.CreatedAt, &item.Task.UpdatedAt, &item.Name, &item.Objective,
 			&item.BriefStatus, &item.BriefReady, &item.StrategyStatus, &item.ReviewStatus,
+			&archivedAt, &item.StrategyArchivedBy, &item.StrategyArchiveReason,
+			&item.StrategyRevision, &item.StrategyVersion,
 		); err != nil {
 			return nil, err
+		}
+		if discardedAt.Valid {
+			item.Task.DiscardedAt = &discardedAt.Time
+		}
+		if archivedAt.Valid {
+			item.StrategyArchivedAt = &archivedAt.Time
 		}
 		result = append(result, item)
 	}
@@ -628,6 +655,9 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	if err != nil {
 		return SendMessageResult{}, false, err
 	}
+	if task.DiscardedAt != nil {
+		return SendMessageResult{}, false, ErrInvalidState
+	}
 	request := struct {
 		ConversationID string `json:"conversation_id"`
 		Content        string `json:"content"`
@@ -796,6 +826,9 @@ func (s Service) PatchBriefDraft(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return BriefDraft{}, false, err
 	}
+	if task.DiscardedAt != nil {
+		return BriefDraft{}, false, ErrInvalidState
+	}
 	if _, err := s.project(ctx, actor, task.ProjectID); err != nil {
 		return BriefDraft{}, false, err
 	}
@@ -855,6 +888,9 @@ func (s Service) ConfirmBrief(ctx context.Context, actor contract.ActorContext, 
 	task, err := scanTask(s.DB.QueryRowContext(ctx, taskSelect+` WHERE organization_id = ? AND id = ?`, actor.OrganizationID, taskID))
 	if err != nil {
 		return BriefVersion{}, false, err
+	}
+	if task.DiscardedAt != nil {
+		return BriefVersion{}, false, ErrInvalidState
 	}
 	if _, err := s.project(ctx, actor, task.ProjectID); err != nil {
 		return BriefVersion{}, false, err
