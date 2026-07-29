@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-viral-remake-workspace-v1.schema.json",
+  "title": "creative-viral-remake-workspace/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "task_id",
+    "revision",
+    "status",
+    "selected_route_id",
+    "readiness",
+    "blockers",
+    "recoverable"
+  ],
+  "properties": {
+    "contract_version": {"const": "creative-viral-remake-workspace/v1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {
+      "enum": [
+        "waiting_for_analysis",
+        "analysis_ready",
+        "generation_ready",
+        "generating",
+        "candidate_ready",
+        "ready_for_review",
+        "rights_blocked",
+        "similarity_blocked",
+        "provider_failed"
+      ]
+    },
+    "selected_route_id": {"const": "route_manual_viral_remake_v1"},
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planning_ready", "generation_ready", "production_ready"],
+      "properties": {
+        "planning_ready": {"type": "boolean"},
+        "generation_ready": {"type": "boolean"},
+        "production_ready": {"type": "boolean"}
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1}
+      }
+    },
+    "recoverable": {"type": "boolean"}
+  }
+}

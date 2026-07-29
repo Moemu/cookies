@@ -57,6 +57,8 @@ type GatewayRouteSnapshot struct {
 	TemperatureSet       bool                     `json:"-"`
 	ThinkingMode         string                   `json:"thinking_mode,omitempty"`
 	ReasoningSplit       bool                     `json:"reasoning_split,omitempty"`
+	VideoInputModes      []VideoInputMode         `json:"video_input_modes,omitempty"`
+	VideoAudioPolicies   []VideoAudioPolicy       `json:"video_audio_policies,omitempty"`
 }
 
 func (s GatewayRouteSnapshot) Validate() error {
@@ -68,7 +70,13 @@ func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
 }
 
 func (s GatewayRouteSnapshot) ValidateVideoWithPolicy(allowInsecureHTTP bool) error {
-	return s.validateWithLimits(allowInsecureHTTP, 1800, 200<<20)
+	if err := s.validateWithLimits(allowInsecureHTTP, 1800, 200<<20); err != nil {
+		return err
+	}
+	if err := validateVideoInputModes(s.VideoInputModes); err != nil {
+		return err
+	}
+	return validateVideoAudioPolicies(s.VideoAudioPolicies)
 }
 
 func (s GatewayRouteSnapshot) validateWithLimits(allowInsecureHTTP bool, maxTimeoutSeconds int, maxResponseBytes int64) error {
@@ -202,6 +210,10 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		if err := applyTextRouteConstraints(&snapshot, constraintsJSON); err != nil {
 			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
 		}
+	} else if capability == "video.generate" {
+		if err := applyVideoRouteConstraints(&snapshot, constraintsJSON); err != nil {
+			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
+		}
 	}
 	validate := snapshot.ValidateWithPolicy
 	if capability == "text.generate" {
@@ -213,6 +225,62 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q: %w", modelAlias, err)
 	}
 	return snapshot, nil
+}
+
+func applyVideoRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {
+	if snapshot == nil {
+		return fmt.Errorf("route snapshot is required")
+	}
+	var constraints struct {
+		InputModes    []VideoInputMode   `json:"video_input_modes"`
+		AudioPolicies []VideoAudioPolicy `json:"video_audio_policies"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &constraints); err != nil {
+			return err
+		}
+	}
+	if err := validateVideoInputModes(constraints.InputModes); err != nil {
+		return err
+	}
+	if err := validateVideoAudioPolicies(constraints.AudioPolicies); err != nil {
+		return err
+	}
+	snapshot.VideoInputModes = append([]VideoInputMode(nil), constraints.InputModes...)
+	snapshot.VideoAudioPolicies = append([]VideoAudioPolicy(nil), constraints.AudioPolicies...)
+	return nil
+}
+
+func validateVideoInputModes(values []VideoInputMode) error {
+	seen := make(map[VideoInputMode]struct{}, len(values))
+	for _, value := range values {
+		switch value {
+		case VideoInputTextOnly, VideoInputReferenceImage, VideoInputFirstLastFrame:
+		default:
+			return fmt.Errorf("video input mode %q is invalid", value)
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("video input mode %q is duplicated", value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func validateVideoAudioPolicies(values []VideoAudioPolicy) error {
+	seen := make(map[VideoAudioPolicy]struct{}, len(values))
+	for _, value := range values {
+		switch value {
+		case VideoAudioSilent, VideoAudioGenerated:
+		default:
+			return fmt.Errorf("video audio policy %q is invalid", value)
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("video audio policy %q is duplicated", value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
 }
 
 func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {

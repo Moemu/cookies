@@ -51,8 +51,11 @@ type StrategyPackageSnapshot struct {
 
 type Service struct {
 	Repository       Repository
+	ViralRemakes     ViralRemakeRepository
+	ViralAnalyzer    ViralReferenceAnalyzer
 	Projects         ActiveProjectResolver
 	StrategyPackages StrategyPackageReader
+	Sources          CreativeSourceReader
 	Assets           AssetReader
 	Composer         media.VideoComposer
 	RenderedAssets   RenderedAssetWriter
@@ -78,10 +81,13 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return CreativeTask{}, err
 	}
-	if intake.Status != IntakeReady || intake.Source != IntakeSourceStrategyPackage || request.RouteIndex >= len(intake.Request.CreativeRoutes) {
+	if intake.Status != IntakeReady {
 		return CreativeTask{}, ErrIntakeNotReady
 	}
-	route := intake.Request.CreativeRoutes[request.RouteIndex]
+	route, err := selectedVideoRoute(intake, request)
+	if err != nil {
+		return CreativeTask{}, err
+	}
 	if err := route.Validate(); err != nil {
 		return CreativeTask{}, err
 	}
@@ -101,6 +107,21 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	}
 	if !source.Ready || source.Kind != contract.AssetVideo || source.MIMEType != "video/mp4" || source.Ref != request.SourceVideo {
 		return CreativeTask{}, fmt.Errorf("source_video must be a ready MP4 in the same project")
+	}
+	var viralDraft *ViralRemakeDraft
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
+			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
+		}
+		if referenceImage := intake.Request.ManualViralRemake.ReferenceImage; referenceImage != nil {
+			image, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, *referenceImage)
+			if readErr != nil {
+				return CreativeTask{}, readErr
+			}
+			if !image.Ready || image.Kind != contract.AssetImage || image.Ref != *referenceImage {
+				return CreativeTask{}, fmt.Errorf("reference_image must be a ready image in the same project")
+			}
+		}
 	}
 	id, err := s.idGenerator()("creativetask")
 	if err != nil {
@@ -124,10 +145,59 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
 		CallToAction: request.CallToAction, CreatedAt: now,
 	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+		manual := intake.Request.ManualViralRemake
+		snapshot := ViralRemakeInputSnapshot{
+			Source: intake.Source, SelectedRouteID: route.RouteID,
+			ReferenceVideo: request.SourceVideo, ReferenceImage: manual.ReferenceImage,
+			ProductName: manual.ProductName, SellingPoints: append([]string{}, manual.SellingPoints...),
+			CallToAction: request.CallToAction, UserInstruction: manual.UserInstruction,
+			MandatoryElements:    append([]string{}, request.Mandatory...),
+			ProhibitedClaims:     append([]string{}, request.Prohibited...),
+			ReferenceVideoRights: manual.ReferenceVideoRights, ReferenceImageRights: manual.ReferenceImageRights,
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize viral remake input: %w", hashErr)
+		}
+		blockers := []string{"analysis_snapshot", "confirmed_prompt_package", "provider_video_route"}
+		if manual.ReferenceVideoRights != RightsConfirmed {
+			blockers = append(blockers, "reference_video_rights")
+		}
+		if manual.ReferenceImage != nil && manual.ReferenceImageRights != RightsConfirmed {
+			blockers = append(blockers, "reference_image_rights")
+		}
+		viralDraft = &ViralRemakeDraft{
+			ContractVersion: "creative-viral-remake-draft/v1", TaskID: task.ID, Revision: 1,
+			Status: ViralWaitingForAnalysis, SelectedRouteID: route.RouteID,
+			InputSnapshot: snapshot, InputHash: inputHash,
+			Readiness: CreativeReadiness{
+				PlanningReady: true, GenerationReady: false, ProductionReady: false,
+				MissingFields: []string{}, Blockers: blockers,
+			},
+			Candidates: []ViralCandidate{}, CreatedAt: now, UpdatedAt: now,
+		}
+		draft.ViralRemake = viralDraft
+	}
 	if err := draft.Validate(); err != nil {
 		return CreativeTask{}, err
 	}
 	return s.Repository.CreateVideoTask(ctx, task, draft)
+}
+
+func selectedVideoRoute(intake CreativeIntake, request CreateVideoTaskRequest) (CreativeRouteSnapshot, error) {
+	if request.SelectedRouteID != "" {
+		for _, route := range intake.Request.CreativeRoutes {
+			if route.RouteID == request.SelectedRouteID {
+				return route, nil
+			}
+		}
+		return CreativeRouteSnapshot{}, fmt.Errorf("selected_route_id is not present in the Creative intake")
+	}
+	if intake.Source != IntakeSourceStrategyPackage || request.RouteIndex < 0 || request.RouteIndex >= len(intake.Request.CreativeRoutes) {
+		return CreativeRouteSnapshot{}, ErrIntakeNotReady
+	}
+	return intake.Request.CreativeRoutes[request.RouteIndex], nil
 }
 
 func (s Service) CreateIntake(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, key contract.IdempotencyKey, request CreateIntakeRequest) (CreativeIntake, error) {

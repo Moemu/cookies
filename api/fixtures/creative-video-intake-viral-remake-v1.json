@@ -1,0 +1,110 @@
+{
+  "contract_version": "creative-video-intake/v1",
+  "intake_id": "fixture_video_viral_remake_v1",
+  "organization_id": "fixture_org",
+  "project_id": "fixture_project_viral_remake",
+  "status": "fixture_ready",
+  "source": {
+    "kind": "fixture",
+    "fixture_id": "viral-remake/v1",
+    "documents": [
+      {
+        "file_name": "viral-remake-fixture.md",
+        "locator": "fixture://briefs/viral-remake-v1",
+        "page_refs": ["product-mapping", "similarity-policy"],
+        "note": "虚构开发样例，用于验证爆款结构拆解和品牌化原创改写。"
+      }
+    ]
+  },
+  "campaign": {
+    "objective": "复用高停留结构和转化节奏，为目标产品生成三个原创视频变体。",
+    "audience": "关注效率工具和工作流优化的短视频用户。",
+    "core_message": "目标产品通过自动化减少重复步骤。",
+    "call_to_action": "立即体验",
+    "channels": ["douyin"],
+    "locale": "zh-CN"
+  },
+  "video": {
+    "mode": "viral_remake",
+    "purpose": "performance",
+    "target_duration_seconds": 15,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "variant_count": 3,
+    "hook_deadline_seconds": 1,
+    "audio_policy": "generated_audio",
+    "transition": "not_applicable"
+  },
+  "product": {
+    "brand_name": "虚构效率品牌",
+    "product_name": "FlowKit",
+    "selling_points": ["自动整理任务", "减少重复操作", "跨设备同步"],
+    "proof_points": ["使用授权产品界面录屏展示真实操作"],
+    "usage_scenarios": ["个人任务管理", "团队工作协作"]
+  },
+  "creative": {
+    "concept": "保留源视频的钩子、问题、证明、利益和 CTA 功能顺序，替换人物、场景、品牌与具体表达。",
+    "tone": ["快速", "清晰", "可信"],
+    "visual_keywords": ["高反差开场", "问题升级", "操作证明", "结果定格"],
+    "mandatory_elements": ["每条变体记录 preserve 和 replace", "CTA 清晰", "来源和授权可追踪"],
+    "prohibited_claims": ["不得逐帧复制源视频", "不得复用原人物、商标、字幕或受保护表达", "不得虚构产品功能"],
+    "reference_policy": "源视频只用于节奏、镜头功能和转化节点参考；产品图片和界面录屏用于目标产品保真。",
+    "similarity_policy": "输出 similarityRisk；高风险变体必须阻止生成并要求重新改写。"
+  },
+  "source_assets": [
+    {
+      "role": "reference_video",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://assets/viral-reference.mp4",
+      "rights_status": "fixture_only",
+      "note": "开发替身；生产环境必须提供可分析、可参考且授权明确的 AssetVersionRef。"
+    },
+    {
+      "role": "product_image",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://assets/flowkit-product.png",
+      "rights_status": "fixture_only",
+      "note": "用于测试多模态目标产品约束。"
+    }
+  ],
+  "claims": [
+    {
+      "text": "爆款复刻只复用结构、节奏和转化节点，不复制具体受保护表达。",
+      "status": "assumption",
+      "evidence_refs": ["fixture_viral_similarity"]
+    }
+  ],
+  "evidence_refs": [
+    {
+      "id": "fixture_viral_similarity",
+      "source_type": "fixture_document",
+      "locator": "fixture://briefs/viral-remake-v1#similarity-policy",
+      "note": "用于测试相似性风险、来源授权和重写门禁。"
+    }
+  ],
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false,
+    "missing_fields": [
+      "source.strategy_package_ref",
+      "source_assets.reference_video.production_ref",
+      "source_assets.product_image.production_ref"
+    ],
+    "blockers": ["仅为开发 fixture，参考视频、目标产品素材和产品事实均未经过正式确认。"],
+    "assumptions": [
+      {
+        "field": "video.variant_count",
+        "value": "3",
+        "reason": "用于验证多变体拆解、抽样和生成。"
+      }
+    ]
+  },
+  "confirmation": {
+    "required": true,
+    "status": "unconfirmed"
+  },
+  "created_at": "2026-07-28T06:00:00Z"
+}

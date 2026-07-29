@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -486,6 +487,9 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusBadRequest, "BRAND_NOT_FOUND", "The selected brand does not exist in this organization.", false
 	case errors.Is(err, project.ErrProductNotFound):
 		status, code, message, retryable = http.StatusBadRequest, "PRODUCT_NOT_FOUND", "A selected product does not exist in this organization.", false
+	}
+	if status == http.StatusInternalServerError {
+		log.Printf("request %s failed: %v", requestIDFrom(r.Context()), err)
 	}
 	writeProblem(w, status, contract.Error{Code: code, Message: message, RequestID: requestIDFrom(r.Context()), Retryable: retryable})
 }

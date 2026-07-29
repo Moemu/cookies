@@ -24,5 +24,19 @@
 - **CreativeDirection**: The user-selected expression of a message, including
   concept, tone and visual keywords. It can refine an upstream recommendation
   without changing that upstream object.
+- **CreativeSourceVersion**: The immutable upstream version deliberately
+  selected for one creative effort. It may be a confirmed Brief, an approved
+  StrategyPackage or a development fixture; later upstream versions never
+  alter an existing CreativeIntake.
+- **VideoTemplateRecipe**: Creative's versioned production grammar for a video
+  pattern. It defines required facts and assets, motion phases and preservation
+  rules, but it is not the final model prompt.
+- **PromptPackage**: An immutable, traceable compilation of one CreativeIntake
+  and one VideoTemplateRecipe into structured directions and the exact model
+  prompt shown for approval.
+- **GenerationSpec**: The frozen, approved combination of a PromptPackage,
+  conditioning assets and media settings used to request model production.
+- **Candidate**: One model-produced output under evaluation. Provider success
+  makes a Candidate available; it does not make the Candidate approved.
 - **Ready Intake**: An Intake with a channel, objective, audience and core
   message. Only a ready Intake may create a CreativeTask.

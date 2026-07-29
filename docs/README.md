@@ -32,6 +32,8 @@
 | [视频素材剪辑与开源框架方案](./21-video-material-editor-spec.md) | 素材剪辑子模块、编辑器布局、OpenCut/FFmpeg 选型、数据模型与 MVP | 产品、设计、前端、后端、音视频研发 |
 | [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md) | Project 管理、唯一工作台、八阶段落点、四模块逐页问题、整改计划与全面评估 | 产品、设计、前端、后端、测试 |
 | [Strategy × Creative 并行开发契约（已废止）](./23-strategy-creative-parallel-contracts-v2.md) | 仅保留为历史记录；前端已改为单一负责人，本文不再约束职责、路由或实施顺序 | 历史资料 |
+| [Strategy → Creative 开发契约 v2](./25-strategy-to-creative-development-contract-v2.md) | 冻结 StrategyPackage、CreativeHandoff、CreativeIntake、CreativeVideoIntake、稳定 Route ID 与三级 readiness 边界 | Strategy、Creative、后端、测试 |
+| [爆款复刻 MVP 技术实施方案](./plans/2026-07-28-viral-remake-mvp-technical-plan.md) | Strategy 未接线时以 manual Intake 跑通 Creative 爆款分析、原创改写、Provider 生成、Assets 入库和检查闭环 | Creative、平台、前端、后端、测试 |
 | [广告策略库](./策略/README.md) | 素材洞察、漫剧制作、剪辑包装、商品与素材投放及全链路闭环策略 | 策略、创意、投放、数据、产品 |
 
 ## 系统划分

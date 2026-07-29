@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, BarChart3, BookOpenCheck, Check, CircleAlert, CircleCheck,
-  Database, FileInput, Filter, Layers3, Lightbulb, Link2, Play, RefreshCw,
+  Database, FileInput, Filter, Layers3, Lightbulb, Link2, RefreshCw,
   Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
@@ -474,7 +474,7 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
           {assetState === 'error' ? <div className="panel-empty">素材读取失败，请重试。</div> : null}
           {assetState === 'ready' && !filtered.length ? <div className="panel-empty">{mode === 'assets' ? '当前 Project 暂无已持久化的图片或视频资产。' : '当前 Project 暂无已生成并持久化的经验结论。'}</div> : null}
           {filtered.map(asset => { const feature = featureForAsset(asset, assetFeatures); return <button key={asset.id} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
-            <span className="asset-card-preview">{asset.kind === 'video' ? <Play size={18} fill="currentColor"/> : <Layers3 size={18}/>}<small>{assetType(asset)}</small></span>
+            <span className="asset-card-preview"><AssetMedia artifact={asset}/><small>{assetType(asset)}</small></span>
             <span><small>{asset.id.slice(0, 8)} · {asset.sourceJobId ? '生成任务产物' : '服务端存档'}</small><b>{assetTitle(asset)}</b><em>{feature ? featureSummary(feature) : '暂无多模态特征'}</em></span>
           </button> })}
         </div>
@@ -483,6 +483,7 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
         {selected ? <><span className="section-label">服务端产物详情</span><h3>{assetTitle(selected)}</h3><p>{assetType(selected)} · {selected.status === 'ready' ? '已持久化' : '草稿'}</p>
           <div className="feature-stack"><span>可追溯元数据</span><b>Artifact {selected.id}</b><b>版本 v{selected.version}</b><b>{selected.sourceJobId ? `来源任务 ${selected.sourceJobId}` : '非生成任务产物'}</b><b>更新时间 {new Date(selected.updatedAt).toLocaleString('zh-CN')}</b></div>
           {selectedFeature ? <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>Hook {percent(selectedFeature.hookStrength)}</b><b>商品露出 {percent(selectedFeature.productVisibility)}</b><b>相似度风险 {riskLabel(selectedFeature.similarityRisk)}</b>{selectedFeature.sellingPoints.slice(0, 2).map(point => <b key={point}>卖点：{point}</b>)}</div> : <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>暂无特征，Planner 使用基础元数据降级。</b></div>}
+          <div className="asset-detail-preview"><AssetMedia artifact={selected} controls/></div>
           <div className="experience-card"><BookOpenCheck size={18}/><span><small>产物内容</small><b>{selected.content}</b></span></div>
         </> : <div className="panel-empty">选择当前 Project 的服务端产物后查看详情；系统不会以固定 CTR 或 AI 结论替代真实结果。</div>}
       </aside>
@@ -495,7 +496,19 @@ function assetType(artifact: ApiArtifact): string {
 }
 
 function assetTitle(artifact: ApiArtifact): string {
+  if (artifact.kind === 'video') return `${artifact.sourceJobId ? 'AI 生成视频' : '项目视频'} · ${artifact.id.slice(-8)}`
+  if (artifact.kind === 'image') return `${artifact.sourceJobId ? 'AI 生成图片' : '项目图片'} · ${artifact.id.slice(-8)}`
   return artifact.content.replace(/^\[knowledge\]\s*/, '').slice(0, 48) || `${assetType(artifact)}产物`
+}
+
+function AssetMedia({ artifact, controls = false }: { artifact: ApiArtifact; controls?: boolean }) {
+  if (artifact.kind === 'video') {
+    return <video src={artifact.content} controls={controls} muted={!controls} playsInline preload="metadata" aria-label={`${assetTitle(artifact)}预览`}/>
+  }
+  if (artifact.kind === 'image') {
+    return <img src={artifact.content} alt={`${assetTitle(artifact)}预览`} loading="lazy"/>
+  }
+  return <Layers3 size={18}/>
 }
 
 function featureForAsset(asset: ApiArtifact, features: ApiAssetFeature[]): ApiAssetFeature | undefined {

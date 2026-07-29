@@ -287,6 +287,70 @@ func TestCreateVideoTaskConsumesApprovedRouteAndReadyProjectVideo(t *testing.T) 
 	}
 }
 
+func TestCreateManualViralRemakeTaskUsesStableRouteAndRestorableSnapshot(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.Assets = testAssetReader{snapshots: map[contract.AssetID]CreativeAssetSnapshot{
+		"asset_reference_video": {
+			Ref:  contract.AssetVersionRef{AssetID: "asset_reference_video", Version: 2},
+			Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true,
+		},
+		"asset_product_image": {
+			Ref:  contract.AssetVersionRef{AssetID: "asset_product_image", Version: 1},
+			Kind: contract.AssetImage, MIMEType: "image/png", Ready: true,
+		},
+	}}
+	rc := testRequestContext()
+	referenceImage := contract.AssetVersionRef{AssetID: "asset_product_image", Version: 1}
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "manual-viral-intake-1", CreateIntakeRequest{
+		Source: IntakeSourceManual, Format: FormatVideo, PerformanceMode: PerformanceModeViralRemake,
+		Channel: ChannelDouyin, Objective: "复用高停留结构，生成原创转化广告", Audience: "效率工具用户",
+		CoreMessage: "减少重复操作", CallToAction: "立即体验", Concept: "保留功能节奏并替换受保护表达",
+		Tone: []string{"清晰"}, VisualKeywords: []string{"高反差开场"}, Mandatory: []string{}, Prohibited: []string{},
+		CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteID: ManualViralRemakeRouteID, RouteType: PerformanceModeViralRemake,
+			VideoPurpose: "performance", Channels: []string{"douyin"}, Reason: "用户选择爆款复刻",
+			TargetDurationSeconds: 15, AspectRatio: "9:16", RequiresHumanConfirmation: true,
+		}},
+		ManualViralRemake: &ManualViralRemakeInput{
+			ProductName: "FlowKit", SellingPoints: []string{"自动整理任务", "减少重复操作"},
+			UserInstruction: "保留钩子功能和节奏，替换人物、品牌、字幕和音乐",
+			ReferenceVideo:  contract.AssetVersionRef{AssetID: "asset_reference_video", Version: 2},
+			ReferenceImage:  &referenceImage, ReferenceVideoRights: RightsConfirmed,
+			ReferenceImageRights: RightsConfirmed,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := service.CreateVideoTask(context.Background(), rc.Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		SelectedRouteID: ManualViralRemakeRouteID, Channel: ChannelDouyin,
+		SourceVideo: contract.AssetVersionRef{AssetID: "asset_reference_video", Version: 2},
+		Concept:     "原创效率工具广告", Prompt: "等待 Phase 2 真实拆解后生成", CallToAction: "立即体验",
+		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), rc.Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.PerformanceMode != PerformanceModeViralRemake || detail.VideoDraft == nil ||
+		detail.VideoDraft.ViralRemake == nil {
+		t.Fatalf("viral workspace was not persisted: %+v", detail)
+	}
+	viral := detail.VideoDraft.ViralRemake
+	if viral.SelectedRouteID != ManualViralRemakeRouteID || viral.Revision != 1 ||
+		viral.InputSnapshot.ReferenceVideo != (contract.AssetVersionRef{AssetID: "asset_reference_video", Version: 2}) {
+		t.Fatalf("viral input snapshot = %+v", viral)
+	}
+	if !viral.Readiness.PlanningReady || viral.Readiness.GenerationReady || viral.Readiness.ProductionReady {
+		t.Fatalf("viral readiness = %+v", viral.Readiness)
+	}
+}
+
 func TestRenderJobPersistsFinalAssetLineage(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -414,8 +478,9 @@ type strategyPackageReader struct {
 }
 
 type testAssetReader struct {
-	snapshot CreativeAssetSnapshot
-	err      error
+	snapshot  CreativeAssetSnapshot
+	snapshots map[contract.AssetID]CreativeAssetSnapshot
+	err       error
 }
 
 type testRenderScheduler struct{ render RenderJob }
@@ -444,7 +509,14 @@ func (w *testRenderedAssetWriter) IngestRenderedVideo(_ context.Context, _ contr
 	return w.ref, nil
 }
 
-func (r testAssetReader) ReadForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ contract.AssetVersionRef) (CreativeAssetSnapshot, error) {
+func (r testAssetReader) ReadForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, ref contract.AssetVersionRef) (CreativeAssetSnapshot, error) {
+	if r.snapshots != nil {
+		value, ok := r.snapshots[ref.AssetID]
+		if !ok {
+			return CreativeAssetSnapshot{}, ErrNotFound
+		}
+		return value, r.err
+	}
 	return r.snapshot, r.err
 }
 
@@ -592,6 +664,21 @@ func (r *memoryRepository) ReviseDraft(_ context.Context, _ contract.Organizatio
 	}
 	value.Draft = draft
 	value.Task.Version = draft.Version
+	value.Task.UpdatedAt = draft.CreatedAt
+	r.tasks[taskID] = value
+	return draft, nil
+}
+func (r *memoryRepository) ReviseVideoDraft(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, taskID string, expectedRevision int64, draft VideoDraft, status TaskStatus) (VideoDraft, error) {
+	value, ok := r.tasks[taskID]
+	if !ok {
+		return VideoDraft{}, ErrNotFound
+	}
+	if value.VideoDraft == nil || value.VideoDraft.Revision != expectedRevision || draft.Revision != expectedRevision+1 {
+		return VideoDraft{}, ErrVersionConflict
+	}
+	value.VideoDraft = &draft
+	value.Task.Status = status
+	value.Task.Version++
 	value.Task.UpdatedAt = draft.CreatedAt
 	r.tasks[taskID] = value
 	return draft, nil

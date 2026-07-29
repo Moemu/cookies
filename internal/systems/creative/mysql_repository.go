@@ -182,6 +182,53 @@ func (r MySQLRepository) CreateVideoTask(ctx context.Context, task CreativeTask,
 	return task, nil
 }
 
+func (r MySQLRepository) ReviseVideoDraft(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, taskID string, expectedRevision int64, draft VideoDraft, status TaskStatus) (VideoDraft, error) {
+	if r.DB == nil {
+		return VideoDraft{}, fmt.Errorf("creative MySQL database is required")
+	}
+	if draft.TaskID != taskID || draft.Revision != expectedRevision+1 || draft.Validate() != nil {
+		return VideoDraft{}, fmt.Errorf("next creative video draft revision is invalid")
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return VideoDraft{}, err
+	}
+	defer tx.Rollback()
+	var current int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0) FROM creative_video_drafts WHERE organization_id = ? AND task_id = ? FOR UPDATE`, organizationID, taskID).Scan(&current); err != nil {
+		return VideoDraft{}, err
+	}
+	if current != expectedRevision {
+		return VideoDraft{}, ErrVersionConflict
+	}
+	content, err := json.Marshal(draft)
+	if err != nil {
+		return VideoDraft{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO creative_video_drafts
+		(organization_id, task_id, revision, content_payload, created_at) VALUES (?, ?, ?, ?, ?)`,
+		organizationID, taskID, draft.Revision, content, draft.CreatedAt); err != nil {
+		return VideoDraft{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE creative_tasks SET status = ?, version = version + 1, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		status, draft.CreatedAt, organizationID, projectID, taskID)
+	if err != nil {
+		return VideoDraft{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return VideoDraft{}, err
+	}
+	if affected != 1 {
+		return VideoDraft{}, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return VideoDraft{}, err
+	}
+	return draft, nil
+}
+
 func (r MySQLRepository) ListTasks(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]CreativeTask, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("creative MySQL database is required")

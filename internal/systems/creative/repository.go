@@ -41,3 +41,10 @@ type Repository interface {
 	CreatePackage(context.Context, CreativePackage) (CreativePackage, error)
 	ListPackages(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativePackage, error)
 }
+
+// ViralRemakeRepository is a narrow seam for append-only video-draft
+// revisions. It is separate from the base Repository so other Creative test
+// adapters do not need to understand the viral-remake workflow.
+type ViralRemakeRepository interface {
+	ReviseVideoDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, VideoDraft, TaskStatus) (VideoDraft, error)
+}

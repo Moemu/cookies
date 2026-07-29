@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAssetVersionRef, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
@@ -158,7 +158,7 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       assetId: selectedItem.pointer.assetId,
       assetVersion: selectedVersion,
       status: 'confirmed',
-      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
       confirmedBy: currentProject.owner,
       note: '已确认当前版本可进入投放计划和交付预检。',
       createdAt: now,
@@ -195,7 +195,7 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       assetId: selectedItem.pointer.assetId,
       assetVersion: selectedVersion,
       status: 'changes_requested',
-      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
       confirmedBy: currentProject.owner,
         note,
       createdAt: now,
@@ -279,11 +279,15 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
         </span>
       </div>
       <div className="material-preview-frame">
-        <div className="material-preview-card">
-          <span>ASSET</span>
-          <b>{selectedItem.pointer.assetId}</b>
-          <small>当前预览版本 v{selectedVersion}</small>
-        </div>
+        {selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'video'
+          ? <video key={`${selectedItem.pointer.assetId}-v${selectedVersion}`} controls playsInline preload="metadata" src={selectedItem.pointer.contentUrl} aria-label={`${selectedItem.title}素材检查预览`}/>
+          : selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'image'
+            ? <img src={selectedItem.pointer.contentUrl} alt={`${selectedItem.title}素材检查预览`}/>
+            : <div className="material-preview-card">
+              <span>ASSET</span>
+              <b>{selectedItem.pointer.assetId}</b>
+              <small>当前预览版本 v{selectedVersion}</small>
+            </div>}
       </div>
       <div className="material-version-strip" aria-label="素材版本">
         {selectedItem.versions.map(version => {
@@ -400,8 +404,9 @@ function buildMaterialQueue(workbench: ApiAgencyWorkbench, projectId: string): M
       pointer.versions.forEach(version => versions.add(version.version))
       workbench.qualityCheckRuns.filter(run => run.assetId === pointer.assetId).forEach(run => versions.add(run.assetVersion))
       workbench.materialConfirmations.filter(confirmation => confirmation.assetId === pointer.assetId).forEach(confirmation => versions.add(confirmation.assetVersion))
-      return { pointer, title: materialTitle(pointer.assetId), versions: Array.from(versions).sort((left, right) => right - left) }
+      return { pointer, title: materialTitle(pointer), versions: Array.from(versions).sort((left, right) => right - left) }
     })
+    .sort((left, right) => right.pointer.updatedAt.localeCompare(left.pointer.updatedAt))
 }
 
 function materialAuthorizationGate(pointer: ApiAssetVersionPointer): { allowed: boolean; reason: string } {
@@ -466,8 +471,11 @@ function materialTarget(assetId: string, version: number) {
   return `${assetId}@v${version}`
 }
 
-function materialTitle(assetId: string) {
-  return assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+function materialTitle(pointer: ApiAssetVersionPointer) {
+  const suffix = pointer.assetId.replace(/^asset[_-]/, '').slice(-8)
+  if (pointer.mediaKind === 'video') return `${pointer.sourceJobId ? 'AI 生成视频' : '项目视频'} · ${suffix}`
+  if (pointer.mediaKind === 'image') return `${pointer.sourceJobId ? 'AI 生成图片' : '项目图片'} · ${suffix}`
+  return pointer.assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
 }
 
 function qualityStatusLabel(status: ApiQualityCheckRun['status']) {
@@ -910,12 +918,15 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
 }
 
 function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: string }) {
-  const { currentProject, reloadProjects, updateArtifact } = useProject()
+  const { currentProject, reloadProjects } = useProject()
   const [briefPrompt, setBriefPrompt] = useState('')
   const [brief, setBrief] = useState<ApiArtifact | null>(null)
   const [briefModel, setBriefModel] = useState('')
   const [briefNotice, setBriefNotice] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [productAsset, setProductAsset] = useState<ApiAssetVersionRef | null>(null)
+  const [productImageName, setProductImageName] = useState('')
+  const [isUploadingProduct, setIsUploadingProduct] = useState(false)
   const evidence = operationRecords(currentProject.operations, 'evidence')
 
   useEffect(() => {
@@ -938,10 +949,15 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
     setIsGenerating(true)
     try {
       const result = await api.generateBrief(currentProject.id, briefPrompt)
-      setBrief(result.artifact)
+      const nextBrief = productAsset
+        ? await api.attachBriefProductAsset(result.artifact, productAsset)
+        : result.artifact
+      setBrief(nextBrief)
       setBriefModel(result.job.model ?? '服务端默认文本模型')
       await reloadProjects()
-      setBriefNotice('策略 Brief 草稿已生成，等待人工确认。')
+      setBriefNotice(productAsset
+        ? '策略 Brief 草稿已生成，商品图已绑定，等待人工确认。'
+        : '策略 Brief 草稿已生成，等待人工确认。')
     } catch (cause) {
       setBriefNotice(cause instanceof Error ? cause.message : '生成策略 Brief 失败，请重试。')
     } finally {
@@ -949,11 +965,39 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
     }
   }
 
+  const uploadProductImage = async (file: File | undefined) => {
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setBriefNotice('商品图仅支持 JPG、PNG 或 WebP。')
+      return
+    }
+    setIsUploadingProduct(true)
+    try {
+      const asset = await api.uploadProjectAsset(currentProject.id, file)
+      setProductAsset(asset)
+      setProductImageName(file.name)
+      if (brief?.status === 'draft') {
+        const updated = await api.attachBriefProductAsset(brief, asset)
+        setBrief(updated)
+        setBriefNotice('商品高清图已上传并绑定到当前 Brief 草稿。')
+      } else if (brief?.status === 'ready') {
+        setBriefNotice('商品图已上传；当前 Brief 已确认，请生成一份新 Brief 草稿后再绑定。')
+      } else {
+        setBriefNotice('商品图已上传；生成 Brief 时会自动绑定。')
+      }
+    } catch (cause) {
+      setBriefNotice(cause instanceof Error ? cause.message : '商品图上传失败，请重试。')
+    } finally {
+      setIsUploadingProduct(false)
+    }
+  }
+
   const confirmBrief = async () => {
     if (!brief) return
     try {
-      await updateArtifact('brief', { status: '已确认', summary: brief.content.slice(0, 52) })
-      setBrief({ ...brief, status: 'ready' })
+      const confirmed = await api.confirmBrief(brief)
+      setBrief(confirmed)
+      await reloadProjects()
       setBriefNotice('Brief 已确认，可进入创意生成。')
     } catch (cause) {
       setBriefNotice(cause instanceof Error ? cause.message : '确认 Brief 失败，请重试。')
@@ -971,6 +1015,19 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
         ['成功指标', '官网表单提交量提升 ≥30%\n关键行业线索成本（CPL）降低 ≥20%'],
       ].map(([label, content], index) => <div className="strategy-row" key={label}><h3>{label}</h3><p>{content}</p><span className="citation">[{index + 1}]</span><button aria-label={`编辑${label}`}><Pencil size={15} /></button></div>)}
       <div className="prompt-box"><label htmlFor="ai-prompt">输入广告需求，生成策略 Brief</label><div><input id="ai-prompt" value={briefPrompt} onChange={event => setBriefPrompt(event.target.value)} placeholder="例如：面向研发工程师，突出新品精度与交期，获取销售线索"/><button aria-label="生成策略 Brief" onClick={() => void generateBrief()} disabled={isGenerating}>{isGenerating ? '生成中…' : <Send size={18} />}</button></div></div>
+      <div className="brief-asset-row">
+        <label className="secondary-button" htmlFor="brief-product-image">
+          <Plus size={14} />{isUploadingProduct ? '上传中…' : '添加商品高清图'}
+        </label>
+        <input
+          id="brief-product-image"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          disabled={isUploadingProduct}
+          onChange={event => void uploadProductImage(event.target.files?.[0])}
+        />
+        <span>{productImageName || '生成电商前贴前需要；会作为 Brief 的商品 Asset。'}</span>
+      </div>
       {brief ? <div className="insight-note"><span>AI 生成 Brief · {brief.status === 'ready' ? '已确认' : '草稿'}</span><p>{brief.content}</p><small>模型：{briefModel || '服务端已存档'} · 任务：{brief.sourceJobId ?? '手工创建'}</small>{brief.status !== 'ready' ? <button className="secondary-button" onClick={() => void confirmBrief()}>确认 Brief</button> : null}</div> : null}
       {briefNotice ? <div className="inline-notice" role="status">{briefNotice}</div> : null}
     </section>

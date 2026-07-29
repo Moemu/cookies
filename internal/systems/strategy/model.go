@@ -106,8 +106,11 @@ type BriefBrand struct {
 	Name string `json:"name,omitempty"`
 }
 type BriefProduct struct {
-	Name     string   `json:"name,omitempty"`
-	Evidence []string `json:"evidence,omitempty"`
+	Name          string                     `json:"name,omitempty"`
+	Category      string                     `json:"category,omitempty"`
+	SellingPoints []string                   `json:"selling_points,omitempty"`
+	Evidence      []string                   `json:"evidence,omitempty"`
+	AssetRefs     []contract.AssetVersionRef `json:"asset_refs,omitempty"`
 }
 type BriefCampaign struct {
 	Objective string `json:"objective"`

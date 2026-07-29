@@ -458,6 +458,140 @@ func TestCreateVideoJobUsesProviderVideoSeam(t *testing.T) {
 	}
 }
 
+func TestGetViralRemakeWorkspaceRestoresPersistedDraft(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 28, 10, 0, 0, 0, time.UTC)
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_viral", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeViralRemake,
+		},
+		VideoDraft: &creative.VideoDraft{
+			ContractVersion: "creative-video-draft/v1", TaskID: "creative_task_viral", Revision: 1,
+			Concept: "viral", Prompt: "pending analysis", DurationSeconds: 15, AspectRatio: "9:16",
+			Resolution: "720p", SourceVideo: contract.AssetVersionRef{AssetID: "asset_video", Version: 1},
+			Mandatory: []string{}, Prohibited: []string{}, CreatedAt: now,
+			ViralRemake: &creative.ViralRemakeDraft{
+				ContractVersion: "creative-viral-remake-draft/v1", TaskID: "creative_task_viral", Revision: 1,
+				Status: "waiting_for_analysis", SelectedRouteID: creative.ManualViralRemakeRouteID,
+				InputSnapshot: creative.ViralRemakeInputSnapshot{
+					Source: creative.IntakeSourceManual, SelectedRouteID: creative.ManualViralRemakeRouteID,
+					ReferenceVideo: contract.AssetVersionRef{AssetID: "asset_video", Version: 1},
+				},
+				InputHash: "sha256:test", Readiness: creative.CreativeReadiness{
+					PlanningReady: true, MissingFields: []string{}, Blockers: []string{"analysis_snapshot"},
+				},
+				CreatedAt: now, UpdatedAt: now,
+			},
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_viral/viral-remake", nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"selected_route_id":"route_manual_viral_remake_v1"`) {
+		t.Fatalf("workspace body = %s", response.Body.String())
+	}
+}
+
+func TestCreativeVideoJobRequiresAndMapsApprovedFirstLastFrameSpec(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := (creative.CommercePrerollPlanner{}).Plan(creative.CommercePrerollPlanningInput{
+		TaskID: "creative_task_1", IntakeVersion: 1,
+		TemplateID: creative.CommerceWindowRevealTemplateID, TemplateVersion: 1,
+		BrandName: "Guerlain", ProductName: "Abeille Royale",
+		ProductAsset:    contract.AssetVersionRef{AssetID: "asset_product", Version: 1},
+		DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+		AudioPolicy: creative.VideoAudioSilent,
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	spec, err := plan.BindFrames(creative.ConditionedFrames{
+		StartFrame: contract.AssetVersionRef{AssetID: "asset_first", Version: 1},
+		TailFrame:  contract.AssetVersionRef{AssetID: "asset_last", Version: 1},
+	})
+	if err != nil {
+		t.Fatalf("BindFrames() error = %v", err)
+	}
+	approval, err := creative.ApproveVideoGeneration(spec, actor.Principal.ID, time.Date(2026, time.July, 28, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ApproveVideoGeneration() error = %v", err)
+	}
+	body, err := json.Marshal(creative.CreateVideoJobRequest{
+		ModelAlias:     "cookies.video.standard",
+		Prompt:         &plan.Prompt,
+		GenerationSpec: &spec,
+		Approval:       &approval,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	jobs.job.Kind = "provider.video.generate"
+	creativeManager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{ID: "creative_task_1", OrganizationID: "org_1", ProjectID: "project_1", Format: creative.FormatVideo},
+		VideoDraft: &creative.VideoDraft{
+			TaskID: "creative_task_1", Prompt: "legacy prompt", DurationSeconds: 5, AspectRatio: "9:16", Resolution: "720p",
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: creativeManager, ProviderJobs: jobs,
+		Projects: staticProjectManager{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID,
+			ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/creative-tasks/creative_task_1:video-job", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "creative-video-approved-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	input := jobs.videoRequest.Input
+	if input.Prompt != plan.Prompt.CompiledPrompt ||
+		input.InputMode != provider.VideoInputFirstLastFrame ||
+		input.AudioPolicy != provider.VideoAudioSilent ||
+		len(input.ConditioningAssets) != 2 {
+		t.Fatalf("approved provider video input = %+v", input)
+	}
+	if creativeManager.registeredProviderJobID != jobs.job.ID {
+		t.Fatalf("registered provider job = %q", creativeManager.registeredProviderJobID)
+	}
+}
+
 func TestCreativeCoverJobKeepsCreativeTaskLineage(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate}}
@@ -595,6 +729,8 @@ type providerJobStub struct {
 
 type creativeManagerStub struct {
 	detail                  creative.TaskDetail
+	commerceSources         []creative.CreativeSourceOption
+	preparedCommerce        creative.PreparedCommercePreroll
 	registeredProviderJobID string
 	frozenVersion           creative.CreativeVersion
 	freezeKey               contract.IdempotencyKey
@@ -606,6 +742,12 @@ type creativeManagerStub struct {
 	packages                []creative.CreativePackage
 }
 
+func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {
+	return s.commerceSources, nil
+}
+func (s *creativeManagerStub) PrepareCommercePreroll(context.Context, contract.ActorContext, contract.ProjectID, creative.PrepareCommercePrerollRequest) (creative.PreparedCommercePreroll, error) {
+	return s.preparedCommerce, nil
+}
 func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
 	return creative.CreativeIntake{}, nil
 }
@@ -622,6 +764,30 @@ func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, 
 	return nil, nil
 }
 func (s *creativeManagerStub) GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) AnalyzeViralRemake(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateViralPrompt(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateViralPromptRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmViralGeneration(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmViralGenerationRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ViralProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
+	return provider.VideoGenerationInput{
+		Prompt: "viral", DurationSeconds: 5, AspectRatio: "9:16", Resolution: "720p",
+		InputMode: provider.VideoInputTextOnly, ConditioningAssets: []provider.VideoConditioningAsset{},
+	}, "sha256:viral", nil
+}
+func (s *creativeManagerStub) RegisterViralCandidateJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ReconcileViralCandidate(context.Context, contract.ActorContext, contract.ProjectID, string, contract.ProviderJob) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) SubmitViralCandidateReview(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
 func (s *creativeManagerStub) ArchiveTask(context.Context, contract.ActorContext, contract.ProjectID, string) error {

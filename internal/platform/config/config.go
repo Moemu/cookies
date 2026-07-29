@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -98,6 +99,7 @@ type Provider struct {
 	ImageAdapter      string
 	VideoAdapter      string
 	TextAdapter       string
+	AudioAdapter      string
 	MasterKey         string
 	MasterKeyVersion  string
 	OutputBucket      string
@@ -106,6 +108,7 @@ type Provider struct {
 	ArkVideo          ArkVideo
 	ArkText           ArkText
 	OpenAIImage       OpenAIImage
+	VolcengineASR     VolcengineASR
 }
 
 type ArkImage struct {
@@ -130,6 +133,20 @@ type OpenAIImage struct {
 	APIKey  string
 	Model   string
 	BaseURL string
+}
+
+// VolcengineASR is the local-only preconfiguration for the recording-file
+// recognition capability. The actual audio.transcribe execution adapter is
+// introduced with the Creative Phase 2 runtime, so keeping this separate from
+// Ark text/video prevents one credential from being used for the wrong API.
+type VolcengineASR struct {
+	Endpoint    string
+	AuthMode    string
+	AppID       string
+	AccessToken string
+	APIKey      string
+	ResourceID  string
+	Model       string
 }
 
 // MySQL contains only connection-pool configuration. No business module owns
@@ -188,6 +205,9 @@ func parseDotEnv(reader io.Reader) (map[string]string, error) {
 	for scanner.Scan() {
 		lineNumber++
 		line := strings.TrimSpace(scanner.Text())
+		if lineNumber == 1 {
+			line = strings.TrimPrefix(line, "\uFEFF")
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -289,6 +309,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
 			VideoAdapter:      valueOr(lookup, "COOKIES_PROVIDER_VIDEO_ADAPTER", "fake"),
 			TextAdapter:       valueOr(lookup, "COOKIES_PROVIDER_TEXT_ADAPTER", "fake"),
+			AudioAdapter:      valueOr(lookup, "COOKIES_PROVIDER_AUDIO_ADAPTER", "fake"),
 			MasterKey:         valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY", ""),
 			MasterKeyVersion:  valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY_VERSION", "v1"),
 			OutputBucket:      valueOr(lookup, "COOKIES_PROVIDER_OUTPUT_BUCKET", "cookies-provider-output"),
@@ -312,6 +333,15 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 				APIKey:  valueOr(lookup, "COOKIES_OPENAI_IMAGE_API_KEY", ""),
 				Model:   valueOr(lookup, "COOKIES_OPENAI_IMAGE_MODEL", ""),
 				BaseURL: valueOr(lookup, "COOKIES_OPENAI_IMAGE_BASE_URL", ""),
+			},
+			VolcengineASR: VolcengineASR{
+				Endpoint:    valueOr(lookup, "COOKIES_VOLCENGINE_ASR_ENDPOINT", "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"),
+				AuthMode:    valueOr(lookup, "COOKIES_VOLCENGINE_ASR_AUTH_MODE", "legacy"),
+				AppID:       valueOr(lookup, "COOKIES_VOLCENGINE_ASR_APP_ID", ""),
+				AccessToken: valueOr(lookup, "COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN", ""),
+				APIKey:      valueOr(lookup, "COOKIES_VOLCENGINE_ASR_API_KEY", ""),
+				ResourceID:  valueOr(lookup, "COOKIES_VOLCENGINE_ASR_RESOURCE_ID", "volc.bigasr.auc_turbo"),
+				Model:       valueOr(lookup, "COOKIES_VOLCENGINE_ASR_MODEL", "bigmodel"),
 			},
 		},
 	}
@@ -392,6 +422,9 @@ func (c Config) Validate() error {
 	if c.Provider.VideoAdapter != "fake" && c.Provider.VideoAdapter != "ark_video" {
 		return fmt.Errorf("COOKIES_PROVIDER_VIDEO_ADAPTER must be fake or ark_video")
 	}
+	if c.Provider.AudioAdapter != "fake" && c.Provider.AudioAdapter != "volcengine_asr" {
+		return fmt.Errorf("COOKIES_PROVIDER_AUDIO_ADAPTER must be fake or volcengine_asr")
+	}
 	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires a real text adapter")
 	}
@@ -415,6 +448,30 @@ func (c Config) Validate() error {
 	}
 	if c.Provider.TextAdapter == "ark_text" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkText.APIKey) == "" || strings.TrimSpace(c.Provider.ArkText.Model) == "") {
 		return fmt.Errorf("ark_text is local-only and requires COOKIES_ARK_TEXT_API_KEY and COOKIES_ARK_TEXT_MODEL")
+	}
+	if c.Provider.AudioAdapter == "volcengine_asr" {
+		if c.Environment != EnvironmentLocal {
+			return fmt.Errorf("volcengine_asr is local-only until the audio.transcribe runtime is introduced")
+		}
+		endpoint, err := url.Parse(c.Provider.VolcengineASR.Endpoint)
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" {
+			return fmt.Errorf("COOKIES_VOLCENGINE_ASR_ENDPOINT must be an absolute HTTPS URL")
+		}
+		if strings.TrimSpace(c.Provider.VolcengineASR.ResourceID) == "" || strings.TrimSpace(c.Provider.VolcengineASR.Model) == "" {
+			return fmt.Errorf("volcengine_asr requires resource ID and model")
+		}
+		switch c.Provider.VolcengineASR.AuthMode {
+		case "legacy":
+			if strings.TrimSpace(c.Provider.VolcengineASR.AppID) == "" || strings.TrimSpace(c.Provider.VolcengineASR.AccessToken) == "" {
+				return fmt.Errorf("legacy volcengine_asr requires COOKIES_VOLCENGINE_ASR_APP_ID and COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN")
+			}
+		case "api_key":
+			if strings.TrimSpace(c.Provider.VolcengineASR.APIKey) == "" {
+				return fmt.Errorf("api_key volcengine_asr requires COOKIES_VOLCENGINE_ASR_API_KEY")
+			}
+		default:
+			return fmt.Errorf("COOKIES_VOLCENGINE_ASR_AUTH_MODE must be legacy or api_key")
+		}
 	}
 	usesCredentialBroker := c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway" || c.Provider.VideoAdapter == "ark_video"
 	if usesCredentialBroker && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {

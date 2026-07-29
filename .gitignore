@@ -37,6 +37,8 @@ test-results/
 
 # Local persistent object storage
 .data/
+.tmp/
+tmp/
 
 # Local MVP backend persistence
 /data/

@@ -19,6 +19,114 @@ type Reader struct {
 	Service strategy.Service
 }
 
+func (r Reader) ListCreativeSources(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+) ([]creative.CreativeSourceOption, error) {
+	packages, err := r.Service.ListPackages(ctx, actor, projectID)
+	if err != nil {
+		return nil, err
+	}
+	briefs, err := r.Service.ListProjectBriefVersions(ctx, actor, projectID)
+	if err != nil {
+		return nil, err
+	}
+	options := make([]creative.CreativeSourceOption, 0, len(packages)+len(briefs))
+	for _, value := range packages {
+		options = append(options, creative.CreativeSourceOption{
+			SourceRef: creative.CreativeSourceReference{
+				Kind: creative.CreativeSourceStrategy, ID: value.PackageID,
+				Version: value.Version, ContentHash: string(value.ContentHash),
+			},
+			Status: "approved", Product: productFactsFromBrief(value.Snapshot.Brief, value.Snapshot.Strategy),
+			ConfirmedAt: value.PublishedAt,
+		})
+	}
+	for _, value := range briefs {
+		options = append(options, creative.CreativeSourceOption{
+			SourceRef: creative.CreativeSourceReference{
+				Kind: creative.CreativeSourceConfirmedBrief, ID: value.BriefID,
+				Version: value.Version, ContentHash: string(value.ContentHash),
+			},
+			Status: "confirmed", Product: productFactsFromBrief(value, strategy.StrategyDocument{}),
+			ConfirmedAt: value.ConfirmedAt,
+		})
+	}
+	if len(briefs) > 0 {
+		// Briefs are returned newest-first. Creative defaults to the latest
+		// human-confirmed Brief while keeping approved Strategy packages as
+		// explicitly selectable historical sources.
+		options[len(packages)].Preferred = true
+	} else if len(options) > 0 {
+		options[0].Preferred = true
+	}
+	return options, nil
+}
+
+func (r Reader) ReadCreativeSource(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	reference creative.CreativeSourceReference,
+) (creative.CreativeSourceSnapshot, error) {
+	if err := reference.Validate(); err != nil {
+		return creative.CreativeSourceSnapshot{}, err
+	}
+	switch reference.Kind {
+	case creative.CreativeSourceStrategy:
+		value, err := r.Service.GetPackage(ctx, actor, projectID, reference.ID, reference.Version)
+		if err != nil {
+			return creative.CreativeSourceSnapshot{}, err
+		}
+		if !strings.EqualFold(string(value.ContentHash), strings.TrimSpace(reference.ContentHash)) {
+			return creative.CreativeSourceSnapshot{}, fmt.Errorf("strategy package content hash no longer matches the selected version")
+		}
+		return creative.CreativeSourceSnapshot{
+			SourceRef: reference,
+			Product:   productFactsFromBrief(value.Snapshot.Brief, value.Snapshot.Strategy),
+		}, nil
+	case creative.CreativeSourceConfirmedBrief:
+		value, err := r.Service.GetBriefVersion(ctx, actor, reference.ID, reference.Version)
+		if err != nil {
+			return creative.CreativeSourceSnapshot{}, err
+		}
+		if value.ProjectID != projectID ||
+			!strings.EqualFold(string(value.ContentHash), strings.TrimSpace(reference.ContentHash)) {
+			return creative.CreativeSourceSnapshot{}, fmt.Errorf("Brief content hash no longer matches the selected version")
+		}
+		return creative.CreativeSourceSnapshot{
+			SourceRef: reference,
+			Product:   productFactsFromBrief(value, strategy.StrategyDocument{}),
+		}, nil
+	default:
+		return creative.CreativeSourceSnapshot{}, fmt.Errorf("unsupported creative source kind %q", reference.Kind)
+	}
+}
+
+func productFactsFromBrief(brief strategy.BriefVersion, document strategy.StrategyDocument) creative.CommerceProductFacts {
+	snapshot := brief.Snapshot
+	sellingPoints := append([]string{}, snapshot.Product.SellingPoints...)
+	if len(sellingPoints) == 0 {
+		sellingPoints = append(sellingPoints, snapshot.Product.Evidence...)
+	}
+	if len(sellingPoints) == 0 && strings.TrimSpace(document.Proposition) != "" {
+		sellingPoints = append(sellingPoints, document.Proposition)
+	}
+	tone := append([]string{}, snapshot.Creative.Tone...)
+	visualKeywords := append([]string{}, tone...)
+	mandatory := append([]string{}, snapshot.Creative.MandatoryElements...)
+	mandatory = append(mandatory, snapshot.Constraints...)
+	prohibited := append([]string{}, snapshot.Creative.ProhibitedClaims...)
+	return creative.CommerceProductFacts{
+		BrandName: snapshot.Brand.Name, ProductName: snapshot.Product.Name,
+		ProductCategory: snapshot.Product.Category, SellingPoints: sellingPoints,
+		Tone: tone, VisualKeywords: visualKeywords,
+		Mandatory: mandatory, Prohibited: prohibited,
+		ProductAssets: append([]contract.AssetVersionRef{}, snapshot.Product.AssetRefs...),
+	}
+}
+
 func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reference creative.StrategyPackageReference) (creative.StrategyPackageSnapshot, error) {
 	value, err := r.Service.GetPackage(ctx, actor, projectID, reference.PackageID, reference.PackageVersion)
 	if err != nil {

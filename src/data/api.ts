@@ -1,13 +1,20 @@
 import {
+  attachKanonBriefProductAsset,
+  createKanonCommercePrerollVideo,
+  createKanonBrief,
+  createKanonPreparedCommercePrerollVideo,
   createKanonMedia,
   createKanonProject,
+  confirmKanonBrief,
   getKanonCapabilities,
   getKanonJob,
   listKanonArtifacts,
+  listKanonCommercePrerollSources,
   listKanonJobs,
   listKanonProjects,
   listKanonTasks,
   loadKanonAgencyWorkbench,
+  prepareKanonCommercePreroll,
   unsupportedKanonWrite,
 } from '../backend/kanon-api'
 
@@ -171,6 +178,9 @@ export type ApiAssetVersionPointer = {
   organizationId: string
   projectId: string
   assetId: string
+  mediaKind?: 'image' | 'video'
+  contentUrl?: string
+  sourceJobId?: string
   workingVersion: number
   qualityCheckedVersion?: number
   humanConfirmedVersion?: number
@@ -206,6 +216,8 @@ export type ApiArtifact = {
   status: 'draft' | 'ready' | 'archived'
   content: string
   sourceJobId?: string
+  briefTaskId?: string
+  briefDraftVersion?: number
   version: number
   createdAt: string
   updatedAt: string
@@ -250,6 +262,77 @@ export type ApiGenerationJob = {
   version: number
   createdAt: string
   updatedAt: string
+}
+
+export type ApiCommerceTemplateId =
+  | 'commerce.product-cut'
+  | 'commerce.window-reveal'
+  | 'commerce.one-click'
+  | 'commerce.miniature'
+  | 'commerce.device-summon'
+
+export type ApiCreativeSourceRef = {
+  kind: 'confirmed_brief' | 'strategy_package'
+  id: string
+  version: number
+  content_hash: string
+}
+
+export type ApiCommerceProductFacts = {
+  brand_name: string
+  product_name: string
+  product_category?: string
+  selling_points: string[]
+  tone: string[]
+  visual_keywords: string[]
+  mandatory_elements: string[]
+  prohibited_claims: string[]
+  product_asset_refs: Array<{ asset_id: string; version: number }>
+}
+
+export type ApiCreativeSourceOption = {
+  source_ref: ApiCreativeSourceRef
+  status: 'confirmed' | 'approved'
+  product: ApiCommerceProductFacts
+  confirmed_at: string
+  preferred: boolean
+}
+
+export type ApiPreparedCommercePreroll = {
+  contract_version: 'creative-commerce-preroll-preparation/v1'
+  source_ref: ApiCreativeSourceRef
+  product: ApiCommerceProductFacts
+  plan: {
+    template: {
+      template_id: ApiCommerceTemplateId
+      template_version: 1
+    }
+    frame_plan: {
+      start_frame_kind: string
+      tail_frame_kind: string
+    }
+    prompt: {
+      fidelity: string
+      camera: string
+      environment: string
+      timeline: Array<{
+        start_seconds: number
+        end_seconds: number
+        purpose: 'information_gap' | 'single_transformation' | 'product_hold'
+        instruction: string
+      }>
+      guardrails: string[]
+      compiled_prompt: string
+      prompt_hash: string
+    }
+  }
+  readiness: {
+    planning_ready: boolean
+    generation_ready: boolean
+    blockers: string[]
+    warnings: string[]
+  }
+  prepared_at: string
 }
 
 export type ApiVideoPurpose = 'preroll'
@@ -550,6 +633,132 @@ export type ApiQualityReport = {
 export type ApiAssetVersionRef = {
   asset_id: string
   version: number
+}
+
+export type ApiViralRemakeWorkspace = {
+  task: {
+    id: string
+    performance_mode: 'viral_remake'
+    status: string
+  }
+  intake: {
+    id: string
+    request: {
+      call_to_action: string
+      manual_viral_remake: {
+        product_name: string
+        selling_points: string[]
+        user_instruction: string
+        reference_video: ApiAssetVersionRef
+        reference_image?: ApiAssetVersionRef
+        reference_video_rights: 'pending' | 'confirmed'
+        reference_image_rights?: 'pending' | 'confirmed'
+      }
+    }
+  }
+  video_draft: {
+    revision: number
+    viral_remake: {
+      revision: number
+      status:
+        | 'waiting_for_analysis'
+        | 'analysis_ready'
+        | 'generation_ready'
+        | 'generating'
+        | 'candidate_ready'
+        | 'provider_failed'
+        | 'ready_for_review'
+      selected_route_id: 'route_manual_viral_remake_v1'
+      input_snapshot: {
+        reference_video: ApiAssetVersionRef
+        reference_image?: ApiAssetVersionRef
+        product_name: string
+        selling_points: string[]
+        call_to_action: string
+        user_instruction: string
+        reference_video_rights: 'pending' | 'confirmed'
+        reference_image_rights?: 'pending' | 'confirmed'
+      }
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        missing_fields: string[]
+        blockers: string[]
+      }
+      analysis_snapshot?: {
+        contract_version: 'creative-viral-analysis-snapshot/v1'
+        task_id: string
+        source_asset_ref: ApiAssetVersionRef
+        dimensions: Array<{
+          id: ApiVideoPromptDimension['id']
+          prompt: string
+          evidence_refs: string[]
+          confidence: number
+          source: 'ai_extracted'
+        }>
+        preserve_rules: string[]
+        replace_rules: string[]
+        transcript?: string
+        confidence: number
+        evidence_refs: string[]
+        model_lineage: {
+          model_alias: string
+          route_revision_id: string
+          prompt_version: string
+        }
+        content_hash: string
+        created_at: string
+      }
+      prompt_draft?: {
+        revision: number
+        dimensions: Record<ApiVideoPromptDimension['id'], string>
+        composite_prompt: string
+        updated_at: string
+      }
+      prompt_package?: {
+        contract_version: 'creative-viral-prompt-package/v1'
+        prompt_version: number
+        content_hash: string
+        composite_prompt: string
+        generation_spec: {
+          model_alias: string
+          duration_seconds: number
+          aspect_ratio: string
+          resolution: string
+          candidate_count: number
+        }
+        confirmed_by: string
+        confirmed_at: string
+      }
+      candidates: Array<{
+        id: string
+        provider_job_id: string
+        prompt_hash: string
+        status: 'queued' | 'running' | 'succeeded' | 'failed' | 'reviewed'
+        output_asset_ref?: ApiAssetVersionRef
+        checks: Array<{ code: string; passed: boolean; message: string }>
+        error_code?: string
+        error_message?: string
+        created_at: string
+        updated_at: string
+      }>
+    }
+  }
+  production_jobs: Array<{ provider_job_id: string; kind: string }>
+}
+
+export type ApiCreateManualViralRemakeInput = {
+  sourceVideo: ApiAssetVersionRef
+  referenceImage?: ApiAssetVersionRef
+  productName: string
+  sellingPoints: string[]
+  callToAction: string
+  userInstruction: string
+  objective: string
+  audience: string
+  coreMessage: string
+  durationSeconds: number
 }
 
 export type ApiHitSegmentRole = 'hook' | 'problem' | 'proof' | 'offer' | 'cta'
@@ -1266,6 +1475,250 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
   return payload as T
 }
 
+async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
+  const response = await fetch(`${backendOrigin}/api/creative/v1${path}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(headers ?? {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const responseText = await response.text()
+  let payload: T | { error?: { message?: string; request_id?: string } }
+  try {
+    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; request_id?: string } } : {}
+  } catch {
+    throw new Error(`Creative API 返回了无法解析的响应（HTTP ${response.status}）`)
+  }
+  if (!response.ok) {
+    const error = payload as { error?: { message?: string; request_id?: string } }
+    const requestId = error.error?.request_id ? `（request_id: ${error.error.request_id}）` : ''
+    throw new Error(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`)
+  }
+  return payload as T
+}
+
+async function putUploadedAsset(url: string, headers: Record<string, string>, file: File) {
+  const requestHeaders = new Headers()
+  for (const [name, value] of Object.entries(headers)) {
+    const normalized = name.toLowerCase()
+    if (normalized !== 'host' && normalized !== 'content-length') requestHeaders.set(name, value)
+  }
+  if (!requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', file.type)
+  const target = url.startsWith('/') ? `${backendOrigin}${url}` : url
+  const response = await fetch(target, { method: 'PUT', headers: requestHeaders, body: file })
+  if (!response.ok) throw new Error(`素材上传失败（HTTP ${response.status}）`)
+}
+
+async function uploadProjectAsset(projectId: string, file: File): Promise<ApiAssetVersionRef> {
+  const path = `/projects/${encodeURIComponent(projectId)}/assets/uploads`
+  const created = await platformRequest<{
+    session: { id: string; project_asset_ref: null | { asset_version: ApiAssetVersionRef } }
+    upload: null | { url: string; method: 'PUT'; headers: Record<string, string> }
+  }>(path, 'POST', {
+    filename: file.name,
+    declared_mime_type: file.type,
+    declared_size_bytes: file.size,
+    declared_sha256: null,
+  }, { 'Idempotency-Key': `viral-upload-${Date.now()}-${Math.random().toString(36).slice(2)}` })
+  const existing = created.session.project_asset_ref?.asset_version
+  if (existing) return existing
+  if (!created.upload) throw new Error('素材上传会话没有返回可用的上传地址。')
+  await putUploadedAsset(created.upload.url, created.upload.headers, file)
+  const completed = await platformRequest<{
+    project_asset_ref: null | { asset_version: ApiAssetVersionRef }
+  }>(`${path}/${encodeURIComponent(created.session.id)}:finalize`, 'POST')
+  const result = completed.project_asset_ref?.asset_version
+  if (!result) throw new Error('素材已经上传，但没有生成可用的 AssetVersionRef。')
+  return result
+}
+
+async function createManualViralRemakeWorkspace(
+  projectId: string,
+  input: ApiCreateManualViralRemakeInput,
+): Promise<ApiViralRemakeWorkspace> {
+  const duration = Math.min(60, Math.max(4, Math.round(input.durationSeconds)))
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual',
+      format: 'video',
+      performance_mode: 'viral_remake',
+      channel: 'douyin',
+      objective: input.objective,
+      audience: input.audience,
+      core_message: input.coreMessage,
+      call_to_action: input.callToAction,
+      concept: input.userInstruction,
+      tone: ['清晰', '高节奏'],
+      visual_keywords: ['高停留开场', '产品证明', '原创表达'],
+      mandatory_elements: [],
+      prohibited_claims: ['不得复用原片人物、商标、字幕、音乐或逐字台词'],
+      creative_routes: [{
+        route_id: 'route_manual_viral_remake_v1',
+        route_type: 'viral_remake',
+        video_purpose: 'performance',
+        channels: ['douyin'],
+        reason: '用户在 Creative 爆款复刻工作区明确选择该路线',
+        target_duration_seconds: duration,
+        aspect_ratio: '9:16',
+        source_asset_refs: [input.sourceVideo, ...(input.referenceImage ? [input.referenceImage] : [])],
+        evidence_refs: [],
+        requires_human_confirmation: true,
+      }],
+      manual_viral_remake: {
+        product_name: input.productName,
+        selling_points: input.sellingPoints.filter(Boolean),
+        user_instruction: input.userInstruction,
+        reference_video: input.sourceVideo,
+        reference_image: input.referenceImage,
+        reference_video_rights: 'pending',
+        reference_image_rights: input.referenceImage ? 'pending' : undefined,
+      },
+    },
+    { 'Idempotency-Key': `manual-viral-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_viral_remake_v1',
+      channel: 'douyin',
+      source_video: input.sourceVideo,
+      concept: input.userInstruction,
+      prompt: '等待 Phase 2 视频理解后编译五维提示词',
+      call_to_action: input.callToAction,
+      mandatory_elements: [],
+      prohibited_claims: ['不得复制原片受保护表达'],
+      confirm_route: true,
+    },
+  )
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}/viral-remake`,
+  )
+}
+
+async function getLatestViralRemakeWorkspace(projectId: string): Promise<ApiViralRemakeWorkspace | null> {
+  const result = await creativeRequest<{ items: Array<{ id: string; performance_mode?: string; status: string }> }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=100`,
+  )
+  const task = result.items.find(item => item.performance_mode === 'viral_remake' && item.status !== 'archived')
+  if (!task) return null
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}/viral-remake`,
+  )
+}
+
+async function getViralRemakeWorkspace(projectId: string, taskId: string): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake`,
+  )
+}
+
+async function analyzeViralRemake(projectId: string, taskId: string): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake:analyze-reference`,
+    'POST',
+    undefined,
+    { 'Idempotency-Key': `viral-analysis-${taskId}-${Date.now()}` },
+  )
+}
+
+async function updateViralPrompt(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  dimensions: Record<ApiVideoPromptDimension['id'], string>,
+): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake/prompt-draft`,
+    'PATCH',
+    { expected_revision: expectedRevision, dimensions },
+  )
+}
+
+async function confirmViralGeneration(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  confirmReferenceImageRights: boolean,
+): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake:confirm-generation`,
+    'POST',
+    {
+      expected_revision: expectedRevision,
+      confirm_reference_video_rights: true,
+      confirm_reference_image_rights: confirmReferenceImageRights,
+    },
+    { 'Idempotency-Key': `viral-confirm-${taskId}-${expectedRevision}` },
+  )
+}
+
+type ApiProviderJobWire = {
+  id: string
+  project_id: string
+  kind: string
+  execution_status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  provider_status: string
+  project_asset_refs: Array<{ asset_version: ApiAssetVersionRef }>
+  error?: { message?: string }
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+function mapViralProviderJob(job: ApiProviderJobWire): ApiGenerationJob {
+  const providerStatus = job.provider_status
+  let status: ApiGenerationJob['status'] = 'queued'
+  if (job.execution_status === 'failed' || providerStatus === 'failed' || providerStatus === 'expired') status = 'failed'
+  else if (job.execution_status === 'cancelled' || providerStatus === 'cancelled') status = 'cancelled'
+  else if (job.execution_status === 'succeeded' || providerStatus === 'succeeded' || providerStatus === 'partially_succeeded') status = 'succeeded'
+  else if (job.execution_status === 'running' || providerStatus !== 'submitted') status = 'running'
+  return {
+    id: job.id,
+    projectId: job.project_id,
+    artifactKind: 'video',
+    status,
+    model: 'cookies.video.standard',
+    diagnostic: job.error?.message,
+    artifactId: job.project_asset_refs.at(-1)?.asset_version.asset_id,
+    version: job.version,
+    createdAt: job.created_at,
+    updatedAt: job.updated_at,
+  }
+}
+
+async function createViralVideoJob(projectId: string, taskId: string): Promise<ApiGenerationJob> {
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    {},
+    { 'Idempotency-Key': `viral-video-${taskId}-${Date.now()}` },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getViralVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  const job = await platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  )
+  return mapViralProviderJob(job)
+}
+
+async function submitViralCandidateReview(
+  projectId: string,
+  taskId: string,
+  candidateId: string,
+): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake/candidates/${encodeURIComponent(candidateId)}:submit-review`,
+    'POST',
+  )
+}
+
 function projectQuery(projectId?: string): string {
   return projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
 }
@@ -1558,15 +2011,34 @@ export const api = {
   cancelJob: async (id: string, _scope?: ApiPrerollScope) =>
     Promise.reject<ApiGenerationJob>(unsupportedKanonWrite(`模型作业 ${id} 取消`)),
   generateBrief: async (_projectId: string, _prompt: string) =>
-    Promise.reject<{ job: ApiGenerationJob; artifact: ApiArtifact }>(
-      unsupportedKanonWrite('一键生成 Brief'),
-    ),
+    createKanonBrief(_projectId, _prompt),
+  confirmBrief: (artifact: ApiArtifact) => confirmKanonBrief(artifact),
+  attachBriefProductAsset: (artifact: ApiArtifact, asset: ApiAssetVersionRef) =>
+    attachKanonBriefProductAsset(artifact, asset),
   createMedia: (
     projectId: string,
     kind: 'image' | 'video',
     prompt: string,
     briefId: string,
   ) => createKanonMedia(projectId, kind, prompt, briefId),
+  createCommercePrerollVideo: (
+    projectId: string,
+    prompt: string,
+    briefId: string,
+  ) => createKanonCommercePrerollVideo(projectId, prompt, briefId),
+  createPreparedCommercePrerollVideo: (
+    projectId: string,
+    prompt: string,
+    sourceId: string,
+    productAsset: { asset_id: string; version: number },
+  ) => createKanonPreparedCommercePrerollVideo(projectId, prompt, sourceId, productAsset),
+  listCommercePrerollSources: (projectId: string) =>
+    listKanonCommercePrerollSources(projectId),
+  prepareCommercePreroll: (
+    projectId: string,
+    source: ApiCreativeSourceOption,
+    templateId: ApiCommerceTemplateId,
+  ) => prepareKanonCommercePreroll(projectId, source, templateId),
   createPrerollVideo: (
     scope: ApiPrerollScope,
     prompt: string,
@@ -1634,6 +2106,16 @@ export const api = {
     platformRequest<{ quality_report: ApiQualityReport | null }>(`/projects/${encodeURIComponent(projectId)}/remix-render-jobs/${encodeURIComponent(jobId)}/quality-report`),
   createHitAnalysis: (projectId: string, input: ApiCreateHitAnalysisInput) =>
     platformRequest<ApiHitAnalysis>(`/projects/${encodeURIComponent(projectId)}/remix-hit-analyses`, 'POST', input),
+  uploadProjectAsset,
+  createManualViralRemakeWorkspace,
+  getLatestViralRemakeWorkspace,
+  getViralRemakeWorkspace,
+  analyzeViralRemake,
+  updateViralPrompt,
+  confirmViralGeneration,
+  createViralVideoJob,
+  getViralVideoJob,
+  submitViralCandidateReview,
   getHitAnalysis: (projectId: string, analysisId: string) =>
     platformRequest<ApiHitAnalysis>(`/projects/${encodeURIComponent(projectId)}/remix-hit-analyses/${encodeURIComponent(analysisId)}`),
   createProductMapping: (projectId: string, input: ApiCreateProductMappingInput) =>

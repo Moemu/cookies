@@ -1,0 +1,106 @@
+{
+  "contract_version": "creative-video-intake/v1",
+  "intake_id": "fixture_video_brand_video_v1",
+  "organization_id": "fixture_org",
+  "project_id": "fixture_project_brand_video",
+  "status": "fixture_ready",
+  "source": {
+    "kind": "fixture",
+    "fixture_id": "brand-video/v1",
+    "documents": [
+      {
+        "file_name": "brand-video-fixture.md",
+        "locator": "fixture://briefs/brand-video-v1",
+        "page_refs": ["brand-proposition", "proof", "visual-language"],
+        "note": "虚构开发样例，用于验证 Brief 到品牌片的五阶段流程。"
+      }
+    ]
+  },
+  "campaign": {
+    "objective": "建立高精度制造品牌认知并获取打样咨询。",
+    "audience": "需要小批量高精度零件的研发、采购和产品负责人。",
+    "core_message": "可被看见和验证的精度，才能成为可信赖的交付承诺。",
+    "call_to_action": "预约获取打样方案",
+    "channels": ["weibo_video", "xiaohongshu_video"],
+    "locale": "zh-CN"
+  },
+  "video": {
+    "mode": "brand_video",
+    "purpose": "brand",
+    "target_duration_seconds": 30,
+    "aspect_ratio": "16:9",
+    "resolution": "1080p",
+    "variant_count": 1,
+    "hook_deadline_seconds": 3,
+    "audio_policy": "voiceover",
+    "transition": "not_applicable"
+  },
+  "product": {
+    "brand_name": "虚构品牌·白泽精工",
+    "product_name": "高精度零件打样服务",
+    "selling_points": ["复杂零件打样", "过程可追踪", "交付节点透明"],
+    "proof_points": ["正式项目必须提供检测报告和交付记录作为证据"],
+    "usage_scenarios": ["新品研发", "工程验证", "小批量试产"]
+  },
+  "creative": {
+    "concept": "从微距切削和检测过程出发，让品牌承诺通过真实工序和证据逐步被看见。",
+    "tone": ["理性", "克制", "高级", "可信"],
+    "visual_keywords": ["冷白工业光", "微距金属切削", "检测仪器", "真实工程场景"],
+    "mandatory_elements": ["品牌主张", "真实工序", "证据来源", "明确 CTA"],
+    "prohibited_claims": ["不得使用未经证实的精度和交期数字", "不得展示客户保密图纸", "不得伪造检测报告"],
+    "reference_policy": "品牌资产用于统一色彩、标识和产品外观；真实工序与证据必须来自当前 Project 的授权素材。",
+    "similarity_policy": "品牌片以自身 Brief 为唯一叙事来源，不模仿其他品牌片的具体镜头或文案。"
+  },
+  "source_assets": [
+    {
+      "role": "logo",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://assets/baize-logo.svg",
+      "rights_status": "fixture_only",
+      "note": "虚构品牌标识，仅用于页面和契约测试。"
+    },
+    {
+      "role": "main_video",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://assets/precision-machining.mp4",
+      "rights_status": "fixture_only",
+      "note": "虚构工序素材替身。"
+    }
+  ],
+  "claims": [
+    {
+      "text": "正式品牌片中的精度、交期和检测结论必须绑定可审计证据。",
+      "status": "assumption",
+      "evidence_refs": ["fixture_brand_proof"]
+    }
+  ],
+  "evidence_refs": [
+    {
+      "id": "fixture_brand_proof",
+      "source_type": "fixture_document",
+      "locator": "fixture://briefs/brand-video-v1#proof",
+      "note": "用于测试品牌片事实、证据和审批门禁。"
+    }
+  ],
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false,
+    "missing_fields": ["source.strategy_package_ref", "source_assets.production_refs", "claims.confirmed_evidence"],
+    "blockers": ["品牌广告只能用 fixture 验证流程；真实生成、审批和交付必须使用已确认 Brief 和证据。"],
+    "assumptions": [
+      {
+        "field": "campaign",
+        "value": "白泽精工虚构品牌 Campaign",
+        "reason": "用于覆盖品牌广告专属字段和五阶段工作流。"
+      }
+    ]
+  },
+  "confirmation": {
+    "required": true,
+    "status": "unconfirmed"
+  },
+  "created_at": "2026-07-28T06:00:00Z"
+}

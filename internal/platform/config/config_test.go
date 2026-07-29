@@ -25,6 +25,9 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if value.Media.FFmpegPath != "" || value.Media.FFprobePath != "" || value.Media.VideoWorkRoot != ".data/video-work" {
 		t.Fatalf("unexpected safe media defaults: %#v", value.Media)
 	}
+	if value.Provider.AudioAdapter != "fake" {
+		t.Fatalf("unexpected audio adapter default: %q", value.Provider.AudioAdapter)
+	}
 }
 
 func TestPasswordAuthenticationDefaultsToLocalOnly(t *testing.T) {
@@ -117,6 +120,17 @@ func TestParseDotEnvAcceptsLocalDevelopmentValues(t *testing.T) {
 	}
 	if values["COOKIES_MYSQL_DSN"] != "cookies:pass@tcp(127.0.0.1:3307)/cookies?parseTime=true" || values["COOKIES_HTTP_ADDR"] != ":8080" {
 		t.Fatalf("unexpected dotenv values: %#v", values)
+	}
+}
+
+func TestParseDotEnvAcceptsUTF8BOM(t *testing.T) {
+	t.Parallel()
+	values, err := parseDotEnv(strings.NewReader("\uFEFF# local only\nCOOKIES_ENV=local\n"))
+	if err != nil {
+		t.Fatalf("parseDotEnv() error = %v", err)
+	}
+	if values["COOKIES_ENV"] != "local" {
+		t.Fatalf("COOKIES_ENV = %q, want local", values["COOKIES_ENV"])
 	}
 }
 
@@ -234,6 +248,55 @@ func TestArkVideoAdapterIsExplicitAndLocalOnly(t *testing.T) {
 		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
 	})); err == nil {
 		t.Fatal("expected Ark video adapter outside local to be rejected")
+	}
+}
+
+func TestVolcengineASRLegacyConfigurationIsExplicitAndLocalOnly(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_PROVIDER_AUDIO_ADAPTER": "volcengine_asr",
+	})); err == nil {
+		t.Fatal("expected Volcengine ASR configuration without legacy credentials to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV":                         "local",
+		"COOKIES_PROVIDER_AUDIO_ADAPTER":      "volcengine_asr",
+		"COOKIES_VOLCENGINE_ASR_AUTH_MODE":    "legacy",
+		"COOKIES_VOLCENGINE_ASR_APP_ID":       "test-app",
+		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN": "test-token",
+	}))
+	if err != nil || config.Provider.AudioAdapter != "volcengine_asr" {
+		t.Fatalf("valid local Volcengine ASR configuration rejected: config=%#v err=%v", config.Provider, err)
+	}
+	if config.Provider.VolcengineASR.ResourceID != "volc.bigasr.auc_turbo" ||
+		config.Provider.VolcengineASR.Model != "bigmodel" {
+		t.Fatalf("unexpected ASR defaults: %#v", config.Provider.VolcengineASR)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory",
+		"COOKIES_PROVIDER_AUDIO_ADAPTER":      "volcengine_asr",
+		"COOKIES_VOLCENGINE_ASR_APP_ID":       "test-app",
+		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN": "test-token",
+	})); err == nil {
+		t.Fatal("expected Volcengine ASR outside local to be rejected")
+	}
+}
+
+func TestVolcengineASRRejectsInsecureEndpointAndIncompleteAPIKeyAuth(t *testing.T) {
+	t.Parallel()
+	common := map[string]string{
+		"COOKIES_PROVIDER_AUDIO_ADAPTER":      "volcengine_asr",
+		"COOKIES_VOLCENGINE_ASR_APP_ID":       "test-app",
+		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN": "test-token",
+	}
+	common["COOKIES_VOLCENGINE_ASR_ENDPOINT"] = "http://openspeech.bytedance.com/recognize"
+	if _, err := FromLookup(mapLookup(common)); err == nil {
+		t.Fatal("expected an insecure ASR endpoint to be rejected")
+	}
+	delete(common, "COOKIES_VOLCENGINE_ASR_ENDPOINT")
+	common["COOKIES_VOLCENGINE_ASR_AUTH_MODE"] = "api_key"
+	if _, err := FromLookup(mapLookup(common)); err == nil {
+		t.Fatal("expected api_key auth without COOKIES_VOLCENGINE_ASR_API_KEY to be rejected")
 	}
 }
 

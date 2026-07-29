@@ -18,18 +18,52 @@ const (
 // VideoGenerationInput is the stable Provider-owned input for asynchronous
 // video creation. Vendor request shapes remain private to video adapters.
 type VideoGenerationInput struct {
-	Prompt          string `json:"prompt"`
-	DurationSeconds int    `json:"duration_seconds"`
-	AspectRatio     string `json:"aspect_ratio"`
-	Resolution      string `json:"resolution"`
+	Prompt             string                   `json:"prompt"`
+	DurationSeconds    int                      `json:"duration_seconds"`
+	AspectRatio        string                   `json:"aspect_ratio"`
+	Resolution         string                   `json:"resolution"`
+	AudioPolicy        VideoAudioPolicy         `json:"audio_policy,omitempty"`
+	InputMode          VideoInputMode           `json:"input_mode,omitempty"`
+	ConditioningAssets []VideoConditioningAsset `json:"conditioning_assets,omitempty"`
+}
+
+type VideoAudioPolicy string
+
+const (
+	VideoAudioSilent    VideoAudioPolicy = "silent"
+	VideoAudioGenerated VideoAudioPolicy = "generated_audio"
+)
+
+type VideoInputMode string
+
+const (
+	VideoInputTextOnly       VideoInputMode = "text_only"
+	VideoInputReferenceImage VideoInputMode = "reference_image"
+	VideoInputFirstLastFrame VideoInputMode = "first_last_frame"
+)
+
+type VideoConditioningRole string
+
+const (
+	VideoConditioningReferenceImage VideoConditioningRole = "reference_image"
+	VideoConditioningFirstFrame     VideoConditioningRole = "first_frame"
+	VideoConditioningLastFrame      VideoConditioningRole = "last_frame"
+)
+
+// VideoConditioningAsset records only an immutable Assets-owned reference.
+// Provider resolves authorized content just before submission, so durable job
+// state never contains expiring URLs or object-storage credentials.
+type VideoConditioningAsset struct {
+	Role      VideoConditioningRole    `json:"role"`
+	Reference contract.ProjectAssetRef `json:"reference"`
 }
 
 func (i VideoGenerationInput) Validate() error {
 	if strings.TrimSpace(i.Prompt) == "" {
 		return fmt.Errorf("video prompt is required")
 	}
-	if i.DurationSeconds < 1 || i.DurationSeconds > 30 {
-		return fmt.Errorf("video duration must be between 1 and 30 seconds")
+	if i.DurationSeconds < 4 || i.DurationSeconds > 15 {
+		return fmt.Errorf("video duration must be between 4 and 15 seconds")
 	}
 	switch i.AspectRatio {
 	case "9:16", "16:9", "1:1":
@@ -40,6 +74,58 @@ func (i VideoGenerationInput) Validate() error {
 	case "480p", "720p", "1080p":
 	default:
 		return fmt.Errorf("video resolution is not supported")
+	}
+	switch i.AudioPolicy {
+	case "", VideoAudioSilent, VideoAudioGenerated:
+	default:
+		return fmt.Errorf("video audio policy is not supported")
+	}
+	mode := i.InputMode
+	if mode == "" {
+		mode = VideoInputTextOnly
+	}
+	seenRoles := make(map[VideoConditioningRole]struct{}, len(i.ConditioningAssets))
+	seenReferences := make(map[string]struct{}, len(i.ConditioningAssets))
+	for index, asset := range i.ConditioningAssets {
+		if err := asset.Reference.Validate(); err != nil {
+			return fmt.Errorf("invalid video conditioning asset at index %d: %w", index, err)
+		}
+		switch asset.Role {
+		case VideoConditioningReferenceImage, VideoConditioningFirstFrame, VideoConditioningLastFrame:
+		default:
+			return fmt.Errorf("video conditioning role at index %d is not supported", index)
+		}
+		if _, exists := seenRoles[asset.Role]; exists {
+			return fmt.Errorf("video conditioning role %q is duplicated", asset.Role)
+		}
+		seenRoles[asset.Role] = struct{}{}
+		key := fmt.Sprintf("%s:%s:%d", asset.Reference.ProjectID, asset.Reference.AssetVersion.AssetID, asset.Reference.AssetVersion.Version)
+		if _, exists := seenReferences[key]; exists {
+			return fmt.Errorf("video conditioning asset at index %d is duplicated", index)
+		}
+		seenReferences[key] = struct{}{}
+	}
+	switch mode {
+	case VideoInputTextOnly:
+		if len(i.ConditioningAssets) != 0 {
+			return fmt.Errorf("text-only video input does not accept conditioning assets")
+		}
+	case VideoInputReferenceImage:
+		if len(i.ConditioningAssets) != 1 || i.ConditioningAssets[0].Role != VideoConditioningReferenceImage {
+			return fmt.Errorf("reference-image video input requires exactly one reference_image asset")
+		}
+	case VideoInputFirstLastFrame:
+		if len(i.ConditioningAssets) != 2 {
+			return fmt.Errorf("first-last-frame video input requires exactly two conditioning assets")
+		}
+		if _, ok := seenRoles[VideoConditioningFirstFrame]; !ok {
+			return fmt.Errorf("first-last-frame video input requires a first_frame asset")
+		}
+		if _, ok := seenRoles[VideoConditioningLastFrame]; !ok {
+			return fmt.Errorf("first-last-frame video input requires a last_frame asset")
+		}
+	default:
+		return fmt.Errorf("video input mode is not supported")
 	}
 	return nil
 }
@@ -81,6 +167,11 @@ func (r CreateVideoJobRequest) Validate() error {
 	}
 	if err := r.Input.Validate(); err != nil {
 		return err
+	}
+	for index, asset := range r.Input.ConditioningAssets {
+		if asset.Reference.ProjectID != r.Project.ProjectID {
+			return fmt.Errorf("video conditioning asset at index %d belongs to another project", index)
+		}
 	}
 	return nil
 }

@@ -528,12 +528,14 @@ components:
       properties:
         capability:
           type: string
-          enum: [image.generate]
+          enum: [image.generate, image.edit, video.generate]
         model_alias:
           type: string
           examples: [cookies.image.standard]
         input:
-          $ref: '#/components/schemas/ImageGenerationInput'
+          oneOf:
+            - $ref: '#/components/schemas/ImageGenerationInput'
+            - $ref: '#/components/schemas/VideoGenerationInput'
         project_context_version:
           type: integer
           minimum: 1
@@ -560,7 +562,31 @@ components:
         height:
           type: integer
           minimum: 1
+        source_assets:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectAssetRef'}
       additionalProperties: false
+    VideoGenerationInput:
+      type: object
+      additionalProperties: false
+      required: [prompt, duration_seconds, aspect_ratio, resolution]
+      properties:
+        prompt: {type: string, minLength: 1, writeOnly: true}
+        duration_seconds: {type: integer, minimum: 4, maximum: 15}
+        aspect_ratio: {enum: ['9:16', '16:9', '1:1']}
+        resolution: {enum: [480p, 720p, 1080p]}
+        audio_policy: {enum: [silent, generated_audio]}
+        input_mode: {enum: [text_only, reference_image, first_last_frame]}
+        conditioning_assets:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, reference]
+            properties:
+              role: {enum: [reference_image, first_frame, last_frame]}
+              reference: {$ref: '#/components/schemas/ProjectAssetRef'}
     Job:
       type: object
       required:
