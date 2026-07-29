@@ -198,7 +198,7 @@ describe('CreativeImageTextPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '生成第 1 张图' }))
     expect(await screen.findByText('The service could not complete the request.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '晨光咖啡桌图文方向 · 小红书图文 · 初稿手工创意输入' }))
+    fireEvent.click(screen.getByRole('button', { name: /晨光咖啡桌\s*图文方向 · 小红书图文 · 初稿\s*手工创意输入/ }))
     await waitFor(() => expect(screen.queryByText('The service could not complete the request.')).not.toBeInTheDocument())
   })
 })
