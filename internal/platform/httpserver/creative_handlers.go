@@ -206,6 +206,49 @@ func (s *Server) getViralRemakeWorkspace(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) getShortDramaPrerollWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetTaskDetail(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if value.Task.Format != creative.FormatVideo || value.Task.PerformanceMode != creative.PerformanceModeShortDramaPreroll ||
+		value.VideoDraft == nil || value.VideoDraft.ShortDramaPreroll == nil {
+		s.notFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) selectShortDramaCandidate(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.SelectShortDramaCandidateRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.SelectShortDramaCandidate(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) analyzeViralRemake(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -536,9 +579,24 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 		ProjectContextVersion int64               `json:"project_context_version"`
 	}{TaskID: taskID, ModelAlias: modelAlias, Draft: *detail.VideoDraft, ProjectContextVersion: project.ProjectContextVersion}
 	isViral := detail.Task.PerformanceMode == creative.PerformanceModeViralRemake && detail.VideoDraft.ViralRemake != nil
+	isShortDrama := detail.Task.PerformanceMode == creative.PerformanceModeShortDramaPreroll && detail.VideoDraft.ShortDramaPreroll != nil
 	if isViral {
 		var promptHash string
 		videoInput, promptHash, err = s.creative.ViralProviderInput(r.Context(), rc.Actor, projectID, taskID)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+		requestBody = struct {
+			TaskID                string                        `json:"task_id"`
+			ModelAlias            string                        `json:"model_alias"`
+			PromptPackageHash     string                        `json:"prompt_package_hash"`
+			Input                 provider.VideoGenerationInput `json:"input"`
+			ProjectContextVersion int64                         `json:"project_context_version"`
+		}{TaskID: taskID, ModelAlias: modelAlias, PromptPackageHash: promptHash, Input: videoInput, ProjectContextVersion: project.ProjectContextVersion}
+	} else if isShortDrama {
+		var promptHash string
+		videoInput, promptHash, err = s.creative.ShortDramaProviderInput(r.Context(), rc.Actor, projectID, taskID)
 		if err != nil {
 			s.writeServiceError(w, r, err)
 			return

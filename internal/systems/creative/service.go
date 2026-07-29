@@ -65,7 +65,7 @@ type Service struct {
 }
 
 func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateVideoTaskRequest) (CreativeTask, error) {
-	if s.Repository == nil || s.Projects == nil || s.Assets == nil {
+	if s.Repository == nil || s.Projects == nil {
 		return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
 	}
 	if !actor.HasScope(ScopeWrite) {
@@ -101,14 +101,20 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if !channelAllowed {
 		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
 	}
-	source, err := s.Assets.ReadForCreative(ctx, actor, projectID, request.SourceVideo)
-	if err != nil {
-		return CreativeTask{}, err
-	}
-	if !source.Ready || source.Kind != contract.AssetVideo || source.MIMEType != "video/mp4" || source.Ref != request.SourceVideo {
-		return CreativeTask{}, fmt.Errorf("source_video must be a ready MP4 in the same project")
+	if route.RouteType != PerformanceModeShortDramaPreroll {
+		if s.Assets == nil {
+			return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
+		}
+		source, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, request.SourceVideo)
+		if readErr != nil {
+			return CreativeTask{}, readErr
+		}
+		if !source.Ready || source.Kind != contract.AssetVideo || source.MIMEType != "video/mp4" || source.Ref != request.SourceVideo {
+			return CreativeTask{}, fmt.Errorf("source_video must be a ready MP4 in the same project")
+		}
 	}
 	var viralDraft *ViralRemakeDraft
+	var shortDramaDraft *ShortDramaPrerollDraft
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
 		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
@@ -178,6 +184,40 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			Candidates: []ViralCandidate{}, CreatedAt: now, UpdatedAt: now,
 		}
 		draft.ViralRemake = viralDraft
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeShortDramaPreroll {
+		manual := intake.Request.ManualShortDramaPreroll
+		if manual == nil {
+			return CreativeTask{}, fmt.Errorf("manual short drama preroll input is required")
+		}
+		snapshot := ShortDramaPrerollInputSnapshot{
+			Source: intake.Source, SelectedRouteID: route.RouteID,
+			BriefID: manual.BriefID, BriefVersion: manual.BriefVersion, BriefName: manual.BriefName,
+			StoryTitle: manual.StoryTitle, Synopsis: manual.Synopsis,
+			ReviewedSellingPoints: append([]string{}, manual.ReviewedSellingPoints...), OpeningLine: manual.OpeningLine,
+			HookStrategy: manual.HookStrategy, SubtitleStyle: manual.SubtitleStyle, Transition: manual.Transition,
+			HookStrength: manual.HookStrength, CallToAction: request.CallToAction,
+			CharacterReferences: append([]contract.AssetVersionRef{}, manual.CharacterReferences...),
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize short drama input: %w", hashErr)
+		}
+		candidates, planErr := planShortDramaCandidates(snapshot, "sha256:"+inputHash)
+		if planErr != nil {
+			return CreativeTask{}, planErr
+		}
+		shortDramaDraft = &ShortDramaPrerollDraft{
+			ContractVersion: "creative-short-drama-preroll-draft/v1", TaskID: task.ID, Revision: 1,
+			SelectedRouteID: route.RouteID, InputSnapshot: snapshot, InputHash: "sha256:" + inputHash,
+			Readiness: CreativeReadiness{
+				PlanningReady: true, GenerationReady: false, ProductionReady: false,
+				MissingFields: []string{}, Blockers: []string{"selected_candidate"},
+			},
+			Candidates: candidates, CreatedAt: now, UpdatedAt: now,
+		}
+		draft.ShortDramaPreroll = shortDramaDraft
+		draft.Prompt = candidates[0].PromptPackage.CompiledPrompt
 	}
 	if err := draft.Validate(); err != nil {
 		return CreativeTask{}, err

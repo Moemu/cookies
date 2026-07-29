@@ -1600,6 +1600,12 @@ func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext,
 func (s *creativeManagerStub) CreateVideoTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateVideoTaskRequest) (creative.CreativeTask, error) {
 	return creative.CreativeTask{}, nil
 }
+func (s *creativeManagerStub) SelectShortDramaCandidate(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaCandidateRequest) (creative.TaskDetail, error) {
+	return creative.TaskDetail{}, nil
+}
+func (s *creativeManagerStub) ShortDramaProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
+	return provider.VideoGenerationInput{}, "", nil
+}
 func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
 	return nil, nil
 }

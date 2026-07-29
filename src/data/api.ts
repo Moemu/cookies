@@ -315,6 +315,7 @@ export type ApiProjectMediaAsset = {
   projectId: string
   version: number
   kind: 'video' | 'image' | 'document'
+  sourceType?: 'upload' | 'provider_generated' | 'imported' | 'captured' | 'rendered'
   mimeType: string
   sizeBytes: number
   durationSeconds?: number
@@ -449,17 +450,82 @@ export type ApiShortDramaStoryContext = {
 export type ApiShortDramaPrerollCandidate = {
   id: string
   hookType: 'conflict' | 'reversal' | 'suspense' | 'selling_point_bridge'
+  executionAngle: 'dialogue_confrontation' | 'action_reveal' | 'reaction_escalation'
+  executionAngleLabel: string
   score: number
   scoreMeaning: 'hook_relevance'
   evidence: string[]
+  hookLine: string
   voiceover: string
+  storyboard: Array<{ startSeconds: number; endSeconds: number; visual: string; copy: string }>
   visualIntent: string
   transitionLine: string
+  promptPackage: { compiledPrompt: string; contentHash: string; directorSpec: Record<string, string> }
 }
 
 export type ApiShortDramaPrerollPlan = {
   version: 'short_drama_preroll_v1'
   candidates: ApiShortDramaPrerollCandidate[]
+}
+
+export type ApiShortDramaHookStrategy = 'conflict_reversal' | 'suspense_reveal' | 'identity_contrast' | 'selling_point_bridge'
+
+export type ApiShortDramaPrerollWorkspace = {
+  task: { id: string; performance_mode: 'short_drama_preroll'; status: string }
+  video_draft: {
+    revision: number
+    short_drama_preroll: {
+      revision: number
+      selected_candidate_id?: string
+      input_snapshot: {
+        brief_id: string
+        brief_version: number
+        brief_name: string
+        story_title: string
+        synopsis: string
+        reviewed_selling_points: string[]
+        opening_line?: string
+        hook_strategy: ApiShortDramaHookStrategy
+        subtitle_style: 'high_contrast_dynamic' | 'brand_minimal'
+        transition: 'hard_cut' | 'action_match' | 'audio_bridge'
+        hook_strength: number
+        call_to_action: string
+      }
+      readiness: { planning_ready: boolean; generation_ready: boolean; production_ready: boolean; blockers: string[] }
+      candidates: Array<{
+        id: string
+        hook_strategy: ApiShortDramaHookStrategy
+        execution_angle: ApiShortDramaPrerollCandidate['executionAngle']
+        score: number
+        score_meaning: 'hook_relevance'
+        evidence: string[]
+        hook_line: string
+        voiceover: string
+        storyboard: Array<{ start_seconds: number; end_seconds: number; visual: string; copy: string }>
+        visual_intent: string
+        transition_line: string
+        prompt_package: { compiled_prompt: string; content_hash: string; director_spec: Record<string, string> }
+      }>
+    }
+  }
+}
+
+export type ApiCreateManualShortDramaPrerollInput = {
+  briefId: string
+  briefVersion: number
+  briefName: string
+  title: string
+  synopsis: string
+  reviewedSellingPoints: string[]
+  openingLine?: string
+  hookStrategy: ApiShortDramaHookStrategy
+  subtitleStyle: 'high_contrast_dynamic' | 'brand_minimal'
+  transition: 'hard_cut' | 'action_match' | 'audio_bridge'
+  hookStrength: number
+  objective: string
+  audience: string
+  prohibitedClaims: string[]
+  callToAction: string
 }
 
 export type ApiShortDramaPrerollSnapshot = {
@@ -1356,6 +1422,78 @@ async function createManualViralRemakeWorkspace(
   )
 }
 
+async function createManualShortDramaPrerollWorkspace(
+  projectId: string,
+  input: ApiCreateManualShortDramaPrerollInput,
+): Promise<ApiShortDramaPrerollWorkspace> {
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual', format: 'video', performance_mode: 'short_drama_preroll', channel: 'douyin',
+      objective: input.objective, audience: input.audience,
+      core_message: input.reviewedSellingPoints.filter(Boolean).join('；'), call_to_action: input.callToAction,
+      concept: '短剧导流广告前贴', tone: ['紧凑', '悬念'], visual_keywords: ['人物连续', '高对比字幕', 'CTA 收束'],
+      mandatory_elements: [], prohibited_claims: input.prohibitedClaims,
+      creative_routes: [{
+        route_id: 'route_manual_short_drama_preroll_v1', route_type: 'short_drama_preroll', video_purpose: 'performance',
+        channels: ['douyin'], reason: '用户在短剧前贴工作区明确选择本地预置 Brief', target_duration_seconds: 6,
+        aspect_ratio: '9:16', source_asset_refs: [], evidence_refs: [], requires_human_confirmation: true,
+      }],
+      manual_short_drama_preroll: {
+        brief_id: input.briefId, brief_version: input.briefVersion, brief_name: input.briefName,
+        story_title: input.title, synopsis: input.synopsis, reviewed_selling_points: input.reviewedSellingPoints.filter(Boolean),
+        opening_line: input.openingLine || undefined, hook_strategy: input.hookStrategy, subtitle_style: input.subtitleStyle,
+        transition: input.transition, hook_strength: input.hookStrength, character_references: [],
+      },
+    },
+    { 'Idempotency-Key': `manual-short-drama-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_short_drama_preroll_v1', channel: 'douyin',
+      concept: '短剧导流广告前贴', prompt: '等待人工选择短剧候选后由服务端编译 PromptPackage',
+      call_to_action: input.callToAction, mandatory_elements: [], prohibited_claims: ['不得虚构未确认剧情事实'], confirm_route: true,
+    },
+  )
+  return creativeRequest<ApiShortDramaPrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}/short-drama-preroll`,
+  )
+}
+
+async function selectShortDramaPrerollCandidate(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  candidateId: string,
+): Promise<ApiShortDramaPrerollWorkspace> {
+  return creativeRequest<ApiShortDramaPrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll:select-candidate`,
+    'POST',
+    { expected_revision: expectedRevision, candidate_id: candidateId },
+    { 'Idempotency-Key': `short-drama-select-${taskId}-${expectedRevision}-${candidateId}` },
+  )
+}
+
+async function createShortDramaPrerollVideoJob(projectId: string, taskId: string): Promise<ApiGenerationJob> {
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    { model_alias: 'cookies.video.standard' },
+    { 'Idempotency-Key': `short-drama-video-${taskId}-${Date.now()}` },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getShortDramaPrerollVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  const job = await platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  )
+  return mapViralProviderJob(job)
+}
+
 async function getLatestViralRemakeWorkspace(projectId: string): Promise<ApiViralRemakeWorkspace | null> {
   const result = await creativeRequest<{ items: Array<{ id: string; performance_mode?: string; status: string }> }>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=100`,
@@ -1940,7 +2078,7 @@ export const api = {
       `已审核卖点：${storyContext.reviewedSellingPoints.join('；')}`,
       storyContext.openingLine ? `开场台词：${storyContext.openingLine}` : '',
       `候选方案：${candidateId}（${planVersion}）`,
-      '生成 9:16、6 秒、静音可理解的短剧广告前贴，并保留稳定拼接点。',
+      '生成 9:16、独立 6 秒、静音可理解的短剧广告前贴，并以清晰 CTA 收束。',
     ].filter(Boolean).join('。'),
     briefId,
   ).then(job => ({ ...job, purpose: scope.purpose, prerollType: scope.prerollType })),
@@ -1981,6 +2119,10 @@ export const api = {
     platformRequest<ApiHitAnalysis>(`/projects/${encodeURIComponent(projectId)}/remix-hit-analyses`, 'POST', input),
   uploadProjectAsset,
   createManualViralRemakeWorkspace,
+  createManualShortDramaPrerollWorkspace,
+  selectShortDramaPrerollCandidate,
+  createShortDramaPrerollVideoJob,
+  getShortDramaPrerollVideoJob,
   getLatestViralRemakeWorkspace,
   getViralRemakeWorkspace,
   analyzeViralRemake,

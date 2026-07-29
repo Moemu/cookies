@@ -69,21 +69,22 @@ type CreateIntakeRequest struct {
 	// StrategyPackage is supplied only for the explicit, user-triggered handoff
 	// from an immutable Strategy package. The server reads and validates that
 	// package; callers never submit its content as trusted Creative input.
-	StrategyPackage   *StrategyPackageReference `json:"strategy_package,omitempty"`
-	CreativeRoutes    []CreativeRouteSnapshot   `json:"creative_routes,omitempty"`
-	Format            CreativeFormat            `json:"format,omitempty"`
-	PerformanceMode   string                    `json:"performance_mode,omitempty"`
-	ManualViralRemake *ManualViralRemakeInput   `json:"manual_viral_remake,omitempty"`
-	Channel           CreativeChannel           `json:"channel"`
-	Objective         string                    `json:"objective"`
-	Audience          string                    `json:"audience"`
-	CoreMessage       string                    `json:"core_message"`
-	CallToAction      string                    `json:"call_to_action"`
-	Concept           string                    `json:"concept"`
-	Tone              []string                  `json:"tone"`
-	VisualKeywords    []string                  `json:"visual_keywords"`
-	Mandatory         []string                  `json:"mandatory_elements"`
-	Prohibited        []string                  `json:"prohibited_claims"`
+	StrategyPackage         *StrategyPackageReference     `json:"strategy_package,omitempty"`
+	CreativeRoutes          []CreativeRouteSnapshot       `json:"creative_routes,omitempty"`
+	Format                  CreativeFormat                `json:"format,omitempty"`
+	PerformanceMode         string                        `json:"performance_mode,omitempty"`
+	ManualViralRemake       *ManualViralRemakeInput       `json:"manual_viral_remake,omitempty"`
+	ManualShortDramaPreroll *ManualShortDramaPrerollInput `json:"manual_short_drama_preroll,omitempty"`
+	Channel                 CreativeChannel               `json:"channel"`
+	Objective               string                        `json:"objective"`
+	Audience                string                        `json:"audience"`
+	CoreMessage             string                        `json:"core_message"`
+	CallToAction            string                        `json:"call_to_action"`
+	Concept                 string                        `json:"concept"`
+	Tone                    []string                      `json:"tone"`
+	VisualKeywords          []string                      `json:"visual_keywords"`
+	Mandatory               []string                      `json:"mandatory_elements"`
+	Prohibited              []string                      `json:"prohibited_claims"`
 }
 
 type CreativeRouteSnapshot struct {
@@ -100,14 +101,20 @@ type CreativeRouteSnapshot struct {
 }
 
 func (r CreativeRouteSnapshot) Validate() error {
-	if r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake {
+	if r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake && r.RouteType != PerformanceModeShortDramaPreroll {
 		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
 	}
 	if r.RouteType == PerformanceModeViralRemake && r.RouteID != ManualViralRemakeRouteID {
 		return fmt.Errorf("viral remake route_id must be %q", ManualViralRemakeRouteID)
 	}
+	if r.RouteType == PerformanceModeShortDramaPreroll && r.RouteID != ManualShortDramaPrerollRouteID {
+		return fmt.Errorf("short drama preroll route_id must be %q", ManualShortDramaPrerollRouteID)
+	}
 	if r.RouteType == "pre_roll" && r.TargetDurationSeconds != 5 {
 		return fmt.Errorf("creative pre-roll route duration must be 5 seconds")
+	}
+	if r.RouteType == PerformanceModeShortDramaPreroll && r.TargetDurationSeconds != 6 {
+		return fmt.Errorf("short drama preroll route duration must be 6 seconds")
 	}
 	if r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
 		r.TargetDurationSeconds < 4 || r.TargetDurationSeconds > 60 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
@@ -152,6 +159,9 @@ func (r CreateIntakeRequest) Validate() error {
 		if r.ManualViralRemake != nil {
 			return r.validateManualViralRemake()
 		}
+		if r.ManualShortDramaPreroll != nil {
+			return r.validateManualShortDramaPreroll()
+		}
 		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
 			return fmt.Errorf("manual image intake must not include video routing")
 		}
@@ -167,6 +177,25 @@ func (r CreateIntakeRequest) Validate() error {
 		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
 	return r.validateContent()
+}
+
+func (r CreateIntakeRequest) validateManualShortDramaPreroll() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeShortDramaPreroll {
+		return fmt.Errorf("manual short drama preroll intake requires format=video and performance_mode=short_drama_preroll")
+	}
+	if r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou {
+		return fmt.Errorf("manual short drama preroll supports douyin or kuaishou")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualShortDramaPrerollRouteID {
+		return fmt.Errorf("manual short drama preroll requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualShortDramaPreroll.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
 }
 
 func (r CreateIntakeRequest) validateContent() error {
@@ -275,7 +304,7 @@ type CreateVideoTaskRequest struct {
 	SelectedRouteID string                   `json:"selected_route_id,omitempty"`
 	RouteIndex      int                      `json:"route_index"`
 	Channel         CreativeChannel          `json:"channel"`
-	SourceVideo     contract.AssetVersionRef `json:"source_video"`
+	SourceVideo     contract.AssetVersionRef `json:"source_video,omitempty"`
 	Concept         string                   `json:"concept"`
 	Prompt          string                   `json:"prompt"`
 	CallToAction    string                   `json:"call_to_action"`
@@ -289,8 +318,10 @@ func (r CreateVideoTaskRequest) Validate() error {
 		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if err := r.SourceVideo.Validate(); err != nil {
-		return fmt.Errorf("source_video: %w", err)
+	if r.SelectedRouteID != ManualShortDramaPrerollRouteID {
+		if err := r.SourceVideo.Validate(); err != nil {
+			return fmt.Errorf("source_video: %w", err)
+		}
 	}
 	if strings.TrimSpace(r.Concept) == "" || len(r.Concept) > 500 || strings.TrimSpace(r.Prompt) == "" || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
@@ -302,30 +333,37 @@ func (r CreateVideoTaskRequest) Validate() error {
 }
 
 type VideoDraft struct {
-	ContractVersion string                   `json:"contract_version"`
-	TaskID          string                   `json:"task_id"`
-	Revision        int64                    `json:"revision"`
-	Concept         string                   `json:"concept"`
-	Prompt          string                   `json:"prompt"`
-	DurationSeconds int                      `json:"duration_seconds"`
-	AspectRatio     string                   `json:"aspect_ratio"`
-	Resolution      string                   `json:"resolution"`
-	SourceVideo     contract.AssetVersionRef `json:"source_video"`
-	Mandatory       []string                 `json:"mandatory_elements"`
-	Prohibited      []string                 `json:"prohibited_claims"`
-	CallToAction    string                   `json:"cta"`
-	ViralRemake     *ViralRemakeDraft        `json:"viral_remake,omitempty"`
-	CreatedAt       time.Time                `json:"created_at"`
+	ContractVersion   string                   `json:"contract_version"`
+	TaskID            string                   `json:"task_id"`
+	Revision          int64                    `json:"revision"`
+	Concept           string                   `json:"concept"`
+	Prompt            string                   `json:"prompt"`
+	DurationSeconds   int                      `json:"duration_seconds"`
+	AspectRatio       string                   `json:"aspect_ratio"`
+	Resolution        string                   `json:"resolution"`
+	SourceVideo       contract.AssetVersionRef `json:"source_video,omitempty"`
+	Mandatory         []string                 `json:"mandatory_elements"`
+	Prohibited        []string                 `json:"prohibited_claims"`
+	CallToAction      string                   `json:"cta"`
+	ViralRemake       *ViralRemakeDraft        `json:"viral_remake,omitempty"`
+	ShortDramaPreroll *ShortDramaPrerollDraft  `json:"short_drama_preroll,omitempty"`
+	CreatedAt         time.Time                `json:"created_at"`
 }
 
 func (d VideoDraft) Validate() error {
 	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
 		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds < 4 || d.DurationSeconds > 60 ||
-		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.SourceVideo.Validate() != nil || d.CreatedAt.IsZero() {
+		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.CreatedAt.IsZero() {
+		return fmt.Errorf("creative video draft is incomplete")
+	}
+	if d.ShortDramaPreroll == nil && d.SourceVideo.Validate() != nil {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
 	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {
 		return fmt.Errorf("creative viral remake draft is incomplete")
+	}
+	if d.ShortDramaPreroll != nil && d.ShortDramaPreroll.Validate() != nil {
+		return fmt.Errorf("creative short drama preroll draft is incomplete")
 	}
 	return nil
 }
