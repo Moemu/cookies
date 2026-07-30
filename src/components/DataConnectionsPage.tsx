@@ -13,6 +13,7 @@ import {
   type ApiPlatform,
   type ApiQualityStatus,
 } from '../data/api'
+import { hashText, parseMetricCsv } from '../data/metricCsv'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -415,7 +416,10 @@ function ImportDetail({ batch, sources, busy, projectId, onWrite }: {
   const submit = () => {
     let rows: ApiMetricRow[]
     try {
-      rows = parseMetricCsv(text)
+      // 用这个数据源自己配的字段映射解析。以前只认一张硬编码的中文别名表，
+      // 平台把「曝光」导成「曝光量」就对不上，然后静默填 0 导进去。
+      const source = importable.find(candidate => candidate.id === dataSourceId)
+      rows = parseMetricCsv(text, source?.field_mapping ?? {})
     } catch (cause) {
       setParseError(cause instanceof Error ? cause.message : '表格解析失败。')
       return
@@ -469,7 +473,7 @@ function ImportDetail({ batch, sources, busy, projectId, onWrite }: {
         <textarea value={text} onChange={event => setText(event.target.value)} rows={6}
           placeholder={'platform_object_id,stat_date,impressions,clicks,conversions,spend_cents\nAD-1001,2026-07-20,12000,340,18,86000'}/>
       </label>
-      {parseError ? <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>解析失败</small>{parseError}</span></div> : null}
+      {parseError ? <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>一行都没导入</small>{parseError}</span></div> : null}
       <div className="prelaunch-actions">
         <button className="primary-button full" disabled={busy || !dataSourceId || !text.trim()} onClick={submit}><Upload size={15}/>{busy ? '处理中…' : '导入'}</button>
       </div>
@@ -598,82 +602,6 @@ function textToMapping(text: string): Record<string, string> {
     mapping[column.trim()] = metric.trim()
   })
   return mapping
-}
-
-/**
- * 把粘贴进来的报表转成导入行。这里只做形状检查，业务规则（日期是否越界、
- * 数值是否为负、对象是否已登记）留给后端逐行判断——后端会把被拒的行连同
- * 原因一起返回，比在前端拦掉更有用。
- */
-function parseMetricCsv(text: string): ApiMetricRow[] {
-  const lines = text.split('\n').map(line => line.trim()).filter(Boolean)
-  if (lines.length < 2) throw new Error('至少要有表头和一行数据。')
-  const header = lines[0].split(',').map(cell => canonicalColumn(cell.trim()))
-  const required = ['platform_object_id', 'stat_date']
-  const missing = required.filter(column => !header.includes(column))
-  if (missing.length) throw new Error(`表头缺少必需的列：${missing.join('、')}。`)
-
-  return lines.slice(1).map((line, index) => {
-    const cells = line.split(',').map(cell => cell.trim())
-    if (cells.length !== header.length) {
-      throw new Error(`第 ${index + 1} 行有 ${cells.length} 列，表头有 ${header.length} 列，对不上。`)
-    }
-    const record: Record<string, string> = {}
-    header.forEach((column, position) => { record[column] = cells[position] })
-    return {
-      platform_object_kind: record.platform_object_kind || 'ad',
-      platform_object_id: record.platform_object_id,
-      platform_object_name: record.platform_object_name || undefined,
-      stat_date: record.stat_date,
-      counts: {
-        impressions: toInteger(record.impressions),
-        clicks: toInteger(record.clicks),
-        conversions: toInteger(record.conversions),
-        video_views: toInteger(record.video_views),
-        video_completions: toInteger(record.video_completions),
-        spend_cents: toInteger(record.spend_cents),
-        revenue_cents: toInteger(record.revenue_cents),
-      },
-    }
-  })
-}
-
-// 表头允许写中文，省得每次导入前先去改一遍平台导出的文件。
-const columnAliases: Record<string, string> = {
-  对象类型: 'platform_object_kind',
-  对象ID: 'platform_object_id',
-  对象名称: 'platform_object_name',
-  日期: 'stat_date',
-  曝光: 'impressions',
-  展现: 'impressions',
-  展现数: 'impressions',
-  点击: 'clicks',
-  点击数: 'clicks',
-  转化: 'conversions',
-  转化数: 'conversions',
-  播放: 'video_views',
-  完播: 'video_completions',
-  花费分: 'spend_cents',
-  消耗分: 'spend_cents',
-  收入分: 'revenue_cents',
-}
-
-function canonicalColumn(name: string): string {
-  return columnAliases[name] ?? name
-}
-
-function toInteger(value?: string): number {
-  const parsed = Number.parseInt((value ?? '').replace(/[,\s]/g, ''), 10)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-/** djb2。只用来判断「这份文件是不是刚才那份」，不是安全用途。 */
-function hashText(text: string): string {
-  let hash = 5381
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0
-  }
-  return `paste-${(hash >>> 0).toString(16)}-${text.length}`
 }
 
 function formatTime(value: string): string {

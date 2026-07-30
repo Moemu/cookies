@@ -205,6 +205,20 @@ type FeatureDriver struct {
 // 其余的会在 Notes 里说清楚被排除了多少个——静默截断等于谎报覆盖面。
 const maxComparisonAssets = 8
 
+// 趋势与异常的天数门槛。这几个数决定页面上什么时候给判定、什么时候说「看不出来」，
+// 所以它们必须有名字：系统设置 · 样本门槛 直接引用这里，改了值那一页会跟着变。
+// 写成裸数字的时候，那一页只能抄一份，迟早对不上。
+const (
+	// minTrendDays 少于这么多天就没有走势可言，趋势判 unknown、疲劳不给结论。
+	minTrendDays = 4
+	// minAnomalyDays 少于这么多天就没有「常态」可言，算出来的异常全是噪声。
+	// 项目级和素材级用同一个数——换个阈值只会让两处的「异常」不是同一个意思。
+	minAnomalyDays = 5
+	// anomalyMADMultiple 偏离中位数超过这么多个 MAD 才算异常。用 MAD 不用标准差，
+	// 是因为标准差会被它想找的那个异常点自己抬高，越异常越不容易被发现。
+	anomalyMADMultiple = 3.5
+)
+
 // GetPerformanceAnalysis 组装五个解释性视图。
 func (s Service) GetPerformanceAnalysis(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, window MetricWindow) (PerformanceAnalysis, error) {
 	if err := s.connectorsReady(actor, projectID, ScopeRead); err != nil {
@@ -369,13 +383,17 @@ func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping
 }
 
 // assignFeatures 把特征贴到素材上。同一个 key 有 AI 行和人工行时以人工为准
-// （AM-006「人工结果不被后台覆盖」）；被拒绝的 AI 行直接丢掉——被人否掉的
+// （AM-006「人工结果不被后台覆盖」）；只有被人**明确否掉**的行丢掉——被否掉的
 // 推断不该继续参与变量识别。
+//
+// 注意 authored 不在丢弃之列：那是 AI 没提过、人第一个填的项，是货真价实的
+// 特征，不是被推翻的推断。早先这里连它一起丢，导致人在内容分析里手填的特征
+// 在素材对比和驱动因素里一条都看不见。
 func assignFeatures(slices map[string]*assetSlice, features []AssetFeature) {
 	human := map[string]map[string]struct{}{}
 	for _, feature := range features {
 		slice, ok := slices[feature.AssetID]
-		if !ok || feature.ReviewState == ReviewRejected {
+		if !ok || !feature.ReviewState.CountsTowardAnalysis() {
 			continue
 		}
 		if !comparableKind(feature.Value.Kind) {
@@ -486,6 +504,10 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 		AssetType:      baseline.kind,
 		BaselineCounts: baseline.total, VariantCounts: variant.total,
 		BaselineRates: RatesOf(baseline.total), VariantRates: RatesOf(variant.total),
+		// 必须初始化成空切片，不能留 nil。两个素材在已记录特征上完全一致时这里
+		// 一条都不会 append，nil 会被序列化成 null，前端读 .length 直接抛异常并
+		// 崩掉整个投后分析页——六个视图一起打不开。
+		ChangedFeatures: make([]FeatureDiff, 0),
 	}
 	result.BaselineCTRInterval = WilsonInterval(baseline.total.Clicks, baseline.total.Impressions)
 	result.VariantCTRInterval = WilsonInterval(variant.total.Clicks, variant.total.Impressions)
@@ -605,6 +627,8 @@ func buildTrends(ordered []*assetSlice) []AssetTrend {
 			AssetID: slice.assetID, AssetTitle: slice.title, AssetType: slice.kind,
 			ActiveDays: len(dates),
 			Confidence: confidenceOf(slice.total, true, len(slice.objects)),
+			// 同 ChangedFeatures：空切片要初始化，nil 序列化成 null 会崩掉前端。
+			Points: make([]PerformancePoint, 0, len(dates)),
 		}
 		for _, date := range dates {
 			counts := slice.byDate[date]
@@ -613,7 +637,7 @@ func buildTrends(ordered []*assetSlice) []AssetTrend {
 		first, second := splitHalves(slice)
 		trend.CTRChange = relativeChange(RatesOf(first).CTR, RatesOf(second).CTR)
 		switch {
-		case len(dates) < 4:
+		case len(dates) < minTrendDays:
 			trend.Direction, trend.Note = "unknown", fmt.Sprintf("窗口内只有 %d 天有数据，看不出走势。", len(dates))
 		case trend.CTRChange == nil:
 			trend.Direction, trend.Note = "unknown", "前半段没有展示，算不出变化，不能当成持平。"
@@ -668,7 +692,7 @@ func buildFatigue(ordered []*assetSlice, window MetricWindow) []FatigueSignal {
 		impressionsUp := signal.ImpressionChange != nil && *signal.ImpressionChange >= 0.1
 
 		switch {
-		case len(slice.dates()) < 4:
+		case len(slice.dates()) < minTrendDays:
 			signal.Note = fmt.Sprintf("只有 %d 天数据，疲劳要看趋势，天数不够就没有趋势可看。", len(slice.dates()))
 			// 曝光量再大也换不来天数。这里必须把置信压到 low_sample，否则页面上会
 			// 出现「没有疲劳迹象 · 置信充分」——那是在说「查过了，没问题」，
@@ -756,11 +780,11 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 		spends = append(spends, float64(projectByDate[date].SpendCents))
 	}
 	median, mad := medianAndMAD(spends)
-	// 少于 5 天没有「常态」可言，算出来的异常全是噪声。
-	if len(dates) >= 5 && mad > 0 {
+	// 少于 minAnomalyDays 天没有「常态」可言，算出来的异常全是噪声。
+	if len(dates) >= minAnomalyDays && mad > 0 {
 		for index, date := range dates {
 			deviation := math.Abs(spends[index]-median) / mad
-			if deviation < 3.5 {
+			if deviation < anomalyMADMultiple {
 				continue
 			}
 			kind := AnomalySpike
@@ -785,7 +809,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 	// 换个阈值只会让两处的「异常」不是同一个意思。
 	for _, slice := range ordered {
 		dates := slice.dates()
-		if len(dates) < 5 {
+		if len(dates) < minAnomalyDays {
 			continue
 		}
 		impressions := make([]float64, 0, len(dates))
@@ -812,7 +836,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 		extremes := map[AnomalyKind]*worst{}
 		for index := range dates {
 			deviation := math.Abs(impressions[index]-assetMedian) / assetMAD
-			if deviation < 3.5 {
+			if deviation < anomalyMADMultiple {
 				continue
 			}
 			kind := AnomalySpike

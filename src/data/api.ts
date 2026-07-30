@@ -633,7 +633,9 @@ export type ApiFeatureSource = 'ai' | 'human'
 
 export type ApiConfidence = 'low' | 'medium' | 'high'
 
-export type ApiReviewState = 'pending' | 'confirmed' | 'rejected'
+// authored 是「AI 没提过这一项，人第一个填的」，和 rejected（有推断但人不认）分开。
+// 混成一个值会让人手填的特征被投后分析当成被否掉的推断丢掉。
+export type ApiReviewState = 'pending' | 'confirmed' | 'rejected' | 'authored'
 
 export type ApiMappingStatus = 'unmatched' | 'matched' | 'ignored'
 
@@ -717,6 +719,43 @@ export type ApiFeatureInput = {
   value: ApiFeatureValue
   confidence?: ApiConfidence
   review_state?: ApiReviewState
+}
+
+// 一次分析任务的留痕。这里没有输入正文，只有它的指纹和规模——
+// 外部返回的内容和输入全文都不入日志（doc09 §7）。
+export type ApiAnalysisRun = {
+  id: string
+  kind: 'feature_extraction'
+  asset_id: string
+  status: 'running' | 'succeeded' | 'failed'
+  asset_type: ApiInsightAssetType
+  skill_id?: string
+  skill_version?: string
+  skill_content_hash?: string
+  prompt_version?: string
+  provider_code?: string
+  model_alias?: string
+  model_version?: string
+  generation_mode?: 'model' | 'template'
+  input_hash?: string
+  result_hash?: string
+  feature_count: number
+  dropped_fields?: string[]
+  data_through?: string
+  prompt_tokens: number
+  completion_tokens: number
+  latency_ms: number
+  error_code?: string
+  error_message?: string
+  started_at: string
+  finished_at?: string
+  created_by: string
+}
+
+export type ApiAnalyzeAssetResult = {
+  run: ApiAnalysisRun
+  features: ApiInsightAssetFeature[]
+  dropped_fields?: string[]
 }
 
 export type ApiFeatureField = {
@@ -1273,6 +1312,50 @@ export type ApiCapabilityOperations = {
   skills: ApiSkillHealth[]
   evaluations: ApiSkillEvaluation[]
   dashboard: ApiOperationsDashboard
+}
+
+/**
+ * 一条设置。effect 和 recommended 不是可选注释：20 §121 要求「重要阈值显示影响说明
+ * 和默认推荐」，22 §239 记的问题正是「缺少实际阈值影响说明」。
+ */
+export type ApiSettingItem = {
+  key: string
+  label: string
+  /** 现在生效的值，后端已格式化好（含单位），前端不要再拼。 */
+  value: string
+  effect: string
+  recommended: string
+  /**
+   * 当前值偏离了推荐值，页面要提示「有人调过它」。由后端判定，前端不要自己拿
+   * value 和 recommended 比字符串——确认权限那组两边说的是不同的事（管到哪些操作
+   * vs 该发给谁），字面永远不同，一比就会给每一条都打上凭空造出来的告警。
+   */
+  deviates: boolean
+  /** 值在代码里的位置，例如 internal/systems/insights/connectors.go:267。 */
+  source: string
+  /** 文档依据；没有依据会显式写「无文档指定值」，不会留空。 */
+  basis: string
+}
+
+export type ApiSettingGroup = {
+  key: string
+  label: string
+  /** in_effect 现在真的在生效；not_built 还没有任何东西，此时 items 为空。 */
+  state: 'in_effect' | 'not_built'
+  summary: string
+  /** 只在 not_built 时有内容。 */
+  missing: string[]
+  items: ApiSettingItem[]
+}
+
+export type ApiInsightSettings = {
+  generated_at: string
+  /** 恒为 false。不要因此渲染禁用输入框——改不动的输入框比一句「这里改不了」更恼人。 */
+  editable: boolean
+  editable_note: string
+  /** 恒为 false：这些值对整个部署生效，路径上的 project 只用于鉴权。 */
+  project_scoped: boolean
+  groups: ApiSettingGroup[]
 }
 
 /** 一行 canonical 日指标。stat_date 是数据源时区下的当地日期 YYYY-MM-DD。 */
@@ -2663,6 +2746,19 @@ export const api = {
     assetId: string,
     body: { expected_version: number; features: ApiFeatureInput[]; reason: string },
   ) => request<{ items: ApiInsightAssetFeature[] }>(`${insightAssetPath(projectId, assetId)}/features`, 'PATCH', body),
+  // AI 提特征。**只有人点按钮才会调到这里**：登记素材时自动排队会把复核队列
+  // 灌满没人要看的结果，而复核是这套东西唯一的质量闸门（03 AM-005）。
+  // content 必须由调用方带上——素材库存的是素材的身份和状态，不存正文。
+  analyzeInsightAsset: (
+    projectId: string,
+    assetId: string,
+    body: { expected_version: number; content: string; note?: string },
+  ) => request<ApiAnalyzeAssetResult>(`${insightAssetPath(projectId, assetId)}:analyze`, 'POST', body),
+  // 分析历史。失败的也在里面：只列成功的话，成功率永远是 100%。
+  listInsightAssetAnalysisRuns: (projectId: string, assetId: string, limit = 20) =>
+    request<{ items: ApiAnalysisRun[] }>(
+      `${insightAssetPath(projectId, assetId)}/analysis-runs?limit=${limit}`,
+    ),
   identifyInsightAssetType: (
     projectId: string,
     assetId: string,
@@ -2807,6 +2903,10 @@ export const api = {
       `${insightProjectPath(projectId)}/capability-operations${query ? `?${query}` : ''}`,
     )
   },
+  // 系统设置整页只读，所以只有 get 没有 put。这些值不来自数据库，全部是代码常量本身，
+  // 每次请求现算——中间隔一层存储，就会有页面和代码对不上的那一天。
+  getInsightSettings: (projectId: string) =>
+    request<ApiInsightSettings>(`${insightProjectPath(projectId)}/settings`),
   // observed_through 要回传界面上那条问题的 last_observed_at，不要用当前时间：
   // 「你处置的是你看到的那个版本」靠它成立，中间问题若又恶化不会被一并盖掉。
   resolveQualityIssue: (

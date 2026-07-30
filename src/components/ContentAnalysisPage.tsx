@@ -1,9 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleAlert, Layers3, Lightbulb, RefreshCw, Sparkles, UserCheck } from 'lucide-react'
+import { CircleAlert, Layers3, Lightbulb, RefreshCw, ScrollText, Sparkles, UserCheck, Wand2 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import {
   api,
+  type ApiAnalysisRun,
   type ApiConfidence,
+  type ApiReviewState,
   type ApiFeatureInput,
   type ApiFeatureMatrix,
   type ApiFeatureSchema,
@@ -52,6 +54,15 @@ const assetTypeOrder: ApiInsightAssetType[] = [
 
 const confidenceLabels: Record<ApiConfidence, string> = { low: '低', medium: '中', high: '高' }
 
+// 人工那一行的措辞。authored 不能写成「推翻 AI」——AI 根本没提过这一项，
+// 没有东西可推翻；也不能写成「认可」，人并没有认可过任何机器结论。
+const reviewLabels: Record<ApiReviewState, string> = {
+  pending: '待复核',
+  confirmed: '认可 AI',
+  rejected: '推翻 AI',
+  authored: '人工填写',
+}
+
 const statusLabels: Record<string, string> = {
   awaiting_data: '待数据', awaiting_match: '待匹配', analysable: '可分析', analysing: '分析中',
   pending_confirmation: '待确认', confirmed: '已确认', needs_review: '待复审', retired: '已失效',
@@ -69,6 +80,11 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState('')
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
+  // 素材正文不在素材库里（素材库存的是身份和状态，不存正文），提取时必须由人带上。
+  const [content, setContent] = useState('')
+  const [note, setNote] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [runs, setRuns] = useState<ApiAnalysisRun[]>([])
 
   const loadList = useCallback(async () => {
     if (!currentProject.id) return
@@ -100,7 +116,8 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
   }, [currentProject.id, target])
 
   useEffect(() => { void loadList() }, [loadList])
-  useEffect(() => { setEditingKey(''); setDraft('') }, [target, selectedId])
+  // 换素材就把草稿全部清掉。上一条素材的正文留在框里，一不小心就会提到另一条素材头上。
+  useEffect(() => { setEditingKey(''); setDraft(''); setContent(''); setNote('') }, [target, selectedId])
 
   const breakdownAssets = assets
 
@@ -126,6 +143,25 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
 
   useEffect(() => { void loadFeatures() }, [loadFeatures])
 
+  /**
+   * 分析历史（03 §82「数据与方法」）。失败的任务也要列出来：只显示成功的，
+   * 成功率看上去永远是 100%，运营面上就没法判断供应商是不是出问题了（§310）。
+   */
+  const loadRuns = useCallback(async () => {
+    if (target !== 'single' || !selectedAsset) {
+      setRuns([])
+      return
+    }
+    try {
+      const page = await api.listInsightAssetAnalysisRuns(currentProject.id, selectedAsset.id, 10)
+      setRuns(page.items)
+    } catch {
+      setRuns([])
+    }
+  }, [currentProject.id, target, selectedAsset?.id])
+
+  useEffect(() => { void loadRuns() }, [loadRuns])
+
   const typeSchema = schemas.find(schema =>
     schema.asset_type === (target === 'single' ? selectedAsset?.asset_type : target))
 
@@ -133,7 +169,7 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
    * 写人工层。后端的 PATCH 是整层替换（ReplaceLayer: human），所以要把已有的人工结论
    * 一起带上，否则会把别人此前的判断抹掉。AI 那一层始终不动（AM-006、§14）。
    */
-  const writeHumanLayer = useCallback(async (key: string, value: ApiFeatureValue, verdict: 'confirmed' | 'rejected', reason: string) => {
+  const writeHumanLayer = useCallback(async (key: string, value: ApiFeatureValue, verdict: 'confirmed' | 'rejected' | 'authored', reason: string) => {
     if (!selectedAsset) return
     const kept: ApiFeatureInput[] = features
       .filter(feature => feature.source === 'human' && feature.key !== key)
@@ -149,7 +185,11 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
       await loadList()
       await loadFeatures()
       // loadList 会清空提示，所以放在它之后再写，否则这条反馈一闪就没了。
-      setNotice(verdict === 'confirmed' ? `已认可「${key}」，人工结论已单独记一行。` : `已推翻「${key}」并写入人工结论。`)
+      setNotice(verdict === 'confirmed'
+        ? `已认可「${key}」，人工结论已单独记一行。`
+        : verdict === 'authored'
+          ? `已填写「${key}」。AI 没提过这一项，所以记的是人工原创，不是推翻。`
+          : `已推翻「${key}」并写入人工结论。`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '写入人工结论失败。')
     }
@@ -170,6 +210,37 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
       setNotice(cause instanceof Error ? cause.message : '类型判定失败。')
     }
   }, [currentProject.id, selectedAsset, loadList])
+
+  /**
+   * AI 提特征（AM-005）。**只有人点这个按钮才会调模型**——登记素材时自动排队，
+   * 会把复核队列灌满没人看的结果，而复核是这套东西唯一的质量闸门。
+   *
+   * 提出来的结果只写 AI 那一层，状态停在待确认，不会自动变成已确认的结论（09 §8）。
+   */
+  const analyze = useCallback(async () => {
+    if (!selectedAsset || !content.trim()) return
+    setAnalyzing(true)
+    try {
+      const result = await api.analyzeInsightAsset(currentProject.id, selectedAsset.id, {
+        expected_version: selectedAsset.version,
+        content: content.trim(),
+        note: note.trim() || undefined,
+      })
+      await loadList()
+      await loadFeatures()
+      await loadRuns()
+      const dropped = result.dropped_fields?.length ? `，另有 ${result.dropped_fields.length} 项没采信：${result.dropped_fields.join('；')}` : ''
+      // loadList 会清空提示，所以放在它之后再写。
+      setNotice(`提取完成，AI 给出 ${result.features.length} 项特征${dropped}。这些还只是待确认，需要逐项认可或推翻。`)
+    } catch (cause) {
+      // 失败的任务后端也会记一行，所以照样刷新历史，让人看得见它失败过。
+      // 接口按平台惯例只回一句笼统的错误码文案，真正的原因在那条记录里。
+      await loadRuns()
+      setNotice(`${cause instanceof Error ? cause.message : '提取失败'}。具体原因见右侧「数据与方法」最新一条。`)
+    } finally {
+      setAnalyzing(false)
+    }
+  }, [currentProject.id, selectedAsset, content, note, loadList, loadFeatures, loadRuns])
 
   const header = target === 'single'
     ? { title: '单素材逐项拆解', lead: '一条素材的全部特征，按它自己那套体系分组；AI 与人工两层分开显示。' }
@@ -214,6 +285,32 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
               </div>
             </div>
             : null}
+          {selectedAsset?.asset_type && typeSchema ? <div className="content-extract">
+            <div><span className="section-label">AI 提特征</span></div>
+            <p>
+              照「{typeSchema.label}」自己那套 {typeSchema.fields.length} 个变量提问，不会把别类素材的字段套过来。
+              素材正文没有存在库里，要提取就得先把正文贴进来。提出来的结果只进 AI 那一层，仍然要逐项人工认可才算数。
+            </p>
+            <textarea
+              aria-label="素材内容"
+              rows={6}
+              value={content}
+              placeholder="把这条素材的正文、口播稿或分镜说明贴进来"
+              onChange={event => setContent(event.target.value)}
+            />
+            <input
+              aria-label="补充说明"
+              value={note}
+              placeholder="补充说明（选填）：投放场景、已知背景，会一起给到模型"
+              onChange={event => setNote(event.target.value)}
+            />
+            <div className="actions">
+              <button className="primary-button" disabled={analyzing || !content.trim()} onClick={() => { void analyze() }}>
+                <Wand2 size={15}/>{analyzing ? '提取中…' : '提取特征'}
+              </button>
+              <span>只有点这个按钮才会真的调一次模型。登记素材时不会自动提——那样只会把待复核的结果堆满，没人看得完。</span>
+            </div>
+          </div> : null}
           {selectedAsset?.asset_type && typeSchema ? <FeatureBreakdown
             schema={typeSchema}
             features={features}
@@ -223,7 +320,10 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
             onEdit={key => { setEditingKey(key); setDraft('') }}
             onCancel={() => { setEditingKey('') }}
             onConfirm={(key, value) => { void writeHumanLayer(key, value, 'confirmed', '人工认可 AI 提取结果') }}
-            onReject={(key, value) => { void writeHumanLayer(key, value, 'rejected', '人工推翻并改写 AI 提取结果') }}
+            onReject={(key, value, hadAi) => {
+              void writeHumanLayer(key, value, hadAi ? 'rejected' : 'authored',
+                hadAi ? '人工推翻并改写 AI 提取结果' : '人工填写 AI 未提取的特征')
+            }}
           /> : null}
         </> : null}
       </section>
@@ -245,6 +345,24 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
             ? <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>最近一次状态说明</small><b>{selectedAsset.analysis_status_reason}</b></span></div>
             : null}
           <div className="prelaunch-fact"><UserCheck size={17}/><span><small>两层为什么不合并</small><b>人工结论单独成行，后台再跑一次提取也不会盖掉它；AI 那一行也保留，方便回头看机器当时判断成了什么。</b></span></div>
+          <div className="analysis-run-list">
+            <span className="section-label">数据与方法</span>
+            {runs.length
+              ? runs.map(run => <div className={`analysis-run ${run.status}`} key={run.id}>
+                <b>{runStatusLabels[run.status] ?? run.status} · {formatTime(run.started_at)}</b>
+                <small>
+                  {run.skill_id ? `${run.skill_id}@${run.skill_version ?? '—'}` : '未记录 Skill'}
+                  {' · '}{run.model_alias ?? '未记录模型'}{run.model_version ? `（${run.model_version}）` : ''}
+                  {' · '}耗时 {formatLatency(run.latency_ms)}
+                </small>
+                {run.status === 'succeeded' ? <small>
+                  提出 {run.feature_count} 项特征
+                  {run.dropped_fields?.length ? ` · 有 ${run.dropped_fields.length} 项没采信：${run.dropped_fields.join('；')}` : ''}
+                </small> : null}
+                {run.status === 'failed' ? <small>{readableError(run.error_message) || '没有记下失败原因。'}</small> : null}
+              </div>)
+              : <div className="prelaunch-fact"><ScrollText size={17}/><span><small>还没有跑过提取</small><b>每次提取都会留一条记录：用的哪版 Skill、哪个模型、花了多久、哪几项没采信。失败的也会留，不然成功率永远是 100%。</b></span></div>}
+          </div>
         </> : target !== 'single' ? <>
           <span className="section-label">特征体系</span><h3>{typeSchema?.label ?? assetTypeLabels[target]}</h3>
           <p>{typeSchema?.fields.length ?? 0} 个变量 · 来源 {typeSchema?.source ?? '03 §5'}</p>
@@ -296,7 +414,12 @@ function FeatureBreakdown({ schema, features, editingKey, draft, onDraft, onEdit
   onEdit: (key: string) => void
   onCancel: () => void
   onConfirm: (key: string, value: ApiFeatureValue) => void
-  onReject: (key: string, value: ApiFeatureValue) => void
+  /**
+   * hadAi 决定这次保存的语义：AI 提过这一项，人给了别的值，那是**推翻**；
+   * AI 压根没提过，人是第一个填的，那是**人工原创**。两者不能都记成推翻——
+   * 记成推翻的话，投后分析会把这条特征当成被否掉的推断丢掉，人填了等于白填。
+   */
+  onReject: (key: string, value: ApiFeatureValue, hadAi: boolean) => void
 }) {
   return <div className="content-breakdown">
     {groupsOf(schema).map(group => <Fragment key={group}>
@@ -309,7 +432,7 @@ function FeatureBreakdown({ schema, features, editingKey, draft, onDraft, onEdit
           <span><b>{field.label}</b><small>{field.key} · {kindLabels[field.kind] ?? field.kind}{field.unit ? ` · ${field.unit}` : ''}</small></span>
           <span>
             {ai ? <b className="content-layer ai">AI · {formatValue(ai.value)} · 置信{confidenceLabels[ai.confidence ?? 'low']}</b> : <b className="content-layer">AI 还没提取这一项</b>}
-            {human ? <b className="content-layer human">人工 · {formatValue(human.value)} · {human.review_state === 'rejected' ? '推翻 AI' : '认可'}</b> : null}
+            {human ? <b className="content-layer human">人工 · {formatValue(human.value)} · {reviewLabels[human.review_state] ?? human.review_state}</b> : null}
             {editing ? <input
               autoFocus
               aria-label={`改写 ${field.label}`}
@@ -320,7 +443,7 @@ function FeatureBreakdown({ schema, features, editingKey, draft, onDraft, onEdit
           </span>
           <span className="actions">
             {editing ? <>
-              <button className="secondary-button" disabled={!draft.trim()} onClick={() => onReject(field.key, parseValue(field.kind, draft))}>保存人工结论</button>
+              <button className="secondary-button" disabled={!draft.trim()} onClick={() => onReject(field.key, parseValue(field.kind, draft), Boolean(ai))}>保存人工结论</button>
               <button className="secondary-button" onClick={onCancel}>取消</button>
             </> : <>
               {ai && !human ? <button className="secondary-button" onClick={() => onConfirm(field.key, ai.value)}>认可</button> : null}
@@ -331,6 +454,26 @@ function FeatureBreakdown({ schema, features, editingKey, draft, onDraft, onEdit
       })}
     </Fragment>)}
   </div>
+}
+
+const runStatusLabels: Record<string, string> = { running: '进行中', succeeded: '成功', failed: '失败' }
+
+function formatTime(raw: string): string {
+  const at = new Date(raw)
+  return Number.isNaN(at.getTime()) ? raw : at.toLocaleString('zh-CN', { hour12: false })
+}
+
+/**
+ * 库里存的是整条错误链（英文 sentinel + 中文原因），排查时有用，但摆在页面上
+ * 只会让人多看一串英文。这里只取那句给人看的中文。
+ */
+function readableError(raw = ''): string {
+  const at = raw.search(/[一-龥]/)
+  return at > 0 && /: $/.test(raw.slice(0, at)) ? raw.slice(at) : raw
+}
+
+function formatLatency(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} 秒` : `${ms} 毫秒`
 }
 
 const kindLabels: Record<string, string> = {

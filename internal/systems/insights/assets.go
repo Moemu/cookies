@@ -113,20 +113,33 @@ func (c Confidence) valid() bool {
 // On that human row the state says whether the person agreed with the machine —
 // confirmed 表示认可 AI 的判断，rejected 表示推翻它并给出自己的取值 — which is what
 // makes 技能提取准确率 measurable later.
+//
+// authored 是第四种，它和上面三种的区别是刚性的：**AI 从来没提过这一项，人是第一个
+// 填的**。rejected 说的是「有个推断，我不认」，authored 说的是「没有推断，我来填」。
+// 把两者混成一个值有两处后果：投后分析会把人手填的特征当成「被否掉的推断」丢掉，
+// 于是内容分析里填的东西在素材对比和驱动因素里一条都看不见；技能提取准确率也会把
+// AI 压根没提过的项算成它提错了。
 type ReviewState string
 
 const (
 	ReviewPending   ReviewState = "pending"
 	ReviewConfirmed ReviewState = "confirmed"
 	ReviewRejected  ReviewState = "rejected"
+	ReviewAuthored  ReviewState = "authored"
 )
 
 func (s ReviewState) valid() bool {
 	switch s {
-	case ReviewPending, ReviewConfirmed, ReviewRejected:
+	case ReviewPending, ReviewConfirmed, ReviewRejected, ReviewAuthored:
 		return true
 	}
 	return false
+}
+
+// CountsTowardAnalysis 说明这一行该不该参与变量识别与归因。
+// 只有被人明确否掉的推断出局；待复核、认可 AI、人工原创都算数。
+func (s ReviewState) CountsTowardAnalysis() bool {
+	return s != ReviewRejected
 }
 
 // MappingStatus tracks AM-003: a platform creative/ad either points at one of
@@ -886,7 +899,7 @@ func (s Service) PatchFeatures(ctx context.Context, actor contract.ActorContext,
 			state = ReviewConfirmed
 		}
 		if !state.valid() || state == ReviewPending {
-			return nil, fmt.Errorf("%w: 人工结论的复核状态只能是 confirmed 或 rejected", ErrInvalidRequest)
+			return nil, fmt.Errorf("%w: 人工结论的复核状态只能是 confirmed、rejected 或 authored", ErrInvalidRequest)
 		}
 		id, idErr := s.idGenerator()("assetfeature")
 		if idErr != nil {

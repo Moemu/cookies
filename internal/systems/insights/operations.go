@@ -798,9 +798,12 @@ func buildSkillEvaluations(assets []Asset, features []AssetFeature) []SkillEvalu
 	buckets := map[string]*bucket{}
 	for id, ai := range aiRows {
 		human, reviewed := humanRows[id]
-		if !reviewed {
+		if !reviewed || human.ReviewState == ReviewAuthored {
 			// 没人看过的不算样本。把它算成「机器对了」会让准确率随提取量自动上涨，
 			// 那是这个数字最容易被误用的方式。
+			//
+			// authored 同样不算：它表示人当时并没有看见 AI 的结论、是自己起头填的
+			// （比如 AI 行是后来才补上的），拿它去评判机器对不对是错位的。
 			continue
 		}
 		groupKey := strings.TrimSpace(ai.SkillID) + "@" + strings.TrimSpace(ai.SkillVersion)

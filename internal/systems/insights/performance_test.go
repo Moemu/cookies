@@ -1,6 +1,7 @@
 package insights
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -440,5 +441,52 @@ func TestTwoValuedFeatureProducesOneDriverRow(t *testing.T) {
 	}
 	if rows[0].RestAssets != minDriverAssets {
 		t.Fatalf("留下的那一行必须以另一个取值为对照组，实际对照 %d 个素材", rows[0].RestAssets)
+	}
+}
+
+// 人在内容分析里手填的特征，必须能被投后分析看见。
+//
+// 早先这里是断的：前端「保存人工结论」一律写 rejected，assignFeatures 又把所有
+// rejected 丢掉，于是人辛苦填的特征在素材对比和驱动因素里一条都不出现，页面上
+// 只显示「窗口内的素材都还没有内容特征」。
+func TestAssignFeaturesKeepsAuthoredRows(t *testing.T) {
+	slices := map[string]*assetSlice{"a1": {features: map[string]string{}}}
+	assignFeatures(slices, []AssetFeature{{
+		AssetID: "a1", Key: "hook_type", Source: SourceHuman, ReviewState: ReviewAuthored,
+		Value: FeatureValue{Kind: FeatureKindEnum, Terms: []string{"问题"}},
+	}})
+	if got := slices["a1"].features["hook_type"]; got != "问题" {
+		t.Fatalf("人工首次填写的特征应当参与变量识别，实际拿到 %q", got)
+	}
+}
+
+// 但被人明确否掉的推断还是要丢。这两件事必须分得开，否则「人工推翻」就失效了。
+func TestAssignFeaturesStillDropsRejected(t *testing.T) {
+	slices := map[string]*assetSlice{"a1": {features: map[string]string{}}}
+	assignFeatures(slices, []AssetFeature{{
+		AssetID: "a1", Key: "hook_type", Source: SourceHuman, ReviewState: ReviewRejected,
+		Value: FeatureValue{Kind: FeatureKindEnum, Terms: []string{"问题"}},
+	}})
+	if _, ok := slices["a1"].features["hook_type"]; ok {
+		t.Fatal("被人明确否掉的特征不该继续参与变量识别")
+	}
+}
+
+// 两个素材在已记录特征上完全一致时，changed_features 必须是空数组而不是 null。
+//
+// 这一条看着琐碎，实际是整页白屏的根因：前端读 item.changed_features.length，
+// 拿到 null 直接抛 TypeError，投后分析六个视图一起打不开。
+func TestComparisonChangedFeaturesSerializesAsArray(t *testing.T) {
+	left := &assetSlice{assetID: "a1", title: "A", kind: AssetTypePrerollAd,
+		total: MetricCounts{Impressions: 10000, Clicks: 300}, features: map[string]string{"hook_type": "问题"}}
+	right := &assetSlice{assetID: "a2", title: "B", kind: AssetTypePrerollAd,
+		total: MetricCounts{Impressions: 9000, Clicks: 280}, features: map[string]string{"hook_type": "问题"}}
+
+	encoded, err := json.Marshal(compareAssets(left, right, true))
+	if err != nil {
+		t.Fatalf("序列化失败：%v", err)
+	}
+	if !strings.Contains(string(encoded), `"changed_features":[]`) {
+		t.Fatalf("没有差异时必须序列化成空数组，实际是 %s", encoded)
 	}
 }

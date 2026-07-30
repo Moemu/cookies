@@ -255,12 +255,13 @@ function AnalysisViews({ state, target }: { state: DataState; target: ViewTarget
   </StateBoundary>
 }
 
+// 后端已经保证这些数组不会是 null，这里再兜一层：一个字段没返回不该让整页打不开。
 function countFor(analysis: ApiPerformanceAnalysis, target: ViewTarget): number {
-  if (target === 'comparisons') return analysis.comparisons.length
-  if (target === 'trends') return analysis.trends.length
-  if (target === 'fatigue') return analysis.fatigue.length
-  if (target === 'anomalies') return analysis.anomalies.length
-  return analysis.drivers.length
+  if (target === 'comparisons') return (analysis.comparisons ?? []).length
+  if (target === 'trends') return (analysis.trends ?? []).length
+  if (target === 'fatigue') return (analysis.fatigue ?? []).length
+  if (target === 'anomalies') return (analysis.anomalies ?? []).length
+  return (analysis.drivers ?? []).length
 }
 
 function ComparisonList({ items }: { items: ApiVariantComparison[] }) {
@@ -274,9 +275,9 @@ function ComparisonList({ items }: { items: ApiVariantComparison[] }) {
       <p>{item.note}</p>
 
       <div className="insight-analysis-diff">
-        <span>改动的变量（{item.changed_features.length} 个）· 两侧一致的特征 {item.controlled_count} 个</span>
-        {item.changed_features.length
-          ? item.changed_features.map(diff => <b key={diff.key}>
+        <span>改动的变量（{(item.changed_features ?? []).length} 个）· 两侧一致的特征 {item.controlled_count} 个</span>
+        {(item.changed_features ?? []).length
+          ? (item.changed_features ?? []).map(diff => <b key={diff.key}>
               {diff.label}：{diff.baseline} → {diff.variant}{diff.human_only ? '（只能人工判定）' : ''}
             </b>)
           : <b>已记录的特征上两边完全一致。</b>}
@@ -313,7 +314,8 @@ function Side({ title, rates, impressions, interval }:
 function TrendList({ items }: { items: ApiAssetTrend[] }) {
   return <div className="insight-analysis-list" role="list" aria-label="趋势">
     {items.map(item => {
-      const peak = Math.max(...item.points.map(point => point.counts.impressions), 1)
+      const points = item.points ?? []
+      const peak = Math.max(...points.map(point => point.counts.impressions), 1)
       return <article className="insight-analysis-card" role="listitem" key={item.asset_id}>
         <header>
           <b>{item.asset_title}</b>
@@ -326,7 +328,7 @@ function TrendList({ items }: { items: ApiAssetTrend[] }) {
           <span className="section-label">
             {item.active_days} 天有数据 · 点击率变化 {formatSigned(item.ctr_change)} · 置信{confidenceLabels[item.confidence]}
           </span>
-          {item.points.map(point => <div className="insight-series-row" key={point.date}>
+          {points.map(point => <div className="insight-series-row" key={point.date}>
             <span>{formatDate(point.date)}</span>
             <span className="insight-series-track">
               <i style={{ width: `${Math.max(2, Math.round((point.counts.impressions / peak) * 100))}%` }}/>

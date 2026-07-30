@@ -68,6 +68,7 @@ const reviewLabels: Record<ApiReviewState, string> = {
   pending: '待人工复核',
   confirmed: '人工认可',
   rejected: '人工推翻',
+  authored: '人工填写',
 }
 
 const emptyHints: Record<ViewTarget, string> = {
