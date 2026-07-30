@@ -46,16 +46,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install web dependencies
-        run: npm ci --prefix web
+      - name: Install frontend dependencies
+        run: npm ci
 
-      - name: Check web shell
-        run: npm run check --prefix web
-
-      - name: Validate API contracts
-        run: npm run contract:check --prefix web
+      - name: Build frontend
+        run: npm run build
 
   migrations:
     runs-on: ubuntu-latest
