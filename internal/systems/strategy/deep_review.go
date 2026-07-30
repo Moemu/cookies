@@ -13,6 +13,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/strategy/promptkit"
 )
 
 func (s Service) StartDeepReview(
@@ -71,7 +72,7 @@ func (s Service) StartDeepReview(
 	input := map[string]any{
 		"analysis_id": analysisID, "review_id": review.ID, "strategy_id": review.StrategyID,
 		"candidate_revision": review.CandidateRevision, "candidate_content_hash": review.CandidateContentHash,
-		"model_alias": modelAlias,
+		"model_alias": modelAlias, "prompt_version": s.reviewPromptVersion(),
 	}
 	task := agent.Task{
 		ID: taskID, OrganizationID: actor.OrganizationID, ProjectID: review.ProjectID,
@@ -144,6 +145,7 @@ func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contra
 		CandidateRevision    int64                `json:"candidate_revision"`
 		CandidateContentHash contract.ContentHash `json:"candidate_content_hash"`
 		ModelAlias           string               `json:"model_alias"`
+		PromptVersion        string               `json:"prompt_version"`
 	}
 	if err := json.Unmarshal(task.InputSnapshot, &input); err != nil {
 		return nil, err
@@ -172,18 +174,44 @@ func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contra
 	if err != nil {
 		return nil, err
 	}
+	promptVersion := strings.TrimSpace(input.PromptVersion)
+	if promptVersion == "" {
+		promptVersion = s.reviewPromptVersion()
+	}
+	promptDefinition, err := promptkit.Resolve(promptkit.StageReview, promptVersion)
+	if err != nil {
+		return nil, err
+	}
+	userPrompt := fmt.Sprintf(
+		"Candidate revision %d with content hash %s:\n%s",
+		revision.Revision, revision.ContentHash, mustJSON(revision.Document),
+	)
+	if promptVersion == promptkit.ReviewV2 {
+		brief, briefErr := scanBriefVersion(s.DB.QueryRowContext(ctx, briefVersionSelect+`
+			WHERE organization_id = ? AND project_id = ? AND brief_id = ? AND version = ?`,
+			task.OrganizationID, task.ProjectID, review.BriefID, review.BriefVersion))
+		if briefErr != nil {
+			return nil, briefErr
+		}
+		documents, documentsErr := s.generationDocumentsForBrief(ctx, actor, task.ProjectID, brief)
+		if documentsErr != nil {
+			return nil, documentsErr
+		}
+		quality := evaluateStrategyQuality(revision.Document, GenerationContext{
+			Brief: brief, Evidence: evidenceFromBrief(brief), Documents: documents,
+		})
+		userPrompt = deepReviewUserPromptV2(brief, revision, documents, quality)
+	}
 	started := time.Now()
+	callStarted := time.Now()
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: actor, Project: project, ModelAlias: input.ModelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-deep-review"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "You are a senior advertising strategy reviewer. Analyze the candidate rigorously, cite exact strategy sections, prioritize business risk, evidence gaps, channel coherence, measurability, and execution feasibility. Do not approve or reject; provide decision support for the human reviewer."},
-			{Role: provider.TextRoleUser, Content: fmt.Sprintf(
-				"Candidate revision %d with content hash %s:\n%s",
-				revision.Revision, revision.ContentHash, mustJSON(revision.Document),
-			)},
+			{Role: provider.TextRoleSystem, Content: promptDefinition.System},
+			{Role: provider.TextRoleUser, Content: userPrompt},
 		},
-		OutputJSONSchema: deepReviewOutputSchema(),
+		OutputJSONSchema: deepReviewOutputSchema(promptVersion),
 	})
 	if err != nil {
 		return nil, textGenerationError(err)
@@ -199,20 +227,32 @@ func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contra
 	if err := json.Unmarshal(candidate, &output); err != nil {
 		return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Deep review output is invalid"}}
 	}
-	if strings.TrimSpace(output.Summary) == "" || len(output.Findings) == 0 {
+	if strings.TrimSpace(output.Summary) == "" ||
+		(promptVersion == promptkit.ReviewV1 && len(output.Findings) == 0) {
 		return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Deep review output is incomplete"}}
 	}
 	for _, finding := range output.Findings {
 		if finding.Severity != "blocker" && finding.Severity != "warning" && finding.Severity != "opportunity" {
 			return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Deep review severity is invalid"}}
 		}
+		if promptVersion == promptkit.ReviewV2 &&
+			(strings.TrimSpace(finding.CheckType) == "" || strings.TrimSpace(finding.StrategyPath) == "") {
+			return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Deep review finding is not traceable"}}
+		}
+	}
+	skillVersion := "v1.0.0"
+	if promptVersion == promptkit.ReviewV2 {
+		skillVersion = "v2.0.0"
 	}
 	trace := SkillExecutionTrace{
 		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: input.ModelAlias,
 		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
-		ResponseMode: response.ResponseMode, PromptVersion: "strategy.review.deep.v1",
-		SkillVersions: map[string]string{"strategy.review.deep": "v1.0.0"},
+		ResponseMode: response.ResponseMode, PromptVersion: promptVersion,
+		SkillVersions: map[string]string{"strategy.review.deep": skillVersion},
 		Usage:         response.Usage, LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
+		Attempts: []SkillRunAttempt{
+			modelCallAttempt("deep_review", promptVersion, response, time.Since(callStarted).Milliseconds(), nil),
+		},
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -233,7 +273,7 @@ func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contra
 	if err != nil || changed != 1 {
 		return nil, ErrVersionConflict
 	}
-	if _, err := s.insertSkillRun(ctx, tx, task, "strategy.review.deep", "v1.0.0", trace, output); err != nil {
+	if _, err := s.insertSkillRun(ctx, tx, task, "strategy.review.deep", skillVersion, trace, output); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -277,21 +317,69 @@ func scanDeepReview(row rowScanner) (DeepReviewAnalysis, error) {
 	return value, nil
 }
 
-func deepReviewOutputSchema() json.RawMessage {
+func deepReviewUserPromptV2(
+	brief BriefVersion,
+	revision DraftRevision,
+	documents []KnowledgeExcerpt,
+	quality QualityReport,
+) string {
+	input := struct {
+		Brief             BriefVersion         `json:"brief"`
+		CandidateRevision int64                `json:"candidate_revision"`
+		CandidateHash     contract.ContentHash `json:"candidate_hash"`
+		Candidate         StrategyDocument     `json:"candidate"`
+		Evidence          []EvidenceItem       `json:"brief_evidence"`
+		Documents         []KnowledgeExcerpt   `json:"evidence_chunks"`
+		Quality           QualityReport        `json:"quality_report"`
+	}{
+		Brief: brief, CandidateRevision: revision.Revision, CandidateHash: revision.ContentHash,
+		Candidate: revision.Document, Evidence: evidenceFromBrief(brief), Documents: documents,
+		Quality: quality,
+	}
+	return fmt.Sprintf("<review_input>\n%s\n</review_input>\n只依据 review_input 审阅候选策略。", mustJSON(input))
+}
+
+func deepReviewOutputSchema(promptVersion string) json.RawMessage {
+	if promptVersion == promptkit.ReviewV1 {
+		return json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"summary":{"type":"string"},
+				"findings":{"type":"array","minItems":1,"maxItems":12,"items":{
+					"type":"object",
+					"properties":{
+						"severity":{"type":"string","enum":["blocker","warning","opportunity"]},
+						"section":{"type":"string"},
+						"title":{"type":"string"},
+						"detail":{"type":"string"},
+						"recommendation":{"type":"string"}
+					},
+					"required":["severity","section","title","detail","recommendation"],
+					"additionalProperties":false
+				}}
+			},
+			"required":["summary","findings"],
+			"additionalProperties":false
+		}`)
+	}
 	return json.RawMessage(`{
 		"type":"object",
 		"properties":{
 			"summary":{"type":"string"},
-			"findings":{"type":"array","minItems":1,"maxItems":12,"items":{
+			"findings":{"type":"array","minItems":0,"maxItems":12,"items":{
 				"type":"object",
 				"properties":{
 					"severity":{"type":"string","enum":["blocker","warning","opportunity"]},
 					"section":{"type":"string"},
+					"check_type":{"type":"string","enum":["brief_alignment","unsupported_claim","evidence_gap","channel_coherence","platform_distinctness","measurement","execution","compliance","opportunity"]},
+					"strategy_path":{"type":"string"},
 					"title":{"type":"string"},
 					"detail":{"type":"string"},
-					"recommendation":{"type":"string"}
+					"recommendation":{"type":"string"},
+					"brief_refs":{"type":"array","items":{"type":"string"}},
+					"evidence_refs":{"type":"array","items":{"type":"string"}}
 				},
-				"required":["severity","section","title","detail","recommendation"],
+				"required":["severity","section","check_type","strategy_path","title","detail","recommendation","brief_refs","evidence_refs"],
 				"additionalProperties":false
 			}}
 		},

@@ -1,0 +1,43 @@
+{
+  "business_code": "viral_remake",
+  "generation": 2,
+  "version": "1.1.0",
+  "display_name": "爆款复刻",
+  "summary": "提炼参考内容的抽象传播机制，并原创映射到当前产品、受众和目标。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 60,
+  "match_rules": [
+    {"id":"has_reference","field":"reference_present","operator":"equals","values":["true"],"weight":50,"reason":"Brief 已提供参考内容"},
+    {"id":"objective_conversion","field":"objective_type","operator":"in","values":["conversion","sales","install","lead"],"weight":20,"reason":"希望把传播机制映射到明确转化目标"},
+    {"id":"deliverable_video","field":"deliverable_type","operator":"in","values":["video","unknown"],"weight":15,"reason":"参考内容适合视频机制分析"},
+    {"id":"brand_only","field":"brand_goal","operator":"equals","values":["true"],"weight":-10,"reason":"长期品牌任务需要更谨慎地评估复刻方式"}
+  ],
+  "questions": [
+    {"id":"reference_locator","label":"参考视频链接或描述","type":"reference_locator","required_for":"strategy","help":"Strategy 不会自动下载该链接。","validation":{"max_length":1200}},
+    {"id":"mechanism_focus","label":"希望借鉴什么抽象机制？","type":"multi_select","required_for":"strategy","options":[{"value":"rhythm","label":"节奏"},{"value":"message_order","label":"信息顺序"},{"value":"conflict","label":"冲突结构"},{"value":"conversion","label":"转化机制"}],"validation":{"max_items":4}},
+    {"id":"rights_status","label":"目前了解的权利状态","type":"single_select","required_for":"production","help":"未知不会阻止抽象机制分析；进入生产前再按实际用途确认。","options":[{"value":"unknown","label":"未知"},{"value":"owned","label":"自有"},{"value":"licensed","label":"已获许可"},{"value":"public_analysis_only","label":"仅公开内容分析"}]},
+    {"id":"production_use","label":"是否计划使用原画面、人物、声音、台词、音乐或商标？","type":"boolean","required_for":"production"}
+  ],
+  "requirements": {
+    "strategy": ["目标产品","目标受众","转化目标","参考链接或描述","需要借鉴的抽象机制"],
+    "production": ["自有素材","权利范围","相似性风险要求","渠道规格"]
+  },
+  "output_fields": [
+    {"key":"transferable_mechanisms","label":"可迁移机制","type":"string_array","required":true,"max_items":6,"description":"可以原创迁移的节奏、顺序、冲突或转化机制。"},
+    {"key":"product_mapping","label":"产品映射","type":"string_array","required":true,"max_items":6,"description":"机制与当前产品、人群、卖点和 CTA 的映射。"},
+    {"key":"non_copyable_elements","label":"不可复制元素","type":"string_array","required":true,"max_items":10,"description":"不能直接复用的具体表达和权利要素。"},
+    {"key":"originality_guardrails","label":"原创边界","type":"string_array","required":true,"max_items":8,"description":"原创度、品牌一致性和相似性风险要求。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["structure_analysis","rhythm_analysis","message_order_analysis","conversion_mechanism_analysis"],
+    "production_confirmations": ["download_or_storage","frame_or_audio_reuse","likeness_or_voice","model_conditioning","commercial_derivative"]
+  },
+  "skill_name": "creative_task.viral_remake",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}

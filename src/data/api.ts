@@ -401,6 +401,58 @@ export type ApiCreativeSourceOption = {
   preferred: boolean
 }
 
+export type ApiTaskStrategyCreativeIntake = {
+  id: string
+  source: 'task_strategy'
+  status: 'draft' | 'needs_clarification' | 'ready' | 'superseded'
+  request: {
+    format: 'image_text' | 'video'
+    performance_mode?: string
+    objective: string
+    audience: string
+    core_message: string
+    concept: string
+    task_strategy_input: {
+      business_code: string
+      business_strategy: Record<string, unknown>
+      guardrails: string[]
+      open_questions: string[]
+      media: Array<{
+        asset_ref: ApiAssetVersionRef
+        role: string
+        kind?: string
+        status: string
+        usefulness: string
+      }>
+      reference_use: {
+        locator?: string
+        rights_status: string
+        intended_use: string
+        warnings: string[]
+      }
+    }
+  }
+  missing_fields: string[]
+  warnings: string[]
+}
+
+export type ApiCreativeTaskHandoffDetail = {
+  task: {
+    id: string
+    intake_id: string
+    format: 'image_text' | 'video'
+    channel: string
+    status: string
+    direction: {
+      focus: string
+      audience: string
+      core_message: string
+      call_to_action: string
+    }
+  }
+  intake: ApiTaskStrategyCreativeIntake
+}
+
 export type ApiPreparedCommercePreroll = {
   contract_version: 'creative-commerce-preroll-preparation/v1'
   source_ref: ApiCreativeSourceRef
@@ -691,6 +743,7 @@ export type ApiShortDramaPrerollWorkspace = {
 }
 
 export type ApiCreateManualShortDramaPrerollInput = {
+  parentIntakeId?: string
   briefId: string
   briefVersion: number
   briefName: string
@@ -1226,6 +1279,7 @@ export type ApiViralRemakeWorkspace = {
 }
 
 export type ApiCreateManualViralRemakeInput = {
+  parentIntakeId?: string
   sourceVideo: ApiAssetVersionRef
   referenceImage?: ApiAssetVersionRef
   productName: string
@@ -1673,6 +1727,18 @@ async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, 
   return payload as T
 }
 
+function getTaskStrategyCreativeIntake(projectId: string, intakeId: string) {
+  return creativeRequest<ApiTaskStrategyCreativeIntake>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}`,
+  )
+}
+
+function getCreativeTaskHandoffDetail(projectId: string, taskId: string) {
+  return creativeRequest<ApiCreativeTaskHandoffDetail>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}`,
+  )
+}
+
 async function putUploadedAsset(url: string, headers: Record<string, string>, file: File) {
   const requestHeaders = new Headers()
   for (const [name, value] of Object.entries(headers)) {
@@ -1718,6 +1784,7 @@ async function createManualViralRemakeWorkspace(
     'POST',
     {
       source: 'manual',
+      parent_intake_id: input.parentIntakeId,
       format: 'video',
       performance_mode: 'viral_remake',
       channel: 'douyin',
@@ -1782,7 +1849,8 @@ async function createManualShortDramaPrerollWorkspace(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
     'POST',
     {
-      source: 'manual', format: 'video', performance_mode: 'short_drama_preroll', channel: 'douyin',
+      source: 'manual', parent_intake_id: input.parentIntakeId,
+      format: 'video', performance_mode: 'short_drama_preroll', channel: 'douyin',
       objective: input.objective, audience: input.audience,
       core_message: input.reviewedSellingPoints.filter(Boolean).join('；'), call_to_action: input.callToAction,
       concept: '短剧导流广告前贴', tone: ['紧凑', '悬念'], visual_keywords: ['人物连续', '高对比字幕', 'CTA 收束'],
@@ -2776,6 +2844,8 @@ export const api = {
   uploadProjectAsset,
   createManualViralRemakeWorkspace,
   createManualShortDramaPrerollWorkspace,
+  getTaskStrategyCreativeIntake,
+  getCreativeTaskHandoffDetail,
   selectShortDramaPrerollCandidate,
   regenerateShortDramaPrerollCandidates,
   createShortDramaPrerollVideoJob,

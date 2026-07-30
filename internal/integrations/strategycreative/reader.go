@@ -4,6 +4,7 @@ package strategycreative
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -179,4 +180,187 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		Mandatory: mandatory, Prohibited: prohibited,
 		CreativeRoutes: routes,
 	}, nil
+}
+
+// ReadTaskStrategyForCreative is the versioned, authorization-checked handoff
+// from Strategy to Creative. It deliberately performs a deterministic field
+// projection; no model call occurs at this integration boundary.
+func (r Reader) ReadTaskStrategyForCreative(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	reference creative.TaskStrategyReference,
+) (creative.TaskStrategySnapshot, error) {
+	value, err := r.Service.GetCreativeTaskStrategyVersion(
+		ctx, actor, reference.PlanID, reference.StrategyVersion,
+	)
+	if err != nil {
+		return creative.TaskStrategySnapshot{}, err
+	}
+	if value.ProjectID != projectID {
+		return creative.TaskStrategySnapshot{}, fmt.Errorf("task strategy does not belong to the selected project")
+	}
+	if !strings.EqualFold(strings.TrimSpace(value.ContentHash), strings.TrimSpace(reference.ExpectedContentHash)) {
+		return creative.TaskStrategySnapshot{}, fmt.Errorf("task strategy content hash no longer matches the selected version")
+	}
+	if value.ContractVersion != creative.TaskStrategyContractVersion ||
+		value.Document.ContractVersion != creative.TaskStrategyContractVersion {
+		return creative.TaskStrategySnapshot{}, fmt.Errorf("unsupported task strategy contract %q", value.ContractVersion)
+	}
+	plan, err := r.Service.GetCreativeTaskPlan(ctx, actor, reference.PlanID)
+	if err != nil {
+		return creative.TaskStrategySnapshot{}, err
+	}
+	if plan.ProjectID != projectID || plan.BusinessCode != value.Document.BusinessRef.BusinessCode {
+		return creative.TaskStrategySnapshot{}, fmt.Errorf("task strategy lineage does not match its plan")
+	}
+	brief, err := r.Service.GetBriefVersion(
+		ctx, actor, value.Document.Lineage.BriefID, value.Document.Lineage.BriefVersion,
+	)
+	if err != nil {
+		return creative.TaskStrategySnapshot{}, err
+	}
+	if brief.ProjectID != projectID ||
+		!strings.EqualFold(string(brief.ContentHash), value.Document.Lineage.BriefContentHash) {
+		return creative.TaskStrategySnapshot{}, fmt.Errorf("task strategy Brief lineage no longer matches")
+	}
+	document := value.Document
+	mandatory := appendUnique(append([]string{}, brief.Snapshot.Creative.MandatoryElements...))
+	prohibited := appendUnique(append([]string{}, brief.Snapshot.Creative.ProhibitedClaims...))
+	tone := appendUnique(append([]string{}, brief.Snapshot.Creative.Tone...))
+	visualKeywords := append([]string{}, tone...)
+	if len(visualKeywords) == 0 {
+		visualKeywords = append(visualKeywords, document.Audience.Insights...)
+	}
+	if len(visualKeywords) > 16 {
+		visualKeywords = visualKeywords[:16]
+	}
+	media := make([]creative.TaskStrategyMediaItem, 0, len(document.Media.Items))
+	for _, item := range document.Media.Items {
+		media = append(media, creative.TaskStrategyMediaItem{
+			AssetRef: item.AssetRef, Role: item.Role, Kind: item.Kind, MIMEType: item.MIMEType,
+			Status: item.Status, Usefulness: item.Usefulness,
+			StrategyUses: append([]string{}, item.StrategyUses...),
+			Observations: append([]string{}, item.Observations...),
+			Limitations:  append([]string{}, item.Limitations...),
+			WidthPixels:  item.WidthPixels, HeightPixels: item.HeightPixels,
+			DurationSeconds: item.DurationSeconds,
+		})
+	}
+	return creative.TaskStrategySnapshot{
+		PlanID: reference.PlanID, StrategyVersion: value.Version, ContentHash: value.ContentHash,
+		BusinessCode: document.BusinessRef.BusinessCode,
+		Objective:    document.Objective,
+		Audience: creative.TaskStrategyAudience{
+			Primary: document.Audience.Primary, Insights: append([]string{}, document.Audience.Insights...),
+		},
+		CoreMessage:  document.CoreMessage,
+		CallToAction: taskStrategyCTA(plan.Answers, brief.Snapshot),
+		Concept:      taskStrategyConcept(document.BusinessRef.BusinessCode, document.BusinessStrategy, document.CoreMessage),
+		Tone:         tone, VisualKeywords: visualKeywords, Mandatory: mandatory, Prohibited: prohibited,
+		BusinessStrategy:  cloneAnyMap(document.BusinessStrategy),
+		MessageHierarchy:  append([]string{}, document.MessageHierarchy...),
+		ClaimsAndEvidence: append([]string{}, document.ClaimsAndEvidence...),
+		Guardrails:        appendUnique(append([]string{}, document.Guardrails...)),
+		Media:             media,
+		ReferenceUse: creative.TaskStrategyReferenceUse{
+			Locator: document.ReferenceUse.Locator, RightsStatus: document.ReferenceUse.RightsStatus,
+			IntendedUse: document.ReferenceUse.IntendedUse,
+			Warnings:    append([]string{}, document.ReferenceUse.Warnings...),
+		},
+		OpenQuestions: append([]string{}, document.OpenQuestions...),
+		Lineage: creative.TaskStrategyLineage{
+			BriefID: document.Lineage.BriefID, BriefVersion: document.Lineage.BriefVersion,
+			BriefContentHash:       document.Lineage.BriefContentHash,
+			SourceStrategyID:       document.Lineage.SourceStrategyID,
+			SourceStrategyRevision: document.Lineage.SourceStrategyRevision,
+			SourceStrategyHash:     document.Lineage.SourceStrategyHash,
+			BusinessGeneration:     document.BusinessRef.Generation,
+			BusinessVersion:        document.BusinessRef.Version,
+			BusinessContentHash:    document.BusinessRef.ContentHash,
+			SkillName:              document.Lineage.SkillName, SkillVersion: document.Lineage.SkillVersion,
+			SkillContentHash:      document.Lineage.SkillContentHash,
+			PromptVersion:         document.Lineage.PromptVersion,
+			ProjectContextVersion: document.Lineage.ProjectContextVersion,
+		},
+	}, nil
+}
+
+func taskStrategyConcept(code string, values map[string]any, fallback string) string {
+	keys := map[string][]string{
+		creative.BusinessXiaohongshuImageText: {"content_angle"},
+		creative.BusinessCommercePreroll:      {"conversion_message", "opening_mechanisms"},
+		creative.BusinessShortDramaPreroll:    {"audience_bridge", "hook_mechanisms"},
+		creative.BusinessViralRemake:          {"product_mapping", "transferable_mechanisms"},
+	}
+	for _, key := range keys[code] {
+		if value := firstStrategyValue(values[key]); value != "" {
+			return value
+		}
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func firstStrategyValue(value any) string {
+	switch item := value.(type) {
+	case string:
+		return strings.TrimSpace(item)
+	case []string:
+		if len(item) > 0 {
+			return strings.TrimSpace(item[0])
+		}
+	case []any:
+		if len(item) > 0 {
+			return strings.TrimSpace(fmt.Sprint(item[0]))
+		}
+	}
+	return ""
+}
+
+func taskStrategyCTA(answers map[string]json.RawMessage, brief strategy.BriefDocument) string {
+	for _, key := range []string{"conversion_action", "interaction_goal"} {
+		var value string
+		if raw, found := answers[key]; found && json.Unmarshal(raw, &value) == nil {
+			labels := map[string]string{
+				"purchase": "立即购买", "visit": "了解更多", "coupon": "领取优惠",
+				"live": "进入直播间", "save": "收藏内容", "comment": "参与评论",
+				"search": "搜索品牌", "install": "立即安装", "register": "立即注册",
+				"reserve": "立即预约", "reactivate": "返回体验",
+			}
+			if label := labels[value]; label != "" {
+				return label
+			}
+			if strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	for _, platform := range brief.PlatformBriefs {
+		if strings.TrimSpace(platform.ConversionPath) != "" {
+			return strings.TrimSpace(platform.ConversionPath)
+		}
+	}
+	return ""
+}
+
+func appendUnique(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func cloneAnyMap(value map[string]any) map[string]any {
+	result := make(map[string]any, len(value))
+	for key, item := range value {
+		result[key] = item
+	}
+	return result
 }

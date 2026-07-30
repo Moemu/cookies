@@ -1,15 +1,47 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Download, ExternalLink, FileText, Film, Image, Music2, Play, RotateCcw, Save, Scissors, Send, ShieldCheck, Sparkles, Subtitles, ThumbsDown, ThumbsUp, Video, Volume2, WandSparkles } from 'lucide-react'
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  CircleCheck,
+  ClipboardCheck,
+  Download,
+  ExternalLink,
+  FileText,
+  Film,
+  Image,
+  Music2,
+  Play,
+  RotateCcw,
+  Save,
+  Scissors,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Subtitles,
+  ThumbsDown,
+  ThumbsUp,
+  Video,
+  Volume2,
+  WandSparkles,
+} from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, commerceTemplateApiId, guerlainPromptCopy, hookStoryboard } from '../data/commerceHooks'
-import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiCommercePrerollWorkspace, type ApiCreativeSourceOption, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPreparedCommercePreroll, type ApiPrerollScope, type ApiProjectMediaAsset, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaGenerationConfig, type ApiShortDramaHookStrategy, type ApiShortDramaPaceProfile, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaPrerollWorkspace, type ApiShortDramaStoryContext, type ApiShortDramaSubtitleStyle, type ApiViralRemakeWorkspace, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
+import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiCommercePrerollWorkspace, type ApiCreativeSourceOption, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPreparedCommercePreroll, type ApiPrerollScope, type ApiProjectMediaAsset, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaGenerationConfig, type ApiShortDramaHookStrategy, type ApiShortDramaPaceProfile, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaPrerollWorkspace, type ApiShortDramaStoryContext, type ApiShortDramaSubtitleStyle, type ApiTaskStrategyCreativeIntake, type ApiViralRemakeWorkspace, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
 import { industryProfile } from '../data/industry-profiles'
 import { findLocalShortDramaBrief, localShortDramaBriefs, shortDramaVideoLabel } from '../data/shortDramaBriefs'
 import { GamePrerollWorkspace } from './GamePrerollWorkspace'
+import {
+  TaskStrategyHandoffBanner,
+  taskStrategyPerformanceMode,
+  useTaskStrategyCreativeIntake,
+  useTaskStrategyTaskHandoffDetail,
+} from '../features/creative/TaskStrategyHandoff'
 
 function IndustrySchema({ module, profile, industry }: { module: string; industry: string; profile: { fields: string[]; format: string } }) {
   return <section className="industry-schema" aria-label={`${industry}${module}配置`}>
@@ -35,6 +67,8 @@ export function ImageTextCreationPage({ state, activeTaskId }: { state: DataStat
   const [job, setJob] = useState<ApiGenerationJob | null>(null)
   const [confirmedBriefId, setConfirmedBriefId] = useState('')
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
+  const handoffDetail = useTaskStrategyTaskHandoffDetail(currentProject.id, activeTaskId)
+  const inheritedFocus = handoffDetail?.task.direction.focus
   const pages = ['封面主张', '精度证据', '制造场景', '行动引导']
   const configuredProvider = providers.find(provider => provider.status === '已配置')
   const save = async () => {
@@ -47,6 +81,9 @@ export function ImageTextCreationPage({ state, activeTaskId }: { state: DataStat
       setNotice(cause instanceof Error ? cause.message : '保存创意版本失败，请重试。')
     }
   }
+  useEffect(() => {
+    if (inheritedFocus) setHeadline(inheritedFocus.slice(0, 24))
+  }, [inheritedFocus])
   useEffect(() => {
     let active = true
     void Promise.all([api.listArtifacts(currentProject.id), api.listJobs(currentProject.id)]).then(([artifacts, jobs]) => {
@@ -88,7 +125,7 @@ export function ImageTextCreationPage({ state, activeTaskId }: { state: DataStat
   }
   return <StateBoundary state={state} onRetry={() => setNotice('已重新加载')} onCreate={() => setNotice('已创建空白画板')}><div className="image-editor-specialized">
     <aside className="creative-structure"><div className="surface-toolbar"><h3>图文结构</h3><button aria-label="新增图文页面"><Image size={16}/></button></div>{pages.map((page, index) => <button key={page} className={selected === index ? 'creative-page active' : 'creative-page'} onClick={() => setSelected(index)}><span>{String(index + 1).padStart(2, '0')}</span><b>{page}</b><small>{index === 0 ? '主视觉' : index === 3 ? 'CTA' : '内容页'}</small></button>)}<div className="version-block"><span>来源</span><b>{currentProject.artifacts.strategy.version}</b><small>{currentProject.artifacts.strategy.summary}</small></div></aside>
-    <section className="image-canvas-workspace"><div className="canvas-toolbar light"><span>{activeTask ? `${activeTask.name} · 图文 v1.${version}` : `${currentProject.name} · 图文 v1.${version}`}</span><div><button onClick={() => setNotice('预览链接已生成')}><ExternalLink size={14}/>预览</button><button onClick={() => setNotice('PNG 导出任务已创建')}><Download size={14}/>导出</button></div></div>{activeTask ? <div className="creative-task-banner"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}<div className="portrait-stage"><div className="social-poster"><img src="/assets/white-precision-cnc.png" alt="CNC 设备加工高精度金属零件"/><div className="poster-copy"><small>WHITE PRECISION</small><h2>{headline}</h2><p>±0.01mm 精度 · 98%+ 准时交付</p></div><span className="poster-index">0{selected + 1} / 04</span></div></div><div className="page-strip">{pages.map((page, index) => <button key={page} className={selected === index ? 'active' : ''} onClick={() => setSelected(index)}><span>{index + 1}</span>{page}</button>)}</div></section>
+    <section className="image-canvas-workspace"><div className="canvas-toolbar light"><span>{activeTask ? `${activeTask.name} · 图文 v1.${version}` : `${currentProject.name} · 图文 v1.${version}`}</span><div><button onClick={() => setNotice('预览链接已生成')}><ExternalLink size={14}/>预览</button><button onClick={() => setNotice('PNG 导出任务已创建')}><Download size={14}/>导出</button></div></div>{handoffDetail ? <TaskStrategyHandoffBanner intake={handoffDetail.intake}/> : activeTask ? <div className="creative-task-banner"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}<div className="portrait-stage"><div className="social-poster"><img src="/assets/white-precision-cnc.png" alt="CNC 设备加工高精度金属零件"/><div className="poster-copy"><small>WHITE PRECISION</small><h2>{headline}</h2><p>±0.01mm 精度 · 98%+ 准时交付</p></div><span className="poster-index">0{selected + 1} / 04</span></div></div><div className="page-strip">{pages.map((page, index) => <button key={page} className={selected === index ? 'active' : ''} onClick={() => setSelected(index)}><span>{index + 1}</span>{page}</button>)}</div></section>
     <aside className="creative-inspector"><div className="surface-toolbar"><h3>页面属性</h3><span className="status success"><span/>品牌检查通过</span></div><label>渠道与画幅<select value={channel} onChange={event => setChannel(event.target.value)}><option>小红书 4:5</option><option>公众号 16:9</option><option>信息流 1:1</option></select></label><label>主标题<textarea value={headline} onChange={event => setHeadline(event.target.value)} maxLength={24}/><small>{headline.length} / 24 字</small></label><div className="check-list"><span><Check size={14}/>安全区未遮挡</span><span><Check size={14}/>核心信息有证据</span><span><Check size={14}/>品牌用语一致</span></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置 ARK_API_KEY，无法发起图片生成。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成图片。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generateImage()}><WandSparkles size={15}/>{job && ['queued', 'running'].includes(job.status) ? '图片生成中…' : '生成当前主视觉'}</button><button className="secondary-button full" onClick={save}><Save size={15}/>保存新版本</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div></StateBoundary>
 }
@@ -133,10 +170,16 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const [brandGenerated, setBrandGenerated] = useState(false)
   const [brandStage, setBrandStage] = useState(0)
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
+  const activeTaskType = activeTask?.type
+  const handoffIntake = useTaskStrategyCreativeIntake(
+    currentProject.id,
+    activeTaskId,
+    Boolean(activeTaskId && !activeTask),
+  )
   const category = activeView === '品牌广告' ? 'brand' : activeView === '素材剪辑' ? 'editing' : 'performance'
   const activeMode = performanceModes.find(item => item.id === selected) ?? performanceModes[0]
   useEffect(() => {
-    if (!activeTask) return
+    if (!activeTaskType) return
     const modeByType: Partial<Record<BusinessTaskType, string>> = {
       short_drama_preroll: 'short-drama',
       game_preroll: 'game',
@@ -144,9 +187,17 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       viral_remake: 'viral-remake',
       video: 'short-drama',
     }
-    const nextMode = modeByType[activeTask.type]
+    const nextMode = modeByType[activeTaskType]
     if (nextMode) setSelected(nextMode)
-  }, [activeTask])
+  }, [activeTaskType])
+  useEffect(() => {
+    if (!handoffIntake) return
+    const nextMode = taskStrategyPerformanceMode(
+      handoffIntake.request.task_strategy_input.business_code,
+    )
+    if (nextMode) setSelected(nextMode)
+    setNotice('任务策略已冻结到 Creative；请补齐生产素材和人工确认后继续。')
+  }, [handoffIntake])
   const create = async () => {
     const name = category === 'performance' ? activeMode.label : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
     const type: BusinessTaskType = category === 'brand' ? 'brand_video'
@@ -170,10 +221,10 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 到剪辑交付形成完整叙事。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
   const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '沿着 Brief、剧本、资产、广告生成和剪辑的固定路径推进，所有产物均保留来源与确认记录。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
-    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
+    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
     <IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/>
     <ProjectMediaContext />
-    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace onNotice={setNotice}/> : selected === 'short-drama' ? <PreRollWorkspace key={selected} mode={selected} onNotice={setNotice}/> : selected === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace onNotice={setNotice}/> : <div className="performance-workflow">
+    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selected === 'short-drama' ? <PreRollWorkspace handoffIntake={handoffIntake ?? undefined} key={selected} mode={selected} onNotice={setNotice}/> : selected === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <div className="performance-workflow">
       <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
       <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
       <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
@@ -257,7 +308,7 @@ function ProjectMediaContext() {
   </section>
 }
 
-function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
+function ViralRemixWorkspace({ onNotice, handoffIntake }: { onNotice: (message: string) => void; handoffIntake?: ApiTaskStrategyCreativeIntake }) {
   const { currentProject, reloadProjects } = useProject()
   const { providers } = useModelConfig()
   const [sourceAssetId, setSourceAssetId] = useState('source_video')
@@ -424,15 +475,16 @@ function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void
       let taskId = viralTaskId
       if (!taskId) {
         const workspace = await api.createManualViralRemakeWorkspace(currentProject.id, {
+          parentIntakeId: handoffIntake?.id,
           sourceVideo: makeAsset(sourceAssetId, sourceVersion),
           referenceImage: referenceImageAsset,
           productName,
           sellingPoints: [sellingPoint, secondSellingPoint],
           callToAction: cta,
           userInstruction,
-          objective: '复用高停留结构，生成当前产品的原创转化广告',
-          audience: '当前 Project 的目标受众（手工输入，待 Strategy 接管）',
-          coreMessage: [sellingPoint, secondSellingPoint].filter(Boolean).join('；'),
+          objective: handoffIntake?.request.objective || '复用高停留结构，生成当前产品的原创转化广告',
+          audience: handoffIntake?.request.audience || '当前 Project 的目标受众',
+          coreMessage: handoffIntake?.request.core_message || [sellingPoint, secondSellingPoint].filter(Boolean).join('；'),
           durationSeconds,
         })
         taskId = workspace.task.id
@@ -614,7 +666,7 @@ function mapShortDramaWorkspacePlan(workspace: ApiShortDramaPrerollWorkspace): A
   return { version: 'short_drama_preroll_v1', candidates }
 }
 
-function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; onNotice: (message: string) => void }) {
+function PreRollWorkspace({ mode, onNotice, handoffIntake }: { mode: 'short-drama' | 'game'; onNotice: (message: string) => void; handoffIntake?: ApiTaskStrategyCreativeIntake }) {
   const { currentProject, reloadProjects } = useProject()
   const { providers } = useModelConfig()
   const preset = preRollPresets[mode]
@@ -884,19 +936,24 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
           generationConfig,
         )
         : await api.createManualShortDramaPrerollWorkspace(currentProject.id, {
+          parentIntakeId: handoffIntake?.id,
           briefId: selectedBrief.id,
           briefVersion: selectedBrief.version,
           briefName: selectedBrief.name,
           title: storyContext.title,
           synopsis: storyContext.synopsis,
-          reviewedSellingPoints: storyContext.reviewedSellingPoints.filter(Boolean),
+          reviewedSellingPoints: Array.from(new Set([
+            ...storyContext.reviewedSellingPoints.filter(Boolean),
+            ...(handoffIntake?.request.core_message ? [handoffIntake.request.core_message] : []),
+          ])),
+          openingLine: storyContext.openingLine || undefined,
           hookStrategy,
           subtitleStyle,
           transition: 'hard_cut',
           hookStrength,
           paceProfile,
-          objective: selectedBrief.objective,
-          audience: `偏好${selectedBrief.applicableGenres.join('、')}内容的竖屏短剧观众`,
+          objective: handoffIntake?.request.objective || selectedBrief.objective,
+          audience: handoffIntake?.request.audience || `偏好${selectedBrief.applicableGenres.join('、')}内容的竖屏短剧观众`,
           prohibitedClaims: selectedBrief.prohibited,
           callToAction: selectedBrief.callToAction,
         })
@@ -988,7 +1045,7 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
   </div>
 }
 
-function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
+function CommerceHookWorkspace({ onNotice, handoffIntake }: { onNotice: (message: string) => void; handoffIntake?: ApiTaskStrategyCreativeIntake }) {
   const { currentProject, reloadProjects, updateArtifact } = useProject()
   const { providers } = useModelConfig()
   const [selectedId, setSelectedId] = useState(commerceHookTemplates[0].id)
@@ -1014,10 +1071,22 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
   )
   const usingFixture = !selectedSource
   const fixtureProductAsset = commerceWorkspace?.video_draft.commerce_preroll.input_snapshot.product_asset_ref
-  const selectedProductAsset = selectedSource?.product.product_asset_refs[0] ?? (usingFixture ? fixtureProductAsset : undefined)
+  const inheritedProductAsset = handoffIntake?.request.task_strategy_input.media.find(item =>
+    item.kind === 'image' && item.status === 'ready',
+  )?.asset_ref
+  const selectedProductAsset = inheritedProductAsset
+    ?? selectedSource?.product.product_asset_refs[0]
+    ?? (usingFixture ? fixtureProductAsset : undefined)
   const sourcePreview = selectedProductAsset
     ? `/platform/v1/projects/${encodeURIComponent(currentProject.id)}/assets/${encodeURIComponent(selectedProductAsset.asset_id)}/versions/${selectedProductAsset.version}/content`
     : selected.image
+  const effectivePreparedBlockers = prepared?.readiness.blockers.filter(blocker =>
+    !(handoffIntake && selectedProductAsset && blocker === 'PRODUCT_IMAGE_MISSING'),
+  ) ?? []
+  const effectivePreparedReady = Boolean(prepared && effectivePreparedBlockers.length === 0)
+  const effectiveSourceNotice = prepared && prepared.readiness.blockers.length > 0 && effectivePreparedReady
+    ? '已用冻结任务策略中的商品素材补齐 Brief 缺口；提示词已合并业务专属判断和约束。'
+    : sourceNotice
 
   useEffect(() => {
     let active = true
@@ -1113,7 +1182,15 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
     return () => { active = false }
   }, [commerceWorkspace, currentProject.id, selected.id, selectedSource])
 
-  const prompt = `${fidelity}\n${camera}\n${motion}\n${environment}\n${result}\n${guardrails}`
+  const inheritedStrategyPrompt = handoffIntake
+    ? [
+        `冻结任务策略目标：${handoffIntake.request.objective}`,
+        `核心信息：${handoffIntake.request.core_message}`,
+        `业务专属判断：${JSON.stringify(handoffIntake.request.task_strategy_input.business_strategy)}`,
+        `任务策略约束：${handoffIntake.request.task_strategy_input.guardrails.join('；')}`,
+      ].join('\n')
+    : ''
+  const prompt = `${fidelity}\n${camera}\n${motion}\n${environment}\n${result}\n${guardrails}${inheritedStrategyPrompt ? `\n${inheritedStrategyPrompt}` : ''}`
   const storyboard = prepared
     ? prepared.plan.prompt.timeline.map((segment, index) => ({
         time: `00:${segment.start_seconds.toFixed(1).padStart(4, '0')}–00:${segment.end_seconds.toFixed(1).padStart(4, '0')}`,
@@ -1211,16 +1288,17 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
       onNotice('当前 Brief 的提示词还没有准备完成，请稍后再试。')
       return
     }
-    if (selectedSource && !prepared?.readiness.generation_ready) {
-      onNotice(`当前 Brief 还不能正式生成：${prepared?.readiness.blockers.join('、') || '缺少商品素材'}`)
+    if (selectedSource && !effectivePreparedReady) {
+      onNotice(`当前输入还不能正式生成：${effectivePreparedBlockers.join('、') || '缺少商品素材'}`)
       return
     }
     try {
       setPreparing(true)
-      const sourceId = selectedSource?.source_ref.id ?? 'creative-video-intake-commerce-preroll-guerlain-v1'
-      const productAsset = selectedSource?.product.product_asset_refs[0]
+      setGeneratedAsset(null)
+      const sourceId = handoffIntake?.id ?? selectedSource?.source_ref.id ?? 'creative-video-intake-commerce-preroll-guerlain-v1'
+      const productAsset = selectedProductAsset
       let confirmedWorkspace = commerceWorkspace
-      if (usingFixture) {
+      if (usingFixture && !handoffIntake) {
         const saved = await persistFixtureDraft()
         confirmedWorkspace = await api.confirmCommercePrerollGeneration(
           currentProject.id,
@@ -1229,7 +1307,7 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
         )
         setCommerceWorkspace(confirmedWorkspace)
       }
-      const next = usingFixture && confirmedWorkspace
+      const next = usingFixture && !handoffIntake && confirmedWorkspace
         ? await api.createCommercePrerollWorkspaceVideoJob(currentProject.id, confirmedWorkspace)
         : productAsset
           ? await api.createPreparedCommercePrerollVideo(currentProject.id, prompt, sourceId, productAsset)
@@ -1288,8 +1366,8 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
       <label>结果与停留<textarea value={result} onChange={event => setResult(event.target.value)}/></label>
       <div className="hook-guardrail"><ShieldCheck size={15}/><span><b>自动附加生成护栏</b><small>{guardrails}</small></span></div>
       {configuredProvider ? <div className="hook-model"><CircleCheck size={15}/><span><b>{configuredProvider.name}</b><small>服务端媒体模型目录</small></span></div> : <div className="hook-model missing"><CircleAlert size={15}/><span><b>尚未配置模型</b><small>请在服务端配置 ARK_API_KEY 后重新检查能力。</small></span></div>}
-      {sourceNotice ? <div className={prepared && !prepared.readiness.generation_ready ? 'hook-model missing' : 'hook-model'}><CircleAlert size={15}/><span><b>来源与准备状态</b><small>{sourceNotice}</small></span></div> : null}
-      <div className="hook-actions"><button className="secondary-button" disabled={preparing} onClick={() => void save()}><Save size={14}/>保存策略</button><button className="primary-button" disabled={!configuredProvider || preparing || Boolean(selectedSource && !prepared?.readiness.generation_ready) || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}><WandSparkles size={14}/>{preparing ? '准备素材…' : job && ['queued', 'running'].includes(job.status) ? '生成中…' : generatedAsset ? '重新生成视频' : '生成视频'}</button></div>
+      {effectiveSourceNotice ? <div className={prepared && !effectivePreparedReady ? 'hook-model missing' : 'hook-model'}><CircleAlert size={15}/><span><b>来源与准备状态</b><small>{effectiveSourceNotice}</small></span></div> : null}
+      <div className="hook-actions"><button className="secondary-button" disabled={preparing} onClick={() => void save()}><Save size={14}/>保存策略</button><button className="primary-button" disabled={!configuredProvider || preparing || Boolean(selectedSource && !effectivePreparedReady) || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}><WandSparkles size={14}/>{preparing ? '准备素材…' : job && ['queued', 'running'].includes(job.status) ? '生成中…' : generatedAsset ? '重新生成视频' : '生成视频'}</button></div>
       {job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}
     </aside>
   </div>

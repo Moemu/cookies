@@ -1,0 +1,42 @@
+{
+  "business_code": "xiaohongshu_image_text",
+  "generation": 1,
+  "version": "1.0.0",
+  "display_name": "小红书图文",
+  "summary": "面向生活化种草、真实体验、互动和搜索承接的图文任务。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 10,
+  "match_rules": [
+    {"id":"channel_xhs","field":"channels","operator":"contains","values":["xiaohongshu"],"weight":45,"reason":"目标渠道包含小红书"},
+    {"id":"objective_consideration","field":"objective_type","operator":"in","values":["awareness","consideration"],"weight":25,"reason":"任务目标适合种草和决策教育"},
+    {"id":"deliverable_image_text","field":"deliverable_type","operator":"in","values":["image_text","unknown"],"weight":15,"reason":"期望交付适合图文表达"},
+    {"id":"brand_only","field":"brand_goal","operator":"equals","values":["true"],"weight":-10,"reason":"纯品牌长期传播并非图文种草的唯一优势"}
+  ],
+  "questions": [
+    {"id":"audience_scene","label":"用户最典型的生活场景是什么？","type":"textarea","required_for":"strategy","brief_source_path":"audience.scenarios","help":"Brief 已有场景时直接继承。","validation":{"max_length":800}},
+    {"id":"search_intent","label":"希望用户搜索或记住哪些关键词？","type":"multi_select","required_for":"strategy","help":"填写品牌词、品类词或场景词。","options":[{"value":"brand","label":"品牌词"},{"value":"category","label":"品类词"},{"value":"scene","label":"场景词"}],"validation":{"max_items":3}},
+    {"id":"interaction_goal","label":"希望形成哪种互动？","type":"single_select","required_for":"strategy","options":[{"value":"save","label":"收藏"},{"value":"comment","label":"评论"},{"value":"search","label":"搜索"},{"value":"purchase","label":"购买"}]},
+    {"id":"commercial_disclosure","label":"是否有商业内容披露要求？","type":"textarea","required_for":"production","validation":{"max_length":500}}
+  ],
+  "requirements": {
+    "strategy": ["目标人群","用户痛点或场景","核心卖点与证据","CTA 意图"],
+    "production": ["产品图片及授权","商业内容披露要求","品牌禁用表达"]
+  },
+  "output_fields": [
+    {"key":"content_angle","label":"内容角度","type":"string","required":true,"max_length":300,"description":"与受众场景和核心主张连接的内容角度。"},
+    {"key":"message_priority","label":"信息优先级","type":"string_array","required":true,"max_items":5,"description":"从用户问题到证据和 CTA 的信息顺序。"},
+    {"key":"search_and_interaction_intent","label":"搜索与互动意图","type":"string_array","required":true,"max_items":6,"description":"应承接的关键词类型和互动目标。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["style_description","structure_analysis"],
+    "production_confirmations": ["product_asset_rights","commercial_disclosure"]
+  },
+  "skill_name": "creative_task.xiaohongshu_image_text",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}

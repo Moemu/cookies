@@ -1,77 +1,116 @@
 param(
-    [string]$ListenAddress = "127.0.0.1:8080"
+    [string]$ListenAddress = "127.0.0.1:8080",
+    [switch]$Foreground,
+    [switch]$SkipDatabasePreparation,
+    [switch]$SkipTika
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$required = @(
-    "COOKIES_MYSQL_PORT",
-    "COOKIES_MYSQL_DSN",
-    "COOKIES_PROVIDER_MASTER_KEY",
-    "COOKIES_PROVIDER_MASTER_KEY_VERSION",
-    "COOKIES_PROVIDER_IMAGE_ADAPTER",
-    "COOKIES_PROVIDER_TEXT_ADAPTER",
-    "COOKIES_PROVIDER_ALLOW_INSECURE_HTTP",
-    "COOKIES_PROVIDER_OUTPUT_BUCKET",
-    "COOKIES_STRATEGY_ENABLED",
-    "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED",
-    "COOKIES_STRATEGY_TEXT_MODEL_ALIAS",
-    "COOKIES_STRATEGY_CRITIC_ENABLED",
-    "COOKIES_STRATEGY_APPROVE_ENABLED",
-    "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED",
-    "COOKIES_ENV",
-    "COOKIES_BLOB_PROVIDER",
-    "COOKIES_FILESYSTEM_BLOB_ROOT",
-    "COOKIES_LOCAL_ORGANIZATION_ID",
-    "COOKIES_LOCAL_PRINCIPAL_KIND",
-    "COOKIES_LOCAL_PRINCIPAL_ID",
-    "COOKIES_LOCAL_PROJECT_ID",
-    "COOKIES_LOCAL_SCOPES"
-)
+. "$PSScriptRoot\local-acceptance-common.ps1"
 
-foreach ($name in $required) {
-    $value = [Environment]::GetEnvironmentVariable($name, "User")
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        throw "$name is not configured; run import-clawex-model-providers.ps1 first"
-    }
-    [Environment]::SetEnvironmentVariable($name, $value, "Process")
-}
+Assert-LocalCommand docker
+Assert-LocalCommand go
+Initialize-LocalAcceptanceEnvironment
 $env:COOKIES_HTTP_ADDR = $ListenAddress
+$tikaPort = Get-LocalAcceptanceSetting "COOKIES_TIKA_PORT" "9998"
+$tikaURL = "http://127.0.0.1:$tikaPort"
+if ($SkipTika) {
+    Set-LocalAcceptanceProcessSetting "COOKIES_RESEARCH_TIKA_ENABLED" "false"
+}
+else {
+    Set-LocalAcceptanceProcessSetting "COOKIES_RESEARCH_TIKA_ENABLED" "true"
+    Set-LocalAcceptanceProcessSetting "COOKIES_RESEARCH_TIKA_BASE_URL" $tikaURL
+    Set-LocalAcceptanceProcessSetting "COOKIES_RESEARCH_TIKA_VERSION" "3.2.3.0"
+    Set-LocalAcceptanceProcessSetting "COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS" "120"
+    Set-LocalAcceptanceProcessSetting "COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES" "20971520"
+}
 
 Push-Location $repoRoot
 try {
-    & docker compose up -d mysql | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "start MySQL failed"
+    if (-not $SkipDatabasePreparation) {
+        & "$PSScriptRoot\start-local-database.ps1"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Local database preparation failed."
+        }
     }
-    $deadline = (Get-Date).AddSeconds(60)
+    else {
+        Assert-SeedTextRoute
+    }
+
+    if (-not $SkipTika) {
+        Write-Host "[backend] Starting Apache Tika and waiting for its API..."
+        & docker compose up -d tika
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to start Apache Tika."
+        }
+        $tikaDeadline = (Get-Date).AddSeconds(60)
+        do {
+            if (Test-LocalHTTP "$tikaURL/version") {
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $tikaDeadline)
+        if (-not (Test-LocalHTTP "$tikaURL/version")) {
+            throw "Apache Tika did not become ready at $tikaURL."
+        }
+    }
+
+    $port = [int]($ListenAddress.Split(":")[-1])
+    $readyURL = "http://$ListenAddress/readyz"
+    if (Test-LocalHTTP $readyURL) {
+        Write-Host "Backend is already running: http://$ListenAddress"
+        return
+    }
+    if (Test-LocalListeningPort $port) {
+        throw "$ListenAddress is already in use by another process."
+    }
+
+    $binaryDirectory = Join-Path $repoRoot ".data\bin"
+    New-Item -ItemType Directory -Force -Path $binaryDirectory | Out-Null
+    $executable = Join-Path $binaryDirectory "cookies-api-adapter.exe"
+    Write-Host "[backend] Building the Go API..."
+    & go build -o $executable ./cmd/cookies-api
+    if ($LASTEXITCODE -ne 0) {
+        throw "Building cookies-api failed."
+    }
+
+    $executable = (Resolve-Path $executable).Path
+    Write-Host ""
+    Write-Host "Backend configuration:"
+    Write-Host "  API:   http://$ListenAddress"
+    Write-Host "  Text:  $script:SeedTextAlias -> $script:SeedTextModel"
+    Write-Host "  Tika:  $(if ($SkipTika) { 'disabled' } else { $tikaURL })"
+    Write-Host "  Login: Admin / 123456 (unless overridden by local environment)"
+
+    if ($Foreground) {
+        Write-Host "[backend] Press Ctrl+C to stop."
+        & $executable
+        if ($LASTEXITCODE -ne 0) {
+            throw "Backend stopped with exit code $LASTEXITCODE."
+        }
+        return
+    }
+
+    $process = Start-Process `
+        -FilePath $executable `
+        -WorkingDirectory $repoRoot `
+        -WindowStyle Hidden `
+        -PassThru
+    $deadline = (Get-Date).AddSeconds(30)
     do {
-        $mysqlHealth = & docker inspect --format "{{.State.Health.Status}}" cookies-mysql-1 2>$null
-        if ($mysqlHealth -eq "healthy") {
+        if (Test-LocalHTTP $readyURL) {
             break
         }
-        Start-Sleep -Seconds 2
+        if ($process.HasExited) {
+            throw "Backend exited before it became ready (exit code $($process.ExitCode))."
+        }
+        Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
-    if ($mysqlHealth -ne "healthy") {
-        throw "MySQL did not become healthy"
+    if (-not (Test-LocalHTTP $readyURL)) {
+        throw "Backend did not become ready at $readyURL."
     }
-    & go build -o dist/cookies-api-adapter.exe ./cmd/cookies-api
-    if ($LASTEXITCODE -ne 0) {
-        throw "build cookies-api failed"
-    }
-    $existing = Get-NetTCPConnection `
-        -LocalPort ([int]($ListenAddress.Split(":")[-1])) `
-        -State Listen `
-        -ErrorAction SilentlyContinue
-    if ($existing) {
-        throw "$ListenAddress is already in use"
-    }
-    $process = Start-Process `
-        -FilePath (Resolve-Path "dist/cookies-api-adapter.exe") `
-        -PassThru `
-        -WindowStyle Hidden
-    Write-Output "cookies_api_pid=$($process.Id)"
-    Write-Output "cookies_api_url=http://$ListenAddress"
+    Write-Host "Backend started: http://$ListenAddress (PID $($process.Id))"
 }
 finally {
     Pop-Location

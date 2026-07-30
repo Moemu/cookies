@@ -1,0 +1,15 @@
+{
+  "name": "creative_task.commerce_preroll",
+  "version": "v1.0.0",
+  "kind": "creative_task",
+  "match": ["commerce_preroll"],
+  "instructions": [
+    "围绕单一转化主张、商品识别、卖点证明和 CTA 的信息顺序制定策略。",
+    "明确商品保真、优惠事实、功效证据和静音可理解要求。",
+    "可以提出商品动作、痛点或结果先行等抽象机制，不生成具体镜头或提示词。"
+  ],
+  "quality_checks": [
+    "策略必须区分 generation 与 production 阶段的素材要求。",
+    "不得生成具体 Hook、脚本、镜头、台词或模型提示词。"
+  ]
+}

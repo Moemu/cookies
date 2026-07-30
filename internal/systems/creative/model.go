@@ -20,6 +20,7 @@ type IntakeSource string
 const (
 	IntakeSourceManual           IntakeSource = "manual"
 	IntakeSourceStrategyPackage  IntakeSource = "strategy_package"
+	IntakeSourceTaskStrategy     IntakeSource = "task_strategy"
 	IntakeSourceUploadedDocument IntakeSource = "uploaded_document"
 	IntakeSourceConversation     IntakeSource = "conversation"
 )
@@ -66,10 +67,17 @@ const (
 
 type CreateIntakeRequest struct {
 	Source IntakeSource `json:"source"`
+	// ParentIntakeID links a production-specific manual intake back to a
+	// task-strategy handoff without allowing the manual flow to rewrite it.
+	ParentIntakeID string `json:"parent_intake_id,omitempty"`
 	// StrategyPackage is supplied only for the explicit, user-triggered handoff
 	// from an immutable Strategy package. The server reads and validates that
 	// package; callers never submit its content as trusted Creative input.
-	StrategyPackage         *StrategyPackageReference     `json:"strategy_package,omitempty"`
+	StrategyPackage *StrategyPackageReference `json:"strategy_package,omitempty"`
+	// TaskStrategy is the immutable Strategy-side version selected by the
+	// user. TaskStrategyInput is populated only by the server-side adapter.
+	TaskStrategy            *TaskStrategyReference        `json:"task_strategy,omitempty"`
+	TaskStrategyInput       *TaskStrategyInput            `json:"task_strategy_input,omitempty"`
 	CreativeRoutes          []CreativeRouteSnapshot       `json:"creative_routes,omitempty"`
 	Format                  CreativeFormat                `json:"format,omitempty"`
 	PerformanceMode         string                        `json:"performance_mode,omitempty"`
@@ -169,8 +177,8 @@ func (r CreateIntakeRequest) Validate() error {
 	}
 	switch r.Source {
 	case IntakeSourceManual:
-		if r.StrategyPackage != nil {
-			return fmt.Errorf("manual intake must not include strategy_package")
+		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil {
+			return fmt.Errorf("manual intake must not include a Strategy reference")
 		}
 		if r.ManualViralRemake != nil {
 			return r.validateManualViralRemake()
@@ -188,13 +196,26 @@ func (r CreateIntakeRequest) Validate() error {
 			return fmt.Errorf("manual image intake must not include video routing")
 		}
 	case IntakeSourceStrategyPackage:
-		if r.StrategyPackage == nil {
+		if r.StrategyPackage == nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" {
 			return fmt.Errorf("strategy_package is required for a strategy intake")
 		}
 		if len(r.CreativeRoutes) != 0 {
 			return fmt.Errorf("creative_routes are resolved from Strategy and must not be submitted by a caller")
 		}
 		return r.StrategyPackage.Validate()
+	case IntakeSourceTaskStrategy:
+		if r.TaskStrategy == nil {
+			return fmt.Errorf("task_strategy is required for a task strategy intake")
+		}
+		if r.StrategyPackage != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" {
+			return fmt.Errorf("task strategy content is resolved by Creative and must not be submitted by a caller")
+		}
+		if len(r.CreativeRoutes) != 0 || r.Format != "" || r.PerformanceMode != "" ||
+			r.Channel != "" || strings.TrimSpace(r.Objective) != "" || strings.TrimSpace(r.Audience) != "" ||
+			strings.TrimSpace(r.CoreMessage) != "" {
+			return fmt.Errorf("task strategy mapped fields are resolved by Creative and must not be submitted by a caller")
+		}
+		return r.TaskStrategy.Validate()
 	default:
 		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
@@ -290,6 +311,9 @@ func (r CreateIntakeRequest) validateManualViralRemake() error {
 	}
 	if len(r.CreativeRoutes) != 1 {
 		return fmt.Errorf("manual viral remake requires exactly one stable route")
+	}
+	if r.CreativeRoutes[0].RouteID != ManualViralRemakeRouteID {
+		return fmt.Errorf("manual viral remake route_id must be %q", ManualViralRemakeRouteID)
 	}
 	if err := r.CreativeRoutes[0].Validate(); err != nil {
 		return err

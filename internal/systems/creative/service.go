@@ -22,6 +22,13 @@ type StrategyPackageReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, StrategyPackageReference) (StrategyPackageSnapshot, error)
 }
 
+// TaskStrategyReader is the explicit boundary for consuming a frozen
+// CreativeTaskStrategyVersion. Implementations must authorize the read and
+// verify project and content hash before returning a Creative-owned snapshot.
+type TaskStrategyReader interface {
+	ReadTaskStrategyForCreative(context.Context, contract.ActorContext, contract.ProjectID, TaskStrategyReference) (TaskStrategySnapshot, error)
+}
+
 type AssetReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
 }
@@ -55,6 +62,7 @@ type Service struct {
 	ViralAnalyzer            ViralReferenceAnalyzer
 	Projects                 ActiveProjectResolver
 	StrategyPackages         StrategyPackageReader
+	TaskStrategies           TaskStrategyReader
 	Sources                  CreativeSourceReader
 	Assets                   AssetReader
 	Composer                 media.VideoComposer
@@ -345,6 +353,19 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	if project.OrganizationID != requestContext.Actor.OrganizationID || project.ProjectID != projectID {
 		return CreativeIntake{}, fmt.Errorf("resolved project context does not match request scope")
 	}
+	if request.Source == IntakeSourceManual && strings.TrimSpace(request.ParentIntakeID) != "" {
+		parent, parentErr := s.Repository.GetIntake(
+			ctx, requestContext.Actor.OrganizationID, projectID, request.ParentIntakeID,
+		)
+		if parentErr != nil {
+			return CreativeIntake{}, parentErr
+		}
+		if parent.Source != IntakeSourceTaskStrategy || parent.Request.TaskStrategyInput == nil ||
+			parent.Status != IntakeReady ||
+			!taskStrategyParentSupports(parent.Request.TaskStrategyInput.BusinessCode, request.PerformanceMode) {
+			return CreativeIntake{}, fmt.Errorf("parent_intake_id is not a compatible ready task strategy handoff")
+		}
+	}
 	strategyReady := true
 	if request.Source == IntakeSourceStrategyPackage {
 		if s.StrategyPackages == nil {
@@ -364,6 +385,22 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			}
 		}
 		strategyReady = snapshot.CreativeReady
+	}
+	if request.Source == IntakeSourceTaskStrategy {
+		if s.TaskStrategies == nil {
+			return CreativeIntake{}, fmt.Errorf("task strategy intake is unavailable")
+		}
+		reference := *request.TaskStrategy
+		snapshot, readErr := s.TaskStrategies.ReadTaskStrategyForCreative(
+			ctx, requestContext.Actor, projectID, reference,
+		)
+		if readErr != nil {
+			return CreativeIntake{}, readErr
+		}
+		request, err = resolvedTaskStrategyRequest(&reference, snapshot)
+		if err != nil {
+			return CreativeIntake{}, err
+		}
 	}
 	hash, err := contract.CanonicalJSONHash(request)
 	if err != nil {
@@ -393,6 +430,17 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	return stored, err
 }
 
+func taskStrategyParentSupports(businessCode, performanceMode string) bool {
+	switch businessCode {
+	case BusinessShortDramaPreroll:
+		return performanceMode == PerformanceModeShortDramaPreroll
+	case BusinessViralRemake:
+		return performanceMode == PerformanceModeViralRemake
+	default:
+		return false
+	}
+}
+
 func resolvedStrategyPackageRequest(reference *StrategyPackageReference, snapshot StrategyPackageSnapshot) CreateIntakeRequest {
 	concept := strings.TrimSpace(snapshot.Concept)
 	if concept == "" {
@@ -419,6 +467,35 @@ func (s Service) ListIntakes(ctx context.Context, actor contract.ActorContext, p
 		return nil, err
 	}
 	return s.Repository.ListIntakes(ctx, actor.OrganizationID, projectID, normalizedLimit(limit))
+}
+
+func (s Service) GetIntake(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string) (CreativeIntake, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeIntake{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return CreativeIntake{}, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if strings.TrimSpace(intakeID) == "" {
+		return CreativeIntake{}, fmt.Errorf("creative intake_id is required")
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeIntake{}, err
+	}
+	return s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
+}
+
+func (s Service) ListBusinessCapabilities(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]CreativeBusinessCapability, error) {
+	if s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return CreativeBusinessCapabilities(), nil
 }
 
 func (s Service) CreateTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateTaskRequest) (CreativeTask, error) {

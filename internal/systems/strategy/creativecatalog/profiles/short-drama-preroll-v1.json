@@ -1,0 +1,42 @@
+{
+  "business_code": "short_drama_preroll",
+  "generation": 1,
+  "version": "1.0.0",
+  "display_name": "短剧前贴",
+  "summary": "兼顾广告转化与短剧正片观看连续性的短时长前贴任务。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 30,
+  "match_rules": [
+    {"id":"context_short_drama","field":"content_context","operator":"equals","values":["short_drama"],"weight":55,"reason":"任务有明确短剧正片语境"},
+    {"id":"objective_conversion","field":"objective_type","operator":"in","values":["conversion","lead"],"weight":25,"reason":"任务以转化或引流为目标"},
+    {"id":"deliverable_video","field":"deliverable_type","operator":"in","values":["video","unknown"],"weight":15,"reason":"前贴需要视频交付"},
+    {"id":"has_main_video","field":"asset_roles","operator":"contains","values":["main_video"],"weight":15,"reason":"已有正片可以设计衔接约束"}
+  ],
+  "questions": [
+    {"id":"drama_genre","label":"短剧类型和剧情氛围是什么？","type":"textarea","required_for":"strategy","validation":{"max_length":800}},
+    {"id":"audience_connection","label":"产品受众与短剧受众的连接点是什么？","type":"textarea","required_for":"strategy","validation":{"max_length":800}},
+    {"id":"continuity_requirement","label":"广告与正片需要保持怎样的连续性？","type":"textarea","required_for":"strategy","validation":{"max_length":800}},
+    {"id":"main_video_ref","label":"正片素材引用","type":"asset_ref","required_for":"production","help":"只在最终拼接阶段必需。"}
+  ],
+  "requirements": {
+    "strategy": ["转化目标","短剧类型和受众","产品卖点","CTA 意图","衔接要求"],
+    "production": ["短剧正片及授权","产品图片或 Logo","时长和画幅"]
+  },
+  "output_fields": [
+    {"key":"audience_bridge","label":"受众连接","type":"string","required":true,"max_length":400,"description":"产品受众和短剧受众之间的连接。"},
+    {"key":"hook_mechanisms","label":"钩子机制","type":"string_array","required":true,"max_items":4,"description":"问题、冲突或悬念等抽象方向，不是具体 Hook。"},
+    {"key":"continuity_guardrails","label":"连续性约束","type":"string_array","required":true,"max_items":6,"description":"避免破坏正片观看体验的边界。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["genre_description","continuity_planning"],
+    "production_confirmations": ["main_video_rights","talent_rights","music_rights"]
+  },
+  "skill_name": "creative_task.short_drama_preroll",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}

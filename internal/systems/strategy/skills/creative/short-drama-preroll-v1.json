@@ -1,0 +1,15 @@
+{
+  "name": "creative_task.short_drama_preroll",
+  "version": "v1.0.0",
+  "kind": "creative_task",
+  "match": ["short_drama_preroll"],
+  "instructions": [
+    "同时考虑广告转化和短剧正片观看连续性。",
+    "明确目标受众与短剧受众的连接点、卖点顺序、CTA 意图和衔接边界。",
+    "可以提出问题、冲突或悬念等抽象机制，不生成具体 Hook、台词、镜头或提示词。"
+  ],
+  "quality_checks": [
+    "策略必须标明正片在 production 阶段的要求和授权边界。",
+    "不得输出具体 Hook、台词、脚本、分镜或模型提示词。"
+  ]
+}

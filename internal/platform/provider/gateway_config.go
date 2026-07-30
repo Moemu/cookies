@@ -174,6 +174,10 @@ type TextRouteResolver interface {
 	ResolveTextRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
 }
 
+type ResearchRouteResolver interface {
+	ResolveResearchRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
+}
+
 type VideoRouteResolver interface {
 	ResolveVideoRoute(context.Context, contract.OrganizationID, string) (VideoRouteSnapshot, error)
 }
@@ -251,6 +255,10 @@ func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organiza
 
 func (s MySQLGatewayConfigStore) ResolveTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
 	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "adapter_gateway")
+}
+
+func (s MySQLGatewayConfigStore) ResolveResearchRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "research.web", modelAlias, "ark")
 }
 
 func (s MySQLGatewayConfigStore) ResolveVideoRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (VideoRouteSnapshot, error) {

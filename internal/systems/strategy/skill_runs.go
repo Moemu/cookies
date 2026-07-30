@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 func (s Service) ListSkillRuns(ctx context.Context, actor contract.ActorContext, agentTaskID string) ([]SkillRun, error) {
@@ -31,6 +32,78 @@ func (s Service) ListSkillRuns(ctx context.Context, actor contract.ActorContext,
 		value, err := scanSkillRun(rows)
 		if err != nil {
 			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].Attempts, err = s.listAttemptsForSkillRun(
+			ctx, actor.OrganizationID, projectID, values[index].ID,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+func (s Service) listAttemptsForSkillRun(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	skillRunID string,
+) ([]SkillRunAttempt, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT attempt_no, purpose, provider_code,
+		model_alias, model_version, route_revision_id, response_mode, api_mode, background,
+		prompt_version, input_tokens, output_tokens, total_tokens, latency_ms,
+		validation_passed, validation_errors, output_hash, created_at
+		FROM platform_skill_run_attempts
+		WHERE organization_id = ? AND project_id = ? AND skill_run_id = ?
+		ORDER BY attempt_no ASC`,
+		organizationID, projectID, skillRunID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []SkillRunAttempt{}
+	for rows.Next() {
+		var value SkillRunAttempt
+		var modelAlias, modelVersion, routeRevisionID, responseMode, apiMode, promptVersion sql.NullString
+		var inputTokens, outputTokens, totalTokens sql.NullInt64
+		var validationErrors []byte
+		var outputHash sql.NullString
+		if err := rows.Scan(
+			&value.AttemptNo, &value.Purpose, &value.ProviderCode,
+			&modelAlias, &modelVersion, &routeRevisionID, &responseMode, &apiMode, &value.Background,
+			&promptVersion, &inputTokens, &outputTokens, &totalTokens, &value.LatencyMS,
+			&value.ValidationPassed, &validationErrors, &outputHash, &value.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		value.ModelAlias = modelAlias.String
+		value.ModelVersion = modelVersion.String
+		value.RouteRevisionID = routeRevisionID.String
+		value.ResponseMode = provider.TextResponseMode(responseMode.String)
+		value.APIMode = provider.TextAPIMode(apiMode.String)
+		value.PromptVersion = promptVersion.String
+		value.OutputHash = outputHash.String
+		value.ValidationErrors = []string{}
+		if len(validationErrors) > 0 && string(validationErrors) != "null" {
+			if err := json.Unmarshal(validationErrors, &value.ValidationErrors); err != nil {
+				return nil, err
+			}
+		}
+		if inputTokens.Valid || outputTokens.Valid || totalTokens.Valid {
+			value.Usage = &provider.TokenUsage{
+				InputTokens: inputTokens.Int64, OutputTokens: outputTokens.Int64,
+				TotalTokens: totalTokens.Int64,
+			}
 		}
 		values = append(values, value)
 	}

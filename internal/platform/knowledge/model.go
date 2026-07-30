@@ -19,11 +19,17 @@ type Chunk struct {
 	OrganizationID contract.OrganizationID `json:"organization_id"`
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	Index          int                     `json:"index"`
+	Kind           string                  `json:"kind"`
 	Text           string                  `json:"text"`
 	SourceURI      string                  `json:"source_uri"`
 	Section        string                  `json:"section"`
+	PageNumber     *int                    `json:"page_number,omitempty"`
 	StartLine      int                     `json:"start_line"`
 	EndLine        int                     `json:"end_line"`
+	TextSHA256     string                  `json:"text_sha256"`
+	Locator        map[string]any          `json:"locator"`
+	ParserCode     string                  `json:"parser_code"`
+	ParserVersion  string                  `json:"parser_version"`
 	CreatedAt      time.Time               `json:"created_at"`
 }
 

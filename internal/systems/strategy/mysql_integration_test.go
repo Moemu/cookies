@@ -75,6 +75,11 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	service := strategy.Service{
 		DB: db, Projects: projectService, Knowledge: integrationKnowledgeReader{reference.ID: reference},
 		Agents: agent.MySQLStore{DB: db}, V2Enabled: true,
+		CreativeTaskPlanningEnabled: true,
+		CreativeTaskPromptVersion:   "strategy.creative_task.generate.v2",
+	}
+	if err := service.EnsureCreativeBusinessCatalog(ctx); err != nil {
+		t.Fatalf("seed creative business catalog: %v", err)
 	}
 
 	createdTask, duplicate, err := service.CreateTask(
@@ -224,6 +229,67 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || strategyDraft.CurrentRevision != 1 {
 		t.Fatalf("get generated draft: revision=%d err=%v", strategyDraft.CurrentRevision, err)
 	}
+	catalog, err := service.ListCreativeBusinesses(ctx, actor, projectID)
+	if err != nil || len(catalog.Items) != 7 {
+		t.Fatalf("creative business catalog: items=%d err=%v", len(catalog.Items), err)
+	}
+	recommendation, err := service.RecommendCreativeBusinesses(
+		ctx, actor, projectID, briefVersion.BriefID, briefVersion.Version, 3,
+	)
+	if err != nil || !recommendationContains(
+		recommendation.Recommended, "xiaohongshu_image_text",
+	) {
+		t.Fatalf("creative recommendation=%#v err=%v", recommendation, err)
+	}
+	taskPlan, duplicate, err := service.CreateCreativeTaskPlan(
+		ctx, actor, contract.IdempotencyKey("creative_plan_"+suffix), projectID,
+		strategy.CreateCreativeTaskPlanRequest{
+			BriefID: briefVersion.BriefID, BriefVersion: briefVersion.Version,
+			SourceStrategy: &strategy.SourceStrategyRequest{
+				StrategyID: strategyDraft.ID, Revision: strategyDraft.CurrentRevision,
+			},
+			BusinessCode: "xiaohongshu_image_text", SelectionSource: "recommended",
+			CatalogHash: catalog.CatalogHash,
+		},
+	)
+	if err != nil || duplicate || taskPlan.Status != "collecting" {
+		t.Fatalf("create creative task plan: duplicate=%v plan=%#v err=%v", duplicate, taskPlan, err)
+	}
+	taskPlan, duplicate, err = service.PatchCreativeTaskPlanAnswers(
+		ctx, actor, contract.IdempotencyKey("creative_answers_"+suffix), taskPlan.ID,
+		strategy.CreativeTaskAnswerPatch{
+			ExpectedVersion: taskPlan.Version,
+			Operations: []strategy.CreativeTaskAnswerOperation{
+				{Op: "set", QuestionID: "audience_scene", Value: json.RawMessage(`"研发负责人在选型和内部汇报时"`)},
+				{Op: "set", QuestionID: "search_intent", Value: json.RawMessage(`["category","scene"]`)},
+				{Op: "set", QuestionID: "interaction_goal", Value: json.RawMessage(`"search"`)},
+			},
+		},
+	)
+	if err != nil || duplicate || !taskPlan.Completeness.Ready || taskPlan.Status != "ready" {
+		t.Fatalf("complete creative task plan: duplicate=%v plan=%#v err=%v", duplicate, taskPlan, err)
+	}
+	generation, duplicate, err := service.CreateCreativeTaskStrategy(
+		ctx, actor, contract.IdempotencyKey("creative_generate_"+suffix),
+		taskPlan.ID, taskPlan.Version, taskPlan.CurrentRevision,
+	)
+	if err != nil || duplicate || generation.Plan.Status != "generating" {
+		t.Fatalf("queue creative task strategy: duplicate=%v result=%#v err=%v", duplicate, generation, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, generation.AgentTask); err != nil {
+		t.Fatalf("generate creative task strategy: %v", err)
+	}
+	taskPlan, err = service.GetCreativeTaskPlan(ctx, actor, taskPlan.ID)
+	if err != nil || taskPlan.Status != "generated" || taskPlan.CurrentStrategy == nil {
+		t.Fatalf("read generated creative task strategy: plan=%#v err=%v", taskPlan, err)
+	}
+	exported, err := service.ExportCreativeTaskStrategyMarkdown(
+		ctx, actor, taskPlan.ID, taskPlan.CurrentStrategyVersion,
+	)
+	if err != nil || !strings.Contains(exported, "xiaohongshu_image_text") ||
+		strings.Contains(exported, "seedance_prompt") {
+		t.Fatalf("export creative task strategy: content=%q err=%v", exported, err)
+	}
 	strategies, err := service.ListProjectStrategies(ctx, actor, projectID)
 	if err != nil || len(strategies) != 1 ||
 		strategies[0].StrategyID != strategyDraft.ID ||
@@ -278,7 +344,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatalf("get generation metadata: %v", err)
 	}
 	if metadata.GenerationMode != "deterministic" ||
-		metadata.PromptVersion != "strategy.generate.v2" ||
+		metadata.PromptVersion != "strategy.generate.v3" ||
 		len(metadata.SkillVersions) < 3 ||
 		len(metadata.SkillSnapshotHashes) < 2 ||
 		len(metadata.GenerationContextHash) != 64 ||
@@ -306,6 +372,13 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || deepResult.Status != "succeeded" || len(deepResult.Findings) != 1 ||
 		deepResult.APIMode != provider.TextAPIResponses || !deepResult.Background {
 		t.Fatalf("deep review result=%#v err=%v", deepResult, err)
+	}
+	deepSkillRuns, err := service.ListSkillRuns(ctx, actor, deep.AgentTask.ID)
+	if err != nil || len(deepSkillRuns) != 1 || len(deepSkillRuns[0].Attempts) != 1 ||
+		deepSkillRuns[0].Attempts[0].Purpose != "deep_review" ||
+		!deepSkillRuns[0].Attempts[0].ValidationPassed ||
+		len(deepSkillRuns[0].Attempts[0].OutputHash) != 64 {
+		t.Fatalf("deep review skill attempts=%#v err=%v", deepSkillRuns, err)
 	}
 	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{alwaysFail: true}}
 	failedDeep, duplicate, err := service.StartDeepReview(
@@ -719,7 +792,7 @@ func (a *deepReviewTextAdapter) GenerateText(
 			Code: "MODEL_RATE_LIMITED", Message: "retry deep review", Retryable: true,
 		}}
 	}
-	output := json.RawMessage(`{"summary":"候选策略具备基础可执行性。","findings":[{"severity":"warning","section":"measurement","title":"指标需要收敛","detail":"核心指标与渠道指标的归因窗口尚未明确。","recommendation":"补充统一归因窗口与渠道分解口径。"}]}`)
+	output := json.RawMessage(`{"summary":"候选策略具备基础可执行性。","findings":[{"severity":"warning","section":"measurement","check_type":"measurement","strategy_path":"measurement","title":"指标需要收敛","detail":"核心指标与渠道指标的归因窗口尚未明确。","recommendation":"补充统一归因窗口与渠道分解口径。","brief_refs":["measurement.primary_kpi"],"evidence_refs":[]}]}`)
 	return provider.SynchronousResult{
 		ProviderCode: "adapter_gateway", ModelVersion: "gpt-5.5-pro",
 		Text: string(output), StructuredOutput: output,
@@ -736,12 +809,27 @@ func (p *recordingPublisher) Publish(_ context.Context, event eventoutbox.Event)
 	return nil
 }
 
+func recommendationContains(
+	items []strategy.CreativeBusinessRecommendation,
+	businessCode string,
+) bool {
+	for _, item := range items {
+		if item.BusinessCode == businessCode {
+			return true
+		}
+	}
+	return false
+}
+
 func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contract.OrganizationID, userID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	statements := []string{
 		"DELETE FROM event_consumptions WHERE event_id IN (SELECT event_id FROM event_outbox WHERE organization_id=?)",
+		"DELETE FROM strategy_creative_task_strategy_versions WHERE organization_id=?",
+		"DELETE FROM strategy_creative_task_plan_revisions WHERE organization_id=?",
+		"DELETE FROM strategy_creative_task_plans WHERE organization_id=?",
 		"DELETE FROM creative_intakes WHERE organization_id=?",
 		"DELETE FROM strategy_evidence_references WHERE organization_id=?",
 		"DELETE FROM strategy_feedback WHERE organization_id=?",
@@ -767,6 +855,7 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM strategy_conversations WHERE organization_id=?",
 		"DELETE FROM strategy_workspaces WHERE organization_id=?",
 		"DELETE FROM strategy_write_receipts WHERE organization_id=?",
+		"DELETE FROM platform_skill_run_attempts WHERE organization_id=?",
 		"DELETE FROM platform_skill_runs WHERE organization_id=?",
 		"DELETE FROM platform_agent_dispatches WHERE organization_id=?",
 		"DELETE FROM platform_agent_tasks WHERE organization_id=?",

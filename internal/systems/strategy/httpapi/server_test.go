@@ -91,6 +91,17 @@ func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
 	}
 }
 
+func TestRevisionScopeAmbiguousHasActionableError(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	writeError(response, strategy.ErrRevisionScopeAmbiguous)
+	if response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "REVISION_SCOPE_AMBIGUOUS") ||
+		!strings.Contains(response.Body.String(), "修改的策略章节") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestMatchesIfNoneMatch(t *testing.T) {
 	t.Parallel()
 	etag := `"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`
