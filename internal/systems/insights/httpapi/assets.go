@@ -26,6 +26,8 @@ func (s *Server) registerAssetRoutes() {
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets/{asset_id}/lineage", s.listAssetLineage)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets/{asset_id}/features", s.listAssetFeatures)
 	s.mux.HandleFunc("PATCH /api/insights/v1/projects/{project_id}/assets/{asset_id}/features", s.patchAssetFeatures)
+	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets/{asset_id}/analysis-runs", s.listAssetAnalysisRuns)
+	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/analysis-runs", s.listAnalysisRuns)
 
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/asset-mappings", s.listAssetMappings)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/asset-mappings", s.registerAssetMapping)
@@ -114,6 +116,40 @@ func (s *Server) patchAssetFeatures(writer http.ResponseWriter, request *http.Re
 	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
+// listAssetAnalysisRuns 供素材详情页的「数据与方法」读这条素材的分析历史
+// （03 §82：必须展示 Skill/算法版本、数据截止时间和方法）。
+func (s *Server) listAssetAnalysisRuns(writer http.ResponseWriter, request *http.Request) {
+	filter := analysisRunFilter(request)
+	filter.AssetID = request.PathValue("asset_id")
+	values, err := s.app.ListAnalysisRuns(request.Context(), mustActor(request), projectID(request), filter)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+// listAnalysisRuns 是项目级的分析任务流水，供能力运营看成功率和耗时（03 §310）。
+func (s *Server) listAnalysisRuns(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.app.ListAnalysisRuns(request.Context(), mustActor(request), projectID(request), analysisRunFilter(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func analysisRunFilter(request *http.Request) insights.AnalysisRunFilter {
+	filter := insights.AnalysisRunFilter{
+		Kind:  insights.AnalysisRunKind(request.URL.Query().Get("kind")),
+		Limit: queryLimit(request),
+	}
+	for _, value := range queryList(request, "status") {
+		filter.Statuses = append(filter.Statuses, insights.AnalysisRunStatus(value))
+	}
+	return filter
+}
+
 // assetAction carries the 分析状态链 verbs of PRD §11.1. Each is an explicit
 // decision with an expected version, so two people cannot confirm past each other.
 func (s *Server) assetAction(writer http.ResponseWriter, request *http.Request) {
@@ -142,6 +178,19 @@ func (s *Server) assetAction(writer http.ResponseWriter, request *http.Request) 
 			return
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+	case strings.HasSuffix(action, ":analyze"):
+		// AI 提特征。这是一次真实的模型调用，会花钱也会花时间，
+		// 所以只挂在这条显式的动词上——没有任何地方会自动触发它。
+		var body insights.AnalyzeAssetRequest
+		if !decode(writer, request, &body) {
+			return
+		}
+		value, err := s.app.AnalyzeAsset(request.Context(), actor, project, strings.TrimSuffix(action, ":analyze"), body)
+		if err != nil {
+			writeError(writer, request, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, value)
 	case strings.HasSuffix(action, ":confirm"):
 		s.assetTransition(writer, request, strings.TrimSuffix(action, ":confirm"), s.app.ConfirmAssetAnalysis)
 	case strings.HasSuffix(action, ":request-review"):

@@ -551,8 +551,8 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 		result.Note = "至少一边没有内容特征，两个素材之间到底改了什么无从判断。数字上的差异不能算到任何变量头上。"
 	case minImpressions < directionalSampleImpressions:
 		result.Verdict, result.Confidence = VerdictLowSample, ConfidenceLowSample
-		result.Note = fmt.Sprintf("样本较少的一边只有 %d 次展示，不到 %d 次的方向性门槛，先不谈差异。",
-			minImpressions, directionalSampleImpressions)
+		result.Note = fmt.Sprintf("样本较少的一边只有 %s 次展示，不到 %s 次的方向性门槛，先不谈差异。",
+			countText(minImpressions), countText(directionalSampleImpressions))
 	case len(result.ChangedFeatures) == 0:
 		result.Verdict, result.Confidence = VerdictConfounded, ConfidenceConfounded
 		result.Note = "两个素材在已记录的特征上完全一致，差异来自特征体系没覆盖到的地方——可能是投放设置、时段或受众，不是内容。"
@@ -566,8 +566,8 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 			result.ChangedFeatures[0].Label)
 	case minImpressions < sufficientSampleImpressions:
 		result.Verdict, result.Confidence = VerdictDirectional, ConfidenceDirectional
-		result.Note = fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %d 次展示的充分门槛。",
-			result.ChangedFeatures[0].Label, sufficientSampleImpressions)
+		result.Note = fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %s 次展示的充分门槛。",
+			result.ChangedFeatures[0].Label, countText(sufficientSampleImpressions))
 	default:
 		result.Verdict, result.Confidence = VerdictAttributable, ConfidenceSufficient
 		result.Note = fmt.Sprintf("只改了「%s」，其余 %d 个特征取值相同，样本充分且区间不重叠——这个差异可以归到这个变量上。",
@@ -1053,44 +1053,23 @@ func buildDriver(kind AssetType, key, value string, inGroup, rest []*assetSlice,
 		AssetType: kind, Key: key, Label: field.Label, Group: field.Group, Value: value,
 		Assets: len(inGroup), RestAssets: len(rest),
 	}
-	for _, slice := range inGroup {
-		driver.Counts = driver.Counts.add(slice.total)
-	}
-	for _, slice := range rest {
-		driver.RestCounts = driver.RestCounts.add(slice.total)
-	}
-	driver.Rates, driver.RestRates = RatesOf(driver.Counts), RatesOf(driver.RestCounts)
-	driver.CTRInterval = WilsonInterval(driver.Counts.Clicks, driver.Counts.Impressions)
-	driver.RestCTRInterval = WilsonInterval(driver.RestCounts.Clicks, driver.RestCounts.Impressions)
-	driver.IntervalsOverlap = intervalsOverlap(driver.CTRInterval, driver.RestCTRInterval)
-	driver.CTRLift = relativeChange(driver.RestRates.CTR, driver.Rates.CTR)
-	driver.CovaryingFeatures = covaryingFeatures(key, inGroup, rest)
-
-	minImpressions := driver.Counts.Impressions
-	if driver.RestCounts.Impressions < minImpressions {
-		minImpressions = driver.RestCounts.Impressions
-	}
-	switch {
-	case minImpressions < directionalSampleImpressions:
-		driver.Confidence = ConfidenceLowSample
-		driver.Note = fmt.Sprintf("样本较少的一侧只有 %d 次展示，这个分组还比不出东西。", minImpressions)
-	case len(driver.CovaryingFeatures) > 0:
-		driver.Confidence = ConfidenceConfounded
-		driver.Note = fmt.Sprintf("这一组素材在「%s」上也整齐地和其他素材不同，差异不能只算到「%s」头上。",
-			strings.Join(driver.CovaryingFeatures, "」「"), field.Label)
-	case driver.IntervalsOverlap:
-		driver.Confidence = ConfidenceDirectional
-		driver.Note = "两组的点击率置信区间重叠，差异可能只是波动。"
-	case !comparable:
-		driver.Confidence = ConfidenceConfounded
-		driver.Note = "窗口内口径不一致，两组之间的差异可能来自口径而不是内容。"
-	case minImpressions < sufficientSampleImpressions:
-		driver.Confidence = ConfidenceDirectional
-		driver.Note = "区间不重叠，但样本还没到充分门槛；而且这是相关不是因果，要确认得做只改这一个变量的实验。"
-	default:
-		driver.Confidence = ConfidenceSufficient
-		driver.Note = "样本充分、区间不重叠、也没发现同向变化的其他特征。但这仍然是相关：要确认因果得做只改这一个变量的实验。"
-	}
+	// 组间判定走 group_compare.go，和实验中心共用一套。驱动因素是事后按特征凑的分组，
+	// 所以 PreRegistered 为 false——同样的数字，这里只能说到「相关」。
+	comparison := compareGroups(groupCompareInput{
+		InGroup:      inGroup,
+		Rest:         rest,
+		CovaryKey:    key,
+		SubjectLabel: field.Label,
+		Comparable:   comparable,
+	})
+	driver.Counts, driver.RestCounts = comparison.Counts, comparison.RestCounts
+	driver.Rates, driver.RestRates = comparison.Rates, comparison.RestRates
+	driver.CTRInterval, driver.RestCTRInterval = comparison.CTRInterval, comparison.RestCTRInterval
+	driver.IntervalsOverlap = comparison.IntervalsOverlap
+	driver.CTRLift = comparison.CTRLift
+	driver.CovaryingFeatures = comparison.CovaryingFeatures
+	driver.Confidence = comparison.Confidence
+	driver.Note = comparison.Note
 	return driver
 }
 

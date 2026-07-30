@@ -316,6 +316,82 @@ func TestCreateReportDerivesFindingsFromSimulatedMetricSnapshot(t *testing.T) {
 	if strings.Contains(report.Summary, "client supplied") || strings.Contains(strings.Join(report.Findings, " "), "client supplied") {
 		t.Fatalf("report must be server-derived: %#v", report)
 	}
+	if len(report.Digest) != 0 || report.WindowStart != "" || report.WindowEnd != "" {
+		t.Fatalf("不带窗口的报告不该有汇总：%#v", report)
+	}
+}
+
+// 带窗口的报告必须真的把三处结论取回来。取不到时要报错，不能悄悄建成一份空报告——
+// 人在投后分析页点的是「定格这一屏」，拿到一份没有内容的报告比拿到错误更难发现。
+func TestCreateReportWithWindowFailsRatherThanFreezingNothing(t *testing.T) {
+	t.Parallel()
+	service := testService() // 没有 Connectors / Assets / Experiments
+	_, err := service.CreateReport(context.Background(), testActor(), "project_1", CreateReportRequest{
+		ExecutionID: "deliveryexecution_1",
+		Window: MetricWindow{
+			Start: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+			End:   time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC),
+		},
+	})
+	if err == nil {
+		t.Fatal("窗口分析取不到时，报告不该创建成功")
+	}
+}
+
+func TestDropReportFindingMarksInsteadOfRemoving(t *testing.T) {
+	t.Parallel()
+	repository := &memoryRepository{reports: map[string]InsightReport{}, experiences: map[string]Experience{}}
+	service := testService()
+	service.Repository = repository
+	actor := testActor()
+
+	report, err := service.CreateReport(context.Background(), actor, "project_1", CreateReportRequest{
+		ExecutionID: "deliveryexecution_1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 直接塞进仓储：这条用例要验的是删减本身，不是汇总怎么算出来的。
+	seeded := repository.reports[report.ID]
+	seeded.Digest = []ReportFinding{
+		{Kind: SectionAssetPerformance, Text: "首图单一利益点的组明显更好。"},
+		{Kind: SectionExperiment, Text: "实验 A 支持这一点。"},
+	}
+	repository.reports[report.ID] = seeded
+
+	dropped, err := service.DropReportFinding(context.Background(), actor, "project_1", report.ID, seeded.Version, 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped.Digest) != 2 || !dropped.Digest[1].Dropped || dropped.Digest[0].Dropped {
+		t.Fatalf("删减应只打标记不删条目：%#v", dropped.Digest)
+	}
+	if dropped.Version != seeded.Version+1 {
+		t.Fatalf("version=%d", dropped.Version)
+	}
+
+	restored, err := service.DropReportFinding(context.Background(), actor, "project_1", report.ID, dropped.Version, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Digest[1].Dropped {
+		t.Fatalf("放回去应清掉标记：%#v", restored.Digest)
+	}
+
+	if _, err := service.DropReportFinding(context.Background(), actor, "project_1", report.ID, restored.Version, 9, true); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("越界下标 error=%v", err)
+	}
+	if _, err := service.DropReportFinding(context.Background(), actor, "project_1", report.ID, restored.Version-1, 0, true); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("版本冲突 error=%v", err)
+	}
+
+	confirmed, err := service.ConfirmReport(context.Background(), actor, "project_1", report.ID, restored.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DropReportFinding(context.Background(), actor, "project_1", report.ID, confirmed.Version, 0, true); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("已确认的报告不该还能删减 error=%v", err)
+	}
 }
 
 func testActor() contract.ActorContext {
@@ -407,6 +483,23 @@ func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contr
 	value.Version++
 	value.ConfirmedBy = actorID
 	value.ConfirmedAt = &now
+	value.UpdatedAt = now
+	r.reports[id] = value
+	return value, nil
+}
+func (r *memoryRepository) UpdateReportDigest(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, digest []ReportFinding, now time.Time) (InsightReport, error) {
+	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if value.Version != expectedVersion {
+		return InsightReport{}, ErrVersionConflict
+	}
+	if value.Status != ReportDraft {
+		return InsightReport{}, ErrInvalidState
+	}
+	value.Digest = digest
+	value.Version++
 	value.UpdatedAt = now
 	r.reports[id] = value
 	return value, nil

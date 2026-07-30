@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/insights"
@@ -19,6 +20,7 @@ type Application interface {
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)
 	ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error)
+	DropReportFinding(context.Context, contract.ActorContext, contract.ProjectID, string, int64, int, bool) (insights.InsightReport, error)
 	CreateExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64, insights.CreateExperienceRequest) (insights.Experience, error)
 	ListExperiences(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperienceStatus, int) ([]insights.Experience, error)
 	ConfirmExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experience, error)
@@ -51,6 +53,11 @@ type Application interface {
 	RetireAsset(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AssetTransitionRequest) (insights.Asset, error)
 	GetFeatureMatrix(context.Context, contract.ActorContext, contract.ProjectID, []string) (insights.FeatureMatrix, error)
 
+	// AI 提特征（03 §9 AM-005）。只有人点按钮才会走到这里：
+	// 登记素材时自动排队会把复核队列灌满没人要看的结果，而复核是唯一的质量闸门。
+	AnalyzeAsset(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AnalyzeAssetRequest) (insights.AnalyzeAssetResult, error)
+	ListAnalysisRuns(context.Context, contract.ActorContext, contract.ProjectID, insights.AnalysisRunFilter) ([]insights.AnalysisRun, error)
+
 	// 数据接入与投后分析指标（doc10）。
 	RegisterDataSource(context.Context, contract.ActorContext, contract.ProjectID, insights.RegisterDataSourceRequest) (insights.DataSource, error)
 	ListDataSources(context.Context, contract.ActorContext, contract.ProjectID, insights.DataSourceFilter) ([]insights.DataSource, error)
@@ -69,6 +76,20 @@ type Application interface {
 	// 能力运营（03 §一级导航；20 §4.1）。只读：这个模块治理的东西全部记在
 	// features.go 和指标字典里，改它们要改代码并过评审，不走接口。
 	GetCapabilityOperations(context.Context, contract.ActorContext, contract.ProjectID, insights.MetricWindow) (insights.CapabilityOperations, error)
+
+	// 实验中心（03 §7.3 / AM-009）。判定不在入参里：判定要是能传，
+	// 事先定的样本门槛就形同虚设。人只写解读，系统给判定。
+	CreateExperiment(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateExperimentRequest) (insights.Experiment, error)
+	ListExperiments(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperimentFilter) ([]insights.Experiment, error)
+	GetExperiment(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.ExperimentDetail, error)
+	AttachExperimentAsset(context.Context, contract.ActorContext, contract.ProjectID, string, string, insights.AttachExperimentAssetRequest) (insights.AttachExperimentAssetResult, error)
+	DetachExperimentAsset(context.Context, contract.ActorContext, contract.ProjectID, string, string, string) (insights.ExperimentVariant, error)
+	StartExperiment(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experiment, error)
+	ConcludeExperiment(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ConcludeExperimentRequest) (insights.Experiment, error)
+
+	// 系统设置（03 §78；20 §121）。只读且不读库：返回的每个值都是代码常量本身，
+	// 不是抄过来的副本——抄一份迟早和代码对不上，那时候这一页就从说明变成误导。
+	GetInsightSettings(context.Context, contract.ActorContext, contract.ProjectID) (insights.InsightSettings, error)
 }
 
 type Server struct {
@@ -90,8 +111,10 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/prelaunch", server.preLaunch)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/performance", server.performance)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/capability-operations", server.capabilityOperations)
+	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/settings", server.settings)
 	server.registerAssetRoutes()
 	server.registerConnectorRoutes()
+	server.registerExperimentRoutes()
 	return server
 }
 
@@ -100,11 +123,44 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) createReport(writer http.ResponseWriter, request *http.Request) {
-	var body insights.CreateReportRequest
+	// 窗口在线上传的是「2026-07-01」这样的日子，不是时间戳：投后分析页上人看到的
+	// 就是两个日期，报告要定格的也是这两个日期。中间过一道时区换算，定格下来的
+	// 窗口就可能和人当时看到的差一天，而报告上还是写着同一个区间。
+	// 这里的 Window 遮住内嵌结构里的同名字段（Go 取层级更浅的那个）。
+	var body struct {
+		insights.CreateReportRequest
+		Window struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"window"`
+	}
 	if !decode(writer, request, &body) {
 		return
 	}
-	value, err := s.app.CreateReport(request.Context(), mustActor(request), projectID(request), body)
+	payload := body.CreateReportRequest
+	start, end := strings.TrimSpace(body.Window.Start), strings.TrimSpace(body.Window.End)
+	switch {
+	case start == "" && end == "":
+		// 不传窗口就是老调用方，报告照旧生成，只是没有四块汇总。
+	case start == "" || end == "":
+		// 只传一头就退回去。补一个默认值等于替人挑了半个窗口，而报告上会写得
+		// 像是他自己选的。
+		writeError(writer, request, insights.ErrInvalidRequest)
+		return
+	default:
+		parsedStart, err := time.ParseInLocation("2006-01-02", start, time.UTC)
+		if err != nil {
+			writeError(writer, request, insights.ErrInvalidRequest)
+			return
+		}
+		parsedEnd, err := time.ParseInLocation("2006-01-02", end, time.UTC)
+		if err != nil {
+			writeError(writer, request, insights.ErrInvalidRequest)
+			return
+		}
+		payload.Window = insights.MetricWindow{Start: parsedStart, End: parsedEnd}
+	}
+	value, err := s.app.CreateReport(request.Context(), mustActor(request), projectID(request), payload)
 	if err != nil {
 		writeError(writer, request, err)
 		return
@@ -132,6 +188,24 @@ func (s *Server) reportAction(writer http.ResponseWriter, request *http.Request)
 			return
 		}
 		value, err := s.app.ConfirmReport(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":confirm"), body.ExpectedVersion)
+		if err != nil {
+			writeError(writer, request, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, value)
+	case strings.HasSuffix(action, ":drop-finding"):
+		// 人工删减。dropped 可以来回切，因为「删错了」比「删漏了」常见得多，
+		// 而报告在确认之前本来就是可改的。
+		var body struct {
+			ExpectedVersion int64 `json:"expected_version"`
+			Index           int   `json:"index"`
+			Dropped         bool  `json:"dropped"`
+		}
+		if !decode(writer, request, &body) {
+			return
+		}
+		value, err := s.app.DropReportFinding(request.Context(), mustActor(request), projectID(request),
+			strings.TrimSuffix(action, ":drop-finding"), body.ExpectedVersion, body.Index, body.Dropped)
 		if err != nil {
 			writeError(writer, request, err)
 			return
@@ -315,6 +389,20 @@ func (s *Server) capabilityOperations(writer http.ResponseWriter, request *http.
 		return
 	}
 	value, err := s.app.GetCapabilityOperations(request.Context(), mustActor(request), projectID(request), window)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+// settings 返回五组当前生效的阈值与规则。没有 PUT/PATCH 配对：整页只读，
+// 改阈值要走代码评审（03 §17.3 把「最低样本由谁配置」列为待确认，在那条定下来
+// 之前开放写接口，等于先替它选了答案）。
+//
+// 路径上带 project_id 只为沿用同一套鉴权，值本身对整个部署生效，不分 Project。
+func (s *Server) settings(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.app.GetInsightSettings(request.Context(), mustActor(request), projectID(request))
 	if err != nil {
 		writeError(writer, request, err)
 		return

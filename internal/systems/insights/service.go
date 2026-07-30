@@ -10,6 +10,7 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
+	"github.com/shikanon/cookies/internal/systems/insights/skills"
 )
 
 const (
@@ -102,10 +103,18 @@ type CreateReportRequest struct {
 	ExecutionID string   `json:"execution_id"`
 	Summary     string   `json:"summary"`
 	Findings    []string `json:"findings"`
+
+	// Window 是要定格的数据窗口。来自投后分析页当前选的窗口——「看到什么定格什么」，
+	// 不让后端偷偷默认（20 §4.1：数据窗口必须能被看到）。后端自己挑一个窗口的话，
+	// 人看到的那一屏和报告里定格的会是两回事，而两边都写着同一个日期区间。
+	Window MetricWindow `json:"window"`
 }
 
 func (r CreateReportRequest) Validate() error {
 	if strings.TrimSpace(r.ExecutionID) == "" {
+		return ErrInvalidRequest
+	}
+	if !r.Window.Start.IsZero() && !r.Window.End.IsZero() && r.Window.End.Before(r.Window.Start) {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -126,7 +135,15 @@ type InsightReport struct {
 	Status            ReportStatus            `json:"status"`
 	Summary           string                  `json:"summary"`
 	Findings          []string                `json:"findings"`
-	Version           int64                   `json:"version"`
+
+	// Digest 是定格的四块发现。Findings（[]string）保留，是旧报告的兼容读法。
+	Digest []ReportFinding `json:"digest"`
+	// 定格的数据窗口。报告存的是「在这个时点、基于这份数据窗口、做了这个判断」。
+	// 旧报告没有窗口，这两个字段为空——空比编一个进去诚实。
+	WindowStart string `json:"window_start,omitempty"`
+	WindowEnd   string `json:"window_end,omitempty"`
+
+	Version int64 `json:"version"`
 	CreatedBy         string                  `json:"created_by"`
 	ConfirmedBy       string                  `json:"confirmed_by,omitempty"`
 	ConfirmedAt       *time.Time              `json:"confirmed_at,omitempty"`
@@ -369,6 +386,7 @@ type Repository interface {
 	ListReports(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]InsightReport, error)
 	GetReport(context.Context, contract.OrganizationID, contract.ProjectID, string) (InsightReport, error)
 	ConfirmReport(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (InsightReport, error)
+	UpdateReportDigest(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, []ReportFinding, time.Time) (InsightReport, error)
 	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
 	ListExperiences(context.Context, contract.OrganizationID, contract.ProjectID, ExperienceStatus, int) ([]Experience, error)
 	GetExperience(context.Context, contract.OrganizationID, contract.ProjectID, string) (Experience, error)
@@ -387,10 +405,23 @@ type Service struct {
 	Assets AssetRepository
 	// Connectors backs 数据接入 and the Canonical daily metrics 投后分析 reads.
 	Connectors ConnectorRepository
-	Projects   ActiveProjectResolver
-	Delivery   DeliveryReader
-	NewID      ids.Generator
-	Now        func() time.Time
+	// Runs 记录每次分析任务的输入、方法、模型版本和结果（03 §344 验收 12）。
+	// 与 Assets 分开：分析任务是只增不改的流水，素材是有状态机的实体。
+	Runs AnalysisRunRepository
+	// Experiments 支撑实验中心。与 Repository 分开的理由同上：
+	// 实验有自己的状态机（设计中 → 已开跑 → 已下结论），和复盘报告没有共同点。
+	Experiments ExperimentRepository
+	Projects    ActiveProjectResolver
+	Delivery DeliveryReader
+	// Text 是特征提取唯一的模型出口。为 nil 时提取直接失败，
+	// 不会退化成模板产出——库里一条编造的特征，代价远大于一次失败的提取。
+	Text TextGenerator
+	// TextModelAlias 是能力别名，不是供应商的模型 ID（10 §凭据只存引用）。
+	TextModelAlias string
+	// Skills 为 nil 时用内嵌的默认注册表；测试可以换成自己的。
+	Skills *skills.Registry
+	NewID  ids.Generator
+	Now    func() time.Time
 }
 
 func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreateReportRequest) (InsightReport, error) {
@@ -417,6 +448,30 @@ func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, 
 	}
 	now := s.now()
 	summary, findings := summarizeSimulatedMetrics(*execution.MetricSnapshot)
+
+	// 报告不产生新分析，它组织已有分析（20 §118）。这里把投后分析、实验、经验三处
+	// 已经算完的结论取过来定格。窗口为空时跳过——旧调用方（以及只想留一份投放数字
+	// 存档的场景）不该因为这个新增字段而突然创建失败。
+	digest := make([]ReportFinding, 0)
+	windowStart, windowEnd := "", ""
+	if !request.Window.Start.IsZero() && !request.Window.End.IsZero() {
+		analysis, err := s.GetPerformanceAnalysis(ctx, actor, projectID, request.Window)
+		if err != nil {
+			return InsightReport{}, err
+		}
+		experiments, err := s.concludedExperimentsInWindow(ctx, actor, projectID, request.Window)
+		if err != nil {
+			return InsightReport{}, err
+		}
+		experiences, err := s.ListExperiences(ctx, actor, projectID, ExperienceConfirmed, 50)
+		if err != nil {
+			return InsightReport{}, err
+		}
+		digest = buildReportDigest(analysis, experiments, experiences)
+		windowStart = request.Window.Start.Format("2006-01-02")
+		windowEnd = request.Window.End.Format("2006-01-02")
+	}
+
 	return s.Repository.CreateReport(ctx, InsightReport{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		ExecutionID: execution.ID, DeliveryMode: execution.Mode, EvidenceID: execution.EvidenceID,
@@ -424,8 +479,60 @@ func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, 
 		MetricSnapshotID: execution.MetricSnapshot.ID, CreativePackageID: execution.CreativePackageID,
 		IsSimulated: true, DatasetVersion: execution.MetricSnapshot.DatasetVersion, Status: ReportDraft,
 		Summary: summary, Findings: findings,
+		Digest: digest, WindowStart: windowStart, WindowEnd: windowEnd,
 		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	})
+}
+
+// concludedExperimentsInWindow 取观察窗口和报告窗口有重叠的、已结论的实验。
+//
+// 用重叠而不是包含：实验的观察窗口是建实验时定的，报告的窗口是人在投后分析页上当时
+// 选的，两者本来就不会正好对齐。要求包含的话，绝大多数实验都会因为差几天而被排除，
+// 报告里那一块就永远写着「本轮没有实验」。
+func (s Service) concludedExperimentsInWindow(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, window MetricWindow) ([]Experiment, error) {
+	values, err := s.ListExperiments(ctx, actor, projectID,
+		ExperimentFilter{Status: ExperimentConcluded, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]Experiment, 0, len(values))
+	for _, experiment := range values {
+		if experiment.WindowStart.After(window.End) || experiment.WindowEnd.Before(window.Start) {
+			continue
+		}
+		matched = append(matched, experiment)
+	}
+	return matched, nil
+}
+
+// DropReportFinding 把一条发现标记为已删除，或者把删掉的那条恢复回来。
+//
+// **不物理删除**——留着才知道系统带了什么、人不要什么，这是评估自动带入好不好用的
+// 唯一依据。只有 draft 状态的报告能改：确认过的报告是要被引用、被追溯的，改一条
+// 等于让引用它的人手上的那份变成假的。
+func (s Service) DropReportFinding(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, reportID string, expectedVersion int64, index int, dropped bool) (InsightReport, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return InsightReport{}, err
+	}
+	report, err := s.Repository.GetReport(ctx, actor.OrganizationID, projectID, reportID)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if report.Status != ReportDraft {
+		return InsightReport{}, ErrInvalidState
+	}
+	if report.Version != expectedVersion {
+		return InsightReport{}, ErrVersionConflict
+	}
+	if index < 0 || index >= len(report.Digest) {
+		return InsightReport{}, ErrInvalidRequest
+	}
+	digest := make([]ReportFinding, len(report.Digest))
+	copy(digest, report.Digest)
+	digest[index].Dropped = dropped
+	return s.Repository.UpdateReportDigest(ctx, actor.OrganizationID, projectID, reportID, expectedVersion, digest, s.now())
 }
 
 func (s Service) ListReports(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]InsightReport, error) {

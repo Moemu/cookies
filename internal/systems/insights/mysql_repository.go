@@ -20,19 +20,64 @@ func (r MySQLRepository) CreateReport(ctx context.Context, value InsightReport) 
 	if err != nil {
 		return InsightReport{}, err
 	}
+	digest, err := marshalReportDigest(value.Digest)
+	if err != nil {
+		return InsightReport{}, err
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_reports (
 		id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary,
 		metric_snapshot_id, creative_package_id, is_simulated, dataset_version,
-		status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+		status, summary, findings, digest, window_start, window_end,
+		version, created_by, confirmed_by, confirmed_at, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, value.DeliveryMode,
 		value.EvidenceID, value.EvidenceSummary, value.MetricSnapshotID, value.CreativePackageID,
 		value.IsSimulated, value.DatasetVersion, value.Status, value.Summary, findings,
+		digest, value.WindowStart, value.WindowEnd,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	if isDuplicateKey(err) {
+		return InsightReport{}, fmt.Errorf("%w: 这次投放的这个数据窗口已经定格过一份报告了，去报告中心看那一份", ErrInvalidState)
+	}
 	if err != nil {
 		return InsightReport{}, err
 	}
 	return value, nil
+}
+
+// UpdateReportDigest 覆盖整份汇总。人工删减改的是 dropped 标记，条目本身不删——
+// 报告要能说清「系统给了什么、人拿掉了哪几条」，物理删掉就查不回来了。
+func (r MySQLRepository) UpdateReportDigest(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, digest []ReportFinding, now time.Time) (InsightReport, error) {
+	encoded, err := marshalReportDigest(digest)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_reports SET digest = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
+		encoded, now, organizationID, projectID, id, expectedVersion, ReportDraft)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if affected == 0 {
+		value, getErr := r.GetReport(ctx, organizationID, projectID, id)
+		if getErr != nil {
+			return InsightReport{}, getErr
+		}
+		if value.Version != expectedVersion {
+			return InsightReport{}, ErrVersionConflict
+		}
+		return InsightReport{}, ErrInvalidState
+	}
+	return r.GetReport(ctx, organizationID, projectID, id)
+}
+
+func marshalReportDigest(digest []ReportFinding) ([]byte, error) {
+	if digest == nil {
+		digest = make([]ReportFinding, 0)
+	}
+	return json.Marshal(digest)
 }
 
 func (r MySQLRepository) ListReports(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]InsightReport, error) {
@@ -396,7 +441,7 @@ func unmarshalNullableJSON(raw []byte, target any) error {
 	return json.Unmarshal(raw, target)
 }
 
-const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
+const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, digest, window_start, window_end, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
 const experienceSelect = `SELECT id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, status_reason, status_changed_by, status_changed_at, confirmed_by, confirmed_at, version, created_by, created_at, updated_at FROM insight_experiences`
 const experienceAuditSelect = `SELECT id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at FROM insight_experience_audits`
 const experienceReferenceSelect = `SELECT id, organization_id, project_id, experience_id, consumer_kind, consumer_id, outcome, note, version, created_by, created_at, updated_at FROM insight_experience_references`
@@ -407,12 +452,13 @@ type rowScanner interface {
 
 func scanInsightReport(row rowScanner) (InsightReport, error) {
 	var value InsightReport
-	var findings []byte
-	var confirmedBy sql.NullString
+	var findings, digest []byte
+	var confirmedBy, windowStart, windowEnd sql.NullString
 	var confirmedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &value.DeliveryMode,
 		&value.EvidenceID, &value.EvidenceSummary, &value.MetricSnapshotID, &value.CreativePackageID,
-		&value.IsSimulated, &value.DatasetVersion, &value.Status, &value.Summary, &findings, &value.Version,
+		&value.IsSimulated, &value.DatasetVersion, &value.Status, &value.Summary, &findings,
+		&digest, &windowStart, &windowEnd, &value.Version,
 		&value.CreatedBy, &confirmedBy, &confirmedAt, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return InsightReport{}, err
@@ -420,6 +466,16 @@ func scanInsightReport(row rowScanner) (InsightReport, error) {
 	if err := json.Unmarshal(findings, &value.Findings); err != nil {
 		return InsightReport{}, fmt.Errorf("decode insight findings: %w", err)
 	}
+	// 老报告这一列是空的。空切片而不是 nil：nil 序列化成 null，前端拿到会白屏。
+	value.Digest = make([]ReportFinding, 0)
+	if err := unmarshalNullableJSON(digest, &value.Digest); err != nil {
+		return InsightReport{}, fmt.Errorf("decode insight digest: %w", err)
+	}
+	if value.Digest == nil {
+		value.Digest = make([]ReportFinding, 0)
+	}
+	value.WindowStart = windowStart.String
+	value.WindowEnd = windowEnd.String
 	if confirmedBy.Valid {
 		value.ConfirmedBy = confirmedBy.String
 	}

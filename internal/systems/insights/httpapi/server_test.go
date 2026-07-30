@@ -41,6 +41,58 @@ func TestInsightsHTTPExposesReportExperienceAndPreLaunchLoop(t *testing.T) {
 	}
 }
 
+// 定格窗口按天传，不能只传一头。补一个默认值等于替人挑了半个窗口，
+// 而报告上会写得像是他自己选的。
+func TestCreateReportWindowMustBeWholeOrAbsent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		window string
+		status int
+		start  string
+	}{
+		{"两头都有", `,"window":{"start":"2026-07-01","end":"2026-07-14"}`, 201, "2026-07-01"},
+		{"两头都没有", "", 201, ""},
+		{"只有开头", `,"window":{"start":"2026-07-01","end":""}`, 400, ""},
+		{"日期写错", `,"window":{"start":"2026/07/01","end":"2026-07-14"}`, 400, ""},
+	}
+	for _, test := range tests {
+		app := &applicationStub{report: insights.InsightReport{ID: "insightreport_1", Version: 1}}
+		server := New(app)
+		response := httptest.NewRecorder()
+		body := `{"execution_id":"deliveryexecution_1"` + test.window + `}`
+		server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/reports", body))
+		if response.Code != test.status {
+			t.Fatalf("%s status=%d，想要 %d，body=%s", test.name, response.Code, test.status, response.Body.String())
+		}
+		var got string
+		if !app.reportWindow.Start.IsZero() {
+			got = app.reportWindow.Start.Format("2006-01-02")
+		}
+		if got != test.start {
+			t.Fatalf("%s 窗口起点=%q，想要 %q", test.name, got, test.start)
+		}
+	}
+}
+
+// 人工删减走 :drop-finding。索引和 dropped 都要原样传到后面——
+// 传错一个索引，删掉的就是另一条发现，而人看不出来。
+func TestDropReportFindingPassesIndexAndFlag(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{report: insights.InsightReport{ID: "insightreport_1", Version: 2}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/reports/insightreport_1:drop-finding",
+		`{"expected_version":1,"index":3,"dropped":true}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if app.droppedIndex != 3 || !app.droppedFlag {
+		t.Fatalf("index=%d dropped=%v，想要 3/true", app.droppedIndex, app.droppedFlag)
+	}
+}
+
 // 跨渠道比较默认关闭（03 §10.3②）。缺参数、写别的值都算关闭——
 // 只有显式 true 才打开，因为打开意味着把不可直接比较的渠道并排放。
 func TestPreLaunchCrossChannelIsOffUnlessExplicitlyTrue(t *testing.T) {
@@ -178,6 +230,47 @@ func TestInsightsHTTPExposesAssetAnalysisSurface(t *testing.T) {
 	}
 }
 
+// AI 提特征只挂在一条显式的动词上，分析留痕可按素材读也可按项目读。
+func TestInsightsHTTPExposesFeatureExtraction(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{
+		feature:     insights.AssetFeature{ID: "assetfeature_1", Key: "article_type"},
+		analysisRun: insights.AnalysisRun{ID: "insightrun_1", SkillID: "insight.extract.wechat_article"},
+	}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/assets/insightasset_1:analyze",
+		`{"expected_version":1,"content":"公众号正文","note":"重发版"}`))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "insightrun_1") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if app.analyzedAssetID != "insightasset_1" || app.analyzeRequest.Content != "公众号正文" ||
+		app.analyzeRequest.Note != "重发版" || app.analyzeRequest.ExpectedVersion != 1 {
+		t.Fatalf("asset=%q request=%#v", app.analyzedAssetID, app.analyzeRequest)
+	}
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/assets/insightasset_1/analysis-runs?status=failed&limit=5", ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "insightrun_1") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if app.runFilter.AssetID != "insightasset_1" || app.runFilter.Limit != 5 ||
+		len(app.runFilter.Statuses) != 1 || app.runFilter.Statuses[0] != insights.AnalysisRunFailed {
+		t.Fatalf("filter=%#v", app.runFilter)
+	}
+
+	// 项目级的流水不带素材条件，否则能力运营看到的成功率只是某一条素材的。
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/analysis-runs?kind=feature_extraction", ""))
+	if response.Code != http.StatusOK || app.runFilter.AssetID != "" ||
+		app.runFilter.Kind != insights.AnalysisRunFeatureExtraction {
+		t.Fatalf("status=%d filter=%#v", response.Code, app.runFilter)
+	}
+}
+
 // 22 §8.3 要求每个可见 L2 标签都真实改变数据集，所以筛选条件必须原样传到服务层，
 // 而不是前端拿到同一批数据自己分。
 func TestAssetQueriesForwardEveryFilterToTheService(t *testing.T) {
@@ -238,6 +331,11 @@ type applicationStub struct {
 	mappingFilter  insights.AssetMappingFilter
 	matrixAssetIDs []string
 
+	analysisRun     insights.AnalysisRun
+	analyzeRequest  insights.AnalyzeAssetRequest
+	analyzedAssetID string
+	runFilter       insights.AnalysisRunFilter
+
 	dataSource        insights.DataSource
 	importBatch       insights.ImportBatch
 	dataSourceFilter  insights.DataSourceFilter
@@ -249,9 +347,29 @@ type applicationStub struct {
 	qualityRequest insights.ResolveQualityIssueRequest
 
 	capabilityOperations insights.CapabilityOperations
+	settings             insights.InsightSettings
+
+	experiment        insights.Experiment
+	readout           insights.ExperimentReadout
+	attachResult      insights.AttachExperimentAssetResult
+	experimentRequest insights.CreateExperimentRequest
+	experimentFilter  insights.ExperimentFilter
+	experimentID      string
+	variantID         string
+	attachedAssetID   string
+	interpretation    string
+	reportWindow      insights.MetricWindow
+	droppedIndex      int
+	droppedFlag       bool
 }
 
-func (s *applicationStub) CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error) {
+func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {
+	s.reportWindow = request.Window
+	return s.report, nil
+}
+func (s *applicationStub) DropReportFinding(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, _ int64, index int, dropped bool) (insights.InsightReport, error) {
+	s.droppedIndex = index
+	s.droppedFlag = dropped
 	return s.report, nil
 }
 func (s *applicationStub) ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error) {
@@ -349,6 +467,15 @@ func (s *applicationStub) RequestAssetReview(context.Context, contract.ActorCont
 func (s *applicationStub) RetireAsset(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AssetTransitionRequest) (insights.Asset, error) {
 	return s.asset, nil
 }
+func (s *applicationStub) AnalyzeAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, assetID string, request insights.AnalyzeAssetRequest) (insights.AnalyzeAssetResult, error) {
+	s.analyzedAssetID = assetID
+	s.analyzeRequest = request
+	return insights.AnalyzeAssetResult{Run: s.analysisRun, Features: []insights.AssetFeature{s.feature}}, nil
+}
+func (s *applicationStub) ListAnalysisRuns(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, filter insights.AnalysisRunFilter) ([]insights.AnalysisRun, error) {
+	s.runFilter = filter
+	return []insights.AnalysisRun{s.analysisRun}, nil
+}
 func (s *applicationStub) GetFeatureMatrix(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, assetIDs []string) (insights.FeatureMatrix, error) {
 	s.matrixAssetIDs = assetIDs
 	assets := make([]insights.Asset, 0, len(assetIDs))
@@ -402,6 +529,37 @@ func (s *applicationStub) GetCapabilityOperations(_ context.Context, _ contract.
 	report := s.capabilityOperations
 	report.Window = window
 	return report, nil
+}
+func (s *applicationStub) GetInsightSettings(_ context.Context, _ contract.ActorContext, _ contract.ProjectID) (insights.InsightSettings, error) {
+	return s.settings, nil
+}
+func (s *applicationStub) CreateExperiment(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateExperimentRequest) (insights.Experiment, error) {
+	s.experimentRequest = request
+	return s.experiment, nil
+}
+func (s *applicationStub) ListExperiments(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, filter insights.ExperimentFilter) ([]insights.Experiment, error) {
+	s.experimentFilter = filter
+	return []insights.Experiment{s.experiment}, nil
+}
+func (s *applicationStub) GetExperiment(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (insights.ExperimentDetail, error) {
+	s.experimentID = id
+	return insights.ExperimentDetail{Experiment: s.experiment, Readout: s.readout}, nil
+}
+func (s *applicationStub) AttachExperimentAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, experimentID, variantID string, request insights.AttachExperimentAssetRequest) (insights.AttachExperimentAssetResult, error) {
+	s.experimentID, s.variantID, s.attachedAssetID = experimentID, variantID, request.AssetID
+	return s.attachResult, nil
+}
+func (s *applicationStub) DetachExperimentAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, experimentID, variantID, assetID string) (insights.ExperimentVariant, error) {
+	s.experimentID, s.variantID, s.attachedAssetID = experimentID, variantID, assetID
+	return s.attachResult.Variant, nil
+}
+func (s *applicationStub) StartExperiment(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string, _ int64) (insights.Experiment, error) {
+	s.experimentID = id
+	return s.experiment, nil
+}
+func (s *applicationStub) ConcludeExperiment(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string, request insights.ConcludeExperimentRequest) (insights.Experiment, error) {
+	s.experimentID, s.interpretation = id, request.Interpretation
+	return s.experiment, nil
 }
 func (s *applicationStub) ResolveQualityIssue(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.ResolveQualityIssueRequest) (insights.QualityDisposition, error) {
 	s.qualityRequest = request
@@ -570,5 +728,68 @@ func TestInsightsHTTPExposesCapabilityOperationsSurface(t *testing.T) {
 	}
 	if app.window.Days() != 30 {
 		t.Fatalf("缺省窗口应当是最近 30 天：%d 天", app.window.Days())
+	}
+}
+
+// 实验中心的路由要能和已有的 `{experiment_action}` 形式共存：
+// `POST .../insight-experiments/exp_1:start` 和
+// `POST .../insight-experiments/exp_1/variants/var_1/assets` 段数不同，互不遮挡。
+func TestInsightsHTTPExposesExperimentSurface(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{
+		experiment: insights.Experiment{
+			ID: "insightexperiment_1", Title: "露脸开场是否提升点击",
+			AssetType: insights.AssetTypePrerollAd, VariableKey: "preroll_hook_type",
+			VariableLabel: "开场钩子类型", MinImpressions: 10000,
+			Status: insights.ExperimentDraft, Version: 1,
+			ControlledKeys: []string{}, Variants: []insights.ExperimentVariant{},
+		},
+		readout: insights.ExperimentReadout{
+			Samples: []insights.VariantSample{{
+				VariantID: "insightvariant_1", Name: "露脸", Impressions: 1200, Short: 8800,
+			}},
+			Comparisons: []insights.ExperimentComparison{{
+				VariantID: "insightvariant_1", Blocked: true,
+				Blocker: "「露脸」还差 8800 次展示才到事先定的门槛。",
+			}},
+			Notes: []string{},
+		},
+		attachResult: insights.AttachExperimentAssetResult{
+			Variant:  insights.ExperimentVariant{ID: "insightvariant_1", AssetIDs: []string{"insightasset_1"}},
+			Warnings: []string{"「CTA 类型」本来要求各组一致"},
+		},
+	}
+	server := New(app)
+	tests := []struct {
+		method, path, body string
+		status             int
+		want               string
+	}{
+		{http.MethodGet, "/api/insights/v1/projects/project_1/insight-experiments?status=draft", "", 200, "露脸开场是否提升点击"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/insight-experiments", `{"title":"露脸开场是否提升点击","asset_type":"preroll_ad","variable_key":"preroll_hook_type","min_impressions":10000,"window_start":"2026-07-01","window_end":"2026-07-10","variants":[{"name":"露脸","variable_value":"露脸"},{"name":"不露脸","variable_value":"不露脸","is_baseline":true}]}`, 201, "insightexperiment_1"},
+		// 样本不到门槛时接口里就不能有对比数字，前端才没得显示。
+		{http.MethodGet, "/api/insights/v1/projects/project_1/insight-experiments/insightexperiment_1", "", 200, "还差 8800 次展示"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/insight-experiments/insightexperiment_1/variants/insightvariant_1/assets", `{"asset_id":"insightasset_1"}`, 200, "本来要求各组一致"},
+		{http.MethodDelete, "/api/insights/v1/projects/project_1/insight-experiments/insightexperiment_1/variants/insightvariant_1/assets/insightasset_1", "", 200, "insightvariant_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/insight-experiments/insightexperiment_1:start", `{"expected_version":1}`, 200, "insightexperiment_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/insight-experiments/insightexperiment_1:conclude", `{"expected_version":2,"interpretation":"露脸开场确实更好"}`, 200, "insightexperiment_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/insight-experiments/insightexperiment_1:unknown", `{}`, 404, ""},
+	}
+	for _, test := range tests {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, authenticatedRequest(test.method, test.path, test.body))
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
+			t.Fatalf("%s %s status=%d body=%s", test.method, test.path, response.Code, response.Body.String())
+		}
+	}
+	if app.experimentFilter.Status != insights.ExperimentDraft {
+		t.Fatalf("状态筛选没有透传：%q", app.experimentFilter.Status)
+	}
+	if app.experimentID != "insightexperiment_1" || app.variantID != "insightvariant_1" {
+		t.Fatalf("路径参数没有解析出来：experiment=%q variant=%q", app.experimentID, app.variantID)
+	}
+	// 判定不在入参里：能传判定，事先定的门槛就形同虚设。
+	if app.interpretation != "露脸开场确实更好" {
+		t.Fatalf("解读没有透传：%q", app.interpretation)
 	}
 }

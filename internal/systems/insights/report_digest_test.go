@@ -1,0 +1,177 @@
+package insights
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestDigestOrdersByStrength(t *testing.T) {
+	// 可归因的排在方向性前面，方向性排在混杂前面。
+	// 报告是给人扫一眼的，最强的证据必须在最上面。
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
+		{VariantTitle: "混", BaselineTitle: "基", Verdict: VerdictConfounded, Note: "混杂的一条"},
+		{VariantTitle: "归", BaselineTitle: "基", Verdict: VerdictAttributable, Note: "可归因的一条"},
+		{VariantTitle: "方", BaselineTitle: "基", Verdict: VerdictDirectional, Note: "方向性的一条"},
+	}}
+	got := buildReportDigest(analysis, nil, nil)
+	if len(got) == 0 {
+		t.Fatal("汇总不该是空的")
+	}
+	if got[0].Strength != VerdictAttributable {
+		t.Fatalf("最强的证据必须排在最上面，实际第一条是 %q", got[0].Strength)
+	}
+}
+
+func TestDigestSkipsLowSampleFindings(t *testing.T) {
+	// 样本不足的配对不进报告。带进去等于让人在复盘会上引用一条算不出来的结论。
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
+		{VariantTitle: "甲", BaselineTitle: "乙", Verdict: VerdictLowSample, Note: "样本不够"},
+	}}
+	got := buildReportDigest(analysis, nil, nil)
+	for _, finding := range got {
+		if finding.Strength == VerdictLowSample {
+			t.Fatal("样本不足的结论不该自动带进报告")
+		}
+	}
+}
+
+func TestDigestCountsSkippedFindings(t *testing.T) {
+	// 略过的条数必须写出来。静默截断读起来像「就这么多」，实际不是。
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
+		{VariantTitle: "甲", BaselineTitle: "乙", Verdict: VerdictLowSample, Note: "样本不够"},
+		{VariantTitle: "丙", BaselineTitle: "丁", Verdict: VerdictNoFeatures, Note: "没填特征"},
+	}}
+	got := buildReportDigest(analysis, nil, nil)
+	var mentioned bool
+	for _, finding := range got {
+		if strings.Contains(finding.Text, "2 组素材") {
+			mentioned = true
+		}
+	}
+	if !mentioned {
+		t.Fatal("被略过的对比条数没有出现在报告里，读者会以为算过的就这些")
+	}
+}
+
+func TestDigestAlwaysHasExperimentSection(t *testing.T) {
+	// 实验中心一个实验都没有时，这一块要明写「没有」，不能隐藏。
+	// 隐藏了以后没人记得这块该有。
+	got := buildReportDigest(PerformanceAnalysis{}, nil, nil)
+	var found bool
+	for _, finding := range got {
+		if finding.Kind == SectionExperiment {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("实验结论这一块必须出现，哪怕内容是「本轮没有实验」")
+	}
+}
+
+func TestDigestCoversFourSections(t *testing.T) {
+	// 四块都必须出现。少一块，读的人不会发现它缺了——只会以为那块本来就没内容。
+	got := buildReportDigest(PerformanceAnalysis{}, nil, nil)
+	for _, kind := range ReportSectionOrder {
+		var found bool
+		for _, finding := range got {
+			if finding.Kind == kind {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("报告缺了「%s」这一块", ReportSectionLabels[kind])
+		}
+	}
+}
+
+func TestDigestOnlyRecommendsFromAttributable(t *testing.T) {
+	// 方向性的结论不能推建议。方向性的意思就是「看着像但说不准」，
+	// 拿它指导下一轮等于把一次没验证的观察变成一条要照着做的规定。
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{{
+		VariantTitle: "甲", BaselineTitle: "乙", Verdict: VerdictDirectional, Note: "方向性",
+		ChangedFeatures: []FeatureDiff{{Label: "开场", Baseline: "产品", Variant: "人脸"}},
+	}}}
+	for _, finding := range buildReportDigest(analysis, nil, nil) {
+		if finding.Kind == SectionRecommendation && finding.Strength == VerdictDirectional {
+			t.Fatal("方向性的结论不该被推成下一轮建议")
+		}
+	}
+}
+
+func TestDigestKeepsAlternativeExplanations(t *testing.T) {
+	// 疲劳信号排除不了的其他解释要跟着一起进报告。只写「在衰退」，
+	// 下一步就会变成换素材，而真正的原因没人查。
+	analysis := PerformanceAnalysis{Comparable: true, Fatigue: []FatigueSignal{{
+		AssetTitle: "甲素材", Severity: FatigueLikely, Note: "后半段点击率明显下滑",
+		AlternativeExplanations: []string{"这段时间预算也调过"},
+	}}}
+	var found bool
+	for _, finding := range buildReportDigest(analysis, nil, nil) {
+		if strings.Contains(finding.Text, "这段时间预算也调过") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("没能排除的其他解释必须跟着疲劳信号一起进报告")
+	}
+}
+
+func TestDigestReturnsEmptySliceNotNil(t *testing.T) {
+	got := buildReportDigest(PerformanceAnalysis{}, nil, nil)
+	if got == nil {
+		t.Fatal("空切片必须初始化，nil 会序列化成 null 并崩掉前端")
+	}
+}
+
+func TestDigestMergesSameDirection(t *testing.T) {
+	// 同一个变量朝同一个方向改，在几对素材上各出现一次，报告里只能是一条建议。
+	// 逐条推出去就是同一句话抄三遍，读的人分不清这是三条独立发现还是一条被重复了。
+	// 而「有几组对比支持它」必须留在句子里——那才是这条建议值多少钱的关键。
+	diff := []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "问题", Variant: "利益"}}
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
+		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff},
+		{VariantTitle: "v3", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff},
+		{VariantTitle: "v5", BaselineTitle: "v3", Verdict: VerdictAttributable, ChangedFeatures: diff},
+	}}
+	var recommendations []string
+	for _, finding := range buildReportDigest(analysis, nil, nil) {
+		if finding.Kind == SectionRecommendation {
+			recommendations = append(recommendations, finding.Text)
+		}
+	}
+	if len(recommendations) != 1 {
+		t.Fatalf("同一个方向只该推一条建议，实际推了 %d 条：%v", len(recommendations), recommendations)
+	}
+	if !strings.Contains(recommendations[0], "3 组") {
+		t.Fatalf("建议里必须写清有几组对比支持它，实际是：%s", recommendations[0])
+	}
+}
+
+func TestDigestRefusesToRecommendConflictingDirections(t *testing.T) {
+	// 同一个变量的两个相反方向都被判成可归因时，绝不能各推一条建议——
+	// 那是在同一节里叫人往两个相反的方向走，还都盖着「可归因」的章。
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
+		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable,
+			ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "问题", Variant: "利益"}}},
+		{VariantTitle: "v4", BaselineTitle: "v2", Verdict: VerdictAttributable,
+			ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "利益", Variant: "问题"}}},
+	}}
+	var recommendations []ReportFinding
+	for _, finding := range buildReportDigest(analysis, nil, nil) {
+		if finding.Kind == SectionRecommendation {
+			recommendations = append(recommendations, finding)
+		}
+	}
+	if len(recommendations) != 1 {
+		t.Fatalf("方向打架时只该出一条说明，实际出了 %d 条", len(recommendations))
+	}
+	if strings.Contains(recommendations[0].Text, "可以继续按") {
+		t.Fatalf("方向打架时不该推任何方向，实际是：%s", recommendations[0].Text)
+	}
+	if recommendations[0].Strength == VerdictAttributable {
+		t.Fatal("这条说明本身不是可归因结论，不该盖可归因的章")
+	}
+	if !strings.Contains(recommendations[0].Text, "实验中心") {
+		t.Fatalf("方向解不开时必须指向实验中心，实际是：%s", recommendations[0].Text)
+	}
+}

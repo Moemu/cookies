@@ -1266,7 +1266,7 @@ func confidenceOf(counts MetricCounts, attributable bool, objects int) Confidenc
 func overallConfidence(overview MetricOverview) (ConfidenceLevel, string) {
 	switch {
 	case overview.Totals.Impressions < directionalSampleImpressions:
-		return ConfidenceLowSample, fmt.Sprintf("窗口内仅 %d 次展示，不足以支撑结论，只能当作观察。", overview.Totals.Impressions)
+		return ConfidenceLowSample, fmt.Sprintf("窗口内仅 %s 次展示，不足以支撑结论，只能当作观察。", countText(overview.Totals.Impressions))
 	case len(overview.Warnings) > 0:
 		return ConfidenceConfounded, "数据存在未匹配、延迟或质量问题，结论只能是方向性的，且不应据此自动优化。"
 	case !overview.Comparable:

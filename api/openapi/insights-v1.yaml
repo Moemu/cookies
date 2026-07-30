@@ -67,6 +67,32 @@ paths:
                 $ref: '#/components/schemas/InsightReport'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/reports/{report_id}:drop-finding:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ReportID'
+    post:
+      summary: Drop or restore one auto-filled finding
+      description: |
+        报告里的发现是系统自动带入的，人只做删减——加不了新的一条。
+        写进去的每条发现都得能回溯到某次对比、某个实验或某条经验，
+        手打一条就断了这个链子。只有草稿能改。
+      operationId: dropInsightReportFinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropReportFinding'
+      responses:
+        '200':
+          description: Report with the finding marked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/reports/{report_id}:create-experience:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -663,6 +689,95 @@ paths:
                       $ref: '#/components/schemas/AssetFeature'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:analyze:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Run AI feature extraction on the asset
+      description: >-
+        AM-005, the AI half. The model is asked for exactly this asset type's own
+        feature system, and its answer only ever writes the AI inference layer —
+        the asset lands in 待确认 and waits for a person (03 §14, 09 §8).
+
+        Only a human action reaches this endpoint. Nothing enqueues extraction
+        automatically: an auto-filled review queue is a review queue nobody reads,
+        and review is the only quality gate this module has.
+
+        `content` is required because the asset library stores an asset's identity
+        and state, not its body — the caller supplies the text or shot description
+        to analyse.
+      operationId: analyzeInsightAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeAsset'
+      responses:
+        '200':
+          description: The run that was recorded, plus the features it wrote.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeAssetResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}/analysis-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+      - $ref: '#/components/parameters/AnalysisRunStatusFilter'
+      - $ref: '#/components/parameters/Limit'
+    get:
+      summary: Analysis history of one asset
+      description: >-
+        Backs 素材详情页「数据与方法」 (03 §82): every conclusion must be traceable to the
+        asset, the data cut-off, the metric version and the Skill/algorithm version.
+        Failed runs are listed too — a success rate that only counts successes is
+        always 100%.
+      operationId: listInsightAssetAnalysisRuns
+      responses:
+        '200':
+          description: Runs for this asset, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalysisRun'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/analysis-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AnalysisRunKindFilter'
+      - $ref: '#/components/parameters/AnalysisRunStatusFilter'
+      - $ref: '#/components/parameters/Limit'
+    get:
+      summary: Analysis runs across the project
+      description: >-
+        Backs 分析任务成功率、P95 时长和数据新鲜度 in 能力运营 (03 §310).
+      operationId: listInsightAnalysisRuns
+      responses:
+        '200':
+          description: Runs in the project, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalysisRun'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/assets/{asset_id}:confirm:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -1096,6 +1211,43 @@ paths:
                 $ref: '#/components/schemas/CapabilityOperations'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/settings:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Insight system settings (read-only)
+      description: |
+        系统设置的五个二级视图（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）
+        共用这一个响应。20 §121 给 MVP 的定位是「可采用保守默认值」，并要求
+        「重要阈值显示影响说明和默认推荐；不使用仪表盘布局」；22 §239 记的问题
+        正是「缺少实际阈值影响说明」。
+
+
+        **这个端点只读，没有配对的写接口，也不读库。** 返回的每个值都是代码常量本身，
+        不是抄过来的副本——抄一份迟早会和代码对不上，那时候这一页就从说明变成误导。
+        改阈值要走代码评审：03 §17.3 把「最低样本由全局规则还是行业模板配置」列为
+        待确认，在那条定下来之前开放写接口，等于先替它选了答案。
+
+
+        路径上带 `project_id` 只为沿用同一套鉴权（需要 `insights.read`）。
+        `project_scoped` 恒为 `false`：这些值对整个部署生效，不因项目而不同。
+
+
+        分组的 `state` 有两个取值。`in_effect` 表示这一组的值现在真的在生效，
+        页面上的判定就是按它们做的；`not_built` 表示这一组还没有任何东西，此时
+        `items` 为空而 `missing` 说明缺什么。**前端必须把两者渲染成不同的样子**——
+        「通知」一组当前是 `not_built`，把它画成一张空表单，读的人会以为通知在后台
+        默默生效，而实际上代码里没有一处会主动往外发消息。
+      operationId: getInsightSettings
+      responses:
+        '200':
+          description: The thresholds and rules currently in effect.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightSettings'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/data-quality:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -1156,6 +1308,253 @@ paths:
                 $ref: '#/components/schemas/QualityDisposition'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List experiments
+      description: >-
+        实验列表（03 §7.3 / AM-009）。返回的每个实验都带它的分组，不单独出分组端点：
+        一个实验离开它的分组没有意义，分两次读只会让列表页在两次请求之间显示
+        「有实验、没有组」的中间状态。
+
+
+        这里不带读数（样本量、对比、判定）——那些要按窗口聚合日指标，列表页
+        逐个实验算一遍会很慢，而列表页也用不上。要读数请打详情。
+      operationId: listInsightExperiments
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ExperimentStatus'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Experiments in this project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Register an experiment
+      description: >-
+        建实验就是**事先登记**：被测变量、分组、每组最低展示量，全部在看到结果之前定下。
+        这是实验中心和投后分析「驱动因素」的唯一区别——那边是事后从已投数据里认出来的
+        对照，排除不掉「这批素材本来就是被人挑出来投的」这个选择效应，所以只能说到相关。
+
+
+        分组和实验一次建完：分两步建的话，中间那个「只有一组」的状态没有任何意义，
+        却要多一套校验去容忍它。至少两组、恰好一个基线组，取值和名字都不能重复。
+
+
+        `variable_key` 必须是 `asset_type` 那套特征体系里的字段，且不能是自由文本——
+        自由文本的取值两条素材几乎不可能一样，分出来全是单元素组。
+      operationId: createInsightExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExperiment'
+      responses:
+        '201':
+          description: The registered experiment, in draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Experiment detail with a live readout
+      description: >-
+        实验本身加上此刻的读数：每组的样本量、够不够事先定的门槛、以及过了门槛的
+        那些对比。
+
+
+        **没有单独的「样本检查」端点。** 样本量是这一页唯一要回答的问题，另开一个
+        端点会让页面在两次请求之间拿到对不上的两个数，而用户不知道该信哪个。
+
+
+        读数每次现算，不落库：落库就会出现「页面显示的样本数是三天前的」。
+
+
+        `comparisons[].blocked` 为 true 时 `result` 一定不存在。这是有意的——样本
+        不达标却把 CTR 差异显示出来，人会先看见数字再看见提示，然后记住数字。
+      operationId: getInsightExperiment
+      responses:
+        '200':
+          description: The experiment and its current readout.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperimentDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}:start:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Freeze the groups and start the experiment
+      description: >-
+        **这一步是整个实验中心的支点。** 开跑之后分组冻结，谁也不能再往表现好的那组
+        补素材。少了这个冻结，「事先登记」只是个说法，结论的可信度和事后凑对没有区别。
+
+
+        每一组都必须已经有素材——开跑之后就补不上了。
+      operationId: startInsightExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expected_version: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: The experiment, now running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}:conclude:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Conclude the experiment
+      description: >-
+        两个前提缺一不可：样本过了事先定的门槛（系统卡门槛），人写了解读（人负责说明）。
+
+
+        **入参里没有判定。** 判定由系统按门槛和区间给出——判定要是能传，事先定的
+        门槛就形同虚设。人只写 `interpretation`：只留一个判定，读的人无从知道这条
+        结论该怎么用。
+
+
+        样本没到门槛时返回 409：那时候下结论等于「凑够了就说显著」。
+      operationId: concludeInsightExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConcludeExperiment'
+      responses:
+        '200':
+          description: The concluded experiment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}/variants/{variant_id}/assets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variant_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Put an asset into a group
+      description: >-
+        人从素材库挑，系统把关。三道关：
+
+
+        1. 素材类型必须和实验登记的一致——两套特征体系不一样，放一起比不出这个变量。
+        2. 素材在被测变量上的取值必须和这一组的 `variable_value` 对得上，对不上直接拦。
+           放错组的素材会让整次实验比的都不是登记的那个变量。
+        3. `controlled_keys` 里的特征和已入组素材不一致时**只给黄牌**（`warnings`），
+           不拦。真实素材很难只差一个变量，硬拦会让实验一个也建不起来；但不说出来，
+           结论就会被当成干净的对照。
+
+
+        素材还没有被测变量的结论时也拦，并提示先去内容分析补上——不知道取值就不知道
+        它该进哪一组。
+
+
+        只在 `draft` 状态可用。已开跑返回 409。
+      operationId: attachInsightExperimentAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [asset_id]
+              properties:
+                asset_id: { type: string }
+      responses:
+        '200':
+          description: The updated group, plus any warnings raised by the controlled features.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachExperimentAssetResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}/variants/{variant_id}/assets/{asset_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variant_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: asset_id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      summary: Remove an asset from a group
+      description: 只在 `draft` 状态可用。已开跑返回 409——冻结是双向的，移出和加入一样会改变对照。
+      operationId: detachInsightExperimentAsset
+      responses:
+        '200':
+          description: The updated group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperimentVariant'
+        default:
+          $ref: '#/components/responses/Problem'
 components:
   securitySchemes:
     sessionCookie:
@@ -1197,6 +1596,16 @@ components:
       in: path
       required: true
       schema: { type: string }
+    AnalysisRunKindFilter:
+      name: kind
+      in: query
+      schema: { type: string, enum: [feature_extraction] }
+    AnalysisRunStatusFilter:
+      name: status
+      in: query
+      description: Comma separated. Omit to see every run, failures included.
+      schema: { type: string }
+      example: failed
   requestBodies:
     ExpectedVersion:
       required: true
@@ -1261,6 +1670,59 @@ components:
       required: [execution_id]
       properties:
         execution_id: { type: string }
+        summary: { type: string }
+        findings:
+          type: array
+          items: { type: string }
+        window:
+          allOf:
+            - $ref: '#/components/schemas/ReportWindow'
+          description: |
+            要定格的数据窗口，来自投后分析页当前选的那一屏。省略时报告照旧生成，
+            只是没有 `digest`。两端要么都给要么都不给：只给一端会被拒绝，
+            因为后端补上另一端等于替人挑了半个窗口，而报告上会写得像是他自己选的。
+    ReportWindow:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        start: { type: string, format: date }
+        end: { type: string, format: date }
+    DropReportFinding:
+      type: object
+      additionalProperties: false
+      required: [expected_version, index, dropped]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        index: { type: integer, minimum: 0 }
+        dropped:
+          type: boolean
+          description: |
+            true 是删掉，false 是撤销删掉。条目不会被物理移除——报告要能说清
+            「系统给了什么、人拿掉了哪几条」。
+    ReportFinding:
+      type: object
+      description: |
+        报告里的一条发现。四块（素材表现 / 实验结论 / 相关经验 / 下一轮建议）
+        按 `kind` 分组，顺序即 `ReportSectionKind` 的枚举顺序。
+      required: [kind, text, dropped]
+      properties:
+        kind:
+          type: string
+          enum: [asset_performance, experiment, experience, recommendation]
+        text: { type: string }
+        strength:
+          allOf:
+            - $ref: '#/components/schemas/VariantVerdict'
+          description: 出自素材对比的发现才有。用来排序：可归因的排在方向性前面。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        source_ref:
+          type: string
+          description: 这条发现的来源 ID（实验或经验），供前端跳回去核对。
+        dropped:
+          type: boolean
+          description: 被人工删掉的条目留在数组里，只是标记为 true。
     CreateExperience:
       type: object
       additionalProperties: false
@@ -1346,6 +1808,17 @@ components:
         findings:
           type: array
           items: { type: string }
+          description: 旧报告的读法，保留不动。新报告读 `digest`。
+        digest:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportFinding'
+          description: 定格的四块发现。老报告为空数组。
+        window_start:
+          type: string
+          format: date
+          description: 定格的数据窗口起点。老报告没有窗口概念，此时为空——空比编一个进去诚实。
+        window_end: { type: string, format: date }
         version: { type: integer, minimum: 1 }
         created_by: { type: string }
         confirmed_by: { type: string }
@@ -1929,6 +2402,97 @@ components:
             Writes the human layer only. Entries must not carry a confidence —
             a person's conclusion has no machine confidence.
         reason: { type: string, maxLength: 1000 }
+    AnalyzeAsset:
+      type: object
+      additionalProperties: false
+      required: [expected_version, content]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        content:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: >-
+            The text to analyse: the article body for written assets, the script
+            or shot description for video. Required, and supplied by the caller —
+            the asset library stores identity and state, not the asset body. The
+            cap is about cost and explainability, not performance: over very long
+            inputs a model reports what the piece mentions rather than what it is.
+        note:
+          type: string
+          maxLength: 1000
+          description: Human context, e.g. "this is the vertical recut, same footage as A".
+    AnalyzeAssetResult:
+      type: object
+      required: [run, features]
+      properties:
+        run:
+          $ref: '#/components/schemas/AnalysisRun'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetFeature'
+          description: Every feature of the asset after the run, both layers.
+        dropped_fields:
+          type: array
+          items: { type: string }
+          description: >-
+            Answers that were discarded, one human-readable reason each. Always
+            surface these: a few missing features look like "the model didn't see
+            it", while the real cause may be a format mismatch — that is a bug to
+            fix, not a model limitation.
+    AnalysisRun:
+      type: object
+      description: >-
+        One analysis task, append-only. Records the input, the method, the Skill
+        version, the result and the error (03 §113/§304/§344 acceptance 12).
+        The input's full text is deliberately absent — only its hash and shape are
+        kept (09 §7).
+      required: [id, kind, asset_id, status, asset_type, started_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        kind: { type: string, enum: [feature_extraction] }
+        asset_id: { type: string }
+        status: { type: string, enum: [running, succeeded, failed] }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        skill_id: { type: string }
+        skill_version: { type: string }
+        skill_content_hash: { type: string }
+        prompt_version: { type: string }
+        provider_code: { type: string }
+        model_alias:
+          type: string
+          description: A capability alias, never a vendor model ID (10 §凭据只存引用).
+        model_version: { type: string }
+        route_revision_id: { type: string }
+        response_mode: { type: string }
+        generation_mode: { type: string, enum: [model, template] }
+        input_hash: { type: string }
+        input_summary:
+          type: object
+          description: Shape of the input only — character counts and field counts, no text.
+        result_hash: { type: string }
+        feature_count: { type: integer }
+        dropped_fields:
+          type: array
+          items: { type: string }
+        data_through:
+          type: string
+          format: date-time
+          description: Data cut-off. Absent for content-only runs, which read no metrics.
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        latency_ms: { type: integer }
+        error_code: { type: string }
+        error_message: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     RegisterAssetMapping:
       type: object
       additionalProperties: false
@@ -2789,6 +3353,80 @@ components:
           description: >-
             词表待办只覆盖**已经有人用过**的开放枚举字段。把六套 schema 里所有没发布词表
             的字段都列进来，真正在散的那几个会被埋掉。
+    SettingItem:
+      type: object
+      required: [key, label, value, effect, recommended, deviates, source, basis]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value:
+          type: string
+          description: 现在生效的值，已格式化成人能读的样子（含单位）。
+        effect:
+          type: string
+          description: >-
+            调大调小会发生什么。20 §121 要求「重要阈值显示影响说明」——写「会影响置信度」
+            没有意义，这里要写清楚哪一句话会从「有结论」变成「没结论」。
+        recommended:
+          type: string
+          description: 默认推荐值。
+        deviates:
+          type: boolean
+          description: >-
+            当前值偏离了推荐值，页面要提示「有人调过它」。由服务端判定，客户端不要自己
+            拿 value 和 recommended 比字符串：确认权限那组两边说的是不同的事
+            （这个权限管到哪些操作 vs 该发给谁），字面永远不同，一比就会给每一条都
+            打上凭空造出来的告警。
+        source:
+          type: string
+          description: 这个值在代码里的位置，例如 `internal/systems/insights/connectors.go:267`。
+        basis:
+          type: string
+          description: >-
+            文档依据。没有依据的阈值会显式写「无文档指定值」——那本身就是个待办，
+            留空则看不出是没依据还是忘了写。
+    SettingGroup:
+      type: object
+      required: [key, label, state, summary, missing, items]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        state:
+          type: string
+          enum: [in_effect, not_built]
+          description: >-
+            `in_effect` 这一组的值现在真的在生效；`not_built` 这一组还没有任何东西，
+            此时 items 为空、missing 说明缺什么。两者必须渲染成不同的样子。
+        summary: { type: string }
+        missing:
+          type: array
+          items: { type: string }
+          description: 只在 state 为 not_built 时有内容：缺的到底是什么、现在怎么替代。
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettingItem'
+    InsightSettings:
+      type: object
+      required: [generated_at, editable, editable_note, project_scoped, groups]
+      properties:
+        generated_at: { type: string, format: date-time }
+        editable:
+          type: boolean
+          description: >-
+            恒为 false。前端据此决定不渲染任何输入框——渲染一个改不动的输入框，
+            比直接说「这里改不了」更让人恼火。
+        editable_note:
+          type: string
+          description: 为什么只读、想改要走什么路径。
+        project_scoped:
+          type: boolean
+          description: 恒为 false。这些值对整个部署生效，路径上的 project_id 只用于鉴权。
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettingGroup'
+          description: 顺序与导航上的五个二级视图一致（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）。
     CapabilityOperations:
       type: object
       required: [window, generated_at, feature_systems, metrics, caliber_conflicts, skills, evaluations, dashboard]
@@ -2932,3 +3570,253 @@ components:
           description: >-
             为 true 时把行里出现的、尚未登记的平台对象写入 待匹配 队列，而不是猜它
             属于哪个素材版本。
+
+    ExperimentStatus:
+      type: string
+      enum: [draft, running, concluded]
+      description: >-
+        `draft` 设计中，变量/分组/门槛都还能改；`running` 已开跑，**分组冻结**；
+        `concluded` 已下结论，连人写的解读一起冻住。冻结这件事是「事先登记」的
+        全部依据——没有它，谁都可以在看完数据之后往表现好的那组补两条素材。
+    ExperimentVerdict:
+      type: string
+      enum: [supported, refuted, inconclusive]
+      description: >-
+        系统给的判定，不是人写的解读。`supported` 区间不重叠且变体更好；
+        `refuted` 区间不重叠但变体更差；`inconclusive` 区间重叠，样本再多也
+        只能说没看出差别。
+    GroupComparison:
+      type: object
+      description: >-
+        组间比较结果。**实验中心和投后分析「驱动因素」共用同一套算法**，两者的
+        差别只在 note 的措辞：事先登记的分组能说到「归因到这个变量」，事后凑出
+        的分组只能说到「相关」。共用一套是为了让这两页永远不会给出互相矛盾的判定。
+      required: [counts, rest_counts, rates, rest_rates, intervals_overlap, covarying_features, confidence, note]
+      properties:
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rest_counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+        rest_rates:
+          $ref: '#/components/schemas/MetricRates'
+        ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        rest_ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        intervals_overlap:
+          type: boolean
+          description: 为 true 时差异可能只是波动，不管相对差看起来有多大。
+        ctr_lift: { type: number, description: '点击率相对变化；任一侧分母为 0 时缺失' }
+        covarying_features:
+          type: array
+          items: { type: string }
+          description: >-
+            这一组在被测变量之外还整齐地不同的特征。非空时差异不能只算到被测变量
+            头上。事先登记的实验这里恒为空——混杂由入组那道关把守，不在事后翻账。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string, description: '给人读的一句话，说明这条判定为什么是这个强度。' }
+    ExperimentVariant:
+      type: object
+      description: 实验的一组。基线组有且只有一个。
+      required: [id, organization_id, project_id, experiment_id, name, variable_value, is_baseline, asset_ids, position, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        experiment_id: { type: string }
+        name: { type: string, maxLength: 64 }
+        variable_value:
+          type: string
+          maxLength: 200
+          description: 这一组在被测变量上的取值。入组素材必须和它对得上。
+        is_baseline: { type: boolean }
+        asset_ids:
+          type: array
+          items: { type: string }
+        position: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Experiment:
+      type: object
+      description: 一次事先登记的对照实验（03 §7.3 / AM-009）。
+      required: [id, organization_id, project_id, title, hypothesis, asset_type, variable_key, variable_label, controlled_keys, min_impressions, window_start, window_end, status, version, created_by, created_at, updated_at, variants]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        title: { type: string, maxLength: 200 }
+        hypothesis: { type: string, maxLength: 2000 }
+        source_experience_id:
+          type: string
+          description: >-
+            假设的出处：投前洞察的假设卡「拿去验证」过来时带上。为空表示空白新建，
+            也就是「这条假设没有出处」。实验有结论之后靠它知道该回头更新哪张卡。
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        variable_key: { type: string, description: '被测变量，必须是这个素材类型特征体系里的字段，且不能是自由文本。' }
+        variable_label: { type: string }
+        controlled_keys:
+          type: array
+          items: { type: string }
+          description: 要求各组一致的其他特征。不一致不拦，入组时给黄牌。
+        min_impressions:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            **事先**定的每组最低展示量。事后再定门槛等于允许「凑够了就说显著」，
+            所以开跑之后不能改。
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        status:
+          $ref: '#/components/schemas/ExperimentStatus'
+        verdict:
+          $ref: '#/components/schemas/ExperimentVerdict'
+        interpretation: { type: string, maxLength: 2000, description: '人写的解读。判定由系统给，解读由人负责，两者分开存。' }
+        concluded_by: { type: string }
+        concluded_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        version: { type: integer, format: int64 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExperimentVariant'
+    VariantSample:
+      type: object
+      description: >-
+        一组的样本量，以及够不够事先定的门槛。**这一层永远返回**，包括不够的时候：
+        知道还差多少才知道还要投多久。不够时被藏起来的是对比数字，不是样本数字。
+      required: [variant_id, name, variable_value, is_baseline, assets, assets_with_data, impressions, clicks, meets_threshold, short_by]
+      properties:
+        variant_id: { type: string }
+        name: { type: string }
+        variable_value: { type: string }
+        is_baseline: { type: boolean }
+        assets: { type: integer, description: '这一组里的素材条数' }
+        assets_with_data: { type: integer, description: '其中窗口内真的有投放数据的条数' }
+        impressions: { type: integer, format: int64 }
+        clicks: { type: integer, format: int64 }
+        meets_threshold: { type: boolean, description: '为 false 时，这一组参与的所有对比都不出数字。' }
+        short_by: { type: integer, format: int64, description: '还差多少次展示到门槛。' }
+    ExperimentComparison:
+      type: object
+      description: 某个变体组 vs 基线组。
+      required: [variant_id, variant_name, variant_value, baseline_id, baseline_name, baseline_value, blocked]
+      properties:
+        variant_id: { type: string }
+        variant_name: { type: string }
+        variant_value: { type: string }
+        baseline_id: { type: string }
+        baseline_name: { type: string }
+        baseline_value: { type: string }
+        blocked:
+          type: boolean
+          description: >-
+            **为 true 时 result 和 verdict 一定不存在。** 这是有意的：样本不达标却
+            显示 CTR 差异，人会先看见数字再看见提示，然后记住数字。
+        blocker: { type: string, description: '拦下的原因，含还差多少展示。' }
+        result:
+          $ref: '#/components/schemas/GroupComparison'
+        verdict:
+          $ref: '#/components/schemas/ExperimentVerdict'
+    ExperimentReadout:
+      type: object
+      description: 实验详情页的全部读数。每次现算，不落库。
+      required: [window, caliber, comparable, samples, comparisons, ready, notes]
+      properties:
+        window:
+          $ref: '#/components/schemas/MetricWindow'
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        comparable:
+          type: boolean
+          description: 沿用投后分析的口径判定：窗口内混了币种/归因窗口/指标版本/平台时为 false。
+        comparable_reason: { type: string }
+        samples:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariantSample'
+        comparisons:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExperimentComparison'
+        ready:
+          type: boolean
+          description: 每一组都过了门槛才为 true。为 false 时下结论会被拒绝。
+        verdict:
+          $ref: '#/components/schemas/ExperimentVerdict'
+        notes:
+          type: array
+          items: { type: string }
+    ExperimentDetail:
+      type: object
+      required: [experiment, readout]
+      properties:
+        experiment:
+          $ref: '#/components/schemas/Experiment'
+        readout:
+          $ref: '#/components/schemas/ExperimentReadout'
+    CreateVariant:
+      type: object
+      additionalProperties: false
+      required: [name, variable_value]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        variable_value: { type: string, minLength: 1, maxLength: 200 }
+        is_baseline: { type: boolean }
+    CreateExperiment:
+      type: object
+      additionalProperties: false
+      required: [title, asset_type, variable_key, min_impressions, window_start, window_end, variants]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        hypothesis: { type: string, maxLength: 2000 }
+        source_experience_id: { type: string, description: '投前洞察假设卡「拿去验证」时带上；空白新建时留空。' }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        variable_key: { type: string, minLength: 1 }
+        controlled_keys:
+          type: array
+          items: { type: string }
+        min_impressions: { type: integer, format: int64, minimum: 1 }
+        window_start: { type: string, format: date }
+        window_end: { type: string, format: date }
+        variants:
+          type: array
+          minItems: 2
+          maxItems: 8
+          description: 至少两组，且恰好一组 is_baseline。只有一组就没有对照，也就没有实验。
+          items:
+            $ref: '#/components/schemas/CreateVariant'
+    AttachExperimentAssetResult:
+      type: object
+      description: >-
+        变量取值对不上是硬拦（返回错误）；控住的变量不一致只给黄牌。真实素材很难只差
+        一个变量，硬拦会让实验一个都建不起来，不说又会让结论被当成干净对照。
+      required: [variant, warnings]
+      properties:
+        variant:
+          $ref: '#/components/schemas/ExperimentVariant'
+        warnings:
+          type: array
+          items: { type: string }
+    ConcludeExperiment:
+      type: object
+      additionalProperties: false
+      required: [interpretation]
+      description: >-
+        **没有 verdict 字段。** 判定由系统按事先定的门槛和置信区间给出——判定要是
+        能传，门槛就形同虚设。
+      properties:
+        expected_version: { type: integer, format: int64 }
+        interpretation:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 人写的解读。只留一个判定，读的人无从知道这条结论该怎么用。
