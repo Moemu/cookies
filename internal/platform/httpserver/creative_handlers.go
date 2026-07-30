@@ -53,6 +53,128 @@ func (s *Server) prepareCommercePreroll(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) ensureCommerceFixtureWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.EnsureCommerceFixtureWorkspaceRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.EnsureCommerceFixtureWorkspace(
+		r.Context(),
+		rc,
+		contract.ProjectID(r.PathValue("project_id")),
+		key,
+		body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getLatestCommercePrerollWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetLatestCommerceWorkspace(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getCommercePrerollWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetCommerceWorkspace(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateCommercePrerollDraft(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.UpdateCommercePrerollDraftRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateCommercePrerollDraft(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"),
+		body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) confirmCommerceGeneration(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.ConfirmCommerceGenerationRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmCommerceGeneration(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"),
+		body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) createCreativeIntake(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -225,6 +347,94 @@ func (s *Server) getShortDramaPrerollWorkspace(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) getLatestShortDramaPrerollWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetLatestShortDramaWorkspace(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getLatestGamePrerollWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetLatestGamePrerollWorkspace(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) selectGamePrerollCandidate(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.SelectGamePrerollCandidateRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.SelectGamePrerollCandidate(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"),
+		body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) regenerateGamePrerollCandidates(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.RegenerateGamePrerollCandidatesRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.RegenerateGamePrerollCandidates(
+		r.Context(),
+		rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"),
+		body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) selectShortDramaCandidate(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -240,6 +450,30 @@ func (s *Server) selectShortDramaCandidate(w http.ResponseWriter, r *http.Reques
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := s.creative.SelectShortDramaCandidate(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) regenerateShortDramaCandidates(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.RegenerateShortDramaCandidatesRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.RegenerateShortDramaCandidates(
 		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body,
 	)
 	if err != nil {
@@ -580,6 +814,8 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 	}{TaskID: taskID, ModelAlias: modelAlias, Draft: *detail.VideoDraft, ProjectContextVersion: project.ProjectContextVersion}
 	isViral := detail.Task.PerformanceMode == creative.PerformanceModeViralRemake && detail.VideoDraft.ViralRemake != nil
 	isShortDrama := detail.Task.PerformanceMode == creative.PerformanceModeShortDramaPreroll && detail.VideoDraft.ShortDramaPreroll != nil
+	isGamePreroll := detail.Task.PerformanceMode == creative.PerformanceModeGamePreroll && detail.VideoDraft.GamePreroll != nil
+	isCommercePreroll := detail.Task.PerformanceMode == creative.PerformanceModeCommercePreroll && detail.VideoDraft.CommercePreroll != nil
 	if isViral {
 		var promptHash string
 		videoInput, promptHash, err = s.creative.ViralProviderInput(r.Context(), rc.Actor, projectID, taskID)
@@ -597,6 +833,34 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 	} else if isShortDrama {
 		var promptHash string
 		videoInput, promptHash, err = s.creative.ShortDramaProviderInput(r.Context(), rc.Actor, projectID, taskID)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+		requestBody = struct {
+			TaskID                string                        `json:"task_id"`
+			ModelAlias            string                        `json:"model_alias"`
+			PromptPackageHash     string                        `json:"prompt_package_hash"`
+			Input                 provider.VideoGenerationInput `json:"input"`
+			ProjectContextVersion int64                         `json:"project_context_version"`
+		}{TaskID: taskID, ModelAlias: modelAlias, PromptPackageHash: promptHash, Input: videoInput, ProjectContextVersion: project.ProjectContextVersion}
+	} else if isGamePreroll {
+		var promptHash string
+		videoInput, promptHash, err = s.creative.GamePrerollProviderInput(r.Context(), rc.Actor, projectID, taskID)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+		requestBody = struct {
+			TaskID                string                        `json:"task_id"`
+			ModelAlias            string                        `json:"model_alias"`
+			PromptPackageHash     string                        `json:"prompt_package_hash"`
+			Input                 provider.VideoGenerationInput `json:"input"`
+			ProjectContextVersion int64                         `json:"project_context_version"`
+		}{TaskID: taskID, ModelAlias: modelAlias, PromptPackageHash: promptHash, Input: videoInput, ProjectContextVersion: project.ProjectContextVersion}
+	} else if isCommercePreroll {
+		var promptHash string
+		videoInput, promptHash, err = s.creative.CommerceProviderInput(r.Context(), rc.Actor, projectID, taskID)
 		if err != nil {
 			s.writeServiceError(w, r, err)
 			return
@@ -643,6 +907,21 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 	}
 	if isViral {
 		if _, err := s.creative.RegisterViralCandidateJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	} else if isShortDrama {
+		if _, err := s.creative.RegisterShortDramaGenerationAttempt(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	} else if isGamePreroll {
+		if _, err := s.creative.RegisterGamePrerollGenerationAttempt(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	} else if isCommercePreroll {
+		if _, err := s.creative.RegisterCommerceGenerationAttempt(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
 			s.writeServiceError(w, r, err)
 			return
 		}

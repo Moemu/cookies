@@ -770,6 +770,56 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .preroll-candidate-detail details { height: auto; }
 .preroll-candidate-detail summary { display: block; min-height: 0; padding: 0; font-size: 8px; border: 0; }
 .preroll-candidate-detail pre { max-height: 120px; margin: 4px 0 0; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; }
+.preroll-workspace.game-preroll-workspace {
+  grid-template-columns: 210px minmax(520px, 1fr) 240px;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "story preview config"
+    "story candidates config";
+  align-items: stretch;
+}
+.game-preroll-rail { display: contents; }
+.game-preroll-storyboard { grid-area: story; min-height: 100%; border-right: 1px solid var(--line); }
+.game-preroll-main { grid-area: preview; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.game-candidate-section { grid-area: candidates; height: auto !important; min-width: 0; align-self: start; background: var(--canvas); border-right: 1px solid var(--line); }
+.game-candidate-section[open] { display: block; }
+.game-candidate-section > summary { background: var(--surface); }
+.game-candidate-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+.game-candidate-grid > .preroll-candidate-card { width: auto; min-width: 0; margin: 8px 5px 12px; border-radius: 6px; overflow: hidden; }
+.game-candidate-grid > .preroll-candidate-card:first-child { margin-left: 10px; }
+.game-candidate-grid > .preroll-candidate-card:last-child { margin-right: 10px; }
+.game-candidate-grid > .preroll-candidate-empty { grid-column: 1 / -1; }
+.game-candidate-grid > .preroll-candidate-card > button { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px; color: var(--text); background: transparent; border: 0; text-align: left; }
+.game-candidate-grid > .preroll-candidate-card > button:hover { background: var(--subtle); }
+.game-candidate-grid > .preroll-candidate-card > button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); box-shadow: inset 3px 0 var(--cobalt); }
+.game-candidate-grid > .preroll-candidate-card > button > span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.game-candidate-grid > .preroll-candidate-card > button > span b { font-size: 10px; }
+.game-candidate-grid > .preroll-candidate-card > button > span small,
+.game-candidate-grid > .preroll-candidate-card > button > small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.game-candidate-grid > .preroll-candidate-card > button > strong { font-size: 9px; line-height: 1.5; font-weight: 600; }
+.game-candidate-section .preroll-candidate-detail { background: var(--surface); }
+.game-candidate-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px 4px; }
+.game-candidate-toolbar small { min-width: 0; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.game-candidate-toolbar button { display: inline-flex; flex: none; align-items: center; gap: 5px; min-height: 30px; padding: 0 10px; font-size: 9px; }
+.game-preroll-config { grid-area: config; padding: 18px 14px; border-left: 0; }
+.game-preroll-config h3 { margin-bottom: 12px; }
+.game-config-section { display: grid; gap: 9px; padding: 12px 0; border-top: 1px solid var(--line); }
+.game-config-heading { display: flex; align-items: center; gap: 8px; }
+.game-config-heading > span { display: grid; place-items: center; width: 22px; height: 22px; color: var(--cobalt-dark); background: var(--cobalt-soft); border-radius: 50%; font-size: 8px; font-weight: 700; }
+.game-config-heading b { font-size: 10px; }
+.game-config-section label { margin: 0; }
+.game-config-section label > small { color: var(--cobalt-dark); font-size: 8px; }
+.game-config-copy { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.game-source-ready { display: flex; align-items: flex-start; gap: 8px; padding: 9px; color: oklch(.42 .11 155); background: oklch(.97 .02 155); border: 1px solid oklch(.86 .055 155); border-radius: 6px; }
+.game-source-ready > svg { flex: none; margin-top: 1px; }
+.game-source-ready span { display: grid; gap: 3px; }
+.game-source-ready b { color: var(--text); font-size: 9px; }
+.game-source-ready small { color: var(--muted); font-size: 8px; line-height: 1.4; }
+.game-policy-details { height: auto; padding-top: 2px; }
+.game-policy-details summary { display: flex; align-items: center; gap: 6px; min-height: 0; padding: 0; color: var(--muted); border: 0; font-size: 8px; cursor: pointer; }
+.game-policy-details > small { display: block; padding: 7px 0 0 20px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.game-output-section .full { margin-top: 0; }
+.game-output-section .inline-notice { margin-top: 0; }
 .material-preview-frame > video, .material-preview-frame > img { display: block; width: min(360px, 86%); max-height: 520px; object-fit: contain; background: #000; box-shadow: 0 28px 70px oklch(0 0 0 / .28); }
 .preroll-candidate-empty { margin: 10px; padding: 14px 10px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line-strong); font-size: 9px; line-height: 1.55; }
 

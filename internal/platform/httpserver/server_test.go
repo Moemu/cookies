@@ -1352,6 +1352,424 @@ func TestGetViralRemakeWorkspaceRestoresPersistedDraft(t *testing.T) {
 	}
 }
 
+func TestRegenerateShortDramaCandidatesForwardsVersionedConfig(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_short_drama", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeShortDramaPreroll,
+		},
+		VideoDraft: &creative.VideoDraft{
+			ContractVersion: "creative-video-draft/v1", TaskID: "creative_task_short_drama", Revision: 3,
+			Concept: "独立六秒短剧引流前贴", Prompt: "候选", DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+			ShortDramaPreroll: &creative.ShortDramaPrerollDraft{
+				ContractVersion: "creative-short-drama-preroll-draft/v1", TaskID: "creative_task_short_drama", Revision: 3,
+			},
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	body := bytes.NewBufferString(`{
+		"expected_revision": 2,
+		"generation_config": {
+			"subtitle_style": "brand_minimal",
+			"hook_strength": 5,
+			"pace_profile": "auto"
+		},
+		"variation_intent": "more_visual"
+	}`)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-tasks/creative_task_short_drama/short-drama-preroll:regenerate-candidates",
+		body,
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "short-drama-regenerate-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if manager.regenerateTaskID != "creative_task_short_drama" ||
+		manager.regenerateRequest.ExpectedRevision != 2 ||
+		manager.regenerateRequest.GenerationConfig.SubtitleStyle != "brand_minimal" ||
+		manager.regenerateRequest.GenerationConfig.HookStrength != 5 {
+		t.Fatalf("regenerate request was not forwarded: task=%q request=%+v", manager.regenerateTaskID, manager.regenerateRequest)
+	}
+}
+
+func TestRegenerateGamePrerollCandidatesForwardsVersionedConfig(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_game", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeGamePreroll,
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-tasks/creative_task_game/game-preroll:regenerate-candidates",
+		bytes.NewBufferString(`{
+			"expected_revision": 3,
+			"generation_config": {
+				"subtitle_style": "high_contrast_dynamic",
+				"hook_strength": 4,
+				"pace_profile": "punchy"
+			}
+		}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "game-preroll-regenerate-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if manager.regenerateGameTaskID != "creative_task_game" ||
+		manager.regenerateGameRequest.ExpectedRevision != 3 ||
+		manager.regenerateGameRequest.GenerationConfig.HookStrength != 4 {
+		t.Fatalf("game regenerate request was not forwarded: task=%q request=%+v", manager.regenerateGameTaskID, manager.regenerateGameRequest)
+	}
+}
+
+func TestCreateShortDramaIntakeAcceptsInitialPaceProfile(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-intakes",
+		bytes.NewBufferString(`{
+			"source":"manual",
+			"format":"video",
+			"performance_mode":"short_drama_preroll",
+			"channel":"douyin",
+			"objective":"引导观看短剧",
+			"audience":"悬疑短剧观众",
+			"core_message":"关键证词与事故记录矛盾",
+			"call_to_action":"点击揭开真相",
+			"concept":"独立六秒短剧引流前贴",
+			"tone":["悬念"],
+			"visual_keywords":["信息缺口"],
+			"mandatory_elements":[],
+			"prohibited_claims":[],
+			"creative_routes":[],
+			"manual_short_drama_preroll":{
+				"brief_id":"brief_suspense",
+				"brief_version":1,
+				"brief_name":"悬疑真相",
+				"story_title":"消失的第七份证词",
+				"synopsis":"林夏整理父亲遗物时发现一份未出现在案件卷宗里的录音，录音时间与六年前事故记录完全矛盾，真正隐瞒秘密的人似乎已经找到她。",
+				"reviewed_selling_points":["关键录音出现"],
+				"hook_strategy":"suspense_reveal",
+				"subtitle_style":"high_contrast_dynamic",
+				"transition":"hard_cut",
+				"hook_strength":4,
+				"pace_profile":"suspense_hold",
+				"character_references":[]
+			}
+		}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "short-drama-initial-pace-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if manager.createdIntakeRequest.ManualShortDramaPreroll == nil ||
+		manager.createdIntakeRequest.ManualShortDramaPreroll.PaceProfile != "suspense_hold" {
+		t.Fatalf("pace profile was not decoded: %#v", manager.createdIntakeRequest.ManualShortDramaPreroll)
+	}
+}
+
+func TestGetLatestShortDramaWorkspaceRestoresThePersistedTask(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_short_drama", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeShortDramaPreroll,
+		},
+		VideoDraft: &creative.VideoDraft{
+			ContractVersion: "creative-video-draft/v1", TaskID: "creative_task_short_drama", Revision: 4,
+			Concept: "独立六秒短剧引流前贴", Prompt: "候选", DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+			ShortDramaPreroll: &creative.ShortDramaPrerollDraft{
+				ContractVersion: "creative-short-drama-preroll-draft/v1", TaskID: "creative_task_short_drama", Revision: 4,
+				SelectedCandidateID: "candidate_3",
+			},
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/creative/v1/projects/project_1/creative-workspaces/short-drama-preroll",
+		nil,
+	)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"id":"creative_task_short_drama"`) ||
+		!strings.Contains(response.Body.String(), `"selected_candidate_id":"candidate_3"`) {
+		t.Fatalf("workspace body = %s", response.Body.String())
+	}
+	if manager.latestShortDramaProjectID != "project_1" {
+		t.Fatalf("latest short drama workspace project = %q", manager.latestShortDramaProjectID)
+	}
+}
+
+func TestGamePrerollWorkspaceRestoresAndForwardsHumanSelection(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 30, 16, 0, 0, 0, time.UTC)
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_game", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeGamePreroll,
+		},
+		VideoDraft: &creative.VideoDraft{
+			ContractVersion: "creative-video-draft/v1", TaskID: "creative_task_game", Revision: 2,
+			Concept: "保卫向日葵技能选择挑战", Prompt: "已编译 Prompt", DurationSeconds: 6,
+			AspectRatio: "9:16", Resolution: "720p",
+			SourceVideo: contract.AssetVersionRef{AssetID: "asset_gameplay", Version: 1},
+			Mandatory:   []string{}, Prohibited: []string{}, CreatedAt: now,
+			GamePreroll: &creative.GamePrerollDraft{
+				ContractVersion: "creative-game-preroll-draft/v1", TaskID: "creative_task_game",
+				Revision: 2, SelectedRouteID: creative.ManualGamePrerollRouteID,
+				InputHash: "sha256:test", Candidates: []creative.GamePrerollCandidate{
+					{ID: "game_candidate_1"},
+					{ID: "game_candidate_2"},
+					{ID: "game_candidate_3"},
+				},
+				SelectedCandidateID: "game_candidate_1",
+				CreatedAt:           now, UpdatedAt: now,
+			},
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+
+	getRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/api/creative/v1/projects/project_1/creative-workspaces/game-preroll",
+		nil,
+	)
+	getResponse := httptest.NewRecorder()
+	server.ServeHTTP(getResponse, getRequest)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	if !strings.Contains(getResponse.Body.String(), `"selected_candidate_id":"game_candidate_1"`) ||
+		manager.latestGamePrerollProjectID != "project_1" {
+		t.Fatalf("restored game workspace = %s, project=%q", getResponse.Body.String(), manager.latestGamePrerollProjectID)
+	}
+
+	selectRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-tasks/creative_task_game/game-preroll:select-candidate",
+		bytes.NewBufferString(`{"expected_revision":2,"candidate_id":"game_candidate_2"}`),
+	)
+	selectRequest.Header.Set("Content-Type", "application/json")
+	selectRequest.Header.Set("Idempotency-Key", "game-select-1")
+	selectResponse := httptest.NewRecorder()
+	server.ServeHTTP(selectResponse, selectRequest)
+	if selectResponse.Code != http.StatusOK {
+		t.Fatalf("select status = %d, body=%s", selectResponse.Code, selectResponse.Body.String())
+	}
+	if manager.selectedGameTaskID != "creative_task_game" ||
+		manager.selectedGameRequest.ExpectedRevision != 2 ||
+		manager.selectedGameRequest.CandidateID != "game_candidate_2" {
+		t.Fatalf("game selection was not forwarded: task=%q request=%+v", manager.selectedGameTaskID, manager.selectedGameRequest)
+	}
+}
+
+func TestShortDramaVideoJobRegistersAVersionedGenerationAttempt(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_short_drama", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeShortDramaPreroll,
+		},
+		VideoDraft: &creative.VideoDraft{
+			ContractVersion: "creative-video-draft/v1", TaskID: "creative_task_short_drama", Revision: 5,
+			Concept: "独立六秒短剧引流前贴", Prompt: "已批准候选", DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+			ShortDramaPreroll: &creative.ShortDramaPrerollDraft{
+				ContractVersion: "creative-short-drama-preroll-draft/v1", TaskID: "creative_task_short_drama", Revision: 5,
+				SelectedCandidateID: "candidate_3",
+			},
+		},
+	}}
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	brandID := contract.BrandID("brand_1")
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager, ProviderJobs: jobs,
+		Projects: staticProjectManager{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID,
+			ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-tasks/creative_task_short_drama:video-job",
+		bytes.NewBufferString(`{}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "short-drama-video-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if manager.registeredShortDramaProviderJobID != jobs.job.ID || manager.registeredProviderJobID != "" {
+		t.Fatalf(
+			"short drama job registered through wrong lineage seam: short=%q generic=%q",
+			manager.registeredShortDramaProviderJobID, manager.registeredProviderJobID,
+		)
+	}
+}
+
+func TestGamePrerollVideoJobUsesSelectedPromptAndRegistersGenerationAttempt(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite, provider.ScopeJobCreate},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{
+			ID: "creative_task_game", OrganizationID: "org_1", ProjectID: "project_1",
+			Format: creative.FormatVideo, PerformanceMode: creative.PerformanceModeGamePreroll,
+		},
+		VideoDraft: &creative.VideoDraft{
+			ContractVersion: "creative-video-draft/v1", TaskID: "creative_task_game", Revision: 3,
+			Concept: "保卫向日葵", Prompt: "server compiled", DurationSeconds: 6,
+			AspectRatio: "9:16", Resolution: "720p",
+			SourceVideo: contract.AssetVersionRef{AssetID: "asset_gameplay", Version: 1},
+			GamePreroll: &creative.GamePrerollDraft{
+				ContractVersion: "creative-game-preroll-draft/v1", TaskID: "creative_task_game",
+				Revision: 3, SelectedCandidateID: "game_candidate_2",
+			},
+		},
+	}}
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	brandID := contract.BrandID("brand_1")
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager, ProviderJobs: jobs,
+		Projects: staticProjectManager{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID,
+			ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-tasks/creative_task_game:video-job",
+		bytes.NewBufferString(`{"model_alias":"cookies.video.standard"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "game-video-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if jobs.videoRequest.ModelAlias != "cookies.video.standard" ||
+		manager.registeredGamePrerollProviderJobID != jobs.job.ID ||
+		manager.registeredProviderJobID != "" {
+		t.Fatalf(
+			"game job route mismatch: model=%q game=%q generic=%q",
+			jobs.videoRequest.ModelAlias,
+			manager.registeredGamePrerollProviderJobID,
+			manager.registeredProviderJobID,
+		)
+	}
+}
+
 func TestCreativeVideoJobRequiresAndMapsApprovedFirstLastFrameSpec(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{
@@ -1700,18 +2118,29 @@ type providerJobStub struct {
 }
 
 type creativeManagerStub struct {
-	detail                  creative.TaskDetail
-	commerceSources         []creative.CreativeSourceOption
-	preparedCommerce        creative.PreparedCommercePreroll
-	registeredProviderJobID string
-	frozenVersion           creative.CreativeVersion
-	freezeKey               contract.IdempotencyKey
-	freezeTaskID            string
-	revisedDraft            creative.ImageTextDraft
-	reviseTaskID            string
-	reviseRequest           creative.ReviseDraftRequest
-	versions                []creative.CreativeVersion
-	packages                []creative.CreativePackage
+	detail                             creative.TaskDetail
+	commerceSources                    []creative.CreativeSourceOption
+	preparedCommerce                   creative.PreparedCommercePreroll
+	registeredProviderJobID            string
+	registeredShortDramaProviderJobID  string
+	registeredGamePrerollProviderJobID string
+	frozenVersion                      creative.CreativeVersion
+	freezeKey                          contract.IdempotencyKey
+	freezeTaskID                       string
+	revisedDraft                       creative.ImageTextDraft
+	reviseTaskID                       string
+	reviseRequest                      creative.ReviseDraftRequest
+	versions                           []creative.CreativeVersion
+	packages                           []creative.CreativePackage
+	regenerateTaskID                   string
+	regenerateRequest                  creative.RegenerateShortDramaCandidatesRequest
+	regenerateGameTaskID               string
+	regenerateGameRequest              creative.RegenerateGamePrerollCandidatesRequest
+	latestShortDramaProjectID          contract.ProjectID
+	latestGamePrerollProjectID         contract.ProjectID
+	selectedGameTaskID                 string
+	selectedGameRequest                creative.SelectGamePrerollCandidateRequest
+	createdIntakeRequest               creative.CreateIntakeRequest
 }
 
 func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {
@@ -1720,7 +2149,26 @@ func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contra
 func (s *creativeManagerStub) PrepareCommercePreroll(context.Context, contract.ActorContext, contract.ProjectID, creative.PrepareCommercePrerollRequest) (creative.PreparedCommercePreroll, error) {
 	return s.preparedCommerce, nil
 }
-func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
+func (s *creativeManagerStub) EnsureCommerceFixtureWorkspace(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.EnsureCommerceFixtureWorkspaceRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetLatestCommerceWorkspace(context.Context, contract.ActorContext, contract.ProjectID) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetCommerceWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateCommercePrerollDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateCommercePrerollDraftRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmCommerceGeneration(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmCommerceGenerationRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) CommerceProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
+	return provider.VideoGenerationInput{}, "", nil
+}
+func (s *creativeManagerStub) CreateIntake(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, _ contract.IdempotencyKey, request creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
+	s.createdIntakeRequest = request
 	return creative.CreativeIntake{}, nil
 }
 func (s *creativeManagerStub) ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error) {
@@ -1735,7 +2183,33 @@ func (s *creativeManagerStub) CreateVideoTask(context.Context, contract.ActorCon
 func (s *creativeManagerStub) SelectShortDramaCandidate(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaCandidateRequest) (creative.TaskDetail, error) {
 	return creative.TaskDetail{}, nil
 }
+func (s *creativeManagerStub) RegenerateShortDramaCandidates(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.RegenerateShortDramaCandidatesRequest) (creative.TaskDetail, error) {
+	s.regenerateTaskID = taskID
+	s.regenerateRequest = request
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetLatestShortDramaWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.TaskDetail, error) {
+	s.latestShortDramaProjectID = projectID
+	return s.detail, nil
+}
 func (s *creativeManagerStub) ShortDramaProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
+	return provider.VideoGenerationInput{}, "", nil
+}
+func (s *creativeManagerStub) GetLatestGamePrerollWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.TaskDetail, error) {
+	s.latestGamePrerollProjectID = projectID
+	return s.detail, nil
+}
+func (s *creativeManagerStub) SelectGamePrerollCandidate(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.SelectGamePrerollCandidateRequest) (creative.TaskDetail, error) {
+	s.selectedGameTaskID = taskID
+	s.selectedGameRequest = request
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RegenerateGamePrerollCandidates(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.RegenerateGamePrerollCandidatesRequest) (creative.TaskDetail, error) {
+	s.regenerateGameTaskID = taskID
+	s.regenerateGameRequest = request
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GamePrerollProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
 	return provider.VideoGenerationInput{}, "", nil
 }
 func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
@@ -1782,6 +2256,17 @@ func (s *creativeManagerStub) RegisterImagePlanJob(_ context.Context, _ contract
 func (s *creativeManagerStub) RegisterVideoJob(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) error {
 	s.registeredProviderJobID = providerJobID
 	return nil
+}
+func (s *creativeManagerStub) RegisterShortDramaGenerationAttempt(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) (creative.ShortDramaGenerationAttempt, error) {
+	s.registeredShortDramaProviderJobID = providerJobID
+	return creative.ShortDramaGenerationAttempt{ProviderJobID: providerJobID}, nil
+}
+func (s *creativeManagerStub) RegisterGamePrerollGenerationAttempt(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) (creative.GamePrerollGenerationAttempt, error) {
+	s.registeredGamePrerollProviderJobID = providerJobID
+	return creative.GamePrerollGenerationAttempt{ProviderJobID: providerJobID}, nil
+}
+func (s *creativeManagerStub) RegisterCommerceGenerationAttempt(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, providerJobID string) (creative.CommerceGenerationAttempt, error) {
+	return creative.CommerceGenerationAttempt{ProviderJobID: providerJobID}, nil
 }
 func (s *creativeManagerStub) CreateRenderJob(context.Context, contract.RequestContext, contract.ProjectID, string, creative.CreateRenderJobRequest, contract.IdempotencyKey) (creative.RenderJob, bool, error) {
 	return creative.RenderJob{}, false, nil

@@ -641,6 +641,34 @@ func (r *memoryRepository) GetTaskDetail(_ context.Context, _ contract.Organizat
 	}
 	return value, nil
 }
+func (r *memoryRepository) CreateShortDramaGenerationAttempt(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, attempt ShortDramaGenerationAttempt) (ShortDramaGenerationAttempt, error) {
+	value, ok := r.tasks[attempt.TaskID]
+	if !ok {
+		return ShortDramaGenerationAttempt{}, ErrNotFound
+	}
+	for _, existing := range value.ShortDramaGenerationAttempts {
+		if existing.ProviderJobID == attempt.ProviderJobID {
+			return existing, nil
+		}
+	}
+	value.ShortDramaGenerationAttempts = append(value.ShortDramaGenerationAttempts, attempt)
+	r.tasks[attempt.TaskID] = value
+	return attempt, nil
+}
+func (r *memoryRepository) CreateGamePrerollGenerationAttempt(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, attempt GamePrerollGenerationAttempt) (GamePrerollGenerationAttempt, error) {
+	value, ok := r.tasks[attempt.TaskID]
+	if !ok {
+		return GamePrerollGenerationAttempt{}, ErrNotFound
+	}
+	for _, existing := range value.GamePrerollGenerationAttempts {
+		if existing.ProviderJobID == attempt.ProviderJobID {
+			return existing, nil
+		}
+	}
+	value.GamePrerollGenerationAttempts = append(value.GamePrerollGenerationAttempts, attempt)
+	r.tasks[attempt.TaskID] = value
+	return attempt, nil
+}
 func (r *memoryRepository) ArchiveTask(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, taskID string, now time.Time) error {
 	value, ok := r.tasks[taskID]
 	if !ok {

@@ -6,6 +6,7 @@ import {
   createKanonMedia,
   createKanonProject,
   confirmKanonBrief,
+  ensureKanonGuerlainCommerceFixtureAssets,
   getKanonCapabilities,
   getKanonJob,
   listKanonArtifacts,
@@ -437,6 +438,118 @@ export type ApiPreparedCommercePreroll = {
   prepared_at: string
 }
 
+export type ApiCommercePrerollWorkspace = {
+  task: {
+    id: string
+    status: 'draft' | 'in_progress' | 'ready_for_review' | 'generating' | 'generated' | 'archived'
+    performance_mode: 'commerce_preroll'
+    updated_at: string
+  }
+  intake: {
+    id: string
+    version: number
+    request: {
+      objective: string
+      audience: string
+      core_message: string
+      call_to_action: string
+      manual_commerce_preroll: {
+        fixture_id: string
+        fixture_version: number
+        fixture_content_hash: string
+        brand_name: string
+        product_name: string
+        product_category?: string
+        selling_points: string[]
+        visual_keywords: string[]
+        product_asset_ref: ApiAssetVersionRef
+        first_frame_asset_ref: ApiAssetVersionRef
+        last_frame_asset_ref: ApiAssetVersionRef
+        template_ref: { template_id: ApiCommerceTemplateId; template_version: 1 }
+      }
+    }
+  }
+  video_draft: {
+    revision: number
+    prompt: string
+    commerce_preroll: {
+      contract_version: 'creative-commerce-preroll-draft/v1'
+      revision: number
+      input_hash: string
+      input_snapshot: {
+        fixture_id: string
+        fixture_version: number
+        fixture_content_hash: string
+        brand_name: string
+        product_name: string
+        product_category?: string
+        selling_points: string[]
+        visual_keywords: string[]
+        mandatory_elements: string[]
+        prohibited_claims: string[]
+        product_asset_ref: ApiAssetVersionRef
+        first_frame_asset_ref: ApiAssetVersionRef
+        last_frame_asset_ref: ApiAssetVersionRef
+      }
+      plan: {
+        template: { template_id: ApiCommerceTemplateId; template_version: 1 }
+        frame_plan: {
+          start_frame_kind: string
+          tail_frame_kind: string
+          product_asset_ref: ApiAssetVersionRef
+        }
+        prompt: {
+          prompt_version: number
+          fidelity: string
+          camera: string
+          environment: string
+          timeline: Array<{
+            start_seconds: number
+            end_seconds: number
+            purpose: 'information_gap' | 'single_transformation' | 'product_hold'
+            instruction: string
+          }>
+          guardrails: string[]
+          compiled_prompt: string
+          prompt_hash: string
+        }
+        generation_spec: {
+          generation_spec_hash: string
+          duration_seconds: 6
+          aspect_ratio: '9:16'
+          resolution: '720p'
+          generation_ready: boolean
+          production_ready: boolean
+        }
+      }
+      approval?: {
+        generation_spec_hash: string
+        confirmed_by: string
+        confirmed_at: string
+      }
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        missing_fields: string[]
+        blockers: string[]
+      }
+    }
+  }
+  commerce_preroll_generation_attempts?: Array<{
+    id: string
+    task_id: string
+    draft_revision: number
+    template_ref: { template_id: ApiCommerceTemplateId; template_version: 1 }
+    prompt_hash: string
+    generation_spec_hash: string
+    provider_job_id: string
+    retry_of_attempt_id?: string
+    output_asset_version?: ApiAssetVersionRef
+    created_at: string
+  }>
+}
+
 export type ApiVideoPurpose = 'preroll'
 export type ApiPrerollType = 'short_drama' | 'game' | 'commerce'
 
@@ -450,17 +563,36 @@ export type ApiShortDramaStoryContext = {
 export type ApiShortDramaPrerollCandidate = {
   id: string
   hookType: 'conflict' | 'reversal' | 'suspense' | 'selling_point_bridge'
-  executionAngle: 'dialogue_confrontation' | 'action_reveal' | 'reaction_escalation'
+  executionAngle: 'dialogue_confrontation' | 'action_reveal' | 'reaction_escalation' | 'result_first'
   executionAngleLabel: string
   score: number
-  scoreMeaning: 'hook_relevance'
+  scoreMeaning: 'editorial_quality_heuristic'
   evidence: string[]
+  primaryTestVariable: string
+  pacingProfile: string
+  visualGrammar: string
+  variantHypothesis: string
   hookLine: string
   voiceover: string
   storyboard: Array<{ startSeconds: number; endSeconds: number; visual: string; copy: string }>
   visualIntent: string
   transitionLine: string
-  promptPackage: { compiledPrompt: string; contentHash: string; directorSpec: Record<string, string> }
+  promptPackage: {
+    compiledPrompt: string
+    contentHash: string
+    directorSpec: Record<string, string>
+    candidateBatchId?: string
+    promptCompilerVersion?: string
+    generationConfig: ApiShortDramaGenerationConfig
+    subtitleSpec: {
+      mode: string
+      max_lines: number
+      safe_area: string
+      keyword_emphasis: boolean
+      animation_density: string
+      contrast_policy: string
+    }
+  }
 }
 
 export type ApiShortDramaPrerollPlan = {
@@ -469,6 +601,42 @@ export type ApiShortDramaPrerollPlan = {
 }
 
 export type ApiShortDramaHookStrategy = 'conflict_reversal' | 'suspense_reveal' | 'identity_contrast' | 'selling_point_bridge'
+export type ApiShortDramaSubtitleStyle = 'high_contrast_dynamic' | 'brand_minimal'
+export type ApiShortDramaPaceProfile = 'auto' | 'punchy' | 'balanced' | 'suspense_hold'
+export type ApiShortDramaVariationIntent = 'balanced' | 'more_visual' | 'more_dialogue' | 'more_suspense'
+
+export type ApiShortDramaGenerationConfig = {
+  subtitle_style: ApiShortDramaSubtitleStyle
+  hook_strength: number
+  pace_profile: ApiShortDramaPaceProfile
+}
+
+type ApiShortDramaCandidateWire = {
+  id: string
+  hook_strategy: ApiShortDramaHookStrategy
+  execution_angle: ApiShortDramaPrerollCandidate['executionAngle']
+  primary_test_variable?: string
+  pacing_profile?: string
+  visual_grammar?: string
+  variant_hypothesis?: string
+  score: number
+  score_meaning: 'editorial_quality_heuristic'
+  evidence: string[]
+  hook_line: string
+  voiceover: string
+  storyboard: Array<{ start_seconds: number; end_seconds: number; visual: string; copy: string }>
+  visual_intent: string
+  transition_line: string
+  prompt_package: {
+    compiled_prompt: string
+    content_hash: string
+    director_spec: Record<string, string>
+    candidate_batch_id?: string
+    prompt_compiler_version?: string
+    generation_config?: ApiShortDramaGenerationConfig
+    subtitle_spec?: ApiShortDramaPrerollCandidate['promptPackage']['subtitleSpec']
+  }
+}
 
 export type ApiShortDramaPrerollWorkspace = {
   task: { id: string; performance_mode: 'short_drama_preroll'; status: string }
@@ -486,28 +654,40 @@ export type ApiShortDramaPrerollWorkspace = {
         reviewed_selling_points: string[]
         opening_line?: string
         hook_strategy: ApiShortDramaHookStrategy
-        subtitle_style: 'high_contrast_dynamic' | 'brand_minimal'
+        subtitle_style: ApiShortDramaSubtitleStyle
         transition: 'hard_cut' | 'action_match' | 'audio_bridge'
         hook_strength: number
+        pace_profile?: ApiShortDramaPaceProfile
         call_to_action: string
       }
       readiness: { planning_ready: boolean; generation_ready: boolean; production_ready: boolean; blockers: string[] }
-      candidates: Array<{
+      active_candidate_batch?: {
         id: string
-        hook_strategy: ApiShortDramaHookStrategy
-        execution_angle: ApiShortDramaPrerollCandidate['executionAngle']
-        score: number
-        score_meaning: 'hook_relevance'
-        evidence: string[]
-        hook_line: string
-        voiceover: string
-        storyboard: Array<{ start_seconds: number; end_seconds: number; visual: string; copy: string }>
-        visual_intent: string
-        transition_line: string
-        prompt_package: { compiled_prompt: string; content_hash: string; director_spec: Record<string, string> }
-      }>
+        revision: number
+        planner_version: string
+        prompt_compiler_version: string
+        diversity_nonce: string
+        generation_config: ApiShortDramaGenerationConfig
+        variation_intent: ApiShortDramaVariationIntent
+        generated_candidate_count: number
+        candidates: ApiShortDramaCandidateWire[]
+        created_at: string
+      }
+      candidates: ApiShortDramaCandidateWire[]
     }
   }
+  short_drama_generation_attempts?: Array<{
+    id: string
+    task_id: string
+    draft_revision: number
+    candidate_batch_id: string
+    candidate_id: string
+    prompt_package_hash: string
+    generation_spec_hash: string
+    provider_job_id: string
+    output_asset_version?: ApiAssetVersionRef
+    created_at: string
+  }>
 }
 
 export type ApiCreateManualShortDramaPrerollInput = {
@@ -519,9 +699,10 @@ export type ApiCreateManualShortDramaPrerollInput = {
   reviewedSellingPoints: string[]
   openingLine?: string
   hookStrategy: ApiShortDramaHookStrategy
-  subtitleStyle: 'high_contrast_dynamic' | 'brand_minimal'
+  subtitleStyle: ApiShortDramaSubtitleStyle
   transition: 'hard_cut' | 'action_match' | 'audio_bridge'
   hookStrength: number
+  paceProfile: ApiShortDramaPaceProfile
   objective: string
   audience: string
   prohibitedClaims: string[]
@@ -533,6 +714,135 @@ export type ApiShortDramaPrerollSnapshot = {
   storyContext: Omit<ApiShortDramaStoryContext, 'openingLine'>
   selectedCandidate: ApiShortDramaPrerollCandidate
   prompt: string
+}
+
+export type ApiGameEvidenceMoment = {
+  id: string
+  kind: 'skill_choice' | 'wave_progress' | 'battle'
+  start_milliseconds: number
+  end_milliseconds: number
+  description: string
+  verified_copy: string[]
+}
+
+export type ApiGameHookMechanism =
+  | 'choice_challenge'
+  | 'tactical_tradeoff'
+  | 'wave_escalation'
+  | 'failure_reversal'
+  | 'merge_upgrade'
+  | 'reward_reveal'
+
+export type ApiGamePrerollCandidate = {
+  id: string
+  hook_mechanism: ApiGameHookMechanism
+  execution_angle: string
+  primary_test_variable: string
+  variant_hypothesis: string
+  score: number
+  score_meaning: 'evidence_grounded_hook_relevance'
+  hook_line: string
+  evidence_moment_ids: string[]
+  storyboard: Array<{
+    start_milliseconds: number
+    end_milliseconds: number
+    visual: string
+    copy: string
+    evidence_moment_id: string
+  }>
+  prompt_package: {
+    prompt_compiler_version: string
+    input_snapshot_hash: string
+    candidate_batch_id: string
+    candidate_id: string
+    generation_config: {
+      subtitle_style: 'high_contrast_dynamic' | 'brand_minimal'
+      hook_strength: number
+      pace_profile: 'punchy' | 'balanced'
+    }
+    director_spec: Record<string, string>
+    negative_constraints: string[]
+    compiled_prompt: string
+    content_hash: string
+  }
+}
+
+export type ApiGamePrerollWorkspace = {
+  task: { id: string; performance_mode: 'game_preroll'; status: string }
+  video_draft: {
+    revision: number
+    game_preroll: {
+      revision: number
+      selected_candidate_id?: string
+      input_snapshot: {
+        brief_id: string
+        brief_version: number
+        brief_name: string
+        game_name: string
+        gameplay_summary: string
+        source_video: ApiAssetVersionRef
+        source_video_rights: 'confirmed'
+        call_to_action: string
+        evidence_moments: ApiGameEvidenceMoment[]
+        allowed_mechanisms: ApiGameHookMechanism[]
+        prohibited_mechanisms: ApiGameHookMechanism[]
+      }
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        blockers: string[]
+      }
+      active_candidate_batch: {
+        id: string
+        revision: number
+        planner_version: string
+        prompt_compiler_version: string
+        generation_config: {
+          subtitle_style: 'high_contrast_dynamic' | 'brand_minimal'
+          hook_strength: number
+          pace_profile: 'punchy' | 'balanced'
+        }
+        generated_candidate_count: number
+        candidates: ApiGamePrerollCandidate[]
+        created_at: string
+      }
+      candidates: ApiGamePrerollCandidate[]
+    }
+  }
+  game_preroll_generation_attempts?: Array<{
+    id: string
+    task_id: string
+    draft_revision: number
+    candidate_batch_id: string
+    candidate_id: string
+    prompt_package_hash: string
+    generation_spec_hash: string
+    provider_job_id: string
+    output_asset_version?: ApiAssetVersionRef
+    created_at: string
+  }>
+}
+
+export type ApiCreateManualGamePrerollInput = {
+  briefId: string
+  briefVersion: number
+  briefName: string
+  gameName: string
+  gameplaySummary: string
+  sourceVideo: ApiAssetVersionRef
+  evidenceMoments: ApiGameEvidenceMoment[]
+  allowedMechanisms: ApiGameHookMechanism[]
+  prohibitedMechanisms: ApiGameHookMechanism[]
+  subtitleStyle: 'high_contrast_dynamic' | 'brand_minimal'
+  hookStrength: number
+  paceProfile: 'punchy' | 'balanced'
+  objective: string
+  audience: string
+  coreMessage: string
+  callToAction: string
+  mandatoryElements: string[]
+  prohibitedClaims: string[]
 }
 
 export type ApiPrerollScope = {
@@ -1332,6 +1642,13 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
   return payload as T
 }
 
+class CreativeApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'CreativeApiError'
+  }
+}
+
 async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
   const response = await fetch(`${backendOrigin}/api/creative/v1${path}`, {
     method,
@@ -1351,7 +1668,7 @@ async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, 
   if (!response.ok) {
     const error = payload as { error?: { message?: string; request_id?: string } }
     const requestId = error.error?.request_id ? `（request_id: ${error.error.request_id}）` : ''
-    throw new Error(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`)
+    throw new CreativeApiError(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`, response.status)
   }
   return payload as T
 }
@@ -1479,7 +1796,7 @@ async function createManualShortDramaPrerollWorkspace(
         brief_id: input.briefId, brief_version: input.briefVersion, brief_name: input.briefName,
         story_title: input.title, synopsis: input.synopsis, reviewed_selling_points: input.reviewedSellingPoints.filter(Boolean),
         opening_line: input.openingLine || undefined, hook_strategy: input.hookStrategy, subtitle_style: input.subtitleStyle,
-        transition: input.transition, hook_strength: input.hookStrength, character_references: [],
+        transition: input.transition, hook_strength: input.hookStrength, pace_profile: input.paceProfile, character_references: [],
       },
     },
     { 'Idempotency-Key': `manual-short-drama-${Date.now()}-${Math.random().toString(36).slice(2)}` },
@@ -1512,17 +1829,309 @@ async function selectShortDramaPrerollCandidate(
   )
 }
 
-async function createShortDramaPrerollVideoJob(projectId: string, taskId: string): Promise<ApiGenerationJob> {
+async function regenerateShortDramaPrerollCandidates(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  generationConfig: ApiShortDramaGenerationConfig,
+  variationIntent: ApiShortDramaVariationIntent = 'balanced',
+): Promise<ApiShortDramaPrerollWorkspace> {
+  return creativeRequest<ApiShortDramaPrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll:regenerate-candidates`,
+    'POST',
+    {
+      expected_revision: expectedRevision,
+      generation_config: generationConfig,
+      variation_intent: variationIntent,
+    },
+    {
+      'Idempotency-Key': [
+        'short-drama-regenerate',
+        taskId,
+        expectedRevision,
+        generationConfig.subtitle_style,
+        generationConfig.hook_strength,
+        generationConfig.pace_profile,
+        variationIntent,
+      ].join('-'),
+    },
+  )
+}
+
+async function createShortDramaPrerollVideoJob(
+  projectId: string,
+  taskId: string,
+  draftRevision: number,
+  candidateId: string,
+): Promise<ApiGenerationJob> {
   const job = await creativeRequest<ApiProviderJobWire>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
     'POST',
     { model_alias: 'cookies.video.standard' },
-    { 'Idempotency-Key': `short-drama-video-${taskId}-${Date.now()}` },
+    { 'Idempotency-Key': `short-drama-video-${taskId}-${draftRevision}-${candidateId}` },
   )
   return mapViralProviderJob(job)
 }
 
 async function getShortDramaPrerollVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  const job = await platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getLatestShortDramaPrerollWorkspace(projectId: string): Promise<ApiShortDramaPrerollWorkspace | null> {
+  try {
+    return await creativeRequest<ApiShortDramaPrerollWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/creative-workspaces/short-drama-preroll`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
+function commerceRequestFingerprint(value: unknown) {
+  const text = JSON.stringify(value)
+  let hash = 2166136261
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+async function ensureCommercePrerollFixtureWorkspace(
+  projectId: string,
+): Promise<ApiCommercePrerollWorkspace> {
+  const assets = await ensureKanonGuerlainCommerceFixtureAssets(projectId)
+  return creativeRequest<ApiCommercePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-workspaces/commerce-preroll:ensure-fixture`,
+    'POST',
+    {
+      template_ref: {
+        template_id: 'commerce.window-reveal',
+        template_version: 1,
+      },
+      product_asset_ref: assets.productAsset,
+      first_frame_asset_ref: assets.firstFrame,
+      last_frame_asset_ref: assets.lastFrame,
+    },
+    { 'Idempotency-Key': `commerce-fixture-${projectId}-guerlain-v1` },
+  )
+}
+
+async function getLatestCommercePrerollWorkspace(
+  projectId: string,
+): Promise<ApiCommercePrerollWorkspace | null> {
+  try {
+    return await creativeRequest<ApiCommercePrerollWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/creative-workspaces/commerce-preroll`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
+async function updateCommercePrerollDraft(
+  projectId: string,
+  taskId: string,
+  input: {
+    expected_revision: number
+    template_ref: { template_id: ApiCommerceTemplateId; template_version: 1 }
+    fidelity?: string
+    camera?: string
+    motion?: string
+    environment?: string
+    result?: string
+    guardrails?: string[]
+  },
+): Promise<ApiCommercePrerollWorkspace> {
+  return creativeRequest<ApiCommercePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/commerce-preroll-draft`,
+    'PATCH',
+    input,
+    {
+      'Idempotency-Key': [
+        'commerce-draft',
+        taskId,
+        input.expected_revision,
+        commerceRequestFingerprint(input),
+      ].join('-'),
+    },
+  )
+}
+
+async function confirmCommercePrerollGeneration(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+): Promise<ApiCommercePrerollWorkspace> {
+  return creativeRequest<ApiCommercePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/commerce-preroll:confirm-generation`,
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `commerce-confirm-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function createCommercePrerollWorkspaceVideoJob(
+  projectId: string,
+  workspace: ApiCommercePrerollWorkspace,
+): Promise<ApiGenerationJob> {
+  const taskId = workspace.task.id
+  const draft = workspace.video_draft.commerce_preroll
+  const attemptOrdinal = (workspace.commerce_preroll_generation_attempts?.length ?? 0) + 1
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    { model_alias: 'cookies.video.standard' },
+    {
+      'Idempotency-Key': [
+        'commerce-video',
+        taskId,
+        draft.revision,
+        attemptOrdinal,
+        draft.plan.generation_spec.generation_spec_hash.slice(-12),
+      ].join('-'),
+    },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function createManualGamePrerollWorkspace(
+  projectId: string,
+  input: ApiCreateManualGamePrerollInput,
+): Promise<ApiGamePrerollWorkspace> {
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual',
+      format: 'video',
+      performance_mode: 'game_preroll',
+      channel: 'douyin',
+      objective: input.objective,
+      audience: input.audience,
+      core_message: input.coreMessage,
+      call_to_action: input.callToAction,
+      concept: input.briefName,
+      tone: ['紧张', '清晰', '真实玩法'],
+      visual_keywords: ['技能三选一', '波次推进', '竖屏塔防'],
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+      creative_routes: [{
+        route_id: 'route_manual_game_preroll_v1',
+        route_type: 'game_preroll',
+        video_purpose: 'performance',
+        channels: ['douyin'],
+        reason: '用户确认使用《保卫向日葵》授权实录固定样例跑通游戏前贴',
+        target_duration_seconds: 6,
+        aspect_ratio: '9:16',
+        source_asset_refs: [input.sourceVideo],
+        evidence_refs: input.evidenceMoments.map(moment => moment.id),
+        requires_human_confirmation: true,
+      }],
+      manual_game_preroll: {
+        brief_id: input.briefId,
+        brief_version: input.briefVersion,
+        brief_name: input.briefName,
+        game_name: input.gameName,
+        gameplay_summary: input.gameplaySummary,
+        source_video: input.sourceVideo,
+        source_video_rights: 'confirmed',
+        evidence_moments: input.evidenceMoments,
+        allowed_mechanisms: input.allowedMechanisms,
+        prohibited_mechanisms: input.prohibitedMechanisms,
+        subtitle_style: input.subtitleStyle,
+        hook_strength: input.hookStrength,
+        pace_profile: input.paceProfile,
+      },
+    },
+    { 'Idempotency-Key': `manual-game-preroll-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_game_preroll_v1',
+      channel: 'douyin',
+      source_video: input.sourceVideo,
+      concept: input.briefName,
+      prompt: '等待人工选择游戏前贴候选后由服务端编译 PromptPackage',
+      call_to_action: input.callToAction,
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+      confirm_route: true,
+    },
+  )
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}`,
+  )
+}
+
+async function selectGamePrerollCandidate(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  candidateId: string,
+): Promise<ApiGamePrerollWorkspace> {
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/game-preroll:select-candidate`,
+    'POST',
+    { expected_revision: expectedRevision, candidate_id: candidateId },
+    { 'Idempotency-Key': `game-preroll-select-${taskId}-${expectedRevision}-${candidateId}` },
+  )
+}
+
+async function regenerateGamePrerollCandidates(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+): Promise<ApiGamePrerollWorkspace> {
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/game-preroll:regenerate-candidates`,
+    'POST',
+    {
+      expected_revision: expectedRevision,
+      generation_config: {
+        subtitle_style: 'high_contrast_dynamic',
+        hook_strength: 4,
+        pace_profile: 'punchy',
+      },
+    },
+    { 'Idempotency-Key': `game-preroll-regenerate-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function createGamePrerollVideoJob(
+  projectId: string,
+  taskId: string,
+  draftRevision: number,
+  candidateId: string,
+): Promise<ApiGenerationJob> {
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    { model_alias: 'cookies.video.standard' },
+    { 'Idempotency-Key': `game-preroll-video-${taskId}-${draftRevision}-${candidateId}` },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getLatestGamePrerollWorkspace(projectId: string): Promise<ApiGamePrerollWorkspace | null> {
+  try {
+    return await creativeRequest<ApiGamePrerollWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/creative-workspaces/game-preroll`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
+async function getGamePrerollVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
   const job = await platformRequest<ApiProviderJobWire>(
     `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
   )
@@ -2168,8 +2777,21 @@ export const api = {
   createManualViralRemakeWorkspace,
   createManualShortDramaPrerollWorkspace,
   selectShortDramaPrerollCandidate,
+  regenerateShortDramaPrerollCandidates,
   createShortDramaPrerollVideoJob,
   getShortDramaPrerollVideoJob,
+  getLatestShortDramaPrerollWorkspace,
+  ensureCommercePrerollFixtureWorkspace,
+  getLatestCommercePrerollWorkspace,
+  updateCommercePrerollDraft,
+  confirmCommercePrerollGeneration,
+  createCommercePrerollWorkspaceVideoJob,
+  createManualGamePrerollWorkspace,
+  selectGamePrerollCandidate,
+  regenerateGamePrerollCandidates,
+  createGamePrerollVideoJob,
+  getLatestGamePrerollWorkspace,
+  getGamePrerollVideoJob,
   getLatestViralRemakeWorkspace,
   getViralRemakeWorkspace,
   analyzeViralRemake,

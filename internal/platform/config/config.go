@@ -42,6 +42,7 @@ type Config struct {
 	Scanner       Scanner
 	Media         Media
 	Provider      Provider
+	Creative      Creative
 	Strategy      Strategy
 	Research      Research
 	LocalIdentity *LocalIdentity
@@ -94,6 +95,13 @@ type Strategy struct {
 	PromptVersion            string
 	CriticEnabled            bool
 	OrganizationAllowlist    []string
+}
+
+type Creative struct {
+	ShortDramaModelPlannerEnabled  bool
+	ShortDramaPlannerModelAlias    string
+	GamePrerollModelPlannerEnabled bool
+	GamePrerollPlannerModelAlias   string
 }
 
 // Research configures an optional backend-owned MCP stdio client. The browser
@@ -278,6 +286,22 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gamePrerollModelPlannerEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_CREATIVE_GAME_PREROLL_MODEL_PLANNER_ENABLED",
+		true,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	shortDramaModelPlannerEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_CREATIVE_SHORT_DRAMA_MODEL_PLANNER_ENABLED",
+		true,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
@@ -308,6 +332,12 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			FFmpegPath:    valueOr(lookup, "COOKIES_FFMPEG_PATH", ""),
 			FFprobePath:   valueOr(lookup, "COOKIES_FFPROBE_PATH", ""),
 			VideoWorkRoot: valueOr(lookup, "COOKIES_VIDEO_WORK_ROOT", ".data/video-work"),
+		},
+		Creative: Creative{
+			ShortDramaModelPlannerEnabled:  shortDramaModelPlannerEnabled,
+			ShortDramaPlannerModelAlias:    valueOr(lookup, "COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+			GamePrerollModelPlannerEnabled: gamePrerollModelPlannerEnabled,
+			GamePrerollPlannerModelAlias:   valueOr(lookup, "COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 		},
 		Strategy: Strategy{
 			Enabled:                  strategyEnabled,
@@ -441,6 +471,12 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Media.VideoWorkRoot) == "" {
 		return fmt.Errorf("COOKIES_VIDEO_WORK_ROOT must not be empty")
+	}
+	if strings.TrimSpace(c.Creative.ShortDramaPlannerModelAlias) == "" {
+		return fmt.Errorf("COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Creative.GamePrerollPlannerModelAlias) == "" {
+		return fmt.Errorf("COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS must not be empty")
 	}
 	if c.Research.TimeoutSeconds < 1 || c.Research.TimeoutSeconds > 600 {
 		return fmt.Errorf("COOKIES_RESEARCH_TIMEOUT_SECONDS must be between 1 and 600")

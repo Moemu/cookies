@@ -50,18 +50,21 @@ type StrategyPackageSnapshot struct {
 }
 
 type Service struct {
-	Repository       Repository
-	ViralRemakes     ViralRemakeRepository
-	ViralAnalyzer    ViralReferenceAnalyzer
-	Projects         ActiveProjectResolver
-	StrategyPackages StrategyPackageReader
-	Sources          CreativeSourceReader
-	Assets           AssetReader
-	Composer         media.VideoComposer
-	RenderedAssets   RenderedAssetWriter
-	RenderScheduler  RenderScheduler
-	NewID            ids.Generator
-	Now              func() time.Time
+	Repository               Repository
+	ViralRemakes             ViralRemakeRepository
+	ViralAnalyzer            ViralReferenceAnalyzer
+	Projects                 ActiveProjectResolver
+	StrategyPackages         StrategyPackageReader
+	Sources                  CreativeSourceReader
+	Assets                   AssetReader
+	Composer                 media.VideoComposer
+	RenderedAssets           RenderedAssetWriter
+	RenderScheduler          RenderScheduler
+	ShortDramaPrerollPlanner ShortDramaPrerollPlanner
+	GamePrerollPlanner       GamePrerollPlanner
+	CommerceWorkspaces       CommerceWorkspaceRepository
+	NewID                    ids.Generator
+	Now                      func() time.Time
 }
 
 func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateVideoTaskRequest) (CreativeTask, error) {
@@ -74,7 +77,8 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if err := request.Validate(); err != nil {
 		return CreativeTask{}, err
 	}
-	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+	projectContext, err := s.Projects.RequireActiveContext(ctx, actor, projectID)
+	if err != nil {
 		return CreativeTask{}, err
 	}
 	intake, err := s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
@@ -115,6 +119,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	}
 	var viralDraft *ViralRemakeDraft
 	var shortDramaDraft *ShortDramaPrerollDraft
+	var gamePrerollDraft *GamePrerollDraft
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
 		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
@@ -127,6 +132,12 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			if !image.Ready || image.Kind != contract.AssetImage || image.Ref != *referenceImage {
 				return CreativeTask{}, fmt.Errorf("reference_image must be a ready image in the same project")
 			}
+		}
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeGamePreroll {
+		if intake.Request.ManualGamePreroll == nil ||
+			intake.Request.ManualGamePreroll.SourceVideo != request.SourceVideo {
+			return CreativeTask{}, fmt.Errorf("source_video must match the immutable game preroll intake snapshot")
 		}
 	}
 	id, err := s.idGenerator()("creativetask")
@@ -196,14 +207,31 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			StoryTitle: manual.StoryTitle, Synopsis: manual.Synopsis,
 			ReviewedSellingPoints: append([]string{}, manual.ReviewedSellingPoints...), OpeningLine: manual.OpeningLine,
 			HookStrategy: manual.HookStrategy, SubtitleStyle: manual.SubtitleStyle, Transition: manual.Transition,
-			HookStrength: manual.HookStrength, CallToAction: request.CallToAction,
+			HookStrength: manual.HookStrength, PaceProfile: normalizeShortDramaPaceProfile(manual.PaceProfile),
+			CallToAction:        request.CallToAction,
 			CharacterReferences: append([]contract.AssetVersionRef{}, manual.CharacterReferences...),
 		}
 		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
 		if hashErr != nil {
 			return CreativeTask{}, fmt.Errorf("canonicalize short drama input: %w", hashErr)
 		}
-		candidates, planErr := planShortDramaCandidates(snapshot, "sha256:"+inputHash)
+		batchID := fmt.Sprintf("%s_batch_%d", task.ID, 1)
+		planner := s.ShortDramaPrerollPlanner
+		if planner == nil {
+			planner = DeterministicShortDramaPrerollPlanner{}
+		}
+		batch, planErr := planner.Plan(
+			ctx,
+			actor,
+			projectContext,
+			snapshot,
+			"sha256:"+inputHash,
+			batchID,
+			1,
+			shortDramaGenerationConfig(snapshot),
+			"balanced",
+			now,
+		)
 		if planErr != nil {
 			return CreativeTask{}, planErr
 		}
@@ -214,10 +242,64 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 				PlanningReady: true, GenerationReady: false, ProductionReady: false,
 				MissingFields: []string{}, Blockers: []string{"selected_candidate"},
 			},
-			Candidates: candidates, CreatedAt: now, UpdatedAt: now,
+			ActiveCandidateBatch: &batch, Candidates: batch.Candidates, CreatedAt: now, UpdatedAt: now,
 		}
 		draft.ShortDramaPreroll = shortDramaDraft
-		draft.Prompt = candidates[0].PromptPackage.CompiledPrompt
+		draft.Prompt = batch.Candidates[0].PromptPackage.CompiledPrompt
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeGamePreroll {
+		manual := intake.Request.ManualGamePreroll
+		if manual == nil {
+			return CreativeTask{}, fmt.Errorf("manual game preroll input is required")
+		}
+		snapshot := GamePrerollInputSnapshot{
+			Source: intake.Source, SelectedRouteID: route.RouteID,
+			BriefID: manual.BriefID, BriefVersion: manual.BriefVersion, BriefName: manual.BriefName,
+			GameName: manual.GameName, GameplaySummary: manual.GameplaySummary,
+			SourceVideo: request.SourceVideo, SourceVideoRights: manual.SourceVideoRights,
+			CallToAction:         request.CallToAction,
+			EvidenceMoments:      append([]GameEvidenceMoment{}, manual.EvidenceMoments...),
+			AllowedMechanisms:    append([]GameHookMechanism{}, manual.AllowedMechanisms...),
+			ProhibitedMechanisms: append([]GameHookMechanism{}, manual.ProhibitedMechanisms...),
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize game preroll input: %w", hashErr)
+		}
+		planner := s.GamePrerollPlanner
+		if planner == nil {
+			planner = DeterministicGamePrerollPlanner{}
+		}
+		batch, planErr := planner.Plan(
+			ctx,
+			actor,
+			projectContext,
+			snapshot,
+			"sha256:"+inputHash,
+			fmt.Sprintf("%s_batch_%d", task.ID, 1),
+			1,
+			GamePrerollGenerationConfig{
+				SubtitleStyle: manual.SubtitleStyle,
+				HookStrength:  manual.HookStrength,
+				PaceProfile:   manual.PaceProfile,
+			},
+			now,
+		)
+		if planErr != nil {
+			return CreativeTask{}, planErr
+		}
+		gamePrerollDraft = &GamePrerollDraft{
+			ContractVersion: "creative-game-preroll-draft/v1", TaskID: task.ID, Revision: 1,
+			SelectedRouteID: route.RouteID, InputSnapshot: snapshot, InputHash: "sha256:" + inputHash,
+			Readiness: CreativeReadiness{
+				PlanningReady: true, GenerationReady: false, ProductionReady: false,
+				MissingFields: []string{}, Blockers: []string{"selected_candidate"},
+			},
+			ActiveCandidateBatch: &batch, Candidates: batch.Candidates,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		draft.GamePreroll = gamePrerollDraft
+		draft.Prompt = batch.Candidates[0].PromptPackage.CompiledPrompt
 	}
 	if err := draft.Validate(); err != nil {
 		return CreativeTask{}, err

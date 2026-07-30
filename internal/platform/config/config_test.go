@@ -29,6 +29,12 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if value.Provider.AudioAdapter != "fake" {
 		t.Fatalf("unexpected audio adapter default: %q", value.Provider.AudioAdapter)
 	}
+	if !value.Creative.ShortDramaModelPlannerEnabled ||
+		value.Creative.ShortDramaPlannerModelAlias != "cookies.text.standard" ||
+		!value.Creative.GamePrerollModelPlannerEnabled ||
+		value.Creative.GamePrerollPlannerModelAlias != "cookies.text.standard" {
+		t.Fatalf("unexpected Creative game preroll defaults: %#v", value.Creative)
+	}
 }
 
 func TestPasswordAuthenticationDefaultsToLocalOnly(t *testing.T) {

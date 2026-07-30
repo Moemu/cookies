@@ -123,6 +123,51 @@ func main() {
 	creativeService := &creative.Service{
 		Repository: creativeRepository, ViralRemakes: creativeRepository,
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
+		CommerceWorkspaces: creativeRepository,
+	}
+	if cfg.Creative.ShortDramaModelPlannerEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure Creative short-drama planner: %v", textAdapterErr)
+		}
+		creativeService.ShortDramaPrerollPlanner = creative.FallbackShortDramaPrerollPlanner{
+			Primary: creative.ModelShortDramaPrerollPlanner{
+				Text:       &provider.Service{TextAdapter: textAdapter},
+				ModelAlias: cfg.Creative.ShortDramaPlannerModelAlias,
+			},
+			Fallback: creative.DeterministicShortDramaPrerollPlanner{},
+			OnPrimaryFailure: func(err error) {
+				log.Printf("Creative short-drama model planning fell back to deterministic planning: %v", err)
+			},
+		}
+		log.Printf(
+			"Creative short-drama planning configured: model_alias=%s fallback=deterministic",
+			cfg.Creative.ShortDramaPlannerModelAlias,
+		)
+	} else {
+		creativeService.ShortDramaPrerollPlanner = creative.DeterministicShortDramaPrerollPlanner{}
+	}
+	if cfg.Creative.GamePrerollModelPlannerEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure Creative game-preroll planner: %v", textAdapterErr)
+		}
+		creativeService.GamePrerollPlanner = creative.FallbackGamePrerollPlanner{
+			Primary: creative.ModelGamePrerollPlanner{
+				Text:       &provider.Service{TextAdapter: textAdapter},
+				ModelAlias: cfg.Creative.GamePrerollPlannerModelAlias,
+			},
+			Fallback: creative.DeterministicGamePrerollPlanner{},
+			OnPrimaryFailure: func(err error) {
+				log.Printf("Creative game-preroll model planning fell back to deterministic planning: %v", err)
+			},
+		}
+		log.Printf(
+			"Creative game-preroll planning configured: model_alias=%s fallback=deterministic",
+			cfg.Creative.GamePrerollPlannerModelAlias,
+		)
+	} else {
+		creativeService.GamePrerollPlanner = creative.DeterministicGamePrerollPlanner{}
 	}
 	if cfg.Provider.AudioAdapter == "volcengine_asr" && cfg.Provider.TextAdapter == "adapter_gateway" {
 		cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
