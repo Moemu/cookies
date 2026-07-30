@@ -115,6 +115,24 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 	}
 }
 
+func TestResearchCategoryIsExplicitAndBounded(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"", "general", "audience", "competitor", "industry", " Audience "} {
+		if !validResearchCategory(value, true) {
+			t.Fatalf("category %q should be valid", value)
+		}
+	}
+	for _, value := range []string{"creative", "brand", "unknown"} {
+		if validResearchCategory(value, true) {
+			t.Fatalf("category %q should be rejected", value)
+		}
+	}
+	if normalizedResearchCategory("") != "general" ||
+		normalizedResearchCategory(" Competitor ") != "competitor" {
+		t.Fatal("research category normalization changed unexpectedly")
+	}
+}
+
 type allowingProjects struct{}
 
 func (allowingProjects) GetContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, BarChart3, BookOpenCheck, Check, CircleAlert, CircleCheck,
-  Database, FileInput, Filter, Layers3, Lightbulb, Link2, RefreshCw,
+  Database, FileInput, Filter, Layers3, Lightbulb, RefreshCw,
   Play, Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiArtifact, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult, type ApiProjectMediaAsset } from '../data/api'
+import { api, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult, type ApiProjectMediaAsset } from '../data/api'
+import { createMutationKey, strategyApi } from '../features/strategy/api'
+import type { KnowledgeDocument, StrategyTaskListItem } from '../features/strategy/types'
 import type { DataState, SystemKey } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -59,14 +61,16 @@ const preLaunchInsights = [
 ]
 
 export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataState; onOpenProject: OpenProject }) {
-  const { currentProject, reloadProjects } = useProject()
+  const { currentProject } = useProject()
   const [channel, setChannel] = useState('全渠道')
   const [format, setFormat] = useState('全部形式')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState(preLaunchInsights[0].id)
-  const [references, setReferences] = useState<ApiArtifact[]>([])
+  const [references, setReferences] = useState<KnowledgeDocument[]>([])
+  const [briefTargets, setBriefTargets] = useState<StrategyTaskListItem[]>([])
+  const [targetTaskId, setTargetTaskId] = useState('')
   const [notice, setNotice] = useState('')
-  const [busyTarget, setBusyTarget] = useState<'brief' | 'creative' | ''>('')
+  const [busy, setBusy] = useState(false)
   const filtered = useMemo(() => preLaunchInsights.filter(insight =>
     (channel === '全渠道' || insight.channel === channel || insight.channel === '全渠道')
     && (format === '全部形式' || insight.format === format)
@@ -76,47 +80,56 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
 
   useEffect(() => {
     let active = true
-    void api.listArtifacts(currentProject.id).then(artifacts => {
-      if (active) setReferences(artifacts.filter(artifact => artifact.content.startsWith('[prelaunch-insight]')))
+    void Promise.all([
+      strategyApi.listKnowledgeDocuments(currentProject.id),
+      strategyApi.listTasks(currentProject.id, 'active'),
+    ]).then(([documentResult, taskResult]) => {
+      if (!active) return
+      const targets = taskResult.items.filter(item => !item.task.discarded_at && item.brief_status === 'open')
+      setReferences(documentResult.items.filter(document => document.source_type === 'prelaunch_insight'))
+      setBriefTargets(targets)
+      setTargetTaskId(current => targets.some(item => item.task.id === current)
+        ? current : targets[0]?.task.id ?? '')
     }).catch(() => {
-      if (active) setReferences([])
+      if (active) {
+        setReferences([])
+        setBriefTargets([])
+        setTargetTaskId('')
+      }
     })
     return () => { active = false }
   }, [currentProject.id])
 
-  const citeInsight = async (target: 'brief' | 'creative') => {
-    setBusyTarget(target)
+  const citeInsight = async () => {
+    setBusy(true)
     try {
-      const reference = await api.createArtifact({
-        projectId: currentProject.id,
-        kind: 'document',
-        status: 'ready',
-        content: `[prelaunch-insight] ${selected.id} | ${selected.title} | 建议：${selected.recommendation} | 证据：${selected.evidence} | 边界：${selected.boundary} | 引用目标：${target}`,
+      const targetTask = briefTargets.find(item => item.task.id === targetTaskId)
+      if (!targetTask) {
+        throw new Error('请选择一个可编辑的策略 Brief；如果列表为空，请先创建策略任务。')
+      }
+      const draft = await strategyApi.getBriefDraft(targetTask.task.id)
+      if (draft.status !== 'open') {
+        throw new Error('当前 Brief 已冻结，不能直接追加引用；请创建新的策略任务或修订链路。')
+      }
+      const reference = await strategyApi.importKnowledgeDocument(currentProject.id, {
+        title: `${selected.id} · ${selected.title}`,
+        source_uri: `cookies://prelaunch-insights/${selected.id}`,
+        source_type: 'prelaunch_insight',
+        text: `建议：${selected.recommendation}\n证据：${selected.evidence}\n适用边界：${selected.boundary}\n渠道：${selected.channel}\n形式：${selected.format}\n置信度：${selected.confidence}`,
       })
-      if (target === 'brief' && currentProject.artifacts.brief.id) {
-        const artifacts = await api.listArtifacts(currentProject.id)
-        const brief = artifacts.find(artifact => artifact.id === currentProject.artifacts.brief.id)
-        if (brief && !brief.content.includes(selected.id)) {
-          await api.updateArtifact(brief.id, { content: `${brief.content}\n\n投前洞察引用 ${selected.id}：${selected.recommendation}` })
-        }
-      }
-      if (target === 'creative') {
-        const creativeTask = [...currentProject.tasks].reverse().find(task => task.type !== 'strategy')
-        if (creativeTask) {
-          await api.updateTask(currentProject.id, creativeTask.id, {
-            sourceArtifactIds: [...new Set([...creativeTask.sourceArtifactIds, reference.id])],
-          })
-        }
-      }
+      await strategyApi.patchBriefField(
+        targetTask.task.id,
+        draft,
+        'reference_ids',
+        [...new Set([...(draft.document.reference_ids ?? []), reference.id])],
+        createMutationKey('prelaunch-brief-reference'),
+      )
       setReferences(current => [...current, reference])
-      await reloadProjects()
-      setNotice(target === 'brief'
-        ? `已将 ${selected.id} 写入当前 Brief 的证据引用。`
-        : `已将 ${selected.id} 关联到创意来源链，后续新建创意任务也会自动继承。`)
+      setNotice(`已将 ${selected.id} 作为 Knowledge Document 写入“${targetTask.name}”Brief 的真实证据引用。`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '投前洞察引用失败，请稍后重试。')
     } finally {
-      setBusyTarget('')
+      setBusy(false)
     }
   }
 
@@ -157,8 +170,9 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
         <div className="prelaunch-fact"><Database size={17}/><span><small>证据</small><b>{selected.evidence}</b></span></div>
         <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>适用边界</small>{selected.boundary}</span></div>
         <div className="prelaunch-actions">
-          <button className="secondary-button full" disabled={Boolean(busyTarget)} onClick={() => void citeInsight('brief')}><FileInput size={15}/>{busyTarget === 'brief' ? '正在写入 Brief…' : '引用到 Brief'}</button>
-          <button className="primary-button full" disabled={Boolean(busyTarget)} onClick={() => void citeInsight('creative')}><Link2 size={15}/>{busyTarget === 'creative' ? '正在关联创意…' : '引用到创意任务'}</button>
+          <label>目标 Brief<select aria-label="目标 Brief" disabled={busy || !briefTargets.length} value={targetTaskId} onChange={event => setTargetTaskId(event.target.value)}>{briefTargets.map(item => <option key={item.task.id} value={item.task.id}>{item.name}</option>)}{!briefTargets.length ? <option value="">没有可编辑的 Brief</option> : null}</select></label>
+          <button className="primary-button full" disabled={busy || !targetTaskId} onClick={() => void citeInsight()}><FileInput size={15}/>{busy ? '正在写入 Brief…' : '引用到所选 Brief'}</button>
+          <small>创意任务通过批准后的策略包继承证据，不在这里建立旁路引用。</small>
         </div>
         <button className="text-button prelaunch-deeplink" onClick={() => onOpenProject(currentProject.id, 'strategy', 'briefs')}>进入需求中心检查 Brief<ArrowRight size={14}/></button>
         <div className="reference-count"><BookOpenCheck size={15}/><span><b>{references.length} 条引用记录</b><small>保存在当前 Project，可跨刷新追溯</small></span></div>

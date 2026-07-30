@@ -1637,6 +1637,44 @@ func (s *Server) getKnowledgeResearchRun(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) listKnowledgeResearchArtifacts(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit, ok := boundedLimit(w, r, 50, 100)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ListResearchArtifacts(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.URL.Query().Get("category"), limit,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getKnowledgeResearchArtifact(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetResearchArtifact(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("artifact_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	decoder := json.NewDecoder(r.Body)

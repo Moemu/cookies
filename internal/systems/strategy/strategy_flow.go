@@ -633,6 +633,13 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 		if err := updateBriefDraft(ctx, tx, draft.Version, updated); err != nil {
 			return nil, err
 		}
+		if err := syncEvidenceReferences(
+			ctx, tx, agentTask.OrganizationID, agentTask.ProjectID, "brief_draft", updated.ID,
+			updated.Version, "reference_ids", updated.Document.ReferenceIDs,
+			agentTask.CreatedBy.ID, now, true,
+		); err != nil {
+			return nil, err
+		}
 	}
 	decision = reconcileConversationTurn(updated, decision)
 	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.1.0", trace, decision)
@@ -774,6 +781,12 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 		return nil, err
 	}
 	if err := insertDraftRevision(ctx, tx, agentTask.OrganizationID, agentTask.ProjectID, revision); err != nil {
+		return nil, err
+	}
+	if err := syncEvidenceReferences(
+		ctx, tx, agentTask.OrganizationID, agentTask.ProjectID, "strategy_revision", locked.ID,
+		revisionNumber, "evidence_refs", document.EvidenceRefs, agentTask.ID, now, false,
+	); err != nil {
 		return nil, err
 	}
 	if err := s.insertComplianceReport(

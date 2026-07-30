@@ -864,6 +864,13 @@ func (s Service) PatchBriefDraft(ctx context.Context, actor contract.ActorContex
 		updated.ID, updated.Version, patchJSON, snapshotHash, actor.Principal.ID, updated.UpdatedAt); err != nil {
 		return BriefDraft{}, false, err
 	}
+	if err := syncEvidenceReferences(
+		ctx, tx, actor.OrganizationID, task.ProjectID, "brief_draft", updated.ID,
+		updated.Version, "reference_ids", updated.Document.ReferenceIDs,
+		actor.Principal.ID, updated.UpdatedAt, true,
+	); err != nil {
+		return BriefDraft{}, false, err
+	}
 	if err := insertReceipt(ctx, tx, actor, task.ProjectID, "brief.patch", key, hash, 200, updated, updated.UpdatedAt); err != nil {
 		if isDuplicate(err) {
 			tx.Rollback()
@@ -954,6 +961,13 @@ func (s Service) ConfirmBrief(ctx context.Context, actor contract.ActorContext, 
 		 source_draft_version, confirmed_by, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		version.BriefID, version.Version, version.OrganizationID, version.ProjectID, snapshot,
 		version.ContentHash, version.SourceDraftID, version.SourceDraftVersion, version.ConfirmedBy, version.ConfirmedAt); err != nil {
+		return BriefVersion{}, false, err
+	}
+	if err := syncEvidenceReferences(
+		ctx, tx, actor.OrganizationID, task.ProjectID, "brief_version", version.BriefID,
+		version.Version, "reference_ids", version.Snapshot.ReferenceIDs,
+		actor.Principal.ID, now, false,
+	); err != nil {
 		return BriefVersion{}, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE strategy_brief_drafts SET status = 'confirmed',

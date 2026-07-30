@@ -572,12 +572,18 @@ function ResearchPane({ brief, busy, documents, onResearch, onUpload, researchRu
   brief: BriefDraft | null
   busy: string
   documents: WorkspaceState['documents']
-  onResearch: (mode: 'web' | 'mcp', query: string, includeDocuments: boolean) => Promise<boolean>
+  onResearch: (
+    mode: 'web' | 'mcp',
+    category: 'general' | 'audience' | 'competitor' | 'industry',
+    query: string,
+    includeDocuments: boolean,
+  ) => Promise<boolean>
   onUpload: (file: File) => Promise<boolean>
   researchRun: WorkspaceState['researchRun']
 }) {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'web' | 'mcp'>('web')
+  const [category, setCategory] = useState<'general' | 'audience' | 'competitor' | 'industry'>('general')
   const [includeDocuments, setIncludeDocuments] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
   const frozen = brief?.status === 'confirmed'
@@ -596,10 +602,11 @@ function ResearchPane({ brief, busy, documents, onResearch, onUpload, researchRu
       <section className="kanon-research-form">
         <div className="surface-toolbar"><h3>外部研究</h3><span>{mode === 'mcp' ? 'MCP Runner' : '联网搜索'}</span></div>
         <label>研究方式<select disabled={Boolean(busy) || frozen} value={mode} onChange={event => setMode(event.target.value as 'web' | 'mcp')}><option value="web">联网搜索</option><option value="mcp">MCP 工具</option></select></label>
+        <label>研究分类<select disabled={Boolean(busy) || frozen} value={category} onChange={event => setCategory(event.target.value as typeof category)}><option value="general">综合研究</option><option value="audience">受众研究</option><option value="competitor">竞品研究</option><option value="industry">行业研究</option></select></label>
         <label>要验证的问题<textarea disabled={Boolean(busy) || frozen} rows={4} value={query} onChange={event => setQuery(event.target.value)} placeholder="例如：近半年小红书工业品牌内容的有效切入点是什么？"/></label>
         <label className="kanon-check"><input checked={includeDocuments} disabled={!documents.length || Boolean(busy) || frozen} type="checkbox" onChange={event => setIncludeDocuments(event.target.checked)}/><span>同时向研究 Runner 披露所选项目资料正文</span></label>
         <label className="kanon-check"><input checked={confirmed} disabled={Boolean(busy) || frozen} type="checkbox" onChange={event => setConfirmed(event.target.checked)}/><span>确认执行外部研究并记录披露字段</span></label>
-        <button className="primary-button" disabled={Boolean(busy) || frozen || !confirmed || !query.trim()} onClick={() => void onResearch(mode, query, includeDocuments)}><Search size={15}/>{busy === 'research' ? '研究中…' : '开始研究'}</button>
+        <button className="primary-button" disabled={Boolean(busy) || frozen || !confirmed || !query.trim()} onClick={() => void onResearch(mode, category, query, includeDocuments)}><Search size={15}/>{busy === 'research' ? '研究中…' : '开始研究'}</button>
       </section>
     </div>
     {researchRun ? <div className="kanon-research-result">

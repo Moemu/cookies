@@ -22,6 +22,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/eventoutbox"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
@@ -67,7 +68,14 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
-	service := strategy.Service{DB: db, Projects: projectService, Agents: agent.MySQLStore{DB: db}}
+	reference := knowledge.Reference{
+		ID: "knowledge_reference_" + suffix, Kind: "document", Title: "投前洞察证据",
+		Content: "历史项目验证了当前主张。", ContentHash: strings.Repeat("a", 64),
+	}
+	service := strategy.Service{
+		DB: db, Projects: projectService, Knowledge: integrationKnowledgeReader{reference.ID: reference},
+		Agents: agent.MySQLStore{DB: db}, V2Enabled: true,
+	}
 
 	createdTask, duplicate, err := service.CreateTask(
 		ctx, actor, contract.IdempotencyKey("atomic_task_"+suffix), projectID,
@@ -144,18 +152,36 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 	patch := strategy.BriefPatch{ExpectedVersion: draft.Version, Operations: []strategy.BriefPatchOperation{
+		{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"集成测试品牌"`)},
+		{Op: "set", FieldPath: "product.name", Value: json.RawMessage(`"集成测试产品"`)},
+		{Op: "set", FieldPath: "industry", Value: json.RawMessage(`"工业制造"`)},
+		{Op: "set", FieldPath: "region", Value: json.RawMessage(`"中国大陆"`)},
+		{Op: "set", FieldPath: "language", Value: json.RawMessage(`"zh-CN"`)},
 		{Op: "set", FieldPath: "campaign.objective", Value: json.RawMessage(`"新品认知"`)},
 		{Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`"研发负责人"`)},
 		{Op: "set", FieldPath: "proposition", Value: json.RawMessage(`"缩短研发周期"`)},
 		{Op: "set", FieldPath: "channels", Value: json.RawMessage(`["xiaohongshu"]`)},
+		{Op: "set", FieldPath: "reference_ids", Value: json.RawMessage(`["` + reference.ID + `"]`)},
 	}}
 	draft, _, err = service.PatchBriefDraft(ctx, actor, contract.IdempotencyKey("briefpatch_"+suffix), bundle.Task.ID, patch)
 	if err != nil || !draft.Completeness.Ready {
 		t.Fatalf("patch brief: ready=%v err=%v", draft.Completeness.Ready, err)
 	}
+	evidenceReferences, err := service.ListEvidenceReferences(ctx, actor, projectID, reference.ID)
+	if err != nil || len(evidenceReferences) != 1 ||
+		evidenceReferences[0].TargetType != "brief_draft" ||
+		evidenceReferences[0].TargetVersion != draft.Version {
+		t.Fatalf("draft evidence references=%#v err=%v", evidenceReferences, err)
+	}
 	briefVersion, duplicate, err := service.ConfirmBrief(ctx, actor, contract.IdempotencyKey("confirm_"+suffix), bundle.Task.ID, draft.Version)
 	if err != nil || duplicate {
 		t.Fatalf("confirm brief: duplicate=%v err=%v", duplicate, err)
+	}
+	briefs, err := service.ListProjectBriefs(ctx, actor, projectID)
+	if err != nil || len(briefs) != 2 ||
+		briefs[0].BriefID != briefVersion.BriefID ||
+		briefs[0].LatestConfirmedVersion != briefVersion.Version {
+		t.Fatalf("brief center summaries=%#v err=%v", briefs, err)
 	}
 	briefConfirmedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
 	if err != nil || briefConfirmedTask.Status != "active" {
@@ -197,6 +223,16 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	strategyDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
 	if err != nil || strategyDraft.CurrentRevision != 1 {
 		t.Fatalf("get generated draft: revision=%d err=%v", strategyDraft.CurrentRevision, err)
+	}
+	strategies, err := service.ListProjectStrategies(ctx, actor, projectID)
+	if err != nil || len(strategies) != 1 ||
+		strategies[0].StrategyID != strategyDraft.ID ||
+		strategies[0].CurrentRevision != strategyDraft.CurrentRevision {
+		t.Fatalf("strategy center summaries=%#v err=%v", strategies, err)
+	}
+	evidenceReferences, err = service.ListEvidenceReferences(ctx, actor, projectID, reference.ID)
+	if err != nil || len(evidenceReferences) != 3 {
+		t.Fatalf("versioned evidence references=%#v err=%v", evidenceReferences, err)
 	}
 	versionedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
 	if err != nil {
@@ -707,6 +743,7 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 	statements := []string{
 		"DELETE FROM event_consumptions WHERE event_id IN (SELECT event_id FROM event_outbox WHERE organization_id=?)",
 		"DELETE FROM creative_intakes WHERE organization_id=?",
+		"DELETE FROM strategy_evidence_references WHERE organization_id=?",
 		"DELETE FROM strategy_feedback WHERE organization_id=?",
 		"DELETE FROM strategy_compliance_reports WHERE organization_id=?",
 		"DELETE FROM strategy_conversation_memories WHERE organization_id=?",
@@ -761,4 +798,19 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 	if _, err := db.ExecContext(ctx, "DELETE FROM users WHERE id=?", userID); err != nil {
 		t.Errorf("cleanup user: %v", err)
 	}
+}
+
+type integrationKnowledgeReader map[string]knowledge.Reference
+
+func (r integrationKnowledgeReader) GetReference(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	id string,
+) (knowledge.Reference, error) {
+	value, ok := r[id]
+	if !ok {
+		return knowledge.Reference{}, knowledge.ErrNotFound
+	}
+	return value, nil
 }

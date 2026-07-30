@@ -123,6 +123,29 @@ export type BriefVersion = {
   snapshot: BriefDocument
 }
 
+export type BriefCenterSummary = {
+  brief_id: string
+  task_id: string
+  workspace_id: string
+  name: string
+  objective: string
+  status: BriefDraft['status']
+  version: number
+  ready: boolean
+  blocker_count: number
+  warning_count: number
+  conflict_count: number
+  latest_confirmed_version: number
+  discarded_at?: string
+  updated_at: string
+}
+
+export type BriefCenterDetail = {
+  summary: BriefCenterSummary
+  draft: BriefDraft
+  versions: BriefVersion[]
+}
+
 export type PlatformPlan = {
   platform: string
   role: string
@@ -182,6 +205,29 @@ export type StrategyDraft = {
   version: number
   skill_versions: Record<string, string>
   revision?: DraftRevision
+}
+
+export type StrategyCenterSummary = {
+  strategy_id: string
+  task_id: string
+  workspace_id: string
+  name: string
+  objective: string
+  brief_id: string
+  brief_version: number
+  status: StrategyDraft['status']
+  current_revision: number
+  version: number
+  review_id?: string
+  review_status?: Review['status']
+  package_id?: string
+  package_version: number
+  package_status?: PackageVersion['status']
+  archived_at?: string
+  archived_by?: string
+  archive_reason?: string
+  created_at: string
+  updated_at: string
 }
 
 export type GenerationReadiness = {
@@ -384,6 +430,9 @@ export type AgentTaskInspection = {
 
 export type ResearchArtifact = {
   id: string
+  research_run_id: string
+  source_type: string
+  category: 'general' | 'audience' | 'competitor' | 'industry'
   title: string
   source_url?: string
   content: string
@@ -394,6 +443,7 @@ export type ResearchArtifact = {
 export type ResearchRun = {
   id: string
   mode: 'web' | 'mcp'
+  category: ResearchArtifact['category']
   query: string
   document_ids: string[]
   disclosed_fields: string[]
@@ -404,6 +454,18 @@ export type ResearchRun = {
   error_code?: string
   error_message?: string
   artifacts: ResearchArtifact[]
+}
+
+export type EvidenceReference = {
+  evidence_type: 'research_artifact' | 'knowledge_document' | 'external_reference'
+  evidence_id: string
+  target_type: 'brief_draft' | 'brief_version' | 'strategy_revision'
+  target_id: string
+  target_version: number
+  field_path: string
+  content_hash: string
+  created_by: string
+  created_at: string
 }
 
 export type WorkspaceDetail = {
