@@ -109,6 +109,13 @@ func NewOutputRef(providerCode, providerJobID, outputID, mimeType string, conten
 	if !strings.HasPrefix(mimeType, "image/") || len(contents) == 0 {
 		return contract.ProviderOutputRef{}, fmt.Errorf("image contents and MIME type are required")
 	}
+	return newOutputRef(providerCode, providerJobID, outputID, mimeType, contents, expiresAt)
+}
+
+func newOutputRef(providerCode, providerJobID, outputID, mimeType string, contents []byte, expiresAt time.Time) (contract.ProviderOutputRef, error) {
+	if strings.TrimSpace(mimeType) == "" || len(contents) == 0 {
+		return contract.ProviderOutputRef{}, fmt.Errorf("output contents and MIME type are required")
+	}
 	digest := sha256.Sum256(contents)
 	sha := hex.EncodeToString(digest[:])
 	ref := contract.ProviderOutputRef{ProviderCode: providerCode, ProviderJobID: providerJobID, OutputID: outputID, RetrievalExpiresAt: expiresAt.UTC(), DeclaredMIMEType: mimeType, DeclaredSizeBytes: int64(len(contents)), DeclaredSHA256: &sha}

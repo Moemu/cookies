@@ -1,0 +1,63 @@
+CREATE TABLE platform_agent_tasks (
+  id VARCHAR(96) NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) NOT NULL,
+  project_id VARCHAR(96) NOT NULL,
+  source_system VARCHAR(64) NOT NULL,
+  source_type VARCHAR(64) NOT NULL,
+  source_id VARCHAR(96) NOT NULL,
+  kind VARCHAR(128) NOT NULL,
+  status VARCHAR(24) NOT NULL,
+  job_id VARCHAR(96) NULL,
+  version BIGINT NOT NULL DEFAULT 1,
+  input_snapshot JSON NOT NULL,
+  result_type VARCHAR(128) NULL,
+  result_id VARCHAR(128) NULL,
+  result_version BIGINT NULL,
+  error_code VARCHAR(128) NULL,
+  error_message VARCHAR(1024) NULL,
+  created_by_kind VARCHAR(16) NOT NULL,
+  created_by_id VARCHAR(96) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_agent_task_org_project_id (organization_id, project_id, id),
+  UNIQUE KEY uq_agent_task_job (organization_id, job_id),
+  KEY idx_agent_task_source (organization_id, project_id, source_system, source_type, source_id),
+  KEY idx_agent_task_status (status, updated_at)
+);
+
+CREATE TABLE platform_skill_runs (
+  id VARCHAR(96) NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) NOT NULL,
+  project_id VARCHAR(96) NOT NULL,
+  agent_task_id VARCHAR(96) NOT NULL,
+  skill_name VARCHAR(128) NOT NULL,
+  skill_version VARCHAR(64) NOT NULL,
+  status VARCHAR(24) NOT NULL,
+  input_hash CHAR(64) NOT NULL,
+  provider_code VARCHAR(64) NULL,
+  model_version VARCHAR(128) NULL,
+  output_snapshot JSON NULL,
+  error_code VARCHAR(128) NULL,
+  error_message VARCHAR(1024) NULL,
+  started_at DATETIME(6) NULL,
+  completed_at DATETIME(6) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_skill_run_org_project_id (organization_id, project_id, id),
+  UNIQUE KEY uq_skill_run_task_skill (organization_id, project_id, agent_task_id, skill_name, skill_version),
+  KEY idx_skill_run_task (organization_id, project_id, agent_task_id)
+);
+
+CREATE TABLE platform_agent_dispatches (
+  agent_task_id VARCHAR(96) NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) NOT NULL,
+  project_id VARCHAR(96) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'pending',
+  available_at DATETIME(6) NOT NULL,
+  attempt_count INT NOT NULL DEFAULT 0,
+  last_error VARCHAR(1024) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  KEY idx_agent_dispatch_claim (status, available_at, created_at),
+  KEY idx_agent_dispatch_scope (organization_id, project_id, agent_task_id)
+);

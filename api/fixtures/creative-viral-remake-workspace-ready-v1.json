@@ -1,0 +1,14 @@
+{
+  "contract_version": "creative-viral-remake-workspace/v1",
+  "task_id": "creativetask_viral_ready",
+  "revision": 3,
+  "status": "generation_ready",
+  "selected_route_id": "route_manual_viral_remake_v1",
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false
+  },
+  "blockers": [],
+  "recoverable": true
+}

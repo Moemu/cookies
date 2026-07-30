@@ -1,0 +1,583 @@
+openapi: 3.1.0
+info:
+  title: cookies Strategy API
+  version: 1.0.0
+  license:
+    name: Apache License 2.0
+    identifier: Apache-2.0
+  description: Project-scoped Strategy MVP API. Organization scope always comes from trusted identity.
+servers:
+  - url: /
+security:
+  - cookiesAuth: []
+paths:
+  /api/strategy/v1/workspaces:
+    post:
+      operationId: createStrategyWorkspace
+      summary: Create an active Strategy workspace.
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, name]
+              properties:
+                project_id: {type: string, minLength: 1}
+                name: {type: string, minLength: 1, maxLength: 255}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/workspaces:
+    get:
+      operationId: listStrategyWorkspaces
+      summary: List workspaces in an authorized project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/generation-readiness:
+    get:
+      operationId: getStrategyGenerationReadiness
+      summary: Preflight the configured Strategy text route without invoking a model.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/brief-versions:
+    get:
+      operationId: listProjectStrategyBriefVersions
+      summary: List immutable confirmed Brief versions available to downstream Creative work.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/workspaces/{workspace_id}:
+    get:
+      operationId: getStrategyWorkspace
+      summary: Read one workspace.
+      parameters: [{$ref: '#/components/parameters/WorkspaceID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversations:
+    post:
+      operationId: createStrategyConversation
+      summary: Create a conversation, task, and empty Brief draft.
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, workspace_id]
+              properties:
+                project_id: {type: string, minLength: 1}
+                workspace_id: {type: string, minLength: 1}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversations/{conversation_id}:
+    get:
+      operationId: getStrategyConversation
+      summary: Read one conversation.
+      parameters: [{$ref: '#/components/parameters/ConversationID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversations/{conversation_id}/memory:
+    get:
+      operationId: getStrategyConversationMemory
+      summary: Read the persisted summary and unresolved high-impact questions.
+      parameters: [{$ref: '#/components/parameters/ConversationID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversations/{conversation_id}/messages:
+    get:
+      operationId: listStrategyMessages
+      summary: List append-only conversation messages.
+      parameters: [{$ref: '#/components/parameters/ConversationID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStrategyMessage
+      summary: Append a user message and queue Brief extraction.
+      parameters:
+        - {$ref: '#/components/parameters/ConversationID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: {type: string, minLength: 1, maxLength: 65536}
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversations/{conversation_id}/events:
+    get:
+      operationId: streamStrategyEvents
+      summary: Replay and stream durable conversation events.
+      parameters:
+        - {$ref: '#/components/parameters/ConversationID'}
+        - name: Last-Event-ID
+          in: header
+          schema: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Server-sent event stream.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/agent-tasks/{agent_task_id}:
+    get:
+      operationId: getStrategyAgentTask
+      summary: Read durable Agent and runtime progress.
+      parameters: [{$ref: '#/components/parameters/AgentTaskID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/agent-tasks/{agent_task_id}:cancel':
+    post:
+      operationId: cancelStrategyAgentTask
+      summary: Request cancellation with optimistic concurrency.
+      parameters: [{$ref: '#/components/parameters/AgentTaskID'}]
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '202': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/tasks/{task_id}:
+    get:
+      operationId: getStrategyTask
+      summary: Read the durable Strategy task aggregate.
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/tasks/{task_id}/brief-draft:
+    get:
+      operationId: getStrategyBriefDraft
+      summary: Read the mutable Brief draft.
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+    patch:
+      operationId: patchStrategyBriefDraft
+      summary: Apply an allowlisted user Brief patch.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+        - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '../contracts/strategy-brief-patch-v1.schema.json'}
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/tasks/{task_id}/brief:confirm':
+    post:
+      operationId: confirmStrategyBrief
+      summary: Confirm an immutable Brief version.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/briefs/{brief_id}/versions:
+    get:
+      operationId: listStrategyBriefVersions
+      summary: List immutable Brief versions.
+      parameters: [{$ref: '#/components/parameters/BriefID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/briefs/{brief_id}/versions/{version}:
+    get:
+      operationId: getStrategyBriefVersion
+      summary: Read one immutable Brief version.
+      parameters:
+        - {$ref: '#/components/parameters/BriefID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/tasks/{task_id}/strategies:
+    post:
+      operationId: createStrategyDraft
+      summary: Queue generation from an explicit Brief version.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brief_id, brief_version]
+              properties:
+                brief_id: {type: string, minLength: 1}
+                brief_version: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-drafts/{strategy_id}:
+    get:
+      operationId: getStrategyDraft
+      summary: Read a Strategy draft and its current revision.
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+    patch:
+      operationId: patchStrategyDraft
+      summary: Create a revision from an allowlisted section patch.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '../contracts/strategy-section-patch-v1.schema.json'}
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/agent-tasks/{agent_task_id}/skill-runs:
+    get:
+      operationId: listStrategySkillRuns
+      summary: List safe, user-visible Skill and compliance execution metadata.
+      parameters: [{$ref: '#/components/parameters/AgentTaskID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-drafts/{strategy_id}/revisions:
+    get:
+      operationId: listStrategyDraftRevisions
+      summary: List immutable revisions of a Strategy draft.
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-drafts/{strategy_id}/generation-metadata:
+    get:
+      operationId: getStrategyGenerationMetadata
+      summary: Read safe model, Prompt, Skill, token, and quality metadata for the latest revision.
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-drafts/{strategy_id}/revisions/{revision}:
+    get:
+      operationId: getStrategyDraftRevision
+      summary: Read one immutable Strategy revision.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/Revision'}
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/strategy-drafts/{strategy_id}:revise':
+    post:
+      operationId: reviseStrategyDraft
+      summary: Queue a natural-language revision.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, base_revision, instruction]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                base_revision: {type: integer, minimum: 1}
+                instruction: {type: string, minLength: 1, maxLength: 4096}
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/strategy-drafts/{strategy_id}:submit':
+    post:
+      operationId: submitStrategyDraft
+      summary: Freeze a review candidate.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, candidate_revision]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                candidate_revision: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/strategy-drafts/{strategy_id}:approve':
+    post:
+      operationId: approveStrategyDraft
+      summary: Atomically approve and publish a Strategy package.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [review_id, candidate_content_hash, expected_version]
+              properties:
+                review_id: {type: string, minLength: 1}
+                candidate_content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+                expected_version: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/strategy-reviews/{review_id}:return':
+    post:
+      operationId: returnStrategyReview
+      summary: Return a review with a required reason.
+      parameters: [{$ref: '#/components/parameters/ReviewID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 16384}
+              additionalProperties: false
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-reviews/{review_id}:
+    get:
+      operationId: getStrategyReview
+      summary: Read a review and its immutable candidate.
+      parameters: [{$ref: '#/components/parameters/ReviewID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-reviews/{review_id}/comments:
+    get:
+      operationId: listStrategyReviewComments
+      summary: List append-only comments for a Strategy review.
+      parameters: [{$ref: '#/components/parameters/ReviewID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStrategyReviewComment
+      summary: Append a review comment.
+      parameters: [{$ref: '#/components/parameters/ReviewID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: {type: string, minLength: 1, maxLength: 16384}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/strategy-packages:
+    get:
+      operationId: listStrategyPackages
+      summary: List published package versions.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/feedback:
+    get:
+      operationId: listStrategyFeedback
+      summary: List feedback for an exact Strategy revision or package version.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: target_type, in: query, required: true, schema: {enum: [strategy_revision, strategy_package]}}
+        - {name: target_id, in: query, required: true, schema: {type: string}}
+        - {name: target_version, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStrategyFeedback
+      summary: Append outcome feedback to an exact immutable Strategy target.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, target_version, rating, comment]
+              properties:
+                target_type: {enum: [strategy_revision, strategy_package]}
+                target_id: {type: string, minLength: 1}
+                target_version: {type: integer, minimum: 1}
+                rating: {enum: [useful, partly_useful, not_useful]}
+                comment: {type: string, maxLength: 2000}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}:
+    get:
+      operationId: getStrategyPackageVersion
+      summary: Read the immutable cross-module Strategy package.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/PackageID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Immutable package snapshot.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '../contracts/strategy-package-v1.schema.json'}
+                  - {$ref: '../contracts/strategy-package-v2.schema.json'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/creative-handoff:
+    get:
+      operationId: getStrategyCreativeHandoff
+      summary: Read the immutable Creative projection frozen with a Strategy package version.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/PackageID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Immutable Strategy to Creative handoff.
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/strategy-creative-handoff-v1.schema.json'
+        '304':
+          description: The caller already has the current immutable handoff.
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md:
+    get:
+      operationId: exportStrategyPackageMarkdown
+      summary: Export an immutable package as Markdown.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/PackageID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Markdown package export.
+          content:
+            text/markdown:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    cookiesAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 255}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      schema: {type: string}
+    ProjectID: {name: project_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    WorkspaceID: {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    ConversationID: {name: conversation_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    AgentTaskID: {name: agent_task_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    TaskID: {name: task_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    BriefID: {name: brief_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    StrategyID: {name: strategy_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    ReviewID: {name: review_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    PackageID: {name: package_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    Version: {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+    Revision: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}}
+  requestBodies:
+    ExpectedVersion:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [expected_version]
+            properties:
+              expected_version: {type: integer, minimum: 1}
+            additionalProperties: false
+  responses:
+    JSONResource:
+      description: JSON resource.
+      content:
+        application/json:
+          schema: {type: object}
+    JSONList:
+      description: JSON resource list.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: {type: array, items: {type: object}}
+            additionalProperties: false
+    Problem:
+      description: Stable API problem.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message, request_id, retryable]
+                properties:
+                  code: {type: string}
+                  message: {type: string}
+                  request_id: {type: string}
+                  retryable: {type: boolean}
+                  details: {type: array, items: {type: object}}
+            additionalProperties: false

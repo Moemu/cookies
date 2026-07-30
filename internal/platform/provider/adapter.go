@@ -17,6 +17,12 @@ type ImageProviderAdapter interface {
 	Poll(context.Context, ImageTaskReference) (ImageTaskResult, error)
 }
 
+// ImageSubmissionPreparer performs local/DB-only validation before Provider
+// persists the at-most-once submission fence. It must not make a model request.
+type ImageSubmissionPreparer interface {
+	Prepare(context.Context, ImageGenerationRequest) error
+}
+
 // ImageGenerationRequest contains only the Provider-owned fields needed to
 // invoke an image model. It deliberately contains neither a database handle
 // nor an Asset storage location.
@@ -27,6 +33,7 @@ type ImageGenerationRequest struct {
 	ModelAlias     string
 	IdempotencyKey contract.IdempotencyKey
 	Input          ImageGenerationInput
+	Route          *ImageRouteSnapshot
 	Sources        []VisionSource
 }
 
@@ -65,11 +72,14 @@ const (
 // request was accepted or completed. ProviderCode and ModelVersion are
 // system-resolved, never accepted from the public API request.
 type ImageSubmission struct {
-	Status         ImageSubmissionStatus
-	ProviderCode   string
-	ModelVersion   string
-	ExternalTaskID string
-	Outputs        []contract.ProviderOutputRef
+	Status           ImageSubmissionStatus
+	ProviderCode     string
+	ModelVersion     string
+	ExternalTaskID   string
+	Outputs          []contract.ProviderOutputRef
+	AdapterRequestID string
+	ActualProvider   string
+	ActualModel      string
 }
 
 func (s ImageSubmission) Validate() error {

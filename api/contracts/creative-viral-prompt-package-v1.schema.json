@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-viral-prompt-package-v1.schema.json",
+  "title": "creative-viral-prompt-package/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "task_id",
+    "prompt_version",
+    "analysis_snapshot_hash",
+    "input_snapshot_hash",
+    "dimensions",
+    "preserve_rules",
+    "replace_rules",
+    "product_facts",
+    "negative_constraints",
+    "generation_spec",
+    "content_hash",
+    "confirmed_by",
+    "confirmed_at"
+  ],
+  "properties": {
+    "contract_version": {"const": "creative-viral-prompt-package/v1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "prompt_version": {"type": "integer", "minimum": 1},
+    "analysis_snapshot_hash": {"$ref": "#/$defs/hash"},
+    "input_snapshot_hash": {"$ref": "#/$defs/hash"},
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_goal_type",
+        "quality_style_lighting",
+        "environment_atmosphere",
+        "camera_content",
+        "music_sound"
+      ],
+      "properties": {
+        "task_goal_type": {"type": "string", "minLength": 1},
+        "quality_style_lighting": {"type": "string", "minLength": 1},
+        "environment_atmosphere": {"type": "string", "minLength": 1},
+        "camera_content": {"type": "string", "minLength": 1},
+        "music_sound": {"type": "string", "minLength": 1}
+      }
+    },
+    "preserve_rules": {"$ref": "#/$defs/stringList"},
+    "replace_rules": {"$ref": "#/$defs/stringList"},
+    "product_facts": {"$ref": "#/$defs/stringList"},
+    "negative_constraints": {"$ref": "#/$defs/stringList"},
+    "generation_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_alias", "duration_seconds", "aspect_ratio", "resolution", "candidate_count"],
+      "properties": {
+        "model_alias": {"const": "cookies.video.standard"},
+        "duration_seconds": {"type": "integer", "minimum": 4, "maximum": 15},
+        "aspect_ratio": {"const": "9:16"},
+        "resolution": {"const": "720p"},
+        "candidate_count": {"type": "integer", "minimum": 1, "maximum": 3}
+      }
+    },
+    "content_hash": {"$ref": "#/$defs/hash"},
+    "confirmed_by": {"type": "string", "minLength": 1},
+    "confirmed_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stringList": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  }
+}

@@ -5,127 +5,300 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
-	"github.com/shikanon/cookies/internal/systems/strategy/prompts"
 )
 
-type MySQLStore struct{ DB *sql.DB }
+type rowScanner interface{ Scan(...any) error }
 
-func (s MySQLStore) CreateProposal(ctx context.Context, proposal Proposal) (Proposal, bool, error) {
-	if s.DB == nil {
-		return Proposal{}, false, fmt.Errorf("strategy database is required")
-	}
-	input, err := json.Marshal(proposal.Input)
-	if err != nil {
-		return Proposal{}, false, err
-	}
-	result, err := s.DB.ExecContext(ctx, `INSERT INTO strategy_proposals
-		(id, organization_id, project_id, source_type, source_object_uri, input_json, input_hash, template_version, status)
-		VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id=id`,
-		proposal.ID, proposal.OrganizationID, proposal.ProjectID, proposal.SourceType, proposal.SourceObjectURI, input, proposal.InputHash, proposal.TemplateVersion, proposal.Status)
-	if err != nil {
-		return Proposal{}, false, err
-	}
-	if rows, _ := result.RowsAffected(); rows == 0 {
-		var existingID string
-		if err := s.DB.QueryRowContext(ctx, `SELECT id FROM strategy_proposals WHERE organization_id=? AND project_id=? AND input_hash=? AND template_version=?`,
-			proposal.OrganizationID, proposal.ProjectID, proposal.InputHash, proposal.TemplateVersion).Scan(&existingID); err != nil {
-			return Proposal{}, false, err
-		}
-		value, err := s.GetProposal(ctx, proposal.OrganizationID, proposal.ProjectID, existingID)
-		return value, true, err
-	}
-	value, err := s.GetProposal(ctx, proposal.OrganizationID, proposal.ProjectID, proposal.ID)
-	return value, false, err
-}
+const workspaceSelect = `SELECT id, organization_id, project_id, name, is_primary, status,
+	version, created_by, created_at, updated_at FROM strategy_workspaces`
 
-func (s MySQLStore) GetProposal(ctx context.Context, org contract.OrganizationID, projectID contract.ProjectID, proposalID string) (Proposal, error) {
-	var proposal Proposal
-	var input []byte
-	var sourceType, sourceObjectURI sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id, source_type, source_object_uri, input_json, input_hash, template_version, status, created_at, updated_at
-		FROM strategy_proposals WHERE organization_id=? AND project_id=? AND id=?`, org, projectID, proposalID).
-		Scan(&proposal.ID, &proposal.OrganizationID, &proposal.ProjectID, &sourceType, &sourceObjectURI, &input, &proposal.InputHash, &proposal.TemplateVersion, &proposal.Status, &proposal.CreatedAt, &proposal.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Proposal{}, ErrProposalNotFound
-	}
-	if err != nil {
-		return Proposal{}, err
-	}
-	if err := json.Unmarshal(input, &proposal.Input); err != nil {
-		return Proposal{}, fmt.Errorf("decode proposal input: %w", err)
-	}
-	proposal.SourceType = sourceType.String
-	proposal.SourceObjectURI = sourceObjectURI.String
-	return proposal, nil
-}
-
-func (s MySQLStore) CreateStrategy(ctx context.Context, strategy StrategyOutput) (StrategyOutput, error) {
-	if s.DB == nil {
-		return StrategyOutput{}, fmt.Errorf("strategy database is required")
-	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO strategy_outputs
-		(id, proposal_id, organization_id, project_id, strategy_json, model_alias, model_version, provider_code)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, strategy.ID, strategy.ProposalID, strategy.OrganizationID, strategy.ProjectID,
-		strategy.Content, strategy.ModelAlias, strategy.ModelVersion, strategy.ProviderCode)
-	if err != nil {
-		return StrategyOutput{}, err
-	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE strategy_proposals SET status='generated' WHERE organization_id=? AND project_id=? AND id=?`,
-		strategy.OrganizationID, strategy.ProjectID, strategy.ProposalID); err != nil {
-		return StrategyOutput{}, err
-	}
-	return s.GetStrategy(ctx, strategy.OrganizationID, strategy.ProjectID, strategy.ID)
-}
-
-func (s MySQLStore) GetStrategy(ctx context.Context, org contract.OrganizationID, projectID contract.ProjectID, strategyID string) (StrategyOutput, error) {
-	return s.getStrategy(ctx, `id=?`, org, projectID, strategyID)
-}
-
-func (s MySQLStore) GetStrategyByProposal(ctx context.Context, org contract.OrganizationID, projectID contract.ProjectID, proposalID string) (StrategyOutput, error) {
-	return s.getStrategy(ctx, `proposal_id=?`, org, projectID, proposalID)
-}
-
-func (s MySQLStore) getStrategy(ctx context.Context, condition string, org contract.OrganizationID, projectID contract.ProjectID, valueID string) (StrategyOutput, error) {
-	var value StrategyOutput
-	var approved sql.NullTime
-	query := `SELECT id, proposal_id, organization_id, project_id, strategy_json, model_alias, model_version, provider_code, approved_at, created_at
-		FROM strategy_outputs WHERE organization_id=? AND project_id=? AND ` + condition + ` ORDER BY created_at DESC LIMIT 1`
-	err := s.DB.QueryRowContext(ctx, query, org, projectID, valueID).
-		Scan(&value.ID, &value.ProposalID, &value.OrganizationID, &value.ProjectID, &value.Content, &value.ModelAlias, &value.ModelVersion, &value.ProviderCode, &approved, &value.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return StrategyOutput{}, ErrStrategyNotFound
-	}
-	if err != nil {
-		return StrategyOutput{}, err
-	}
-	if approved.Valid {
-		approvedAt := approved.Time.UTC()
-		value.ApprovedAt = &approvedAt
+func scanWorkspace(row rowScanner) (Workspace, error) {
+	var value Workspace
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.Name,
+		&value.IsPrimary, &value.Status, &value.Version, &value.CreatedBy, &value.CreatedAt,
+		&value.UpdatedAt); err != nil {
+		return Workspace{}, mapNotFound(err)
 	}
 	return value, nil
 }
 
-func (s MySQLStore) ApproveStrategy(ctx context.Context, org contract.OrganizationID, projectID contract.ProjectID, strategyID string) (StrategyOutput, error) {
-	result, err := s.DB.ExecContext(ctx, `UPDATE strategy_outputs SET approved_at=COALESCE(approved_at, ?) WHERE organization_id=? AND project_id=? AND id=?`,
-		time.Now().UTC(), org, projectID, strategyID)
-	if err != nil {
-		return StrategyOutput{}, err
+const conversationSelect = `SELECT id, organization_id, project_id, workspace_id, status,
+	version, created_by, created_at, updated_at FROM strategy_conversations`
+
+func scanConversation(row rowScanner) (Conversation, error) {
+	var value Conversation
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.WorkspaceID,
+		&value.Status, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		return Conversation{}, mapNotFound(err)
 	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return StrategyOutput{}, ErrStrategyNotFound
-	}
-	value, err := s.GetStrategy(ctx, org, projectID, strategyID)
-	if err != nil {
-		return StrategyOutput{}, err
-	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE strategy_proposals SET status='approved' WHERE organization_id=? AND project_id=? AND id=?`, org, projectID, value.ProposalID)
-	return value, err
+	return value, nil
 }
 
-var _ Store = MySQLStore{}
-var _ = prompts.TemplateVersion
+const taskSelect = `SELECT id, organization_id, project_id, workspace_id, conversation_id,
+	brief_id, COALESCE(current_agent_task_id, ''), COALESCE(current_strategy_id, ''),
+	status, discarded_at, COALESCE(discarded_by, ''), COALESCE(discard_reason, ''),
+	version, created_at, updated_at FROM strategy_tasks`
+
+func scanTask(row rowScanner) (Task, error) {
+	var value Task
+	var discardedAt sql.NullTime
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.WorkspaceID,
+		&value.ConversationID, &value.BriefID, &value.CurrentAgentTaskID, &value.CurrentStrategyID,
+		&value.Status, &discardedAt, &value.DiscardedBy, &value.DiscardReason,
+		&value.Version, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		return Task{}, mapNotFound(err)
+	}
+	if discardedAt.Valid {
+		value.DiscardedAt = &discardedAt.Time
+	}
+	return value, nil
+}
+
+const messageSelect = `SELECT id, organization_id, project_id, conversation_id, role,
+	content_type, content, ai_generated, COALESCE(agent_task_id, ''), skill_run_ids,
+	created_by, created_at FROM strategy_messages`
+
+func scanMessage(row rowScanner) (Message, error) {
+	var value Message
+	var skillRuns []byte
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ConversationID,
+		&value.Role, &value.ContentType, &value.Content, &value.AIGenerated, &value.AgentTaskID,
+		&skillRuns, &value.CreatedBy, &value.CreatedAt); err != nil {
+		return Message{}, mapNotFound(err)
+	}
+	if len(skillRuns) > 0 {
+		_ = json.Unmarshal(skillRuns, &value.SkillRunIDs)
+	}
+	return value, nil
+}
+
+const briefDraftSelect = `SELECT id, organization_id, project_id, brief_id, status, version,
+	base_brief_version, document, field_states, completeness, updated_by, created_at, updated_at
+	FROM strategy_brief_drafts`
+
+func scanBriefDraft(row rowScanner) (BriefDraft, error) {
+	var value BriefDraft
+	var base sql.NullInt64
+	var document, states, completeness json.RawMessage
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.BriefID,
+		&value.Status, &value.Version, &base, &document, &states, &completeness,
+		&value.UpdatedBy, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		return BriefDraft{}, mapNotFound(err)
+	}
+	if base.Valid {
+		value.BaseBriefVersion = &base.Int64
+	}
+	if err := json.Unmarshal(document, &value.Document); err != nil {
+		return BriefDraft{}, err
+	}
+	if err := json.Unmarshal(states, &value.FieldStates); err != nil {
+		return BriefDraft{}, err
+	}
+	if err := json.Unmarshal(completeness, &value.Completeness); err != nil {
+		return BriefDraft{}, err
+	}
+	return value, nil
+}
+
+const briefVersionSelect = `SELECT brief_id, version, organization_id, project_id, snapshot,
+	content_hash, source_draft_id, source_draft_version, confirmed_by, confirmed_at
+	FROM strategy_brief_versions`
+
+func scanBriefVersion(row rowScanner) (BriefVersion, error) {
+	var value BriefVersion
+	var snapshot json.RawMessage
+	if err := row.Scan(&value.BriefID, &value.Version, &value.OrganizationID, &value.ProjectID,
+		&snapshot, &value.ContentHash, &value.SourceDraftID, &value.SourceDraftVersion,
+		&value.ConfirmedBy, &value.ConfirmedAt); err != nil {
+		return BriefVersion{}, mapNotFound(err)
+	}
+	var stored struct {
+		Document    BriefDocument         `json:"document"`
+		FieldStates map[string]FieldState `json:"field_states"`
+	}
+	if err := json.Unmarshal(snapshot, &stored); err != nil {
+		return BriefVersion{}, err
+	}
+	value.Snapshot = stored.Document
+	value.FieldStates = stored.FieldStates
+	return value, nil
+}
+
+func insertMessage(ctx context.Context, executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, message Message) error {
+	skillRuns := any(nil)
+	if len(message.SkillRunIDs) > 0 {
+		skillRuns = mustJSON(message.SkillRunIDs)
+	}
+	_, err := executor.ExecContext(ctx, `INSERT INTO strategy_messages
+		(id, organization_id, project_id, conversation_id, role, content_type, content,
+		 ai_generated, agent_task_id, skill_run_ids, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`, message.ID,
+		message.OrganizationID, message.ProjectID, message.ConversationID, message.Role,
+		message.ContentType, message.Content, message.AIGenerated, message.AgentTaskID,
+		skillRuns, message.CreatedBy, message.CreatedAt)
+	return err
+}
+
+func insertConversationEvent(ctx context.Context, executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, eventID string, organizationID contract.OrganizationID, projectID contract.ProjectID, conversationID, eventType string, payload json.RawMessage, createdAt interface{}) error {
+	_, err := executor.ExecContext(ctx, `INSERT INTO strategy_conversation_events
+		(event_id, organization_id, project_id, conversation_id, event_type, payload, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, eventID, organizationID, projectID, conversationID,
+		eventType, payload, createdAt)
+	return err
+}
+
+func updateBriefDraft(ctx context.Context, executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, expectedVersion int64, draft BriefDraft) error {
+	document, err := snapshotJSON(draft.Document)
+	if err != nil {
+		return err
+	}
+	states, err := snapshotJSON(draft.FieldStates)
+	if err != nil {
+		return err
+	}
+	completeness, err := snapshotJSON(draft.Completeness)
+	if err != nil {
+		return err
+	}
+	result, err := executor.ExecContext(ctx, `UPDATE strategy_brief_drafts SET document = ?,
+		field_states = ?, completeness = ?, version = ?, updated_by = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = 'open'`,
+		document, states, completeness, draft.Version, draft.UpdatedBy, draft.UpdatedAt,
+		draft.OrganizationID, draft.ProjectID, draft.ID, expectedVersion)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrVersionConflict
+	}
+	return nil
+}
+
+func mapNotFound(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+const draftSelect = `SELECT id, organization_id, project_id, task_id, brief_id, brief_version,
+	project_context_version, status, archived_at, COALESCE(archived_by, ''),
+	COALESCE(archive_reason, ''), current_revision, COALESCE(current_review_id, ''),
+	version, skill_versions, created_at, updated_at FROM strategy_drafts`
+
+func scanDraft(row rowScanner) (Draft, error) {
+	var value Draft
+	var skills json.RawMessage
+	var archivedAt sql.NullTime
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.TaskID,
+		&value.BriefID, &value.BriefVersion, &value.ProjectContextVersion, &value.Status,
+		&archivedAt, &value.ArchivedBy, &value.ArchiveReason,
+		&value.CurrentRevision, &value.CurrentReviewID, &value.Version, &skills,
+		&value.CreatedAt, &value.UpdatedAt); err != nil {
+		return Draft{}, mapNotFound(err)
+	}
+	if archivedAt.Valid {
+		value.ArchivedAt = &archivedAt.Time
+	}
+	if err := json.Unmarshal(skills, &value.SkillVersions); err != nil {
+		return Draft{}, err
+	}
+	return value, nil
+}
+
+const draftRevisionSelect = `SELECT strategy_id, revision, base_revision, document,
+	changed_sections, content_hash, created_by, created_at FROM strategy_draft_revisions`
+
+func scanDraftRevision(row rowScanner) (DraftRevision, error) {
+	var value DraftRevision
+	var base sql.NullInt64
+	var document, changed json.RawMessage
+	if err := row.Scan(&value.StrategyID, &value.Revision, &base, &document, &changed,
+		&value.ContentHash, &value.CreatedBy, &value.CreatedAt); err != nil {
+		return DraftRevision{}, mapNotFound(err)
+	}
+	if base.Valid {
+		value.BaseRevision = &base.Int64
+	}
+	if err := json.Unmarshal(document, &value.Document); err != nil {
+		return DraftRevision{}, err
+	}
+	if err := json.Unmarshal(changed, &value.ChangedSections); err != nil {
+		return DraftRevision{}, err
+	}
+	return value, nil
+}
+
+func insertDraftRevision(ctx context.Context, executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, organizationID contract.OrganizationID, projectID contract.ProjectID, revision DraftRevision) error {
+	document, err := snapshotJSON(revision.Document)
+	if err != nil {
+		return err
+	}
+	changed, err := snapshotJSON(revision.ChangedSections)
+	if err != nil {
+		return err
+	}
+	lineage, err := snapshotJSON(revision.Document.Lineage)
+	if err != nil {
+		return err
+	}
+	_, err = executor.ExecContext(ctx, `INSERT INTO strategy_draft_revisions
+		(strategy_id, revision, organization_id, project_id, base_revision, document,
+		 changed_sections, content_hash, lineage, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, revision.StrategyID, revision.Revision,
+		organizationID, projectID, revision.BaseRevision, document, changed,
+		revision.ContentHash, lineage, revision.CreatedBy, revision.CreatedAt)
+	return err
+}
+
+const reviewSelect = `SELECT id, organization_id, project_id, strategy_id, candidate_revision,
+	candidate_content_hash, brief_id, brief_version, project_context_version, status,
+	COALESCE(decision_reason, ''), COALESCE(decided_by, ''), decided_at, created_by,
+	created_at, updated_at FROM strategy_reviews`
+
+func scanReview(row rowScanner) (Review, error) {
+	var value Review
+	var decidedAt sql.NullTime
+	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.StrategyID,
+		&value.CandidateRevision, &value.CandidateContentHash, &value.BriefID,
+		&value.BriefVersion, &value.ProjectContextVersion, &value.Status,
+		&value.DecisionReason, &value.DecidedBy, &decidedAt, &value.CreatedBy,
+		&value.CreatedAt, &value.UpdatedAt); err != nil {
+		return Review{}, mapNotFound(err)
+	}
+	if decidedAt.Valid {
+		value.DecidedAt = &decidedAt.Time
+	}
+	return value, nil
+}
+
+const packageVersionSelect = `SELECT package_id, version, organization_id, project_id,
+	snapshot, content_hash, status, published_by, published_at FROM strategy_package_versions`
+
+func scanPackageVersion(row rowScanner) (PackageVersion, error) {
+	var value PackageVersion
+	var snapshot json.RawMessage
+	if err := row.Scan(&value.PackageID, &value.Version, &value.OrganizationID, &value.ProjectID,
+		&snapshot, &value.ContentHash, &value.Status, &value.PublishedBy,
+		&value.PublishedAt); err != nil {
+		return PackageVersion{}, mapNotFound(err)
+	}
+	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
+		return PackageVersion{}, err
+	}
+	return value, nil
+}

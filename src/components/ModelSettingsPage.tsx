@@ -88,7 +88,7 @@ export function ModelSettingsPage() {
       <aside className="model-settings-guide">
         <h3>接入规则</h3>
         <ol><li><span>01</span><p><b>登录后配置</b>未登录不能读取或写入密钥配置。</p></li><li><span>02</span><p><b>任务按需检查</b>生成请求由服务端统一校验 Provider 状态。</p></li><li><span>03</span><p><b>掩码返回</b>响应和本地浏览器存储都不含完整密钥。</p></li></ol>
-        <div className="model-settings-audit"><span>默认账号</span><b>本地 MVP 默认使用 demo@cookies.local / cookies-demo，可通过服务端环境变量覆盖。</b></div>
+        <div className="model-settings-audit"><span>默认账号</span><b>本地 MVP 默认使用 Admin / 123456，可通过服务端环境变量覆盖。</b></div>
       </aside>
     </div>
   </div>

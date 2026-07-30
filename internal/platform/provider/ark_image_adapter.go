@@ -54,6 +54,8 @@ func NewArkImageAdapter(config ArkImageConfig, handles OutputHandleStore) (*ArkI
 	return newCompatibleImageAdapter(config.APIKey, config.Model, baseURL, "/images/generations", arkProviderCode, "Ark", handles)
 }
 
+func (a *ArkImageAdapter) ProviderCode() string { return a.providerCode }
+
 func (a *ArkImageAdapter) Submit(ctx context.Context, request ImageGenerationRequest) (ImageSubmission, error) {
 	if err := request.Validate(); err != nil {
 		return ImageSubmission{}, err

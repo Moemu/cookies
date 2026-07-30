@@ -1,0 +1,319 @@
+openapi: 3.1.0
+info:
+  title: Cookies Insights API
+  version: 1.0.0
+  description: Evidence-backed reports, confirmation, and reusable experience.
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+paths:
+  /api/insights/v1/projects/{project_id}/reports:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List insight reports
+      operationId: listInsightReports
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Project reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Create an evidence-backed report
+      operationId: createInsightReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReport'
+      responses:
+        '201':
+          description: Draft report created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/reports/{report_id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ReportID'
+    post:
+      summary: Confirm an insight report
+      operationId: confirmInsightReport
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '200':
+          description: Human-confirmed report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/reports/{report_id}:create-experience:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ReportID'
+    post:
+      summary: Create reusable experience
+      operationId: createExperienceFromReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExperience'
+      responses:
+        '201':
+          description: Reusable confirmed experience.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List reusable experience
+      operationId: listExperiences
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Confirmed project experience.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/prelaunch:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Get pre-launch experience references
+      operationId: getPreLaunchInsights
+      responses:
+        '200':
+          description: Confirmed experience references for the next cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreLaunchInsight'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/performance:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Get the performance evidence projection
+      operationId: getPerformanceOverview
+      responses:
+        '200':
+          description: Read-only projection of Delivery evidence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceOverview'
+        default:
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: cookies_session
+  parameters:
+    ProjectID:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    ReportID:
+      name: report_id
+      in: path
+      required: true
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+  requestBodies:
+    ExpectedVersion:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version]
+            properties:
+              expected_version: { type: integer, minimum: 1 }
+  responses:
+    Problem:
+      description: Problem details.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    CreateReport:
+      type: object
+      additionalProperties: false
+      required: [execution_id]
+      properties:
+        execution_id: { type: string }
+    CreateExperience:
+      type: object
+      additionalProperties: false
+      required: [expected_report_version, conclusion, conditions, counterexamples]
+      properties:
+        expected_report_version: { type: integer, minimum: 1 }
+        conclusion: { type: string, maxLength: 2000 }
+        conditions:
+          type: array
+          maxItems: 20
+          items: { type: string, maxLength: 500 }
+        counterexamples:
+          type: array
+          maxItems: 20
+          items: { type: string, maxLength: 500 }
+    DeliveryExecutionSnapshot:
+      type: object
+      required: [id, change_set_id, plan_id, creative_package_id, mode, evidence_id, evidence_summary]
+      properties:
+        id: { type: string }
+        change_set_id: { type: string }
+        plan_id: { type: string }
+        creative_package_id: { type: string }
+        mode: { type: string, enum: [local_simulation] }
+        evidence_id: { type: string }
+        evidence_summary: { type: string }
+        metric_snapshot:
+          $ref: '#/components/schemas/DeliveryMetricSnapshot'
+    DeliveryMetricSnapshot:
+      type: object
+      required: [id, source, is_simulated, dataset_version, currency, raw_metrics]
+      properties:
+        id: { type: string }
+        source: { type: string, const: demo_fixture }
+        is_simulated: { type: boolean, const: true }
+        dataset_version: { type: string, const: preroll-demo/v1 }
+        currency: { type: string, const: CNY }
+        raw_metrics:
+          type: object
+          required: [impressions, clicks, conversions, spend_cents]
+          properties:
+            impressions: { type: integer, minimum: 0 }
+            clicks: { type: integer, minimum: 0 }
+            conversions: { type: integer, minimum: 0 }
+            spend_cents: { type: integer, minimum: 0 }
+    InsightReport:
+      type: object
+      required: [id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        execution_id: { type: string }
+        delivery_mode: { type: string, enum: [local_simulation] }
+        evidence_id: { type: string }
+        evidence_summary: { type: string }
+        metric_snapshot_id: { type: string }
+        creative_package_id: { type: string }
+        is_simulated: { type: boolean }
+        dataset_version: { type: string }
+        status: { type: string, enum: [draft, confirmed] }
+        summary: { type: string }
+        findings:
+          type: array
+          items: { type: string }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        confirmed_by: { type: string }
+        confirmed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Experience:
+      type: object
+      required: [id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        report_id: { type: string }
+        source_execution_id: { type: string }
+        source_evidence_id: { type: string }
+        source_metric_snapshot_id: { type: string }
+        conclusion: { type: string }
+        conditions:
+          type: array
+          items: { type: string }
+        counterexamples:
+          type: array
+          items: { type: string }
+        status: { type: string, enum: [confirmed] }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PreLaunchInsight:
+      type: object
+      required: [project_id, experience_references, disclosure]
+      properties:
+        project_id: { type: string }
+        experience_references:
+          type: array
+          items:
+            $ref: '#/components/schemas/Experience'
+        disclosure: { type: string }
+    PerformanceOverview:
+      type: object
+      required: [project_id, executions, disclosure]
+      properties:
+        project_id: { type: string }
+        executions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryExecutionSnapshot'
+        disclosure: { type: string }
+    Problem:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id, retryable, details]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+            retryable: { type: boolean }
+            details:
+              type: array
+              items: { type: object }

@@ -14,6 +14,7 @@ import (
 
 var ErrIdempotencyConflict = errors.New("idempotency key was reused with a different request")
 var ErrNoHandler = errors.New("no job handler is registered for this kind")
+var ErrLeaseLost = errors.New("job execution lease was lost")
 
 type CreateRequest struct {
 	Job            contract.Job
@@ -63,6 +64,13 @@ type LeaseRecoverer interface {
 	ReclaimExpired(ctx context.Context, now time.Time, leaseDuration time.Duration) (LeaseRecovery, error)
 }
 
+// LeaseRenewer extends an active claim while a handler is still doing useful
+// work. It is kept separate from Store so lightweight stores and existing
+// test doubles do not need to implement lease recovery mechanics.
+type LeaseRenewer interface {
+	RenewLease(ctx context.Context, claim Claim, now time.Time) error
+}
+
 type Store interface {
 	Enqueue(ctx context.Context, request CreateRequest) (job contract.Job, duplicate bool, err error)
 	Claim(ctx context.Context, workerID string, now time.Time) (Claim, bool, error)
@@ -85,9 +93,12 @@ type DeferredError struct{ AvailableAt time.Time }
 func (e DeferredError) Error() string { return "job execution deferred" }
 
 type Worker struct {
-	Store    Store
-	Handlers map[string]Handler
-	Now      func() time.Time
+	Store             Store
+	Handlers          map[string]Handler
+	Now               func() time.Time
+	LeaseRenewer      LeaseRenewer
+	Canceller         ClaimCanceller
+	HeartbeatInterval time.Duration
 }
 
 func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
@@ -105,9 +116,21 @@ func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 	if handler == nil {
 		return true, w.Store.Fail(ctx, claim, contract.JobError{Code: "JOB_HANDLER_UNAVAILABLE", Message: "No handler is configured for this job kind", Retryable: false}, w.Now().UTC())
 	}
-	result, err := handler(ctx, claim)
+	result, err := w.runHandler(ctx, claim, handler)
 	if err == nil {
+		if w.Canceller != nil {
+			cancelled, checkErr := w.Canceller.IsCancelRequested(ctx, claim.Job.OrganizationID, claim.Job.ID)
+			if checkErr != nil {
+				return true, checkErr
+			}
+			if cancelled {
+				return true, w.Canceller.CancelClaim(ctx, claim, w.Now().UTC())
+			}
+		}
 		return true, w.Store.Succeed(ctx, claim, result, w.Now().UTC())
+	}
+	if errors.Is(err, ErrLeaseLost) {
+		return true, err
 	}
 	var deferred DeferredError
 	if errors.As(err, &deferred) {
@@ -125,4 +148,36 @@ func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 		return true, w.Store.Fail(ctx, claim, executionError.JobError, w.Now().UTC())
 	}
 	return true, w.Store.Fail(ctx, claim, contract.JobError{Code: "JOB_EXECUTION_FAILED", Message: "Job execution failed", Retryable: true}, w.Now().UTC())
+}
+
+func (w Worker) runHandler(ctx context.Context, claim Claim, handler Handler) (Result, error) {
+	if w.LeaseRenewer == nil || w.HeartbeatInterval <= 0 {
+		return handler(ctx, claim)
+	}
+	handlerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type outcome struct {
+		result Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := handler(handlerCtx, claim)
+		done <- outcome{result: result, err: err}
+	}()
+	ticker := time.NewTicker(w.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case completed := <-done:
+			return completed.result, completed.err
+		case <-ticker.C:
+			if err := w.LeaseRenewer.RenewLease(ctx, claim, w.Now().UTC()); err != nil {
+				cancel()
+				return Result{}, fmt.Errorf("%w: renew job %s lease: %v", ErrLeaseLost, claim.Job.ID, err)
+			}
+		case <-ctx.Done():
+			return Result{}, ctx.Err()
+		}
+	}
 }

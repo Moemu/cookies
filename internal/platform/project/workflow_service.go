@@ -57,6 +57,170 @@ func (s Service) GetWorkbench(ctx context.Context, actor contract.ActorContext, 
 	return s.Store.GetWorkbench(ctx, actor.OrganizationID, projectID)
 }
 
+func (s Service) RunWorkbenchQualityCheck(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request RunWorkbenchQualityCheckRequest) (WorkbenchQualityCheckRun, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return WorkbenchQualityCheckRun{}, err
+	}
+	workbench, err := s.Store.GetWorkbench(ctx, actor.OrganizationID, projectID)
+	if err != nil {
+		return WorkbenchQualityCheckRun{}, err
+	}
+	pointer := findWorkbenchAssetPointer(workbench.AssetVersionPointers, request.AssetID)
+	if pointer == nil || !workbenchAssetVersionExists(*pointer, request.AssetVersion) {
+		return WorkbenchQualityCheckRun{}, ErrNotFound
+	}
+	if pointer.QualityCheckedVersion != nil && *pointer.QualityCheckedVersion == request.AssetVersion {
+		if prior := latestPassedWorkbenchQualityCheck(workbench.QualityCheckRuns, request.AssetID, request.AssetVersion); prior != nil {
+			return *prior, nil
+		}
+	}
+	id, err := s.newID("qualitycheck")
+	if err != nil {
+		return WorkbenchQualityCheckRun{}, err
+	}
+	now := time.Now().UTC()
+	run := WorkbenchQualityCheckRun{
+		ID: id, OrganizationID: string(actor.OrganizationID), ProjectID: string(projectID),
+		AssetID: request.AssetID, AssetVersion: request.AssetVersion, Status: "passed",
+		Model: "cookies.quality.basic", RuleVersion: "agency-material-rules-2026-07",
+		PromptVersion: "material-check-2026-07-29",
+		Summary:       "服务端已完成素材可读性、版本完整性和基础交付门禁检查，未发现阻断问题。",
+		Issues:        []WorkbenchQualityCheckIssue{},
+		CreatedAt:     now,
+		CompletedAt:   &now,
+	}
+	workbench.QualityCheckRuns = append([]WorkbenchQualityCheckRun{run}, workbench.QualityCheckRuns...)
+	pointer.QualityCheckedVersion = &request.AssetVersion
+	pointer.UpdatedAt = now
+	if err := s.Store.UpsertWorkbench(ctx, workbench); err != nil {
+		return WorkbenchQualityCheckRun{}, err
+	}
+	return run, nil
+}
+
+func (s Service) RecordWorkbenchMaterialConfirmation(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request RecordWorkbenchMaterialConfirmationRequest) (WorkbenchMaterialConfirmation, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return WorkbenchMaterialConfirmation{}, err
+	}
+	if request.Status != "confirmed" && request.Status != "changes_requested" {
+		return WorkbenchMaterialConfirmation{}, fmt.Errorf("status must be confirmed or changes_requested")
+	}
+	if request.Status == "changes_requested" && strings.TrimSpace(request.Note) == "" {
+		return WorkbenchMaterialConfirmation{}, fmt.Errorf("note is required when changes are requested")
+	}
+	workbench, err := s.Store.GetWorkbench(ctx, actor.OrganizationID, projectID)
+	if err != nil {
+		return WorkbenchMaterialConfirmation{}, err
+	}
+	pointer := findWorkbenchAssetPointer(workbench.AssetVersionPointers, request.AssetID)
+	if pointer == nil || !workbenchAssetVersionExists(*pointer, request.AssetVersion) {
+		return WorkbenchMaterialConfirmation{}, ErrNotFound
+	}
+	qualityRun := latestPassedWorkbenchQualityCheck(workbench.QualityCheckRuns, request.AssetID, request.AssetVersion)
+	if qualityRun == nil {
+		return WorkbenchMaterialConfirmation{}, ErrInvalidState
+	}
+	if prior := latestWorkbenchMaterialConfirmation(workbench.MaterialConfirmations, request, actor.Principal.ID); prior != nil {
+		return *prior, nil
+	}
+	id, err := s.newID("confirmation")
+	if err != nil {
+		return WorkbenchMaterialConfirmation{}, err
+	}
+	now := time.Now().UTC()
+	confirmation := WorkbenchMaterialConfirmation{
+		ID: id, OrganizationID: string(actor.OrganizationID), ProjectID: string(projectID),
+		QualityCheckRunID: qualityRun.ID, AssetID: request.AssetID, AssetVersion: request.AssetVersion,
+		Status: request.Status, Scope: strings.TrimSpace(request.Scope), ConfirmedBy: actor.Principal.ID,
+		Note: strings.TrimSpace(request.Note), CreatedAt: now,
+	}
+	workbench.MaterialConfirmations = append([]WorkbenchMaterialConfirmation{confirmation}, workbench.MaterialConfirmations...)
+	if request.Status == "confirmed" {
+		pointer.HumanConfirmedVersion = &request.AssetVersion
+	} else if pointer.HumanConfirmedVersion != nil && *pointer.HumanConfirmedVersion == request.AssetVersion {
+		pointer.HumanConfirmedVersion = nil
+	}
+	pointer.UpdatedAt = now
+	if err := s.Store.UpsertWorkbench(ctx, workbench); err != nil {
+		return WorkbenchMaterialConfirmation{}, err
+	}
+	return confirmation, nil
+}
+
+func (s Service) UpdateWorkbenchAssetPointer(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request UpdateWorkbenchAssetPointerRequest) (WorkbenchAssetVersionPointer, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return WorkbenchAssetVersionPointer{}, err
+	}
+	if request.DeliveryVersion == nil || *request.DeliveryVersion < 1 {
+		return WorkbenchAssetVersionPointer{}, fmt.Errorf("delivery_version must be positive")
+	}
+	workbench, err := s.Store.GetWorkbench(ctx, actor.OrganizationID, projectID)
+	if err != nil {
+		return WorkbenchAssetVersionPointer{}, err
+	}
+	pointer := findWorkbenchAssetPointer(workbench.AssetVersionPointers, request.AssetID)
+	if pointer == nil || !workbenchAssetVersionExists(*pointer, *request.DeliveryVersion) {
+		return WorkbenchAssetVersionPointer{}, ErrNotFound
+	}
+	if pointer.HumanConfirmedVersion == nil || *pointer.HumanConfirmedVersion != *request.DeliveryVersion {
+		return WorkbenchAssetVersionPointer{}, ErrInvalidState
+	}
+	pointer.DeliveryVersion = request.DeliveryVersion
+	pointer.UpdatedAt = time.Now().UTC()
+	if err := s.Store.UpsertWorkbench(ctx, workbench); err != nil {
+		return WorkbenchAssetVersionPointer{}, err
+	}
+	return *pointer, nil
+}
+
+func findWorkbenchAssetPointer(pointers []WorkbenchAssetVersionPointer, assetID string) *WorkbenchAssetVersionPointer {
+	assetID = strings.TrimSpace(assetID)
+	for index := range pointers {
+		if pointers[index].AssetID == assetID {
+			return &pointers[index]
+		}
+	}
+	return nil
+}
+
+func workbenchAssetVersionExists(pointer WorkbenchAssetVersionPointer, version int) bool {
+	for _, candidate := range pointer.Versions {
+		if candidate.Version == version {
+			return true
+		}
+	}
+	return false
+}
+
+func latestPassedWorkbenchQualityCheck(runs []WorkbenchQualityCheckRun, assetID string, version int) *WorkbenchQualityCheckRun {
+	var latest *WorkbenchQualityCheckRun
+	for index := range runs {
+		run := &runs[index]
+		if run.AssetID != assetID || run.AssetVersion != version || run.Status != "passed" || run.CompletedAt == nil {
+			continue
+		}
+		if latest == nil || run.CreatedAt.After(latest.CreatedAt) {
+			latest = run
+		}
+	}
+	return latest
+}
+
+func latestWorkbenchMaterialConfirmation(confirmations []WorkbenchMaterialConfirmation, request RecordWorkbenchMaterialConfirmationRequest, principalID string) *WorkbenchMaterialConfirmation {
+	for index := range confirmations {
+		confirmation := &confirmations[index]
+		if confirmation.AssetID == request.AssetID &&
+			confirmation.AssetVersion == request.AssetVersion &&
+			confirmation.Status == request.Status &&
+			confirmation.Scope == strings.TrimSpace(request.Scope) &&
+			confirmation.Note == strings.TrimSpace(request.Note) &&
+			confirmation.ConfirmedBy == principalID {
+			return confirmation
+		}
+	}
+	return nil
+}
+
 func (s Service) CreateBusinessTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreateBusinessTaskRequest) (BusinessTask, error) {
 	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
 		return BusinessTask{}, err

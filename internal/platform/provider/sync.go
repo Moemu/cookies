@@ -42,6 +42,7 @@ type TextGenerateRequest struct {
 	Actor            contract.ActorContext
 	Project          contract.ProjectContext
 	ModelAlias       string
+	InvocationKey    contract.IdempotencyKey
 	Messages         []TextMessage
 	OutputJSONSchema json.RawMessage
 }
@@ -53,6 +54,11 @@ func (r TextGenerateRequest) Validate() error {
 	if strings.TrimSpace(r.ModelAlias) == "" || len(r.Messages) == 0 {
 		return fmt.Errorf("model alias and one or more text messages are required")
 	}
+	if r.InvocationKey != "" {
+		if err := r.InvocationKey.Validate(); err != nil {
+			return fmt.Errorf("invalid text invocation key: %w", err)
+		}
+	}
 	for index, message := range r.Messages {
 		if err := message.Validate(); err != nil {
 			return fmt.Errorf("invalid text message at index %d: %w", index, err)
@@ -62,7 +68,9 @@ func (r TextGenerateRequest) Validate() error {
 }
 
 type TextAdapterRequest struct {
+	OrganizationID   contract.OrganizationID
 	ModelAlias       string
+	InvocationKey    contract.IdempotencyKey
 	Messages         []TextMessage
 	OutputJSONSchema json.RawMessage
 }
@@ -141,6 +149,22 @@ type SynchronousResult struct {
 	ModelVersion     string
 	Text             string
 	StructuredOutput json.RawMessage
+	Usage            *TokenUsage
+	RouteSnapshot    *GatewayRouteSnapshot
+}
+
+type TokenUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	TotalTokens  int64 `json:"total_tokens"`
+}
+
+func (u TokenUsage) Validate() error {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.TotalTokens < 0 ||
+		u.TotalTokens < u.InputTokens+u.OutputTokens {
+		return fmt.Errorf("provider token usage is invalid")
+	}
+	return nil
 }
 
 func (r SynchronousResult) Validate() error {
@@ -153,15 +177,47 @@ func (r SynchronousResult) Validate() error {
 	if len(r.StructuredOutput) > 0 && !json.Valid(r.StructuredOutput) {
 		return fmt.Errorf("structured output must be valid JSON")
 	}
+	if r.Usage != nil {
+		if err := r.Usage.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 type SynchronousResponse struct {
-	ProviderCode     string          `json:"provider_code"`
-	ModelAlias       string          `json:"model_alias"`
-	ModelVersion     string          `json:"model_version"`
-	Text             string          `json:"text"`
-	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
+	ProviderCode     string           `json:"provider_code"`
+	ModelAlias       string           `json:"model_alias"`
+	ModelVersion     string           `json:"model_version"`
+	Text             string           `json:"text"`
+	StructuredOutput json.RawMessage  `json:"structured_output,omitempty"`
+	Usage            *TokenUsage      `json:"usage,omitempty"`
+	RouteRevisionID  string           `json:"route_revision_id,omitempty"`
+	ResponseMode     TextResponseMode `json:"response_mode,omitempty"`
+	APIMode          TextAPIMode      `json:"api_mode,omitempty"`
+	Background       bool             `json:"background,omitempty"`
+}
+
+type TextRouteInspection struct {
+	ModelAlias      string           `json:"model_alias"`
+	UpstreamModel   string           `json:"upstream_model"`
+	RouteRevisionID string           `json:"route_revision_id"`
+	ResponseMode    TextResponseMode `json:"response_mode"`
+	APIMode         TextAPIMode      `json:"api_mode"`
+	Background      bool             `json:"background"`
+	Ready           bool             `json:"ready"`
+}
+
+type TextRouteInspector interface {
+	InspectTextRoute(context.Context, contract.OrganizationID, string) (TextRouteInspection, error)
+}
+
+func (s Service) InspectTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (TextRouteInspection, error) {
+	inspector, ok := s.TextAdapter.(TextRouteInspector)
+	if !ok {
+		return TextRouteInspection{}, fmt.Errorf("text provider does not expose route inspection")
+	}
+	return inspector.InspectTextRoute(ctx, organizationID, modelAlias)
 }
 
 func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) (SynchronousResponse, error) {
@@ -171,14 +227,21 @@ func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) 
 	if err := request.Validate(); err != nil {
 		return SynchronousResponse{}, err
 	}
-	result, err := s.TextAdapter.GenerateText(ctx, TextAdapterRequest{ModelAlias: request.ModelAlias, Messages: request.Messages, OutputJSONSchema: request.OutputJSONSchema})
+	result, err := s.TextAdapter.GenerateText(ctx, TextAdapterRequest{OrganizationID: request.Actor.OrganizationID, ModelAlias: request.ModelAlias, InvocationKey: request.InvocationKey, Messages: request.Messages, OutputJSONSchema: request.OutputJSONSchema})
 	if err != nil {
 		return SynchronousResponse{}, err
 	}
 	if err := result.Validate(); err != nil {
 		return SynchronousResponse{}, fmt.Errorf("text provider response: %w", err)
 	}
-	return SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput}, nil
+	response := SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}
+	if result.RouteSnapshot != nil {
+		response.RouteRevisionID = result.RouteSnapshot.RouteRevisionID
+		response.ResponseMode = result.RouteSnapshot.TextResponseMode
+		response.APIMode = result.RouteSnapshot.TextAPIMode
+		response.Background = result.RouteSnapshot.Background
+	}
+	return response, nil
 }
 
 func (s Service) UnderstandVision(ctx context.Context, request VisionUnderstandRequest) (SynchronousResponse, error) {
@@ -208,7 +271,7 @@ func (s Service) UnderstandVision(ctx context.Context, request VisionUnderstandR
 	if err := result.Validate(); err != nil {
 		return SynchronousResponse{}, fmt.Errorf("vision provider response: %w", err)
 	}
-	return SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput}, nil
+	return SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}, nil
 }
 
 func validateVisionSources(requested []contract.ProjectAssetRef, sources []VisionSource) error {

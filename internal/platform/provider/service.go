@@ -130,11 +130,29 @@ type JobRecord struct {
 	SourceSystem          string
 	SourceTaskID          string
 	Input                 ImageGenerationInput
+	VideoInput            VideoGenerationInput
 	ProviderCode          string
 	ModelVersion          string
 	ExternalTaskID        string
 	Outputs               []OutputRecord
+	Route                 *ImageRouteSnapshot
+	SubmissionState       SubmissionState
+	AdapterRequestID      string
+	ActualProvider        string
+	ActualModel           string
+	ExecutionDeadlineAt   *time.Time
+	SubmittedAt           *time.Time
+	ResponseReceivedAt    *time.Time
 }
+
+type SubmissionState string
+
+const (
+	SubmissionNotStarted SubmissionState = "not_started"
+	SubmissionInFlight   SubmissionState = "in_flight"
+	SubmissionCompleted  SubmissionState = "completed"
+	SubmissionUnknown    SubmissionState = "unknown"
+)
 
 type OutputStatus string
 
@@ -174,13 +192,23 @@ type Service struct {
 	Store         JobStore
 	Scheduler     ExecutionScheduler
 	ImageAdapter  ImageProviderAdapter
+	VideoAdapter  VideoProviderAdapter
 	TextAdapter   TextProviderAdapter
 	VisionAdapter VisionProviderAdapter
 	VisionSources VisionSourceResolver
 	Intake        GeneratedIntakeClient
 	OutputHandles OutputHandleStore
+	Routes        ImageRouteResolver
+	VideoRoutes   VideoRouteResolver
 	NewID         func() (string, error)
 	Now           func() time.Time
+}
+
+// ProcessVideoJob uses the same Assets intake protocol as image generation.
+// The durable output MIME type and provenance capability distinguish the
+// resulting asset; Assets remains the owner of storage and asset versions.
+func (s Service) ProcessVideoJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, *time.Time, error) {
+	return s.ProcessImageJob(ctx, organizationID, projectID, jobID)
 }
 
 func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobRequest) (contract.ProviderJob, bool, error) {
@@ -208,6 +236,17 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		return contract.ProviderJob{}, false, fmt.Errorf("generate provider job ID: %w", err)
 	}
 	createdAt := now().UTC()
+	var route *ImageRouteSnapshot
+	if s.Routes != nil {
+		resolved, resolveErr := s.Routes.ResolveImageRoute(ctx, request.Actor.OrganizationID, request.ModelAlias)
+		if resolveErr != nil {
+			return contract.ProviderJob{}, false, fmt.Errorf("resolve provider image route: %w", resolveErr)
+		}
+		if request.Input.Width != 1024 || request.Input.Height != 1024 {
+			return contract.ProviderJob{}, false, fmt.Errorf("adapter gateway M1 supports only 1024x1024 images")
+		}
+		route = &resolved
+	}
 	job := contract.ProviderJob{
 		ID:               providerJobID,
 		Kind:             imageJobKindForOperation(request.Operation),
@@ -237,6 +276,8 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		SourceSystem:          request.SourceSystem,
 		SourceTaskID:          request.SourceTaskID,
 		Input:                 request.Input,
+		Route:                 route,
+		SubmissionState:       SubmissionNotStarted,
 	})
 	if err != nil {
 		return contract.ProviderJob{}, false, err

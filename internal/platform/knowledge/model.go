@@ -13,19 +13,6 @@ const (
 	ScopeWrite contract.Scope = "assets.write"
 )
 
-type Document struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	Title          string                  `json:"title"`
-	SourceURI      string                  `json:"source_uri"`
-	SourceType     string                  `json:"source_type"`
-	ChunkCount     int                     `json:"chunk_count"`
-	ImportedBy     contract.Principal      `json:"imported_by"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
-}
-
 type Chunk struct {
 	ID             string                  `json:"id"`
 	DocumentID     string                  `json:"document_id"`
@@ -82,7 +69,9 @@ func (r ImportDocumentRequest) Validate() error {
 	if len([]rune(r.SourceURI)) > 512 {
 		return fmt.Errorf("source_uri is too long")
 	}
-	if r.SourceType != "" && r.SourceType != "docs" && r.SourceType != "strategy" && r.SourceType != "retrospective" && r.SourceType != "feishu_summary" {
+	if r.SourceType != "" && r.SourceType != "docs" && r.SourceType != "strategy" &&
+		r.SourceType != "retrospective" && r.SourceType != "feishu_summary" &&
+		r.SourceType != "prelaunch_insight" {
 		return fmt.Errorf("source_type is invalid")
 	}
 	return nil

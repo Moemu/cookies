@@ -15,6 +15,10 @@ var ErrNotFound = errors.New("project not found")
 var ErrNotActive = errors.New("project is not active")
 var ErrBrandNotFound = errors.New("brand not found")
 var ErrProductNotFound = errors.New("product not found")
+var ErrMembershipNotFound = errors.New("project membership not found")
+var ErrMembershipForbidden = errors.New("project membership operation forbidden")
+var ErrMembershipConflict = errors.New("project membership changed")
+var ErrLastOwner = errors.New("project must keep an active owner")
 
 type Store interface {
 	CreateBrand(context.Context, Brand) error

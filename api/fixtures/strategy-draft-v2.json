@@ -1,0 +1,29 @@
+{
+  "contract_version": "strategy-draft/v2",
+  "objective": "获取制造企业销售线索",
+  "audience": {"primary": "制造企业研发负责人", "insights": ["重视可验证的数据与真实落地案例"]},
+  "proposition": "用可验证的流程协作缩短研发周期",
+  "channel_strategy": [
+    {"platform": "xiaohongshu", "role": "专业认知", "formats": ["图文笔记"]},
+    {"platform": "douyin", "role": "兴趣激发", "formats": ["短视频"]},
+    {"platform": "taobao_tmall", "role": "商品承接", "formats": ["详情页"]},
+    {"platform": "wechat_ecosystem", "role": "信任培育", "formats": ["公众号文章"]}
+  ],
+  "creative_recommendations": ["问题式标题命中研发场景", "用流程前后对比建立可信度", "用明确下一步承接咨询"],
+  "constraints": ["不得承诺无法验证的结果"],
+  "budget_and_cadence": {"budget": "CNY 100000", "cadence": "两周验证"},
+  "experiment_matrix": [{"hypothesis": "案例证据提高咨询意愿", "variable": "证据形式", "metric": "有效咨询率"}],
+  "measurement": ["有效线索数"],
+  "assumptions_and_gaps": ["各平台预算分配待确认"],
+  "executive_summary": "四个平台分别承担认知、兴趣、承接与培育，并统一回收有效线索。",
+  "cross_platform_role": "小红书与抖音触达，淘宝天猫和微信生态承接与培育。",
+  "platform_plans": [
+    {"platform": "xiaohongshu", "role": "专业认知", "audience_angle": "研发流程效率", "content_pillars": ["场景问题", "案例证据"], "formats": ["图文笔记"], "conversion_path": "搜索到表单", "cadence": "每周三篇", "primary_kpi": "有效咨询", "creative_ideas": ["流程对比图文"], "constraints": ["不使用绝对化承诺"]},
+    {"platform": "douyin", "role": "兴趣激发", "audience_angle": "协作冲突", "content_pillars": ["前三秒问题", "案例证明"], "formats": ["短视频"], "conversion_path": "视频到落地页", "cadence": "每周三条", "primary_kpi": "有效线索", "creative_ideas": ["三秒冲突钩子"], "constraints": ["不承诺播放量"]},
+    {"platform": "taobao_tmall", "role": "商品承接", "audience_angle": "方案可信度", "content_pillars": ["利益点", "信任证据"], "formats": ["详情页"], "conversion_path": "详情页到咨询", "cadence": "持续承接", "primary_kpi": "咨询率", "creative_ideas": ["详情页证据模块"], "constraints": ["价格信息需确认"]},
+    {"platform": "wechat_ecosystem", "role": "信任培育", "audience_angle": "长期效率", "content_pillars": ["方法论", "客户案例"], "formats": ["公众号文章"], "conversion_path": "文章到企微", "cadence": "每周一篇", "primary_kpi": "新增企微", "creative_ideas": ["研发协作方法清单"], "constraints": ["控制触达频次"]}
+  ],
+  "evidence_refs": ["knowledgedoc_01"],
+  "lineage": {"brief_id": "brief_01", "brief_version": 1, "project_context_version": 3, "skill_versions": {"channel.xiaohongshu": "v1.0.0", "channel.douyin": "v1.0.0", "channel.taobao_tmall": "v1.0.0", "channel.wechat_ecosystem": "v1.0.0"}},
+  "compliance": {"contract_version": "strategy-compliance-report/v1", "passed": true, "issues": [], "checked_at": "2026-07-24T08:00:00Z"}
+}

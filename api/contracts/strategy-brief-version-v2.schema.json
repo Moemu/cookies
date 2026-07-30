@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-brief-version-v2.schema.json",
+  "title": "strategy-brief-version/v2",
+  "type": "object",
+  "required": ["contract_version", "brand", "product", "industry", "region", "language", "campaign", "audience", "proposition", "channels", "budget", "schedule", "constraints", "measurement", "platform_briefs", "creative", "reference_ids"],
+  "properties": {
+    "contract_version": {"const": "strategy-brief-version/v2"},
+    "brand": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "minLength": 1}},
+      "additionalProperties": false
+    },
+    "product": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "industry": {"type": "string", "minLength": 1},
+    "region": {"type": "string", "minLength": 1},
+    "language": {"type": "string", "minLength": 1},
+    "campaign": {
+      "type": "object",
+      "required": ["objective"],
+      "properties": {"objective": {"type": "string", "minLength": 1}},
+      "additionalProperties": false
+    },
+    "audience": {
+      "type": "object",
+      "required": ["primary"],
+      "properties": {
+        "primary": {"type": "string", "minLength": 1},
+        "pain_points": {"type": "array", "items": {"type": "string"}},
+        "scenarios": {"type": "array", "items": {"type": "string"}},
+        "exclusions": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "proposition": {"type": "string", "minLength": 1},
+    "channels": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"enum": ["xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"]}
+    },
+    "budget": {
+      "type": "object",
+      "required": ["total"],
+      "properties": {"total": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["window"],
+      "properties": {"window": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "measurement": {
+      "type": "object",
+      "required": ["primary_kpi"],
+      "properties": {"primary_kpi": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "platform_briefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["platform"],
+        "properties": {
+          "platform": {"enum": ["xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"]},
+          "role": {"type": "string"},
+          "content_formats": {"type": "array", "items": {"type": "string"}},
+          "conversion_path": {"type": "string"},
+          "budget": {"type": "string"},
+          "primary_kpi": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "creative": {
+      "type": "object",
+      "properties": {
+        "tone": {"type": "array", "items": {"type": "string"}},
+        "mandatory_elements": {"type": "array", "items": {"type": "string"}},
+        "prohibited_claims": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "reference_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

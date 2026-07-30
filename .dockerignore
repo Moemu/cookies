@@ -1,0 +1,12 @@
+.git
+.data
+.env
+.env.*
+!.env.example
+/assets
+/dist
+node_modules
+web/dist
+web/node_modules
+*.exe
+*.log
