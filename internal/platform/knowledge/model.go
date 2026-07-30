@@ -69,7 +69,9 @@ func (r ImportDocumentRequest) Validate() error {
 	if len([]rune(r.SourceURI)) > 512 {
 		return fmt.Errorf("source_uri is too long")
 	}
-	if r.SourceType != "" && r.SourceType != "docs" && r.SourceType != "strategy" && r.SourceType != "retrospective" && r.SourceType != "feishu_summary" {
+	if r.SourceType != "" && r.SourceType != "docs" && r.SourceType != "strategy" &&
+		r.SourceType != "retrospective" && r.SourceType != "feishu_summary" &&
+		r.SourceType != "prelaunch_insight" {
 		return fmt.Errorf("source_type is invalid")
 	}
 	return nil

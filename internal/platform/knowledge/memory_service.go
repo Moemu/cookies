@@ -180,6 +180,14 @@ func (s *MemoryService) ListResearchRuns(context.Context, contract.ActorContext,
 	return []ResearchRun{}, nil
 }
 
+func (s *MemoryService) ListResearchArtifacts(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]ResearchArtifact, error) {
+	return []ResearchArtifact{}, nil
+}
+
+func (s *MemoryService) GetResearchArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (ResearchArtifact, error) {
+	return ResearchArtifact{}, ErrNotFound
+}
+
 type chunkPart struct {
 	text      string
 	section   string

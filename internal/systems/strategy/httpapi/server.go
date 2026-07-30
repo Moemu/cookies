@@ -51,6 +51,8 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("PATCH /api/strategy/v1/tasks/{task_id}/brief-draft", server.patchBriefDraft)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief:confirm", server.confirmBrief)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/brief-versions", server.listProjectBriefVersions)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/briefs", server.listProjectBriefs)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/briefs/{brief_id}", server.getProjectBrief)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions", server.listBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
@@ -58,6 +60,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/generation-probe", server.probeGeneration)
 	mux.HandleFunc("GET /api/strategy/v1/skills", server.listSkills)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}", server.getStrategy)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-drafts", server.listProjectStrategies)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/generation-metadata", server.getGenerationMetadata)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions", server.listStrategyRevisions)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions/{revision}", server.getStrategyRevision)
@@ -79,6 +82,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md", server.exportPackage)
 	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/feedback", server.createFeedback)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/feedback", server.listFeedback)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/evidence-references", server.listEvidenceReferences)
 	server.mux = mux
 	return server
 }
@@ -389,6 +393,25 @@ func (s *Server) listProjectBriefVersions(writer http.ResponseWriter, request *h
 	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
+func (s *Server) listProjectBriefs(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListProjectBriefs(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getProjectBrief(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetProjectBrief(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.PathValue("brief_id"),
+	)
+	writeResult(writer, value, err)
+}
+
 func (s *Server) getBriefVersion(writer http.ResponseWriter, request *http.Request) {
 	version, ok := positivePathInt(writer, request, "version")
 	if !ok {
@@ -400,6 +423,17 @@ func (s *Server) getBriefVersion(writer http.ResponseWriter, request *http.Reque
 		writer.Header().Set("Cache-Control", "private, no-cache")
 	}
 	writeResult(writer, value, err)
+}
+
+func (s *Server) listProjectStrategies(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListProjectStrategies(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) createStrategy(writer http.ResponseWriter, request *http.Request) {
@@ -744,6 +778,18 @@ func (s *Server) approveStrategy(writer http.ResponseWriter, request *http.Reque
 
 func (s *Server) listPackages(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.Service.ListPackages(request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listEvidenceReferences(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListEvidenceReferences(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("evidence_id"),
+	)
 	if err != nil {
 		writeError(writer, err)
 		return

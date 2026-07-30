@@ -516,11 +516,17 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         setState(current => ({ ...current, brief }))
       }
     }, false),
-    runResearch: (mode: 'web' | 'mcp', query: string, includeDocuments: boolean) =>
+    runResearch: (
+      mode: 'web' | 'mcp',
+      category: 'general' | 'audience' | 'competitor' | 'industry',
+      query: string,
+      includeDocuments: boolean,
+    ) =>
       perform('research', async () => {
         const documentIds = includeDocuments ? state.documents.map(document => document.id).slice(0, 20) : []
         const researchRun = await strategyApi.runExternalResearch(projectId, {
           mode,
+          category,
           query,
           document_ids: documentIds,
           disclosed_fields: documentIds.length ? ['query', 'document_content'] : ['query'],

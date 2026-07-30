@@ -74,6 +74,23 @@ func TestTaskAndDeepReviewRoutesRejectInvalidBodies(t *testing.T) {
 	}
 }
 
+func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	for _, path := range []string{
+		"/api/strategy/v1/projects/project_1/briefs",
+		"/api/strategy/v1/projects/project_1/briefs/brief_1",
+		"/api/strategy/v1/projects/project_1/strategy-drafts",
+		"/api/strategy/v1/projects/project_1/evidence-references",
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code == http.StatusNotFound {
+			t.Fatalf("%s was not mounted", path)
+		}
+	}
+}
+
 func TestMatchesIfNoneMatch(t *testing.T) {
 	t.Parallel()
 	etag := `"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`

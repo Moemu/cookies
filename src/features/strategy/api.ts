@@ -2,12 +2,15 @@ import { BackendApiError, apiRequest } from '../../backend/platform'
 import type {
   AgentTask,
   AgentTaskInspection,
+  BriefCenterDetail,
+  BriefCenterSummary,
   BriefDraft,
   BriefVersion,
   ConversationBundle,
   ConversationMemory,
   DeepReviewAnalysis,
   DraftRevision,
+  EvidenceReference,
   GenerationMetadata,
   GenerationProbe,
   GenerationReadiness,
@@ -15,12 +18,14 @@ import type {
   Message,
   PackageVersion,
   ResearchRun,
+  ResearchArtifact,
   Review,
   ReviewComment,
   ReviewPolicy,
   SkillRun,
   SkillDescriptor,
   StrategyDraft,
+  StrategyCenterSummary,
   StrategyTask,
   StrategyTaskBundle,
   StrategyTaskListItem,
@@ -51,6 +56,32 @@ export const strategyApi = {
       `${root}/projects/${encodeURIComponent(projectId)}/tasks?lifecycle=${lifecycle}`,
       { signal },
     ),
+
+  listProjectBriefs: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<{ items: BriefCenterSummary[] }>(
+      `${root}/projects/${encodeURIComponent(projectId)}/briefs`,
+      { signal },
+    ),
+
+  getProjectBrief: (projectId: string, briefId: string, signal?: AbortSignal) =>
+    apiRequest<BriefCenterDetail>(
+      `${root}/projects/${encodeURIComponent(projectId)}/briefs/${encodeURIComponent(briefId)}`,
+      { signal },
+    ),
+
+  listProjectStrategies: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<{ items: StrategyCenterSummary[] }>(
+      `${root}/projects/${encodeURIComponent(projectId)}/strategy-drafts`,
+      { signal },
+    ),
+
+  listEvidenceReferences: (projectId: string, evidenceId = '', signal?: AbortSignal) => {
+    const query = evidenceId ? `?evidence_id=${encodeURIComponent(evidenceId)}` : ''
+    return apiRequest<{ items: EvidenceReference[] }>(
+      `${root}/projects/${encodeURIComponent(projectId)}/evidence-references${query}`,
+      { signal },
+    )
+  },
 
   createTask: (projectId: string, name: string, objective: string, mutationKey?: string) =>
     apiRequest<StrategyTaskBundle>(`${root}/projects/${encodeURIComponent(projectId)}/tasks`, {
@@ -331,6 +362,15 @@ export const strategyApi = {
       { signal },
     ),
 
+  importKnowledgeDocument: (
+    projectId: string,
+    input: { title: string; source_uri?: string; source_type: string; text: string },
+  ) =>
+    apiRequest<KnowledgeDocument>(
+      `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+
   uploadKnowledgeDocument: (projectId: string, file: File) => {
     const body = new FormData()
     body.append('file', file)
@@ -344,6 +384,7 @@ export const strategyApi = {
     projectId: string,
     request: {
       mode: 'web' | 'mcp'
+      category?: ResearchArtifact['category']
       query: string
       document_ids: string[]
       disclosed_fields: string[]
@@ -358,6 +399,12 @@ export const strategyApi = {
   listResearchRuns: (projectId: string, signal?: AbortSignal) =>
     apiRequest<{ items: ResearchRun[] }>(
       `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs?limit=20`,
+      { signal },
+    ),
+
+  listResearchArtifacts: (projectId: string, category = 'all', signal?: AbortSignal) =>
+    apiRequest<{ items: ResearchArtifact[] }>(
+      `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-artifacts?category=${encodeURIComponent(category)}&limit=100`,
       { signal },
     ),
 

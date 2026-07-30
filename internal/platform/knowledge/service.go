@@ -71,6 +71,7 @@ type Document struct {
 
 type ResearchRequest struct {
 	Mode            string   `json:"mode"`
+	Category        string   `json:"category,omitempty"`
 	Query           string   `json:"query"`
 	DocumentIDs     []string `json:"document_ids"`
 	DisclosedFields []string `json:"disclosed_fields"`
@@ -109,6 +110,7 @@ type ResearchRun struct {
 	OrganizationID  contract.OrganizationID `json:"organization_id"`
 	ProjectID       contract.ProjectID      `json:"project_id"`
 	Mode            string                  `json:"mode"`
+	Category        string                  `json:"category"`
 	Query           string                  `json:"query"`
 	DocumentIDs     []string                `json:"document_ids"`
 	DisclosedFields []string                `json:"disclosed_fields"`
@@ -128,6 +130,7 @@ type ResearchArtifact struct {
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	ResearchRunID  string                  `json:"research_run_id"`
 	SourceType     string                  `json:"source_type"`
+	Category       string                  `json:"category"`
 	Title          string                  `json:"title"`
 	SourceURL      string                  `json:"source_url,omitempty"`
 	Content        string                  `json:"content"`
@@ -186,17 +189,20 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	}
 	document := Document{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		Title: filename, SourceType: "docs", ChunkCount: 1,
 		Filename: filename, MIMEType: mimeType, SizeBytes: size,
 		ContentSHA256: hex.EncodeToString(contentSum[:]), TextSHA256: hex.EncodeToString(textSum[:]),
 		ExtractedText: extracted, Status: "ready", CreatedBy: actor.Principal.ID,
 		CreatedAt: now, UpdatedAt: now, Blob: object.ObjectLocation,
 	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO platform_knowledge_documents
-		(id, organization_id, project_id, filename, mime_type, size_bytes, content_sha256,
+		(id, organization_id, project_id, title, source_uri, source_type, chunk_count,
+		 filename, mime_type, size_bytes, content_sha256,
 		 text_sha256, extracted_text, object_provider, object_bucket, object_key,
 		 object_version_id, object_etag, status, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		document.ID, document.OrganizationID, document.ProjectID, document.Filename, document.MIMEType,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		document.ID, document.OrganizationID, document.ProjectID, document.Title, nil,
+		document.SourceType, document.ChunkCount, document.Filename, document.MIMEType,
 		document.SizeBytes, document.ContentSHA256, document.TextSHA256, document.ExtractedText,
 		object.Provider, object.Bucket, object.Key, object.VersionID, object.ETag, document.Status,
 		document.CreatedBy, document.CreatedAt, document.UpdatedAt)
@@ -225,6 +231,18 @@ func (s Service) ImportDocument(ctx context.Context, actor contract.ActorContext
 	document.SourceType = normalizedSourceType(request.SourceType)
 	document.ChunkCount = len(splitIntoChunks(request.Text))
 	document.ImportedBy = actor.Principal
+	_, err = s.DB.ExecContext(ctx, `UPDATE platform_knowledge_documents
+		SET title = ?, source_uri = ?, source_type = ?, chunk_count = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		document.Title, nullable(document.SourceURI), document.SourceType, document.ChunkCount,
+		document.UpdatedAt, actor.OrganizationID, projectID, document.ID)
+	if err != nil {
+		_, _ = s.DB.ExecContext(ctx, `DELETE FROM platform_knowledge_documents
+			WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			actor.OrganizationID, projectID, document.ID)
+		_ = s.Blobs.Delete(ctx, document.Blob)
+		return Document{}, err
+	}
 	return document, nil
 }
 
@@ -358,6 +376,10 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 		return ResearchRun{}, err
 	}
 	request.Mode = strings.ToLower(strings.TrimSpace(request.Mode))
+	if !validResearchCategory(request.Category, true) {
+		return ResearchRun{}, ErrInvalidResearchRequest
+	}
+	request.Category = normalizedResearchCategory(request.Category)
 	request.Query = strings.TrimSpace(request.Query)
 	if !request.Confirmed {
 		return ResearchRun{}, ErrExternalConfirmationRequired
@@ -382,16 +404,17 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	now := s.now()
 	run := ResearchRun{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		Mode: request.Mode, Query: request.Query, DocumentIDs: append([]string(nil), request.DocumentIDs...),
+		Mode: request.Mode, Category: request.Category, Query: request.Query,
+		DocumentIDs:     append([]string(nil), request.DocumentIDs...),
 		DisclosedFields: append([]string(nil), request.DisclosedFields...), Status: "running",
 		ConfirmedBy: actor.Principal.ID, ConfirmedAt: now, Artifacts: []ResearchArtifact{},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO platform_research_runs
-		(id, organization_id, project_id, mode, query_text, document_ids, disclosed_fields,
+		(id, organization_id, project_id, mode, category, query_text, document_ids, disclosed_fields,
 		 status, confirmed_by, confirmed_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Query, jsonBytes(run.DocumentIDs),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Category, run.Query, jsonBytes(run.DocumentIDs),
 		jsonBytes(run.DisclosedFields), run.Status, run.ConfirmedBy, run.ConfirmedAt, now, now); err != nil {
 		return ResearchRun{}, err
 	}
@@ -493,7 +516,7 @@ func (s Service) ListResearchRuns(ctx context.Context, actor contract.ActorConte
 }
 
 const researchRunSelect = `SELECT id, organization_id, project_id, mode, query_text,
-	document_ids, disclosed_fields, status, confirmed_by, confirmed_at,
+	category, document_ids, disclosed_fields, status, confirmed_by, confirmed_at,
 	COALESCE(error_code, ''), COALESCE(error_message, ''), created_at, updated_at
 	FROM platform_research_runs`
 
@@ -506,7 +529,7 @@ func scanResearchRun(scanner researchRunScanner) (ResearchRun, error) {
 	var documentIDs, disclosedFields []byte
 	err := scanner.Scan(
 		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Mode, &value.Query,
-		&documentIDs, &disclosedFields, &value.Status, &value.ConfirmedBy, &value.ConfirmedAt,
+		&value.Category, &documentIDs, &disclosedFields, &value.Status, &value.ConfirmedBy, &value.ConfirmedAt,
 		&value.ErrorCode, &value.ErrorMessage, &value.CreatedAt, &value.UpdatedAt,
 	)
 	if err != nil {
@@ -538,7 +561,7 @@ func (s Service) getResearchRun(ctx context.Context, organizationID contract.Org
 
 func (s Service) listResearchArtifacts(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string) ([]ResearchArtifact, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id, organization_id, project_id, research_run_id,
-		source_type, title, COALESCE(source_url, ''), content, citations, content_hash, created_at
+		source_type, category, title, COALESCE(source_url, ''), content, citations, content_hash, created_at
 		FROM platform_research_artifacts
 		WHERE organization_id = ? AND project_id = ? AND research_run_id = ?
 		ORDER BY created_at ASC`, organizationID, projectID, runID)
@@ -552,7 +575,7 @@ func (s Service) listResearchArtifacts(ctx context.Context, organizationID contr
 		var citations []byte
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.ProjectID, &value.ResearchRunID,
-			&value.SourceType, &value.Title, &value.SourceURL, &value.Content, &citations,
+			&value.SourceType, &value.Category, &value.Title, &value.SourceURL, &value.Content, &citations,
 			&value.ContentHash, &value.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -563,6 +586,73 @@ func (s Service) listResearchArtifacts(ctx context.Context, organizationID contr
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+func (s Service) ListResearchArtifacts(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, category string, limit int) ([]ResearchArtifact, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	query := `SELECT id, organization_id, project_id, research_run_id, source_type, category,
+		title, COALESCE(source_url, ''), content, citations, content_hash, created_at
+		FROM platform_research_artifacts
+		WHERE organization_id = ? AND project_id = ?`
+	args := []any{actor.OrganizationID, projectID}
+	if category = strings.ToLower(strings.TrimSpace(category)); category != "" && category != "all" {
+		if !validResearchCategory(category, false) {
+			return nil, ErrInvalidResearchRequest
+		}
+		query += ` AND category = ?`
+		args = append(args, normalizedResearchCategory(category))
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]ResearchArtifact, 0)
+	for rows.Next() {
+		value, err := scanResearchArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s Service) GetResearchArtifact(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ResearchArtifact, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return ResearchArtifact{}, err
+	}
+	return scanResearchArtifact(s.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id,
+		research_run_id, source_type, category, title, COALESCE(source_url, ''), content,
+		citations, content_hash, created_at FROM platform_research_artifacts
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		actor.OrganizationID, projectID, strings.TrimSpace(id)))
+}
+
+func scanResearchArtifact(scanner interface{ Scan(...any) error }) (ResearchArtifact, error) {
+	var value ResearchArtifact
+	var citations []byte
+	if err := scanner.Scan(
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.ResearchRunID,
+		&value.SourceType, &value.Category, &value.Title, &value.SourceURL, &value.Content,
+		&citations, &value.ContentHash, &value.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ResearchArtifact{}, ErrNotFound
+		}
+		return ResearchArtifact{}, err
+	}
+	if err := json.Unmarshal(citations, &value.Citations); err != nil {
+		return ResearchArtifact{}, err
+	}
+	return value, nil
 }
 
 func validateResearchRequest(request ResearchRequest) ([]string, []string, error) {
@@ -619,18 +709,39 @@ func (s Service) insertArtifact(ctx context.Context, tx *sql.Tx, run ResearchRun
 	}
 	value := ResearchArtifact{
 		ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID,
-		ResearchRunID: run.ID, SourceType: run.Mode, Title: strings.TrimSpace(result.Title),
+		ResearchRunID: run.ID, SourceType: run.Mode, Category: run.Category,
+		Title:     strings.TrimSpace(result.Title),
 		SourceURL: strings.TrimSpace(result.SourceURL), Content: strings.TrimSpace(result.Content),
 		Citations: append([]string(nil), result.Citations...), ContentHash: hash, CreatedAt: s.now(),
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO platform_research_artifacts
-		(id, organization_id, project_id, research_run_id, source_type, title, source_url,
+		(id, organization_id, project_id, research_run_id, source_type, category, title, source_url,
 		 content, citations, content_hash, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.ResearchRunID, value.SourceType,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ResearchRunID, value.SourceType, value.Category,
 		value.Title, nullable(value.SourceURL), value.Content, jsonBytes(value.Citations),
 		value.ContentHash, value.CreatedAt)
 	return value, err
+}
+
+func normalizedResearchCategory(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "audience", "competitor", "industry":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "general"
+	}
+}
+
+func validResearchCategory(value string, allowEmpty bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return allowEmpty
+	case "general", "audience", "competitor", "industry":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractDocument(extension string, content []byte) (string, string, error) {
@@ -714,7 +825,8 @@ func allowedMIME(extension, value string) bool {
 	}
 }
 
-const documentSelect = `SELECT id, organization_id, project_id, filename, mime_type, size_bytes,
+const documentSelect = `SELECT id, organization_id, project_id, title, COALESCE(source_uri, ''),
+	source_type, chunk_count, filename, mime_type, size_bytes,
 	content_sha256, text_sha256, extracted_text, status, created_by, created_at, updated_at,
 	object_provider, object_bucket, object_key, object_version_id, object_etag
 	FROM platform_knowledge_documents`
@@ -727,7 +839,8 @@ func scanDocument(row scanner) (Document, error) {
 	var value Document
 	var versionID, etag sql.NullString
 	err := row.Scan(
-		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Filename, &value.MIMEType,
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Title, &value.SourceURI,
+		&value.SourceType, &value.ChunkCount, &value.Filename, &value.MIMEType,
 		&value.SizeBytes, &value.ContentSHA256, &value.TextSHA256, &value.ExtractedText,
 		&value.Status, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt,
 		&value.Blob.Provider, &value.Blob.Bucket, &value.Blob.Key, &versionID, &etag,

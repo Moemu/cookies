@@ -190,6 +190,8 @@ type KnowledgeManager interface {
 	RunResearch(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ResearchRequest) (knowledge.ResearchRun, error)
 	GetResearchRun(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.ResearchRun, error)
 	ListResearchRuns(context.Context, contract.ActorContext, contract.ProjectID, int) ([]knowledge.ResearchRun, error)
+	ListResearchArtifacts(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]knowledge.ResearchArtifact, error)
+	GetResearchArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.ResearchArtifact, error)
 }
 
 // CreativeManager is the public application seam from the shared HTTP host to
@@ -322,6 +324,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchRuns))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeResearchRun))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-artifacts", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchArtifacts))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-artifacts/{artifact_id}", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeResearchArtifact))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixPlan))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.listRemixPlans))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/remix-plans/{plan_id}", server.requireProject(server.requireScope(remix.ScopePlanRead, http.HandlerFunc(server.getRemixPlan))))
