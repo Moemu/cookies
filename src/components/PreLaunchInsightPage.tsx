@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, BookOpenCheck, CircleAlert, CircleCheck, Database, FileInput,
-  Layers3, Lightbulb, Link2, RefreshCw, Search, ShieldCheck, Target,
+  FlaskConical, Layers3, Lightbulb, Link2, RefreshCw, Search, ShieldCheck, Target,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import {
   api,
-  type ApiConfidenceLevel,
   type ApiExperienceReference,
   type ApiFeaturePattern,
   type ApiInsightCard,
-  type ApiInsightCardType,
   type ApiPreLaunchInsight,
 } from '../data/api'
+import {
+  cardTypeLabels, cardTypeMeaning, confidenceLabels,
+  describeApplicability, describeContentBasis, describeDataBasis,
+} from '../data/insightCard'
 import type { DataState, SystemKey } from '../types'
+import { stashExperimentHandoff } from './ExperimentCenterPage'
 import { StateBoundary } from './StateBoundary'
+import { shortId } from '../data/shortId'
 
 /**
  * 投前洞察（03-material-insight-system.md §8，导航见 19 §5.2）。
@@ -28,7 +32,7 @@ import { StateBoundary } from './StateBoundary'
  *   策略证据 —— 只有「事实」和「统计观察」两类卡，因为只有它们能被当证据引用；
  *   创意建议 —— 只有「建议」类卡，它们必须带建议动作；
  *   历史模式 —— 查的不是卡而是特征出现次数，是一次聚合；
- *   风险与反例 —— 带反例的卡，加上置信偏弱（样本不足/存在混杂）的卡；
+ *   风险与反例 —— 还没验证的假设，加上带反例的、置信偏弱（样本不足/存在混杂）的卡；
  *   引用记录 —— 查的是 experience_references，即下游到底用没用。
  *
  * 三条边界必须在界面上看得见，否则这一页会变成「拿历史数据编故事」：
@@ -50,28 +54,6 @@ const viewTargets: Record<string, ViewTarget> = {
   '策略与创意证据': 'evidence',
 }
 
-const cardTypeLabels: Record<ApiInsightCardType, string> = {
-  fact: '事实',
-  statistic: '统计观察',
-  hypothesis: '假设',
-  recommendation: '建议',
-}
-
-// 类型不是标签，是这条结论能被怎么用。写在旁边，避免有人拿假设当证据。
-const cardTypeMeaning: Record<ApiInsightCardType, string> = {
-  fact: '数据里直接读到的，没有加工。可以直接引用。',
-  statistic: '在数据上算出来的观察，口径写在数据依据里。可以引用，但要连口径一起引。',
-  hypothesis: '还没被验证的猜测。可以拿去做实验，不能拿去当证据。',
-  recommendation: '人给出的行动建议。它的说服力来自它引用的证据，不来自它自己。',
-}
-
-const confidenceLabels: Record<ApiConfidenceLevel, string> = {
-  sufficient: '充分',
-  directional: '方向性',
-  low_sample: '样本不足',
-  confounded: '存在混杂',
-}
-
 const headings: Record<ViewTarget, { title: string; blurb: string }> = {
   evidence: {
     title: '可以拿去支撑决策的证据',
@@ -87,7 +69,7 @@ const headings: Record<ViewTarget, { title: string; blurb: string }> = {
   },
   risk: {
     title: '别照抄的那些',
-    blurb: '两类卡在这里：写了反例的，和置信偏弱的（样本不足、存在混杂）。它们不是错的结论，是有边界的结论。这一页存在的意义是让边界和结论一起被看到。',
+    blurb: '三类卡在这里：还没验证的假设，写了反例的，以及置信偏弱的（样本不足、存在混杂）。它们不是错的结论，是有边界的结论。这一页存在的意义是让边界和结论一起被看到。',
   },
   reference: {
     title: '这些结论后来被谁用了',
@@ -96,10 +78,10 @@ const headings: Record<ViewTarget, { title: string; blurb: string }> = {
 }
 
 const emptyHints: Record<ViewTarget, string> = {
-  evidence: '当前筛选下没有「事实」或「统计观察」类的已确认结论。经验库里可能有假设和建议，切到别的视图看看；也可能是这个项目还没有沉淀过复盘。',
+  evidence: '当前筛选下没有「事实」或「统计观察」类的已确认结论。假设类的结论在「风险与反例」里，建议类的在「创意建议」里；如果那两处也是空的，说明这个项目还没有沉淀过复盘。',
   recommendation: '当前筛选下没有建议类结论。建议通常在复盘报告确认时沉淀，可以先去报告中心看看有没有待确认的复盘。',
   pattern: '还没有足够的已确认结论来统计特征。特征来自内容依据字段，如果结论里没写清依据了哪些内容特征，这里就是空的。',
-  risk: '当前筛选下没有带反例的结论，置信也都不弱。这不代表没有风险，只代表还没有人把风险写下来。',
+  risk: '当前筛选下没有未验证的假设，也没有带反例或置信偏弱的结论。这不代表没有风险，只代表还没有人把风险写下来。',
   reference: '这个项目还没有任何引用记录。从左边的证据或建议视图里引用一条，这里就会出现。',
 }
 
@@ -173,7 +155,13 @@ export function PreLaunchInsightPage({ state, activeView, onOpenProject }: {
     if (target === 'evidence') return all.filter(card => card.type === 'fact' || card.type === 'statistic')
     if (target === 'recommendation') return all.filter(card => card.type === 'recommendation')
     if (target === 'risk') {
+      // 假设类必须收在这一格。五个视图是文档定死的（03 §一级导航），而策略证据只收事实和
+      // 统计观察、创意建议只收建议——不收的话，一条「已确认 + 假设 + 没写反例」的经验在整页
+      // 五个视图里一条都不显示，人会以为经验库是空的。而那恰恰是从复盘默认沉淀出来的形态：
+      // 类型和置信留空时后端落到「假设 / 方向性」（service.go withCardDefaults）。
+      // 语义上也对：这一格收的是有边界的结论，「还没验证」是边界最大的一种。
       return all.filter(card =>
+        card.type === 'hypothesis' ||
         card.counterexamples.length > 0 || card.confidence === 'low_sample' || card.confidence === 'confounded')
     }
     return all
@@ -185,6 +173,17 @@ export function PreLaunchInsightPage({ state, activeView, onOpenProject }: {
   }, [cards])
 
   const selected = cards.find(card => card.experience_id === selectedId)
+
+  // 「拿去验证」：把这条假设交给实验中心。这里只是交接，不建实验——变量、分组和样本门槛
+  // 得人在那边一次性定完，替他猜一套预填值等于替他做了实验设计。
+  const verify = useCallback((card: ApiInsightCard) => {
+    stashExperimentHandoff({
+      experienceId: card.experience_id,
+      hypothesis: card.conclusion,
+      title: card.conclusion,
+    })
+    onOpenProject(currentProject.id, 'insight', 'experiments', '', '实验列表')
+  }, [currentProject.id, onOpenProject])
 
   const cite = useCallback(async (card: ApiInsightCard, consumer: 'brief' | 'creative') => {
     setBusyTarget(consumer)
@@ -315,7 +314,7 @@ export function PreLaunchInsightPage({ state, activeView, onOpenProject }: {
             ? '这个视图统计的是特征出现次数，没有单条结论可选。要看某个特征背后的结论，切到「策略证据」按关键词搜。'
             : '引用记录是只读的：它记录已经发生过的引用，不能在这里补记。'}</div>
           : selected
-            ? <CardDetail card={selected} busy={busyTarget} onCite={cite}/>
+            ? <CardDetail card={selected} busy={busyTarget} onCite={cite} onVerify={verify}/>
             : <div className="panel-empty">左边选一条结论，查看它的九个字段和适用边界。</div>}
         {selected && (target === 'evidence' || target === 'recommendation' || target === 'risk')
           ? <button className="text-button prelaunch-deeplink"
@@ -349,12 +348,12 @@ function CardTable({ cards, selectedId, emptyHint, onSelect }: {
       <span>
         <b>{card.conclusion}</b>
         <small>
-          {describeApplicability(card)}
+          {describeApplicability(card.applicability)}
           {card.missing_fields.length ? ` · 缺 ${card.missing_fields.join('、')}` : ''}
         </small>
       </span>
       <span>{cardTypeLabels[card.type]}</span>
-      <span>{describeDataBasis(card)}</span>
+      <span>{describeDataBasis(card.data_basis)}</span>
       <span>
         {card.confidence === 'sufficient' ? <CircleCheck size={14}/> : <CircleAlert size={14}/>}
         {confidenceLabels[card.confidence]}
@@ -395,10 +394,11 @@ function ReferenceTable({ references, cards }: { references: ApiExperienceRefere
   </div>
 }
 
-function CardDetail({ card, busy, onCite }: {
+function CardDetail({ card, busy, onCite, onVerify }: {
   card: ApiInsightCard
   busy: 'brief' | 'creative' | ''
   onCite: (card: ApiInsightCard, consumer: 'brief' | 'creative') => Promise<void>
+  onVerify: (card: ApiInsightCard) => void
 }) {
   // 只有事实和统计观察能被当证据引用（03 §2 目标⑥）。假设和建议也允许引用，
   // 但要先告诉引用的人它的分量不一样，否则 Brief 里会出现「根据经验」而背后是猜测。
@@ -406,12 +406,12 @@ function CardDetail({ card, busy, onCite }: {
   return <>
     <span className="section-label">{cardTypeLabels[card.type]} · 置信{confidenceLabels[card.confidence]}</span>
     <h3>{card.conclusion}</h3>
-    <p>{card.experience_id} · 第 {card.revision} 版 · 被引用 {card.reference_count} 次 · 更新于 {formatTime(card.updated_at)}</p>
+    <p>{shortId(card.experience_id)} · 第 {card.revision} 版 · 被引用 {card.reference_count} 次 · 更新于 {formatTime(card.updated_at)}</p>
 
     <div className="prelaunch-fact"><Layers3 size={17}/><span><small>这条能被怎么用</small><b>{cardTypeMeaning[card.type]}</b></span></div>
-    <div className="prelaunch-fact"><Target size={17}/><span><small>适用范围</small><b>{describeApplicability(card)}</b></span></div>
-    <div className="prelaunch-fact"><Database size={17}/><span><small>数据依据</small><b>{describeDataBasis(card)}</b></span></div>
-    <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>内容依据</small><b>{describeContentBasis(card)}</b></span></div>
+    <div className="prelaunch-fact"><Target size={17}/><span><small>适用范围</small><b>{describeApplicability(card.applicability)}</b></span></div>
+    <div className="prelaunch-fact"><Database size={17}/><span><small>数据依据</small><b>{describeDataBasis(card.data_basis)}</b></span></div>
+    <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>内容依据</small><b>{describeContentBasis(card.content_basis)}</b></span></div>
     {/* 提示文案由后端给（ConfidenceLevel.Hint）：这句话决定别人敢拿它做什么，
         前端再写一份迟早会和后端说得不一样。 */}
     <div className="prelaunch-fact"><ShieldCheck size={17}/><span><small>置信提示</small><b>
@@ -454,6 +454,11 @@ function CardDetail({ card, busy, onCite }: {
     </div> : null}
 
     <div className="prelaunch-actions">
+      {/* 只有假设类才给这个入口。事实和统计观察已经有数据支撑，再去跑一次实验不是验证，
+          是拿结论去找结论；建议类要验的是它背后那条假设，不是建议本身。 */}
+      {card.type === 'hypothesis' ? <button className="secondary-button full" onClick={() => onVerify(card)}>
+        <FlaskConical size={15}/>拿去验证
+      </button> : null}
       <button className="secondary-button full" disabled={Boolean(busy)} onClick={() => void onCite(card, 'brief')}>
         <FileInput size={15}/>{busy === 'brief' ? '正在写入 Brief…' : '引用到 Brief'}
       </button>
@@ -462,43 +467,6 @@ function CardDetail({ card, busy, onCite }: {
       </button>
     </div>
   </>
-}
-
-function describeApplicability(card: ApiInsightCard): string {
-  const scope = card.applicability
-  const parts = [
-    ...(scope.channels ?? []),
-    ...(scope.creative_types ?? []),
-    ...(scope.objectives ?? []),
-    ...(scope.audiences ?? []),
-  ]
-  if (!parts.length) return '没写适用范围——这条结论没说自己适用于哪里'
-  return parts.join(' · ') + (scope.time_range_note ? ` · ${scope.time_range_note}` : '')
-}
-
-function describeDataBasis(card: ApiInsightCard): string {
-  const basis = card.data_basis
-  const parts: string[] = []
-  if (basis.asset_count) parts.push(`${basis.asset_count} 个素材`)
-  if (basis.sample_size) parts.push(`样本 ${basis.sample_size.toLocaleString('zh-CN')}`)
-  if (basis.metrics?.length) parts.push(basis.metrics.join('、'))
-  if (basis.window_start && basis.window_end) parts.push(`${formatDate(basis.window_start)} ~ ${formatDate(basis.window_end)}`)
-  if (basis.baseline) parts.push(`对照：${basis.baseline}`)
-  return parts.length ? parts.join(' · ') : '没写数据依据'
-}
-
-function describeContentBasis(card: ApiInsightCard): string {
-  const basis = card.content_basis
-  const parts: string[] = []
-  if (basis.features?.length) parts.push(basis.features.join('、'))
-  if (basis.example_asset_versions?.length) parts.push(`示例素材 ${basis.example_asset_versions.length} 个`)
-  if (basis.note) parts.push(basis.note)
-  return parts.length ? parts.join(' · ') : '没写内容依据——不知道这条结论指的是素材上的哪个特征'
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleDateString('zh-CN')
 }
 
 function formatTime(value: string): string {

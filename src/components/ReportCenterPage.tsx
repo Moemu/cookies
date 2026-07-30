@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ArrowRight, BookOpenCheck, CircleAlert, CircleCheck, Database, FlaskConical,
-  RefreshCw, Save, ShieldCheck,
+  ArrowRight, BookOpenCheck, CalendarRange, CircleAlert, CircleCheck, Database, FlaskConical,
+  RefreshCw, Save, ShieldCheck, Trash2,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import {
   api,
   type ApiExperience,
   type ApiInsightReport,
+  type ApiReportSectionKind,
   type ApiReportStatus,
+  type ApiVariantVerdict,
 } from '../data/api'
 import type { DataState, SystemKey } from '../types'
 import { StateBoundary } from './StateBoundary'
@@ -46,6 +48,35 @@ const statusLabels: Record<ApiReportStatus, string> = {
   confirmed: '已确认',
 }
 
+// 四块的顺序和后端一致（report_digest.go 的 ReportSectionOrder）：
+// 先看这轮素材跑得怎么样，再看实验说明了什么，然后是能引用的老经验，
+// 最后才是下一轮怎么做。倒过来读，建议就成了没有依据的指令。
+const sectionOrder: ApiReportSectionKind[] = ['asset_performance', 'experiment', 'experience', 'recommendation']
+
+const sectionLabels: Record<ApiReportSectionKind, string> = {
+  asset_performance: '素材表现',
+  experiment: '实验结论',
+  experience: '相关经验',
+  recommendation: '下一轮建议',
+}
+
+// 和投后分析里同一套说法：读者先要知道这条结论能不能用，再看它说了什么。
+const strengthLabels: Record<ApiVariantVerdict, string> = {
+  attributable: '可归因',
+  directional: '只能看方向',
+  confounded: '归不了因',
+  low_sample: '样本不足',
+  no_features: '缺内容特征',
+}
+
+const strengthTone: Record<ApiVariantVerdict, string> = {
+  attributable: 'ok',
+  directional: 'warning',
+  confounded: 'danger',
+  low_sample: 'muted',
+  no_features: 'muted',
+}
+
 const headings: Record<ViewTarget, { title: string; blurb: string }> = {
   all: {
     title: '这个 Project 的所有复盘',
@@ -69,9 +100,10 @@ const emptyHints: Record<ViewTarget, string> = {
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 
-export function ReportCenterPage({ state, activeView, onOpenProject }: {
+export function ReportCenterPage({ state, activeView, objectId, onOpenProject }: {
   state: DataState
   activeView: string
+  objectId?: string
   onOpenProject: OpenProject
 }) {
   const { currentProject } = useProject()
@@ -122,10 +154,15 @@ export function ReportCenterPage({ state, activeView, onOpenProject }: {
     return reports
   }, [reports, target])
 
+  // 从投后分析定格过来时带着报告 ID：刚定格的那份要直接打开，
+  // 否则人会落在列表顶上，还得自己找刚才那一份。
   useEffect(() => {
     const ids = visible.map(report => report.id)
-    setSelectedId(current => ids.includes(current) ? current : ids[0] ?? '')
-  }, [visible])
+    setSelectedId(current => {
+      if (objectId && ids.includes(objectId)) return objectId
+      return ids.includes(current) ? current : ids[0] ?? ''
+    })
+  }, [visible, objectId])
 
   const selected = visible.find(report => report.id === selectedId)
 
@@ -143,6 +180,23 @@ export function ReportCenterPage({ state, activeView, onOpenProject }: {
     }
   }, [currentProject.id, load])
 
+  // 人工删减。删掉的条目不会真的消失，只是标记——报告要能说清
+  // 「系统给了什么、人拿掉了哪几条」，物理删掉就查不回来了。
+  const dropFinding = useCallback(async (report: ApiInsightReport, index: number, dropped: boolean) => {
+    setBusy(true)
+    setNotice('')
+    try {
+      await api.dropReportFinding(currentProject.id, report.id, {
+        expected_version: report.version, index, dropped,
+      })
+      await load()
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '改不动这条发现，请重试。')
+    } finally {
+      setBusy(false)
+    }
+  }, [currentProject.id, load])
+
   const harvest = useCallback(async (report: ApiInsightReport, conclusion: string): Promise<boolean> => {
     setBusy(true)
     setNotice('')
@@ -150,10 +204,13 @@ export function ReportCenterPage({ state, activeView, onOpenProject }: {
       // 类型和置信留空，后端会落到最保守的一格（假设 / 方向性）。这是故意的：
       // 从一句话直接沉淀出来的结论确实还没有依据，替录入的人标成「事实」是伪造。
       // 补依据要去经验库对它做修订。
+      // 适用条件留空。来源报告后端自己记着（经验库那一栏就是从 report_id 渲染的），
+      // 往适用条件里塞一句「来自复盘 xxx」等于把这一栏填满了却什么都没说——经验库
+      // 会把它当成「已经写了适用条件」，而适用条件问的是「这条结论在什么情况下成立」。
+      // 空着，页面就会明写「未填写适用条件」，人才知道还欠什么。
       await api.createExperienceFromReport(currentProject.id, report.id, {
         expected_report_version: report.version,
         conclusion,
-        conditions: [`来自复盘 ${report.id}`],
       })
       setNotice('已沉淀为待确认的经验。它现在是「假设 / 方向性」，去经验库补上适用范围和数据依据后才能当证据用。')
       await load()
@@ -225,7 +282,7 @@ export function ReportCenterPage({ state, activeView, onOpenProject }: {
       <aside className="prelaunch-detail">
         {selected
           ? <ReportDetail report={selected} harvested={harvested.get(selected.id) ?? []}
-            busy={busy} onConfirm={confirm} onHarvest={harvest}
+            busy={busy} onConfirm={confirm} onHarvest={harvest} onDropFinding={dropFinding}
             onOpenExperience={() => onOpenProject(currentProject.id, 'insight', 'knowledge', '', '候选经验')}/>
           : <div className="panel-empty">左边选一份复盘，查看它的证据、发现和沉淀出的经验。</div>}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
@@ -234,20 +291,26 @@ export function ReportCenterPage({ state, activeView, onOpenProject }: {
   </StateBoundary>
 }
 
-function ReportDetail({ report, harvested, busy, onConfirm, onHarvest, onOpenExperience }: {
+function ReportDetail({ report, harvested, busy, onConfirm, onHarvest, onDropFinding, onOpenExperience }: {
   report: ApiInsightReport
   harvested: ApiExperience[]
   busy: boolean
   onConfirm: (report: ApiInsightReport) => Promise<void>
   onHarvest: (report: ApiInsightReport, conclusion: string) => Promise<boolean>
+  onDropFinding: (report: ApiInsightReport, index: number, dropped: boolean) => Promise<void>
   onOpenExperience: () => void
 }) {
   const [draft, setDraft] = useState('')
+  const [showDropped, setShowDropped] = useState(false)
 
   // 换一份报告就把输入框清空：上一份的结论留在框里，很容易被顺手沉淀到这一份上。
-  useEffect(() => { setDraft('') }, [report.id])
+  useEffect(() => { setDraft(''); setShowDropped(false) }, [report.id])
 
   const alreadyHarvested = new Set(harvested.map(experience => experience.conclusion))
+  // 保留原始下标：删减接口按下标定位，过滤之后再传下标会删错另一条。
+  const digest = (report.digest ?? []).map((finding, index) => ({ finding, index }))
+  const kept = digest.filter(item => !item.finding.dropped)
+  const dropped = digest.filter(item => item.finding.dropped)
 
   return <>
     <span className="section-label">{statusLabels[report.status]} · 第 {report.version} 版</span>
@@ -276,8 +339,57 @@ function ReportDetail({ report, harvested, busy, onConfirm, onHarvest, onOpenExp
         : '还没有人确认。确认之前不能从它沉淀经验。'}
     </b></span></div>
 
-    {report.findings.length ? <div className="feature-stack">
-      <span>这次复盘看出来的 {report.findings.length} 件事</span>
+    {/* 四块发现。数据窗口写在最前面：报告说的是「在这个窗口的数据上、
+        做了这个判断」，没有窗口，下面每个数字都无法复核。 */}
+    {digest.length ? <>
+      {report.window_start && report.window_end ? <div className="prelaunch-fact">
+        <CalendarRange size={17}/><span><small>定格的数据窗口</small><b>
+          {formatDay(report.window_start)} ~ {formatDay(report.window_end)}
+        </b></span>
+      </div> : null}
+
+      {sectionOrder.map(kind => {
+        const items = kept.filter(item => item.finding.kind === kind)
+        if (!items.length) return null
+        return <div className="report-section" key={kind}>
+          <span className="section-label">{sectionLabels[kind]}</span>
+          {items.map(item => <div className="report-finding" key={item.index}>
+            <span>
+              {item.finding.text}
+              {alreadyHarvested.has(item.finding.text) ? <em>已沉淀</em> : null}
+              {item.finding.strength ? <em className={strengthTone[item.finding.strength]}>
+                {strengthLabels[item.finding.strength]}
+              </em> : null}
+            </span>
+            {/* 只有草稿能删。确认过的报告改不动——确认的意思就是有人为这一份背书了。 */}
+            {report.status === 'draft' ? <button className="text-button" disabled={busy}
+              aria-label={`删掉这条发现：${item.finding.text}`}
+              onClick={() => { void onDropFinding(report, item.index, true) }}>
+              <Trash2 size={13}/>
+            </button> : null}
+          </div>)}
+        </div>
+      })}
+
+      {dropped.length ? <div className="report-dropped">
+        <button className="text-button" onClick={() => setShowDropped(current => !current)}>
+          人工删掉的 {dropped.length} 条{showDropped ? '（收起）' : '（展开）'}
+        </button>
+        {showDropped ? dropped.map(item => <div className="report-finding muted" key={item.index}>
+          <span>{item.finding.text}</span>
+          {report.status === 'draft' ? <button className="text-button" disabled={busy}
+            onClick={() => { void onDropFinding(report, item.index, false) }}>放回去</button> : null}
+        </div>) : null}
+      </div> : null}
+
+      {!kept.length ? <div className="prelaunch-boundary">
+        <CircleAlert size={16}/><span><small>这份报告的发现被删光了</small>
+          一条不留的报告没法承载任何结论。可以从上面「人工删掉的」里放回来几条。
+        </span></div> : null}
+    </> : report.findings.length ? <div className="feature-stack">
+      {/* 老报告只有一串没有分块的发现。原样显示，不硬塞进四块里——
+          它们本来就没有 kind，归到哪一块都是编的。 */}
+      <span>这次复盘看出来的 {report.findings.length} 件事（这是定格四块发现之前生成的老报告）</span>
       {report.findings.map(finding => <b key={finding}>
         {finding}{alreadyHarvested.has(finding) ? '（已沉淀）' : ''}
       </b>)}
@@ -327,4 +439,11 @@ function ReportDetail({ report, harvested, busy, onConfirm, onHarvest, onOpenExp
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+// 窗口存的就是「2026-07-01」这样的日子，不是时间戳。走一遍 Date 会按本地时区
+// 换算，可能差一天——而报告上写的是定格时人看到的那个区间。
+function formatDay(value: string): string {
+  const parts = value.split('-')
+  return parts.length === 3 ? `${parts[0]}/${Number(parts[1])}/${Number(parts[2])}` : value
 }

@@ -10,10 +10,13 @@ import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { PreLaunchInsightPage } from './PreLaunchInsightPage'
 import { ReportCenterPage } from './ReportCenterPage'
+import { shortId } from '../data/shortId'
 import { AssetLibraryPage } from './AssetLibraryPage'
 import { ContentAnalysisPage } from './ContentAnalysisPage'
 import { DataConnectionsPage } from './DataConnectionsPage'
 import { CapabilityOperationsPage } from './CapabilityOperationsPage'
+import { ExperimentCenterPage } from './ExperimentCenterPage'
+import { InsightSettingsPage } from './InsightSettingsPage'
 import { DataQualityPage } from './DataQualityPage'
 import { PostLaunchAnalysisPage } from './PostLaunchAnalysisPage'
 import { ExperienceLibraryPage } from './ExperienceLibraryPage'
@@ -1121,7 +1124,7 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
   return <div className="editor-layout">
     <aside className="asset-rail"><div className="surface-toolbar"><h3>结构与素材</h3><button aria-label="新增镜头"><Plus size={15}/></button></div>{['开场：精度的瞬间', '产品与制造过程', '真实应用场景', '品牌主张与 CTA'].map((label, i) => <button className={i === selected ? 'asset-row active' : 'asset-row'} onClick={() => setSelected(i)} key={label}><span>{String(i + 1).padStart(2, '0')}</span><b>{label}</b><small>{i === 1 ? '00:06–00:18' : `${i * 8 + 1} 秒`}</small></button>)}</aside>
     <section className="canvas-area"><div className="canvas-toolbar"><span>{item.label} · v1.2</span><div><button>50%</button><button><Download size={15}/>导出预览</button></div></div><div className="media-canvas"><div className="precision-art"><img src="/assets/white-precision-cnc.png" alt="高精度 CNC 设备加工金属零件"/><div className="art-copy"><small>WHITE PRECISION</small><h2>看得见的精度，<br/>兑现你的创新。</h2><p>±0.01mm · 98%+ 准时交付</p></div></div></div><div className="timeline"><div className="time-ruler">00:00 <span>00:06</span><span>00:12</span><span>00:18</span><span>00:24</span><span>00:30</span></div>{['画面', '字幕', '音乐'].map((track, index) => <div className="track" key={track}><b>{track}</b><span className={`clip clip-${index + 1}`}>{index === 0 ? '精密加工 · 06–18s' : index === 1 ? '品牌主张' : 'Precision Theme.wav'}</span></div>)}</div></section>
-    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · 服务端模型目录` : '服务端未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请在服务端设置 ARK_API_KEY 后重新检查能力。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成媒体。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}>{job && ['queued', 'running'].includes(job.status) ? '正在生成…' : `生成选中${mediaKind === 'image' ? '图片' : '视频'}`}</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}{['queued', 'running'].includes(job.status) ? <button onClick={() => void cancel()}>取消</button> : job.status === 'failed' || job.status === 'cancelled' ? <button onClick={() => void generate()}>重试</button> : null}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · 服务端模型目录` : '服务端未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请在服务端设置 ARK_API_KEY 后重新检查能力。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成媒体。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}>{job && ['queued', 'running'].includes(job.status) ? '正在生成…' : `生成选中${mediaKind === 'image' ? '图片' : '视频'}`}</button>{job ? <div className="inline-notice" role="status">任务 {shortId(job.id)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}{['queued', 'running'].includes(job.status) ? <button onClick={() => void cancel()}>取消</button> : job.status === 'failed' || job.status === 'cancelled' ? <button onClick={() => void generate()}>重试</button> : null}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div>
 }
 
@@ -1243,7 +1246,7 @@ function AuditEvidenceSurface() {
   return <div className="audit-evidence-surface">
     <section>
       <div className="audit-evidence-heading"><div><span className="section-label">SERVER AUDIT</span><h2>服务端审计轨迹</h2><p>记录预置项目的创建、产物确认、预检、审批、模拟执行与回滚；不会连接真实广告平台。</p></div><span className="source-chip">不可变事件</span></div>
-      <div className="audit-event-list">{events.length ? events.map(event => <article key={event.id}><span>{new Date(event.createdAt).toLocaleString('zh-CN', { hour12: false })}</span><div><b>{auditActionLabel(event.action)}</b><small>{event.actor} · {event.entityType} · {event.entityId.slice(0, 8)}</small></div><CircleCheck size={16}/></article>) : <div className="panel-empty">正在读取服务端审计记录…</div>}</div>
+      <div className="audit-event-list">{events.length ? events.map(event => <article key={event.id}><span>{new Date(event.createdAt).toLocaleString('zh-CN', { hour12: false })}</span><div><b>{auditActionLabel(event.action)}</b><small>{event.actor} · {event.entityType} · {shortId(event.entityId)}</small></div><CircleCheck size={16}/></article>) : <div className="panel-empty">正在读取服务端审计记录…</div>}</div>
     </section>
     <aside className="audit-boundary"><ShieldCheck size={18}/><h3>模拟边界</h3><p>这些事件只记录本地 MVP 的受控投放模拟。审批、执行和回滚不会对广告账户或外部平台写入。</p></aside>
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
@@ -1344,7 +1347,7 @@ function AgentRunTracePanel() {
       const run = await api.createAgentRun(currentProject.id, renderJobId.trim())
       setRuns(current => [run, ...current.filter(item => item.id !== run.id)])
       setSelectedRunId(run.id)
-      setNotice(run.status === 'failed' ? `诊断失败：${run.error_message ?? '未知错误'}` : `Agent Run ${run.id.slice(0, 8)} 已完成。`)
+      setNotice(run.status === 'failed' ? `诊断失败：${run.error_message ?? '未知错误'}` : `Agent Run ${shortId(run.id)} 已完成。`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '启动 Agent Run 失败')
     } finally {
@@ -1377,7 +1380,7 @@ function AgentRunTracePanel() {
     <div className="agent-trace-grid">
       <aside className="agent-run-list">
         {runs.map(run => <button key={run.id} className={run.id === selectedRun?.id ? 'active' : ''} onClick={() => setSelectedRunId(run.id)}>
-          <span>{run.id.slice(0, 12)}</span><b>{run.workflow}</b><small>{run.status} · {run.target.render_job_id}</small>
+          <span>{run.id.slice(-12)}</span><b>{run.workflow}</b><small>{run.status} · {run.target.render_job_id}</small>
         </button>)}
         {!runs.length ? <div className="panel-empty">暂无 Agent Run，输入 RenderJob ID 后可创建诊断。</div> : null}
       </aside>
@@ -1387,7 +1390,7 @@ function AgentRunTracePanel() {
           <div className="agent-trace-columns">
             <TraceColumn title="步骤" items={selectedRun.steps.map(step => ({ id: step.id, title: step.label, meta: step.status, body: step.summary }))}/>
             <TraceColumn title="工具调用" items={selectedRun.tool_calls.map(call => ({ id: call.id, title: call.name, meta: call.status, body: call.error_message ?? String(call.output?.recommendation ?? call.output?.diagnosis ?? '无输出') }))}/>
-            <TraceColumn title="模型 Span" items={selectedRun.trace_spans.map(span => ({ id: span.id, title: span.name, meta: span.parent_id ? `${span.kind} · parent ${span.parent_id.slice(0, 8)}` : span.kind, body: span.error_message ?? `${span.status}${span.model ? ` · ${span.model}` : ''}` }))}/>
+            <TraceColumn title="模型 Span" items={selectedRun.trace_spans.map(span => ({ id: span.id, title: span.name, meta: span.parent_id ? `${span.kind} · parent ${shortId(span.parent_id)}` : span.kind, body: span.error_message ?? `${span.status}${span.model ? ` · ${span.model}` : ''}` }))}/>
           </div>
           <div className="agent-run-actions"><button className="secondary-button" disabled={busy || !['queued', 'running'].includes(selectedRun.status)} onClick={() => void cancelRun()}>取消</button><button className="primary-button" disabled={busy} onClick={retryDiagnosis}>重试诊断</button></div>
         </> : <div className="panel-empty">选择 Agent Run 后查看 trace 详情。</div>}
@@ -1485,14 +1488,16 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
@@ -1508,7 +1513,9 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'
     : system.key === 'creative' && item.id === 'tasks' ? '新建创意任务'
     : system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet'
-    : item.layout === 'settings' ? '保存配置'
+    // 素材洞察的系统设置整页只读，没有一处可保存。留一个「保存配置」按钮，点下去
+    // 什么都不发生，比不给按钮更让人困惑——那会被读成「保存失败」而不是「不需要保存」。
+    : item.layout === 'settings' ? (system.key === 'insight' ? undefined : '保存配置')
     : undefined
   const taskCreated = (task: BusinessTaskRecord) => {
     setTaskDialog(null)

@@ -9,7 +9,8 @@ import {
   type ApiMetricRates,
   type ApiQualityStatus,
 } from '../data/api'
-import type { DataState } from '../types'
+import type { DataState, SystemKey } from '../types'
+import { FreezeReportAction, isoDay } from './FreezeReportAction'
 import { StateBoundary } from './StateBoundary'
 
 /**
@@ -56,13 +57,17 @@ const qualityLabels: Record<ApiQualityStatus, string> = {
   blocked: '已阻断',
 }
 
-export function PostLaunchOverviewPage({ state }: { state: DataState }) {
+export function PostLaunchOverviewPage({ state, onOpenProject }: {
+  state: DataState
+  onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
+}) {
   const { currentProject } = useProject()
   const [rangeLabel, setRangeLabel] = useState('近 30 天')
   const [overview, setOverview] = useState<ApiMetricOverview | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [notice, setNotice] = useState('')
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [freezing, setFreezing] = useState(false)
 
   const load = useCallback(async () => {
     if (!currentProject.id) return
@@ -84,6 +89,26 @@ export function PostLaunchOverviewPage({ state }: { state: DataState }) {
   }, [currentProject.id, rangeLabel])
 
   useEffect(() => { void load() }, [load])
+
+  // 定格这一屏。窗口取的是后端返回的窗口，不重新算一遍——报告上的日期区间必须和
+  // 人刚才在这一页读到的那个区间一模一样，否则「我当时看到的」和「报告里写的」
+  // 会是两回事，而两边都不会报错。
+  const freeze = useCallback(async (executionId: string) => {
+    if (!overview) return
+    setFreezing(true)
+    setNotice('')
+    try {
+      const report = await api.createReport(currentProject.id, {
+        execution_id: executionId,
+        window: { start: isoDay(overview.window.start), end: isoDay(overview.window.end) },
+      })
+      onOpenProject(currentProject.id, 'insight', 'reports', report.id, '待确认')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '定格失败，请重试。')
+    } finally {
+      setFreezing(false)
+    }
+  }, [overview, currentProject.id, onOpenProject])
 
   // 花得多的排前面：先看清钱去哪了，再谈哪一版更好。
   const assets = useMemo(() => [...(overview?.assets ?? [])]
@@ -245,6 +270,10 @@ export function PostLaunchOverviewPage({ state }: { state: DataState }) {
           谁比谁好、有没有跑不动、哪一天不对劲、和什么特征有关，在同一板块的另外五个视图里
           （素材对比 / 趋势 / 疲劳 / 异常 / 驱动因素）。它们的数据窗口各自独立选择。
         </span></div>
+
+        {/* 总览也要能定格。人读完这一屏就想留档是最常见的路径——如果只有另外五个列表
+            视图上有这个按钮，人得先切到一个自己并不想看的视图才能存下刚才看到的东西。 */}
+        {overview && hasData ? <FreezeReportAction window={overview.window} busy={freezing} onFreeze={freeze}/> : null}
 
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </aside>

@@ -438,6 +438,45 @@ export type ApiKnowledgeSearchResult = {
 // 确认之后从它沉淀经验。后端权威定义在 internal/systems/insights/service.go。
 export type ApiReportStatus = 'draft' | 'confirmed'
 
+// 一次投放执行。后端权威定义在 api/openapi/delivery-v1.yaml 的 ExecutionResult。
+// 这里只取报告要用到的几个字段：挑投放时人要看的是「哪天跑的、跑了什么」。
+export type ApiDeliveryExecutionResult = {
+  execution: {
+    id: string
+    change_set_id: string
+    status: string
+    mode: string
+    executed_by: string
+    started_at: string
+    completed_at: string
+  }
+  evidence: {
+    id: string
+    execution_id: string
+    summary: string
+    mode: string
+    reversible: boolean
+    created_at: string
+  }
+}
+
+// 报告里的一条发现。四块按 kind 分组，顺序即下面这个联合类型的顺序。
+// 后端权威定义在 internal/systems/insights/report_digest.go。
+export type ApiReportSectionKind = 'asset_performance' | 'experiment' | 'experience' | 'recommendation'
+
+export type ApiReportFinding = {
+  kind: ApiReportSectionKind
+  text: string
+  // 出自素材对比的发现才有。可归因的排在方向性前面。
+  strength?: ApiVariantVerdict
+  confidence?: ApiConfidenceLevel
+  // 这条发现的来源 ID（实验或经验），供人跳回去核对。
+  source_ref?: string
+  // 被人工删掉的条目留在数组里，只是标记为 true——报告要能说清
+  // 「系统给了什么、人拿掉了哪几条」。
+  dropped: boolean
+}
+
 export type ApiInsightReport = {
   id: string
   organization_id: string
@@ -453,7 +492,13 @@ export type ApiInsightReport = {
   dataset_version: string
   status: ApiReportStatus
   summary: string
+  // 旧报告的读法，保留不动。新报告读 digest。
   findings: string[]
+  // 定格的四块发现。老报告是空数组。
+  digest?: ApiReportFinding[]
+  // 定格的数据窗口。老报告没有窗口概念，这两个字段为空。
+  window_start?: string
+  window_end?: string
   version: number
   created_by: string
   confirmed_by?: string
@@ -479,6 +524,14 @@ export type ApiExperience = {
   conclusion: string
   conditions: string[]
   counterexamples: string[]
+  // 洞察卡九字段（03 §8.1）在 Experience 上是全的，投前洞察的 /prelaunch 只是它的投影。
+  // 经验库详情要靠这几项判断一条结论该不该确认，缺了就只能看结论一句话点确认。
+  card_type: ApiInsightCardType
+  confidence: ApiConfidenceLevel
+  recommended_action: string
+  applicability: ApiApplicability
+  data_basis: ApiDataBasis
+  content_basis: ApiContentBasis
   status: ApiExperienceStatus
   status_reason: string
   status_changed_by: string
@@ -551,6 +604,21 @@ export type ApiContentBasis = {
   features?: string[]
   example_asset_versions?: string[]
   note?: string
+}
+
+/** 修订请求体（AM-013）。对应后端 insights.ReviseExperienceRequest。 */
+export type ReviseExperienceBody = {
+  expected_version: number
+  reason: string
+  conclusion: string
+  conditions: string[]
+  counterexamples: string[]
+  card_type: ApiInsightCardType
+  confidence: ApiConfidenceLevel
+  recommended_action: string
+  applicability: ApiApplicability
+  data_basis: ApiDataBasis
+  content_basis: ApiContentBasis
 }
 
 export type ApiInsightCard = {
@@ -1335,6 +1403,160 @@ export type ApiSettingItem = {
   source: string
   /** 文档依据；没有依据会显式写「无文档指定值」，不会留空。 */
   basis: string
+}
+
+/**
+ * `draft` 设计中，变量/分组/门槛都还能改；`running` 已开跑，**分组冻结**；
+ * `concluded` 已下结论。冻结是「事先登记」的全部依据——没有它，谁都能在看完数据
+ * 之后往表现好的那组补两条素材。
+ */
+export type ApiExperimentStatus = 'draft' | 'running' | 'concluded'
+
+/** 系统给的判定，不是人写的解读。 */
+export type ApiExperimentVerdict = 'supported' | 'refuted' | 'inconclusive'
+
+/**
+ * 组间比较结果。实验中心和投后分析「驱动因素」共用同一套算法，差别只在 note 的
+ * 措辞：事先登记的分组能说到「归因到这个变量」，事后凑出的分组只能说到「相关」。
+ */
+export type ApiGroupComparison = {
+  counts: ApiMetricCounts
+  rest_counts: ApiMetricCounts
+  rates: ApiMetricRates
+  rest_rates: ApiMetricRates
+  ctr_interval?: ApiRateInterval
+  rest_ctr_interval?: ApiRateInterval
+  /** 为 true 时差异可能只是波动，不管相对差看起来有多大。 */
+  intervals_overlap: boolean
+  ctr_lift?: number
+  /** 事先登记的实验这里恒为空：混杂由入组那道关把守，不在事后翻账。 */
+  covarying_features?: string[]
+  confidence: ApiConfidenceLevel
+  note: string
+}
+
+export type ApiExperimentVariant = {
+  id: string
+  organization_id: string
+  project_id: string
+  experiment_id: string
+  name: string
+  /** 这一组在被测变量上的取值。入组素材必须和它对得上。 */
+  variable_value: string
+  is_baseline: boolean
+  asset_ids: string[]
+  position: number
+  created_at: string
+  updated_at: string
+}
+
+export type ApiExperiment = {
+  id: string
+  organization_id: string
+  project_id: string
+  title: string
+  hypothesis: string
+  /** 假设的出处：投前洞察的假设卡「拿去验证」过来时带上；为空表示空白新建。 */
+  source_experience_id?: string
+  asset_type: ApiInsightAssetType
+  variable_key: string
+  variable_label: string
+  /** 要求各组一致的其他特征。不一致不拦，入组时给黄牌。 */
+  controlled_keys: string[]
+  /** **事先**定的每组最低展示量。开跑之后不能改。 */
+  min_impressions: number
+  window_start: string
+  window_end: string
+  status: ApiExperimentStatus
+  verdict?: ApiExperimentVerdict
+  /** 人写的解读。判定由系统给，解读由人负责，两者分开存。 */
+  interpretation?: string
+  concluded_by?: string
+  concluded_at?: string
+  started_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+  variants: ApiExperimentVariant[]
+}
+
+/**
+ * 一组的样本量。**这一层永远有数**，包括不够的时候：知道还差多少才知道还要投多久。
+ * 不够时被藏起来的是对比数字，不是样本数字。
+ */
+export type ApiVariantSample = {
+  variant_id: string
+  name: string
+  variable_value: string
+  is_baseline: boolean
+  assets: number
+  assets_with_data: number
+  impressions: number
+  clicks: number
+  meets_threshold: boolean
+  short_by: number
+}
+
+export type ApiExperimentComparison = {
+  variant_id: string
+  variant_name: string
+  variant_value: string
+  baseline_id: string
+  baseline_name: string
+  baseline_value: string
+  /**
+   * **为 true 时 result 和 verdict 一定不存在。** 样本不达标却显示 CTR 差异，
+   * 人会先看见数字再看见提示，然后记住数字。
+   */
+  blocked: boolean
+  blocker?: string
+  result?: ApiGroupComparison
+  verdict?: ApiExperimentVerdict
+}
+
+export type ApiExperimentReadout = {
+  window: { start: string; end: string }
+  caliber: ApiMetricCaliber
+  comparable: boolean
+  comparable_reason?: string
+  samples: ApiVariantSample[]
+  comparisons: ApiExperimentComparison[]
+  /** 每一组都过了门槛才为 true。为 false 时下结论会被拒绝。 */
+  ready: boolean
+  verdict?: ApiExperimentVerdict
+  notes: string[]
+}
+
+export type ApiExperimentDetail = {
+  experiment: ApiExperiment
+  readout: ApiExperimentReadout
+}
+
+export type ApiCreateVariantInput = {
+  name: string
+  variable_value: string
+  is_baseline?: boolean
+}
+
+export type ApiCreateExperimentInput = {
+  title: string
+  hypothesis?: string
+  source_experience_id?: string
+  asset_type: ApiInsightAssetType
+  variable_key: string
+  controlled_keys?: string[]
+  min_impressions: number
+  window_start: string
+  window_end: string
+  /** 至少两组，且恰好一组 is_baseline。只有一组就没有对照，也就没有实验。 */
+  variants: ApiCreateVariantInput[]
+}
+
+export type ApiAttachExperimentAssetResult = {
+  variant: ApiExperimentVariant
+  /** 变量取值对不上是硬拦（抛错）；控住的变量不一致只到这里，不拦。 */
+  warnings: string[]
 }
 
 export type ApiSettingGroup = {
@@ -2646,6 +2868,26 @@ export const api = {
     ),
   listReports: (projectId: string, limit = 100) =>
     request<{ items: ApiInsightReport[] }>(`${insightProjectPath(projectId)}/reports?limit=${limit}`),
+  // 投放执行清单。定格报告时要问「这份报告算哪次投放」，答案只能从这里挑——
+  // 让人手打一个执行 ID，打错了报告就挂在了另一次投放上，而两边都不会报错。
+  listDeliveryExecutions: (projectId: string, limit = 50) =>
+    request<{ items: ApiDeliveryExecutionResult[] }>(
+      `/delivery/v1/projects/${encodeURIComponent(projectId)}/executions?limit=${limit}`,
+    ),
+  // 定格一份复盘报告。window 传的是投后分析页当前选的那两个日期——
+  // 人看到什么就定格什么，不让后端另挑一个窗口。
+  createReport: (projectId: string, body: { execution_id: string; window: { start: string; end: string } }) =>
+    request<ApiInsightReport>(`${insightProjectPath(projectId)}/reports`, 'POST', body),
+  // 人工删减。加不了新的一条：写进报告的每条发现都得能回溯到某次对比、
+  // 某个实验或某条经验，手打一条就断了这个链子。
+  dropReportFinding: (
+    projectId: string,
+    reportId: string,
+    body: { expected_version: number; index: number; dropped: boolean },
+  ) =>
+    request<ApiInsightReport>(
+      `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:drop-finding`, 'POST', body,
+    ),
   confirmReport: (projectId: string, reportId: string, expectedVersion: number) =>
     request<ApiInsightReport>(
       `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:confirm`, 'POST',
@@ -2713,6 +2955,12 @@ export const api = {
     request<ApiExperience>(
       `${insightExperiencePath(projectId, experienceId)}:retire`, 'POST',
       { expected_version: expectedVersion, reason },
+    ),
+  // 修订不是编辑：后端会新建一条修订并把旧的那条标成被取代，两条都留着。
+  // 所以这里必须把九个字段整份发过去——没发的字段不是「保持不变」，是「新版本里没有」。
+  reviseExperience: (projectId: string, experienceId: string, body: ReviseExperienceBody) =>
+    request<ApiExperience>(
+      `${insightExperiencePath(projectId, experienceId)}:revise`, 'POST', body,
     ),
   // AM-014 的闭环：下游引用了哪条结论、最后是照做还是改了还是没采纳，
   // 记在经验自己身上，而不是只在 Brief 里留一句话。
@@ -2921,6 +3169,40 @@ export const api = {
   ) => request<ApiDataQualityDisposition>(
     `${insightProjectPath(projectId)}/data-quality/dispositions`, 'POST', body,
   ),
+
+  listInsightExperiments: (projectId: string, status?: ApiExperimentStatus, limit = 50) => {
+    const search = new URLSearchParams({ limit: String(limit) })
+    if (status) search.set('status', status)
+    return request<{ items: ApiExperiment[] }>(
+      `${insightProjectPath(projectId)}/insight-experiments?${search.toString()}`,
+    )
+  },
+  createInsightExperiment: (projectId: string, body: ApiCreateExperimentInput) =>
+    request<ApiExperiment>(`${insightProjectPath(projectId)}/insight-experiments`, 'POST', body),
+  // 样本量没有单独的端点：它是详情的一部分，每次现算跟着详情一起回。两个端点会让
+  // 「样本检查」和「实验结论」拿到对不上的数字，而这一页唯一要回答的就是够不够。
+  getInsightExperiment: (projectId: string, experimentId: string) =>
+    request<ApiExperimentDetail>(insightExperimentPath(projectId, experimentId)),
+  attachInsightExperimentAsset: (projectId: string, experimentId: string, variantId: string, assetId: string) =>
+    request<ApiAttachExperimentAssetResult>(
+      `${insightExperimentPath(projectId, experimentId)}/variants/${encodeURIComponent(variantId)}/assets`,
+      'POST', { asset_id: assetId },
+    ),
+  detachInsightExperimentAsset: (projectId: string, experimentId: string, variantId: string, assetId: string) =>
+    request<ApiExperimentVariant>(
+      `${insightExperimentPath(projectId, experimentId)}/variants/${encodeURIComponent(variantId)}/assets/${encodeURIComponent(assetId)}`,
+      'DELETE',
+    ),
+  startInsightExperiment: (projectId: string, experimentId: string, expectedVersion: number) =>
+    request<ApiExperiment>(
+      `${insightExperimentPath(projectId, experimentId)}:start`, 'POST', { expected_version: expectedVersion },
+    ),
+  // 入参里没有 verdict：判定要是能传，事先定的门槛就形同虚设。人只写解读。
+  concludeInsightExperiment: (projectId: string, experimentId: string, expectedVersion: number, interpretation: string) =>
+    request<ApiExperiment>(
+      `${insightExperimentPath(projectId, experimentId)}:conclude`, 'POST',
+      { expected_version: expectedVersion, interpretation },
+    ),
 }
 
 // Insights 走 /api/insights/v1；request() 已经带上 /api 前缀。
@@ -2931,6 +3213,10 @@ function insightProjectPath(projectId: string): string {
 // 动作端点形如 .../experiences/{id}:confirm，冒号是路径的一部分，不参与编码。
 function insightExperiencePath(projectId: string, experienceId: string): string {
   return `${insightProjectPath(projectId)}/experiences/${encodeURIComponent(experienceId)}`
+}
+
+function insightExperimentPath(projectId: string, experimentId: string): string {
+  return `${insightProjectPath(projectId)}/insight-experiments/${encodeURIComponent(experimentId)}`
 }
 
 function insightAssetPath(projectId: string, assetId: string): string {

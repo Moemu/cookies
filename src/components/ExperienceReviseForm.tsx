@@ -1,0 +1,181 @@
+import { useState } from 'react'
+import { Save, X } from 'lucide-react'
+import type {
+  ApiApplicability, ApiConfidenceLevel, ApiContentBasis, ApiDataBasis,
+  ApiExperience, ApiInsightCardType, ReviseExperienceBody,
+} from '../data/api'
+import { cardTypeLabels, cardTypeMeaning, confidenceLabels } from '../data/insightCard'
+
+/**
+ * 补齐一条经验的依据。
+ *
+ * 报告中心把结论沉淀过来时只带得动结论本身——适用范围、数据依据、内容依据这三样是
+ * 「凭什么这么说、在哪儿成立」，报告里没有对应字段，只能到这里由人补。补不了的话，
+ * 经验库那句「没写数据依据」就永远是没写，而下游引用时看到的正是这句。
+ *
+ * 后端的修订是新增一条修订、把旧的标成被取代，不是就地改。所以提交时九个字段要整份
+ * 发过去：表单里没露出来的（品牌、产品、统计窗口）也得从原件带上，否则新版本会把它们
+ * 弄丢，而页面上不会有任何提示。
+ */
+export function ExperienceReviseForm({ experience, busy, onCancel, onSubmit }: {
+  experience: ApiExperience
+  busy: boolean
+  onCancel: () => void
+  onSubmit: (body: ReviseExperienceBody) => void
+}) {
+  const [conclusion, setConclusion] = useState(experience.conclusion)
+  const [cardType, setCardType] = useState<ApiInsightCardType>(experience.card_type)
+  const [confidence, setConfidence] = useState<ApiConfidenceLevel>(experience.confidence)
+  const [action, setAction] = useState(experience.recommended_action)
+  const [channels, setChannels] = useState(joinList(experience.applicability.channels))
+  const [creativeTypes, setCreativeTypes] = useState(joinList(experience.applicability.creative_types))
+  const [objectives, setObjectives] = useState(joinList(experience.applicability.objectives))
+  const [audiences, setAudiences] = useState(joinList(experience.applicability.audiences))
+  const [timeNote, setTimeNote] = useState(experience.applicability.time_range_note ?? '')
+  const [assetCount, setAssetCount] = useState(numberText(experience.data_basis.asset_count))
+  const [sampleSize, setSampleSize] = useState(numberText(experience.data_basis.sample_size))
+  const [metrics, setMetrics] = useState(joinList(experience.data_basis.metrics))
+  const [baseline, setBaseline] = useState(experience.data_basis.baseline ?? '')
+  const [features, setFeatures] = useState(joinList(experience.content_basis.features))
+  const [examples, setExamples] = useState(joinList(experience.content_basis.example_asset_versions))
+  const [contentNote, setContentNote] = useState(experience.content_basis.note ?? '')
+  const [conditions, setConditions] = useState(experience.conditions.join('\n'))
+  const [counterexamples, setCounterexamples] = useState(experience.counterexamples.join('\n'))
+  const [reason, setReason] = useState('')
+
+  const ready = conclusion.trim().length > 0 && reason.trim().length > 0
+
+  const submit = () => {
+    const applicability: ApiApplicability = {
+      // 品牌和产品这一版没做输入框（当前项目里没人填过），但不能因此丢掉。
+      brands: experience.applicability.brands,
+      products: experience.applicability.products,
+      channels: splitList(channels),
+      creative_types: splitList(creativeTypes),
+      objectives: splitList(objectives),
+      audiences: splitList(audiences),
+      time_range_note: timeNote.trim(),
+    }
+    const dataBasis: ApiDataBasis = {
+      asset_count: parseCount(assetCount),
+      sample_size: parseCount(sampleSize),
+      // 统计窗口来自沉淀时那份报告，人不该在这里手改——改了就和来源报告对不上了。
+      window_start: experience.data_basis.window_start,
+      window_end: experience.data_basis.window_end,
+      metrics: splitList(metrics),
+      baseline: baseline.trim(),
+    }
+    const contentBasis: ApiContentBasis = {
+      features: splitList(features),
+      example_asset_versions: splitList(examples),
+      note: contentNote.trim(),
+    }
+    onSubmit({
+      expected_version: experience.version,
+      reason: reason.trim(),
+      conclusion: conclusion.trim(),
+      conditions: splitLines(conditions),
+      counterexamples: splitLines(counterexamples),
+      card_type: cardType,
+      confidence,
+      recommended_action: action.trim(),
+      applicability,
+      data_basis: dataBasis,
+      content_basis: contentBasis,
+    })
+  }
+
+  return <div className="experience-revise">
+    <span className="section-label">修订这条经验</span>
+    <p>修订会新增一个版本，原来那条保留可查。下游引用记的是版本号，所以改过之后旧的引用不会跟着变。</p>
+
+    <label className="experience-reason">
+      <small>结论</small>
+      <textarea value={conclusion} onChange={event => setConclusion(event.target.value)} rows={3}/>
+    </label>
+
+    <div className="revise-grid">
+      <label><small>这条能被怎么用</small>
+        <select value={cardType} onChange={event => setCardType(event.target.value as ApiInsightCardType)}>
+          {(Object.keys(cardTypeLabels) as ApiInsightCardType[]).map(key => <option key={key} value={key}>{cardTypeLabels[key]}</option>)}
+        </select>
+      </label>
+      <label><small>置信提示</small>
+        <select value={confidence} onChange={event => setConfidence(event.target.value as ApiConfidenceLevel)}>
+          {(Object.keys(confidenceLabels) as ApiConfidenceLevel[]).map(key => <option key={key} value={key}>{confidenceLabels[key]}</option>)}
+        </select>
+      </label>
+    </div>
+    <p className="revise-hint">{cardTypeMeaning[cardType]}</p>
+
+    <label className="experience-reason"><small>建议动作（选「建议」时必填）</small>
+      <input value={action} onChange={event => setAction(event.target.value)} placeholder="例如：下一批数字人口播先做钩子类型 A/B"/>
+    </label>
+
+    <span className="section-label">适用范围 · 这条结论在哪儿成立</span>
+    <div className="revise-grid">
+      <label><small>渠道（逗号分隔）</small><input value={channels} onChange={event => setChannels(event.target.value)} placeholder="抖音, 小红书"/></label>
+      <label><small>创意形式</small><input value={creativeTypes} onChange={event => setCreativeTypes(event.target.value)} placeholder="数字人口播"/></label>
+      <label><small>投放目标</small><input value={objectives} onChange={event => setObjectives(event.target.value)} placeholder="转化"/></label>
+      <label><small>人群</small><input value={audiences} onChange={event => setAudiences(event.target.value)} placeholder="25-34 女性"/></label>
+    </div>
+    <label className="experience-reason"><small>时间说明</small>
+      <input value={timeNote} onChange={event => setTimeNote(event.target.value)} placeholder="例如：仅适用于大促期间"/>
+    </label>
+
+    <span className="section-label">数据依据 · 凭多少数据这么说</span>
+    <div className="revise-grid">
+      <label><small>素材数</small><input inputMode="numeric" value={assetCount} onChange={event => setAssetCount(event.target.value)} placeholder="6"/></label>
+      <label><small>样本量（展示数）</small><input inputMode="numeric" value={sampleSize} onChange={event => setSampleSize(event.target.value)} placeholder="120000"/></label>
+      <label><small>看的是哪些指标</small><input value={metrics} onChange={event => setMetrics(event.target.value)} placeholder="CTR, CVR"/></label>
+      <label><small>对照是什么</small><input value={baseline} onChange={event => setBaseline(event.target.value)} placeholder="同期未改钩子的素材"/></label>
+    </div>
+
+    <span className="section-label">内容依据 · 指的是素材上的什么</span>
+    <div className="revise-grid">
+      <label><small>特征</small><input value={features} onChange={event => setFeatures(event.target.value)} placeholder="钩子类型, 开场节奏"/></label>
+      <label><small>样例素材版本</small><input value={examples} onChange={event => setExamples(event.target.value)} placeholder="assetversion_xxx"/></label>
+    </div>
+    <label className="experience-reason"><small>内容备注</small>
+      <input value={contentNote} onChange={event => setContentNote(event.target.value)} placeholder="例如：三条样例都是前 3 秒出人脸"/>
+    </label>
+
+    <label className="experience-reason"><small>适用条件（一行一条）</small>
+      <textarea value={conditions} onChange={event => setConditions(event.target.value)} rows={3} placeholder="例如：单条素材展示量达到 5 万以上才适用"/>
+    </label>
+    <label className="experience-reason"><small>反例（一行一条）</small>
+      <textarea value={counterexamples} onChange={event => setCounterexamples(event.target.value)} rows={2} placeholder="例如：品牌片上不成立"/>
+    </label>
+    <label className="experience-reason"><small>修订理由（必填，写进审计记录）</small>
+      <textarea value={reason} onChange={event => setReason(event.target.value)} rows={2} placeholder="例如：补齐来源报告里的样本量与指标口径"/>
+    </label>
+
+    <div className="prelaunch-actions">
+      <button className="primary-button full" disabled={busy || !ready} onClick={submit}><Save size={15}/>{busy ? '提交中…' : '保存为新修订'}</button>
+      <button className="secondary-button full" disabled={busy} onClick={onCancel}><X size={15}/>取消</button>
+    </div>
+  </div>
+}
+
+function joinList(values?: string[]): string {
+  return (values ?? []).join(', ')
+}
+
+function splitList(text: string): string[] {
+  // 中英文逗号、顿号都收。人在中文输入法下打出来的是「，」和「、」，
+  // 只认英文逗号的话，整串会被当成一个值存进去。
+  return text.split(/[,，、]/).map(item => item.trim()).filter(Boolean)
+}
+
+function splitLines(text: string): string[] {
+  return text.split('\n').map(item => item.trim()).filter(Boolean)
+}
+
+function numberText(value?: number): string {
+  return value ? String(value) : ''
+}
+
+function parseCount(text: string): number {
+  const parsed = Number(text.replace(/[\s,，]/g, ''))
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0
+}

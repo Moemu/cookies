@@ -192,10 +192,10 @@ export function CapabilityOperationsPage({ state, activeView }: { state: DataSta
 
       <aside className="prelaunch-detail">
         {target === 'features' && currentField ? <FieldDetail system={currentField.system} field={currentField.field}/> : null}
-        {target === 'metrics' && currentMetric ? <MetricDetail metric={currentMetric} report={report}/> : null}
+        {target === 'metrics' && currentMetric && report ? <MetricDetail metric={currentMetric} report={report}/> : null}
         {target === 'evaluation' && currentEvaluation ? <EvaluationDetail evaluation={currentEvaluation}/> : null}
-        {target === 'skills' ? <SkillAside report={report}/> : null}
-        {target === 'dashboard' ? <DashboardAside report={report}/> : null}
+        {target === 'skills' && report ? <SkillAside report={report}/> : null}
+        {target === 'dashboard' && report ? <DashboardAside report={report}/> : null}
         {['features', 'metrics', 'evaluation'].includes(target) && !currentField && !currentMetric && !currentEvaluation
           ? <div className="panel-empty">左侧选一行看细节。</div> : null}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}

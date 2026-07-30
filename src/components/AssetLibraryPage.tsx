@@ -16,6 +16,7 @@ import {
 } from '../data/api'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
+import { shortId } from '../data/shortId'
 
 /**
  * 分析素材库（03 §9 AM-001~006，导航见 19 §5.2）。
@@ -227,7 +228,7 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
           {listState === 'ready' && !rowIds.length ? <div className="panel-empty">{emptyHints[target]}</div> : null}
 
           {(target === 'all' || target === 'awaiting-extraction') && filteredAssets.map(asset => <button role="listitem" key={asset.id} className={selectedId === asset.id ? 'prelaunch-row active' : 'prelaunch-row'} onClick={() => setSelectedId(asset.id)}>
-            <span><b>{asset.title}</b><small>{asset.id.slice(0, 8)} · {sourceKindLabels[asset.source_kind] ?? asset.source_kind} · {formatTime(asset.updated_at)}</small></span>
+            <span><b>{asset.title}</b><small>{shortId(asset.id)} · {sourceKindLabels[asset.source_kind] ?? asset.source_kind} · {formatTime(asset.updated_at)}</small></span>
             <span>{asset.asset_type ? assetTypeLabels[asset.asset_type] : '待识别'}</span>
             <span>{statusLabels[asset.analysis_status]}</span>
             <span><CircleCheck size={14}/>v{asset.revision}</span>
@@ -248,7 +249,7 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
           </button>)}
 
           {target === 'lineage' && lineages.map(entry => <button role="listitem" key={entry.lineageId} className={selectedId === entry.lineageId ? 'prelaunch-row active' : 'prelaunch-row'} onClick={() => setSelectedId(entry.lineageId)}>
-            <span><b>{entry.revisions[entry.revisions.length - 1]?.title}</b><small>血缘 {entry.lineageId.slice(0, 12)} · 最近更新 {formatTime(entry.revisions[entry.revisions.length - 1]?.updated_at ?? '')}</small></span>
+            <span><b>{entry.revisions[entry.revisions.length - 1]?.title}</b><small>血缘 {shortId(entry.lineageId)} · 最近更新 {formatTime(entry.revisions[entry.revisions.length - 1]?.updated_at ?? '')}</small></span>
             <span>{entry.revisions.length} 个版本</span>
             <span>{[...new Set(entry.revisions.map(revision => statusLabels[revision.analysis_status]))].join('、')}</span>
             <span><GitBranch size={14}/>v{entry.revisions[entry.revisions.length - 1]?.revision}</span>
@@ -259,12 +260,12 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
       <aside className="prelaunch-detail">
         {selectedAsset ? <>
           <span className="section-label">素材版本</span><h3>{selectedAsset.title}</h3>
-          <p>{selectedAsset.id.slice(0, 8)} · 第 {selectedAsset.revision} 版 · {statusLabels[selectedAsset.analysis_status]}</p>
+          <p>{shortId(selectedAsset.id)} · 第 {selectedAsset.revision} 版 · {statusLabels[selectedAsset.analysis_status]}</p>
           <div className="prelaunch-fact"><Layers3 size={17}/><span><small>内容类型</small><b>
             {selectedAsset.asset_type ? assetTypeLabels[selectedAsset.asset_type] : '待识别。没有类型就无法确定要提取哪套特征。'}
             {selectedAsset.asset_type_source === 'ai' ? `（AI 识别 · 置信 ${confidenceLabels[selectedAsset.asset_type_confidence ?? 'low']}）` : selectedAsset.asset_type_source === 'human' ? '（人工判定）' : ''}
           </b></span></div>
-          <div className="prelaunch-fact"><Database size={17}/><span><small>来源</small><b>{sourceKindLabels[selectedAsset.source_kind] ?? selectedAsset.source_kind}{selectedAsset.source_ref ? ` · ${selectedAsset.source_ref}` : ''}{selectedAsset.source_job_id ? ` · 任务 ${selectedAsset.source_job_id.slice(0, 8)}` : ''}</b></span></div>
+          <div className="prelaunch-fact"><Database size={17}/><span><small>来源</small><b>{sourceKindLabels[selectedAsset.source_kind] ?? selectedAsset.source_kind}{selectedAsset.source_ref ? ` · ${selectedAsset.source_ref}` : ''}{selectedAsset.source_job_id ? ` · 任务 ${shortId(selectedAsset.source_job_id)}` : ''}</b></span></div>
           {selectedAsset.analysis_status_reason ? <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>最近一次状态说明</small><b>{selectedAsset.analysis_status_reason}</b></span></div> : null}
 
           <div className="feature-stack">

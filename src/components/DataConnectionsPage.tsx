@@ -16,6 +16,7 @@ import {
 import { hashText, parseMetricCsv } from '../data/metricCsv'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
+import { shortId } from '../data/shortId'
 
 /**
  * 数据接入（10-ad-data-connectors.md，导航见 19 §5.2）。
@@ -241,7 +242,7 @@ export function DataConnectionsPage({ state, activeView }: { state: DataState; a
             <button role="listitem" key={mapping.id} className={selectedId === mapping.id ? 'prelaunch-row active' : 'prelaunch-row'} onClick={() => setSelectedId(mapping.id)}>
               <span><b>{mapping.platform_object_name || mapping.platform_object_id}</b><small>{platformLabels[mapping.platform as ApiPlatform] ?? mapping.platform} · {mapping.platform_object_kind} · {mapping.platform_object_id}</small></span>
               <span>{mappingStatusLabels[mapping.status] ?? mapping.status}</span>
-              <span>{mapping.asset_id ? `已归到素材 ${mapping.asset_id.slice(0, 8)}` : mapping.note || '还没认领，花费计入总盘但不算到任何素材头上'}</span>
+              <span>{mapping.asset_id ? `已归到素材 ${shortId(mapping.asset_id)}` : mapping.note || '还没认领，花费计入总盘但不算到任何素材头上'}</span>
               <span>{mapping.status === 'matched' ? <CircleCheck size={14}/> : <CircleAlert size={14}/>}v{mapping.version}</span>
             </button>)}
         </div>

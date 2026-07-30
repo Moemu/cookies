@@ -55,7 +55,9 @@ export const systems: SystemDefinition[] = [
       // 视图按素材类型切分，取自 03 §一级导航与 19 §5.2；原来的「案例拆解/漫剧大盘/制作方法/包装检查」
       // 来自参考站点，与 PRD 的六类特征体系对不上（基线文档 §5 冲突 5）。
       { id: 'content', label: '内容分析', icon: Film, group: '素材与分析', layout: 'analysis', description: '把创意内容转成可比较的变量：按素材类型提取特征，同时服务投前参考与投后解释。', views: ['小红书', '公众号', '品牌广告', '数字人', '广告前贴', '爆款复刻', '单素材拆解'] },
-      { id: 'experiments', label: '实验中心', icon: FlaskConical, group: '素材与分析', layout: 'analysis', description: '管理 A/B 变量、样本检查和可归因结果。', views: ['实验列表', '变量矩阵', '样本检查', '实验结果'] },
+      // 03 §73 和 19 §284 都写五个视图（多「A/B 变体」，末位是「实验结论」不是「实验结果」），
+      // 代码原为四个（基线文档 §5 冲突 12）。这一页整体尚未启用，标签换成文档口径不影响现有功能。
+      { id: 'experiments', label: '实验中心', icon: FlaskConical, group: '素材与分析', layout: 'analysis', description: '管理 A/B 变量、样本检查和可归因结果。', views: ['实验列表', 'A/B 变体', '变量矩阵', '样本检查', '实验结论'] },
       { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['候选经验', '已确认', '待复审', '已失效', '引用记录'] },
       // 只留有数据模型的三个视图。「周期报告 / 自定义报告 / 协作 / 版本与导出」写在
       // 03 §5 和 19 §5.2 的二级功能表里，但 03 §9 的功能需求表里没有任何一条 FR 支撑，

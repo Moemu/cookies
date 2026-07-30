@@ -5,6 +5,7 @@ import {
   api,
   type ApiAssetTrend,
   type ApiConfidenceLevel,
+  type ApiDeliveryExecutionResult,
   type ApiFatigueSignal,
   type ApiFeatureDriver,
   type ApiMetricAnomaly,
@@ -13,7 +14,8 @@ import {
   type ApiVariantComparison,
   type ApiVariantVerdict,
 } from '../data/api'
-import type { DataState } from '../types'
+import type { DataState, SystemKey } from '../types'
+import { FreezeReportAction, isoDay } from './FreezeReportAction'
 import { PostLaunchOverviewPage } from './PostLaunchOverviewPage'
 import { StateBoundary } from './StateBoundary'
 
@@ -141,20 +143,31 @@ const metricLabels: Record<string, string> = {
   revenue_cents: '收入',
 }
 
-export function PostLaunchAnalysisPage({ state, activeView }: { state: DataState; activeView: string }) {
+type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
+
+export function PostLaunchAnalysisPage({ state, activeView, onOpenProject }: {
+  state: DataState
+  activeView: string
+  onOpenProject: OpenProject
+}) {
   const target = viewTargets[activeView]
   // 指标总览走原来那一页：它是「一个主图表 + 素材矩阵 + 解释区」的完整布局（20 §4.1），
   // 和这五个列表视图不是同一种页面，硬塞进来只会两边都不像。
-  if (!target) return <PostLaunchOverviewPage state={state}/>
-  return <AnalysisViews state={state} target={target}/>
+  if (!target) return <PostLaunchOverviewPage state={state} onOpenProject={onOpenProject}/>
+  return <AnalysisViews state={state} target={target} onOpenProject={onOpenProject}/>
 }
 
-function AnalysisViews({ state, target }: { state: DataState; target: ViewTarget }) {
+function AnalysisViews({ state, target, onOpenProject }: {
+  state: DataState
+  target: ViewTarget
+  onOpenProject: OpenProject
+}) {
   const { currentProject } = useProject()
   const [rangeLabel, setRangeLabel] = useState('近 30 天')
   const [analysis, setAnalysis] = useState<ApiPerformanceAnalysis | null>(null)
   const [notice, setNotice] = useState('')
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [freezing, setFreezing] = useState(false)
 
   const load = useCallback(async () => {
     if (!currentProject.id) return
@@ -186,6 +199,26 @@ function AnalysisViews({ state, target }: { state: DataState; target: ViewTarget
   ], [analysis])
 
   const rows = analysis ? countFor(analysis, target) : 0
+
+  // 定格这一屏。窗口用的是当前这一屏的窗口，不重新算——报告上写的日期区间
+  // 必须和人刚才看的那一屏是同一个，否则「我当时看到的」和「报告里写的」
+  // 会是两回事，而两边都写着同一句话。
+  const freeze = useCallback(async (executionId: string) => {
+    if (!analysis) return
+    setFreezing(true)
+    setNotice('')
+    try {
+      const report = await api.createReport(currentProject.id, {
+        execution_id: executionId,
+        window: { start: isoDay(analysis.window.start), end: isoDay(analysis.window.end) },
+      })
+      onOpenProject(currentProject.id, 'insight', 'reports', report.id, '待确认')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '定格失败，请重试。')
+    } finally {
+      setFreezing(false)
+    }
+  }, [analysis, currentProject.id, onOpenProject])
 
   return <StateBoundary state={state} onRetry={() => { void load() }}>
     <div className="prelaunch-workspace">
@@ -246,8 +279,10 @@ function AnalysisViews({ state, target }: { state: DataState; target: ViewTarget
 
         <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>这一页给不了什么</small>
           这里全部是观察到的相关，没有一条是实验证明的因果。要确认某个变量真的有效，得在同一批投放里只改它一个
-          ——那是「实验中心」的事，当前还没有开。
+          ——那是「实验中心」的事，可以从那里建一个实验来验证。
         </span></div>
+
+        {analysis ? <FreezeReportAction window={analysis.window} busy={freezing} onFreeze={freeze}/> : null}
 
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </aside>

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, BookOpenCheck, Check, CircleAlert, CircleCheck, Database, Lightbulb, Link2, RefreshCw, Search } from 'lucide-react'
+import { ArrowRight, BookOpenCheck, Check, CircleAlert, CircleCheck, Database, Layers3, Lightbulb, Link2, PencilLine, RefreshCw, Search, ShieldCheck, Target } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiExperience, type ApiExperienceAudit, type ApiExperienceReference, type ApiExperienceStatus } from '../data/api'
+import { api, type ApiExperience, type ApiExperienceAudit, type ApiExperienceReference, type ApiExperienceStatus, type ReviseExperienceBody } from '../data/api'
+import { ExperienceReviseForm } from './ExperienceReviseForm'
+import {
+  cardTypeLabels, cardTypeMeaning, confidenceLabels,
+  describeApplicability, describeContentBasis, describeDataBasis,
+} from '../data/insightCard'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
+import { shortId } from '../data/shortId'
 
 type ViewTarget = ApiExperienceStatus | 'references'
 
@@ -42,6 +48,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
   const [reason, setReason] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [revising, setRevising] = useState(false)
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
 
   const loadList = useCallback(async () => {
@@ -67,7 +74,10 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
   }, [currentProject.id, target])
 
   useEffect(() => { void loadList() }, [loadList])
-  useEffect(() => { setReason(''); setNotice('') }, [target])
+  useEffect(() => { setReason(''); setNotice(''); setRevising(false) }, [target])
+  // 换了一条经验就把修订表单收起来。表单里的内容是上一条的，留着它继续开着，
+  // 人很容易以为自己在改右边这条，实际提交到的是刚才那条。
+  useEffect(() => { setRevising(false) }, [selectedId])
 
   const filtered = useMemo(() => experiences.filter(experience =>
     `${experience.id} ${experience.conclusion} ${experience.conditions.join(' ')} ${experience.counterexamples.join(' ')}`
@@ -121,9 +131,29 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
       if (action === 'retire') await api.retireExperience(currentProject.id, selected.id, selected.version, reason.trim())
       setReason('')
       await loadList()
-      setNotice(`${selected.id.slice(0, 8)} 已${actionLabels[action]}，可在对应视图中查看。`)
+      setNotice(`${shortId(selected.id)} 已${actionLabels[action]}，可在对应视图中查看。`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '状态变更失败，请稍后重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runRevise = async (body: ReviseExperienceBody) => {
+    if (!selected) return
+    setBusy(true)
+    try {
+      const next = await api.reviseExperience(currentProject.id, selected.id, body)
+      setRevising(false)
+      await loadList()
+      // 修订出来的是一条新记录，旧的那条被标成被取代后就不在这个列表里了。
+      // 不把选中项挪过去，右边会空掉一屏，看着像是刚才那一下把东西弄丢了。
+      setSelectedId(next.id)
+      setNotice(next.status === target
+        ? `已保存为第 ${next.revision} 次修订，原来那条保留可查。`
+        : `已保存为第 ${next.revision} 次修订，它回到「${statusLabels[next.status]}」等人确认；原来那条保留可查。`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '修订失败，请稍后重试。')
     } finally {
       setBusy(false)
     }
@@ -147,7 +177,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
             {listState === 'error' ? <div className="panel-empty">引用记录读取失败，请重试。</div> : null}
             {listState === 'ready' && !filteredReferences.length ? <div className="panel-empty">{emptyHints.references}</div> : null}
             {filteredReferences.map(reference => <div role="listitem" key={reference.id} className="prelaunch-row">
-              <span><b>{reference.consumer_kind} · {reference.consumer_id.slice(0, 12)}</b><small>经验 {reference.experience_id.slice(0, 8)} · {formatTime(reference.created_at)}</small></span>
+              <span><b>{reference.consumer_kind} · {shortId(reference.consumer_id)}</b><small>经验 {shortId(reference.experience_id)} · {formatTime(reference.created_at)}</small></span>
               <span>{reference.outcome || '未记录'}</span>
               <span>{reference.note || '无备注'}</span>
               <span><Link2 size={14}/>v{reference.version}</span>
@@ -182,7 +212,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
           {listState === 'error' ? <div className="panel-empty">经验读取失败，请重试。</div> : null}
           {listState === 'ready' && !filtered.length ? <div className="panel-empty">{emptyHints[target]}</div> : null}
           {filtered.map(experience => <button role="listitem" key={experience.id} className={selectedId === experience.id ? 'prelaunch-row active' : 'prelaunch-row'} onClick={() => setSelectedId(experience.id)}>
-            <span><b>{experience.conclusion}</b><small>{experience.id.slice(0, 8)} · 来源报告 {experience.report_id.slice(0, 8)} · {formatTime(experience.updated_at)}</small></span>
+            <span><b>{experience.conclusion}</b><small>{cardTypeLabels[experience.card_type]} · 置信{confidenceLabels[experience.confidence]} · {shortId(experience.id)} · 来源报告 {shortId(experience.report_id)} · {formatTime(experience.updated_at)}</small></span>
             <span>{statusLabels[experience.status]}</span>
             <span>{experience.conditions.length ? experience.conditions.join('；') : '未填写适用条件'}</span>
             <span><CircleCheck size={14}/>v{experience.revision}</span>
@@ -191,14 +221,31 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
       </section>
       <aside className="prelaunch-detail">
         {selected ? <>
-          <span className="section-label">当前经验</span><h3>{selected.conclusion}</h3>
-          <p>{selected.id.slice(0, 8)} · 第 {selected.revision} 次修订 · {statusLabels[selected.status]}</p>
+          {/* 洞察卡九字段全展开（03 §8.1）。少显示一项，负责点「确认」的人就少一样判断依据：
+              只看结论一句话，看不到样本量和置信，确认按钮就变成了盖章。 */}
+          <span className="section-label">{cardTypeLabels[selected.card_type]} · 置信{confidenceLabels[selected.confidence]}</span>
+          <h3>{selected.conclusion}</h3>
+          <p>{shortId(selected.id)} · 第 {selected.revision} 次修订 · {statusLabels[selected.status]}</p>
+          <div className="prelaunch-fact"><Layers3 size={17}/><span><small>这条能被怎么用</small><b>{cardTypeMeaning[selected.card_type]}</b></span></div>
+          <div className="prelaunch-fact"><ShieldCheck size={17}/><span><small>置信提示</small><b>{confidenceLabels[selected.confidence]}</b></span></div>
+          <div className="prelaunch-fact"><Target size={17}/><span><small>适用范围</small><b>{describeApplicability(selected.applicability)}</b></span></div>
+          <div className="prelaunch-fact"><Database size={17}/><span><small>数据依据</small><b>{describeDataBasis(selected.data_basis)}</b></span></div>
+          <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>内容依据</small><b>{describeContentBasis(selected.content_basis)}</b></span></div>
+          {selected.recommended_action ? <div className="prelaunch-fact"><ArrowRight size={17}/><span><small>建议动作</small><b>{selected.recommended_action}</b></span></div> : null}
           <div className="prelaunch-fact"><CircleCheck size={17}/><span><small>适用条件</small><b>{selected.conditions.length ? selected.conditions.join('；') : '未填写。没有适用条件的结论不应被直接套用。'}</b></span></div>
-          <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>反例</small>{selected.counterexamples.length ? selected.counterexamples.join('；') : '未记录反例。'}</span></div>
-          <div className="prelaunch-fact"><Database size={17}/><span><small>来源</small><b>报告 {selected.report_id.slice(0, 8)} · 执行 {selected.source_execution_id.slice(0, 8)} · 指标快照 {selected.source_metric_snapshot_id.slice(0, 8)}</b></span></div>
+          <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>风险与反例</small>{selected.counterexamples.length ? selected.counterexamples.join('；') : '未记录反例。'}</span></div>
+          <div className="prelaunch-fact"><Database size={17}/><span><small>来源</small><b>报告 {shortId(selected.report_id)} · 执行 {shortId(selected.source_execution_id)} · 指标快照 {shortId(selected.source_metric_snapshot_id)}</b></span></div>
           {selected.status_reason ? <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>最近一次状态说明</small><b>{selected.status_reason}</b></span></div> : null}
 
-          {actionsFor(selected.status).length ? <>
+          {revising ? <ExperienceReviseForm
+            // key 挂在经验 ID 上：换一条就重新挂载一份表单，
+            // 否则 useState 的初值只在第一次挂载时取，下一条打开的还是上一条的内容。
+            key={selected.id}
+            experience={selected}
+            busy={busy}
+            onCancel={() => setRevising(false)}
+            onSubmit={body => { void runRevise(body) }}
+          /> : actionsFor(selected.status).length ? <>
             <label className="experience-reason">
               <small>理由（驳回、申请复审、失效必填，会写入审计记录）</small>
               <textarea value={reason} onChange={event => setReason(event.target.value)} rows={3} placeholder="例如：新一批投放出现反例，结论需要重新验证。"/>
@@ -208,6 +255,11 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
                 {action === 'confirm' ? <Check size={15}/> : <ArrowRight size={15}/>}
                 {busy ? '处理中…' : actionLabels[action]}
               </button>)}
+              {/* 「去经验库补齐依据并确认」——报告页那句话指的就是这个按钮。
+                  没有它，上面那三行「没写数据依据」只能一直没写下去。 */}
+              {canRevise(selected) ? <button className="secondary-button full" disabled={busy} onClick={() => { setNotice(''); setRevising(true) }}>
+                <PencilLine size={15}/>修订，补齐依据
+              </button> : null}
             </div>
           </> : <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>无可用动作</small>已失效经验是逻辑删除，保留可读但不再参与流转。</span></div>}
 
@@ -233,6 +285,15 @@ const actionLabels: Record<'confirm' | 'reject' | 'request-review' | 'retire', s
   reject: '驳回',
   'request-review': '申请复审',
   retire: '失效',
+}
+
+/**
+ * 能不能修订。后端的门槛是：已失效的不能改，已经被新版本取代的也不能改
+ * （一条血缘同时只允许有一个待确认的版本）。前端提前拦掉，免得人填完一整屏
+ * 才在提交时被退回来。
+ */
+function canRevise(experience: ApiExperience): boolean {
+  return experience.status !== 'retired' && !experience.superseded_by_id
 }
 
 function actionsFor(status: ApiExperienceStatus): Array<'confirm' | 'reject' | 'request-review' | 'retire'> {
