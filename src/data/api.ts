@@ -891,6 +891,18 @@ const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string 
 const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? ''}/api`
 const platformBase = `${viteEnv?.VITE_API_BASE_URL ?? ''}/platform/v1`
 
+type PlatformActor = {
+  principal: { id: string }
+}
+
+type PlatformRequestContext = {
+  actor: PlatformActor
+}
+
+type PlatformLoginResult = {
+  actor: PlatformActor
+}
+
 type AgencyWorkbenchOptions = {
   projectIds?: string[]
   includeDemoProject?: boolean
@@ -938,12 +950,21 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const payload = await response.json() as T | { error?: { message?: string } }
+  const payloadText = await response.text()
+  const payload = payloadText ? JSON.parse(payloadText) as T | { error?: { message?: string } } : undefined
   if (!response.ok) {
-    const error = payload as { error?: { message?: string } }
+    const error = (payload ?? {}) as { error?: { message?: string } }
     throw new Error(error.error?.message ?? 'API 请求失败')
   }
   return payload as T
+}
+
+function authSessionFromActor(actor: PlatformActor, username?: string): ApiAuthSession {
+  const identity = username?.trim() || actor.principal.id
+  return {
+    authenticated: true,
+    user: { id: actor.principal.id, email: '', displayName: identity },
+  }
 }
 
 async function platformRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
@@ -956,9 +977,10 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const payload = await response.json() as T | { error?: { message?: string } }
+  const payloadText = await response.text()
+  const payload = payloadText ? JSON.parse(payloadText) as T | { error?: { message?: string } } : undefined
   if (!response.ok) {
-    const error = payload as { error?: { message?: string } }
+    const error = (payload ?? {}) as { error?: { message?: string } }
     throw new Error(error.error?.message ?? '平台 API 请求失败')
   }
   return payload as T
@@ -1215,9 +1237,18 @@ export const api = {
       : options.projectIds ?? []
     return loadPersistedAgencyWorkbench(projectIds)
   },
-  getSession: () => request<ApiAuthSession>('/session'),
-  login: (input: { email: string; password: string }) => request<ApiAuthSession>('/session', 'POST', input),
-  logout: () => request<ApiAuthSession>('/session', 'DELETE'),
+  getSession: async () => authSessionFromActor((await platformRequest<PlatformRequestContext>('/context')).actor),
+  login: async (input: { username: string; password: string }) => {
+    const result = await platformRequest<PlatformLoginResult>('/auth/login', 'POST', {
+      username: input.username,
+      password: input.password,
+    })
+    return authSessionFromActor(result.actor, input.username)
+  },
+  logout: async () => {
+    await platformRequest<void>('/auth/logout', 'POST')
+    return { authenticated: false }
+  },
   getCapabilities: () => request<ApiProviderCapabilities>('/provider/capabilities'),
   getProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration'),
   updateProviderConfiguration: (input: { apiKey: string; baseUrl?: string }) =>
