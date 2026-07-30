@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, BarChart3, BookOpenCheck, Check, CircleAlert, CircleCheck,
-  Database, FileInput, Filter, Layers3, Lightbulb, RefreshCw,
-  Play, Search, Sparkles, Target, TrendingUp,
+  Database, FileInput, Filter, Layers3, Lightbulb, Link2, Play, RefreshCw,
+  Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult, type ApiProjectMediaAsset } from '../data/api'
-import { createMutationKey, strategyApi } from '../features/strategy/api'
-import type { KnowledgeDocument, StrategyTaskListItem } from '../features/strategy/types'
+import { api, type ApiArtifact, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult, type ApiProjectMediaAsset } from '../data/api'
 import type { DataState, SystemKey } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -61,16 +59,14 @@ const preLaunchInsights = [
 ]
 
 export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataState; onOpenProject: OpenProject }) {
-  const { currentProject } = useProject()
+  const { currentProject, reloadProjects } = useProject()
   const [channel, setChannel] = useState('全渠道')
   const [format, setFormat] = useState('全部形式')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState(preLaunchInsights[0].id)
-  const [references, setReferences] = useState<KnowledgeDocument[]>([])
-  const [briefTargets, setBriefTargets] = useState<StrategyTaskListItem[]>([])
-  const [targetTaskId, setTargetTaskId] = useState('')
+  const [references, setReferences] = useState<ApiArtifact[]>([])
   const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busyTarget, setBusyTarget] = useState<'brief' | 'creative' | ''>('')
   const filtered = useMemo(() => preLaunchInsights.filter(insight =>
     (channel === '全渠道' || insight.channel === channel || insight.channel === '全渠道')
     && (format === '全部形式' || insight.format === format)
@@ -80,56 +76,47 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
 
   useEffect(() => {
     let active = true
-    void Promise.all([
-      strategyApi.listKnowledgeDocuments(currentProject.id),
-      strategyApi.listTasks(currentProject.id, 'active'),
-    ]).then(([documentResult, taskResult]) => {
-      if (!active) return
-      const targets = taskResult.items.filter(item => !item.task.discarded_at && item.brief_status === 'open')
-      setReferences(documentResult.items.filter(document => document.source_type === 'prelaunch_insight'))
-      setBriefTargets(targets)
-      setTargetTaskId(current => targets.some(item => item.task.id === current)
-        ? current : targets[0]?.task.id ?? '')
+    void api.listArtifacts(currentProject.id).then(artifacts => {
+      if (active) setReferences(artifacts.filter(artifact => artifact.content.startsWith('[prelaunch-insight]')))
     }).catch(() => {
-      if (active) {
-        setReferences([])
-        setBriefTargets([])
-        setTargetTaskId('')
-      }
+      if (active) setReferences([])
     })
     return () => { active = false }
   }, [currentProject.id])
 
-  const citeInsight = async () => {
-    setBusy(true)
+  const citeInsight = async (target: 'brief' | 'creative') => {
+    setBusyTarget(target)
     try {
-      const targetTask = briefTargets.find(item => item.task.id === targetTaskId)
-      if (!targetTask) {
-        throw new Error('请选择一个可编辑的策略 Brief；如果列表为空，请先创建策略任务。')
-      }
-      const draft = await strategyApi.getBriefDraft(targetTask.task.id)
-      if (draft.status !== 'open') {
-        throw new Error('当前 Brief 已冻结，不能直接追加引用；请创建新的策略任务或修订链路。')
-      }
-      const reference = await strategyApi.importKnowledgeDocument(currentProject.id, {
-        title: `${selected.id} · ${selected.title}`,
-        source_uri: `cookies://prelaunch-insights/${selected.id}`,
-        source_type: 'prelaunch_insight',
-        text: `建议：${selected.recommendation}\n证据：${selected.evidence}\n适用边界：${selected.boundary}\n渠道：${selected.channel}\n形式：${selected.format}\n置信度：${selected.confidence}`,
+      const reference = await api.createArtifact({
+        projectId: currentProject.id,
+        kind: 'document',
+        status: 'ready',
+        content: `[prelaunch-insight] ${selected.id} | ${selected.title} | 建议：${selected.recommendation} | 证据：${selected.evidence} | 边界：${selected.boundary} | 引用目标：${target}`,
       })
-      await strategyApi.patchBriefField(
-        targetTask.task.id,
-        draft,
-        'reference_ids',
-        [...new Set([...(draft.document.reference_ids ?? []), reference.id])],
-        createMutationKey('prelaunch-brief-reference'),
-      )
+      if (target === 'brief' && currentProject.artifacts.brief.id) {
+        const artifacts = await api.listArtifacts(currentProject.id)
+        const brief = artifacts.find(artifact => artifact.id === currentProject.artifacts.brief.id)
+        if (brief && !brief.content.includes(selected.id)) {
+          await api.updateArtifact(brief.id, { content: `${brief.content}\n\n投前洞察引用 ${selected.id}：${selected.recommendation}` })
+        }
+      }
+      if (target === 'creative') {
+        const creativeTask = [...currentProject.tasks].reverse().find(task => task.type !== 'strategy')
+        if (creativeTask) {
+          await api.updateTask(currentProject.id, creativeTask.id, {
+            sourceArtifactIds: [...new Set([...creativeTask.sourceArtifactIds, reference.id])],
+          })
+        }
+      }
       setReferences(current => [...current, reference])
-      setNotice(`已将 ${selected.id} 作为 Knowledge Document 写入“${targetTask.name}”Brief 的真实证据引用。`)
+      await reloadProjects()
+      setNotice(target === 'brief'
+        ? `已将 ${selected.id} 写入当前 Brief 的证据引用。`
+        : `已将 ${selected.id} 关联到创意来源链，后续新建创意任务也会自动继承。`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '投前洞察引用失败，请稍后重试。')
     } finally {
-      setBusy(false)
+      setBusyTarget('')
     }
   }
 
@@ -170,9 +157,8 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
         <div className="prelaunch-fact"><Database size={17}/><span><small>证据</small><b>{selected.evidence}</b></span></div>
         <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>适用边界</small>{selected.boundary}</span></div>
         <div className="prelaunch-actions">
-          <label>目标 Brief<select aria-label="目标 Brief" disabled={busy || !briefTargets.length} value={targetTaskId} onChange={event => setTargetTaskId(event.target.value)}>{briefTargets.map(item => <option key={item.task.id} value={item.task.id}>{item.name}</option>)}{!briefTargets.length ? <option value="">没有可编辑的 Brief</option> : null}</select></label>
-          <button className="primary-button full" disabled={busy || !targetTaskId} onClick={() => void citeInsight()}><FileInput size={15}/>{busy ? '正在写入 Brief…' : '引用到所选 Brief'}</button>
-          <small>创意任务通过批准后的策略包继承证据，不在这里建立旁路引用。</small>
+          <button className="secondary-button full" disabled={Boolean(busyTarget)} onClick={() => void citeInsight('brief')}><FileInput size={15}/>{busyTarget === 'brief' ? '正在写入 Brief…' : '引用到 Brief'}</button>
+          <button className="primary-button full" disabled={Boolean(busyTarget)} onClick={() => void citeInsight('creative')}><Link2 size={15}/>{busyTarget === 'creative' ? '正在关联创意…' : '引用到创意任务'}</button>
         </div>
         <button className="text-button prelaunch-deeplink" onClick={() => onOpenProject(currentProject.id, 'strategy', 'briefs')}>进入需求中心检查 Brief<ArrowRight size={14}/></button>
         <div className="reference-count"><BookOpenCheck size={15}/><span><b>{references.length} 条引用记录</b><small>保存在当前 Project，可跨刷新追溯</small></span></div>
@@ -451,46 +437,6 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
   }
 
   if (mode === 'knowledge') {
-    const highlightedResult = knowledgeResults[0]
-    return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
-      <div className="asset-experience-workspace">
-        <section className="asset-library-panel">
-          <div className="core-flow-toolbar">
-            <div><span className="section-label">KNOWLEDGE / RAG</span><h2>项目知识策略库</h2><p>导入项目 docs 文本，使用确定性关键词检索，并在输出中保留 citation。</p></div>
-            <button className="primary-button" onClick={() => void importProjectKnowledge()}><FileInput size={15}/>导入 Project Docs</button>
-          </div>
-          <div className="asset-filterbar">
-            <div className="search-field"><Search size={15}/><input aria-label="搜索知识库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索 Hook、商品露出、质检或 citation"/></div>
-            <span>{query.trim() ? knowledgeResults.length : filteredKnowledgeDocuments.length} 项 · 当前 Project</span>
-          </div>
-          <div className="asset-card-grid">
-            {assetState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的 Knowledge/RAG 策略库…</div> : null}
-            {assetState === 'error' ? <div className="panel-empty">知识库读取失败，请检查平台 API 或重试。</div> : null}
-            {assetState === 'ready' && !query.trim() && !filteredKnowledgeDocuments.length ? <div className="panel-empty">当前 Project 暂无知识文档，可先导入项目 docs 文本。</div> : null}
-            {assetState === 'ready' && query.trim() && !knowledgeResults.length ? <div className="panel-empty">没有命中的知识片段；换一个关键词试试。</div> : null}
-            {!query.trim() ? filteredKnowledgeDocuments.map(document => <button key={document.id} className="asset-analysis-card" onClick={() => setQuery(document.title)}>
-              <span className="asset-card-preview"><BookOpenCheck size={18}/><small>{document.source_type}</small></span>
-              <span><small>{document.id.slice(0, 8)} · {document.chunk_count} chunks</small><b>{document.title}</b><em>{document.source_uri || 'project docs'}</em></span>
-            </button>) : knowledgeResults.map(result => <button key={result.chunk.id} className={highlightedResult?.chunk.id === result.chunk.id ? 'asset-analysis-card active' : 'asset-analysis-card'}>
-              <span className="asset-card-preview"><Search size={18}/><small>score {result.score}</small></span>
-              <span><small>{result.citations[0]?.title ?? result.chunk.document_id} · L{result.chunk.start_line}-L{result.chunk.end_line}</small><b>{result.citations[0]?.snippet || result.chunk.text}</b><em>{result.citations[0]?.source_uri || result.chunk.source_uri}</em></span>
-            </button>)}
-          </div>
-        </section>
-        <aside className="asset-analysis-detail">
-          {highlightedResult ? <><span className="section-label">Citation</span><h3>{highlightedResult.citations[0]?.title ?? '知识片段'}</h3><p>{highlightedResult.chunk.section} · score {highlightedResult.score}</p>
-            <div className="feature-stack"><span>引用来源</span>{highlightedResult.citations.map(citation => <b key={citation.chunk_id}>{citation.source_uri || 'project docs'} · L{citation.start_line}-L{citation.end_line}</b>)}</div>
-            <div className="experience-card"><BookOpenCheck size={18}/><span><small>可追溯片段</small><b>{highlightedResult.citations[0]?.snippet || highlightedResult.chunk.text}</b></span></div>
-          </> : <div className="panel-empty">输入关键词后查看命中的知识片段、来源文档和行号 citation；Planner 或 Agent 可携带这些引用输出。</div>}
-        </aside>
-      </div>
-    </StateBoundary>
-  }
-
-  // The Kanon knowledge workspace above is the canonical view. Keep the
-  // previous current-project rendering branch unreachable until it can be
-  // removed in a dedicated UI cleanup.
-  if (false) {
     const highlightedResult = knowledgeResults[0]
     return <StateBoundary
       state={state}

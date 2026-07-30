@@ -221,7 +221,7 @@ test("模型密钥配置需要登录且只返回掩码状态", async () => {
     const denied = await fetch(`${url}/api/provider/configuration`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey: "fixture-0000" }),
+      body: JSON.stringify({ apiKey: "ark-live-secret-123456" }),
     });
     assert.equal(denied.status, 401);
 
@@ -237,25 +237,25 @@ test("模型密钥配置需要登录且只返回掩码状态", async () => {
     const saved = await fetch(`${url}/api/provider/configuration`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Cookie: cookie ?? "" },
-      body: JSON.stringify({ apiKey: "fixture-0000", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" }),
+      body: JSON.stringify({ apiKey: "ark-live-secret-123456", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" }),
     });
     const savedBody = await saved.json() as Record<string, unknown>;
     const serialized = JSON.stringify(savedBody);
     assert.equal(saved.status, 200);
     assert.equal(savedBody.status, "configured");
     assert.equal(savedBody.source, "workspace");
-    assert.equal(serialized.includes("fixture-0000"), false);
-    assert.equal(serialized.includes("fixture"), false);
-    assert.equal(serialized.includes("0000"), true);
+    assert.equal(serialized.includes("ark-live-secret-123456"), false);
+    assert.equal(serialized.includes("ark-"), false);
+    assert.equal(serialized.includes("3456"), true);
 
     const capabilities = await fetch(`${url}/api/provider/capabilities`);
     const capabilitiesBody = await capabilities.json() as { status: string; credential?: { source?: string; maskedApiKey?: string } };
     assert.equal(capabilitiesBody.status, "configured");
     assert.equal(capabilitiesBody.credential?.source, "workspace");
-    assert.equal(capabilitiesBody.credential?.maskedApiKey?.includes("0000"), true);
+    assert.equal(capabilitiesBody.credential?.maskedApiKey?.includes("3456"), true);
 
     const stored = await repository.getProviderCredential("ark");
-    assert.equal(stored?.apiKey, "fixture-0000");
+    assert.equal(stored?.apiKey, "ark-live-secret-123456");
   } finally {
     if (server) await close(server);
     await rm(directory, { recursive: true, force: true });

@@ -185,12 +185,12 @@ async function loadPublicInsightStore() {
       const itemId = cleanText(raw.item_id);
       if (!itemId || seen.has(itemId)) continue;
       seen.add(itemId);
-      rows.push(normalizeRow(raw, root, basename(path) || "unknown.csv"));
+      rows.push(normalizeRow(raw, root, basename(path)));
       rowCount += 1;
     }
     const fileStat = await stat(path);
     files.push({
-      filename: basename(path) || "unknown.csv",
+      filename: basename(path),
       row_count: rowCount,
       modified_at: fileStat.mtime.toISOString(),
     });

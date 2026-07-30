@@ -47,7 +47,12 @@ export function loadArkConfig(environment: NodeJS.ProcessEnv = process.env): Ark
   } catch {
     throw new Error("ARK_BASE_URL must be a valid HTTPS URL");
   }
-  if (url.protocol !== "https:") throw new Error("ARK_BASE_URL must use HTTPS");
+  const allowInsecureLocalProvider = environment.NODE_ENV === "test"
+    && environment.ARK_ALLOW_INSECURE_LOCAL_PROVIDER === "true"
+    && ["127.0.0.1", "localhost"].includes(url.hostname);
+  if (url.protocol !== "https:" && !allowInsecureLocalProvider) {
+    throw new Error("ARK_BASE_URL must use HTTPS");
+  }
 
   return { apiKey, baseUrl, configured: apiKey.length > 0, models: ARK_MODELS };
 }

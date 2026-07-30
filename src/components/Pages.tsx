@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Film, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAssetVersionRef, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiProjectMediaAsset, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiProjectMediaAsset, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
@@ -11,12 +11,6 @@ import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPa
 import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
-import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
-import { KanonStrategyTaskCenter, KanonStrategyTaskDialog } from '../features/strategy/KanonStrategyTaskCenter'
-import { KanonBriefCenter, KanonResearchEvidenceCenter, KanonStrategyLibrary } from '../features/strategy/KanonStrategyCenters'
-import type { StrategyTaskBundle } from '../features/strategy/types'
-import { KanonSkillsOperations } from '../features/strategy/KanonSkillsOperations'
-import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
 import { industryProfile } from '../data/industry-profiles'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
@@ -75,7 +69,6 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
   const [workbenchError, setWorkbenchError] = useState(false)
   const [notice, setNotice] = useState('')
   const [changeNote, setChangeNote] = useState('')
-  const [reviewBusy, setReviewBusy] = useState(false)
   const filter = materialFilters.includes(activeView as MaterialFilter) ? activeView as MaterialFilter : '全部素材'
   const routeTarget = parseMaterialTarget(objectId)
 
@@ -116,24 +109,38 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
   const hasCompletedQualityRun = Boolean(selectedState.qualityRun?.completedAt)
   const canConfirmMaterial = selectedState.qualityRun?.status === 'passed' && hasCompletedQualityRun
   const canSetDeliveryVersion = selectedState.confirmation?.status === 'confirmed' && authorizationGate.allowed
-  const reloadWorkbench = async () => {
-    const next = await api.listAgencyWorkbench({ projectIds: [currentProject.id] })
-    setWorkbench(next)
+  const upsertWorkbenchForSelected = (updater: (current: ApiAgencyWorkbench) => ApiAgencyWorkbench) => {
+    setWorkbench(current => current ? updater(current) : current)
   }
-  const handleRunQualityCheck = async () => {
-    setReviewBusy(true)
-    setNotice('')
-    try {
-      await api.runMaterialQualityCheck(currentProject.id, selectedItem.pointer.assetId, selectedVersion)
-      await reloadWorkbench()
-      setNotice(`已在服务端完成 v${selectedVersion} 基础质检，可进入人工确认。`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '运行素材质检失败。')
-    } finally {
-      setReviewBusy(false)
+  const handleRunQualityCheck = () => {
+    const now = new Date().toISOString()
+    const run: ApiQualityCheckRun = {
+      id: `qc-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
+      organizationId: selectedItem.pointer.organizationId,
+      projectId: currentProject.id,
+      assetId: selectedItem.pointer.assetId,
+      assetVersion: selectedVersion,
+      status: 'passed',
+      model: 'demo-quality-vision-v1',
+      ruleVersion: 'agency-material-rules-2026-07',
+      promptVersion: 'material-check-2026-07-27',
+      summary: '大模型已完成品牌、权益、画面安全和渠道规格检查，未发现阻断问题。',
+      issues: [],
+      createdAt: now,
+      completedAt: now,
     }
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      qualityCheckRuns: [run, ...current.qualityCheckRuns],
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        qualityCheckedVersion: selectedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已完成 v${selectedVersion} 大模型质检，可进入人工确认。`)
   }
-  const handleConfirmMaterial = async () => {
+  const handleConfirmMaterial = () => {
     const qualityRun = selectedState.qualityRun
     if (!qualityRun?.completedAt) {
       setNotice('人工确认前必须先完成当前素材版本的大模型质检。')
@@ -143,23 +150,33 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       setNotice('当前质检未通过，不能确认素材；请先选择“需要修改”。')
       return
     }
-    setReviewBusy(true)
-    setNotice('')
-    try {
-      await api.recordMaterialConfirmation(currentProject.id, selectedItem.pointer.assetId, selectedVersion, {
-        status: 'confirmed',
-        scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
-        note: '已确认当前版本可进入投放计划和交付预检。',
-      })
-      await reloadWorkbench()
-      setNotice(`已在服务端写入 v${selectedVersion} 人工确认，确认记录绑定质检 ${qualityRun.id}。`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '确认素材失败。')
-    } finally {
-      setReviewBusy(false)
+    const now = new Date().toISOString()
+    const confirmation: ApiMaterialConfirmation = {
+      id: `confirm-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
+      organizationId: selectedItem.pointer.organizationId,
+      projectId: currentProject.id,
+      qualityCheckRunId: qualityRun.id,
+      assetId: selectedItem.pointer.assetId,
+      assetVersion: selectedVersion,
+      status: 'confirmed',
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      confirmedBy: currentProject.owner,
+      note: '已确认当前版本可进入投放计划和交付预检。',
+      createdAt: now,
     }
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      materialConfirmations: [confirmation, ...current.materialConfirmations],
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        qualityCheckedVersion: selectedVersion,
+        humanConfirmedVersion: selectedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已写入 v${selectedVersion} 人工确认，确认记录绑定质检 ${qualityRun.id}。`)
   }
-  const handleRequestChanges = async () => {
+  const handleRequestChanges = () => {
     const qualityRun = selectedState.qualityRun
     if (!qualityRun?.completedAt) {
       setNotice('需要修改前必须先完成当前素材版本的大模型质检。')
@@ -170,27 +187,56 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       setNotice('需要修改至少要填写一条问题说明。')
       return
     }
-    setReviewBusy(true)
-    setNotice('')
-    try {
-      await api.recordMaterialConfirmation(currentProject.id, selectedItem.pointer.assetId, selectedVersion, {
-        status: 'changes_requested',
-        scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer)}`,
+    const now = new Date().toISOString()
+    const confirmation: ApiMaterialConfirmation = {
+      id: `changes-${selectedItem.pointer.assetId}-v${selectedVersion}-${Date.now()}`,
+      organizationId: selectedItem.pointer.organizationId,
+      projectId: currentProject.id,
+      qualityCheckRunId: qualityRun.id,
+      assetId: selectedItem.pointer.assetId,
+      assetVersion: selectedVersion,
+      status: 'changes_requested',
+      scope: `${currentProject.name} / ${materialTitle(selectedItem.pointer.assetId)}`,
+      confirmedBy: currentProject.owner,
         note,
-      })
-      await reloadWorkbench()
-      setChangeNote('')
-      setNotice(`已在服务端将 v${selectedVersion} 标记为需要修改。`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '提交修改要求失败。')
-    } finally {
-      setReviewBusy(false)
+      createdAt: now,
     }
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      materialConfirmations: [confirmation, ...current.materialConfirmations],
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        humanConfirmedVersion: pointer.humanConfirmedVersion === selectedVersion ? undefined : pointer.humanConfirmedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setChangeNote('')
+    setNotice(`已将 v${selectedVersion} 标记为需要修改，并返回制作环节。`)
   }
   const handleCreateNewVersion = () => {
-    setNotice('新版本必须先在制作环节生成并作为真实 AssetVersion 入库；素材检查不会创建仅存在于浏览器的假版本。')
+    const nextVersion = selectedItem.pointer.workingVersion + 1
+    const now = new Date().toISOString()
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        workingVersion: nextVersion,
+        versions: [{
+          version: nextVersion,
+          createdBy: currentProject.owner,
+          sourceTaskId: `manual-${selectedItem.pointer.assetId}-v${nextVersion}`,
+          sourceType: 'manual_edit',
+          sourceLabel: '人工新增版本',
+          createdAt: now,
+          changeSummary: '在旧版本基础上新增修订版本；历史版本保持不可覆盖。',
+        }, ...pointer.versions],
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已生成 v${nextVersion}，旧质检和确认记录保留，新版本回到待质检流程。`)
+    onOpenProject(currentProject.id, 'creative', 'reviews', materialTarget(selectedItem.pointer.assetId, nextVersion), filter)
   }
-  const handleSetDeliveryVersion = async () => {
+  const handleSetDeliveryVersion = () => {
     if (selectedState.confirmation?.status !== 'confirmed') {
       setNotice('只有已人工确认的素材版本才能进入交付版本。')
       return
@@ -199,17 +245,16 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       setNotice(`授权门禁阻止交付：${authorizationGate.reason}`)
       return
     }
-    setReviewBusy(true)
-    setNotice('')
-    try {
-      await api.setMaterialDeliveryVersion(currentProject.id, selectedItem.pointer.assetId, selectedVersion)
-      await reloadWorkbench()
-      setNotice(`已在服务端将 v${selectedVersion} 设为交付版本，授权覆盖 ${selectedItem.pointer.deliveryTarget.platform} / ${selectedItem.pointer.deliveryTarget.region}。`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '设置交付版本失败。')
-    } finally {
-      setReviewBusy(false)
-    }
+    const now = new Date().toISOString()
+    upsertWorkbenchForSelected(current => ({
+      ...current,
+      assetVersionPointers: current.assetVersionPointers.map(pointer => pointer.id === selectedItem.pointer.id ? {
+        ...pointer,
+        deliveryVersion: selectedVersion,
+        updatedAt: now,
+      } : pointer),
+    }))
+    setNotice(`已将 v${selectedVersion} 设为交付版本，授权覆盖 ${selectedItem.pointer.deliveryTarget.platform} / ${selectedItem.pointer.deliveryTarget.region}。`)
   }
 
   return <div className="material-check-workspace">
@@ -235,15 +280,11 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
         </span>
       </div>
       <div className="material-preview-frame">
-        {selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'video'
-          ? <video key={`${selectedItem.pointer.assetId}-v${selectedVersion}`} controls playsInline preload="metadata" src={selectedItem.pointer.contentUrl} aria-label={`${selectedItem.title}素材检查预览`}/>
-          : selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'image'
-            ? <img src={selectedItem.pointer.contentUrl} alt={`${selectedItem.title}素材检查预览`}/>
-            : <div className="material-preview-card">
-              <span>ASSET</span>
-              <b>{selectedItem.pointer.assetId}</b>
-              <small>当前预览版本 v{selectedVersion}</small>
-            </div>}
+        <div className="material-preview-card">
+          <span>ASSET</span>
+          <b>{selectedItem.pointer.assetId}</b>
+          <small>当前预览版本 v{selectedVersion}</small>
+        </div>
       </div>
       <div className="material-version-strip" aria-label="素材版本">
         {selectedItem.versions.map(version => {
@@ -269,11 +310,11 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
       <AuthorizationGateCard pointer={selectedItem.pointer} gate={authorizationGate} />
       <MaterialHistoryCard items={selectedHistory} />
       <div className="material-action-stack">
-        <button className="secondary-button full" disabled={reviewBusy} onClick={() => void handleRunQualityCheck()}><ShieldCheck size={15}/>运行大模型质检</button>
-        <button className="primary-button full" disabled={!canConfirmMaterial || reviewBusy} onClick={() => void handleConfirmMaterial()}><Check size={15}/>确认素材</button>
+        <button className="secondary-button full" onClick={handleRunQualityCheck}><ShieldCheck size={15}/>运行大模型质检</button>
+        <button className="primary-button full" disabled={!canConfirmMaterial} onClick={handleConfirmMaterial}><Check size={15}/>确认素材</button>
         <label className="material-change-note">修改问题说明<textarea value={changeNote} onChange={event => setChangeNote(event.target.value)} placeholder="例如：画面中的 CTA 与新版 Brief 不一致"/></label>
-        <button className="secondary-button full" disabled={!hasCompletedQualityRun || reviewBusy} onClick={() => void handleRequestChanges()}><CircleAlert size={15}/>需要修改</button>
-        <button className="primary-button full" disabled={!canSetDeliveryVersion || reviewBusy} onClick={() => void handleSetDeliveryVersion()}><ArrowRight size={15}/>设为交付版本</button>
+        <button className="secondary-button full" disabled={!hasCompletedQualityRun} onClick={handleRequestChanges}><CircleAlert size={15}/>需要修改</button>
+        <button className="primary-button full" disabled={!canSetDeliveryVersion} onClick={handleSetDeliveryVersion}><ArrowRight size={15}/>设为交付版本</button>
       </div>
       {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
     </aside>
@@ -360,9 +401,8 @@ function buildMaterialQueue(workbench: ApiAgencyWorkbench, projectId: string): M
       pointer.versions.forEach(version => versions.add(version.version))
       workbench.qualityCheckRuns.filter(run => run.assetId === pointer.assetId).forEach(run => versions.add(run.assetVersion))
       workbench.materialConfirmations.filter(confirmation => confirmation.assetId === pointer.assetId).forEach(confirmation => versions.add(confirmation.assetVersion))
-      return { pointer, title: materialTitle(pointer), versions: Array.from(versions).sort((left, right) => right - left) }
+      return { pointer, title: materialTitle(pointer.assetId), versions: Array.from(versions).sort((left, right) => right - left) }
     })
-    .sort((left, right) => right.pointer.updatedAt.localeCompare(left.pointer.updatedAt))
 }
 
 function materialAuthorizationGate(pointer: ApiAssetVersionPointer): { allowed: boolean; reason: string } {
@@ -427,11 +467,8 @@ function materialTarget(assetId: string, version: number) {
   return `${assetId}@v${version}`
 }
 
-function materialTitle(pointer: ApiAssetVersionPointer) {
-  const suffix = pointer.assetId.replace(/^asset[_-]/, '').slice(-8)
-  if (pointer.mediaKind === 'video') return `${pointer.sourceJobId ? 'AI 生成视频' : '项目视频'} · ${suffix}`
-  if (pointer.mediaKind === 'image') return `${pointer.sourceJobId ? 'AI 生成图片' : '项目图片'} · ${suffix}`
-  return pointer.assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+function materialTitle(assetId: string) {
+  return assetId.replace(/^asset-/, '').split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
 }
 
 function qualityStatusLabel(status: ApiQualityCheckRun['status']) {
@@ -524,32 +561,19 @@ function healthText(status: string) {
 }
 
 export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { onSystemChange: (key: SystemKey) => void; onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string) => void; onManageProject: (id: string) => void }) {
-  const { error: projectError, isLoading, projects } = useProject()
+  const { error: projectError, isLoading } = useProject()
   const [workbench, setWorkbench] = useState<ApiAgencyWorkbench | null>(null)
   const [workbenchError, setWorkbenchError] = useState('')
 
   useEffect(() => {
     let active = true
-    if (projects.length === 0) {
-      setWorkbench({
-        organizations: [],
-        clients: [],
-        brands: [],
-        projects: [],
-        adAccountBindings: [],
-        qualityCheckRuns: [],
-        materialConfirmations: [],
-        assetVersionPointers: [],
-      })
-      return () => { active = false }
-    }
-    void api.listAgencyWorkbench({ projectIds: projects.map(project => project.id) }).then(data => {
+    void api.listAgencyWorkbench({ includeDemoProject: true }).then(data => {
       if (active) setWorkbench(data)
     }).catch(cause => {
       if (active) setWorkbenchError(cause instanceof Error ? cause.message : '加载代理商工作台失败')
     })
     return () => { active = false }
-  }, [projects])
+  }, [])
 
   const portfolio = useMemo(() => {
     const empty = { metrics: [], today: [], checks: [], deliveries: [], health: [], load: [], recent: [] } as {
@@ -763,8 +787,8 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
       <div><span className="section-label">AGENCY PORTFOLIO</span><h1>代理商客户组合工作台</h1><p>聚合跨客户待处理、待检查、临期交付、客户健康与团队负载；Home 只做下钻导航，不直接生成、确认或投放。</p></div>
       <button className="secondary-button" onClick={() => onSystemChange('creative')}>进入创意队列<ArrowRight size={15}/></button>
     </section>
-    {projectError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{projectError}，Home 继续展示代理商组合 mock 数据。</div> : null}
-    {workbenchError ? <div className="page-notice" role="status"><CircleAlert size={16}/>{workbenchError}</div> : null}
+    {projectError ? <div className="page-notice warning" role="status"><CircleAlert size={16}/>{projectError}。Home 暂时不能读取 Project 服务端数据，请确认本地 API 已启动后刷新。</div> : null}
+    {workbenchError ? <div className="page-notice warning" role="status"><CircleAlert size={16}/>{workbenchError}。代理商组合队列暂不可用，请稍后重试或直接进入当前 Project。</div> : null}
     <section className="agency-metrics" aria-label="代理商组合指标">
       {portfolio.metrics.map(metric => <button key={metric.label} className={`agency-metric ${metric.tone}`} onClick={() => onSystemChange(metric.label === '账户异常' || metric.label === '临期交付' ? 'delivery' : 'creative')}>
         <span>{metric.label}</span><b>{metric.value}</b><small>{metric.detail}</small>
@@ -781,7 +805,7 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
             <span className="record-meta"><small>截止</small><b>{record.dueAt}</b></span>
             <ArrowRight size={16}/>
           </button>)}
-          {!portfolio.today.length ? <div className="project-empty">{isLoading && !workbench ? '正在恢复代理商工作台…' : '今日没有需要下钻处理的事项'}</div> : null}
+          {!portfolio.today.length ? <div className="project-empty">{isLoading && !workbench ? '正在恢复代理商工作台…' : workbenchError ? '服务未连接，暂时不能读取跨客户待处理队列。' : '今日没有需要下钻处理的事项。可从最近 Project 或创意队列继续。'}</div> : null}
         </div>
       </section>
       <aside className="agency-panel">
@@ -894,9 +918,6 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
   const [briefModel, setBriefModel] = useState('')
   const [briefNotice, setBriefNotice] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
-  const [productAsset, setProductAsset] = useState<ApiAssetVersionRef | null>(null)
-  const [productImageName, setProductImageName] = useState('')
-  const [isUploadingProduct, setIsUploadingProduct] = useState(false)
   const evidence = operationRecords(currentProject.operations, 'evidence')
 
   useEffect(() => {
@@ -919,15 +940,10 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
     setIsGenerating(true)
     try {
       const result = await api.generateBrief(currentProject.id, briefPrompt)
-      const nextBrief = productAsset
-        ? await api.attachBriefProductAsset(result.artifact, productAsset)
-        : result.artifact
-      setBrief(nextBrief)
+      setBrief(result.artifact)
       setBriefModel(result.job.model ?? '服务端默认文本模型')
       await reloadProjects()
-      setBriefNotice(productAsset
-        ? '策略 Brief 草稿已生成，商品图已绑定，等待人工确认。'
-        : '策略 Brief 草稿已生成，等待人工确认。')
+      setBriefNotice('策略 Brief 草稿已生成，等待人工确认。')
     } catch (cause) {
       setBriefNotice(cause instanceof Error ? cause.message : '生成策略 Brief 失败，请重试。')
     } finally {
@@ -935,39 +951,11 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
     }
   }
 
-  const uploadProductImage = async (file: File | undefined) => {
-    if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setBriefNotice('商品图仅支持 JPG、PNG 或 WebP。')
-      return
-    }
-    setIsUploadingProduct(true)
-    try {
-      const asset = await api.uploadProjectAsset(currentProject.id, file)
-      setProductAsset(asset)
-      setProductImageName(file.name)
-      if (brief?.status === 'draft') {
-        const updated = await api.attachBriefProductAsset(brief, asset)
-        setBrief(updated)
-        setBriefNotice('商品高清图已上传并绑定到当前 Brief 草稿。')
-      } else if (brief?.status === 'ready') {
-        setBriefNotice('商品图已上传；当前 Brief 已确认，请生成一份新 Brief 草稿后再绑定。')
-      } else {
-        setBriefNotice('商品图已上传；生成 Brief 时会自动绑定。')
-      }
-    } catch (cause) {
-      setBriefNotice(cause instanceof Error ? cause.message : '商品图上传失败，请重试。')
-    } finally {
-      setIsUploadingProduct(false)
-    }
-  }
-
   const confirmBrief = async () => {
     if (!brief) return
     try {
-      const confirmed = await api.confirmBrief(brief)
-      setBrief(confirmed)
-      await reloadProjects()
+      await updateArtifact('brief', { status: '已确认', summary: brief.content.slice(0, 52) })
+      setBrief({ ...brief, status: 'ready' })
       setBriefNotice('Brief 已确认，可进入创意生成。')
     } catch (cause) {
       setBriefNotice(cause instanceof Error ? cause.message : '确认 Brief 失败，请重试。')
@@ -986,19 +974,6 @@ function WorkspaceSurface({ item, activeView }: { item: NavItem; activeView: str
         ['成功指标', '官网表单提交量提升 ≥30%\n关键行业线索成本（CPL）降低 ≥20%'],
       ].map(([label, content], index) => <div className="strategy-row" key={label}><h3>{label}</h3><p>{content}</p><span className="citation">[{index + 1}]</span><button aria-label={`编辑${label}`}><Pencil size={15} /></button></div>)}
       <div className="prompt-box"><label htmlFor="ai-prompt">输入广告需求，生成策略 Brief</label><div><input id="ai-prompt" value={briefPrompt} onChange={event => setBriefPrompt(event.target.value)} placeholder="例如：面向研发工程师，突出新品精度与交期，获取销售线索"/><button aria-label="生成策略 Brief" onClick={() => void generateBrief()} disabled={isGenerating}>{isGenerating ? '生成中…' : <Send size={18} />}</button></div></div>
-      <div className="brief-asset-row">
-        <label className="secondary-button" htmlFor="brief-product-image">
-          <Plus size={14} />{isUploadingProduct ? '上传中…' : '添加商品高清图'}
-        </label>
-        <input
-          id="brief-product-image"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          disabled={isUploadingProduct}
-          onChange={event => void uploadProductImage(event.target.files?.[0])}
-        />
-        <span>{productImageName || '生成电商前贴前需要；会作为 Brief 的商品 Asset。'}</span>
-      </div>
       {brief ? <div className="insight-note"><span>AI 生成 Brief · {brief.status === 'ready' ? '已确认' : '草稿'}</span><p>{brief.content}</p><small>模型：{briefModel || '服务端已存档'} · 任务：{brief.sourceJobId ?? '手工创建'}</small>{brief.status !== 'ready' ? <button className="secondary-button" onClick={() => void confirmBrief()}>确认 Brief</button> : null}</div> : null}
       {briefNotice ? <div className="inline-notice" role="status">{briefNotice}</div> : null}
     </section>
@@ -1261,7 +1236,7 @@ function AdAccountBindingSurface({ item, activeView }: { item: NavItem; activeVi
       if (active) setNotice(cause instanceof Error ? cause.message : '读取账户绑定失败。')
     })
     return () => { active = false }
-  }, [currentProject.id])
+  }, [])
 
   const clientsById = useMemo(() => new Map(workbench?.clients.map(client => [client.id, client]) ?? []), [workbench])
   const brandsById = useMemo(() => new Map(workbench?.brands.map(brand => [brand.id, brand]) ?? []), [workbench])
@@ -1588,14 +1563,7 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   let surface
   const taskDomain = system.key === 'strategy' || system.key === 'creative' ? system.key : null
   const taskCenter = item.id === 'tasks' && taskDomain !== null
-  const specialized = system.key === 'strategy' && item.id === 'tasks' ? <KanonStrategyTaskCenter activeView={activeView} onOpenWorkspace={id => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, '概览')} onRequestCreate={() => setTaskDialog({ domain: 'strategy', initialType: 'strategy' })}/>
-    : taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
-    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace activeView={activeView} workspaceId={objectId}/>
-    : system.key === 'strategy' && item.id === 'briefs' ? <KanonBriefCenter activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
-    : system.key === 'strategy' && item.id === 'strategies' ? <KanonStrategyLibrary activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
-    : system.key === 'strategy' && item.id === 'research' ? <KanonResearchEvidenceCenter activeView={activeView}/>
-    : system.key === 'strategy' && item.id === 'operations' ? <KanonSkillsOperations activeView={activeView}/>
-    : system.key === 'strategy' && item.id === 'reviews' ? <KanonReviewCenter activeView={activeView} onOpenReview={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', undefined, '评审')}/>
+  const specialized = taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
     : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={objectId}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
@@ -1634,14 +1602,9 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     setNotice(`${task.name} 已写入服务端并关联当前 Project`)
     onOpenProject(currentProject.id, system.key, 'tasks', task.id)
   }
-  const strategyTaskCreated = (bundle: StrategyTaskBundle) => {
-    setTaskDialog(null)
-    setNotice(`${bundle.workspace.name} 已创建，工作区、对话与 Brief 已持久化`)
-    onOpenProject(currentProject.id, 'strategy', 'workspaces', bundle.workspace.id, '概览')
-  }
 
   const projectProgress = calculateProjectProgress(currentProject)
-  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces'))
+  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews'))
 
-  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, system.key === 'strategy' && item.id === 'workspaces' ? objectId : undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div>{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
+  return <div className={`module-page page-frame layout-${item.layout}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div><footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>{taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }

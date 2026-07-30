@@ -9,6 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "tsx --test test/*.test.ts",
     "contract:check": "go test ./internal/platform/contract",
+    "go:migrate": "go run ./cmd/cookies-migrate",
+    "go:seed": "go run ./cmd/cookies-seed",
     "server": "tsx --env-file=.env server/index.ts",
     "test:server": "tsx --test server/*.test.* server/test/*.test.*",
     "test:media-status": "tsx --test server/test/media-status.test.ts",
@@ -22,7 +24,6 @@
     "lucide-react": "0.564.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "react-router-dom": "^7.18.1",
     "vite": "6.4.3"
   },
   "devDependencies": {

@@ -7,8 +7,8 @@ import type {
   ApiOperationalRecord,
   ApiProjectMediaAsset,
   ApiProject,
-} from "./api.js";
-import type { DeliveryChangeSet } from "../api/delivery.js";
+} from "./api";
+import type { DeliveryChangeSet } from "../api/delivery";
 
 type Fetcher = typeof fetch;
 
@@ -417,7 +417,6 @@ function toApiProjectMediaAsset(asset: PlatformProjectAsset, projectId: string):
     projectId,
     version,
     kind,
-    sourceType: asset.version?.source_type as ApiProjectMediaAsset['sourceType'],
     mimeType,
     sizeBytes: asset.version?.size_bytes ?? 0,
     durationSeconds: asset.version?.media?.duration_seconds,

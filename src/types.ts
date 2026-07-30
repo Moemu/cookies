@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import type { ApiOperationalRecord } from './data/api.js'
+import type { ApiOperationalRecord } from './data/api'
 
 export type SystemKey = 'strategy' | 'creative' | 'insight' | 'delivery'
 export type DataState = 'ready' | 'loading' | 'empty' | 'error' | 'forbidden'

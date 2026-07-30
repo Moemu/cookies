@@ -4,8 +4,9 @@ import { HomePage, ModulePage } from './components/Pages'
 import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
+import { LoginPage } from './components/LoginPage'
 import { StateBoundary } from './components/StateBoundary'
-import { AccountSettingsPage } from './components/AccountSettingsPage'
+import { useAuth } from './context/AuthContext'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
 import { projectHomePath, projectManagePath, projectPath, useAppRoute } from './lib/router'
@@ -13,6 +14,7 @@ import type { SystemKey } from './types'
 
 export default function App() {
   const { route, navigate } = useAppRoute()
+  const { session, isLoading: isAuthLoading } = useAuth()
   const { currentProject, isLoading, reloadProjects, routeDiagnostic, selectProject, targetProjectId } = useProject()
   const system = systems.find(item => item.key === route.systemKey) ?? systems[0]
   const navItem = system.nav.find(item => item.id === route.navId) ?? system.nav[0]
@@ -22,9 +24,17 @@ export default function App() {
   }, [route.projectId, selectProject])
 
   useEffect(() => {
+    if (!route.isLegacyProjectSystemRoute || isLoading || !currentProject.id) return
+    navigate(projectPath(currentProject.id, route.systemKey, route.navId, route.objectId, route.view), true)
+  }, [currentProject.id, isLoading, navigate, route])
+
+  useEffect(() => {
     if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
     rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view))
   }, [route])
+
+  if (isAuthLoading) return <div className="login-page"><div className="page-notice">正在检查登录状态…</div></div>
+  if (!session.authenticated) return <LoginPage/>
 
   const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
   const activeProjectId = route.projectId ?? currentProject.id
@@ -39,18 +49,18 @@ export default function App() {
     selectProject(projectId)
     navigate(projectManagePath(projectId))
   }
-  const routeNeedsProject = Boolean(route.projectId && !route.isHome && !route.isModelSettings && !route.accountPage)
+  const routeNeedsProject = Boolean(route.projectId && !route.isHome && !route.isModelSettings)
   const routeProjectReady = !route.projectId || currentProject.id === route.projectId
   const projectRouteState = isLoading || targetProjectId !== route.projectId ? 'loading' : 'error'
-  const content = route.accountPage ? <AccountSettingsPage page={route.accountPage}/>
-    : route.isModelSettings ? <ModelSettingsPage/>
+  const content = route.isModelSettings ? <ModelSettingsPage/>
     : route.isHome ? <HomePage onSystemChange={changeSystem} onOpenProject={openProject} onManageProject={manageProject}/>
+    : route.isLegacyProjectSystemRoute ? <ProjectRouteBoundary targetProjectId="默认 Project" diagnostic={`旧式模块路由 ${route.systemKey} 将在 Project 加载后自动跳转。`} state={isLoading || currentProject.id ? 'loading' : 'error'} onRetry={() => { void reloadProjects() }}/>
     : routeNeedsProject && !routeProjectReady ? <ProjectRouteBoundary targetProjectId={route.projectId!} diagnostic={routeDiagnostic} state={projectRouteState} onRetry={() => { void reloadProjects(route.projectId) }}/>
     : route.isProjectHome ? <ProjectFlowDashboard onOpenProject={openProject} onManageProject={manageProject}/>
     : route.isProjectManagement ? <ProjectManagementPage onOpenWorkbench={id => openProject(id)} onOpenProject={openProject}/>
     : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>
 
-  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings || Boolean(route.accountPage)} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onAccountNavigate={navigate} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
+  return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
     {content}
   </Shell>
 }

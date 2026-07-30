@@ -1,4 +1,4 @@
-import { platformClient } from '../data/platformClient.js'
+import { platformClient } from '../data/platformClient'
 
 export type PreflightCheck = {
   code: 'confirmed_brief' | 'ready_creative' | 'budget_boundary'
@@ -20,23 +20,6 @@ export type DeliveryChangeSet = {
   version: number
   createdAt: string
   updatedAt: string
-}
-
-const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
-const apiBase = `${viteEnv?.VITE_API_BASE_URL ?? ''}/api`
-
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const payload = await response.json() as T | { error?: { message?: string } }
-  if (!response.ok) {
-    const error = payload as { error?: { message?: string } }
-    throw new Error(error.error?.message ?? '投放模拟请求失败')
-  }
-  return payload as T
 }
 
 export const deliveryApi = {

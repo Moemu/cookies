@@ -16,11 +16,6 @@ export interface CommerceHookTemplate {
   tags: string[]
 }
 
-export type CommerceHookPromptCopy = Pick<
-  CommerceHookTemplate,
-  'fidelity' | 'camera' | 'motion' | 'environment' | 'result' | 'guardrails'
->
-
 export const commerceHookTemplates: CommerceHookTemplate[] = [
   {
     id: 'product-cut', name: '商品切割', category: '感官冲击', duration: '5–7 秒',
@@ -33,14 +28,14 @@ export const commerceHookTemplates: CommerceHookTemplate[] = [
     guardrails: '动作连续、无卡顿；手指、刀具和瓶体不畸变；包装文字全程可辨识。', tags: ['美妆个护', 'ASMR', '节日'],
   },
   {
-    id: 'window-reveal', name: '雾面橱窗揭幕', category: '仪式展示', duration: '6 秒',
-    hook: '从雾面遮挡到清晰揭幕，让娇兰第三代黄金复原蜜完成一次有仪式感的商品登场。', image: '/assets/guerlain-youth-watery-oil-tail.jpg', imageLabel: '娇兰商品尾帧', frameStrategy: '首尾帧生视频',
-    fidelity: '保持娇兰第三代黄金复原蜜的修长矩形瓶型、比例、金属滴管瓶盖、透明暖金色液体、悬浮金珠、蜜蜂标识及包装文字不变。',
-    camera: '9:16 竖版写实商业摄影，中景，透过雾面玻璃橱窗拍摄，固定机位与构图，使用暖金色侧光。',
-    motion: '一只戴浅色手套的手左右擦拭两次玻璃雾气，轨迹连续、幅度克制，全片只执行这一个主动作。',
-    environment: '商品和金色蜂巢背景位置保持稳定，仅允许雾气连续消退与轻微光斑变化，背景不得争夺商品注意力。',
-    result: '雾气完全消失，完整露出娇兰第三代黄金复原蜜正面，瓶型、蜜蜂标识与标签清晰，最后稳定定格 1 秒。',
-    guardrails: '不得生成香水瓶或其他 SKU；不改变瓶型、颜色、金珠、瓶盖、蜜蜂标识及标签位置；不增加字幕、价格、促销信息、水印或第二件商品；手部不畸变，商品不穿模、不闪现、不漂移。', tags: ['娇兰', '护肤', '首尾帧'],
+    id: 'window-reveal', name: '雾面橱窗揭幕', category: '仪式展示', duration: '6–8 秒',
+    hook: '从不可见到清晰可见，让商品登场自带仪式感。', image: '/assets/commerce-hook-reveal.png', imageLabel: '尾帧参考', frameStrategy: '首尾帧生视频',
+    fidelity: '保持香水瓶颜色、透明材质、瓶盖造型和标签文字不变。',
+    camera: '写实中景，透过玻璃橱窗拍摄，镜头静止，暖金色冬日侧光。',
+    motion: '戴手套的手左右擦拭两次玻璃雾气，动作幅度克制且轨迹连续。',
+    environment: '橱窗雪花与礼盒保持稳定，背景光斑轻微闪烁，层次由雾到清晰。',
+    result: '雾气逐渐消失，完整露出商品正面，最后定格 1 秒呈现玻璃质感。',
+    guardrails: '无人物露脸；擦拭不遮挡标签；首尾帧构图、光影和商品位置一致。', tags: ['香氛', '礼赠', '高质感'],
   },
   {
     id: 'one-click', name: '一键取物', category: '动作魔法', duration: '4–6 秒',
@@ -79,65 +74,3 @@ export const hookStoryboard = [
   { time: '00:01.5–00:04.0', name: '完成变化', detail: '只执行一个主动作，环境运动作为辅助信号。' },
   { time: '00:04.0–00:06.0', name: '商品定格', detail: '正面、文字和结果清晰可见，为后续正片留出拼接点。' },
 ]
-
-const guerlainFidelity = '保持娇兰第三代黄金复原蜜的修长矩形瓶型、比例、金属滴管瓶盖、透明暖金色液体、悬浮金珠、蜜蜂标识及包装文字不变。'
-const guerlainGuardrails = '不得生成香水瓶或其他 SKU；不改变瓶型、颜色、金珠、瓶盖、蜜蜂标识及标签位置；不增加字幕、价格、促销信息、水印或第二件商品；手部不畸变，商品不穿模、不闪现、不漂移。'
-
-export function commerceTemplateApiId(id: string) {
-  return `commerce.${id}` as
-    | 'commerce.product-cut'
-    | 'commerce.window-reveal'
-    | 'commerce.one-click'
-    | 'commerce.miniature'
-    | 'commerce.device-summon'
-}
-
-export function guerlainPromptCopy(templateId: string): CommerceHookPromptCopy {
-  switch (templateId) {
-    case 'product-cut':
-      return {
-        fidelity: guerlainFidelity,
-        camera: '9:16 竖版写实商业微距摄影，娇兰商品固定居中，暖金色侧光突出透明瓶身和悬浮金珠。',
-        motion: '刀具只切开商品旁侧的半透明蜂蜜凝胶介质，展示金色细腻截面，全程不接触、不切割商品瓶身。',
-        environment: '金色蜂巢背景和商品位置保持稳定，只允许凝胶产生少量真实切面变化。',
-        result: '刀具退出，娇兰第三代黄金复原蜜正面与蜂蜜凝胶截面共同清晰定格。',
-        guardrails: `${guerlainGuardrails} 不得切割、击碎或打开商品包装。`,
-      }
-    case 'one-click':
-      return {
-        fidelity: guerlainFidelity,
-        camera: '9:16 竖版中近景，暖金色梳妆台场景，固定机位，商品出现路径连续可读。',
-        motion: '一只戴浅色手套的手完成一次按压，闭合展示位平稳打开，娇兰商品沿固定路径升起。',
-        environment: '梳妆台与蜂巢装饰位置保持稳定，不生成手机界面或不存在的电子功能。',
-        result: '手部离开，娇兰第三代黄金复原蜜回到画面中心，正面朝向镜头稳定定格。',
-        guardrails: guerlainGuardrails,
-      }
-    case 'miniature':
-      return {
-        fidelity: guerlainFidelity,
-        camera: '9:16 竖版移轴微缩摄影，商品为最大尺度主体，暖金色浅景深，微缩元素不遮挡标签。',
-        motion: '微缩角色围绕瓶身完成一次连续的金色光泽与蜂蜜质感演示，只表现 Brief 已确认的修护与焕亮卖点。',
-        environment: '微缩活动只发生在瓶身周边安全区域，不触碰、不覆盖商品和品牌标识。',
-        result: '微缩动作停止并退居辅助位置，娇兰第三代黄金复原蜜完整正面稳定定格。',
-        guardrails: `${guerlainGuardrails} 不生成医疗结果、绝对功效或 Brief 未确认的数据。`,
-      }
-    case 'device-summon':
-      return {
-        fidelity: guerlainFidelity,
-        camera: '9:16 竖版中景，暖金色梳妆台与展示柜场景，固定机位，商品出现过程无遮挡。',
-        motion: '梳妆台展示抽屉完成一次机械滑出，娇兰商品随托台平稳升起并转向正面。',
-        environment: '只使用符合美妆品类的真实梳妆台装置，不生成电子屏幕、应用界面或虚构功能。',
-        result: '装置停止，娇兰第三代黄金复原蜜完整正面朝向镜头并稳定定格。',
-        guardrails: guerlainGuardrails,
-      }
-    default:
-      return {
-        fidelity: guerlainFidelity,
-        camera: '9:16 竖版写实商业摄影，中景，透过雾面玻璃橱窗拍摄，固定机位与构图，使用暖金色侧光。',
-        motion: '一只戴浅色手套的手左右擦拭玻璃，雾气连续消退，全片只执行这一个主动作。',
-        environment: '商品和金色蜂巢背景位置保持稳定，仅允许雾气连续消退与轻微光斑变化。',
-        result: '雾气完全消失，完整露出娇兰第三代黄金复原蜜正面，瓶型、蜜蜂标识与标签清晰，最后稳定定格。',
-        guardrails: guerlainGuardrails,
-      }
-  }
-}
