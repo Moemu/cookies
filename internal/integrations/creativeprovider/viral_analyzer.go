@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,51 +71,51 @@ func NewViralAnalyzer(config ViralAnalyzerConfig) (*ViralAnalyzer, error) {
 
 func (a *ViralAnalyzer) Analyze(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request creative.ViralAnalysisRequest) (creative.ViralAnalysisResult, error) {
 	if strings.TrimSpace(request.TaskID) == "" || request.InputSnapshot.ReferenceVideo.Validate() != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("viral analysis request is invalid")
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisSourceUnavailable, "reference video is invalid")
 	}
 	video, _, err := a.config.Assets.OpenPreview(ctx, actor, projectID, request.InputSnapshot.ReferenceVideo)
 	if err != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("open viral reference video: %w", err)
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisSourceUnavailable, "reference video cannot be opened")
 	}
 	defer video.Close()
 	if err := os.MkdirAll(a.config.WorkRoot, 0o750); err != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("prepare viral analysis work root: %w", err)
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "temporary workspace cannot be prepared")
 	}
 	workDir, err := os.MkdirTemp(a.config.WorkRoot, "viral-analysis-*")
 	if err != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("create viral analysis work directory: %w", err)
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "temporary workspace cannot be created")
 	}
 	defer os.RemoveAll(workDir)
 	videoPath := filepath.Join(workDir, "source.mp4")
 	file, err := os.Create(videoPath)
 	if err != nil {
-		return creative.ViralAnalysisResult{}, err
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "reference video cannot be staged")
 	}
 	if _, err = io.Copy(file, video); err != nil {
 		file.Close()
-		return creative.ViralAnalysisResult{}, err
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "reference video cannot be staged")
 	}
 	if err := file.Close(); err != nil {
-		return creative.ViralAnalysisResult{}, err
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "reference video cannot be staged")
 	}
 	transcript, asrEvidence := a.extractTranscript(ctx, videoPath, workDir)
 	frames, frameEvidence, err := a.extractFrames(ctx, videoPath, workDir)
 	if err != nil {
-		return creative.ViralAnalysisResult{}, err
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "reference video frames cannot be extracted")
 	}
 	if len(frames) == 0 {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("reference video produced no analyzable frames")
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisPreparationFailed, "reference video has no analyzable frames")
 	}
 	route, err := a.config.Routes.ResolveTextRoute(ctx, actor.OrganizationID, a.config.ModelAlias)
 	if err != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("resolve Seed-2-pro route: %w", err)
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisProviderUnavailable, "model route is unavailable")
 	}
 	if err := route.ValidateTextWithPolicy(a.config.AllowInsecureHTTP); err != nil {
-		return creative.ViralAnalysisResult{}, err
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisProviderUnavailable, "model route is invalid")
 	}
 	token, err := a.config.Credentials.ResolveGatewayCredential(ctx, route.CredentialID, route.CredentialVersion)
 	if err != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("resolve Seed-2-pro credential: %w", err)
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisProviderUnavailable, "model credential is unavailable")
 	}
 	result, err := a.callVisionModel(ctx, route, token, request, transcript, frames)
 	if err != nil {
@@ -274,15 +275,18 @@ func (a *ViralAnalyzer) callVisionModel(ctx context.Context, route provider.Gate
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := a.config.Client.Do(httpRequest)
 	if err != nil {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("Seed-2-pro analysis request failed: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisProviderUnavailable, "model request timed out")
+		}
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisProviderUnavailable, "model gateway request failed")
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, route.MaxResponseBytes+1))
 	if err != nil || int64(len(responseBody)) > route.MaxResponseBytes {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("Seed-2-pro analysis response exceeded the safety limit")
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisResponseInvalid, "model response exceeded the safety limit")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("Seed-2-pro analysis returned HTTP %d", response.StatusCode)
+		return creative.ViralAnalysisResult{}, viralAnalysisHTTPFailure(response.StatusCode)
 	}
 	var envelope struct {
 		Choices []struct {
@@ -292,9 +296,30 @@ func (a *ViralAnalyzer) callVisionModel(ctx context.Context, route provider.Gate
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(responseBody, &envelope); err != nil || len(envelope.Choices) == 0 {
-		return creative.ViralAnalysisResult{}, fmt.Errorf("Seed-2-pro analysis response is invalid")
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisResponseInvalid, "model response envelope is invalid")
 	}
-	return decodeViralAnalysis(envelope.Choices[0].Message.Content)
+	result, err := decodeViralAnalysis(envelope.Choices[0].Message.Content)
+	if err != nil {
+		return creative.ViralAnalysisResult{}, viralAnalysisFailure(creative.ErrViralAnalysisResponseInvalid, "model response does not contain five-dimensional JSON")
+	}
+	return result, nil
+}
+
+func viralAnalysisHTTPFailure(status int) error {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return viralAnalysisFailure(creative.ErrViralAnalysisProviderRejected, "model gateway rejected the credential")
+	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
+		return viralAnalysisFailure(creative.ErrViralAnalysisProviderRejected, "model gateway rejected the visual analysis request")
+	case status == http.StatusTooManyRequests || status >= http.StatusInternalServerError:
+		return viralAnalysisFailure(creative.ErrViralAnalysisProviderUnavailable, "model gateway is temporarily unavailable")
+	default:
+		return viralAnalysisFailure(creative.ErrViralAnalysisProviderRejected, "model gateway rejected the request")
+	}
+}
+
+func viralAnalysisFailure(category error, detail string) error {
+	return fmt.Errorf("%w: %s", category, detail)
 }
 
 func decodeViralAnalysis(content string) (creative.ViralAnalysisResult, error) {

@@ -328,14 +328,7 @@ func main() {
 	}
 	startWorker(workerContext, "shared-runtime", runtimeRunner.RunOnce)
 
-	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.NewWithDependencies(dependencies),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	server := newHTTPServer(cfg.HTTPAddr, httpserver.NewWithDependencies(dependencies))
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -353,6 +346,22 @@ func main() {
 	log.Printf("cookies platform API listening on %s (%s)", cfg.HTTPAddr, cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server stopped unexpectedly: %v", err)
+	}
+}
+
+const modelAwareWriteTimeout = 11 * time.Minute
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// Text model routes may legitimately wait for an upstream provider for
+		// as long as ten minutes. Keep the server response window slightly
+		// larger so net/http does not cut off a successful model response.
+		WriteTimeout: modelAwareWriteTimeout,
+		IdleTimeout:  60 * time.Second,
 	}
 }
 

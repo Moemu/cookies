@@ -1,8 +1,13 @@
 package creativeprovider
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
@@ -26,5 +31,49 @@ func TestDecodeViralAnalysisAcceptsExactlyStructuredSeed2Output(t *testing.T) {
 	if len(result.Dimensions) != 5 || result.Dimensions[0].ID != creative.ViralTaskGoalType ||
 		result.Dimensions[4].Source != "ai_extracted" || len(result.ReplaceRules) != 1 {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestCallVisionModelClassifiesGatewayAndResponseFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		wantError error
+	}{
+		{
+			name: "gateway unavailable", status: http.StatusInternalServerError,
+			body: `{"error":{"message":"upstream failed"}}`, wantError: creative.ErrViralAnalysisProviderUnavailable,
+		},
+		{
+			name: "gateway rejected image input", status: http.StatusUnprocessableEntity,
+			body: `{"error":{"message":"unsupported input"}}`, wantError: creative.ErrViralAnalysisProviderRejected,
+		},
+		{
+			name: "invalid structured response", status: http.StatusOK,
+			body: `{"choices":[{"message":{"content":"not json"}}]}`, wantError: creative.ErrViralAnalysisResponseInvalid,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Path != "/v1/chat/completions" {
+					t.Fatalf("path = %q", request.URL.Path)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(tt.status)
+				_, _ = writer.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			analyzer := ViralAnalyzer{config: ViralAnalyzerConfig{Client: server.Client()}}
+			_, err := analyzer.callVisionModel(context.Background(), provider.GatewayRouteSnapshot{
+				BaseURL: server.URL, UpstreamModel: "seed-2-pro", TimeoutSeconds: 5, MaxResponseBytes: 1024,
+			}, "test-token", creative.ViralAnalysisRequest{}, "", [][]byte{[]byte("frame")})
+			if !errors.Is(err, tt.wantError) {
+				t.Fatalf("error = %v, want category %v", err, tt.wantError)
+			}
+		})
 	}
 }

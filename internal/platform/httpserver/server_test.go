@@ -199,13 +199,17 @@ func TestProviderCapabilitiesExposeRoutesWithoutCredentials(t *testing.T) {
 func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
-		wantCode   string
+		name          string
+		err           error
+		wantStatus    int
+		wantCode      string
+		wantRetryable bool
 	}{
 		{name: "invalid state", err: creative.ErrInvalidState, wantStatus: http.StatusConflict, wantCode: "INVALID_STATE"},
 		{name: "stale version", err: creative.ErrVersionConflict, wantStatus: http.StatusPreconditionFailed, wantCode: "CREATIVE_VERSION_CONFLICT"},
+		{name: "viral source unavailable", err: creative.ErrViralAnalysisSourceUnavailable, wantStatus: http.StatusUnprocessableEntity, wantCode: "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE"},
+		{name: "viral provider unavailable", err: creative.ErrViralAnalysisProviderUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", wantRetryable: true},
+		{name: "viral invalid response", err: creative.ErrViralAnalysisResponseInvalid, wantStatus: http.StatusBadGateway, wantCode: "VIRAL_ANALYSIS_RESPONSE_INVALID", wantRetryable: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -226,8 +230,8 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 			if problem.Error.Code != tt.wantCode {
 				t.Fatalf("code = %q, want %q", problem.Error.Code, tt.wantCode)
 			}
-			if problem.Error.Retryable {
-				t.Fatal("creative domain conflict must not be retryable without refreshing state")
+			if problem.Error.Retryable != tt.wantRetryable {
+				t.Fatalf("retryable = %t, want %t", problem.Error.Retryable, tt.wantRetryable)
 			}
 		})
 	}

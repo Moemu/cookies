@@ -1772,6 +1772,16 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The Creative resource is not in a valid state for this operation.", false
 	case errors.Is(err, creative.ErrVersionConflict):
 		status, code, message, retryable = http.StatusPreconditionFailed, "CREATIVE_VERSION_CONFLICT", "The Creative draft changed. Refresh the task and try again.", false
+	case errors.Is(err, creative.ErrViralAnalysisSourceUnavailable):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE", "爆款源视频不可读取，请重新上传后再拆解。", false
+	case errors.Is(err, creative.ErrViralAnalysisPreparationFailed):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "VIRAL_ANALYSIS_VIDEO_UNREADABLE", "源视频无法抽帧分析，请上传可正常播放的视频后重试。", false
+	case errors.Is(err, creative.ErrViralAnalysisProviderRejected):
+		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_REQUEST_REJECTED", "视觉分析模型拒绝了本次请求，请检查模型配置或更换源视频。", false
+	case errors.Is(err, creative.ErrViralAnalysisProviderUnavailable):
+		status, code, message, retryable = http.StatusServiceUnavailable, "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", "视觉分析模型网关暂时不可用，请稍后重试。", true
+	case errors.Is(err, creative.ErrViralAnalysisResponseInvalid):
+		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_RESPONSE_INVALID", "视觉分析模型未返回可用的五维拆解结果，请稍后重试。", true
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
 	case errors.Is(err, project.ErrVersionConflict):

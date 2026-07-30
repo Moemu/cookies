@@ -15,6 +15,14 @@ var (
 	ErrProviderJobConflict = errors.New("production job already registered with a different provider job")
 	ErrVersionConflict     = errors.New("creative resource version conflict")
 	ErrInvalidState        = errors.New("creative resource is not in a state that allows this action")
+	// Viral analysis failures are intentionally classified at the domain seam so
+	// HTTP clients can distinguish a retryable model-gateway issue from an
+	// invalid or unreadable source video without receiving provider internals.
+	ErrViralAnalysisSourceUnavailable   = errors.New("viral analysis source video is unavailable")
+	ErrViralAnalysisPreparationFailed   = errors.New("viral analysis video preparation failed")
+	ErrViralAnalysisProviderUnavailable = errors.New("viral analysis provider is unavailable")
+	ErrViralAnalysisProviderRejected    = errors.New("viral analysis provider rejected the request")
+	ErrViralAnalysisResponseInvalid     = errors.New("viral analysis provider returned an invalid response")
 )
 
 type Repository interface {
