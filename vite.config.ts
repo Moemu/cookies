@@ -10,6 +10,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/api/delivery': platformProxyTarget,
       '/api': compatibilityApiProxyTarget,
       '/platform': platformProxyTarget,
     },

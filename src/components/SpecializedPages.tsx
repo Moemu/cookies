@@ -9,6 +9,8 @@ import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
 import { industryProfile } from '../data/industry-profiles'
 
+export { DeliveryPlanLifecyclePage as DeliveryPlanPage } from './DeliveryPlanLifecyclePage'
+
 function IndustrySchema({ module, profile, industry }: { module: string; industry: string; profile: { fields: string[]; format: string } }) {
   return <section className="industry-schema" aria-label={`${industry}${module}配置`}>
     <span>{industry} · {module}</span><b>{profile.format}</b>
@@ -1029,7 +1031,7 @@ function gateGroupsPassed(groups: DeliveryGateGroup[]) {
   return groups.every(group => group.checks.every(check => check.passed))
 }
 
-export function DeliveryPlanPage({ state }: { state: DataState }) {
+function LegacyDeliveryPlanPage({ state }: { state: DataState }) {
   const { currentProject, addChangeSet, preflightChangeSet } = useProject()
   const industry = industryProfile(currentProject.industry)
   const [step, setStep] = useState('计划配置')

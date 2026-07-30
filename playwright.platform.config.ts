@@ -1,6 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const apiBaseURL = 'http://127.0.0.1:18080'
+const mysqlCommand = process.platform === 'win32'
+  ? `wsl.exe --cd "${process.cwd()}" bash -lc "docker compose up -d --wait mysql"`
+  : 'docker compose up -d --wait mysql'
+const localChromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
 
 const localGoEnv = {
   COOKIES_ENV: 'local',
@@ -15,6 +19,8 @@ const localGoEnv = {
     'project.write',
     'assets.read',
     'assets.write',
+    'delivery.plan.read',
+    'delivery.plan.write',
     'provider.job.create',
     'provider.text.generate',
     'provider.vision.understand',
@@ -26,7 +32,7 @@ const localGoEnv = {
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /platform-go-demo\.spec\.ts/,
+  testMatch: /(platform-go-demo|delivery-plan-preflight)\.spec\.ts/,
   fullyParallel: false,
   use: {
     baseURL: 'http://127.0.0.1:4174',
@@ -34,7 +40,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'bash -lc "docker compose up -d --wait mysql && go run ./cmd/cookies-seed && go run ./cmd/cookies-api"',
+      command: `${mysqlCommand} && go run ./cmd/cookies-seed && go run ./cmd/cookies-api`,
       url: `${apiBaseURL}/healthz`,
       env: {
         ...process.env,
@@ -44,7 +50,7 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'npm run dev -- --host 127.0.0.1 --port 4174',
+      command: 'node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 4174',
       url: 'http://127.0.0.1:4174',
       env: {
         ...process.env,
@@ -54,5 +60,11 @@ export default defineConfig({
       timeout: 60_000,
     },
   ],
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{
+    name: 'chromium',
+    use: {
+      ...devices['Desktop Chrome'],
+      launchOptions: localChromiumExecutable ? { executablePath: localChromiumExecutable } : undefined,
+    },
+  }],
 })

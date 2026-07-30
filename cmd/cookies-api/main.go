@@ -32,6 +32,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/platform/remix"
 	"github.com/shikanon/cookies/internal/systems/creative"
+	"github.com/shikanon/cookies/internal/systems/delivery"
 	"github.com/shikanon/cookies/internal/systems/strategy"
 )
 
@@ -92,6 +93,10 @@ func main() {
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	rootMux := http.NewServeMux()
+	deliveryService := delivery.Service{Store: delivery.MySQLStore{DB: db}}
+	rootMux.Handle("/api/delivery/v1/", delivery.NewHTTPHandler(delivery.HTTPDependencies{
+		Service: deliveryService, Resolver: resolver, Authorizer: projectStore,
+	}))
 	if cfg.Environment == config.EnvironmentLocal {
 		imageAdapter, err := buildImageAdapter(cfg, db)
 		if err != nil {
