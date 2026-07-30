@@ -272,6 +272,7 @@ export type GenerationMetadata = {
   latency_ms?: number
   validation_attempts: number
   quality_report?: { passed: boolean; score: number; errors: string[]; warnings: string[] }
+  attempts: SkillRunAttempt[]
 }
 
 export type Review = {
@@ -385,6 +386,26 @@ export type SkillRun = {
   latency_ms: number
   validation_attempts: number
   quality_report?: { passed: boolean; score: number; errors: string[]; warnings: string[] }
+  attempts: SkillRunAttempt[]
+}
+
+export type SkillRunAttempt = {
+  attempt_no: number
+  purpose: 'conversation' | 'generate' | 'repair' | 'revise' | 'deep_review' | string
+  provider_code: string
+  model_alias?: string
+  model_version?: string
+  route_revision_id?: string
+  response_mode?: 'json_schema' | 'json_object' | 'prompt_json'
+  api_mode?: string
+  background?: boolean
+  prompt_version?: string
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
+  latency_ms: number
+  validation_passed: boolean
+  validation_errors: string[]
+  output_hash?: string
+  created_at: string
 }
 
 export type SkillDescriptor = {

@@ -1064,6 +1064,8 @@ func writeError(writer http.ResponseWriter, err error) {
 	retryable := true
 	var details []strategy.ValidationError
 	switch {
+	case errors.Is(err, strategy.ErrRevisionScopeAmbiguous):
+		status, code, message, retryable = 400, "REVISION_SCOPE_AMBIGUOUS", "请说明要修改的策略章节或明确要求整体重写", false
 	case errors.Is(err, strategy.ErrInvalidRequest):
 		status, code, message, retryable = 400, "INVALID_REQUEST", "请求参数无效", false
 	case errors.Is(err, strategy.ErrScopeRequired):

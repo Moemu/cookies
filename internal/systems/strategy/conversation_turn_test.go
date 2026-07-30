@@ -114,3 +114,35 @@ func TestConversationGreetingKeepsNaturalReplyAndLimitsQuestions(t *testing.T) {
 		t.Fatalf("questions = %#v", decision.FollowUpQuestions)
 	}
 }
+
+func TestConversationDecisionOutputSchemaUsesStrictCompatibleTypes(t *testing.T) {
+	t.Parallel()
+	var schema map[string]any
+	if err := json.Unmarshal(conversationDecisionOutputSchema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	if properties["intent"].(map[string]any)["type"] != "string" {
+		t.Fatal("intent enum must declare its string type")
+	}
+	operationProperties := properties["operations"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	for _, name := range []string{"op", "field_path", "confidence"} {
+		if operationProperties[name].(map[string]any)["type"] != "string" {
+			t.Fatalf("operation property %q must declare its string type", name)
+		}
+	}
+	value := operationProperties["value"].(map[string]any)
+	if _, ok := value["anyOf"]; !ok {
+		t.Fatal("operation value must use anyOf")
+	}
+	if _, ok := value["oneOf"]; ok {
+		t.Fatal("operation value must not use oneOf")
+	}
+	if properties["confirm_fields"].(map[string]any)["items"].(map[string]any)["type"] != "string" {
+		t.Fatal("confirm_fields items must declare their string type")
+	}
+	questionProperties := properties["follow_up_questions"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	if questionProperties["field_path"].(map[string]any)["type"] != "string" {
+		t.Fatal("follow-up field_path must declare its string type")
+	}
+}

@@ -10,6 +10,7 @@ import {
   ExternalLink,
   FileText,
   LoaderCircle,
+  LockKeyhole,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -70,14 +71,17 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
   }
 
   const lifecycleLocked = Boolean(state.detail.current_task.discarded_at || state.draft?.archived_at)
-  return <div className="kanon-strategy-root">
+  const showSummaryRail = activeView === '概览' || activeView === '评审'
+  const showEvidenceRail = activeView === '研究' || activeView === '策略'
+  const railMode = showSummaryRail ? 'rail-summary' : showEvidenceRail ? 'rail-evidence' : 'rails-none'
+  return <div className={`kanon-strategy-root${activeView === '对话' ? ' conversation-active' : ''}`}>
     {state.error ? <div className="kanon-strategy-alert" role="alert">
       <AlertCircle size={15}/><span>{state.error}</span>
       <button aria-label="重新加载策略工作区" onClick={() => void actions.reload()}><RefreshCw size={14}/></button>
     </div> : null}
     {lifecycleLocked ? <div className="kanon-lifecycle-banner" role="status"><Archive size={15}/><span><b>{state.detail.current_task.discarded_at ? '任务已废弃' : '策略已归档'}</b>当前工作区为只读，完整对话、Brief、策略版本和评审记录均已保留。请从“策略任务 → 已归档”恢复后继续操作。</span></div> : null}
     <div className="kanon-workspace-contextbar">
-      <div><span>当前工作链</span><strong>{state.detail.workspace.name}</strong><small>{state.detail.current_task.status === 'completed' ? '已完成' : '持续保存'}</small></div>
+      <div><span>当前工作链</span><strong>{state.detail.workspace.name}</strong><small><LockKeyhole size={12}/>已锁定到当前 Project</small></div>
       <label><span>切换工作区</span><select
         aria-label="切换策略工作区"
         value={state.detail.workspace.id}
@@ -88,7 +92,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
       >{state.workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}{workspace.is_primary ? ' · 主工作区' : ''}</option>)}</select></label>
       <button className="icon-button" aria-label="刷新当前策略工作区" disabled={Boolean(state.busy)} onClick={() => void actions.reload()}><RefreshCw size={15}/></button>
     </div>
-    <div className="kanon-strategy-workspace">
+    <div className={`kanon-strategy-workspace ${railMode}`}>
       <main className="kanon-strategy-main">
         <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
         {activeView === '概览' ? <OverviewPane state={state}/> : null}
@@ -151,19 +155,19 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
         /> : null}
         </fieldset>
       </main>
-      <SummaryRail
+      {showSummaryRail ? <SummaryRail
         brief={state.brief}
         briefVersion={state.briefVersion?.version}
         draft={state.draft}
         publishedVersion={state.published?.version}
         review={state.review}
         workspaceName={state.detail.workspace.name}
-      />
-      <EvidenceRail
+      /> : null}
+      {showEvidenceRail ? <EvidenceRail
         documents={state.documents}
         referenceIds={state.brief?.document.reference_ids ?? []}
         researchArtifacts={state.researchRun?.artifacts ?? []}
-      />
+      /> : null}
     </div>
   </div>
 }

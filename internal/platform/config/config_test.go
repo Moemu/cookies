@@ -14,9 +14,14 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	}
 	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
 		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
+		!value.Strategy.ContextSelectionEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
 		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
-		value.Strategy.PromptVersion != "strategy.generate.v2" ||
+		value.Strategy.PromptVersion != "strategy.generate.v3" ||
+		value.Strategy.ConversationPromptVersion != "strategy.conversation.v4" ||
+		value.Strategy.RevisePromptVersion != "strategy.revise.v3" ||
+		value.Strategy.ReviewPromptVersion != "strategy.review.deep.v2" ||
+		value.Strategy.RepairPromptVersion != "strategy.repair.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
 	}
@@ -28,6 +33,43 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	}
 	if value.Provider.AudioAdapter != "fake" {
 		t.Fatalf("unexpected audio adapter default: %q", value.Provider.AudioAdapter)
+	}
+}
+
+func TestStrategyRejectsUnknownPromptVersion(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_STRATEGY_REVIEW_PROMPT_VERSION": "strategy.review.deep.unknown",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_REVIEW_PROMPT_VERSION") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestProductionKeepsPreviousStrategyPromptDefaults(t *testing.T) {
+	t.Parallel()
+	values := secureProductionValues()
+	config, err := FromLookup(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Strategy.PromptVersion != "strategy.generate.v2" ||
+		config.Strategy.ConversationPromptVersion != "strategy.conversation.v3" ||
+		config.Strategy.RevisePromptVersion != "strategy.revise.v2" ||
+		config.Strategy.ReviewPromptVersion != "strategy.review.deep.v1" ||
+		config.Strategy.RepairPromptVersion != "strategy.repair.v1" ||
+		config.Strategy.ContextSelectionEnabled {
+		t.Fatalf("production prompt defaults = %#v", config.Strategy)
+	}
+}
+
+func TestStrategyContextSelectionRejectsInvalidBoolean(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED": "sometimes",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

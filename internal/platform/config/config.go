@@ -84,16 +84,21 @@ type Media struct {
 // Package-to-Creative permits only the explicit package-to-Intake handoff;
 // approval never creates a Creative task implicitly.
 type Strategy struct {
-	Enabled                  bool
-	V2Enabled                bool
-	RealProviderEnabled      bool
-	ApproveEnabled           bool
-	PackageToCreativeEnabled bool
-	TextModelAlias           string
-	DeepReviewModelAlias     string
-	PromptVersion            string
-	CriticEnabled            bool
-	OrganizationAllowlist    []string
+	Enabled                   bool
+	V2Enabled                 bool
+	RealProviderEnabled       bool
+	ApproveEnabled            bool
+	PackageToCreativeEnabled  bool
+	TextModelAlias            string
+	DeepReviewModelAlias      string
+	PromptVersion             string
+	ConversationPromptVersion string
+	RevisePromptVersion       string
+	ReviewPromptVersion       string
+	RepairPromptVersion       string
+	CriticEnabled             bool
+	ContextSelectionEnabled   bool
+	OrganizationAllowlist     []string
 }
 
 // Research configures an optional backend-owned MCP stdio client. The browser
@@ -266,6 +271,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	strategyContextSelectionEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED",
+		environment == EnvironmentLocal || environment == EnvironmentTest,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	passwordAuthEnabled, err := strictBoolValueOr(
 		lookup,
 		"COOKIES_PASSWORD_AUTH_ENABLED",
@@ -277,6 +290,18 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	strategyV2Enabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_V2_ENABLED", true)
 	if err != nil {
 		return Config{}, err
+	}
+	generatePromptDefault := "strategy.generate.v2"
+	conversationPromptDefault := "strategy.conversation.v3"
+	revisePromptDefault := "strategy.revise.v2"
+	reviewPromptDefault := "strategy.review.deep.v1"
+	repairPromptDefault := "strategy.repair.v1"
+	if environment == EnvironmentLocal || environment == EnvironmentTest {
+		generatePromptDefault = "strategy.generate.v3"
+		conversationPromptDefault = "strategy.conversation.v4"
+		revisePromptDefault = "strategy.revise.v3"
+		reviewPromptDefault = "strategy.review.deep.v2"
+		repairPromptDefault = "strategy.repair.v2"
 	}
 	config := Config{
 		Environment: environment,
@@ -310,16 +335,21 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			VideoWorkRoot: valueOr(lookup, "COOKIES_VIDEO_WORK_ROOT", ".data/video-work"),
 		},
 		Strategy: Strategy{
-			Enabled:                  strategyEnabled,
-			V2Enabled:                strategyV2Enabled,
-			RealProviderEnabled:      strategyRealProviderEnabled,
-			ApproveEnabled:           strategyApproveEnabled,
-			PackageToCreativeEnabled: strategyPackageToCreativeEnabled,
-			TextModelAlias:           valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
-			DeepReviewModelAlias:     valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
-			PromptVersion:            valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", "strategy.generate.v2"),
-			CriticEnabled:            strategyCriticEnabled,
-			OrganizationAllowlist:    splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
+			Enabled:                   strategyEnabled,
+			V2Enabled:                 strategyV2Enabled,
+			RealProviderEnabled:       strategyRealProviderEnabled,
+			ApproveEnabled:            strategyApproveEnabled,
+			PackageToCreativeEnabled:  strategyPackageToCreativeEnabled,
+			TextModelAlias:            valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
+			DeepReviewModelAlias:      valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
+			PromptVersion:             valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", generatePromptDefault),
+			ConversationPromptVersion: valueOr(lookup, "COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION", conversationPromptDefault),
+			RevisePromptVersion:       valueOr(lookup, "COOKIES_STRATEGY_REVISE_PROMPT_VERSION", revisePromptDefault),
+			ReviewPromptVersion:       valueOr(lookup, "COOKIES_STRATEGY_REVIEW_PROMPT_VERSION", reviewPromptDefault),
+			RepairPromptVersion:       valueOr(lookup, "COOKIES_STRATEGY_REPAIR_PROMPT_VERSION", repairPromptDefault),
+			CriticEnabled:             strategyCriticEnabled,
+			ContextSelectionEnabled:   strategyContextSelectionEnabled,
+			OrganizationAllowlist:     splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
 		},
 		Research: Research{
 			MCPStdioCommand:    strings.TrimSpace(valueOr(lookup, "COOKIES_RESEARCH_MCP_STDIO_COMMAND", "")),
@@ -476,6 +506,33 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Strategy.PromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION must not be empty")
 	}
+	if !oneOf(c.Strategy.PromptVersion, "strategy.generate.v2", "strategy.generate.v3") {
+		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.ConversationPromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.ConversationPromptVersion, "strategy.conversation.v3", "strategy.conversation.v4") {
+		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.RevisePromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_REVISE_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.RevisePromptVersion, "strategy.revise.v2", "strategy.revise.v3") {
+		return fmt.Errorf("COOKIES_STRATEGY_REVISE_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.ReviewPromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_REVIEW_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.ReviewPromptVersion, "strategy.review.deep.v1", "strategy.review.deep.v2") {
+		return fmt.Errorf("COOKIES_STRATEGY_REVIEW_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.RepairPromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_REPAIR_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.RepairPromptVersion, "strategy.repair.v1", "strategy.repair.v2") {
+		return fmt.Errorf("COOKIES_STRATEGY_REPAIR_PROMPT_VERSION is unsupported")
+	}
 	if c.Strategy.CriticEnabled && !c.Strategy.RealProviderEnabled {
 		return fmt.Errorf("COOKIES_STRATEGY_CRITIC_ENABLED requires COOKIES_STRATEGY_REAL_PROVIDER_ENABLED=true")
 	}
@@ -551,6 +608,15 @@ func (c Config) Validate() error {
 		return fmt.Errorf("local identity requires organization, principal kind, principal ID, and project ID")
 	}
 	return nil
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if strings.TrimSpace(value) == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func valueOr(lookup func(string) (string, bool), key, fallback string) string {

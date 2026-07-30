@@ -104,10 +104,10 @@ func Evaluate(testCase Case, document strategy.StrategyDocument) Score {
 	} else {
 		score.Failures = append(score.Failures, "measurement is incomplete")
 	}
-	if coversChannels(testCase.Channels, document.ChannelStrategy) {
+	if coversChannels(testCase.Channels, document.ChannelStrategy) && platformPlansAreDistinct(document.PlatformPlans) {
 		score.PlatformAdaptation = 1
 	} else {
-		score.Failures = append(score.Failures, "channel mismatch")
+		score.Failures = append(score.Failures, "channel mismatch or duplicated platform plans")
 	}
 	encoded, _ := json.Marshal(document)
 	for _, signal := range testCase.ExpectedSignals {
@@ -117,6 +117,26 @@ func Evaluate(testCase Case, document strategy.StrategyDocument) Score {
 	}
 	score.Total = score.BriefAlignment + score.Specificity + score.Executability + score.Measurement + score.PlatformAdaptation
 	return score
+}
+
+func platformPlansAreDistinct(values []strategy.PlatformPlan) bool {
+	if len(values) < 2 {
+		return true
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		signature := strings.ToLower(strings.TrimSpace(value.Role)) + "\x00" +
+			strings.ToLower(strings.TrimSpace(value.AudienceAngle)) + "\x00" +
+			strings.Join(value.ContentPillars, "\x00") + "\x00" +
+			strings.Join(value.Formats, "\x00") + "\x00" +
+			strings.ToLower(strings.TrimSpace(value.ConversionPath)) + "\x00" +
+			strings.Join(value.CreativeIdeas, "\x00")
+		if _, ok := seen[signature]; ok {
+			return false
+		}
+		seen[signature] = struct{}{}
+	}
+	return true
 }
 
 func containsFold(value, candidate string) bool {

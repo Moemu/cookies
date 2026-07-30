@@ -447,8 +447,28 @@ type SkillRun struct {
 	LatencyMS             int64                   `json:"latency_ms"`
 	ValidationAttempts    int                     `json:"validation_attempts"`
 	QualityReport         *QualityReport          `json:"quality_report,omitempty"`
+	Attempts              []SkillRunAttempt       `json:"attempts"`
 	StartedAt             time.Time               `json:"started_at"`
 	CompletedAt           time.Time               `json:"completed_at"`
+}
+
+type SkillRunAttempt struct {
+	AttemptNo        int                       `json:"attempt_no"`
+	Purpose          string                    `json:"purpose"`
+	ProviderCode     string                    `json:"provider_code"`
+	ModelAlias       string                    `json:"model_alias,omitempty"`
+	ModelVersion     string                    `json:"model_version,omitempty"`
+	RouteRevisionID  string                    `json:"route_revision_id,omitempty"`
+	ResponseMode     provider.TextResponseMode `json:"response_mode,omitempty"`
+	APIMode          provider.TextAPIMode      `json:"api_mode,omitempty"`
+	Background       bool                      `json:"background,omitempty"`
+	PromptVersion    string                    `json:"prompt_version,omitempty"`
+	Usage            *provider.TokenUsage      `json:"usage,omitempty"`
+	LatencyMS        int64                     `json:"latency_ms"`
+	ValidationPassed bool                      `json:"validation_passed"`
+	ValidationErrors []string                  `json:"validation_errors"`
+	OutputHash       string                    `json:"output_hash,omitempty"`
+	CreatedAt        time.Time                 `json:"created_at"`
 }
 
 type DraftRevision struct {
@@ -551,11 +571,15 @@ type ReviewComment struct {
 }
 
 type DeepReviewFinding struct {
-	Severity       string `json:"severity"`
-	Section        string `json:"section"`
-	Title          string `json:"title"`
-	Detail         string `json:"detail"`
-	Recommendation string `json:"recommendation"`
+	Severity       string   `json:"severity"`
+	Section        string   `json:"section"`
+	CheckType      string   `json:"check_type,omitempty"`
+	StrategyPath   string   `json:"strategy_path,omitempty"`
+	Title          string   `json:"title"`
+	Detail         string   `json:"detail"`
+	Recommendation string   `json:"recommendation"`
+	BriefRefs      []string `json:"brief_refs,omitempty"`
+	EvidenceRefs   []string `json:"evidence_refs,omitempty"`
 }
 
 type DeepReviewAnalysis struct {

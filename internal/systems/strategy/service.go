@@ -34,20 +34,26 @@ type KnowledgeReader interface {
 }
 
 type Service struct {
-	DB                   *sql.DB
-	Projects             ProjectReader
-	Knowledge            KnowledgeReader
-	Agents               agent.TransactionalTaskWriter
-	Text                 *provider.Service
-	TextModelAlias       string
-	DeepReviewModelAlias string
-	PromptVersion        string
-	CriticEnabled        bool
-	V2Enabled            bool
-	DisableApproval      bool
-	AllowedOrganizations map[contract.OrganizationID]struct{}
-	NewID                func(string) (string, error)
-	Now                  func() time.Time
+	DB                        *sql.DB
+	Projects                  ProjectReader
+	Knowledge                 KnowledgeReader
+	Agents                    agent.TransactionalTaskWriter
+	Text                      *provider.Service
+	TextModelAlias            string
+	DeepReviewModelAlias      string
+	PromptVersion             string
+	ConversationPromptVersion string
+	RevisePromptVersion       string
+	ReviewPromptVersion       string
+	RepairPromptVersion       string
+	CriticEnabled             bool
+	ContextSelectionEnabled   bool
+	ContextSelector           ContextSelector
+	V2Enabled                 bool
+	DisableApproval           bool
+	AllowedOrganizations      map[contract.OrganizationID]struct{}
+	NewID                     func(string) (string, error)
+	Now                       func() time.Time
 }
 
 func (s Service) now() time.Time {
@@ -685,7 +691,11 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	}
 	now := s.now()
 	message := Message{ID: messageID, OrganizationID: actor.OrganizationID, ProjectID: conversation.ProjectID, ConversationID: conversationID, Role: "user", ContentType: "text", Content: request.Content, CreatedBy: actor.Principal.ID, CreatedAt: now}
-	input, _ := snapshotJSON(map[string]string{"strategy_task_id": task.ID, "message_id": message.ID})
+	input, _ := snapshotJSON(map[string]string{
+		"strategy_task_id": task.ID,
+		"message_id":       message.ID,
+		"prompt_version":   s.conversationPromptVersion(),
+	})
 	agentTask := agent.Task{ID: agentTaskID, OrganizationID: actor.OrganizationID, ProjectID: conversation.ProjectID, SourceSystem: "strategy", SourceType: "strategy_task", SourceID: task.ID, Kind: AgentKindBriefExtract, Status: agent.TaskDispatchPending, Version: 1, InputSnapshot: input, CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {

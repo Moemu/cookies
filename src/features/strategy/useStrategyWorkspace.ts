@@ -63,6 +63,37 @@ function agentFailureMessage(code?: string, message?: string) {
   return message || '本轮 Strategy Agent 任务未完成。'
 }
 
+const recentWorkspaceKey = 'cookies.strategy-workspace-selection.v1'
+
+function readRememberedWorkspace(projectId: string) {
+  try {
+    const raw = window.localStorage.getItem(recentWorkspaceKey)
+    if (!raw) return ''
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return ''
+    const workspaceId = (parsed as Record<string, unknown>)[projectId]
+    return typeof workspaceId === 'string' ? workspaceId : ''
+  } catch {
+    return ''
+  }
+}
+
+function rememberWorkspace(projectId: string, workspaceId: string) {
+  try {
+    const raw = window.localStorage.getItem(recentWorkspaceKey)
+    const parsed = raw ? JSON.parse(raw) as unknown : {}
+    const current = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+    window.localStorage.setItem(recentWorkspaceKey, JSON.stringify({
+      ...current,
+      [projectId]: workspaceId,
+    }))
+  } catch {
+    // Workspace selection is a navigation preference and must not block loading.
+  }
+}
+
 export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '') {
   const [state, setState] = useState<StrategyWorkspaceState>({
     workspaces: [],
@@ -96,9 +127,14 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     const workspaceResult = await strategyApi.listWorkspaces(projectId, signal)
     const workspaces = [...workspaceResult.items].sort((left, right) =>
       Number(right.is_primary) - Number(left.is_primary) || right.version - left.version)
+    const rememberedWorkspaceId = readRememberedWorkspace(projectId)
+    const validRememberedWorkspaceId = workspaces.some(workspace => workspace.id === rememberedWorkspaceId)
+      ? rememberedWorkspaceId
+      : ''
     const targetId = requestedWorkspaceId
       || preferredWorkspaceId
       || currentWorkspaceId.current
+      || validRememberedWorkspaceId
       || workspaces.find(workspace => workspace.is_primary)?.id
       || workspaces[0]?.id
       || ''
@@ -127,6 +163,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     currentWorkspaceId.current = targetId
     const detail = await strategyApi.getWorkspace(targetId, signal)
     if (detail.workspace.project_id !== projectId) throw new Error('策略工作区不属于当前 Project。')
+    rememberWorkspace(projectId, detail.workspace.id)
     const conversation = detail.current_conversation
     const task = detail.current_task
 

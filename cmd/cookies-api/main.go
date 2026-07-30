@@ -231,18 +231,24 @@ func main() {
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
-			PromptVersion: cfg.Strategy.PromptVersion,
-			CriticEnabled: cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
-			DisableApproval:      !cfg.Strategy.ApproveEnabled,
-			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+			PromptVersion:             cfg.Strategy.PromptVersion,
+			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
+			RevisePromptVersion:       cfg.Strategy.RevisePromptVersion,
+			ReviewPromptVersion:       cfg.Strategy.ReviewPromptVersion,
+			RepairPromptVersion:       cfg.Strategy.RepairPromptVersion,
+			CriticEnabled:             cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
+			ContextSelectionEnabled: cfg.Strategy.ContextSelectionEnabled,
+			DisableApproval:         !cfg.Strategy.ApproveEnabled,
+			AllowedOrganizations:    strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
 		}
 		generationMode := "deterministic"
 		if cfg.Strategy.RealProviderEnabled {
 			generationMode = "provider"
 		}
 		log.Printf(
-			"Strategy generation configured: mode=%s model_alias=%s prompt_version=%s critic_enabled=%t",
+			"Strategy generation configured: mode=%s model_alias=%s prompt_version=%s critic_enabled=%t context_selection_enabled=%t",
 			generationMode, cfg.Strategy.TextModelAlias, cfg.Strategy.PromptVersion, cfg.Strategy.CriticEnabled,
+			cfg.Strategy.ContextSelectionEnabled,
 		)
 		// This adapter is the only Strategy-to-Creative connection. It reads an
 		// immutable, authorized Strategy package and leaves Creative to persist

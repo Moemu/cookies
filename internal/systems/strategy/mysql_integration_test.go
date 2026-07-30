@@ -278,7 +278,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatalf("get generation metadata: %v", err)
 	}
 	if metadata.GenerationMode != "deterministic" ||
-		metadata.PromptVersion != "strategy.generate.v2" ||
+		metadata.PromptVersion != "strategy.generate.v3" ||
 		len(metadata.SkillVersions) < 3 ||
 		len(metadata.SkillSnapshotHashes) < 2 ||
 		len(metadata.GenerationContextHash) != 64 ||
@@ -306,6 +306,13 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || deepResult.Status != "succeeded" || len(deepResult.Findings) != 1 ||
 		deepResult.APIMode != provider.TextAPIResponses || !deepResult.Background {
 		t.Fatalf("deep review result=%#v err=%v", deepResult, err)
+	}
+	deepSkillRuns, err := service.ListSkillRuns(ctx, actor, deep.AgentTask.ID)
+	if err != nil || len(deepSkillRuns) != 1 || len(deepSkillRuns[0].Attempts) != 1 ||
+		deepSkillRuns[0].Attempts[0].Purpose != "deep_review" ||
+		!deepSkillRuns[0].Attempts[0].ValidationPassed ||
+		len(deepSkillRuns[0].Attempts[0].OutputHash) != 64 {
+		t.Fatalf("deep review skill attempts=%#v err=%v", deepSkillRuns, err)
 	}
 	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{alwaysFail: true}}
 	failedDeep, duplicate, err := service.StartDeepReview(
@@ -719,7 +726,7 @@ func (a *deepReviewTextAdapter) GenerateText(
 			Code: "MODEL_RATE_LIMITED", Message: "retry deep review", Retryable: true,
 		}}
 	}
-	output := json.RawMessage(`{"summary":"候选策略具备基础可执行性。","findings":[{"severity":"warning","section":"measurement","title":"指标需要收敛","detail":"核心指标与渠道指标的归因窗口尚未明确。","recommendation":"补充统一归因窗口与渠道分解口径。"}]}`)
+	output := json.RawMessage(`{"summary":"候选策略具备基础可执行性。","findings":[{"severity":"warning","section":"measurement","check_type":"measurement","strategy_path":"measurement","title":"指标需要收敛","detail":"核心指标与渠道指标的归因窗口尚未明确。","recommendation":"补充统一归因窗口与渠道分解口径。","brief_refs":["measurement.primary_kpi"],"evidence_refs":[]}]}`)
 	return provider.SynchronousResult{
 		ProviderCode: "adapter_gateway", ModelVersion: "gpt-5.5-pro",
 		Text: string(output), StructuredOutput: output,
@@ -767,6 +774,7 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM strategy_conversations WHERE organization_id=?",
 		"DELETE FROM strategy_workspaces WHERE organization_id=?",
 		"DELETE FROM strategy_write_receipts WHERE organization_id=?",
+		"DELETE FROM platform_skill_run_attempts WHERE organization_id=?",
 		"DELETE FROM platform_skill_runs WHERE organization_id=?",
 		"DELETE FROM platform_agent_dispatches WHERE organization_id=?",
 		"DELETE FROM platform_agent_tasks WHERE organization_id=?",

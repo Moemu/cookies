@@ -1,0 +1,1 @@
+DROP TABLE platform_skill_run_attempts;

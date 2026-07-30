@@ -3,6 +3,7 @@ package strategy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/strategy/promptkit"
 )
 
 type SkillExecutionTrace struct {
@@ -33,6 +35,7 @@ type SkillExecutionTrace struct {
 	LatencyMS             int64
 	ValidationAttempts    int
 	QualityReport         *QualityReport
+	Attempts              []SkillRunAttempt
 }
 
 type CreateStrategyResult struct {
@@ -101,7 +104,10 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 		ProjectContextVersion: projectContext.ProjectContextVersion, Status: "generating",
 		CurrentRevision: 0, Version: 1, SkillVersions: skills, CreatedAt: now, UpdatedAt: now,
 	}
-	input := mustJSON(map[string]any{"strategy_id": strategyID, "brief_id": briefID, "brief_version": briefVersion})
+	input := mustJSON(map[string]any{
+		"strategy_id": strategyID, "brief_id": briefID, "brief_version": briefVersion,
+		"prompt_version": s.generatePromptVersion(),
+	})
 	agentTask := agent.Task{
 		ID: agentTaskID, OrganizationID: actor.OrganizationID, ProjectID: task.ProjectID,
 		SourceSystem: "strategy", SourceType: "strategy_draft", SourceID: strategyID,
@@ -446,6 +452,9 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 		strings.TrimSpace(request.Instruction) == "" || len(request.Instruction) > 4096 {
 		return agent.Task{}, false, ErrInvalidRequest
 	}
+	if scope := resolveRevisionScope(request.Instruction); !scope.Resolved {
+		return agent.Task{}, false, ErrRevisionScopeAmbiguous
+	}
 	draft, err := s.GetDraft(ctx, actor, strategyID)
 	if err != nil {
 		return agent.Task{}, false, err
@@ -473,11 +482,19 @@ func (s Service) ReviseStrategy(ctx context.Context, actor contract.ActorContext
 		return agent.Task{}, false, err
 	}
 	now := s.now()
+	taskInput := struct {
+		Request               ReviseRequest `json:"request"`
+		GeneratePromptVersion string        `json:"generate_prompt_version"`
+		RevisePromptVersion   string        `json:"revise_prompt_version"`
+	}{
+		Request: request, GeneratePromptVersion: s.generatePromptVersion(),
+		RevisePromptVersion: s.revisePromptVersion(),
+	}
 	task := agent.Task{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID,
 		SourceSystem: "strategy", SourceType: "strategy_draft", SourceID: strategyID,
 		Kind: AgentKindDraftRevise, Status: agent.TaskDispatchPending, Version: 1,
-		InputSnapshot: mustJSON(request), CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now,
+		InputSnapshot: mustJSON(taskInput), CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now,
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -587,6 +604,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	var input struct {
 		StrategyTaskID string `json:"strategy_task_id"`
 		MessageID      string `json:"message_id"`
+		PromptVersion  string `json:"prompt_version"`
 	}
 	if err := json.Unmarshal(agentTask.InputSnapshot, &input); err != nil {
 		return nil, err
@@ -611,7 +629,11 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if err != nil {
 		return nil, err
 	}
-	decision, trace, err := s.generateConversationTurn(ctx, agentTask, draft, message)
+	worker := s
+	if strings.TrimSpace(input.PromptVersion) != "" {
+		worker.ConversationPromptVersion = input.PromptVersion
+	}
+	decision, trace, err := worker.generateConversationTurn(ctx, agentTask, draft, message)
 	if err != nil {
 		return nil, err
 	}
@@ -685,6 +707,12 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 }
 
 func (s Service) handleDraftGenerate(ctx context.Context, agentTask agent.Task) (*contract.ResourceRef, error) {
+	var input struct {
+		PromptVersion string `json:"prompt_version"`
+	}
+	if err := json.Unmarshal(agentTask.InputSnapshot, &input); err != nil {
+		return nil, err
+	}
 	draft, err := scanDraft(s.DB.QueryRowContext(ctx, draftSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`,
 		agentTask.OrganizationID, agentTask.ProjectID, agentTask.SourceID))
 	if err != nil {
@@ -700,7 +728,11 @@ func (s Service) handleDraftGenerate(ctx context.Context, agentTask agent.Task) 
 	if err != nil {
 		return nil, err
 	}
-	document, trace, err := s.generateStrategy(ctx, agentTask, brief, draft)
+	worker := s
+	if strings.TrimSpace(input.PromptVersion) != "" {
+		worker.PromptVersion = input.PromptVersion
+	}
+	document, trace, err := worker.generateStrategy(ctx, agentTask, brief, draft)
 	if err != nil {
 		return nil, err
 	}
@@ -708,9 +740,19 @@ func (s Service) handleDraftGenerate(ctx context.Context, agentTask agent.Task) 
 }
 
 func (s Service) handleDraftRevise(ctx context.Context, agentTask agent.Task) (*contract.ResourceRef, error) {
-	var request ReviseRequest
-	if err := json.Unmarshal(agentTask.InputSnapshot, &request); err != nil {
+	var input struct {
+		Request               ReviseRequest `json:"request"`
+		GeneratePromptVersion string        `json:"generate_prompt_version"`
+		RevisePromptVersion   string        `json:"revise_prompt_version"`
+	}
+	if err := json.Unmarshal(agentTask.InputSnapshot, &input); err != nil {
 		return nil, err
+	}
+	request := input.Request
+	if request.BaseRevision == 0 {
+		if err := json.Unmarshal(agentTask.InputSnapshot, &request); err != nil {
+			return nil, err
+		}
 	}
 	draft, err := scanDraft(s.DB.QueryRowContext(ctx, draftSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`,
 		agentTask.OrganizationID, agentTask.ProjectID, agentTask.SourceID))
@@ -732,7 +774,14 @@ func (s Service) handleDraftRevise(ctx context.Context, agentTask agent.Task) (*
 	if err != nil {
 		return nil, err
 	}
-	document, changed, trace, err := s.generateStrategyRevision(ctx, agentTask, brief, draft, revision.Document, request)
+	worker := s
+	if strings.TrimSpace(input.GeneratePromptVersion) != "" {
+		worker.PromptVersion = input.GeneratePromptVersion
+	}
+	if strings.TrimSpace(input.RevisePromptVersion) != "" {
+		worker.RevisePromptVersion = input.RevisePromptVersion
+	}
+	document, changed, trace, err := worker.generateStrategyRevision(ctx, agentTask, brief, draft, revision.Document, request)
 	if err != nil {
 		return nil, err
 	}
@@ -823,6 +872,7 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 		visibilityTrace := trace
 		visibilityTrace.Usage = nil
 		visibilityTrace.QualityReport = nil
+		visibilityTrace.Attempts = nil
 		if _, err := s.insertSkillRun(ctx, tx, agentTask, name, version, visibilityTrace, map[string]any{
 			"applied": true, "snapshot_hash": trace.SkillSnapshotHashes[name],
 		}); err != nil {
@@ -832,6 +882,7 @@ func (s Service) persistGeneratedRevision(ctx context.Context, agentTask agent.T
 	complianceTrace := trace
 	complianceTrace.Usage = nil
 	complianceTrace.QualityReport = nil
+	complianceTrace.Attempts = nil
 	if _, err := s.insertSkillRun(
 		ctx, tx, agentTask, "strategy.compliance.check", "v1.0.0",
 		complianceTrace, compliance,
@@ -891,7 +942,67 @@ func (s Service) insertSkillRun(ctx context.Context, tx *sql.Tx, task agent.Task
 		mustJSON(trace.SkillSnapshotHashes), trace.GenerationContextHash,
 		inputTokens, outputTokens, totalTokens, trace.LatencyMS, trace.ValidationAttempts, quality,
 		mustJSON(output), outputHash, now, now, now, now)
-	return id, err
+	if err != nil {
+		return "", err
+	}
+	for index, attempt := range trace.Attempts {
+		attemptID, idErr := s.newID("skillattempt")
+		if idErr != nil {
+			return "", idErr
+		}
+		attemptNo := index + 1
+		if attempt.AttemptNo > 0 {
+			attemptNo = attempt.AttemptNo
+		}
+		var attemptInputTokens, attemptOutputTokens, attemptTotalTokens any
+		if attempt.Usage != nil {
+			attemptInputTokens = attempt.Usage.InputTokens
+			attemptOutputTokens = attempt.Usage.OutputTokens
+			attemptTotalTokens = attempt.Usage.TotalTokens
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO platform_skill_run_attempts
+			(id, organization_id, project_id, skill_run_id, attempt_no, purpose,
+			 provider_code, model_alias, model_version, route_revision_id, response_mode,
+			 api_mode, background, prompt_version, input_tokens, output_tokens, total_tokens,
+			 latency_ms, validation_passed, validation_errors, output_hash, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			attemptID, task.OrganizationID, task.ProjectID, id, attemptNo, attempt.Purpose,
+			attempt.ProviderCode, attempt.ModelAlias, attempt.ModelVersion, attempt.RouteRevisionID,
+			attempt.ResponseMode, attempt.APIMode, attempt.Background, attempt.PromptVersion,
+			attemptInputTokens, attemptOutputTokens, attemptTotalTokens, attempt.LatencyMS,
+			attempt.ValidationPassed, mustJSON(attempt.ValidationErrors), attempt.OutputHash, now)
+		if err != nil {
+			return "", err
+		}
+	}
+	return id, nil
+}
+
+func modelCallAttempt(
+	purpose string,
+	promptVersion string,
+	response provider.SynchronousResponse,
+	latencyMS int64,
+	validationErrors []string,
+) SkillRunAttempt {
+	candidate := response.StructuredOutput
+	if len(candidate) == 0 {
+		candidate = []byte(response.Text)
+	}
+	outputHash := ""
+	if len(candidate) > 0 {
+		sum := sha256.Sum256(candidate)
+		outputHash = fmt.Sprintf("%x", sum[:])
+	}
+	return SkillRunAttempt{
+		Purpose: purpose, ProviderCode: response.ProviderCode,
+		ModelAlias: response.ModelAlias, ModelVersion: response.ModelVersion,
+		RouteRevisionID: response.RouteRevisionID, ResponseMode: response.ResponseMode,
+		APIMode: response.APIMode, Background: response.Background,
+		PromptVersion: promptVersion, Usage: response.Usage, LatencyMS: latencyMS,
+		ValidationPassed: len(validationErrors) == 0,
+		ValidationErrors: append([]string(nil), validationErrors...), OutputHash: outputHash,
+	}
 }
 
 func (s Service) insertComplianceReport(
@@ -918,7 +1029,11 @@ func (s Service) insertComplianceReport(
 
 func (s Service) generateConversationTurn(ctx context.Context, task agent.Task, draft BriefDraft, message Message) (ConversationTurnDecision, SkillExecutionTrace, error) {
 	started := time.Now()
-	promptVersion := "strategy.conversation.v3"
+	promptVersion := s.conversationPromptVersion()
+	promptDefinition, err := promptkit.Resolve(promptkit.StageConversation, promptVersion)
+	if err != nil {
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, err
+	}
 	if s.Text == nil {
 		patch := deterministicBriefPatch(draft, message)
 		decision := sanitizeConversationDecision(draft, message, ConversationTurnDecision{
@@ -941,19 +1056,42 @@ func (s Service) generateConversationTurn(ctx context.Context, task agent.Task, 
 	if strings.TrimSpace(modelAlias) == "" {
 		modelAlias = "cookies.text.standard"
 	}
-	conversation, _ := s.generationConversation(ctx, task, message.ConversationID)
-	prompt := fmt.Sprintf(`Current Brief draft (version %d): %s
+	conversation, _ := s.generationConversationExcluding(ctx, task, message.ConversationID, message.ID)
+	var prompt string
+	if promptVersion == promptkit.ConversationV3 {
+		prompt = fmt.Sprintf(`Current Brief draft (version %d): %s
 Current field states: %s
 Recent conversation: %s
 Latest user message: %s
 
 Return one conversational turn decision. assistant_reply must be a short, natural Chinese acknowledgement or answer, without listing follow-up questions. Put questions only in follow_up_questions. Extract only facts explicitly stated by the user; never invent a brand, platform, budget, objective, or product detail. Use low or medium confidence for inference so the application can reject it. Ask at most two high-impact questions, never ask for a field that already has a value, and distinguish business objective from target audience. Use confirm_fields only when the user explicitly confirms previously captured information.`,
-		draft.Version, mustJSON(draft.Document), mustJSON(draft.FieldStates), mustJSON(conversation), message.Content)
+			draft.Version, mustJSON(draft.Document), mustJSON(draft.FieldStates), mustJSON(conversation), mustJSON(message.Content))
+	} else {
+		prompt = fmt.Sprintf(`<brief version="%d">
+%s
+</brief>
+<field_states>
+%s
+</field_states>
+<history>
+%s
+</history>
+<latest_message>
+%s
+</latest_message>
+
+返回一次对话决策。assistant_reply 是简短、自然的中文回应，不列出追问；问题只放入 follow_up_questions。
+只提取 latest_message 明确表达的事实。不得编造品牌、平台、预算、目标或产品信息。
+只有能在 latest_message 中直接找到依据的事实才使用 high confidence；推断使用 low 或 medium。
+最多提出两个高价值问题，不询问已有值，区分业务目标和目标受众。只有用户明确确认已记录信息时才使用 confirm_fields。`,
+			draft.Version, mustJSON(draft.Document), mustJSON(draft.FieldStates), mustJSON(conversation), mustJSON(message.Content))
+	}
+	callStarted := time.Now()
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: actor, Project: projectContext, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-brief"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: `You are a calm advertising strategist helping a user clarify an initially vague requirement through conversation. Respond naturally, preserve context, and progressively build a multi-platform advertising Brief. Do not behave like a form. Allowed channel enums are xiaohongshu, douyin, taobao_tmall, and wechat_ecosystem.`},
+			{Role: provider.TextRoleSystem, Content: promptDefinition.System},
 			{Role: provider.TextRoleUser, Content: prompt},
 		},
 		OutputJSONSchema: conversationDecisionOutputSchema(),
@@ -970,6 +1108,9 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
 		trace.GenerationMode = "fake_template"
+		trace.Attempts = []SkillRunAttempt{
+			modelCallAttempt("conversation", promptVersion, response, time.Since(callStarted).Milliseconds(), nil),
+		}
 		patch := deterministicBriefPatch(draft, message)
 		return sanitizeConversationDecision(draft, message, ConversationTurnDecision{
 			Intent: "provide_requirements", Patch: patch,
@@ -1014,6 +1155,9 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: message.ID}
 		patch.Operations[index].Confirmation = "unconfirmed"
 	}
+	trace.Attempts = []SkillRunAttempt{
+		modelCallAttempt("conversation", promptVersion, response, time.Since(callStarted).Milliseconds(), nil),
+	}
 	return decision, trace, nil
 }
 
@@ -1044,6 +1188,7 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 	if strings.TrimSpace(modelAlias) == "" {
 		modelAlias = "cookies.text.standard"
 	}
+	callStarted := time.Now()
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy"),
@@ -1069,6 +1214,9 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 		trace.GenerationMode = "fake_template"
 		trace.QualityReport = &report
 		trace.LatencyMS = time.Since(started).Milliseconds()
+		trace.Attempts = []SkillRunAttempt{
+			modelCallAttempt("generate", generation.PromptVersion, response, time.Since(callStarted).Milliseconds(), nil),
+		}
 		return document, trace, nil
 	}
 	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
@@ -1076,12 +1224,30 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 		normalizeGeneratedStrategy(&document, brief, draft)
 		report = evaluateStrategyQuality(document, generation)
 	}
+	firstValidationErrors := append([]string(nil), report.Errors...)
+	if decodeErr != nil {
+		firstValidationErrors = append(firstValidationErrors, decodeErr.Error())
+	}
+	trace.Attempts = append(trace.Attempts, modelCallAttempt(
+		"generate", generation.PromptVersion, response,
+		time.Since(callStarted).Milliseconds(), firstValidationErrors,
+	))
+	firstDocument := document
+	firstDecodeErr := decodeErr
 	needsRepair := decodeErr != nil || (s.CriticEnabled && !report.Passed)
 	if needsRepair {
 		reasons := report.Errors
 		if decodeErr != nil {
 			reasons = append(reasons, decodeErr.Error())
 		}
+		repairSections := repairSectionsForErrors(reasons)
+		repairVersion := s.repairPromptVersion()
+		repairDefinition, definitionErr := promptkit.Resolve(promptkit.StageRepair, repairVersion)
+		if definitionErr != nil {
+			return StrategyDocument{}, SkillExecutionTrace{}, definitionErr
+		}
+		trace.SkillVersions["strategy.strategy.repair"] = repairVersion
+		repairStarted := time.Now()
 		repair, repairErr := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 			Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
 			InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy-repair"),
@@ -1089,7 +1255,9 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 				{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation)},
 				{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation)},
 				{Role: provider.TextRoleAssistant, Content: response.Text},
-				{Role: provider.TextRoleUser, Content: "上一个输出未通过校验。只修复这些问题并返回完整 JSON：\n- " + strings.Join(reasons, "\n- ")},
+				{Role: provider.TextRoleUser, Content: repairDefinition.System +
+					"\n允许修复的章节：" + strings.Join(repairSections, ",") +
+					"\n问题：\n- " + strings.Join(reasons, "\n- ")},
 			},
 			OutputJSONSchema: strategyOutputSchema(brief.Snapshot.ContractVersion == "strategy-brief-version/v2"),
 		})
@@ -1105,8 +1273,19 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 		document, report, decodeErr = decodeAndEvaluateStrategy(repair, generation, brief, draft)
 		if decodeErr == nil {
 			normalizeGeneratedStrategy(&document, brief, draft)
+			if firstDecodeErr == nil {
+				retainAllowedRevisionSections(firstDocument, &document, repairSections)
+			}
 			report = evaluateStrategyQuality(document, generation)
 		}
+		repairValidationErrors := append([]string(nil), report.Errors...)
+		if decodeErr != nil {
+			repairValidationErrors = append(repairValidationErrors, decodeErr.Error())
+		}
+		trace.Attempts = append(trace.Attempts, modelCallAttempt(
+			"repair", repairVersion, repair,
+			time.Since(repairStarted).Milliseconds(), repairValidationErrors,
+		))
 	}
 	if decodeErr != nil || !report.Passed {
 		return StrategyDocument{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Strategy output failed structural or quality validation"}}
@@ -1118,6 +1297,7 @@ func (s Service) generateStrategy(ctx context.Context, task agent.Task, brief Br
 
 func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, brief BriefVersion, draft Draft, current StrategyDocument, request ReviseRequest) (StrategyDocument, []string, SkillExecutionTrace, error) {
 	started := time.Now()
+	promptVersion := s.revisePromptVersion()
 	generation, err := s.buildGenerationContext(ctx, task, brief, draft)
 	if err != nil {
 		return StrategyDocument{}, nil, SkillExecutionTrace{}, err
@@ -1134,7 +1314,7 @@ func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, 
 		report := evaluateStrategyQuality(document, generation)
 		return document, []string{"assumptions_and_gaps"}, SkillExecutionTrace{
 			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
-			PromptVersion: "strategy.revise.v2", SkillVersions: versions,
+			PromptVersion: promptVersion, SkillVersions: versions,
 			SkillSnapshotHashes: snapshotHashes, GenerationContextHash: contextHash,
 			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1, QualityReport: &report,
 		}, nil
@@ -1145,12 +1325,21 @@ func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, 
 		modelAlias = "cookies.text.standard"
 	}
 	currentJSON := string(mustJSON(current))
-	allowedSections := allowedRevisionSections(request.Instruction)
+	scope := resolveRevisionScope(request.Instruction)
+	if !scope.Resolved {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, ErrRevisionScopeAmbiguous
+	}
+	allowedSections := scope.Sections
+	promptDefinition, definitionErr := promptkit.Resolve(promptkit.StageRevise, promptVersion)
+	if definitionErr != nil {
+		return StrategyDocument{}, nil, SkillExecutionTrace{}, definitionErr
+	}
+	callStarted := time.Now()
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: actor, Project: generation.Project, ModelAlias: modelAlias,
 		InvocationKey: contract.IdempotencyKey("agent-" + task.ID + "-strategy-revise"),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation) + "\n只修改服务端允许的章节；其他章节保持语义和数据不变。"},
+			{Role: provider.TextRoleSystem, Content: strategySystemPrompt(generation) + "\n" + promptDefinition.System},
 			{Role: provider.TextRoleUser, Content: strategyUserPrompt(generation) + "\n\n<current_strategy>\n" + currentJSON + "\n</current_strategy>\n<allowed_sections>\n" + strings.Join(allowedSections, ",") + "\n</allowed_sections>\n<revision_instruction>\n" + strings.TrimSpace(request.Instruction) + "\n</revision_instruction>"},
 		},
 		OutputJSONSchema: strategyOutputSchema(brief.Snapshot.ContractVersion == "strategy-brief-version/v2"),
@@ -1161,7 +1350,7 @@ func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, 
 	trace := SkillExecutionTrace{
 		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
 		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
-		ResponseMode: response.ResponseMode, PromptVersion: "strategy.revise.v2",
+		ResponseMode: response.ResponseMode, PromptVersion: promptVersion,
 		SkillVersions: versions, SkillSnapshotHashes: snapshotHashes,
 		GenerationContextHash: contextHash, Usage: response.Usage, LatencyMS: time.Since(started).Milliseconds(),
 		ValidationAttempts: 1,
@@ -1172,6 +1361,9 @@ func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, 
 		report := evaluateStrategyQuality(document, generation)
 		trace.GenerationMode = "fake_template"
 		trace.QualityReport = &report
+		trace.Attempts = []SkillRunAttempt{
+			modelCallAttempt("revise", promptVersion, response, time.Since(callStarted).Milliseconds(), nil),
+		}
 		return document, []string{"assumptions_and_gaps"}, trace, nil
 	}
 	document, report, decodeErr := decodeAndEvaluateStrategy(response, generation, brief, draft)
@@ -1191,6 +1383,9 @@ func (s Service) generateStrategyRevision(ctx context.Context, task agent.Task, 
 		}}
 	}
 	trace.QualityReport = &report
+	trace.Attempts = []SkillRunAttempt{
+		modelCallAttempt("revise", promptVersion, response, time.Since(callStarted).Milliseconds(), nil),
+	}
 	return document, changed, trace, nil
 }
 
