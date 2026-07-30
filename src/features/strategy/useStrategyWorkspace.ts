@@ -322,22 +322,6 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           timer = window.setTimeout(inspect, 1800)
           return
         }
-        const task = state.detail?.current_task
-        const brief = state.brief
-        if (next.status === 'succeeded' && next.artifacts.length && task && brief?.status === 'open') {
-          const references = Array.from(new Set([
-            ...(brief.document.reference_ids ?? []),
-            ...next.artifacts.map(artifact => artifact.id),
-          ]))
-          const updated = await strategyApi.patchBriefField(
-            task.id,
-            brief,
-            'reference_ids',
-            references,
-            createMutationKey('strategy-research-reference'),
-          )
-          setState(current => ({ ...current, brief: updated }))
-        }
       } catch (error) {
         if (!controller.signal.aborted) {
           setState(current => ({ ...current, error: messageOf(error) }))
@@ -350,7 +334,29 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [projectId, state.brief, state.detail?.current_task, state.researchRun])
+  }, [projectId, state.researchRun])
+
+  useEffect(() => {
+    if (!state.documents.some(document => document.status === 'parse_queued' || document.status === 'parsing')) return
+    const controller = new AbortController()
+    let timer = 0
+    const inspect = async () => {
+      try {
+        const documents = await strategyApi.listKnowledgeDocuments(projectId, controller.signal)
+        setState(current => ({ ...current, documents: documents.items }))
+        if (documents.items.some(document => document.status === 'parse_queued' || document.status === 'parsing')) {
+          timer = window.setTimeout(inspect, 1800)
+        }
+      } catch {
+        if (!controller.signal.aborted) timer = window.setTimeout(inspect, 3000)
+      }
+    }
+    timer = window.setTimeout(inspect, 800)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [projectId, state.documents])
 
   const perform = useCallback(async (name: string, action: () => Promise<void>, reloadAfter = true) => {
     setState(current => ({ ...current, busy: name, error: '' }))
@@ -554,15 +560,12 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       }
     }, false),
     runResearch: (
-      mode: 'web' | 'mcp',
       category: 'general' | 'audience' | 'competitor' | 'industry',
       query: string,
-      includeDocuments: boolean,
+      documentIds: string[],
     ) =>
       perform('research', async () => {
-        const documentIds = includeDocuments ? state.documents.map(document => document.id).slice(0, 20) : []
         const researchRun = await strategyApi.runExternalResearch(projectId, {
-          mode,
           category,
           query,
           document_ids: documentIds,
@@ -570,20 +573,24 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           confirmed: true,
         })
         setState(current => ({ ...current, researchRun }))
-        if (researchRun.artifacts.length && state.brief?.status === 'open' && state.detail?.current_task) {
-          const references = Array.from(new Set([
-            ...(state.brief.document.reference_ids ?? []),
-            ...researchRun.artifacts.map(artifact => artifact.id),
-          ]))
-          const brief = await strategyApi.patchBriefField(
-            state.detail.current_task.id,
-            state.brief,
-            'reference_ids',
-            references,
-            createMutationKey('strategy-research-reference'),
-          )
-          setState(current => ({ ...current, brief }))
-        }
+      }, false),
+    setResearchArtifactAdoption: (artifactId: string, adopted: boolean) =>
+      perform(`research-adoption:${artifactId}`, async () => {
+        const task = state.detail?.current_task
+        const brief = state.brief
+        if (!task || brief?.status !== 'open') throw new Error('当前 Brief 不可更新。')
+        const current = brief.document.reference_ids ?? []
+        const references = adopted
+          ? Array.from(new Set([...current, artifactId]))
+          : current.filter(value => value !== artifactId)
+        const updated = await strategyApi.patchBriefField(
+          task.id,
+          brief,
+          'reference_ids',
+          references,
+          createMutationKey('strategy-research-reference'),
+        )
+        setState(value => ({ ...value, brief: updated }))
       }, false),
   }
 

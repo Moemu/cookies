@@ -24,10 +24,12 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject } from '../../context/ProjectContext'
+import { CreativeTaskPlanner } from './CreativeTaskPlanner'
 import { useStrategyWorkspace } from './useStrategyWorkspace'
 import type {
   BriefDraft,
   DraftRevision,
+  KnowledgeDocument,
   Review,
   StrategyDocument,
   StrategyDraft,
@@ -37,6 +39,10 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
   const { currentProject } = useProject()
   const navigate = useNavigate()
   const { state, actions } = useStrategyWorkspace(currentProject.id, workspaceId)
+  const mainRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 })
+  }, [activeView])
 
   if (state.isLoading) {
     return <div className="kanon-strategy-state" role="status">
@@ -72,7 +78,12 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
 
   const lifecycleLocked = Boolean(state.detail.current_task.discarded_at || state.draft?.archived_at)
   const showSummaryRail = activeView === '概览' || activeView === '评审'
-  const showEvidenceRail = activeView === '研究' || activeView === '策略'
+  const hasEvidence = Boolean(
+    state.documents.length ||
+    state.brief?.document.reference_ids?.length ||
+    state.researchRun?.artifacts.length,
+  )
+  const showEvidenceRail = activeView === '研究' || (activeView === '策略' && hasEvidence)
   const railMode = showSummaryRail ? 'rail-summary' : showEvidenceRail ? 'rail-evidence' : 'rails-none'
   return <div className={`kanon-strategy-root${activeView === '对话' ? ' conversation-active' : ''}`}>
     {state.error ? <div className="kanon-strategy-alert" role="alert">
@@ -93,7 +104,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
       <button className="icon-button" aria-label="刷新当前策略工作区" disabled={Boolean(state.busy)} onClick={() => void actions.reload()}><RefreshCw size={15}/></button>
     </div>
     <div className={`kanon-strategy-workspace ${railMode}`}>
-      <main className="kanon-strategy-main">
+      <main className="kanon-strategy-main" ref={mainRef}>
         <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
         {activeView === '概览' ? <OverviewPane state={state}/> : null}
         {activeView === '对话' ? <ConversationPane
@@ -124,6 +135,11 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
           onSubmit={actions.submitStrategy}
           pending={Boolean(state.pendingAgentTaskId)}
         /> : null}
+        {activeView === '创意任务策略' ? <CreativeTaskPlanner
+          briefVersion={state.briefVersion}
+          draft={state.draft}
+          projectId={currentProject.id}
+        /> : null}
         {activeView === '评审' ? <ReviewPane
           busy={state.busy}
           comments={state.comments}
@@ -141,6 +157,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
           busy={state.busy}
           documents={state.documents}
           researchRun={state.researchRun}
+          onAdoption={actions.setResearchArtifactAdoption}
           onResearch={actions.runResearch}
           onUpload={actions.uploadDocument}
         /> : null}
@@ -235,10 +252,17 @@ function ConversationPane({ brief, busy, messages, onSend, pending }: {
 }) {
   const [content, setContent] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
     const list = listRef.current
     if (list) list.scrollTop = list.scrollHeight
   }, [messages, pending])
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 88), 180)}px`
+  }, [content])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -268,21 +292,27 @@ function ConversationPane({ brief, busy, messages, onSend, pending }: {
       </article> : null}
     </div>
     <form className="kanon-composer" onSubmit={submit}>
-      <label htmlFor="kanon-strategy-message">继续描述需求</label>
+      <label htmlFor="kanon-strategy-message"><span>继续描述需求</span><small>{brief?.completeness.ready ? 'Brief 信息已完整，可继续补充' : 'AI 会同步整理到 Brief'}</small></label>
       <textarea
+        aria-describedby="kanon-strategy-message-help"
         id="kanon-strategy-message"
+        maxLength={4000}
         onChange={event => setContent(event.target.value)}
         onKeyDown={event => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault()
             event.currentTarget.form?.requestSubmit()
           }
         }}
-        placeholder="例如：目标是在小红书建立新品认知，预算 30 万，首期四周……"
+        placeholder="输入品牌、产品、目标受众、预算或希望解决的问题…"
+        ref={textareaRef}
         rows={3}
         value={content}
       />
-      <div><small>内容会写入真实 Conversation · Ctrl/⌘ + Enter 发送</small><button className="primary-button" disabled={busy || !content.trim()} type="submit"><Send size={15}/>{busy ? '处理中…' : '发送'}</button></div>
+      <div>
+        <span id="kanon-strategy-message-help"><small>Enter 发送 · Shift + Enter 换行</small><small className="kanon-composer-count">{content.length} / 4000</small></span>
+        <button aria-label="发送需求消息" className="primary-button" disabled={busy || !content.trim()} type="submit"><Send size={15}/>{busy ? '处理中…' : '发送'}</button>
+      </div>
     </form>
   </section>
 }
@@ -445,14 +475,23 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
   const canEdit = draft.status === 'draft' || draft.status === 'returned'
 
   return <section className="kanon-strategy-editor-pane">
-    <div className="kanon-strategy-heading">
-      <div><span className="section-label">STRATEGY REVISION {draft.current_revision}</span><h2>{document.executive_summary || document.objective}</h2><p>{document.proposition}</p></div>
-      <span className="source-chip">{statusLabel(draft.status)}</span>
+    <div className="kanon-strategy-heading kanon-strategy-document-heading">
+      <div>
+        <span className="section-label">STRATEGY REVISION {draft.current_revision}</span>
+        <h2>{document.executive_summary || document.objective}</h2>
+        <p>{document.proposition}</p>
+      </div>
+      <div className="kanon-strategy-document-meta">
+        <span className="source-chip">{statusLabel(draft.status)}</span>
+        <small title={draft.revision?.content_hash}>{draft.revision?.content_hash.slice(0, 18)}…</small>
+      </div>
     </div>
     <div className="kanon-strategy-section-editor">
-      <nav>{sections.map(value => <button className={value === section ? 'active' : ''} key={value} onClick={() => setSection(value)}>{strategySectionLabel(value)}</button>)}</nav>
+      <nav aria-label="策略区块">{sections.map((value, index) => <button className={value === section ? 'active' : ''} key={value} onClick={() => setSection(value)}>
+        <span>{String(index + 1).padStart(2, '0')}</span>{strategySectionLabel(value)}
+      </button>)}</nav>
       <div>
-        <div className="surface-toolbar"><h3>{strategySectionLabel(section)}</h3><small>保存后创建新 Revision</small></div>
+        <div className="surface-toolbar"><div><h3>{strategySectionLabel(section)}</h3><small>编辑当前区块</small></div><small>保存将创建 Revision {draft.current_revision + 1}</small></div>
         <StructuredStrategyEditor disabled={!canEdit || Boolean(busy)} onChange={setSectionValue} section={section} value={sectionValue}/>
         <button className="secondary-button" disabled={!canEdit || Boolean(busy) || !changed} onClick={() => void onPatch(section, sectionValue)}>
           {busy === `strategy:${section}` ? '保存中…' : '保存为新 Revision'}
@@ -572,25 +611,28 @@ function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove
   </section>
 }
 
-function ResearchPane({ brief, busy, documents, onResearch, onUpload, researchRun }: {
+function ResearchPane({ brief, busy, documents, onAdoption, onResearch, onUpload, researchRun }: {
   brief: BriefDraft | null
   busy: string
   documents: WorkspaceState['documents']
   onResearch: (
-    mode: 'web' | 'mcp',
     category: 'general' | 'audience' | 'competitor' | 'industry',
     query: string,
-    includeDocuments: boolean,
+    documentIds: string[],
   ) => Promise<boolean>
+  onAdoption: (artifactId: string, adopted: boolean) => Promise<boolean>
   onUpload: (file: File) => Promise<boolean>
   researchRun: WorkspaceState['researchRun']
 }) {
   const [query, setQuery] = useState('')
-  const [mode, setMode] = useState<'web' | 'mcp'>('web')
   const [category, setCategory] = useState<'general' | 'audience' | 'competitor' | 'industry'>('general')
-  const [includeDocuments, setIncludeDocuments] = useState(false)
-  const [confirmed, setConfirmed] = useState(false)
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([])
   const frozen = brief?.status === 'confirmed'
+  const referenceIds = brief?.document.reference_ids ?? []
+  useEffect(() => {
+    const readyIDs = new Set(documents.filter(document => document.status === 'ready').map(document => document.id))
+    setSelectedDocumentIds(current => current.filter(id => readyIDs.has(id)))
+  }, [documents])
   return <section className="kanon-research-pane">
     <div className="kanon-strategy-heading">
       <div><span className="section-label">RESEARCH & EVIDENCE</span><h2>把外部与内部资料变成可引用证据</h2><p>研究结果由后端落为 ResearchArtifact，再写入 Brief reference IDs。</p></div>
@@ -599,24 +641,61 @@ function ResearchPane({ brief, busy, documents, onResearch, onUpload, researchRu
     <div className="kanon-research-grid">
       <section>
         <div className="surface-toolbar"><h3>品牌与项目资料</h3><label className="secondary-button" htmlFor="kanon-knowledge-file"><Upload size={14}/>上传资料</label></div>
-        <input id="kanon-knowledge-file" type="file" accept=".md,.docx" disabled={Boolean(busy) || frozen} onChange={event => { const file = event.target.files?.[0]; if (file) void onUpload(file) }}/>
-        {documents.map(document => <article key={document.id}><FileText size={17}/><span><b>{document.title || document.filename}</b><small>{document.source_type || document.mime_type} · {formatBytes(document.size_bytes)}</small></span><CircleCheck size={15}/></article>)}
+        <input id="kanon-knowledge-file" type="file" accept=".md,.docx,.pdf" disabled={Boolean(busy) || frozen} onChange={event => { const file = event.target.files?.[0]; if (file) void onUpload(file) }}/>
+        {documents.map(document => {
+          const ready = document.status === 'ready'
+          const selected = selectedDocumentIds.includes(document.id)
+          return <article className={selected ? 'selected' : ''} key={document.id}>
+            <FileText size={17}/>
+            <span>
+              <b>{document.title || document.filename}</b>
+              <small>{document.source_type || document.mime_type} · {formatBytes(document.size_bytes)} · {documentStatusLabel(document)}</small>
+            </span>
+            <label className="kanon-document-select">
+              <input
+                aria-label={`选择资料 ${document.title || document.filename}`}
+                checked={selected}
+                disabled={!ready || Boolean(busy) || frozen}
+                type="checkbox"
+                onChange={event => setSelectedDocumentIds(current => event.target.checked
+                  ? [...current, document.id]
+                  : current.filter(id => id !== document.id))}
+              />
+              <span>{ready ? '用于本次研究' : '解析完成后可选'}</span>
+            </label>
+          </article>
+        })}
         {!documents.length ? <div className="panel-empty">尚未导入品牌或项目资料。</div> : null}
       </section>
       <section className="kanon-research-form">
-        <div className="surface-toolbar"><h3>外部研究</h3><span>{mode === 'mcp' ? 'MCP Runner' : '联网搜索'}</span></div>
-        <label>研究方式<select disabled={Boolean(busy) || frozen} value={mode} onChange={event => setMode(event.target.value as 'web' | 'mcp')}><option value="web">联网搜索</option><option value="mcp">MCP 工具</option></select></label>
+        <div className="surface-toolbar"><h3>外部研究</h3><span>Seed 联网搜索</span></div>
         <label>研究分类<select disabled={Boolean(busy) || frozen} value={category} onChange={event => setCategory(event.target.value as typeof category)}><option value="general">综合研究</option><option value="audience">受众研究</option><option value="competitor">竞品研究</option><option value="industry">行业研究</option></select></label>
         <label>要验证的问题<textarea disabled={Boolean(busy) || frozen} rows={4} value={query} onChange={event => setQuery(event.target.value)} placeholder="例如：近半年小红书工业品牌内容的有效切入点是什么？"/></label>
-        <label className="kanon-check"><input checked={includeDocuments} disabled={!documents.length || Boolean(busy) || frozen} type="checkbox" onChange={event => setIncludeDocuments(event.target.checked)}/><span>同时向研究 Runner 披露所选项目资料正文</span></label>
-        <label className="kanon-check"><input checked={confirmed} disabled={Boolean(busy) || frozen} type="checkbox" onChange={event => setConfirmed(event.target.checked)}/><span>确认执行外部研究并记录披露字段</span></label>
-        <button className="primary-button" disabled={Boolean(busy) || frozen || !confirmed || !query.trim()} onClick={() => void onResearch(mode, category, query, includeDocuments)}><Search size={15}/>{busy === 'research' ? '研究中…' : '开始研究'}</button>
+        <p className="kanon-research-disclosure">开始研究会把当前问题发送给 Seed 并记录披露字段。项目文件不会自动发送；若勾选资料，仅披露本地检索命中的最多 8 个片段，并记录实际片段 ID。</p>
+        <button className="primary-button" disabled={Boolean(busy) || frozen || !query.trim()} onClick={() => void onResearch(category, query, selectedDocumentIds)}><Search size={15}/>{busy === 'research' ? '研究中…' : '开始联网研究'}</button>
       </section>
     </div>
     {researchRun ? <div className="kanon-research-result">
-      <div><b>Research Run {researchRun.id.slice(0, 12)}</b><span className={`source-chip ${researchRun.status === 'failed' || researchRun.status === 'unavailable' ? 'alert' : ''}`}>{researchRun.status}</span></div>
+      <div><b>Research Run {researchRun.id.slice(0, 12)}</b><span>{researchRun.model_version || researchRun.provider_code}</span><span className={`source-chip ${researchRun.status === 'failed' || researchRun.status === 'unavailable' ? 'alert' : ''}`}>{researchRun.status}</span></div>
       {researchRun.error_message ? <p>{researchRun.error_message}</p> : null}
-      {researchRun.artifacts.map(artifact => <article key={artifact.id}><BookOpen size={17}/><div><b>{artifact.title}</b><p>{artifact.content}</p><small>{artifact.citations.join(' · ') || artifact.content_hash}</small></div>{artifact.source_url ? <a href={artifact.source_url} rel="noreferrer" target="_blank"><ExternalLink size={14}/></a> : null}</article>)}
+      {researchRun.artifacts.map(artifact => {
+        const adopted = referenceIds.includes(artifact.id)
+        return <article key={artifact.id}>
+          <BookOpen size={17}/>
+          <div>
+            <b>{artifact.title}</b>
+            <p>{artifact.content}</p>
+            <div className="kanon-research-sources">
+              {artifact.sources.map(source => <a href={source.url} key={`${source.id}-${source.start_index}-${source.end_index}`} rel="noreferrer" target="_blank">
+                <ExternalLink size={12}/>{source.title || source.domain}<small>{source.verification_status === 'content_verified' ? '已核验' : '模型引用'}</small>
+              </a>)}
+            </div>
+          </div>
+          <button className={adopted ? 'secondary-button' : 'primary-button'} disabled={Boolean(busy) || frozen} onClick={() => void onAdoption(artifact.id, !adopted)}>
+            {adopted ? '取消采纳' : '采纳到 Brief'}
+          </button>
+        </article>
+      })}
     </div> : null}
   </section>
 }
@@ -784,4 +863,11 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function documentStatusLabel(document: KnowledgeDocument) {
+  if (document.status === 'ready') return `${document.chunk_count} 个片段 · 已就绪`
+  if (document.status === 'parse_failed') return document.parse_error_message || '解析失败'
+  if (document.status === 'parsing') return '解析中'
+  return '等待解析'
 }

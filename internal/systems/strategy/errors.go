@@ -18,6 +18,11 @@ var (
 	ErrEventCursorExpired     = errors.New("strategy event cursor expired")
 	ErrFeatureDisabled        = errors.New("strategy feature disabled")
 	ErrGenerationUnavailable  = errors.New("strategy generation provider unavailable")
+	ErrCatalogChanged         = errors.New("strategy creative business catalog changed")
+	ErrBusinessNotSelectable  = errors.New("strategy creative business is not selectable")
+	ErrTaskPlanBlocked        = errors.New("strategy creative task plan is blocked")
+	ErrReservedOutputField    = errors.New("strategy creative task output contains a reserved field")
+	ErrProfileSkillMismatch   = errors.New("strategy creative business profile and skill mismatch")
 )
 
 type ValidationError struct {
@@ -31,3 +36,10 @@ type BlockedError struct {
 
 func (e BlockedError) Error() string { return ErrBriefBlocked.Error() }
 func (e BlockedError) Unwrap() error { return ErrBriefBlocked }
+
+type TaskPlanBlockedError struct {
+	Problems []ValidationError
+}
+
+func (e TaskPlanBlockedError) Error() string { return ErrTaskPlanBlocked.Error() }
+func (e TaskPlanBlockedError) Unwrap() error { return ErrTaskPlanBlocked }

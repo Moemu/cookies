@@ -8,7 +8,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [backend] Building and starting the Go API...
-echo [backend] The API will listen on http://127.0.0.1:8080
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-local-adapter-provider.ps1"
+echo [backend] Preparing MySQL, Apache Tika, real Seed routing, and the Go API...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-local-adapter-provider.ps1" -Foreground
 exit /b %ERRORLEVEL%

@@ -21,6 +21,7 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
+	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
@@ -152,20 +153,38 @@ func main() {
 	}
 	runtimeStore := jobruntime.MySQLStore{DB: db}
 	var researchRunner knowledge.ExternalResearchRunner
-	if cfg.Research.MCPStdioCommand != "" {
-		researchRunner = knowledge.MCPStdioRunner{
-			Command: cfg.Research.MCPStdioCommand, Args: cfg.Research.MCPStdioArgs,
-			ToolName: cfg.Research.MCPToolName, ProtocolVersion: cfg.Research.MCPProtocolVersion,
-			EnvAllowlist:   cfg.Research.MCPEnvAllowlist,
-			Timeout:        time.Duration(cfg.Research.TimeoutSeconds) * time.Second,
-			MaxOutputBytes: cfg.Research.MaxOutputBytes,
+	if cfg.Research.SeedEnabled {
+		cipher, cipherErr := provider.NewAESGCMCredentialCipher(
+			cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion,
+		)
+		if cipherErr != nil {
+			log.Fatalf("configure Seed web research credential encryption: %v", cipherErr)
 		}
-		log.Printf("Knowledge research configured: transport=mcp_stdio tool=%s timeout=%ds",
-			cfg.Research.MCPToolName, cfg.Research.TimeoutSeconds)
+		gatewayConfig := provider.MySQLGatewayConfigStore{
+			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		researchRunner = &seedresearch.Client{
+			Routes: gatewayConfig, Credentials: gatewayConfig,
+			ModelAlias: cfg.Research.SeedModelAlias, MaxConcurrent: cfg.Research.MaxConcurrent,
+			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		log.Printf("Knowledge research configured: transport=ark_responses tool=web_search model_alias=%s",
+			cfg.Research.SeedModelAlias)
 	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
 		AssetsBucket: cfg.ObjectStorage.AssetsBucket, Runner: researchRunner,
+	}
+	if cfg.Research.TikaEnabled {
+		knowledgeService.DocumentParser = knowledge.TikaParser{
+			BaseURL: cfg.Research.TikaBaseURL, Version: cfg.Research.TikaVersion,
+			Timeout:        time.Duration(cfg.Research.TikaTimeoutSeconds) * time.Second,
+			MaxOutputBytes: int64(cfg.Research.TikaMaxOutputBytes),
+		}
+		knowledgeService.DocumentScheduler = knowledge.JobRuntimeDocumentParseScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("documentparsejob") },
+		}
+		log.Printf("Knowledge document parsing configured: parser=tika version=%s", cfg.Research.TikaVersion)
 	}
 	if researchRunner != nil {
 		knowledgeService.Scheduler = knowledge.JobRuntimeResearchScheduler{
@@ -205,6 +224,9 @@ func main() {
 	if researchRunner != nil {
 		runtimeHandlers[knowledge.ResearchJobKind] = knowledgeService.HandleResearchJob
 	}
+	if knowledgeService.DocumentParser != nil {
+		runtimeHandlers[knowledge.DocumentParseJobKind] = knowledgeService.HandleDocumentParseJob
+	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
 	}
@@ -229,17 +251,25 @@ func main() {
 			textProvider = &provider.Service{TextAdapter: textAdapter}
 		}
 		strategyService := strategysystem.Service{
-			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
+			DB: db, Projects: projectService, Knowledge: knowledgeService,
+			CreativeAssets: uploadService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
 			PromptVersion:             cfg.Strategy.PromptVersion,
 			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
 			RevisePromptVersion:       cfg.Strategy.RevisePromptVersion,
 			ReviewPromptVersion:       cfg.Strategy.ReviewPromptVersion,
 			RepairPromptVersion:       cfg.Strategy.RepairPromptVersion,
+			CreativeTaskPromptVersion: cfg.Strategy.CreativeTaskPromptVersion,
 			CriticEnabled:             cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
-			ContextSelectionEnabled: cfg.Strategy.ContextSelectionEnabled,
-			DisableApproval:         !cfg.Strategy.ApproveEnabled,
-			AllowedOrganizations:    strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+			CreativeTaskPlanningEnabled: cfg.Strategy.CreativeTaskPlanningEnabled,
+			ContextSelectionEnabled:     cfg.Strategy.ContextSelectionEnabled,
+			DisableApproval:             !cfg.Strategy.ApproveEnabled,
+			AllowedOrganizations:        strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+		}
+		if cfg.Strategy.CreativeTaskPlanningEnabled {
+			if err := strategyService.EnsureCreativeBusinessCatalog(context.Background()); err != nil {
+				log.Fatalf("seed Strategy creative business catalog: %v", err)
+			}
 		}
 		generationMode := "deterministic"
 		if cfg.Strategy.RealProviderEnabled {
@@ -255,6 +285,9 @@ func main() {
 		// its own Intake only after a user explicitly invokes the endpoint.
 		strategyCreativeReader := strategycreative.Reader{Service: strategyService}
 		creativeService.Sources = strategyCreativeReader
+		if cfg.Strategy.CreativeTaskPlanningEnabled {
+			creativeService.TaskStrategies = strategyCreativeReader
+		}
 		if cfg.Strategy.PackageToCreativeEnabled {
 			creativeService.StrategyPackages = strategyCreativeReader
 		}
@@ -268,6 +301,7 @@ func main() {
 		runtimeHandlers[strategysystem.AgentKindDraftGenerate] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftRevise] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindReviewDeep] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindCreativeTaskGenerate] = strategyHandler
 		agentDispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
 		startWorker(workerContext, "agent-dispatch", agentDispatcher.RunOnce)
 	}

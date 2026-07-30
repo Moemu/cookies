@@ -57,7 +57,7 @@ paths:
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createCreativeIntake
-      summary: Create a normalized manual CreativeIntake or explicitly start one from an immutable Strategy package.
+      summary: Create a normalized manual CreativeIntake or explicitly hand off an immutable Strategy package or CreativeTaskStrategyVersion.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
         required: true
@@ -68,6 +68,33 @@ paths:
         '201': {description: CreativeIntake created.}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:
+    get:
+      operationId: getCreativeIntake
+      summary: Get one Creative-owned frozen Intake snapshot, including task-strategy lineage when present.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200': {description: Frozen CreativeIntake snapshot.}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/business-capabilities:
+    get:
+      operationId: listCreativeBusinessCapabilities
+      summary: List Creative-owned task-strategy handoff and production readiness for each business.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Capability states used to gate Strategy handoff actions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CreativeBusinessCapability'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-task:
     post:
       operationId: createCreativeTask
@@ -317,9 +344,16 @@ components:
     CreateCreativeIntakeRequest:
       type: object
       additionalProperties: false
-      required: [source, channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+      required: [source]
+      oneOf:
+        - properties: {source: {const: manual}}
+          required: [channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+        - properties: {source: {const: strategy_package}}
+          required: [strategy_package]
+        - properties: {source: {const: task_strategy}}
+          required: [task_strategy]
       properties:
-        source: {enum: [manual, strategy_package]}
+        source: {enum: [manual, strategy_package, task_strategy]}
         strategy_package:
           type: object
           additionalProperties: false
@@ -327,6 +361,14 @@ components:
           properties:
             package_id: {type: string, minLength: 1}
             package_version: {type: integer, minimum: 1}
+            expected_content_hash: {type: string, minLength: 1}
+        task_strategy:
+          type: object
+          additionalProperties: false
+          required: [plan_id, strategy_version, expected_content_hash]
+          properties:
+            plan_id: {type: string, minLength: 1}
+            strategy_version: {type: integer, minimum: 1}
             expected_content_hash: {type: string, minLength: 1}
         format: {enum: [image_text, video]}
         performance_mode: {enum: [viral_remake]}
@@ -345,6 +387,22 @@ components:
         visual_keywords: {type: array, items: {type: string}}
         mandatory_elements: {type: array, items: {type: string}}
         prohibited_claims: {type: array, items: {type: string}}
+    CreativeBusinessCapability:
+      type: object
+      additionalProperties: false
+      required: [business_code, display_name, status, can_create_task_immediately, production_inputs]
+      properties:
+        business_code: {type: string}
+        display_name: {type: string}
+        status: {enum: [available, preview, unsupported]}
+        format: {enum: [image_text, video]}
+        channel: {enum: [xiaohongshu, douyin, kuaishou]}
+        performance_mode: {type: string}
+        destination_area: {enum: [image-text, video]}
+        destination_view: {type: string}
+        can_create_task_immediately: {type: boolean}
+        production_inputs: {type: array, items: {type: string}}
+        limitation: {type: string}
     CreateCreativeTaskRequest:
       type: object
       additionalProperties: false

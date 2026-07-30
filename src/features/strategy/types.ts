@@ -74,7 +74,13 @@ export type FieldState = {
 export type BriefDocument = {
   contract_version: 'strategy-brief-version/v1' | 'strategy-brief-version/v2'
   brand?: { name?: string }
-  product?: { name?: string; evidence?: string[] }
+  product?: {
+    name?: string
+    category?: string
+    selling_points?: string[]
+    evidence?: string[]
+    asset_refs?: Array<{ asset_id: string; version: number }>
+  }
   industry?: string
   region?: string
   language?: string
@@ -121,6 +127,228 @@ export type BriefVersion = {
   version: number
   content_hash: string
   snapshot: BriefDocument
+}
+
+export type CreativeBusinessQuestion = {
+  id: string
+  label: string
+  type: 'text' | 'textarea' | 'single_select' | 'multi_select' | 'boolean' | 'asset_ref' | 'reference_locator'
+  required_for: 'recommendation' | 'strategy' | 'production'
+  brief_source_path?: string
+  help?: string
+  options?: Array<{ value: string; label: string }>
+  depends_on?: { question_id: string; equals: unknown }
+  validation?: { max_length?: number; max_items?: number }
+}
+
+export type CreativeBusinessProfile = {
+  business_code: string
+  generation: number
+  version: string
+  display_name: string
+  summary: string
+  lifecycle: 'draft' | 'active' | 'deprecated' | 'retired'
+  selectable: boolean
+  display_order: number
+  questions: CreativeBusinessQuestion[]
+  requirements: { strategy: string[]; production: string[] }
+  output_fields: Array<{
+    key: string
+    label: string
+    type: 'string' | 'string_array' | 'boolean'
+    required: boolean
+    max_items?: number
+    max_length?: number
+    description: string
+  }>
+  reference_policy: {
+    allows_unknown_for_strategy: boolean
+    allowed_strategy_uses: string[]
+    production_confirmations: string[]
+  }
+  content_hash: string
+}
+
+export type CreativeBusinessRecommendation = {
+  business_code: string
+  display_name: string
+  rank?: number
+  score: number
+  eligible: boolean
+  confidence: 'high' | 'medium' | 'low'
+  reasons: string[]
+  missing_signals: string[]
+  warnings: string[]
+  exclusion_reasons: string[]
+  profile_ref: {
+    business_code: string
+    generation: number
+    version: string
+    content_hash: string
+  }
+}
+
+export type CreativeMediaInput = {
+  asset_ref: { asset_id: string; version: number }
+  role: string
+  origin: string
+  kind: 'image' | 'video' | 'document' | ''
+  mime_type?: string
+  status: string
+  width_pixels?: number
+  height_pixels?: number
+  duration_seconds?: number
+  usefulness: 'semantic' | 'production_only' | 'unavailable'
+  strategy_uses: string[]
+  observations: string[]
+  limitations: string[]
+}
+
+export type CreativeMediaAssessment = {
+  items: CreativeMediaInput[]
+  semantic_count: number
+  production_only_count: number
+  unavailable_count: number
+  warnings: string[]
+}
+
+export type CreativeBusinessRecommendationSnapshot = {
+  policy_version: string
+  catalog_hash: string
+  brief_id: string
+  brief_version: number
+  brief_hash: string
+  signals: {
+    objective_type: string
+    channels: string[]
+    deliverable_type: string
+    deliverable_types: string[]
+    industry: string
+    asset_roles: string[]
+    reference_present: boolean
+    content_context: string
+    brand_goal: boolean
+    product_image_count: number
+    product_video_count: number
+    analyzed_asset_count: number
+  }
+  media: CreativeMediaAssessment
+  recommended: CreativeBusinessRecommendation[]
+  alternatives: CreativeBusinessRecommendation[]
+}
+
+export type CreativeTaskStrategyDocument = {
+  contract_version: 'creative-task-strategy/v1'
+  objective: string
+  audience: { primary: string; insights: string[] }
+  core_message: string
+  message_hierarchy: string[]
+  hypotheses: Array<{ id: string; statement: string; variable: string; metric: string }>
+  business_strategy: Record<string, unknown>
+  claims_and_evidence: string[]
+  media?: CreativeMediaAssessment
+  asset_requirements: Array<{ role: string; required_stage: string; requirement: string }>
+  guardrails: string[]
+  reference_use: {
+    locator?: string
+    rights_status: string
+    intended_use: string
+    warnings: string[]
+  }
+  open_questions: string[]
+}
+
+export type CreativeTaskStrategyVersion = {
+  plan_id: string
+  version: number
+  plan_revision: number
+  contract_version: 'creative-task-strategy/v1'
+  document: CreativeTaskStrategyDocument
+  content_hash: string
+  created_at: string
+}
+
+export type CreativeBusinessCapability = {
+  business_code: string
+  display_name: string
+  status: 'available' | 'preview' | 'unsupported'
+  format?: 'image_text' | 'video'
+  channel?: 'xiaohongshu' | 'douyin' | 'kuaishou'
+  performance_mode?: string
+  destination_area?: 'image-text' | 'video'
+  destination_view?: string
+  can_create_task_immediately: boolean
+  production_inputs: string[]
+  limitation?: string
+}
+
+export type TaskStrategyCreativeIntake = {
+  id: string
+  project_id: string
+  source: 'task_strategy'
+  status: 'draft' | 'needs_clarification' | 'ready' | 'superseded'
+  request: {
+    format: 'image_text' | 'video'
+    performance_mode?: string
+    channel: string
+    objective: string
+    audience: string
+    core_message: string
+    call_to_action: string
+    concept: string
+    mandatory_elements: string[]
+    prohibited_claims: string[]
+    task_strategy: {
+      plan_id: string
+      strategy_version: number
+      expected_content_hash: string
+    }
+    task_strategy_input: {
+      contract_version: 'creative-task-strategy/v1'
+      business_code: string
+      business_strategy: Record<string, unknown>
+      guardrails: string[]
+      open_questions: string[]
+      media: Array<{
+        asset_ref: { asset_id: string; version: number }
+        role: string
+        kind?: string
+        status: string
+        usefulness: string
+      }>
+      reference_use: {
+        locator?: string
+        rights_status: string
+        intended_use: string
+        warnings: string[]
+      }
+    }
+  }
+  missing_fields: string[]
+  warnings: string[]
+  version: number
+}
+
+export type CreativeTaskPlan = {
+  id: string
+  project_id: string
+  brief_id: string
+  brief_version: number
+  status: 'collecting' | 'ready' | 'generating' | 'generated' | 'failed' | 'superseded'
+  business_code: string
+  selection_source: 'recommended' | 'manual'
+  answers: Record<string, unknown>
+  completeness: {
+    ready: boolean
+    blockers: Array<{ field: string; reason: string }>
+    warnings: Array<{ field: string; reason: string }>
+  }
+  current_revision: number
+  current_strategy_version: number
+  current_agent_task_id?: string
+  version: number
+  profile?: CreativeBusinessProfile
+  current_strategy?: CreativeTaskStrategyVersion
 }
 
 export type BriefCenterSummary = {
@@ -428,7 +656,13 @@ export type KnowledgeDocument = {
   size_bytes: number
   content_sha256: string
   text_sha256: string
-  status: 'ready'
+  chunk_count: number
+  status: 'parse_queued' | 'parsing' | 'ready' | 'parse_failed'
+  parser_code?: string
+  parser_version?: string
+  parse_error_code?: string
+  parse_error_message?: string
+  parsed_at?: string
   created_at: string
 }
 
@@ -458,22 +692,46 @@ export type ResearchArtifact = {
   source_url?: string
   content: string
   citations: string[]
+  sources: ResearchSource[]
   content_hash: string
+}
+
+export type ResearchSource = {
+  id: string
+  research_run_id: string
+  source_class: 'web' | 'toutiao' | 'douyin' | 'weather' | 'unknown'
+  media_type: 'article' | 'video' | 'data' | 'unknown'
+  title: string
+  url: string
+  canonical_url: string
+  domain: string
+  published_at?: string
+  retrieved_at: string
+  verification_status: 'model_cited' | 'content_verified' | 'conflicted' | 'invalid'
+  content_hash: string
+  start_index: number
+  end_index: number
+  support_level: 'model_cited' | 'content_verified' | 'conflicted' | 'invalid'
 }
 
 export type ResearchRun = {
   id: string
-  mode: 'web' | 'mcp'
+  mode: 'web'
   category: ResearchArtifact['category']
   query: string
   document_ids: string[]
   disclosed_fields: string[]
+  disclosed_chunk_ids: string[]
   status: 'running' | 'succeeded' | 'failed' | 'unavailable'
   confirmed_at: string
   created_at: string
   updated_at: string
   error_code?: string
   error_message?: string
+  provider_code?: string
+  model_version?: string
+  provider_response_id?: string
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
   artifacts: ResearchArtifact[]
 }
 

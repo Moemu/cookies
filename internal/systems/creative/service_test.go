@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,166 @@ func TestStrategyPackageWithoutCreativeReadinessNeedsClarification(t *testing.T)
 	}
 	if intake.Status != IntakeNeedsClarification || len(intake.MissingFields) != 1 || intake.MissingFields[0] != "strategy_package.creative_ready" {
 		t.Fatalf("intake = %#v", intake)
+	}
+}
+
+func TestTaskStrategyHandoffCreatesFrozenReadyIntake(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.TaskStrategies = taskStrategyReader{snapshot: TaskStrategySnapshot{
+		PlanID: "plan_1", StrategyVersion: 2, ContentHash: "sha256:task",
+		BusinessCode: BusinessXiaohongshuImageText,
+		Objective:    "建立新品认知", Audience: TaskStrategyAudience{Primary: "通勤女性", Insights: []string{"关注便携"}},
+		CoreMessage: "轻盈气泡水", CallToAction: "收藏内容", Concept: "通勤场景种草",
+		Tone: []string{"清爽"}, VisualKeywords: []string{"自然光"},
+		BusinessStrategy: map[string]any{"content_angle": "通勤补水"},
+		MessageHierarchy: []string{"场景", "利益点", "证据"}, ClaimsAndEvidence: []string{"0 糖"},
+		Guardrails: []string{"不得夸大"}, Media: []TaskStrategyMediaItem{},
+		ReferenceUse:  TaskStrategyReferenceUse{RightsStatus: "unknown", IntendedUse: "style_description", Warnings: []string{}},
+		OpenQuestions: []string{"确认商业内容披露"},
+		Lineage:       TaskStrategyLineage{BriefID: "brief_1", BriefVersion: 1, BriefContentHash: "sha256:brief"},
+	}}
+	rc := testRequestContext()
+	request := CreateIntakeRequest{
+		Source: IntakeSourceTaskStrategy,
+		TaskStrategy: &TaskStrategyReference{
+			PlanID: "plan_1", StrategyVersion: 2, ExpectedContentHash: "sha256:task",
+		},
+	}
+	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "task-strategy-handoff", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.Source != IntakeSourceTaskStrategy || intake.Status != IntakeReady ||
+		intake.Request.TaskStrategyInput == nil ||
+		intake.Request.TaskStrategyInput.BusinessCode != BusinessXiaohongshuImageText ||
+		intake.Request.Concept != "通勤场景种草" {
+		t.Fatalf("intake = %#v", intake)
+	}
+	task, err := service.CreateTask(context.Background(), rc.Actor, "project_1", intake.ID, defaultTaskRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.IntakeID != intake.ID || task.Format != FormatImageText {
+		t.Fatalf("task = %#v", task)
+	}
+}
+
+func TestTaskStrategyHandoffRejectsUnavailableBusiness(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.TaskStrategies = taskStrategyReader{snapshot: TaskStrategySnapshot{
+		PlanID: "plan_brand", StrategyVersion: 1, ContentHash: "sha256:brand",
+		BusinessCode: BusinessBrandVideo, Objective: "品牌认知",
+		Audience: TaskStrategyAudience{Primary: "大众"}, CoreMessage: "品牌主张",
+		BusinessStrategy: map[string]any{}, Media: []TaskStrategyMediaItem{},
+	}}
+	_, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "brand-handoff", CreateIntakeRequest{
+		Source: IntakeSourceTaskStrategy,
+		TaskStrategy: &TaskStrategyReference{
+			PlanID: "plan_brand", StrategyVersion: 1, ExpectedContentHash: "sha256:brand",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestTaskStrategyCallerCannotSubmitMappedContent(t *testing.T) {
+	t.Parallel()
+	request := CreateIntakeRequest{
+		Source: IntakeSourceTaskStrategy,
+		TaskStrategy: &TaskStrategyReference{
+			PlanID: "plan_1", StrategyVersion: 1, ExpectedContentHash: "hash",
+		},
+		Objective: "forged",
+	}
+	if err := request.Validate(); err == nil {
+		t.Fatal("expected caller-supplied mapped fields to be rejected")
+	}
+}
+
+func TestCreativeBusinessCapabilitiesExposeOnlyImplementedHandoffs(t *testing.T) {
+	t.Parallel()
+	values := CreativeBusinessCapabilities()
+	available := map[string]bool{}
+	for _, value := range values {
+		if value.Status == "available" {
+			available[value.BusinessCode] = true
+		}
+	}
+	for _, code := range []string{
+		BusinessXiaohongshuImageText, BusinessShortDramaPreroll,
+		BusinessCommercePreroll, BusinessViralRemake,
+	} {
+		if !available[code] {
+			t.Fatalf("%s should be available: %#v", code, values)
+		}
+	}
+	if available[BusinessGamePreroll] || available[BusinessBrandVideo] || available[BusinessWechatArticle] {
+		t.Fatalf("preview-only businesses must not be available: %#v", available)
+	}
+}
+
+func TestManualProductionIntakeKeepsCompatibleTaskStrategyParent(t *testing.T) {
+	t.Parallel()
+	newRequest := func(parentID string) CreateIntakeRequest {
+		return CreateIntakeRequest{
+			Source: IntakeSourceManual, ParentIntakeID: parentID,
+			Format: FormatVideo, PerformanceMode: PerformanceModeViralRemake,
+			Channel: ChannelDouyin, Objective: "create an original conversion ad",
+			Audience: "efficiency tool users", CoreMessage: "reduce repetitive work",
+			CallToAction: "try now", Concept: "reuse the mechanism, not the expression",
+			Tone: []string{"clear"}, VisualKeywords: []string{"high contrast"},
+			Mandatory: []string{}, Prohibited: []string{},
+			CreativeRoutes: []CreativeRouteSnapshot{{
+				RouteID: ManualViralRemakeRouteID, RouteType: PerformanceModeViralRemake,
+				VideoPurpose: "performance", Channels: []string{"douyin"},
+				Reason:                "user selected the task strategy handoff",
+				TargetDurationSeconds: 15, AspectRatio: "9:16", RequiresHumanConfirmation: true,
+			}},
+			ManualViralRemake: &ManualViralRemakeInput{
+				ProductName: "FlowKit", SellingPoints: []string{"reduce repetitive work"},
+				UserInstruction:      "keep only the transferable pacing mechanism",
+				ReferenceVideo:       contract.AssetVersionRef{AssetID: "asset_reference_video", Version: 1},
+				ReferenceVideoRights: RightsPending,
+			},
+		}
+	}
+
+	service := testService()
+	repository := service.Repository.(*memoryRepository)
+	repository.intakes["parent_viral"] = CreativeIntake{
+		ID: "parent_viral", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: IntakeSourceTaskStrategy, Status: IntakeReady,
+		Request: CreateIntakeRequest{TaskStrategyInput: &TaskStrategyInput{
+			ContractVersion: TaskStrategyContractVersion, BusinessCode: BusinessViralRemake,
+		}},
+	}
+	intake, err := service.CreateIntake(
+		context.Background(), testRequestContext(), "project_1", "viral-production-child",
+		newRequest("parent_viral"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.Request.ParentIntakeID != "parent_viral" {
+		t.Fatalf("parent lineage was lost: %#v", intake.Request)
+	}
+
+	repository.intakes["parent_commerce"] = CreativeIntake{
+		ID: "parent_commerce", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: IntakeSourceTaskStrategy, Status: IntakeReady,
+		Request: CreateIntakeRequest{TaskStrategyInput: &TaskStrategyInput{
+			ContractVersion: TaskStrategyContractVersion, BusinessCode: BusinessCommercePreroll,
+		}},
+	}
+	_, err = service.CreateIntake(
+		context.Background(), testRequestContext(), "project_1", "invalid-production-child",
+		newRequest("parent_commerce"),
+	)
+	if err == nil || !strings.Contains(err.Error(), "not a compatible") {
+		t.Fatalf("expected incompatible parent to be rejected, got %v", err)
 	}
 }
 
@@ -477,6 +638,11 @@ type strategyPackageReader struct {
 	snapshot StrategyPackageSnapshot
 }
 
+type taskStrategyReader struct {
+	snapshot TaskStrategySnapshot
+	err      error
+}
+
 type testAssetReader struct {
 	snapshot  CreativeAssetSnapshot
 	snapshots map[contract.AssetID]CreativeAssetSnapshot
@@ -531,6 +697,21 @@ func (r strategyPackageReader) ReadForCreative(_ context.Context, _ contract.Act
 	return value, nil
 }
 
+func (r taskStrategyReader) ReadTaskStrategyForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, reference TaskStrategyReference) (TaskStrategySnapshot, error) {
+	if r.err != nil {
+		return TaskStrategySnapshot{}, r.err
+	}
+	value := r.snapshot
+	if value.PlanID == "" {
+		value.PlanID, value.StrategyVersion, value.ContentHash = reference.PlanID, reference.StrategyVersion, reference.ExpectedContentHash
+	}
+	if value.PlanID != reference.PlanID || value.StrategyVersion != reference.StrategyVersion ||
+		value.ContentHash != reference.ExpectedContentHash {
+		return TaskStrategySnapshot{}, fmt.Errorf("task strategy reference mismatch")
+	}
+	return value, nil
+}
+
 func (testProjects) RequireActiveContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
 	brand := contract.BrandID("brand_1")
 	return contract.ProjectContext{OrganizationID: actor.OrganizationID, ProjectID: projectID, BrandID: &brand, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 1}, nil
@@ -555,9 +736,19 @@ func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake
 		if intake.Source == IntakeSourceStrategyPackage && existing.Source == IntakeSourceStrategyPackage && sameStrategyPackage(existing.Request.StrategyPackage, intake.Request.StrategyPackage) {
 			return existing, true, nil
 		}
+		if intake.Source == IntakeSourceTaskStrategy && existing.Source == IntakeSourceTaskStrategy &&
+			sameTaskStrategy(existing.Request.TaskStrategy, intake.Request.TaskStrategy) {
+			return existing, true, nil
+		}
 	}
 	r.intakes[intake.ID] = intake
 	return intake, false, nil
+}
+
+func sameTaskStrategy(left, right *TaskStrategyReference) bool {
+	return left != nil && right != nil && left.PlanID == right.PlanID &&
+		left.StrategyVersion == right.StrategyVersion &&
+		left.ExpectedContentHash == right.ExpectedContentHash
 }
 
 func sameStrategyPackage(left, right *StrategyPackageReference) bool {

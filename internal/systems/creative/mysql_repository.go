@@ -41,14 +41,28 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 		strategyPackageVersion = intake.Request.StrategyPackage.PackageVersion
 		strategyPackageHash = intake.Request.StrategyPackage.ExpectedContentHash
 	}
+	taskStrategyPlanID := ""
+	taskStrategyVersion := int64(0)
+	taskStrategyHash := ""
+	if intake.Request.TaskStrategy != nil {
+		taskStrategyPlanID = intake.Request.TaskStrategy.PlanID
+		taskStrategyVersion = intake.Request.TaskStrategy.StrategyVersion
+		taskStrategyHash = intake.Request.TaskStrategy.ExpectedContentHash
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO creative_intakes (
 		id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 		request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash,
-		strategy_package_id, strategy_package_version, strategy_package_content_hash, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?)`,
+		strategy_package_id, strategy_package_version, strategy_package_content_hash,
+		task_strategy_plan_id, task_strategy_version, task_strategy_content_hash,
+		version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?,
+		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
+		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?)`,
 		intake.ID, intake.OrganizationID, intake.ProjectID, intake.Principal.Kind, intake.Principal.ID, intake.Source, intake.Status,
 		request, missing, warnings, intake.ConfirmedBy, intake.IdempotencyKey, intake.RequestHash,
-		strategyPackageID, strategyPackageVersion, strategyPackageHash, intake.Version, intake.CreatedAt, intake.UpdatedAt)
+		strategyPackageID, strategyPackageVersion, strategyPackageHash,
+		taskStrategyPlanID, taskStrategyVersion, taskStrategyHash,
+		intake.Version, intake.CreatedAt, intake.UpdatedAt)
 	if err == nil {
 		return intake, false, nil
 	}
@@ -70,6 +84,15 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 		}
 		if !errors.Is(packageErr, sql.ErrNoRows) {
 			return CreativeIntake{}, false, packageErr
+		}
+	}
+	if intake.Source == IntakeSourceTaskStrategy && intake.Request.TaskStrategy != nil {
+		existing, strategyErr := r.getIntakeByTaskStrategy(ctx, intake.OrganizationID, intake.ProjectID, *intake.Request.TaskStrategy)
+		if strategyErr == nil {
+			return existing, true, nil
+		}
+		if !errors.Is(strategyErr, sql.ErrNoRows) {
+			return CreativeIntake{}, false, strategyErr
 		}
 	}
 	return CreativeIntake{}, false, getErr
@@ -797,6 +820,10 @@ func (r MySQLRepository) getIntakeByIdempotency(ctx context.Context, intake Crea
 
 func (r MySQLRepository) getIntakeByStrategyPackage(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, reference StrategyPackageReference) (CreativeIntake, error) {
 	return scanIntake(r.DB.QueryRowContext(ctx, creativeIntakeSelect+` WHERE organization_id = ? AND project_id = ? AND source_type = ? AND strategy_package_id = ? AND strategy_package_version = ? AND strategy_package_content_hash = ?`, organizationID, projectID, IntakeSourceStrategyPackage, reference.PackageID, reference.PackageVersion, reference.ExpectedContentHash))
+}
+
+func (r MySQLRepository) getIntakeByTaskStrategy(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, reference TaskStrategyReference) (CreativeIntake, error) {
+	return scanIntake(r.DB.QueryRowContext(ctx, creativeIntakeSelect+` WHERE organization_id = ? AND project_id = ? AND source_type = ? AND task_strategy_plan_id = ? AND task_strategy_version = ? AND task_strategy_content_hash = ?`, organizationID, projectID, IntakeSourceTaskStrategy, reference.PlanID, reference.StrategyVersion, reference.ExpectedContentHash))
 }
 
 func (r MySQLRepository) getVersionByIdempotency(ctx context.Context, value CreativeVersion) (CreativeVersion, error) {

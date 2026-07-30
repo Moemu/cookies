@@ -819,15 +819,35 @@ export function HomePage({ onSystemChange, onOpenProject, onManageProject }: { o
   </div>
 }
 
-function PageHeader({ system, item, activeView, onViewChange, onPrimaryAction, busy, actionLabel }: { system: SystemDefinition; item: NavItem; activeView: string; onViewChange: (v: string) => void; onPrimaryAction: () => void; busy: boolean; actionLabel?: string }) {
+function ViewTabs({ item, activeView, onViewChange, vertical = false }: {
+  item: NavItem
+  activeView: string
+  onViewChange: (view: string) => void
+  vertical?: boolean
+}) {
+  return <nav
+    className={vertical ? 'strategy-workspace-view-nav' : 'tabs'}
+    role="tablist"
+    aria-label={`${item.label}视图`}
+    aria-orientation={vertical ? 'vertical' : 'horizontal'}
+  >
+    {item.views.map(view => <button
+      key={view}
+      role="tab"
+      aria-selected={view === activeView}
+      className={view === activeView ? (vertical ? 'active' : 'tab active') : (vertical ? '' : 'tab')}
+      onClick={() => onViewChange(view)}
+    >{vertical ? <span/> : null}{view}</button>)}
+  </nav>
+}
+
+function PageHeader({ item, activeView, onViewChange, onPrimaryAction, busy, actionLabel, showTabs = true }: { item: NavItem; activeView: string; onViewChange: (v: string) => void; onPrimaryAction: () => void; busy: boolean; actionLabel?: string; showTabs?: boolean }) {
   return <>
     <div className="page-header">
-      <div><div className="breadcrumb">{system.label} <span>/</span> {item.label}</div><h1>{item.label}</h1><p>{item.description}</p></div>
+      <div><h1>{item.label}</h1><p>{item.description}</p></div>
       {actionLabel ? <button className="primary-button" onClick={onPrimaryAction} disabled={busy}>{busy ? '正在保存…' : <><Plus size={16} />{actionLabel}</>}</button> : <span className="page-context-label">Project 数据自动关联 · 无需重复建任务</span>}
     </div>
-    {item.views.length > 1 ? <div className="tabs" role="tablist" aria-label={`${item.label}视图`}>
-      {item.views.map(view => <button key={view} role="tab" aria-selected={view === activeView} className={view === activeView ? 'tab active' : 'tab'} onClick={() => onViewChange(view)}>{view}</button>)}
-    </div> : null}
+    {showTabs && item.views.length > 1 ? <ViewTabs item={item} activeView={activeView} onViewChange={onViewChange}/> : null}
   </>
 }
 
@@ -1552,7 +1572,7 @@ function ObjectDetail({ system, item, objectId, onOpenProject }: { system: Syste
   return <aside className="object-detail" aria-label={`${name}详情`}><div><span className="section-label">服务端对象详情</span><h2>{name}</h2><p>{record ? `${operationField(record, 'kind')} · ${record.status} · ${operationField(record, 'owner')}` : `当前 Project：${currentProject.name}`}</p></div><div className="detail-kv"><span>对象 ID</span><b>{objectId}</b></div><div className="detail-kv"><span>来源版本</span><b>{currentProject.artifacts.strategy.version} → {currentProject.artifacts.creative.version}</b></div><button className="primary-button full" onClick={() => onOpenProject(currentProject.id, next[0], next[1], next[2])}>{next[3]}<ArrowRight size={15}/></button><button className="secondary-button full" onClick={() => onOpenProject(currentProject.id, system.key, item.id)}>返回{item.label}列表</button></aside>
 }
 
-export function ModulePage({ system, item, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
+export function ModulePage({ system, item, contextId, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; contextId?: string; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
   const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
   const [busy, setBusy] = useState(false)
@@ -1596,8 +1616,8 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
     : system.key === 'strategy' && item.id === 'research' ? <KanonResearchEvidenceCenter activeView={activeView}/>
     : system.key === 'strategy' && item.id === 'operations' ? <KanonSkillsOperations activeView={activeView}/>
     : system.key === 'strategy' && item.id === 'reviews' ? <KanonReviewCenter activeView={activeView} onOpenReview={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', undefined, '评审')}/>
-    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={objectId}/>
-    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
+    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={contextId ?? objectId}/>
+    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} onOpenProject={onOpenProject}/>
@@ -1643,6 +1663,11 @@ export function ModulePage({ system, item, objectId, routeView, onOpenProject }:
   const projectProgress = calculateProjectProgress(currentProject)
   const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces'))
   const isStrategyWorkspace = system.key === 'strategy' && item.id === 'workspaces'
+  const changeView = (view: string) => {
+    setActiveView(view)
+    onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view)
+  }
+  const pageSurface = <div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div>
 
-  return <div className={`module-page page-frame layout-${item.layout}${isStrategyWorkspace ? ' strategy-workspace-page' : ''}`}><PageHeader system={system} item={item} activeView={activeView} onViewChange={view => { setActiveView(view); onOpenProject(currentProject.id, system.key, item.id, system.key === 'strategy' && item.id === 'workspaces' ? objectId : undefined, view) }} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div>{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
+  return <div className={`module-page page-frame layout-${item.layout}${isStrategyWorkspace ? ' strategy-workspace-page' : ''}`}><PageHeader item={item} activeView={activeView} onViewChange={changeView} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel} showTabs={!isStrategyWorkspace}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}{isStrategyWorkspace ? <div className="strategy-workspace-shell"><ViewTabs item={item} activeView={activeView} onViewChange={changeView}/>{pageSurface}</div> : pageSurface}{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }

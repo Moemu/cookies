@@ -1348,6 +1348,59 @@ func TestGetViralRemakeWorkspaceRestoresPersistedDraft(t *testing.T) {
 	}
 }
 
+func TestCreativeTaskStrategyReadEndpointsRestoreHandoffAndCapabilities(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{intake: creative.CreativeIntake{
+		ID: "creativeintake_task_strategy_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: creative.IntakeSourceTaskStrategy, Status: creative.IntakeReady,
+		Request: creative.CreateIntakeRequest{
+			Source: creative.IntakeSourceTaskStrategy,
+			TaskStrategy: &creative.TaskStrategyReference{
+				PlanID: "creativeplan_1", StrategyVersion: 2, ExpectedContentHash: "sha256:task",
+			},
+			TaskStrategyInput: &creative.TaskStrategyInput{
+				ContractVersion: creative.TaskStrategyContractVersion,
+				BusinessCode:    creative.BusinessCommercePreroll,
+			},
+		},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+
+	capabilities := httptest.NewRecorder()
+	server.ServeHTTP(capabilities, httptest.NewRequest(
+		http.MethodGet, "/api/creative/v1/projects/project_1/business-capabilities", nil,
+	))
+	if capabilities.Code != http.StatusOK ||
+		!strings.Contains(capabilities.Body.String(), `"business_code":"commerce_preroll"`) ||
+		!strings.Contains(capabilities.Body.String(), `"status":"available"`) {
+		t.Fatalf("capabilities status=%d body=%s", capabilities.Code, capabilities.Body.String())
+	}
+
+	intake := httptest.NewRecorder()
+	server.ServeHTTP(intake, httptest.NewRequest(
+		http.MethodGet,
+		"/api/creative/v1/projects/project_1/creative-intakes/creativeintake_task_strategy_1",
+		nil,
+	))
+	if intake.Code != http.StatusOK ||
+		!strings.Contains(intake.Body.String(), `"source":"task_strategy"`) ||
+		!strings.Contains(intake.Body.String(), `"strategy_version":2`) {
+		t.Fatalf("intake status=%d body=%s", intake.Code, intake.Body.String())
+	}
+}
+
 func TestCreativeVideoJobRequiresAndMapsApprovedFirstLastFrameSpec(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{
@@ -1697,6 +1750,7 @@ type providerJobStub struct {
 
 type creativeManagerStub struct {
 	detail                  creative.TaskDetail
+	intake                  creative.CreativeIntake
 	commerceSources         []creative.CreativeSourceOption
 	preparedCommerce        creative.PreparedCommercePreroll
 	registeredProviderJobID string
@@ -1721,6 +1775,12 @@ func (s *creativeManagerStub) CreateIntake(context.Context, contract.RequestCont
 }
 func (s *creativeManagerStub) ListIntakes(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeIntake, error) {
 	return nil, nil
+}
+func (s *creativeManagerStub) GetIntake(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeIntake, error) {
+	return s.intake, nil
+}
+func (s *creativeManagerStub) ListBusinessCapabilities(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeBusinessCapability, error) {
+	return creative.CreativeBusinessCapabilities(), nil
 }
 func (s *creativeManagerStub) CreateTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.CreateTaskRequest) (creative.CreativeTask, error) {
 	return creative.CreativeTask{}, nil

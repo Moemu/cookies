@@ -549,6 +549,8 @@ func (s Service) HandleAgentTask(ctx context.Context, task agent.Task) (*contrac
 		return s.handleDraftRevise(ctx, task)
 	case AgentKindReviewDeep:
 		return s.handleDeepReview(ctx, task)
+	case AgentKindCreativeTaskGenerate:
+		return s.handleCreativeTaskGenerate(ctx, task)
 	default:
 		return nil, jobruntime.ExecutionError{JobError: contract.JobError{Code: "STRATEGY_TASK_KIND_UNSUPPORTED", Message: "Strategy task kind is unsupported"}}
 	}
@@ -589,6 +591,18 @@ func (s Service) completedAgentResult(ctx context.Context, task agent.Task) (*co
 		}
 		version := analysis.CandidateRevision
 		return &contract.ResourceRef{Type: "strategy.review_analysis", ID: analysis.ID, Version: &version}, true, nil
+	case AgentKindCreativeTaskGenerate:
+		plan, err := scanCreativeTaskPlan(s.DB.QueryRowContext(ctx, creativeTaskPlanSelect+`
+			WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			task.OrganizationID, task.ProjectID, task.SourceID))
+		if err != nil {
+			return nil, true, err
+		}
+		version := plan.CurrentStrategyVersion
+		return &contract.ResourceRef{
+			Type: "strategy.creative_task_strategy_version",
+			ID:   plan.ID, Version: &version,
+		}, true, nil
 	default:
 		draft, err := scanDraft(s.DB.QueryRowContext(ctx, draftSelect+` WHERE organization_id = ?
 			AND project_id = ? AND id = ?`, task.OrganizationID, task.ProjectID, task.SourceID))
@@ -643,7 +657,9 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if len(decision.Patch.Operations) > 0 {
 		updated, err = ApplyBriefPatch(draft, decision.Patch, PatchFromModel, agentTask.ID, now)
 		if err != nil {
-			return nil, err
+			return nil, jobruntime.ExecutionError{JobError: contract.JobError{
+				Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch could not be applied",
+			}}
 		}
 		changed = true
 	}
@@ -1140,6 +1156,7 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 		Warnings: modelOutput.Warnings,
 	}
 	decision = sanitizeConversationDecision(draft, message, decision)
+	decision.Patch = mergeExplicitLabeledBriefOperations(draft, message, decision.Patch)
 	patch := &decision.Patch
 	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
 		patch.ContractVersion = "strategy-brief-patch/v2"
@@ -1561,29 +1578,91 @@ func decodeStrictJSON(value json.RawMessage, target any) error {
 
 func deterministicBriefPatch(draft BriefDraft, message Message) BriefPatch {
 	content := strings.TrimSpace(message.Content)
-	source := FieldSource{Type: "conversation_message", ID: message.ID}
-	operations := []BriefPatchOperation{}
-	add := func(path string, value any) {
-		operations = append(operations, BriefPatchOperation{Op: "set", FieldPath: path, Value: mustJSON(value), Source: source, Confidence: "medium", Confirmation: "unconfirmed"})
-	}
-	fields := []struct {
-		path  string
-		label string
-	}{
-		{"brand.name", "品牌"}, {"product.name", "产品"}, {"industry", "行业"}, {"region", "地区"}, {"language", "语言"},
-		{"campaign.objective", "目标"}, {"audience.primary", "受众"}, {"proposition", "卖点"}, {"budget.total", "预算"},
-		{"schedule.window", "周期"}, {"measurement.primary_kpi", "指标"},
-	}
+	operations := explicitLabeledBriefOperations(message)
 	objectiveExtracted := false
-	for _, field := range fields {
-		pattern := regexp.MustCompile(field.label + `\s*[:：]\s*([^，。;；\n]+)`)
-		if match := pattern.FindStringSubmatch(content); len(match) == 2 {
-			add(field.path, strings.TrimSpace(match[1]))
-			objectiveExtracted = objectiveExtracted || field.path == "campaign.objective"
+	for _, operation := range operations {
+		if operation.FieldPath == "campaign.objective" {
+			objectiveExtracted = true
+			break
 		}
 	}
 	if draft.Document.Campaign.Objective == "" && !objectiveExtracted {
-		add("campaign.objective", content)
+		source := FieldSource{Type: "conversation_message", ID: message.ID}
+		operations = append(operations, BriefPatchOperation{
+			Op: "set", FieldPath: "campaign.objective", Value: mustJSON(content),
+			Source: source, Confidence: "medium", Confirmation: "unconfirmed",
+		})
+	}
+	contractVersion := "strategy-brief-patch/v1"
+	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
+		contractVersion = "strategy-brief-patch/v2"
+	}
+	return BriefPatch{ContractVersion: contractVersion, BaseVersion: draft.Version, Operations: operations, Questions: suggestQuestions(draft)}
+}
+
+func mergeExplicitLabeledBriefOperations(draft BriefDraft, message Message, patch BriefPatch) BriefPatch {
+	existing := make(map[string]struct{}, len(patch.Operations))
+	for _, operation := range patch.Operations {
+		existing[operation.FieldPath] = struct{}{}
+	}
+	for _, operation := range explicitLabeledBriefOperations(message) {
+		if _, found := existing[operation.FieldPath]; found || len(patch.Operations) >= 32 {
+			continue
+		}
+		operation.Confidence = "high"
+		patch.Operations = append(patch.Operations, operation)
+		existing[operation.FieldPath] = struct{}{}
+	}
+	patch.BaseVersion = draft.Version
+	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
+		patch.ContractVersion = "strategy-brief-patch/v2"
+	} else {
+		patch.ContractVersion = "strategy-brief-patch/v1"
+	}
+	return patch
+}
+
+func explicitLabeledBriefOperations(message Message) []BriefPatchOperation {
+	content := strings.TrimSpace(message.Content)
+	source := FieldSource{Type: "conversation_message", ID: message.ID}
+	operations := make([]BriefPatchOperation, 0, 14)
+	add := func(path string, value any) {
+		operations = append(operations, BriefPatchOperation{
+			Op: "set", FieldPath: path, Value: mustJSON(value), Source: source,
+			Confidence: "medium", Confirmation: "unconfirmed",
+		})
+	}
+	fields := []struct {
+		path   string
+		labels []string
+	}{
+		{"brand.name", []string{"品牌名称", "品牌"}},
+		{"product.name", []string{"产品名称", "产品/服务", "产品"}},
+		{"industry", []string{"行业"}},
+		{"region", []string{"地区"}},
+		{"language", []string{"语言"}},
+		{"campaign.objective", []string{"推广目标", "业务目标", "目标"}},
+		{"audience.primary", []string{"核心受众", "目标受众", "受众"}},
+		{"proposition", []string{"核心主张", "核心卖点", "卖点", "主张"}},
+		{"budget.total", []string{"预算"}},
+		{"schedule.window", []string{"时间周期", "周期"}},
+		{"measurement.primary_kpi", []string{"核心 KPI", "核心KPI", "KPI", "指标"}},
+	}
+	for _, field := range fields {
+		if value, found := explicitLabeledValue(content, field.labels...); found {
+			add(field.path, value)
+		}
+	}
+	if value, found := explicitLabeledLineValue(content, "约束条件", "约束"); found {
+		values := make([]string, 0, 4)
+		for _, item := range regexp.MustCompile(`[;；]`).Split(value, -1) {
+			if item = strings.TrimSpace(item); item != "" {
+				values = append(values, item)
+			}
+		}
+		if len(values) > 0 {
+			add("constraints", values)
+		}
 	}
 	var channels []string
 	for _, candidate := range []struct{ keyword, value string }{
@@ -1598,11 +1677,37 @@ func deterministicBriefPatch(draft BriefDraft, message Message) BriefPatch {
 	if len(channels) > 0 {
 		add("channels", channels)
 	}
-	contractVersion := "strategy-brief-patch/v1"
-	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
-		contractVersion = "strategy-brief-patch/v2"
+	return operations
+}
+
+func explicitLabeledValue(content string, labels ...string) (string, bool) {
+	segments := regexp.MustCompile(`[;；\n]`).Split(strings.ReplaceAll(content, "\r\n", "\n"), -1)
+	for _, label := range labels {
+		pattern := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(label) + `\s*[:：]\s*(.+?)\s*$`)
+		for _, segment := range segments {
+			if match := pattern.FindStringSubmatch(segment); len(match) == 2 {
+				if value := strings.TrimSpace(match[1]); value != "" {
+					return value, true
+				}
+			}
+		}
 	}
-	return BriefPatch{ContractVersion: contractVersion, BaseVersion: draft.Version, Operations: operations, Questions: suggestQuestions(draft)}
+	return explicitLabeledLineValue(content, labels...)
+}
+
+func explicitLabeledLineValue(content string, labels ...string) (string, bool) {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	for _, label := range labels {
+		pattern := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(label) + `\s*[:：]\s*(.+?)\s*$`)
+		for _, line := range lines {
+			if match := pattern.FindStringSubmatch(line); len(match) == 2 {
+				if value := strings.TrimSpace(match[1]); value != "" {
+					return value, true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 func suggestQuestions(draft BriefDraft) []string {

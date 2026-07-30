@@ -8,6 +8,10 @@ import type {
   BriefVersion,
   ConversationBundle,
   ConversationMemory,
+  CreativeBusinessProfile,
+  CreativeBusinessCapability,
+  CreativeBusinessRecommendationSnapshot,
+  CreativeTaskPlan,
   DeepReviewAnalysis,
   DraftRevision,
   EvidenceReference,
@@ -29,6 +33,7 @@ import type {
   StrategyTask,
   StrategyTaskBundle,
   StrategyTaskListItem,
+  TaskStrategyCreativeIntake,
   Workspace,
   WorkspaceDetail,
 } from './types'
@@ -73,6 +78,139 @@ export const strategyApi = {
     apiRequest<{ items: StrategyCenterSummary[] }>(
       `${root}/projects/${encodeURIComponent(projectId)}/strategy-drafts`,
       { signal },
+    ),
+
+  listCreativeBusinesses: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<{ catalog_hash: string; items: CreativeBusinessProfile[] }>(
+      `${root}/projects/${encodeURIComponent(projectId)}/creative-businesses`,
+      { signal },
+    ),
+
+  recommendCreativeBusinesses: (
+    projectId: string,
+    brief: BriefVersion,
+    signal?: AbortSignal,
+  ) =>
+    apiRequest<CreativeBusinessRecommendationSnapshot>(
+      `${root}/projects/${encodeURIComponent(projectId)}/creative-business-recommendations`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          brief_id: brief.brief_id,
+          brief_version: brief.version,
+          limit: 3,
+        }),
+        signal,
+      },
+    ),
+
+  listCreativeTaskPlans: (projectId: string, briefId = '', signal?: AbortSignal) =>
+    apiRequest<{ items: CreativeTaskPlan[] }>(
+      `${root}/projects/${encodeURIComponent(projectId)}/creative-task-plans${briefId ? `?brief_id=${encodeURIComponent(briefId)}` : ''}`,
+      { signal },
+    ),
+
+  createCreativeTaskPlan: (
+    projectId: string,
+    input: {
+      brief_id: string
+      brief_version: number
+      source_strategy?: { strategy_id: string; revision: number }
+      business_code: string
+      selection_source: 'recommended' | 'manual'
+      catalog_hash: string
+    },
+    mutationKey?: string,
+  ) =>
+    apiRequest<CreativeTaskPlan>(
+      `${root}/projects/${encodeURIComponent(projectId)}/creative-task-plans`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(mutationKey),
+        body: JSON.stringify(input),
+      },
+    ),
+
+  patchCreativeTaskPlanAnswers: (
+    plan: CreativeTaskPlan,
+    answers: Record<string, unknown>,
+    mutationKey?: string,
+  ) =>
+    apiRequest<CreativeTaskPlan>(
+      `${root}/creative-task-plans/${encodeURIComponent(plan.id)}/answers`,
+      {
+        method: 'PATCH',
+        headers: { ...mutationHeaders(mutationKey), 'If-Match': `"v${plan.version}"` },
+        body: JSON.stringify({
+          expected_version: plan.version,
+          operations: Object.entries(answers).map(([question_id, value]) => ({
+            op: value === undefined ? 'remove' : 'set',
+            question_id,
+            ...(value === undefined ? {} : { value }),
+          })),
+        }),
+      },
+    ),
+
+  generateCreativeTaskStrategy: (plan: CreativeTaskPlan, mutationKey?: string) =>
+    apiRequest<{ plan: CreativeTaskPlan; agent_task: AgentTask }>(
+      `${root}/creative-task-plans/${encodeURIComponent(plan.id)}:generate`,
+      {
+        method: 'POST',
+        headers: { ...mutationHeaders(mutationKey), 'If-Match': `"v${plan.version}"` },
+        body: JSON.stringify({
+          expected_version: plan.version,
+          expected_revision: plan.current_revision,
+        }),
+      },
+    ),
+
+  getCreativeTaskPlan: (planId: string, signal?: AbortSignal) =>
+    apiRequest<CreativeTaskPlan>(
+      `${root}/creative-task-plans/${encodeURIComponent(planId)}`,
+      { signal },
+    ),
+
+  listCreativeBusinessCapabilities: (projectId: string, signal?: AbortSignal) =>
+    apiRequest<{ items: CreativeBusinessCapability[] }>(
+      `/api/creative/v1/projects/${encodeURIComponent(projectId)}/business-capabilities`,
+      { signal },
+    ),
+
+  handoffCreativeTaskStrategy: (
+    projectId: string,
+    plan: CreativeTaskPlan,
+    mutationKey?: string,
+  ) => {
+    if (!plan.current_strategy) throw new Error('请先生成创意任务策略')
+    return apiRequest<TaskStrategyCreativeIntake>(
+      `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(mutationKey),
+        body: JSON.stringify({
+          source: 'task_strategy',
+          task_strategy: {
+            plan_id: plan.id,
+            strategy_version: plan.current_strategy.version,
+            expected_content_hash: plan.current_strategy.content_hash,
+          },
+        }),
+      },
+    )
+  },
+
+  createImageTextTaskFromHandoff: (
+    projectId: string,
+    intakeId: string,
+    focus: string,
+  ) =>
+    apiRequest<{ id: string }>(
+      `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-task`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ content_type: 'custom', focus }),
+      },
     ),
 
   listEvidenceReferences: (projectId: string, evidenceId = '', signal?: AbortSignal) => {
@@ -383,7 +521,6 @@ export const strategyApi = {
   runExternalResearch: (
     projectId: string,
     request: {
-      mode: 'web' | 'mcp'
       category?: ResearchArtifact['category']
       query: string
       document_ids: string[]

@@ -12,6 +12,7 @@ export interface AppRoute {
   systemKey: SystemKey
   navId: string
   objectId?: string
+  contextId?: string
   view?: string
   accountPage?: 'profile' | 'security' | 'organization' | 'organization-members'
 }
@@ -36,7 +37,19 @@ export function parseRoute(location = `${window.location.pathname}${window.locat
   }
   const normalizedSystem = parts[2] === 'insights' ? 'insight' : parts[2]
   const systemKey = systemKeys.has(normalizedSystem as SystemKey) ? normalizedSystem as SystemKey : 'strategy'
-  return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey, navId: parts[3] || 'tasks', objectId: parts[4], view: url.searchParams.get('view') ?? undefined }
+  return {
+    isHome: false,
+    isProjectHome: false,
+    isProjectManagement: false,
+    isModelSettings: false,
+    isLegacyProjectSystemRoute: false,
+    projectId: parts[1],
+    systemKey,
+    navId: parts[3] || 'tasks',
+    objectId: parts[4],
+    contextId: url.searchParams.get('context') ?? undefined,
+    view: url.searchParams.get('view') ?? undefined,
+  }
 }
 
 export function projectHomePath(projectId: string) {
@@ -47,9 +60,12 @@ export function projectManagePath(projectId: string) {
   return `/projects/${projectId}/manage`
 }
 
-export function projectPath(projectId: string, systemKey: SystemKey, navId: string, objectId?: string, view?: string) {
+export function projectPath(projectId: string, systemKey: SystemKey, navId: string, objectId?: string, view?: string, contextId?: string) {
   const path = `/projects/${projectId}/${systemKey}/${navId}${objectId ? `/${objectId}` : ''}`
-  return view ? `${path}?view=${encodeURIComponent(view)}` : path
+  const search = new URLSearchParams()
+  if (view) search.set('view', view)
+  if (contextId) search.set('context', contextId)
+  return search.size ? `${path}?${search.toString()}` : path
 }
 
 export function useAppRoute() {

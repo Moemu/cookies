@@ -75,7 +75,7 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 		{
 			name: "document content declared",
 			request: ResearchRequest{
-				Mode: "mcp", Query: "竞品研究", DocumentIDs: []string{"doc_1"},
+				Mode: "web", Query: "竞品研究", DocumentIDs: []string{"doc_1"},
 				DisclosedFields: []string{"query", "document_content"},
 			},
 		},
@@ -84,6 +84,13 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 			request: ResearchRequest{
 				Mode: "web", Query: "行业案例", DocumentIDs: []string{"doc_1"},
 				DisclosedFields: []string{"query"},
+			},
+			wantError: true,
+		},
+		{
+			name: "mcp is not a public research mode",
+			request: ResearchRequest{
+				Mode: "mcp", Query: "竞品研究", DisclosedFields: []string{"query"},
 			},
 			wantError: true,
 		},

@@ -1,0 +1,15 @@
+{
+  "name": "creative_task.viral_remake",
+  "version": "v1.0.0",
+  "kind": "creative_task",
+  "match": ["viral_remake"],
+  "instructions": [
+    "只提炼参考内容的抽象节奏、信息顺序、冲突结构和转化机制。",
+    "明确目标产品、受众、卖点与抽象机制的映射，以及不能复制的元素。",
+    "权利未知不阻断高层策略分析，但必须把生产性使用要求写入 guardrails。"
+  ],
+  "quality_checks": [
+    "不得复用原画面、人物、台词、音乐、商标或其他可识别表达。",
+    "不得输出五维 Prompt、脚本、分镜或生成提示词。"
+  ]
+}

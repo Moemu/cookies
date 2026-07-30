@@ -91,6 +91,39 @@ func (s *Server) listCreativeIntakes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": values})
 }
 
+func (s *Server) getCreativeIntake(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetIntake(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("intake_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listCreativeBusinessCapabilities(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.creative.ListBusinessCapabilities(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
 func (s *Server) createCreativeTask(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)

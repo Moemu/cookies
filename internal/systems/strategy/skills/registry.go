@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed platform/*.json objective/*.json
+//go:embed platform/*.json objective/*.json creative/*.json
 var skillFiles embed.FS
 
 type Skill struct {
@@ -84,8 +84,8 @@ func (s Skill) Validate() error {
 	if strings.TrimSpace(s.Name) == "" || strings.TrimSpace(s.Version) == "" {
 		return fmt.Errorf("name and version are required")
 	}
-	if s.Kind != "platform" && s.Kind != "objective" {
-		return fmt.Errorf("kind must be platform or objective")
+	if s.Kind != "platform" && s.Kind != "objective" && s.Kind != "creative_task" {
+		return fmt.Errorf("kind must be platform, objective, or creative_task")
 	}
 	if len(s.Match) == 0 || len(s.Instructions) == 0 || len(s.QualityChecks) == 0 {
 		return fmt.Errorf("match, instructions, and quality_checks are required")
@@ -103,6 +103,9 @@ func (r Registry) Select(channels []string, objective string) []Snapshot {
 	}
 	var snapshots []Snapshot
 	for _, skill := range r.skills {
+		if skill.Kind != "platform" && skill.Kind != "objective" {
+			continue
+		}
 		matched := false
 		for _, candidate := range skill.Match {
 			if _, ok := keys[normalize(candidate)]; ok {
@@ -122,6 +125,33 @@ func (r Registry) Select(channels []string, objective string) []Snapshot {
 		})
 	}
 	return snapshots
+}
+
+func (r Registry) SelectCreativeTask(businessCode string) (Snapshot, error) {
+	key := normalize(businessCode)
+	var matched []Skill
+	for _, skill := range r.skills {
+		if skill.Kind != "creative_task" {
+			continue
+		}
+		for _, candidate := range skill.Match {
+			if normalize(candidate) == key {
+				matched = append(matched, skill)
+				break
+			}
+		}
+	}
+	if len(matched) != 1 {
+		return Snapshot{}, fmt.Errorf("creative task skill for %q: found %d, want 1", businessCode, len(matched))
+	}
+	skill := matched[0]
+	encoded, _ := json.Marshal(skill)
+	sum := sha256.Sum256(encoded)
+	return Snapshot{
+		Name: skill.Name, Version: skill.Version, ContentHash: hex.EncodeToString(sum[:]),
+		Instructions:  append([]string(nil), skill.Instructions...),
+		QualityChecks: append([]string(nil), skill.QualityChecks...),
+	}, nil
 }
 
 func (r Registry) List(includeInstructions bool) []Descriptor {

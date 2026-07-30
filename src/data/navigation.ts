@@ -15,7 +15,7 @@ export const systems: SystemDefinition[] = [
     statement: '把模糊需求转化为可追溯、可执行的广告策略。',
     nav: [
       { id: 'tasks', label: '策略任务', icon: ListChecks, group: '工作', layout: 'workspace', description: '创建真实持久化任务，串联 Brief、研究证据、策略版本与评审结果。', views: ['全部任务', '进行中', '待评审', '已完成', '已归档'] },
-      { id: 'workspaces', label: '策略工作区', icon: FolderKanban, group: '工作', layout: 'workspace', description: '在对话、Brief、研究、策略、实验与评审之间保持同一上下文。', views: ['概览', '对话', 'Brief', '研究', '策略', '实验', '评审', '变更记录'] },
+      { id: 'workspaces', label: '策略工作区', icon: FolderKanban, group: '工作', layout: 'workspace', description: '在对话、Brief、研究、策略、创意任务策略、实验与评审之间保持同一上下文。', views: ['概览', '对话', 'Brief', '研究', '策略', '创意任务策略', '实验', '评审', '变更记录'] },
       { id: 'briefs', label: '需求中心', icon: ClipboardCheck, group: '资产与方法', layout: 'table', description: '管理 Brief 完整度、来源、冲突、确认与版本。', views: ['Brief 列表', '待补充', '待确认', '版本库', '冲突队列'] },
       { id: 'strategies', label: '策略资产库', icon: Target, group: '资产与方法', layout: 'analysis', description: '只读治理策略修订、评审和发布状态，修改仍回到所属工作区。', views: ['策略库', '渠道策略', '方案对比', '实验方案', '版本库'] },
       { id: 'research', label: '研究与证据', icon: FileSearch, group: '资产与方法', layout: 'analysis', description: '统一组织研究产物、资料来源和被 Brief、策略引用的证据链。', views: ['全部证据', '受众', '竞品', '行业', '资料来源', '研究任务'] },

@@ -1,0 +1,44 @@
+{
+  "business_code": "brand_video",
+  "generation": 1,
+  "version": "1.0.0",
+  "display_name": "品牌广告",
+  "summary": "以品牌认知、情绪连接和长期记忆资产为目标的视频任务。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 70,
+  "match_rules": [
+    {"id":"brand_goal","field":"brand_goal","operator":"equals","values":["true"],"weight":45,"reason":"任务强调品牌认知或长期品牌资产"},
+    {"id":"objective_awareness","field":"objective_type","operator":"equals","values":["awareness"],"weight":30,"reason":"主要目标是认知而不是短期转化"},
+    {"id":"deliverable_video","field":"deliverable_type","operator":"in","values":["video","unknown"],"weight":15,"reason":"品牌任务适合视频表达"},
+    {"id":"objective_conversion","field":"objective_type","operator":"in","values":["conversion","sales","install"],"weight":-20,"reason":"短期转化不是品牌广告的唯一判断标准"}
+  ],
+  "questions": [
+    {"id":"brand_proposition","label":"品牌长期主张和本次单一主张分别是什么？","type":"textarea","required_for":"strategy","validation":{"max_length":1000}},
+    {"id":"emotional_goal","label":"希望建立什么情绪连接？","type":"textarea","required_for":"strategy","validation":{"max_length":600}},
+    {"id":"brand_role","label":"品牌在目标人群生活中扮演什么角色？","type":"textarea","required_for":"strategy","validation":{"max_length":600}},
+    {"id":"memory_assets","label":"必须使用哪些品牌记忆资产？","type":"textarea","required_for":"production","validation":{"max_length":800}},
+    {"id":"approver","label":"最终品牌审批人是谁？","type":"text","required_for":"production","validation":{"max_length":200}}
+  ],
+  "requirements": {
+    "strategy": ["品牌背景","传播命题","目标人群和文化语境","品牌主张","情绪目标"],
+    "production": ["Logo、品牌色和声音资产","产品素材","审批要求","渠道和母版规格"]
+  },
+  "output_fields": [
+    {"key":"brand_role","label":"品牌角色","type":"string","required":true,"max_length":400,"description":"品牌希望在目标人群心中建立的角色。"},
+    {"key":"story_territories","label":"故事领域","type":"string_array","required":true,"max_items":4,"description":"可进入的抽象故事领域，不是具体故事提案。"},
+    {"key":"emotional_direction","label":"情绪方向","type":"string_array","required":true,"max_items":4,"description":"希望建立的情绪方向和边界。"},
+    {"key":"brand_memory_requirements","label":"品牌记忆要求","type":"string_array","required":true,"max_items":8,"description":"必须强化的品牌资产和识别点。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["category_reference","emotional_territory_analysis"],
+    "production_confirmations": ["brand_asset_rights","talent_rights","music_rights","cultural_review"]
+  },
+  "skill_name": "creative_task.brand_video",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}
