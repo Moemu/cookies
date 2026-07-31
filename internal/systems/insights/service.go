@@ -143,12 +143,12 @@ type InsightReport struct {
 	WindowStart string `json:"window_start,omitempty"`
 	WindowEnd   string `json:"window_end,omitempty"`
 
-	Version int64 `json:"version"`
-	CreatedBy         string                  `json:"created_by"`
-	ConfirmedBy       string                  `json:"confirmed_by,omitempty"`
-	ConfirmedAt       *time.Time              `json:"confirmed_at,omitempty"`
-	CreatedAt         time.Time               `json:"created_at"`
-	UpdatedAt         time.Time               `json:"updated_at"`
+	Version     int64      `json:"version"`
+	CreatedBy   string     `json:"created_by"`
+	ConfirmedBy string     `json:"confirmed_by,omitempty"`
+	ConfirmedAt *time.Time `json:"confirmed_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type CreateExperienceRequest struct {
@@ -425,7 +425,7 @@ type Service struct {
 	// 实验有自己的状态机（设计中 → 已开跑 → 已下结论），和复盘报告没有共同点。
 	Experiments ExperimentRepository
 	Projects    ActiveProjectResolver
-	Delivery DeliveryReader
+	Delivery    DeliveryReader
 	// Text 是特征提取唯一的模型出口。为 nil 时提取直接失败，
 	// 不会退化成模板产出——库里一条编造的特征，代价远大于一次失败的提取。
 	Text TextGenerator
