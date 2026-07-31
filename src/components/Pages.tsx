@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Film, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiProjectMediaAsset, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
-import { calculateProjectProgress, progressBarWidth, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
+import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { PreLaunchInsightPage } from './PreLaunchInsightPage'
@@ -1030,134 +1030,6 @@ function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: stri
   return <div className="analysis-layout">
     <section className="analysis-main"><div className="analysis-heading"><div><span className="section-label">{activeView}</span><h2>{item.label}中，什么正在改变？</h2><p>指标基于当前 Project 的服务端运营记录。</p></div><div className="metric-pair"><span><small>当前</small><b>{chartPoints.at(-1) ?? '—'}{chartPoints.length ? '%' : ''}</b></span><span><small>指标</small><b className="positive">{metric ? operationField(metric, 'unit') : '—'}</b></span></div></div>{chartPoints.length ? <><TrendChart points={chartPoints} /><div className="chart-axis"><span>W1</span><span>W4</span><span>W8</span><span>W12</span></div></> : <div className="panel-empty">暂无服务端指标趋势。</div>}<div className="insight-note"><span>关键转折</span><p>{metric?.title ?? `${activeView}暂无服务端分析结论。`}</p></div></section>
     <aside className="analysis-rail"><span className="section-label">解释与行动</span><h3>服务端指标说明</h3><div className="driver"><span>01</span><b>{metric?.title ?? '暂无指标记录'}</b><strong>{metric ? operationField(metric, 'unit') : '—'}</strong></div><button className="secondary-button full">查看证据与样本</button></aside>
-  </div>
-}
-
-/**
- * 原「内容分析」页：一屏漫剧供需结构。内容分析已改为按素材类型渲染特征体系
- * （ContentAnalysisPage），这一屏讲的是「哪类素材投放效率高」，语义上属于投放结构分析，
- * 暂无入口。代码保留待处置，导出仅为避免未使用告警。
- */
-export function MaterialInsightSurface() {
-  const { advanceArtifact, currentProject } = useProject()
-  const industry = industryProfile(currentProject.industry)
-  const [notice, setNotice] = useState('')
-  const [overview, setOverview] = useState<ApiPublicInsightOverview | null>(null)
-  const [filters, setFilters] = useState<ApiPublicInsightFilters | null>(null)
-  const [videos, setVideos] = useState<ApiPublicInsightVideoListItem[]>([])
-  const [detail, setDetail] = useState<ApiPublicInsightVideoDetail | null>(null)
-  const [publicInsightState, setPublicInsightState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [publicQuery, setPublicQuery] = useState('')
-  const [publicIndustry, setPublicIndustry] = useState('')
-  const [projectMedia, setProjectMedia] = useState<ApiProjectMediaAsset[]>([])
-  const manhuaMix = operationRecords(currentProject.operations, 'audience_mix')
-  const manhuaMethods = operationRecords(currentProject.operations, 'method')
-  useEffect(() => {
-    let active = true
-    setPublicInsightState('loading')
-    void Promise.all([
-      api.getPublicInsightOverview(),
-      api.getPublicInsightFilters(),
-    ]).then(([nextOverview, nextFilters]) => {
-      if (!active) return
-      setOverview(nextOverview)
-      setFilters(nextFilters)
-      setPublicIndustry(nextFilters.industries[0]?.value ?? '')
-    }).catch(cause => {
-      if (!active) return
-      setPublicInsightState('error')
-      setNotice(cause instanceof Error ? cause.message : '读取示例洞察数据失败。')
-    })
-    return () => { active = false }
-  }, [])
-  useEffect(() => {
-    let active = true
-    void api.listProjectMediaAssets(currentProject.id).then(items => {
-      if (active) setProjectMedia(items)
-    }).catch(() => {
-      if (active) setProjectMedia([])
-    })
-    return () => { active = false }
-  }, [currentProject.id])
-  const projectVideos = projectMedia.filter(asset => asset.kind === 'video')
-  const projectBrief = projectMedia.find(asset => asset.mimeType === 'application/pdf')
-  useEffect(() => {
-    let active = true
-    setPublicInsightState('loading')
-    void api.listPublicInsightVideos({
-      page: 1,
-      pageSize: 6,
-      keyword: publicQuery,
-      industry: publicIndustry,
-      sortBy: 'vv_all',
-    }).then(async page => {
-      if (!active) return
-      setVideos(page.items)
-      const first = page.items[0]
-      setDetail(first ? await api.getPublicInsightVideo(first.item_id) : null)
-      if (active) setPublicInsightState('ready')
-    }).catch(cause => {
-      if (!active) return
-      setPublicInsightState('error')
-      setNotice(cause instanceof Error ? cause.message : '筛选示例洞察数据失败。')
-    })
-    return () => { active = false }
-  }, [publicIndustry, publicQuery])
-  const selectPublicVideo = async (itemId: string) => {
-    try {
-      setDetail(await api.getPublicInsightVideo(itemId))
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '读取视频洞察详情失败。')
-    }
-  }
-  const createMaterials = async () => {
-    try {
-      await advanceArtifact('creative', '制作中')
-      setNotice('4 组测试素材已保存到创意制作队列')
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '创建测试素材失败，请重试。')
-    }
-  }
-  return <div className="strategy-analysis-layout">
-    <section className="strategy-analysis-main">
-      <IndustrySchema module="素材洞察" profile={industry.insight} industry={industry.label}/>
-      <div className="analysis-heading"><div><span className="section-label">公开短视频洞察样本</span><h2>部署后自动导入 data 目录作为示例展示。</h2><p>服务端默认读取 data/insights/public_data_insight_source_export/*.csv，保留公开样本的行业、播放、留存、口播和分镜字段。</p></div><span className="source-chip">{overview ? `${overview.total_videos} 条样本 · ${overview.files.length} 个文件` : '加载示例数据'}</span></div>
-      <section className="project-media-analysis" aria-label="当前 Project 视频分析输入"><div><span className="section-label">PROJECT MEDIA INPUT</span><h3>{projectVideos.length} 个视频已纳入内容分析输入</h3><p>{projectBrief ? '已关联 Guerlain KOL Brief PDF；可将其与视频元数据、时长和尺寸共同作为创作及内容分析依据。' : '尚未检测到项目 PDF Brief。'}</p></div><div>{projectVideos.slice(0, 4).map(asset => <span key={asset.id}><Film size={13}/>{asset.durationSeconds?.toFixed(0) ?? '—'}s · {asset.width}×{asset.height}</span>)}</div></section>
-      <div className="public-insight-overview">
-        <span><b>{overview?.total_views.toLocaleString('zh-CN') ?? '—'}</b><small>总播放</small></span>
-        <span><b>{overview ? `${(overview.average_finish_rate * 100).toFixed(1)}%` : '—'}</b><small>平均完播率</small></span>
-        <span><b>{overview ? `${(overview.ai_ratio * 100).toFixed(1)}%` : '—'}</b><small>AI 标记占比</small></span>
-      </div>
-      <div className="prelaunch-filterbar public-insight-filterbar">
-        <div className="search-field"><Search size={15}/><input aria-label="搜索公开短视频洞察" value={publicQuery} onChange={event => setPublicQuery(event.target.value)} placeholder="搜索标题、口播、品牌或亮点"/></div>
-        <label>行业<select aria-label="公开短视频洞察行业" value={publicIndustry} onChange={event => setPublicIndustry(event.target.value)}><option value="">全部行业</option>{filters?.industries.map(item => <option key={item.value} value={item.value}>{item.value}（{item.count}）</option>)}</select></label>
-      </div>
-      {publicInsightState === 'error' ? <div className="panel-empty">示例洞察数据暂时无法读取，请确认 data/insights/public_data_insight_source_export 下存在 CSV。</div> : null}
-      <div className="public-insight-table">
-        <div className="public-insight-row header"><span>视频</span><span>行业</span><span>播放</span><span>完播率</span></div>
-        {videos.map(item => <button key={item.item_id} className={detail?.item_id === item.item_id ? 'public-insight-row active' : 'public-insight-row'} onClick={() => void selectPublicVideo(item.item_id)}>
-          <span><b>{item.item_title}</b><small>{item.item_id} · {item.has_ai_generated === '是' ? 'AI 生成' : '真实素材'} · {item.date}</small></span>
-          <span>{item.industry}</span>
-          <span>{item.vv_all.toLocaleString('zh-CN')}</span>
-          <span>{(item.finish_rate * 100).toFixed(1)}%</span>
-        </button>)}
-        {publicInsightState === 'loading' ? <div className="panel-empty">正在读取 data 目录示例数据…</div> : null}
-        {publicInsightState === 'ready' && !videos.length ? <div className="panel-empty">当前筛选没有匹配的公开短视频样本。</div> : null}
-      </div>
-      {detail ? <div className="public-insight-detail-card"><span className="section-label">当前样本拆解</span><h3>{detail.item_title}</h3><p>{detail.creative_highlight || detail.item_asr}</p><div className="public-insight-tags"><span>{detail.first3s_visual_creative_type}</span><span>{detail.visual_style}</span><span>{detail.bgm_style}</span></div><div className="insight-note"><span>口播脚本</span><p>{detail.oral_script || detail.item_asr || '该样本未提供口播脚本。'}</p></div></div> : null}
-      <div className="analysis-heading secondary"><div><span className="section-label">当前 Project 运营记录</span><h2>供给多，不等于消耗贡献高。</h2><p>下方继续展示当前 Project 服务端运营记录，用于和公开示例样本交叉验证。</p></div><span className="source-chip">项目数据 · 待账户验证</span></div>
-      <div className="mix-legend"><span><i className="supply"/>供给占比</span><span><i className="spend"/>消耗占比</span></div>
-      <div className="mix-table">
-        {manhuaMix.map(row => <div className="mix-row" key={row.id}>
-          <div><b>{row.title}</b><small>{row.status}</small></div>
-          <div className="mix-bars"><span className="mix-bar supply" style={{width: `${Number(row.fields.supply ?? 0) * 1.55}%`}}/><span className="mix-bar spend" style={{width: `${Number(row.fields.spend ?? 0) * 1.55}%`}}/></div>
-          <div className="mix-values"><span>{operationField(row, 'supply')}%</span><strong>{operationField(row, 'spend')}%</strong></div>
-        </div>)}
-        {!manhuaMix.length ? <div className="panel-empty">暂无服务端供需记录。</div> : null}
-      </div>
-      <div className="insight-note"><span>策略建议</span><p>先用同商品、同人群、同预算的小样本测试验证结构机会。首轮只改变制作方法或钩子，避免同时改变多个变量。</p></div>
-    </section>
-    <aside className="strategy-method-rail"><span className="section-label">推荐首轮素材池</span><h3>从低成本验证开始</h3>{manhuaMethods.map(item => <div className="method-card" key={item.id}><span>{item.id}</span><div><b>{item.title}</b><small>{operationField(item, 'detail')}</small></div></div>)}{!manhuaMethods.length ? <div className="panel-empty">暂无服务端推荐方法。</div> : null}<button className="primary-button full" onClick={() => void createMaterials()}>创建 4 组测试素材</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">数据来自当前 Project 的服务端运营记录。</p></aside>
   </div>
 }
 
