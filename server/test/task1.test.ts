@@ -113,15 +113,21 @@ test("预置路演项目可重复初始化且保留完整的投放模拟输入",
     const second = await seedDemoProject(repository);
     const artifacts = await repository.listArtifacts(first.id);
     const changeSets = await repository.listChangeSets(first.id);
+    const auditEvents = await repository.listAuditEvents(first.id);
+    const tasks = await repository.listBusinessTasks(first.id);
 
     assert.equal(first.id, second.id);
     assert.equal(first.name, DEMO_PROJECT_NAME);
     assert.equal((await repository.listProjects()).length, 1);
     assert.equal(artifacts.some((artifact) => artifact.kind === "brief" && artifact.status === "ready"), true);
     assert.equal(artifacts.some((artifact) => artifact.kind === "image" && artifact.status === "ready"), true);
+    assert.equal(artifacts.some((artifact) => artifact.kind === "video" && artifact.status === "ready"), true);
+    assert.equal(artifacts.some((artifact) => artifact.kind === "document" && artifact.content.startsWith("[strategy]")), true);
+    assert.equal(tasks.length, 5);
     assert.equal(changeSets[0]?.status, "preflight_passed");
     assert.equal(changeSets[0]?.preflight?.passed, true);
-    assert.equal((await repository.listAuditEvents(first.id)).length, 5);
+    assert.equal(auditEvents.some((event) => event.action === "business_task.created"), true);
+    assert.equal((await repository.listAuditEvents(first.id)).length, auditEvents.length);
   } finally {
     await temporary.dispose();
   }

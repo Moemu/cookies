@@ -113,7 +113,7 @@ func (a *AdapterGatewayImageAdapter) Submit(ctx context.Context, request ImageGe
 		return ImageSubmission{}, gatewayExecutionError("MODEL_RESPONSE_INVALID", "Adapter gateway response exceeded the configured safety limit")
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return ImageSubmission{}, mapGatewayHTTPError(response.StatusCode)
+		return ImageSubmission{}, mapGatewayImageHTTPError(response.StatusCode)
 	}
 	var decoded struct {
 		Model string `json:"model"`
@@ -170,7 +170,7 @@ func (a *AdapterGatewayImageAdapter) Open(ctx context.Context, project contract.
 
 func (*AdapterGatewayImageAdapter) ProviderCode() string { return adapterGatewayProviderCode }
 
-func mapGatewayHTTPError(status int) error {
+func mapGatewayImageHTTPError(status int) error {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return gatewayExecutionError("MODEL_AUTH_REJECTED", "Adapter gateway rejected its service credential")
@@ -182,6 +182,26 @@ func mapGatewayHTTPError(status int) error {
 		// Unless the adapter explicitly proves non-acceptance, retrying a
 		// synchronous generation can duplicate cost.
 		return gatewayExecutionError("MODEL_RATE_LIMITED", "Adapter gateway rate limited the image request")
+	default:
+		if status >= 500 {
+			return gatewayExecutionError("MODEL_SUBMISSION_UNKNOWN", "Adapter gateway submission outcome is unknown and will not be retried automatically")
+		}
+		return gatewayExecutionError("MODEL_REQUEST_REJECTED", fmt.Sprintf("Adapter gateway returned HTTP %d", status))
+	}
+}
+
+func mapGatewayTextHTTPError(status int) error {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return gatewayExecutionError("MODEL_AUTH_REJECTED", "Adapter gateway rejected its service credential")
+	case http.StatusBadRequest:
+		return gatewayExecutionError("MODEL_REQUEST_REJECTED", "Adapter gateway rejected the text request")
+	case http.StatusUnprocessableEntity:
+		return gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", "Adapter gateway could not process the text request")
+	case http.StatusTooManyRequests:
+		return ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_RATE_LIMITED", Message: "Adapter gateway rate limited the text request", Retryable: true,
+		}}
 	default:
 		if status >= 500 {
 			return gatewayExecutionError("MODEL_SUBMISSION_UNKNOWN", "Adapter gateway submission outcome is unknown and will not be retried automatically")

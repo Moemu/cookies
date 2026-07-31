@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
+	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
+	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
@@ -96,6 +98,7 @@ func main() {
 		}
 		value := &identity.PasswordSessionService{
 			DB: db, Validator: identityStore,
+			UserScopes: identityStore,
 			SessionTTL: time.Duration(cfg.Auth.SessionHours) * time.Hour,
 			Secure:     cfg.Environment != config.EnvironmentLocal && cfg.Environment != config.EnvironmentTest,
 		}
@@ -117,19 +120,147 @@ func main() {
 		uploadService.VideoProbe = assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 	}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
-	creativeService := &creative.Service{Repository: creative.MySQLRepository{DB: db}, Projects: projectService, Assets: creativeAssetReader{uploads: uploadService}}
+	creativeRepository := creative.MySQLRepository{DB: db}
+	creativeService := &creative.Service{
+		Repository: creativeRepository, ViralRemakes: creativeRepository,
+		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
+		CommerceWorkspaces: creativeRepository, Directions: creativeRepository,
+	}
+	if cfg.Creative.DirectionPlanningEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure CreativeDirection planner: %v", textAdapterErr)
+		}
+		creativeService.DirectionPlanner = creative.ModelCreativeDirectionPlanner{
+			Text:       &provider.Service{TextAdapter: textAdapter},
+			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
+		}
+		log.Printf(
+			"CreativeDirection planning configured: model_alias=%s routes=xiaohongshu_image_text",
+			cfg.Creative.DirectionPlannerModelAlias,
+		)
+	}
+	if cfg.Creative.ShortDramaModelPlannerEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure Creative short-drama planner: %v", textAdapterErr)
+		}
+		creativeService.ShortDramaPrerollPlanner = creative.FallbackShortDramaPrerollPlanner{
+			Primary: creative.ModelShortDramaPrerollPlanner{
+				Text:       &provider.Service{TextAdapter: textAdapter},
+				ModelAlias: cfg.Creative.ShortDramaPlannerModelAlias,
+			},
+			Fallback: creative.DeterministicShortDramaPrerollPlanner{},
+			OnPrimaryFailure: func(err error) {
+				log.Printf("Creative short-drama model planning fell back to deterministic planning: %v", err)
+			},
+		}
+		log.Printf(
+			"Creative short-drama planning configured: model_alias=%s fallback=deterministic",
+			cfg.Creative.ShortDramaPlannerModelAlias,
+		)
+	} else {
+		creativeService.ShortDramaPrerollPlanner = creative.DeterministicShortDramaPrerollPlanner{}
+	}
+	if cfg.Creative.GamePrerollModelPlannerEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure Creative game-preroll planner: %v", textAdapterErr)
+		}
+		creativeService.GamePrerollPlanner = creative.FallbackGamePrerollPlanner{
+			Primary: creative.ModelGamePrerollPlanner{
+				Text:       &provider.Service{TextAdapter: textAdapter},
+				ModelAlias: cfg.Creative.GamePrerollPlannerModelAlias,
+			},
+			Fallback: creative.DeterministicGamePrerollPlanner{},
+			OnPrimaryFailure: func(err error) {
+				log.Printf("Creative game-preroll model planning fell back to deterministic planning: %v", err)
+			},
+		}
+		log.Printf(
+			"Creative game-preroll planning configured: model_alias=%s fallback=deterministic",
+			cfg.Creative.GamePrerollPlannerModelAlias,
+		)
+	} else {
+		creativeService.GamePrerollPlanner = creative.DeterministicGamePrerollPlanner{}
+	}
+	if cfg.Provider.AudioAdapter == "volcengine_asr" && cfg.Provider.TextAdapter == "adapter_gateway" {
+		cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure viral analysis credential encryption: %v", cipherErr)
+		}
+		gatewayConfig := provider.MySQLGatewayConfigStore{
+			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		analyzer, analyzerErr := creativeprovider.NewViralAnalyzer(creativeprovider.ViralAnalyzerConfig{
+			Assets: uploadService, Routes: gatewayConfig, Credentials: gatewayConfig,
+			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			ModelAlias: "cookies.text.standard", PromptVersion: "viral.analyze.v1",
+			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+			ASR: creativeprovider.ASRConfig{
+				Endpoint: cfg.Provider.VolcengineASR.Endpoint, AuthMode: cfg.Provider.VolcengineASR.AuthMode,
+				AppID: cfg.Provider.VolcengineASR.AppID, AccessToken: cfg.Provider.VolcengineASR.AccessToken,
+				APIKey: cfg.Provider.VolcengineASR.APIKey, ResourceID: cfg.Provider.VolcengineASR.ResourceID,
+				Model: cfg.Provider.VolcengineASR.Model,
+			},
+		})
+		if analyzerErr != nil {
+			log.Fatalf("configure viral reference analyzer: %v", analyzerErr)
+		}
+		creativeService.ViralAnalyzer = analyzer
+		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
+	}
+	runtimeStore := jobruntime.MySQLStore{DB: db}
+	var researchRunner knowledge.ExternalResearchRunner
+	if cfg.Research.SeedEnabled {
+		cipher, cipherErr := provider.NewAESGCMCredentialCipher(
+			cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion,
+		)
+		if cipherErr != nil {
+			log.Fatalf("configure Seed web research credential encryption: %v", cipherErr)
+		}
+		gatewayConfig := provider.MySQLGatewayConfigStore{
+			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		researchRunner = &seedresearch.Client{
+			Routes: gatewayConfig, Credentials: gatewayConfig,
+			ModelAlias: cfg.Research.SeedModelAlias, MaxConcurrent: cfg.Research.MaxConcurrent,
+			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		log.Printf("Knowledge research configured: transport=ark_responses tool=web_search model_alias=%s",
+			cfg.Research.SeedModelAlias)
+	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
-		AssetsBucket: cfg.ObjectStorage.AssetsBucket,
+		AssetsBucket: cfg.ObjectStorage.AssetsBucket, Runner: researchRunner,
+	}
+	if cfg.Research.TikaEnabled {
+		knowledgeService.DocumentParser = knowledge.TikaParser{
+			BaseURL: cfg.Research.TikaBaseURL, Version: cfg.Research.TikaVersion,
+			Timeout:        time.Duration(cfg.Research.TikaTimeoutSeconds) * time.Second,
+			MaxOutputBytes: int64(cfg.Research.TikaMaxOutputBytes),
+		}
+		knowledgeService.DocumentScheduler = knowledge.JobRuntimeDocumentParseScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("documentparsejob") },
+		}
+		log.Printf("Knowledge document parsing configured: parser=tika version=%s", cfg.Research.TikaVersion)
+	}
+	if researchRunner != nil {
+		knowledgeService.Scheduler = knowledge.JobRuntimeResearchScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("researchjob") },
+		}
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
+	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
 	dependencies := httpserver.Dependencies{
 		Resolver:          resolver,
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
-		Identities:        identityStore, Projects: projectService, Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
+		Identities:        identityStore, Accounts: identityStore, Projects: projectService, ProjectMembers: projectStore,
+		Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
 		Sessions: sessionService, Knowledge: knowledgeService,
-		RemixPlans: remixService,
+		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
+		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},
 	}
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},
@@ -169,9 +300,14 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
-	runtimeStore := jobruntime.MySQLStore{DB: db}
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	if researchRunner != nil {
+		runtimeHandlers[knowledge.ResearchJobKind] = knowledgeService.HandleResearchJob
+	}
+	if knowledgeService.DocumentParser != nil {
+		runtimeHandlers[knowledge.DocumentParseJobKind] = knowledgeService.HandleDocumentParseJob
+	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
 	}
@@ -188,33 +324,58 @@ func main() {
 	}
 	if cfg.Strategy.Enabled {
 		strategyService := strategysystem.Service{
-			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
-			TextModelAlias: cfg.Strategy.TextModelAlias, PromptVersion: cfg.Strategy.PromptVersion,
-			CriticEnabled: cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
-			DisableApproval:      !cfg.Strategy.ApproveEnabled,
-			AllowedOrganizations: strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+			DB: db, Projects: projectService, Knowledge: knowledgeService,
+			CreativeAssets: uploadService, Agents: agentStore, Text: textProvider,
+			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			PromptVersion:             cfg.Strategy.PromptVersion,
+			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
+			RevisePromptVersion:       cfg.Strategy.RevisePromptVersion,
+			ReviewPromptVersion:       cfg.Strategy.ReviewPromptVersion,
+			RepairPromptVersion:       cfg.Strategy.RepairPromptVersion,
+			CreativeTaskPromptVersion: cfg.Strategy.CreativeTaskPromptVersion,
+			CriticEnabled:             cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
+			CreativeTaskPlanningEnabled: cfg.Strategy.CreativeTaskPlanningEnabled,
+			ContextSelectionEnabled:     cfg.Strategy.ContextSelectionEnabled,
+			DisableApproval:             !cfg.Strategy.ApproveEnabled,
+			AllowedOrganizations:        strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+		}
+		if cfg.Strategy.CreativeTaskPlanningEnabled {
+			if err := strategyService.EnsureCreativeBusinessCatalog(context.Background()); err != nil {
+				log.Fatalf("seed Strategy creative business catalog: %v", err)
+			}
 		}
 		generationMode := "deterministic"
 		if cfg.Strategy.RealProviderEnabled {
 			generationMode = "provider"
 		}
 		log.Printf(
-			"Strategy generation configured: mode=%s model_alias=%s prompt_version=%s critic_enabled=%t",
+			"Strategy generation configured: mode=%s model_alias=%s prompt_version=%s critic_enabled=%t context_selection_enabled=%t",
 			generationMode, cfg.Strategy.TextModelAlias, cfg.Strategy.PromptVersion, cfg.Strategy.CriticEnabled,
+			cfg.Strategy.ContextSelectionEnabled,
 		)
 		// This adapter is the only Strategy-to-Creative connection. It reads an
 		// immutable, authorized Strategy package and leaves Creative to persist
 		// its own Intake only after a user explicitly invokes the endpoint.
+		strategyCreativeReader := strategycreative.Reader{Service: strategyService}
+		creativeService.Sources = strategyCreativeReader
+		if cfg.Strategy.CreativeTaskPlanningEnabled {
+			creativeService.TaskStrategies = strategyCreativeReader
+			creativeService.TaskOverlays = strategyCreativeReader
+		}
 		if cfg.Strategy.PackageToCreativeEnabled {
-			creativeService.StrategyPackages = strategycreative.Reader{Service: strategyService}
+			creativeService.StrategyPackages = strategyCreativeReader
 		}
 		strategyAPI := strategyhttp.New(strategyService, agentStore, runtimeStore)
 		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 			httpserver.DomainMount{Pattern: "/api/strategy/v1/", Handler: strategyAPI})
-		strategyHandler := agent.RuntimeHandler(agentStore, strategyService.HandleAgentTask, runtimeStore)
+		strategyHandler := agent.RuntimeHandlerWithFinalFailure(
+			agentStore, strategyService.HandleAgentTask, strategyService.HandleAgentTaskFinalFailure, runtimeStore,
+		)
 		runtimeHandlers[strategysystem.AgentKindBriefExtract] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftGenerate] = strategyHandler
 		runtimeHandlers[strategysystem.AgentKindDraftRevise] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindReviewDeep] = strategyHandler
+		runtimeHandlers[strategysystem.AgentKindCreativeTaskGenerate] = strategyHandler
 		agentDispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
 		startWorker(workerContext, "agent-dispatch", agentDispatcher.RunOnce)
 	}
@@ -281,14 +442,7 @@ func main() {
 	}
 	startWorker(workerContext, "shared-runtime", runtimeRunner.RunOnce)
 
-	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.NewWithDependencies(dependencies),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	server := newHTTPServer(cfg.HTTPAddr, httpserver.NewWithDependencies(dependencies))
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -306,6 +460,22 @@ func main() {
 	log.Printf("cookies platform API listening on %s (%s)", cfg.HTTPAddr, cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server stopped unexpectedly: %v", err)
+	}
+}
+
+const modelAwareWriteTimeout = 11 * time.Minute
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// Text model routes may legitimately wait for an upstream provider for
+		// as long as ten minutes. Keep the server response window slightly
+		// larger so net/http does not cut off a successful model response.
+		WriteTimeout: modelAwareWriteTimeout,
+		IdleTimeout:  60 * time.Second,
 	}
 }
 

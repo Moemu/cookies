@@ -1,5 +1,4 @@
-import { useCallback, useMemo } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
 import type { SystemKey } from '../types'
 
 export interface AppRoute {
@@ -7,10 +6,12 @@ export interface AppRoute {
   isProjectHome: boolean
   isProjectManagement: boolean
   isModelSettings: boolean
+  isLegacyProjectSystemRoute: boolean
   projectId?: string
   systemKey: SystemKey
   navId: string
   objectId?: string
+  contextId?: string
   view?: string
 }
 
@@ -19,19 +20,41 @@ const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'deliv
 export function parseRoute(location = `${window.location.pathname}${window.location.search}`): AppRoute {
   const url = new URL(location, window.location.origin)
   const parts = url.pathname.split('/').filter(Boolean)
-  if (parts[0] === 'settings' && parts[1] === 'models') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, systemKey: 'strategy', navId: 'tasks' }
-  if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, systemKey: 'strategy', navId: 'tasks' }
-  if (!parts[2] || parts[2] === 'home') return { isHome: false, isProjectHome: true, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
-  if (parts[2] === 'manage') return { isHome: false, isProjectHome: false, isProjectManagement: true, isModelSettings: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
+  if (parts[0] === 'settings') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
+  if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
+  if (systemKeys.has(parts[1] as SystemKey)) {
+    const systemKey = parts[1] as SystemKey
+    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: true, systemKey, navId: parts[2] || defaultNavForSystem(systemKey), objectId: parts[3], view: url.searchParams.get('view') ?? undefined }
+  }
+  if (!parts[2] || parts[2] === 'home') return { isHome: false, isProjectHome: true, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
+  if (parts[2] === 'manage') return { isHome: false, isProjectHome: false, isProjectManagement: true, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'strategy', navId: 'tasks' }
   if (parts[2] === 'assets') {
-    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'creative', navId: 'assets', objectId: parts[3], view: url.searchParams.get('view') ?? undefined }
+    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'creative', navId: 'assets', objectId: parts[3], view: url.searchParams.get('view') ?? undefined }
   }
   if (parts[2] === 'provider-jobs') {
-    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey: 'creative', navId: 'production', view: url.searchParams.get('view') ?? undefined }
+    return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, projectId: parts[1], systemKey: 'creative', navId: 'production', view: url.searchParams.get('view') ?? undefined }
   }
   const normalizedSystem = parts[2] === 'insights' ? 'insight' : parts[2]
   const systemKey = systemKeys.has(normalizedSystem as SystemKey) ? normalizedSystem as SystemKey : 'strategy'
-  return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: false, projectId: parts[1], systemKey, navId: parts[3] || 'tasks', objectId: parts[4], view: url.searchParams.get('view') ?? undefined }
+  return {
+    isHome: false,
+    isProjectHome: false,
+    isProjectManagement: false,
+    isModelSettings: false,
+    isLegacyProjectSystemRoute: false,
+    projectId: parts[1],
+    systemKey,
+    navId: parts[3] || 'tasks',
+    objectId: parts[4],
+    contextId: url.searchParams.get('context') ?? undefined,
+    view: url.searchParams.get('view') ?? undefined,
+  }
+}
+
+function defaultNavForSystem(systemKey: SystemKey) {
+  if (systemKey === 'insight') return 'prelaunch'
+  if (systemKey === 'delivery') return 'plans'
+  return 'tasks'
 }
 
 export function projectHomePath(projectId: string) {
@@ -42,21 +65,25 @@ export function projectManagePath(projectId: string) {
   return `/projects/${projectId}/manage`
 }
 
-export function projectPath(projectId: string, systemKey: SystemKey, navId: string, objectId?: string, view?: string) {
+export function projectPath(projectId: string, systemKey: SystemKey, navId: string, objectId?: string, view?: string, contextId?: string) {
   const path = `/projects/${projectId}/${systemKey}/${navId}${objectId ? `/${objectId}` : ''}`
-  return view ? `${path}?view=${encodeURIComponent(view)}` : path
+  const search = new URLSearchParams()
+  if (view) search.set('view', view)
+  if (contextId) search.set('context', contextId)
+  return search.size ? `${path}?${search.toString()}` : path
 }
 
 export function useAppRoute() {
-  const location = useLocation()
-  const routerNavigate = useNavigate()
-  const route = useMemo(
-    () => parseRoute(`${location.pathname}${location.search}`),
-    [location.pathname, location.search],
-  )
+  const [route, setRoute] = useState<AppRoute>(() => parseRoute())
+  useEffect(() => {
+    const sync = () => setRoute(parseRoute())
+    window.addEventListener('popstate', sync)
+    return () => window.removeEventListener('popstate', sync)
+  }, [])
   const navigate = useCallback((path: string, replace = false) => {
-    routerNavigate(path, { replace })
+    window.history[replace ? 'replaceState' : 'pushState']({}, '', path)
+    setRoute(parseRoute(path))
     window.scrollTo({ top: 0 })
-  }, [routerNavigate])
+  }, [])
   return { route, navigate }
 }

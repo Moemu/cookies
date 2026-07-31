@@ -22,7 +22,9 @@ import (
 	"github.com/shikanon/cookies/internal/platform/eventoutbox"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
+	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
 	"github.com/shikanon/cookies/internal/systems/strategy"
 	strategyhttp "github.com/shikanon/cookies/internal/systems/strategy/httpapi"
@@ -66,7 +68,67 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
-	service := strategy.Service{DB: db, Projects: projectService, Agents: agent.MySQLStore{DB: db}}
+	reference := knowledge.Reference{
+		ID: "knowledge_reference_" + suffix, Kind: "document", Title: "投前洞察证据",
+		Content: "历史项目验证了当前主张。", ContentHash: strings.Repeat("a", 64),
+	}
+	service := strategy.Service{
+		DB: db, Projects: projectService, Knowledge: integrationKnowledgeReader{reference.ID: reference},
+		Agents: agent.MySQLStore{DB: db}, V2Enabled: true,
+		CreativeTaskPlanningEnabled: true,
+		CreativeTaskPromptVersion:   "strategy.creative_task.generate.v2",
+	}
+	if err := service.EnsureCreativeBusinessCatalog(ctx); err != nil {
+		t.Fatalf("seed creative business catalog: %v", err)
+	}
+
+	createdTask, duplicate, err := service.CreateTask(
+		ctx, actor, contract.IdempotencyKey("atomic_task_"+suffix), projectID,
+		strategy.CreateTaskRequest{Name: "原子策略任务", Objective: "验证新品认知"},
+	)
+	if err != nil || duplicate || createdTask.BriefDraft.Document.Campaign.Objective != "验证新品认知" {
+		t.Fatalf("create atomic task: duplicate=%v bundle=%#v err=%v", duplicate, createdTask, err)
+	}
+	replayedTask, duplicate, err := service.CreateTask(
+		ctx, actor, contract.IdempotencyKey("atomic_task_"+suffix), projectID,
+		strategy.CreateTaskRequest{Name: "原子策略任务", Objective: "验证新品认知"},
+	)
+	if err != nil || !duplicate || replayedTask.Task.ID != createdTask.Task.ID {
+		t.Fatalf("replay atomic task: duplicate=%v bundle=%#v err=%v", duplicate, replayedTask, err)
+	}
+	taskItems, err := service.ListTasks(ctx, actor, projectID)
+	if err != nil || len(taskItems) != 1 || taskItems[0].Name != "原子策略任务" {
+		t.Fatalf("list atomic tasks: items=%#v err=%v", taskItems, err)
+	}
+	discardedTask, duplicate, err := service.DiscardTask(
+		ctx, actor, contract.IdempotencyKey("discard_task_"+suffix), createdTask.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: createdTask.Task.Version, Reason: "集成测试废弃"},
+	)
+	if err != nil || duplicate || discardedTask.DiscardedAt == nil {
+		t.Fatalf("discard task: duplicate=%v task=%#v err=%v", duplicate, discardedTask, err)
+	}
+	replayedDiscard, duplicate, err := service.DiscardTask(
+		ctx, actor, contract.IdempotencyKey("discard_task_"+suffix), createdTask.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: createdTask.Task.Version, Reason: "集成测试废弃"},
+	)
+	if err != nil || !duplicate || replayedDiscard.Version != discardedTask.Version {
+		t.Fatalf("replay discard task: duplicate=%v task=%#v err=%v", duplicate, replayedDiscard, err)
+	}
+	taskItems, err = service.ListTasks(ctx, actor, projectID)
+	if err != nil || len(taskItems) != 0 {
+		t.Fatalf("discarded task leaked into active list: items=%#v err=%v", taskItems, err)
+	}
+	archivedTaskItems, err := service.ListTasksByLifecycle(ctx, actor, projectID, "archived")
+	if err != nil || len(archivedTaskItems) != 1 || archivedTaskItems[0].Task.ID != createdTask.Task.ID {
+		t.Fatalf("list discarded tasks: items=%#v err=%v", archivedTaskItems, err)
+	}
+	restoredTask, duplicate, err := service.RestoreTask(
+		ctx, actor, contract.IdempotencyKey("restore_task_"+suffix), createdTask.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: discardedTask.Version},
+	)
+	if err != nil || duplicate || restoredTask.DiscardedAt != nil {
+		t.Fatalf("restore task: duplicate=%v task=%#v err=%v", duplicate, restoredTask, err)
+	}
 
 	workspace, duplicate, err := service.CreateWorkspace(ctx, actor, contract.IdempotencyKey("workspace_"+suffix), projectID, "Integration Workspace")
 	if err != nil || duplicate {
@@ -95,29 +157,183 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 	patch := strategy.BriefPatch{ExpectedVersion: draft.Version, Operations: []strategy.BriefPatchOperation{
+		{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"集成测试品牌"`)},
+		{Op: "set", FieldPath: "product.name", Value: json.RawMessage(`"集成测试产品"`)},
+		{Op: "set", FieldPath: "industry", Value: json.RawMessage(`"工业制造"`)},
+		{Op: "set", FieldPath: "region", Value: json.RawMessage(`"中国大陆"`)},
+		{Op: "set", FieldPath: "language", Value: json.RawMessage(`"zh-CN"`)},
 		{Op: "set", FieldPath: "campaign.objective", Value: json.RawMessage(`"新品认知"`)},
 		{Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`"研发负责人"`)},
 		{Op: "set", FieldPath: "proposition", Value: json.RawMessage(`"缩短研发周期"`)},
 		{Op: "set", FieldPath: "channels", Value: json.RawMessage(`["xiaohongshu"]`)},
+		{Op: "set", FieldPath: "reference_ids", Value: json.RawMessage(`["` + reference.ID + `"]`)},
 	}}
 	draft, _, err = service.PatchBriefDraft(ctx, actor, contract.IdempotencyKey("briefpatch_"+suffix), bundle.Task.ID, patch)
 	if err != nil || !draft.Completeness.Ready {
 		t.Fatalf("patch brief: ready=%v err=%v", draft.Completeness.Ready, err)
 	}
+	evidenceReferences, err := service.ListEvidenceReferences(ctx, actor, projectID, reference.ID)
+	if err != nil || len(evidenceReferences) != 1 ||
+		evidenceReferences[0].TargetType != "brief_draft" ||
+		evidenceReferences[0].TargetVersion != draft.Version {
+		t.Fatalf("draft evidence references=%#v err=%v", evidenceReferences, err)
+	}
 	briefVersion, duplicate, err := service.ConfirmBrief(ctx, actor, contract.IdempotencyKey("confirm_"+suffix), bundle.Task.ID, draft.Version)
 	if err != nil || duplicate {
 		t.Fatalf("confirm brief: duplicate=%v err=%v", duplicate, err)
+	}
+	briefs, err := service.ListProjectBriefs(ctx, actor, projectID)
+	if err != nil || len(briefs) != 2 ||
+		briefs[0].BriefID != briefVersion.BriefID ||
+		briefs[0].LatestConfirmedVersion != briefVersion.Version {
+		t.Fatalf("brief center summaries=%#v err=%v", briefs, err)
+	}
+	briefConfirmedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
+	if err != nil || briefConfirmedTask.Status != "active" {
+		t.Fatalf("task after brief confirmation=%#v err=%v", briefConfirmedTask, err)
 	}
 	created, duplicate, err := service.CreateStrategy(ctx, actor, contract.IdempotencyKey("strategy_"+suffix), bundle.Task.ID, briefVersion.BriefID, briefVersion.Version)
 	if err != nil || duplicate {
 		t.Fatalf("create strategy: duplicate=%v err=%v", duplicate, err)
 	}
-	if err := runAgentTaskThroughRuntime(ctx, db, service, created.AgentTask); err != nil {
+	retryProblem := contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "integration retry fixture"}
+	if _, err := db.ExecContext(ctx, `UPDATE platform_agent_tasks SET status = 'failed',
+		version = version + 1, error_code = ?, error_message = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		retryProblem.Code, retryProblem.Message, time.Now().UTC(),
+		actor.OrganizationID, projectID, created.AgentTask.ID,
+	); err != nil {
+		t.Fatalf("mark initial strategy generation failed: %v", err)
+	}
+	service.HandleAgentTaskFinalFailure(created.AgentTask, retryProblem)
+	failedDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
+	if err != nil || failedDraft.Status != "failed" {
+		t.Fatalf("get failed strategy draft: draft=%#v err=%v", failedDraft, err)
+	}
+	retried, duplicate, err := service.RetryStrategy(
+		ctx, actor, contract.IdempotencyKey("strategy_retry_"+suffix), failedDraft.ID, failedDraft.Version,
+	)
+	if err != nil || duplicate || retried.Draft.Status != "generating" {
+		t.Fatalf("retry strategy: duplicate=%v result=%#v err=%v", duplicate, retried, err)
+	}
+	replayedRetry, duplicate, err := service.RetryStrategy(
+		ctx, actor, contract.IdempotencyKey("strategy_retry_"+suffix), failedDraft.ID, failedDraft.Version,
+	)
+	if err != nil || !duplicate || replayedRetry.AgentTask.ID != retried.AgentTask.ID {
+		t.Fatalf("replay strategy retry: duplicate=%v result=%#v err=%v", duplicate, replayedRetry, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, retried.AgentTask); err != nil {
 		t.Fatalf("generate strategy: %v", err)
 	}
 	strategyDraft, err := service.GetDraft(ctx, actor, created.Draft.ID)
 	if err != nil || strategyDraft.CurrentRevision != 1 {
 		t.Fatalf("get generated draft: revision=%d err=%v", strategyDraft.CurrentRevision, err)
+	}
+	catalog, err := service.ListCreativeBusinesses(ctx, actor, projectID)
+	if err != nil || len(catalog.Items) != 7 {
+		t.Fatalf("creative business catalog: items=%d err=%v", len(catalog.Items), err)
+	}
+	recommendation, err := service.RecommendCreativeBusinesses(
+		ctx, actor, projectID, briefVersion.BriefID, briefVersion.Version, 3,
+	)
+	if err != nil || !recommendationContains(
+		recommendation.Recommended, "xiaohongshu_image_text",
+	) {
+		t.Fatalf("creative recommendation=%#v err=%v", recommendation, err)
+	}
+	taskPlan, duplicate, err := service.CreateCreativeTaskPlan(
+		ctx, actor, contract.IdempotencyKey("creative_plan_"+suffix), projectID,
+		strategy.CreateCreativeTaskPlanRequest{
+			BriefID: briefVersion.BriefID, BriefVersion: briefVersion.Version,
+			SourceStrategy: &strategy.SourceStrategyRequest{
+				StrategyID: strategyDraft.ID, Revision: strategyDraft.CurrentRevision,
+			},
+			BusinessCode: "xiaohongshu_image_text", SelectionSource: "recommended",
+			CatalogHash: catalog.CatalogHash,
+		},
+	)
+	if err != nil || duplicate || taskPlan.Status != "collecting" {
+		t.Fatalf("create creative task plan: duplicate=%v plan=%#v err=%v", duplicate, taskPlan, err)
+	}
+	taskPlan, duplicate, err = service.PatchCreativeTaskPlanAnswers(
+		ctx, actor, contract.IdempotencyKey("creative_answers_"+suffix), taskPlan.ID,
+		strategy.CreativeTaskAnswerPatch{
+			ExpectedVersion: taskPlan.Version,
+			Operations: []strategy.CreativeTaskAnswerOperation{
+				{Op: "set", QuestionID: "audience_scene", Value: json.RawMessage(`"研发负责人在选型和内部汇报时"`)},
+				{Op: "set", QuestionID: "search_intent", Value: json.RawMessage(`["category","scene"]`)},
+				{Op: "set", QuestionID: "interaction_goal", Value: json.RawMessage(`"search"`)},
+			},
+		},
+	)
+	if err != nil || duplicate || !taskPlan.Completeness.Ready || taskPlan.Status != "ready" {
+		t.Fatalf("complete creative task plan: duplicate=%v plan=%#v err=%v", duplicate, taskPlan, err)
+	}
+	generation, duplicate, err := service.CreateCreativeTaskStrategy(
+		ctx, actor, contract.IdempotencyKey("creative_generate_"+suffix),
+		taskPlan.ID, taskPlan.Version, taskPlan.CurrentRevision,
+	)
+	if err != nil || duplicate || generation.Plan.Status != "generating" {
+		t.Fatalf("queue creative task strategy: duplicate=%v result=%#v err=%v", duplicate, generation, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, generation.AgentTask); err != nil {
+		t.Fatalf("generate creative task strategy: %v", err)
+	}
+	taskPlan, err = service.GetCreativeTaskPlan(ctx, actor, taskPlan.ID)
+	if err != nil || taskPlan.Status != "generated" || taskPlan.CurrentStrategy == nil {
+		t.Fatalf("read generated creative task strategy: plan=%#v err=%v", taskPlan, err)
+	}
+	exported, err := service.ExportCreativeTaskStrategyMarkdown(
+		ctx, actor, taskPlan.ID, taskPlan.CurrentStrategyVersion,
+	)
+	if err != nil || !strings.Contains(exported, "xiaohongshu_image_text") ||
+		strings.Contains(exported, "seedance_prompt") {
+		t.Fatalf("export creative task strategy: content=%q err=%v", exported, err)
+	}
+	strategies, err := service.ListProjectStrategies(ctx, actor, projectID)
+	if err != nil || len(strategies) != 1 ||
+		strategies[0].StrategyID != strategyDraft.ID ||
+		strategies[0].CurrentRevision != strategyDraft.CurrentRevision {
+		t.Fatalf("strategy center summaries=%#v err=%v", strategies, err)
+	}
+	evidenceReferences, err = service.ListEvidenceReferences(ctx, actor, projectID, reference.ID)
+	if err != nil || len(evidenceReferences) != 3 {
+		t.Fatalf("versioned evidence references=%#v err=%v", evidenceReferences, err)
+	}
+	versionedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.DiscardTask(
+		ctx, actor, contract.IdempotencyKey("discard_versioned_task_"+suffix), bundle.Task.ID,
+		strategy.LifecycleRequest{ExpectedVersion: versionedTask.Version, Reason: "已有版本不可废弃"},
+	); !errors.Is(err, strategy.ErrInvalidState) {
+		t.Fatalf("discard task with strategy revision error=%v", err)
+	}
+	archivedDraft, duplicate, err := service.ArchiveStrategy(
+		ctx, actor, contract.IdempotencyKey("archive_strategy_"+suffix), strategyDraft.ID,
+		strategy.LifecycleRequest{ExpectedVersion: strategyDraft.Version, Reason: "集成测试归档"},
+	)
+	if err != nil || duplicate || archivedDraft.ArchivedAt == nil {
+		t.Fatalf("archive strategy: duplicate=%v draft=%#v err=%v", duplicate, archivedDraft, err)
+	}
+	replayedArchive, duplicate, err := service.ArchiveStrategy(
+		ctx, actor, contract.IdempotencyKey("archive_strategy_"+suffix), strategyDraft.ID,
+		strategy.LifecycleRequest{ExpectedVersion: strategyDraft.Version, Reason: "集成测试归档"},
+	)
+	if err != nil || !duplicate || replayedArchive.Version != archivedDraft.Version {
+		t.Fatalf("replay archive strategy: duplicate=%v draft=%#v err=%v", duplicate, replayedArchive, err)
+	}
+	activeItems, err := service.ListTasks(ctx, actor, projectID)
+	if err != nil || len(activeItems) != 1 || activeItems[0].Task.ID != createdTask.Task.ID {
+		t.Fatalf("archived strategy leaked into active list: items=%#v err=%v", activeItems, err)
+	}
+	strategyDraft, duplicate, err = service.RestoreStrategy(
+		ctx, actor, contract.IdempotencyKey("restore_strategy_"+suffix), strategyDraft.ID,
+		strategy.LifecycleRequest{ExpectedVersion: archivedDraft.Version},
+	)
+	if err != nil || duplicate || strategyDraft.ArchivedAt != nil {
+		t.Fatalf("restore strategy: duplicate=%v draft=%#v err=%v", duplicate, strategyDraft, err)
 	}
 	readiness, err := service.GetGenerationReadiness(ctx, actor, projectID)
 	if err != nil || !readiness.Ready || readiness.GenerationMode != "deterministic" {
@@ -128,7 +344,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatalf("get generation metadata: %v", err)
 	}
 	if metadata.GenerationMode != "deterministic" ||
-		metadata.PromptVersion != "strategy.generate.v2" ||
+		metadata.PromptVersion != "strategy.generate.v3" ||
 		len(metadata.SkillVersions) < 3 ||
 		len(metadata.SkillSnapshotHashes) < 2 ||
 		len(metadata.GenerationContextHash) != 64 ||
@@ -140,6 +356,46 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("submit strategy: duplicate=%v err=%v", duplicate, err)
 	}
+	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{failFirst: true}}
+	service.DeepReviewModelAlias = "cookies.text.deep_review"
+	deep, duplicate, err := service.StartDeepReview(
+		ctx, actor, contract.IdempotencyKey("deep_review_"+suffix), review.ID,
+		strategy.StartDeepReviewRequest{ExpectedReviewStatus: "open"},
+	)
+	if err != nil || duplicate || deep.Analysis.Status != "pending" {
+		t.Fatalf("start deep review: result=%#v duplicate=%v err=%v", deep, duplicate, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, deep.AgentTask); err != nil {
+		t.Fatalf("run deep review: %v", err)
+	}
+	deepResult, err := service.GetLatestDeepReview(ctx, actor, review.ID)
+	if err != nil || deepResult.Status != "succeeded" || len(deepResult.Findings) != 1 ||
+		deepResult.APIMode != provider.TextAPIResponses || !deepResult.Background {
+		t.Fatalf("deep review result=%#v err=%v", deepResult, err)
+	}
+	deepSkillRuns, err := service.ListSkillRuns(ctx, actor, deep.AgentTask.ID)
+	if err != nil || len(deepSkillRuns) != 1 || len(deepSkillRuns[0].Attempts) != 1 ||
+		deepSkillRuns[0].Attempts[0].Purpose != "deep_review" ||
+		!deepSkillRuns[0].Attempts[0].ValidationPassed ||
+		len(deepSkillRuns[0].Attempts[0].OutputHash) != 64 {
+		t.Fatalf("deep review skill attempts=%#v err=%v", deepSkillRuns, err)
+	}
+	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{alwaysFail: true}}
+	failedDeep, duplicate, err := service.StartDeepReview(
+		ctx, actor, contract.IdempotencyKey("deep_review_fail_"+suffix), review.ID,
+		strategy.StartDeepReviewRequest{ExpectedReviewStatus: "open"},
+	)
+	if err != nil || duplicate {
+		t.Fatalf("start failing deep review: duplicate=%v err=%v", duplicate, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, failedDeep.AgentTask); err == nil {
+		t.Fatal("failing deep review unexpectedly succeeded")
+	}
+	failedDeepResult, err := service.GetLatestDeepReview(ctx, actor, review.ID)
+	if err != nil || failedDeepResult.ID != failedDeep.Analysis.ID || failedDeepResult.Status != "failed" {
+		t.Fatalf("failed deep review result=%#v err=%v", failedDeepResult, err)
+	}
+	service.Text = nil
 	strategyDraft, err = service.GetDraft(ctx, actor, strategyDraft.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -193,6 +449,10 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("approve strategy: duplicate=%v err=%v", duplicate, err)
 	}
+	completedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
+	if err != nil || completedTask.Status != "completed" {
+		t.Fatalf("task after strategy approval=%#v err=%v", completedTask, err)
+	}
 	stored, err := service.GetPackage(ctx, actor, projectID, published.PackageID, published.Version)
 	if err != nil {
 		t.Fatalf("get package: %v", err)
@@ -210,6 +470,30 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		!handoff.PackageRef.PackageContentHash.Equal(published.ContentHash) ||
 		handoff.HandoffContentHash.Validate() != nil {
 		t.Fatalf("unexpected creative handoff: %#v", handoff)
+	}
+	if len(handoff.Routes) == 0 {
+		t.Fatal("approved package has no Creative route for v2 task planning")
+	}
+	packageBoundPlan, duplicate, err := service.CreateCreativeTaskPlan(
+		ctx, actor, contract.IdempotencyKey("creative_plan_v2_"+suffix), projectID,
+		strategy.CreateCreativeTaskPlanRequest{
+			ContractVersion: "strategy-creative-task-plan/v2",
+			StrategyPackage: &strategy.CreativeTaskPlanPackageReference{
+				PackageID: published.PackageID, PackageVersion: published.Version,
+				PackageContentHash:     string(published.ContentHash),
+				HandoffContractVersion: handoff.ContractVersion,
+				HandoffContentHash:     string(handoff.HandoffContentHash),
+			},
+			SelectedRouteID: handoff.Routes[0].RouteID,
+			BusinessCode:    "xiaohongshu_image_text", SelectionSource: "recommended",
+			CatalogHash: recommendation.CatalogHash,
+		},
+	)
+	if err != nil || duplicate ||
+		packageBoundPlan.ContractVersion != "strategy-creative-task-plan/v2" ||
+		packageBoundPlan.PackageRef == nil || packageBoundPlan.HandoffRef == nil ||
+		packageBoundPlan.SelectedRouteID != handoff.Routes[0].RouteID {
+		t.Fatalf("create package-bound task plan: plan=%#v duplicate=%v err=%v", packageBoundPlan, duplicate, err)
 	}
 	if _, err := service.GetCreativeHandoff(ctx, actor, contract.ProjectID("other_project"), published.PackageID, published.Version); !errors.Is(err, strategy.ErrProjectAccessDenied) {
 		t.Fatalf("cross-project handoff read error = %v", err)
@@ -464,13 +748,13 @@ func runAgentTaskThroughRuntime(ctx context.Context, db *sql.DB, service strateg
 		return errors.New("agent dispatch was not processed")
 	}
 	var domainErr error
-	handler := agent.RuntimeHandler(agent.MySQLStore{DB: db}, func(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
+	handler := agent.RuntimeHandlerWithFinalFailure(agent.MySQLStore{DB: db}, func(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
 		ref, err := service.HandleAgentTask(ctx, task)
 		if err != nil {
 			domainErr = err
 		}
 		return ref, err
-	}, runtimeStore)
+	}, service.HandleAgentTaskFinalFailure, runtimeStore)
 	worker := jobruntime.Worker{
 		Store: runtimeStore, Handlers: map[string]jobruntime.Handler{task.Kind: handler},
 		Canceller: runtimeStore,
@@ -507,9 +791,58 @@ type recordingPublisher struct {
 	events []eventoutbox.Event
 }
 
+type deepReviewTextAdapter struct {
+	failFirst  bool
+	alwaysFail bool
+	calls      int
+}
+
+func (*deepReviewTextAdapter) InspectTextRoute(
+	context.Context, contract.OrganizationID, string,
+) (provider.TextRouteInspection, error) {
+	return provider.TextRouteInspection{
+		ModelAlias: "cookies.text.deep_review", UpstreamModel: "gpt-5.5-pro",
+		RouteRevisionID: "deep-review-r1", ResponseMode: provider.TextResponseJSONSchema,
+		APIMode: provider.TextAPIResponses, Background: true, Ready: true,
+	}, nil
+}
+
+func (a *deepReviewTextAdapter) GenerateText(
+	context.Context, provider.TextAdapterRequest,
+) (provider.SynchronousResult, error) {
+	a.calls++
+	if a.alwaysFail || (a.failFirst && a.calls == 1) {
+		return provider.SynchronousResult{}, provider.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_RATE_LIMITED", Message: "retry deep review", Retryable: true,
+		}}
+	}
+	output := json.RawMessage(`{"summary":"候选策略具备基础可执行性。","findings":[{"severity":"warning","section":"measurement","check_type":"measurement","strategy_path":"measurement","title":"指标需要收敛","detail":"核心指标与渠道指标的归因窗口尚未明确。","recommendation":"补充统一归因窗口与渠道分解口径。","brief_refs":["measurement.primary_kpi"],"evidence_refs":[]}]}`)
+	return provider.SynchronousResult{
+		ProviderCode: "adapter_gateway", ModelVersion: "gpt-5.5-pro",
+		Text: string(output), StructuredOutput: output,
+		Usage: &provider.TokenUsage{InputTokens: 100, OutputTokens: 40, TotalTokens: 140},
+		RouteSnapshot: &provider.GatewayRouteSnapshot{
+			RouteRevisionID: "deep-review-r1", TextResponseMode: provider.TextResponseJSONSchema,
+			TextAPIMode: provider.TextAPIResponses, Background: true,
+		},
+	}, nil
+}
+
 func (p *recordingPublisher) Publish(_ context.Context, event eventoutbox.Event) error {
 	p.events = append(p.events, event)
 	return nil
+}
+
+func recommendationContains(
+	items []strategy.CreativeBusinessRecommendation,
+	businessCode string,
+) bool {
+	for _, item := range items {
+		if item.BusinessCode == businessCode {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contract.OrganizationID, userID string) {
@@ -518,15 +851,22 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 	defer cancel()
 	statements := []string{
 		"DELETE FROM event_consumptions WHERE event_id IN (SELECT event_id FROM event_outbox WHERE organization_id=?)",
+		"DELETE FROM strategy_creative_task_strategy_versions WHERE organization_id=?",
+		"DELETE FROM strategy_creative_task_plan_revisions WHERE organization_id=?",
+		"DELETE FROM strategy_creative_task_plans WHERE organization_id=?",
 		"DELETE FROM creative_intakes WHERE organization_id=?",
+		"DELETE FROM strategy_evidence_references WHERE organization_id=?",
 		"DELETE FROM strategy_feedback WHERE organization_id=?",
 		"DELETE FROM strategy_compliance_reports WHERE organization_id=?",
 		"DELETE FROM strategy_conversation_memories WHERE organization_id=?",
 		"DELETE FROM strategy_review_comments WHERE organization_id=?",
+		"DELETE FROM strategy_review_analyses WHERE organization_id=?",
+		"DELETE FROM strategy_review_assignments WHERE organization_id=?",
 		"DELETE FROM strategy_creative_handoffs WHERE organization_id=?",
 		"DELETE FROM strategy_package_versions WHERE organization_id=?",
 		"DELETE FROM strategy_packages WHERE organization_id=?",
 		"DELETE FROM strategy_reviews WHERE organization_id=?",
+		"DELETE FROM strategy_review_policies WHERE organization_id=?",
 		"DELETE FROM strategy_draft_revisions WHERE organization_id=?",
 		"DELETE FROM strategy_drafts WHERE organization_id=?",
 		"DELETE FROM strategy_brief_versions WHERE organization_id=?",
@@ -539,6 +879,7 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM strategy_conversations WHERE organization_id=?",
 		"DELETE FROM strategy_workspaces WHERE organization_id=?",
 		"DELETE FROM strategy_write_receipts WHERE organization_id=?",
+		"DELETE FROM platform_skill_run_attempts WHERE organization_id=?",
 		"DELETE FROM platform_skill_runs WHERE organization_id=?",
 		"DELETE FROM platform_agent_dispatches WHERE organization_id=?",
 		"DELETE FROM platform_agent_tasks WHERE organization_id=?",
@@ -547,6 +888,12 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM project_context_versions WHERE organization_id=?",
 		"DELETE FROM project_products WHERE organization_id=?",
 		"DELETE FROM project_memberships WHERE organization_id=?",
+		"DELETE FROM platform_project_workbench_material_confirmations WHERE organization_id=?",
+		"DELETE FROM platform_project_workbench_quality_checks WHERE organization_id=?",
+		"DELETE FROM platform_project_workbench_asset_pointers WHERE organization_id=?",
+		"DELETE FROM platform_project_workbench_ad_accounts WHERE organization_id=?",
+		"DELETE FROM platform_project_workbenches WHERE organization_id=?",
+		"DELETE FROM platform_project_runtimes WHERE organization_id=?",
 		"DELETE FROM projects WHERE organization_id=?",
 		"DELETE FROM brand_guideline_versions WHERE organization_id=?",
 		"DELETE FROM products WHERE organization_id=?",
@@ -564,4 +911,19 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 	if _, err := db.ExecContext(ctx, "DELETE FROM users WHERE id=?", userID); err != nil {
 		t.Errorf("cleanup user: %v", err)
 	}
+}
+
+type integrationKnowledgeReader map[string]knowledge.Reference
+
+func (r integrationKnowledgeReader) GetReference(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	id string,
+) (knowledge.Reference, error) {
+	value, ok := r[id]
+	if !ok {
+		return knowledge.Reference{}, knowledge.ErrNotFound
+	}
+	return value, nil
 }

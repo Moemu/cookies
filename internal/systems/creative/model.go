@@ -3,6 +3,7 @@
 package creative
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type IntakeSource string
 const (
 	IntakeSourceManual           IntakeSource = "manual"
 	IntakeSourceStrategyPackage  IntakeSource = "strategy_package"
+	IntakeSourceTaskStrategy     IntakeSource = "task_strategy"
 	IntakeSourceUploadedDocument IntakeSource = "uploaded_document"
 	IntakeSourceConversation     IntakeSource = "conversation"
 )
@@ -65,25 +67,49 @@ const (
 )
 
 type CreateIntakeRequest struct {
-	Source IntakeSource `json:"source"`
+	ContractVersion string       `json:"contract_version,omitempty"`
+	Source          IntakeSource `json:"source"`
+	// ParentIntakeID links a production-specific manual intake back to a
+	// task-strategy handoff without allowing the manual flow to rewrite it.
+	ParentIntakeID string `json:"parent_intake_id,omitempty"`
 	// StrategyPackage is supplied only for the explicit, user-triggered handoff
 	// from an immutable Strategy package. The server reads and validates that
 	// package; callers never submit its content as trusted Creative input.
-	StrategyPackage *StrategyPackageReference `json:"strategy_package,omitempty"`
-	CreativeRoutes  []CreativeRouteSnapshot   `json:"creative_routes,omitempty"`
-	Channel         CreativeChannel           `json:"channel"`
-	Objective       string                    `json:"objective"`
-	Audience        string                    `json:"audience"`
-	CoreMessage     string                    `json:"core_message"`
-	CallToAction    string                    `json:"call_to_action"`
-	Concept         string                    `json:"concept"`
-	Tone            []string                  `json:"tone"`
-	VisualKeywords  []string                  `json:"visual_keywords"`
-	Mandatory       []string                  `json:"mandatory_elements"`
-	Prohibited      []string                  `json:"prohibited_claims"`
+	StrategyPackage    *StrategyPackageReference         `json:"strategy_package,omitempty"`
+	StrategyPackageRef *StrategyPackageContractReference `json:"strategy_package_ref,omitempty"`
+	// SelectedRouteID is required by the strict v3 Strategy handoff. Creative
+	// resolves it from the immutable Handoff snapshot; callers cannot submit a
+	// route body or override the route after confirmation.
+	SelectedRouteID      string                        `json:"selected_route_id,omitempty"`
+	TaskOverlay          *TaskOverlayReference         `json:"task_overlay,omitempty"`
+	TaskOverlayRef       *TaskOverlayContractReference `json:"task_overlay_ref,omitempty"`
+	TaskOverlayInput     *TaskOverlayInput             `json:"task_overlay_input,omitempty"`
+	StrategyHandoffInput json.RawMessage               `json:"strategy_handoff_input,omitempty"`
+	// TaskStrategy is the immutable Strategy-side version selected by the
+	// user. TaskStrategyInput is populated only by the server-side adapter.
+	TaskStrategy            *TaskStrategyReference        `json:"task_strategy,omitempty"`
+	TaskStrategyInput       *TaskStrategyInput            `json:"task_strategy_input,omitempty"`
+	CreativeRoutes          []CreativeRouteSnapshot       `json:"creative_routes,omitempty"`
+	Format                  CreativeFormat                `json:"format,omitempty"`
+	PerformanceMode         string                        `json:"performance_mode,omitempty"`
+	ManualViralRemake       *ManualViralRemakeInput       `json:"manual_viral_remake,omitempty"`
+	ManualShortDramaPreroll *ManualShortDramaPrerollInput `json:"manual_short_drama_preroll,omitempty"`
+	ManualGamePreroll       *ManualGamePrerollInput       `json:"manual_game_preroll,omitempty"`
+	ManualCommercePreroll   *ManualCommercePrerollInput   `json:"manual_commerce_preroll,omitempty"`
+	Channel                 CreativeChannel               `json:"channel"`
+	Objective               string                        `json:"objective"`
+	Audience                string                        `json:"audience"`
+	CoreMessage             string                        `json:"core_message"`
+	CallToAction            string                        `json:"call_to_action"`
+	Concept                 string                        `json:"concept"`
+	Tone                    []string                      `json:"tone"`
+	VisualKeywords          []string                      `json:"visual_keywords"`
+	Mandatory               []string                      `json:"mandatory_elements"`
+	Prohibited              []string                      `json:"prohibited_claims"`
 }
 
 type CreativeRouteSnapshot struct {
+	RouteID                   string                     `json:"route_id,omitempty"`
 	RouteType                 string                     `json:"route_type"`
 	VideoPurpose              string                     `json:"video_purpose"`
 	Channels                  []string                   `json:"channels"`
@@ -93,13 +119,71 @@ type CreativeRouteSnapshot struct {
 	SourceAssetRefs           []contract.AssetVersionRef `json:"source_asset_refs"`
 	EvidenceRefs              []string                   `json:"evidence_refs"`
 	RequiresHumanConfirmation bool                       `json:"requires_human_confirmation"`
+	ReadinessStatus           string                     `json:"readiness_status,omitempty"`
 }
 
 func (r CreativeRouteSnapshot) Validate() error {
-	if r.RouteType != "pre_roll" || r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
-		r.TargetDurationSeconds != 5 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
+	if r.RouteType != CreativeRouteImageText && r.RouteType != CreativeRouteBrandVideo && r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
+		r.RouteType != PerformanceModeShortDramaPreroll && r.RouteType != PerformanceModeGamePreroll &&
+		r.RouteType != PerformanceModeCommercePreroll {
+		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
+	}
+	if r.RouteType == CreativeRouteImageText {
+		if len(r.Channels) != 1 || r.Channels[0] != string(ChannelXiaohongshu) ||
+			r.AspectRatio != "3:4" || strings.TrimSpace(r.RouteID) == "" ||
+			strings.TrimSpace(r.Reason) == "" {
+			return fmt.Errorf("creative image-text route is incomplete")
+		}
+		return nil
+	}
+	if r.RouteType == CreativeRouteBrandVideo {
+		if r.VideoPurpose != "brand" || len(r.Channels) == 0 ||
+			r.TargetDurationSeconds < 1 || strings.TrimSpace(r.AspectRatio) == "" ||
+			strings.TrimSpace(r.RouteID) == "" || strings.TrimSpace(r.Reason) == "" ||
+			!r.RequiresHumanConfirmation {
+			return fmt.Errorf("creative brand-video route is incomplete")
+		}
+		for _, channel := range r.Channels {
+			if channel != "xiaohongshu" && channel != "wechat_official_account" &&
+				channel != "douyin" && channel != "kuaishou" {
+				return fmt.Errorf("creative brand-video route channel %q is unsupported", channel)
+			}
+		}
+		for _, ref := range r.SourceAssetRefs {
+			if err := ref.Validate(); err != nil {
+				return fmt.Errorf("creative brand-video route source asset: %w", err)
+			}
+		}
+		return nil
+	}
+	if r.RouteType == PerformanceModeViralRemake && r.RouteID != ManualViralRemakeRouteID {
+		return fmt.Errorf("viral remake route_id must be %q", ManualViralRemakeRouteID)
+	}
+	if r.RouteType == PerformanceModeShortDramaPreroll && r.RouteID != ManualShortDramaPrerollRouteID {
+		return fmt.Errorf("short drama preroll route_id must be %q", ManualShortDramaPrerollRouteID)
+	}
+	if r.RouteType == PerformanceModeGamePreroll && r.RouteID != ManualGamePrerollRouteID {
+		return fmt.Errorf("game preroll route_id must be %q", ManualGamePrerollRouteID)
+	}
+	if r.RouteType == PerformanceModeCommercePreroll && r.RouteID != ManualCommercePrerollRouteID {
+		return fmt.Errorf("commerce preroll route_id must be %q", ManualCommercePrerollRouteID)
+	}
+	if r.RouteType == "pre_roll" && r.TargetDurationSeconds != 5 {
+		return fmt.Errorf("creative pre-roll route duration must be 5 seconds")
+	}
+	if r.RouteType == PerformanceModeShortDramaPreroll && r.TargetDurationSeconds != 6 {
+		return fmt.Errorf("short drama preroll route duration must be 6 seconds")
+	}
+	if r.RouteType == PerformanceModeGamePreroll && r.TargetDurationSeconds != 6 {
+		return fmt.Errorf("game preroll route duration must be 6 seconds")
+	}
+	if r.RouteType == PerformanceModeCommercePreroll && r.TargetDurationSeconds != 6 {
+		return fmt.Errorf("commerce preroll route duration must be 6 seconds")
+	}
+	if r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
+		r.TargetDurationSeconds < 4 || r.TargetDurationSeconds > 60 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
 		!r.RequiresHumanConfirmation {
-		return fmt.Errorf("creative pre-roll route is incomplete")
+		return fmt.Errorf("creative video route is incomplete")
 	}
 	for _, channel := range r.Channels {
 		if channel != "douyin" && channel != "kuaishou" {
@@ -115,9 +199,19 @@ func (r CreativeRouteSnapshot) Validate() error {
 }
 
 type StrategyPackageReference struct {
-	PackageID           string `json:"package_id"`
-	PackageVersion      int64  `json:"package_version"`
-	ExpectedContentHash string `json:"expected_content_hash"`
+	PackageID              string `json:"package_id"`
+	PackageVersion         int64  `json:"package_version"`
+	ExpectedContentHash    string `json:"expected_content_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version,omitempty"`
+	ExpectedHandoffHash    string `json:"expected_handoff_hash,omitempty"`
+}
+
+type StrategyPackageContractReference struct {
+	PackageID              string `json:"package_id"`
+	PackageVersion         int64  `json:"package_version"`
+	PackageContentHash     string `json:"package_content_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version"`
+	HandoffContentHash     string `json:"handoff_content_hash"`
 }
 
 func (r StrategyPackageReference) Validate() error {
@@ -133,27 +227,177 @@ func (r CreateIntakeRequest) Validate() error {
 	}
 	switch r.Source {
 	case IntakeSourceManual:
-		if r.StrategyPackage != nil || len(r.CreativeRoutes) != 0 {
-			return fmt.Errorf("manual intake must not include strategy_package")
+		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil ||
+			r.TaskOverlay != nil || r.TaskOverlayInput != nil {
+			return fmt.Errorf("manual intake must not include a Strategy reference")
+		}
+		if r.ManualViralRemake != nil {
+			return r.validateManualViralRemake()
+		}
+		if r.ManualShortDramaPreroll != nil {
+			return r.validateManualShortDramaPreroll()
+		}
+		if r.ManualGamePreroll != nil {
+			return r.validateManualGamePreroll()
+		}
+		if r.ManualCommercePreroll != nil {
+			return r.validateManualCommercePreroll()
+		}
+		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
+			return fmt.Errorf("manual image intake must not include video routing")
 		}
 	case IntakeSourceStrategyPackage:
-		if r.StrategyPackage == nil {
+		if r.StrategyPackage == nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" {
 			return fmt.Errorf("strategy_package is required for a strategy intake")
+		}
+		if r.TaskOverlayInput != nil {
+			return fmt.Errorf("task overlay content is resolved by Creative and must not be submitted by a caller")
+		}
+		if r.TaskOverlay != nil && r.ContractVersion != CreativeIntakeCreateV3ContractVersion {
+			return fmt.Errorf("task_overlay requires creative-intake-create/v3")
 		}
 		if len(r.CreativeRoutes) != 0 {
 			return fmt.Errorf("creative_routes are resolved from Strategy and must not be submitted by a caller")
 		}
-		return r.StrategyPackage.Validate()
+		if err := r.StrategyPackage.Validate(); err != nil {
+			return err
+		}
+		if r.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+			if r.StrategyPackage.HandoffContractVersion != "strategy-creative-handoff/v1" ||
+				strings.TrimSpace(r.StrategyPackage.ExpectedHandoffHash) == "" ||
+				strings.TrimSpace(r.SelectedRouteID) == "" {
+				return fmt.Errorf("v3 strategy intake requires the frozen handoff version/hash and selected_route_id")
+			}
+			if r.TaskOverlay != nil {
+				if err := r.TaskOverlay.Validate(); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case IntakeSourceTaskStrategy:
+		if r.TaskStrategy == nil {
+			return fmt.Errorf("task_strategy is required for a task strategy intake")
+		}
+		if r.StrategyPackage != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" ||
+			r.TaskOverlay != nil || r.TaskOverlayInput != nil {
+			return fmt.Errorf("task strategy content is resolved by Creative and must not be submitted by a caller")
+		}
+		if len(r.CreativeRoutes) != 0 || r.Format != "" || r.PerformanceMode != "" ||
+			r.Channel != "" || strings.TrimSpace(r.Objective) != "" || strings.TrimSpace(r.Audience) != "" ||
+			strings.TrimSpace(r.CoreMessage) != "" {
+			return fmt.Errorf("task strategy mapped fields are resolved by Creative and must not be submitted by a caller")
+		}
+		return r.TaskStrategy.Validate()
 	default:
 		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
 	return r.validateContent()
 }
 
+func (r CreateIntakeRequest) validateManualShortDramaPreroll() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeShortDramaPreroll {
+		return fmt.Errorf("manual short drama preroll intake requires format=video and performance_mode=short_drama_preroll")
+	}
+	if r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou {
+		return fmt.Errorf("manual short drama preroll supports douyin or kuaishou")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualShortDramaPrerollRouteID {
+		return fmt.Errorf("manual short drama preroll requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualShortDramaPreroll.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateManualGamePreroll() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeGamePreroll {
+		return fmt.Errorf("manual game preroll intake requires format=video and performance_mode=game_preroll")
+	}
+	if r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou {
+		return fmt.Errorf("manual game preroll supports douyin or kuaishou")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualGamePrerollRouteID {
+		return fmt.Errorf("manual game preroll requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualGamePreroll.Validate(); err != nil {
+		return err
+	}
+	if len(r.CreativeRoutes[0].SourceAssetRefs) != 1 ||
+		r.CreativeRoutes[0].SourceAssetRefs[0] != r.ManualGamePreroll.SourceVideo {
+		return fmt.Errorf("game preroll route must freeze the licensed source video")
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateManualCommercePreroll() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeCommercePreroll {
+		return fmt.Errorf("manual commerce preroll intake requires format=video and performance_mode=commerce_preroll")
+	}
+	if r.Channel != ChannelDouyin {
+		return fmt.Errorf("manual commerce preroll intake requires channel=douyin")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualCommercePrerollRouteID {
+		return fmt.Errorf("manual commerce preroll requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualCommercePreroll.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
+}
+
 func (r CreateIntakeRequest) validateContent() error {
 	if r.Channel != ChannelXiaohongshu {
 		return fmt.Errorf("Creative M1 supports the xiaohongshu channel")
 	}
+	if len(r.Objective) > 500 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 || len(r.Concept) > 500 {
+		return fmt.Errorf("creative input exceeds its maximum length")
+	}
+	if err := validateStringList("tone", r.Tone, 12, 80); err != nil {
+		return err
+	}
+	if err := validateStringList("visual_keywords", r.VisualKeywords, 16, 120); err != nil {
+		return err
+	}
+	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
+		return err
+	}
+	return validateStringList("prohibited_claims", r.Prohibited, 20, 200)
+}
+
+func (r CreateIntakeRequest) validateManualViralRemake() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeViralRemake {
+		return fmt.Errorf("manual viral remake intake requires format=video and performance_mode=viral_remake")
+	}
+	if r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou {
+		return fmt.Errorf("manual viral remake supports douyin or kuaishou")
+	}
+	if len(r.CreativeRoutes) != 1 {
+		return fmt.Errorf("manual viral remake requires exactly one stable route")
+	}
+	if r.CreativeRoutes[0].RouteID != ManualViralRemakeRouteID {
+		return fmt.Errorf("manual viral remake route_id must be %q", ManualViralRemakeRouteID)
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualViralRemake.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateVideoContent() error {
 	if len(r.Objective) > 500 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 || len(r.Concept) > 500 {
 		return fmt.Errorf("creative input exceeds its maximum length")
 	}
@@ -184,21 +428,23 @@ func (r CreateIntakeRequest) missingFields() []string {
 }
 
 type CreativeIntake struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	Source         IntakeSource            `json:"source"`
-	Status         IntakeStatus            `json:"status"`
-	Request        CreateIntakeRequest     `json:"request"`
-	MissingFields  []string                `json:"missing_fields"`
-	Warnings       []string                `json:"warnings"`
-	ConfirmedBy    string                  `json:"confirmed_by,omitempty"`
-	Principal      contract.Principal      `json:"-"`
-	IdempotencyKey contract.IdempotencyKey `json:"-"`
-	RequestHash    string                  `json:"-"`
-	Version        int64                   `json:"version"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	ContractVersion   string                  `json:"contract_version,omitempty"`
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	Source            IntakeSource            `json:"source"`
+	Status            IntakeStatus            `json:"status"`
+	Request           CreateIntakeRequest     `json:"request"`
+	MissingFields     []string                `json:"missing_fields"`
+	Warnings          []string                `json:"warnings"`
+	ConfirmedBy       string                  `json:"confirmed_by,omitempty"`
+	Principal         contract.Principal      `json:"-"`
+	IdempotencyKey    contract.IdempotencyKey `json:"-"`
+	RequestHash       string                  `json:"-"`
+	InputIdentityHash string                  `json:"input_identity_hash,omitempty"`
+	Version           int64                   `json:"version"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
 }
 
 type CreativeTask struct {
@@ -218,23 +464,27 @@ type CreativeTask struct {
 }
 
 type CreateVideoTaskRequest struct {
-	RouteIndex   int                      `json:"route_index"`
-	Channel      CreativeChannel          `json:"channel"`
-	SourceVideo  contract.AssetVersionRef `json:"source_video"`
-	Concept      string                   `json:"concept"`
-	Prompt       string                   `json:"prompt"`
-	CallToAction string                   `json:"call_to_action"`
-	Mandatory    []string                 `json:"mandatory_elements"`
-	Prohibited   []string                 `json:"prohibited_claims"`
-	ConfirmRoute bool                     `json:"confirm_route"`
+	SelectedRouteID string                   `json:"selected_route_id,omitempty"`
+	RouteIndex      int                      `json:"route_index"`
+	Channel         CreativeChannel          `json:"channel"`
+	SourceVideo     contract.AssetVersionRef `json:"source_video,omitempty"`
+	Concept         string                   `json:"concept"`
+	Prompt          string                   `json:"prompt"`
+	CallToAction    string                   `json:"call_to_action"`
+	Mandatory       []string                 `json:"mandatory_elements"`
+	Prohibited      []string                 `json:"prohibited_claims"`
+	ConfirmRoute    bool                     `json:"confirm_route"`
 }
 
 func (r CreateVideoTaskRequest) Validate() error {
-	if r.RouteIndex < 0 || (r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
-		return fmt.Errorf("route_index, supported video channel, and explicit route confirmation are required")
+	if (strings.TrimSpace(r.SelectedRouteID) == "" && r.RouteIndex < 0) ||
+		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
+		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if err := r.SourceVideo.Validate(); err != nil {
-		return fmt.Errorf("source_video: %w", err)
+	if r.SelectedRouteID != ManualShortDramaPrerollRouteID {
+		if err := r.SourceVideo.Validate(); err != nil {
+			return fmt.Errorf("source_video: %w", err)
+		}
 	}
 	if strings.TrimSpace(r.Concept) == "" || len(r.Concept) > 500 || strings.TrimSpace(r.Prompt) == "" || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
@@ -246,26 +496,45 @@ func (r CreateVideoTaskRequest) Validate() error {
 }
 
 type VideoDraft struct {
-	ContractVersion string                   `json:"contract_version"`
-	TaskID          string                   `json:"task_id"`
-	Revision        int64                    `json:"revision"`
-	Concept         string                   `json:"concept"`
-	Prompt          string                   `json:"prompt"`
-	DurationSeconds int                      `json:"duration_seconds"`
-	AspectRatio     string                   `json:"aspect_ratio"`
-	Resolution      string                   `json:"resolution"`
-	SourceVideo     contract.AssetVersionRef `json:"source_video"`
-	Mandatory       []string                 `json:"mandatory_elements"`
-	Prohibited      []string                 `json:"prohibited_claims"`
-	CallToAction    string                   `json:"cta"`
-	CreatedAt       time.Time                `json:"created_at"`
+	ContractVersion   string                   `json:"contract_version"`
+	TaskID            string                   `json:"task_id"`
+	Revision          int64                    `json:"revision"`
+	Concept           string                   `json:"concept"`
+	Prompt            string                   `json:"prompt"`
+	DurationSeconds   int                      `json:"duration_seconds"`
+	AspectRatio       string                   `json:"aspect_ratio"`
+	Resolution        string                   `json:"resolution"`
+	SourceVideo       contract.AssetVersionRef `json:"source_video,omitempty"`
+	Mandatory         []string                 `json:"mandatory_elements"`
+	Prohibited        []string                 `json:"prohibited_claims"`
+	CallToAction      string                   `json:"cta"`
+	ViralRemake       *ViralRemakeDraft        `json:"viral_remake,omitempty"`
+	ShortDramaPreroll *ShortDramaPrerollDraft  `json:"short_drama_preroll,omitempty"`
+	GamePreroll       *GamePrerollDraft        `json:"game_preroll,omitempty"`
+	CommercePreroll   *CommercePrerollDraft    `json:"commerce_preroll,omitempty"`
+	CreatedAt         time.Time                `json:"created_at"`
 }
 
 func (d VideoDraft) Validate() error {
 	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
-		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds != 5 ||
-		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.SourceVideo.Validate() != nil || d.CreatedAt.IsZero() {
+		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds < 4 || d.DurationSeconds > 60 ||
+		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
+	}
+	if d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
+		return fmt.Errorf("creative video draft is incomplete")
+	}
+	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {
+		return fmt.Errorf("creative viral remake draft is incomplete")
+	}
+	if d.ShortDramaPreroll != nil && d.ShortDramaPreroll.Validate() != nil {
+		return fmt.Errorf("creative short drama preroll draft is incomplete")
+	}
+	if d.GamePreroll != nil && d.GamePreroll.Validate() != nil {
+		return fmt.Errorf("creative game preroll draft is incomplete")
+	}
+	if d.CommercePreroll != nil && d.CommercePreroll.Validate() != nil {
+		return fmt.Errorf("creative commerce preroll draft is incomplete")
 	}
 	return nil
 }
@@ -284,6 +553,7 @@ const (
 // CreateTaskRequest is the explicit second-stage brief that differentiates
 // several Creative tasks produced from one approved Strategy package.
 type CreateTaskRequest struct {
+	DirectionID  string              `json:"direction_id,omitempty"`
 	ContentType  CreativeContentType `json:"content_type"`
 	Focus        string              `json:"focus"`
 	Audience     string              `json:"audience,omitempty"`
@@ -297,21 +567,25 @@ func (r CreateTaskRequest) Validate() error {
 	default:
 		return fmt.Errorf("unsupported Creative content_type %q", r.ContentType)
 	}
-	if len(strings.TrimSpace(r.Focus)) == 0 || len(r.Focus) > 300 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 {
+	if (len(strings.TrimSpace(r.Focus)) == 0 && len(strings.TrimSpace(r.DirectionID)) == 0) ||
+		len(r.Focus) > 300 || len(r.DirectionID) > 96 || len(r.Audience) > 500 ||
+		len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("creative task focus is required or task input exceeds its maximum length")
 	}
 	return nil
 }
 
 type CreativeDirection struct {
-	ContentType    CreativeContentType `json:"content_type"`
-	Focus          string              `json:"focus"`
-	Audience       string              `json:"audience"`
-	CoreMessage    string              `json:"core_message"`
-	CallToAction   string              `json:"call_to_action"`
-	Concept        string              `json:"concept"`
-	Tone           []string            `json:"tone"`
-	VisualKeywords []string            `json:"visual_keywords"`
+	DirectionVersionID string              `json:"direction_version_id,omitempty"`
+	InputIdentityHash  string              `json:"input_identity_hash,omitempty"`
+	ContentType        CreativeContentType `json:"content_type"`
+	Focus              string              `json:"focus"`
+	Audience           string              `json:"audience"`
+	CoreMessage        string              `json:"core_message"`
+	CallToAction       string              `json:"call_to_action"`
+	Concept            string              `json:"concept"`
+	Tone               []string            `json:"tone"`
+	VisualKeywords     []string            `json:"visual_keywords"`
 }
 
 type ImageTextDraft struct {
@@ -362,12 +636,28 @@ type CreateImageJobRequest struct {
 }
 
 type CreateVideoJobRequest struct {
-	ModelAlias string `json:"model_alias"`
+	ModelAlias     string                       `json:"model_alias"`
+	Prompt         *CreativeVideoPrompt         `json:"prompt,omitempty"`
+	GenerationSpec *CreativeVideoGenerationSpec `json:"generation_spec,omitempty"`
+	Approval       *VideoGenerationApproval     `json:"approval,omitempty"`
 }
 
 func (r CreateVideoJobRequest) Validate() error {
 	if len(strings.TrimSpace(r.ModelAlias)) > 128 {
 		return fmt.Errorf("model_alias is too long")
+	}
+	approvedFields := 0
+	if r.Prompt != nil {
+		approvedFields++
+	}
+	if r.GenerationSpec != nil {
+		approvedFields++
+	}
+	if r.Approval != nil {
+		approvedFields++
+	}
+	if approvedFields != 0 && approvedFields != 3 {
+		return fmt.Errorf("prompt, generation_spec, and approval must be supplied together")
 	}
 	return nil
 }
@@ -533,7 +823,7 @@ func (v CreativeVersion) Validate() error {
 		v.OrganizationID == "" || v.ProjectID == "" || v.ContentHash.Validate() != nil || v.CreatedAt.IsZero() {
 		return fmt.Errorf("creative version is incomplete")
 	}
-	if v.Status != CreativeVersionCreated && v.Status != CreativeVersionChecked && v.Status != CreativeVersionApproved && v.Status != CreativeVersionSuperseded {
+	if !validCreativeVersionStatus(v.Status) {
 		return fmt.Errorf("creative version status is invalid")
 	}
 	switch v.Format {
@@ -566,12 +856,41 @@ type ProductionJob struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+type ShortDramaGenerationAttempt struct {
+	ID                 string                    `json:"id"`
+	TaskID             string                    `json:"task_id"`
+	DraftRevision      int64                     `json:"draft_revision"`
+	CandidateBatchID   string                    `json:"candidate_batch_id"`
+	CandidateID        string                    `json:"candidate_id"`
+	PromptPackageHash  string                    `json:"prompt_package_hash"`
+	GenerationSpecHash string                    `json:"generation_spec_hash"`
+	ProviderJobID      string                    `json:"provider_job_id"`
+	OutputAssetVersion *contract.AssetVersionRef `json:"output_asset_version,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at"`
+}
+
+type GamePrerollGenerationAttempt struct {
+	ID                 string                    `json:"id"`
+	TaskID             string                    `json:"task_id"`
+	DraftRevision      int64                     `json:"draft_revision"`
+	CandidateBatchID   string                    `json:"candidate_batch_id"`
+	CandidateID        string                    `json:"candidate_id"`
+	PromptPackageHash  string                    `json:"prompt_package_hash"`
+	GenerationSpecHash string                    `json:"generation_spec_hash"`
+	ProviderJobID      string                    `json:"provider_job_id"`
+	OutputAssetVersion *contract.AssetVersionRef `json:"output_asset_version,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at"`
+}
+
 type TaskDetail struct {
-	Task           CreativeTask    `json:"task"`
-	Intake         CreativeIntake  `json:"intake"`
-	Draft          ImageTextDraft  `json:"draft"`
-	VideoDraft     *VideoDraft     `json:"video_draft,omitempty"`
-	ProductionJobs []ProductionJob `json:"production_jobs"`
+	Task                          CreativeTask                   `json:"task"`
+	Intake                        CreativeIntake                 `json:"intake"`
+	Draft                         ImageTextDraft                 `json:"draft"`
+	VideoDraft                    *VideoDraft                    `json:"video_draft,omitempty"`
+	ProductionJobs                []ProductionJob                `json:"production_jobs"`
+	ShortDramaGenerationAttempts  []ShortDramaGenerationAttempt  `json:"short_drama_generation_attempts,omitempty"`
+	GamePrerollGenerationAttempts []GamePrerollGenerationAttempt `json:"game_preroll_generation_attempts,omitempty"`
+	CommerceGenerationAttempts    []CommerceGenerationAttempt    `json:"commerce_preroll_generation_attempts,omitempty"`
 }
 
 func validateStringList(name string, values []string, maxItems, maxLength int) error {

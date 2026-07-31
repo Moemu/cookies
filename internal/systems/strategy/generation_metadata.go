@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/provider"
@@ -18,8 +19,23 @@ type GenerationReadiness struct {
 	UpstreamModel   string                    `json:"upstream_model,omitempty"`
 	RouteRevisionID string                    `json:"route_revision_id,omitempty"`
 	ResponseMode    provider.TextResponseMode `json:"response_mode,omitempty"`
+	APIMode         provider.TextAPIMode      `json:"api_mode,omitempty"`
+	Background      bool                      `json:"background,omitempty"`
 	PromptVersion   string                    `json:"prompt_version"`
 	ReasonCode      string                    `json:"reason_code,omitempty"`
+}
+
+type GenerationProbe struct {
+	Ready           bool                      `json:"ready"`
+	ProviderCode    string                    `json:"provider_code"`
+	ModelAlias      string                    `json:"model_alias"`
+	ModelVersion    string                    `json:"model_version"`
+	RouteRevisionID string                    `json:"route_revision_id,omitempty"`
+	ResponseMode    provider.TextResponseMode `json:"response_mode,omitempty"`
+	APIMode         provider.TextAPIMode      `json:"api_mode,omitempty"`
+	Background      bool                      `json:"background,omitempty"`
+	Usage           *provider.TokenUsage      `json:"usage,omitempty"`
+	LatencyMS       int64                     `json:"latency_ms"`
 }
 
 type GenerationMetadata struct {
@@ -38,6 +54,7 @@ type GenerationMetadata struct {
 	LatencyMS             int64                     `json:"latency_ms,omitempty"`
 	ValidationAttempts    int                       `json:"validation_attempts"`
 	QualityReport         *QualityReport            `json:"quality_report,omitempty"`
+	Attempts              []SkillRunAttempt         `json:"attempts"`
 }
 
 func (s Service) GetGenerationReadiness(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (GenerationReadiness, error) {
@@ -47,10 +64,7 @@ func (s Service) GetGenerationReadiness(ctx context.Context, actor contract.Acto
 	if _, err := s.project(ctx, actor, projectID); err != nil {
 		return GenerationReadiness{}, err
 	}
-	promptVersion := strings.TrimSpace(s.PromptVersion)
-	if promptVersion == "" {
-		promptVersion = "strategy.generate.v2"
-	}
+	promptVersion := s.generatePromptVersion()
 	if s.Text == nil {
 		return GenerationReadiness{
 			Ready: true, GenerationMode: "deterministic", PromptVersion: promptVersion,
@@ -67,7 +81,84 @@ func (s Service) GetGenerationReadiness(ctx context.Context, actor contract.Acto
 	return GenerationReadiness{
 		Ready: inspection.Ready, GenerationMode: "provider", ModelAlias: inspection.ModelAlias,
 		UpstreamModel: inspection.UpstreamModel, RouteRevisionID: inspection.RouteRevisionID,
-		ResponseMode: inspection.ResponseMode, PromptVersion: promptVersion,
+		ResponseMode: inspection.ResponseMode, APIMode: inspection.APIMode,
+		Background: inspection.Background, PromptVersion: promptVersion,
+	}, nil
+}
+
+func (s Service) ProbeGeneration(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+) (GenerationProbe, error) {
+	return s.ProbeGenerationProfile(ctx, actor, projectID, "")
+}
+
+func (s Service) ProbeGenerationProfile(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	profile string,
+) (GenerationProbe, error) {
+	if err := requireScope(actor, ScopeWrite); err != nil {
+		return GenerationProbe{}, err
+	}
+	project, err := s.project(ctx, actor, projectID)
+	if err != nil {
+		return GenerationProbe{}, err
+	}
+	if s.Text == nil {
+		return GenerationProbe{}, ErrGenerationUnavailable
+	}
+	profile = strings.TrimSpace(profile)
+	var modelAlias string
+	switch profile {
+	case "":
+		modelAlias = strings.TrimSpace(s.TextModelAlias)
+		if modelAlias == "" {
+			modelAlias = "cookies.text.standard"
+		}
+	case "deep_review":
+		modelAlias = strings.TrimSpace(s.DeepReviewModelAlias)
+		if modelAlias == "" {
+			modelAlias = "cookies.text.deep_review"
+		}
+	default:
+		return GenerationProbe{}, ErrInvalidRequest
+	}
+	invocationID, err := s.newID("generationprobe")
+	if err != nil {
+		return GenerationProbe{}, err
+	}
+	started := time.Now()
+	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
+		Actor: actor, Project: project, ModelAlias: modelAlias,
+		InvocationKey: contract.IdempotencyKey(invocationID),
+		Messages: []provider.TextMessage{
+			{Role: provider.TextRoleSystem, Content: "Return the requested structured health check only."},
+			{Role: provider.TextRoleUser, Content: "Return ok=true."},
+		},
+		OutputJSONSchema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}`),
+	})
+	if err != nil {
+		return GenerationProbe{}, err
+	}
+	candidate := response.StructuredOutput
+	if len(candidate) == 0 {
+		candidate = normalizeJSONCandidate(response.Text)
+	}
+	var value struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(candidate, &value); err != nil || !value.OK {
+		return GenerationProbe{}, ErrGenerationUnavailable
+	}
+	return GenerationProbe{
+		Ready: true, ProviderCode: response.ProviderCode, ModelAlias: response.ModelAlias,
+		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
+		ResponseMode: response.ResponseMode, APIMode: response.APIMode,
+		Background: response.Background, Usage: response.Usage,
+		LatencyMS: time.Since(started).Milliseconds(),
 	}, nil
 }
 
@@ -83,7 +174,8 @@ func generationReadinessReason(err error) string {
 	case strings.Contains(message, "master key"), strings.Contains(message, "credential"):
 		return "PROVIDER_CREDENTIAL_UNAVAILABLE"
 	case strings.Contains(message, "base url"), strings.Contains(message, "response mode"),
-		strings.Contains(message, "output tokens"), strings.Contains(message, "temperature"):
+		strings.Contains(message, "api mode"), strings.Contains(message, "output tokens"),
+		strings.Contains(message, "temperature"):
 		return "MODEL_ROUTE_POLICY_INVALID"
 	default:
 		return "PROVIDER_PREFLIGHT_FAILED"
@@ -107,12 +199,13 @@ func (s Service) GetGenerationMetadata(ctx context.Context, actor contract.Actor
 		return GenerationMetadata{}, err
 	}
 	var value GenerationMetadata
+	var skillRunID string
 	var providerCode, modelVersion, generationMode, modelAlias, routeRevisionID, responseMode, promptVersion sql.NullString
 	var generationContextHash, outputHash sql.NullString
 	var inputTokens, outputTokens, totalTokens, latencyMS sql.NullInt64
 	var skillsJSON, skillHashesJSON, qualityJSON []byte
 	err = s.DB.QueryRowContext(ctx, `SELECT
-			sr.provider_code, sr.model_version, sr.generation_mode, sr.model_alias,
+			sr.id, sr.provider_code, sr.model_version, sr.generation_mode, sr.model_alias,
 			sr.route_revision_id, sr.response_mode, sr.prompt_version,
 			COALESCE(sr.skill_versions, JSON_OBJECT()),
 			COALESCE(sr.skill_snapshot_hashes, JSON_OBJECT()),
@@ -130,7 +223,7 @@ func (s Service) GetGenerationMetadata(ctx context.Context, actor contract.Actor
 		ORDER BY sr.completed_at DESC, sr.id DESC LIMIT 1`,
 		actor.OrganizationID, draft.ProjectID, strategyID,
 	).Scan(
-		&providerCode, &modelVersion, &generationMode, &modelAlias,
+		&skillRunID, &providerCode, &modelVersion, &generationMode, &modelAlias,
 		&routeRevisionID, &responseMode, &promptVersion, &skillsJSON, &skillHashesJSON,
 		&generationContextHash, &outputHash,
 		&inputTokens, &outputTokens, &totalTokens, &latencyMS,
@@ -175,6 +268,10 @@ func (s Service) GetGenerationMetadata(ctx context.Context, actor contract.Actor
 			return GenerationMetadata{}, err
 		}
 		value.QualityReport = &report
+	}
+	value.Attempts, err = s.listAttemptsForSkillRun(ctx, actor.OrganizationID, draft.ProjectID, skillRunID)
+	if err != nil {
+		return GenerationMetadata{}, err
 	}
 	return value, nil
 }

@@ -26,6 +26,13 @@ const (
 	TextResponsePromptJSON TextResponseMode = "prompt_json"
 )
 
+type TextAPIMode string
+
+const (
+	TextAPIChatCompletions TextAPIMode = "chat_completions"
+	TextAPIResponses       TextAPIMode = "responses"
+)
+
 // TextOutputTokenParameter records the upstream field used to cap output
 // tokens. Most OpenAI-compatible endpoints use max_tokens, while some
 // providers, including MiniMax, require max_completion_tokens.
@@ -34,6 +41,7 @@ type TextOutputTokenParameter string
 const (
 	TextOutputTokenParameterMaxTokens           TextOutputTokenParameter = "max_tokens"
 	TextOutputTokenParameterMaxCompletionTokens TextOutputTokenParameter = "max_completion_tokens"
+	TextOutputTokenParameterMaxOutputTokens     TextOutputTokenParameter = "max_output_tokens"
 )
 
 // GatewayRouteSnapshot is copied onto an invocation when it is created. Later route
@@ -51,12 +59,18 @@ type GatewayRouteSnapshot struct {
 	TimeoutSeconds       int                      `json:"timeout_seconds"`
 	MaxResponseBytes     int64                    `json:"max_response_bytes"`
 	TextResponseMode     TextResponseMode         `json:"text_response_mode,omitempty"`
+	TextAPIMode          TextAPIMode              `json:"text_api_mode,omitempty"`
 	MaxOutputTokens      int                      `json:"max_output_tokens,omitempty"`
 	OutputTokenParameter TextOutputTokenParameter `json:"output_token_parameter,omitempty"`
 	Temperature          float64                  `json:"temperature,omitempty"`
 	TemperatureSet       bool                     `json:"-"`
 	ThinkingMode         string                   `json:"thinking_mode,omitempty"`
 	ReasoningSplit       bool                     `json:"reasoning_split,omitempty"`
+	ReasoningEffort      string                   `json:"reasoning_effort,omitempty"`
+	Background           bool                     `json:"background,omitempty"`
+	PollIntervalMS       int                      `json:"poll_interval_ms,omitempty"`
+	VideoInputModes      []VideoInputMode         `json:"video_input_modes,omitempty"`
+	VideoAudioPolicies   []VideoAudioPolicy       `json:"video_audio_policies,omitempty"`
 }
 
 func (s GatewayRouteSnapshot) Validate() error {
@@ -68,7 +82,13 @@ func (s GatewayRouteSnapshot) ValidateWithPolicy(allowInsecureHTTP bool) error {
 }
 
 func (s GatewayRouteSnapshot) ValidateVideoWithPolicy(allowInsecureHTTP bool) error {
-	return s.validateWithLimits(allowInsecureHTTP, 1800, 200<<20)
+	if err := s.validateWithLimits(allowInsecureHTTP, 1800, 200<<20); err != nil {
+		return err
+	}
+	if err := validateVideoInputModes(s.VideoInputModes); err != nil {
+		return err
+	}
+	return validateVideoAudioPolicies(s.VideoAudioPolicies)
 }
 
 func (s GatewayRouteSnapshot) validateWithLimits(allowInsecureHTTP bool, maxTimeoutSeconds int, maxResponseBytes int64) error {
@@ -104,12 +124,17 @@ func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) err
 	default:
 		return fmt.Errorf("adapter gateway text response mode is invalid")
 	}
+	switch s.TextAPIMode {
+	case "", TextAPIChatCompletions, TextAPIResponses:
+	default:
+		return fmt.Errorf("adapter gateway text API mode is invalid")
+	}
 	if s.MaxOutputTokens < 0 || s.MaxOutputTokens > 100_000 {
 		return fmt.Errorf("adapter gateway max output tokens are invalid")
 	}
 	if s.MaxOutputTokens > 0 {
 		switch s.OutputTokenParameter {
-		case "", TextOutputTokenParameterMaxTokens, TextOutputTokenParameterMaxCompletionTokens:
+		case "", TextOutputTokenParameterMaxTokens, TextOutputTokenParameterMaxCompletionTokens, TextOutputTokenParameterMaxOutputTokens:
 		default:
 			return fmt.Errorf("adapter gateway output token parameter is invalid")
 		}
@@ -122,6 +147,22 @@ func (s GatewayRouteSnapshot) ValidateTextWithPolicy(allowInsecureHTTP bool) err
 	default:
 		return fmt.Errorf("adapter gateway thinking mode is invalid")
 	}
+	switch s.ReasoningEffort {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh":
+	default:
+		return fmt.Errorf("adapter gateway reasoning effort is invalid")
+	}
+	if (s.TextAPIMode == "" || s.TextAPIMode == TextAPIChatCompletions) &&
+		(s.Background || s.ReasoningEffort != "" || s.OutputTokenParameter == TextOutputTokenParameterMaxOutputTokens) {
+		return fmt.Errorf("Responses-only text constraints require responses API mode")
+	}
+	if s.TextAPIMode == TextAPIResponses &&
+		(s.ThinkingMode != "" || s.ReasoningSplit || s.OutputTokenParameter == TextOutputTokenParameterMaxCompletionTokens) {
+		return fmt.Errorf("chat-completions-only text constraints cannot be used with responses API mode")
+	}
+	if s.PollIntervalMS < 0 || s.PollIntervalMS > 10_000 || (s.PollIntervalMS > 0 && s.PollIntervalMS < 100) {
+		return fmt.Errorf("adapter gateway response polling interval is invalid")
+	}
 	return nil
 }
 
@@ -131,6 +172,10 @@ type ImageRouteResolver interface {
 
 type TextRouteResolver interface {
 	ResolveTextRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
+}
+
+type ResearchRouteResolver interface {
+	ResolveResearchRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
 }
 
 type VideoRouteResolver interface {
@@ -153,12 +198,67 @@ type MySQLGatewayConfigStore struct {
 	AllowInsecureHTTP bool
 }
 
+type CapabilityStatus struct {
+	Capability           string    `json:"capability"`
+	ModelAlias           string    `json:"model_alias"`
+	UpstreamModel        string    `json:"upstream_model"`
+	Available            bool      `json:"available"`
+	CredentialConfigured bool      `json:"credential_configured"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+// ListCapabilities is the read-only Provider configuration seam used by the
+// Kanon settings surface. It reports only active route metadata and whether an
+// encrypted credential exists; plaintext credentials never cross this seam.
+func (s MySQLGatewayConfigStore) ListCapabilities(ctx context.Context, organizationID contract.OrganizationID) ([]CapabilityStatus, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("provider database is required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT r.capability, r.model_alias, rr.upstream_model,
+		EXISTS(
+			SELECT 1 FROM provider_credentials credential
+			WHERE credential.connection_id = rr.connection_id
+			  AND credential.status = 'active'
+			  AND credential.active_from <= UTC_TIMESTAMP(6)
+			  AND (credential.active_until IS NULL OR credential.active_until > UTC_TIMESTAMP(6))
+		) AS credential_configured,
+		r.updated_at
+		FROM provider_model_routes r
+		JOIN provider_model_route_revisions rr ON rr.id = r.current_revision_id
+		JOIN provider_connections connection ON connection.id = rr.connection_id
+		JOIN provider_connection_revisions connection_revision ON connection_revision.id = connection.current_revision_id
+		WHERE r.status = 'enabled' AND connection.status = 'enabled'
+		  AND (r.organization_id IS NULL OR r.organization_id = ?)
+		ORDER BY r.capability, r.model_alias`, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []CapabilityStatus{}
+	for rows.Next() {
+		var item CapabilityStatus
+		if err := rows.Scan(&item.Capability, &item.ModelAlias, &item.UpstreamModel, &item.CredentialConfigured, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.Available = item.CredentialConfigured
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (ImageRouteSnapshot, error) {
 	return s.resolveRoute(ctx, organizationID, "image.generate", modelAlias, "adapter_gateway")
 }
 
 func (s MySQLGatewayConfigStore) ResolveTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
 	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "adapter_gateway")
+}
+
+func (s MySQLGatewayConfigStore) ResolveResearchRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "research.web", modelAlias, "ark")
 }
 
 func (s MySQLGatewayConfigStore) ResolveVideoRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (VideoRouteSnapshot, error) {
@@ -202,6 +302,10 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		if err := applyTextRouteConstraints(&snapshot, constraintsJSON); err != nil {
 			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
 		}
+	} else if capability == "video.generate" {
+		if err := applyVideoRouteConstraints(&snapshot, constraintsJSON); err != nil {
+			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
+		}
 	}
 	validate := snapshot.ValidateWithPolicy
 	if capability == "text.generate" {
@@ -215,17 +319,77 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 	return snapshot, nil
 }
 
+func applyVideoRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {
+	if snapshot == nil {
+		return fmt.Errorf("route snapshot is required")
+	}
+	var constraints struct {
+		InputModes    []VideoInputMode   `json:"video_input_modes"`
+		AudioPolicies []VideoAudioPolicy `json:"video_audio_policies"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &constraints); err != nil {
+			return err
+		}
+	}
+	if err := validateVideoInputModes(constraints.InputModes); err != nil {
+		return err
+	}
+	if err := validateVideoAudioPolicies(constraints.AudioPolicies); err != nil {
+		return err
+	}
+	snapshot.VideoInputModes = append([]VideoInputMode(nil), constraints.InputModes...)
+	snapshot.VideoAudioPolicies = append([]VideoAudioPolicy(nil), constraints.AudioPolicies...)
+	return nil
+}
+
+func validateVideoInputModes(values []VideoInputMode) error {
+	seen := make(map[VideoInputMode]struct{}, len(values))
+	for _, value := range values {
+		switch value {
+		case VideoInputTextOnly, VideoInputReferenceImage, VideoInputFirstLastFrame:
+		default:
+			return fmt.Errorf("video input mode %q is invalid", value)
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("video input mode %q is duplicated", value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func validateVideoAudioPolicies(values []VideoAudioPolicy) error {
+	seen := make(map[VideoAudioPolicy]struct{}, len(values))
+	for _, value := range values {
+		switch value {
+		case VideoAudioSilent, VideoAudioGenerated:
+		default:
+			return fmt.Errorf("video audio policy %q is invalid", value)
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("video audio policy %q is duplicated", value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
 func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {
 	if snapshot == nil {
 		return fmt.Errorf("route snapshot is required")
 	}
 	var constraints struct {
 		ResponseMode         TextResponseMode         `json:"text_response_mode"`
+		APIMode              TextAPIMode              `json:"api_mode"`
 		MaxOutputTokens      int                      `json:"max_output_tokens"`
 		OutputTokenParameter TextOutputTokenParameter `json:"output_token_parameter"`
 		Temperature          *float64                 `json:"temperature"`
 		ThinkingMode         string                   `json:"thinking_mode"`
 		ReasoningSplit       bool                     `json:"reasoning_split"`
+		ReasoningEffort      string                   `json:"reasoning_effort"`
+		Background           bool                     `json:"background"`
+		PollIntervalMS       int                      `json:"poll_interval_ms"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &constraints); err != nil {
@@ -238,7 +402,11 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 	if constraints.ResponseMode == "" {
 		constraints.ResponseMode = TextResponsePromptJSON
 	}
+	if constraints.APIMode == "" {
+		constraints.APIMode = TextAPIChatCompletions
+	}
 	snapshot.TextResponseMode = constraints.ResponseMode
+	snapshot.TextAPIMode = constraints.APIMode
 	snapshot.MaxOutputTokens = constraints.MaxOutputTokens
 	snapshot.OutputTokenParameter = constraints.OutputTokenParameter
 	if constraints.Temperature != nil {
@@ -247,6 +415,9 @@ func applyTextRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessa
 	}
 	snapshot.ThinkingMode = constraints.ThinkingMode
 	snapshot.ReasoningSplit = constraints.ReasoningSplit
+	snapshot.ReasoningEffort = constraints.ReasoningEffort
+	snapshot.Background = constraints.Background
+	snapshot.PollIntervalMS = constraints.PollIntervalMS
 	return nil
 }
 

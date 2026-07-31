@@ -53,45 +53,56 @@ flowchart LR
 
 ## 快速开始
 
-前置条件：Node.js 20 或更高版本，以及 npm。克隆后安装依赖：
+前置条件：Node.js 20 或更高版本、npm、Go 和 Docker。克隆后安装依赖并写入 Go 演示 seed：
 
 ```bash
 git clone --recurse-submodules https://github.com/shikanon/cookies.git
 cd cookies
-npm install
 cp .env.example .env
+npm ci
+docker compose up -d --wait mysql
+npm run go:seed
 ```
 
-在第一个终端启动 API：
+在第一个终端启动 TypeScript 兼容登录 API：
 
 ```bash
-set -a
-source .env
-set +a
 npm run server
 ```
 
-在第二个终端启动 Vite 前端，然后打开命令输出的 `http://127.0.0.1:5173`：
+在第二个终端启动 Go `cookies-api`：
+
+```bash
+go run ./cmd/cookies-api
+```
+
+在第三个终端启动 Vite 前端，然后打开命令输出的 `http://127.0.0.1:5173`：
 
 ```bash
 npm run dev
 ```
 
-服务端将本地演示状态保存到已忽略的 `data/mvp-store.json`。如需重置，停止服务后删除该文件；下次运行 `npm run server` 会重新创建预置项目。
+前端保持同源请求：Vite 将本地演示登录的 `/api` 代理到 `http://127.0.0.1:8787` 上的 TypeScript 兼容服务，将项目工作台的 `/platform` 代理到 `http://127.0.0.1:8080` 上的 Go `cookies-api`。端口变化时分别设置 `VITE_COMPAT_API_PROXY_TARGET` 和 `VITE_PLATFORM_PROXY_TARGET`；此模式下保持 `VITE_API_BASE_URL` 为空。
+
+在 macOS 上，可用 `./scripts/dev.sh` 一键启动完整本地链路：启动 MySQL、执行迁移、写入 canonical Go 投资人演示 seed，再启动 Go API 和 Vite 前端。只准备数据库和 seed 时运行 `./scripts/dev.sh --prepare-only`。
+
+TypeScript MVP 兼容服务（`npm run server`）负责本地演示登录会话。它使用已忽略的 `data/mvp-store.json`，当等价 Go `/platform/v1` 端点可用后，不再作为项目工作台的数据权威；演示登录到工作台时需与 Go API 同时启动。
+
+本地默认测试身份、兼容服务登录配置和完整演示数据导入步骤见[本地演示与测试数据手册](./docs/25-local-demo-runbook.md)。兼容服务的登录密码仅应写在本机未提交的 `COOKIES_DEMO_PASSWORD`；Go 主链路则通过本地身份注入运行，不使用密码登录。
 
 ## 方舟配置
 
-将 `.env.example` 复制为 `.env` 后，在本地填写变量，并在启动 `npm run server` 的终端加载它：
+将 `.env.example` 复制为 `.env` 后，在本地填写变量，并在启动 Go API 的终端加载它：
 
 ```bash
 # 在 .env 本地填写 ARK_API_KEY 后执行：
 set -a && source .env && set +a
-npm run server
+go run ./cmd/cookies-api
 ```
 
 浏览预置项目、运行预检、审批演示 ChangeSet 和查看审计记录时，`ARK_API_KEY` 不是必需项。未配置时，应用会展示由服务端提供的 `not_configured` 状态，并禁用新的 AI 生成；浏览器不会要求输入、保存、掩码展示或接收 API Key。不要提交 `.env` 或任何真实凭据。
 
-服务端在 `server/ark-provider.ts` 中将文本、图片、视频与向量能力映射到指定方舟模型目录。`ARK_BASE_URL` 可选，未设置时使用默认方舟 HTTPS 地址。
+TS MVP 兼容服务在 `server/ark-provider.ts` 中将文本、图片、视频与向量能力映射到指定方舟模型目录。`ARK_BASE_URL` 可选，未设置时使用默认方舟 HTTPS 地址。
 
 ## 验证
 

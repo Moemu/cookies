@@ -1,0 +1,42 @@
+{
+  "business_code": "game_preroll",
+  "generation": 1,
+  "version": "1.0.0",
+  "display_name": "游戏前贴",
+  "summary": "围绕真实玩法兴趣与安装、注册、预约或召回目标的前贴任务。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 40,
+  "match_rules": [
+    {"id":"industry_game","field":"industry","operator":"in","values":["game","游戏"],"weight":45,"reason":"项目属于游戏业务"},
+    {"id":"objective_install","field":"objective_type","operator":"in","values":["install","conversion","reactivation"],"weight":35,"reason":"目标包含安装、注册、预约或召回"},
+    {"id":"deliverable_video","field":"deliverable_type","operator":"in","values":["video","unknown"],"weight":15,"reason":"前贴需要视频交付"},
+    {"id":"has_gameplay","field":"asset_roles","operator":"contains","values":["gameplay"],"weight":15,"reason":"已有真实玩法素材可用于事实约束"}
+  ],
+  "questions": [
+    {"id":"gameplay","label":"最值得突出且允许宣传的真实玩法是什么？","type":"textarea","required_for":"strategy","validation":{"max_length":1000}},
+    {"id":"player_motivation","label":"目标玩家的核心动机是什么？","type":"textarea","required_for":"strategy","validation":{"max_length":800}},
+    {"id":"conversion_action","label":"本次转化动作是什么？","type":"single_select","required_for":"strategy","options":[{"value":"install","label":"安装"},{"value":"register","label":"注册"},{"value":"reserve","label":"预约"},{"value":"reactivate","label":"召回"}]},
+    {"id":"gameplay_asset","label":"游戏画面或角色素材","type":"asset_ref","required_for":"production"}
+  ],
+  "requirements": {
+    "strategy": ["游戏品类和真实玩法","目标玩家","转化动作","允许宣传的奖励或福利"],
+    "production": ["游戏画面和角色素材授权","Logo","渠道规格"]
+  },
+  "output_fields": [
+    {"key":"player_motivation","label":"玩家动机","type":"string","required":true,"max_length":400,"description":"目标玩家最核心的兴趣或痛点。"},
+    {"key":"gameplay_priority","label":"玩法优先级","type":"string_array","required":true,"max_items":5,"description":"建议优先表达的真实玩法或冲突。"},
+    {"key":"truth_guardrails","label":"真实性边界","type":"string_array","required":true,"max_items":8,"description":"不得虚构的玩法、奖励和结果。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["genre_description","gameplay_comparison"],
+    "production_confirmations": ["gameplay_rights","character_rights","music_rights"]
+  },
+  "skill_name": "creative_task.game_preroll",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}

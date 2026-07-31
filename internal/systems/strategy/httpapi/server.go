@@ -32,6 +32,8 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	server := &Server{Service: service, Agents: agents, Jobs: jobs, PollPeriod: time.Second}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/strategy/v1/workspaces", server.createWorkspace)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/tasks", server.createTask)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/tasks", server.listTasks)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/workspaces", server.listWorkspaces)
 	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}", server.getWorkspace)
 	mux.HandleFunc("POST /api/strategy/v1/conversations", server.createConversation)
@@ -44,22 +46,46 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/agent-tasks/{agent_task_id}/skill-runs", server.listSkillRuns)
 	mux.HandleFunc("POST /api/strategy/v1/agent-tasks/{agent_task_action}", server.cancelAgentTask)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}", server.getTask)
+	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_action}", server.taskAction)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}/brief-draft", server.getBriefDraft)
 	mux.HandleFunc("PATCH /api/strategy/v1/tasks/{task_id}/brief-draft", server.patchBriefDraft)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief:confirm", server.confirmBrief)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/brief-versions", server.listProjectBriefVersions)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/briefs", server.listProjectBriefs)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/briefs/{brief_id}", server.getProjectBrief)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions", server.listBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/generation-readiness", server.getGenerationReadiness)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/generation-probe", server.probeGeneration)
+	mux.HandleFunc("GET /api/strategy/v1/skills", server.listSkills)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/creative-businesses", server.listCreativeBusinesses)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/creative-businesses/{business_code}", server.getCreativeBusiness)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/creative-business-recommendations", server.recommendCreativeBusinesses)
+	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/creative-task-plans", server.createCreativeTaskPlan)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/creative-task-plans", server.listCreativeTaskPlans)
+	mux.HandleFunc("GET /api/strategy/v1/creative-task-plans/{plan_id}", server.getCreativeTaskPlan)
+	mux.HandleFunc("PATCH /api/strategy/v1/creative-task-plans/{plan_id}/answers", server.patchCreativeTaskPlanAnswers)
+	mux.HandleFunc("POST /api/strategy/v1/creative-task-plans/{plan_action}", server.creativeTaskPlanAction)
+	mux.HandleFunc("GET /api/strategy/v1/creative-task-plans/{plan_id}/strategy-versions", server.listCreativeTaskStrategyVersions)
+	mux.HandleFunc("GET /api/strategy/v1/creative-task-plans/{plan_id}/strategy-versions/{version}", server.getCreativeTaskStrategyVersion)
+	mux.HandleFunc("GET /api/strategy/v1/creative-task-plans/{plan_id}/strategy-versions/{version}/export.md", server.exportCreativeTaskStrategy)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}", server.getStrategy)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-drafts", server.listProjectStrategies)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/generation-metadata", server.getGenerationMetadata)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions", server.listStrategyRevisions)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions/{revision}", server.getStrategyRevision)
 	mux.HandleFunc("PATCH /api/strategy/v1/strategy-drafts/{strategy_id}", server.patchStrategy)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-drafts/{strategy_action}", server.strategyAction)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}", server.getReview)
+	mux.HandleFunc("GET /api/strategy/v1/reviews", server.listReviews)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/reviews", server.listProjectReviews)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/review-policy", server.getReviewPolicy)
+	mux.HandleFunc("PUT /api/strategy/v1/projects/{project_id}/review-policy", server.updateReviewPolicy)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}/comments", server.listReviewComments)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_id}/comments", server.addReviewComment)
+	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_id}/deep-analysis", server.startDeepReview)
+	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}/deep-analysis", server.getDeepReview)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-reviews/{review_action}", server.reviewAction)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages", server.listPackages)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/creative-handoff", server.getCreativeHandoff)
@@ -67,6 +93,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/strategy-packages/{package_id}/versions/{version}/export.md", server.exportPackage)
 	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/feedback", server.createFeedback)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/feedback", server.listFeedback)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/evidence-references", server.listEvidenceReferences)
 	server.mux = mux
 	return server
 }
@@ -100,6 +127,41 @@ func (s *Server) createWorkspace(writer http.ResponseWriter, request *http.Reque
 	writeJSON(writer, http.StatusCreated, value)
 }
 
+func (s *Server) createTask(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.CreateTaskRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.CreateTask(
+		request.Context(),
+		mustActor(request),
+		idempotencyKey(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writer.Header().Set("Location", "/api/strategy/v1/tasks/"+value.Task.ID)
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listTasks(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListTasksByLifecycle(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("lifecycle"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
 func (s *Server) listWorkspaces(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.Service.ListWorkspaces(request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")))
 	if err != nil {
@@ -121,9 +183,43 @@ func (s *Server) getGenerationReadiness(writer http.ResponseWriter, request *htt
 	writeResult(writer, value, err)
 }
 
+func (s *Server) probeGeneration(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.ProbeGenerationProfile(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("profile"),
+	)
+	writeResult(writer, value, err)
+}
+
 func (s *Server) getGenerationMetadata(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetGenerationMetadata(
 		request.Context(), mustActor(request), request.PathValue("strategy_id"),
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) startDeepReview(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.StartDeepReviewRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.StartDeepReview(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("review_id"), body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func (s *Server) getDeepReview(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetLatestDeepReview(
+		request.Context(), mustActor(request), request.PathValue("review_id"),
 	)
 	writeResult(writer, value, err)
 }
@@ -295,6 +391,38 @@ func (s *Server) listBriefVersions(writer http.ResponseWriter, request *http.Req
 	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
+func (s *Server) listProjectBriefVersions(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListProjectBriefVersions(
+		request.Context(),
+		mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listProjectBriefs(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListProjectBriefs(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getProjectBrief(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetProjectBrief(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.PathValue("brief_id"),
+	)
+	writeResult(writer, value, err)
+}
+
 func (s *Server) getBriefVersion(writer http.ResponseWriter, request *http.Request) {
 	version, ok := positivePathInt(writer, request, "version")
 	if !ok {
@@ -306,6 +434,17 @@ func (s *Server) getBriefVersion(writer http.ResponseWriter, request *http.Reque
 		writer.Header().Set("Cache-Control", "private, no-cache")
 	}
 	writeResult(writer, value, err)
+}
+
+func (s *Server) listProjectStrategies(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListProjectStrategies(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) createStrategy(writer http.ResponseWriter, request *http.Request) {
@@ -333,6 +472,204 @@ func (s *Server) getStrategy(writer http.ResponseWriter, request *http.Request) 
 		writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
 	}
 	writeResult(writer, value, err)
+}
+
+func (s *Server) listSkills(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListSkills(
+		request.Context(),
+		mustActor(request),
+		request.URL.Query().Get("include_instructions") == "true",
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listCreativeBusinesses(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.ListCreativeBusinesses(
+		request.Context(), mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+	)
+	if err == nil {
+		writer.Header().Set("ETag", `"`+value.CatalogHash+`"`)
+		writer.Header().Set("Cache-Control", "private, no-cache")
+	}
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getCreativeBusiness(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetCreativeBusiness(
+		request.Context(), mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		request.PathValue("business_code"),
+	)
+	if err == nil {
+		writer.Header().Set("ETag", `"`+value.ContentHash+`"`)
+		writer.Header().Set("Cache-Control", "private, no-cache")
+	}
+	writeResult(writer, value, err)
+}
+
+func (s *Server) recommendCreativeBusinesses(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		BriefID      string `json:"brief_id"`
+		BriefVersion int64  `json:"brief_version"`
+		Limit        int    `json:"limit"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.Service.RecommendCreativeBusinesses(
+		request.Context(), mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		body.BriefID, body.BriefVersion, body.Limit,
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) createCreativeTaskPlan(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.CreateCreativeTaskPlanRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.CreateCreativeTaskPlan(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		contract.ProjectID(request.PathValue("project_id")), body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writer.Header().Set("Location", "/api/strategy/v1/creative-task-plans/"+value.ID)
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listCreativeTaskPlans(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListCreativeTaskPlans(
+		request.Context(), mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("brief_id"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getCreativeTaskPlan(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetCreativeTaskPlan(
+		request.Context(), mustActor(request), request.PathValue("plan_id"),
+	)
+	if err == nil {
+		writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
+	}
+	writeResult(writer, value, err)
+}
+
+func (s *Server) patchCreativeTaskPlanAnswers(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.CreativeTaskAnswerPatch
+	if !decode(writer, request, &body) {
+		return
+	}
+	if body.ExpectedVersion == 0 {
+		body.ExpectedVersion = parseIfMatch(request.Header.Get("If-Match"))
+	}
+	value, duplicate, err := s.Service.PatchCreativeTaskPlanAnswers(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("plan_id"), body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) creativeTaskPlanAction(writer http.ResponseWriter, request *http.Request) {
+	action := request.PathValue("plan_action")
+	if !strings.HasSuffix(action, ":generate") {
+		writeError(writer, strategy.ErrNotFound)
+		return
+	}
+	planID := strings.TrimSuffix(action, ":generate")
+	var body struct {
+		ExpectedVersion  int64 `json:"expected_version"`
+		ExpectedRevision int64 `json:"expected_revision"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	if body.ExpectedVersion == 0 {
+		body.ExpectedVersion = parseIfMatch(request.Header.Get("If-Match"))
+	}
+	value, duplicate, err := s.Service.CreateCreativeTaskStrategy(
+		request.Context(), mustActor(request), idempotencyKey(request), planID,
+		body.ExpectedVersion, body.ExpectedRevision,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func (s *Server) listCreativeTaskStrategyVersions(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListCreativeTaskStrategyVersions(
+		request.Context(), mustActor(request), request.PathValue("plan_id"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getCreativeTaskStrategyVersion(writer http.ResponseWriter, request *http.Request) {
+	version, ok := positivePathInt(writer, request, "version")
+	if !ok {
+		return
+	}
+	value, err := s.Service.GetCreativeTaskStrategyVersion(
+		request.Context(), mustActor(request), request.PathValue("plan_id"), version,
+	)
+	if err == nil {
+		writer.Header().Set("ETag", `"`+value.ContentHash+`"`)
+	}
+	writeResult(writer, value, err)
+}
+
+func (s *Server) exportCreativeTaskStrategy(writer http.ResponseWriter, request *http.Request) {
+	version, ok := positivePathInt(writer, request, "version")
+	if !ok {
+		return
+	}
+	content, err := s.Service.ExportCreativeTaskStrategyMarkdown(
+		request.Context(), mustActor(request), request.PathValue("plan_id"), version,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writer.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	writer.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="creative-task-strategy-%s-v%d.md"`,
+		request.PathValue("plan_id"), version,
+	))
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write([]byte(content))
 }
 
 func (s *Server) listStrategyRevisions(writer http.ResponseWriter, request *http.Request) {
@@ -397,9 +734,102 @@ func (s *Server) strategyAction(writer http.ResponseWriter, request *http.Reques
 	case strings.HasSuffix(value, ":approve"):
 		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":approve"))
 		s.approveStrategy(writer, request)
+	case strings.HasSuffix(value, ":archive"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":archive"))
+		s.archiveStrategy(writer, request)
+	case strings.HasSuffix(value, ":restore"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":restore"))
+		s.restoreStrategy(writer, request)
+	case strings.HasSuffix(value, ":retry"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":retry"))
+		s.retryStrategy(writer, request)
 	default:
 		writeError(writer, strategy.ErrNotFound)
 	}
+}
+
+func (s *Server) retryStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RetryStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body.ExpectedVersion)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func (s *Server) taskAction(writer http.ResponseWriter, request *http.Request) {
+	value := request.PathValue("task_action")
+	switch {
+	case strings.HasSuffix(value, ":discard"):
+		request.SetPathValue("task_id", strings.TrimSuffix(value, ":discard"))
+		s.discardTask(writer, request)
+	case strings.HasSuffix(value, ":restore"):
+		request.SetPathValue("task_id", strings.TrimSuffix(value, ":restore"))
+		s.restoreTask(writer, request)
+	default:
+		writeError(writer, strategy.ErrNotFound)
+	}
+}
+
+func (s *Server) discardTask(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.DiscardTask(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("task_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func (s *Server) restoreTask(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RestoreTask(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("task_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func (s *Server) archiveStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.ArchiveStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func (s *Server) restoreStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.LifecycleRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.RestoreStrategy(request.Context(), mustActor(request),
+		idempotencyKey(request), request.PathValue("strategy_id"), body)
+	writeLifecycleResult(writer, value, duplicate, err)
+}
+
+func writeLifecycleResult(writer http.ResponseWriter, value any, duplicate bool, err error) {
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) submitStrategy(writer http.ResponseWriter, request *http.Request) {
@@ -423,6 +853,59 @@ func (s *Server) submitStrategy(writer http.ResponseWriter, request *http.Reques
 
 func (s *Server) getReview(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetReview(request.Context(), mustActor(request), request.PathValue("review_id"))
+	writeResult(writer, value, err)
+}
+
+func (s *Server) listReviews(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListReviews(
+		request.Context(),
+		mustActor(request),
+		"",
+		request.URL.Query().Get("filter"),
+		request.URL.Query().Get("status"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listProjectReviews(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListReviews(
+		request.Context(),
+		mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("filter"),
+		request.URL.Query().Get("status"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getReviewPolicy(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetReviewPolicy(
+		request.Context(),
+		mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) updateReviewPolicy(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.UpdateReviewPolicyRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.Service.UpdateReviewPolicy(
+		request.Context(),
+		mustActor(request),
+		contract.ProjectID(request.PathValue("project_id")),
+		body,
+	)
 	writeResult(writer, value, err)
 }
 
@@ -491,6 +974,18 @@ func (s *Server) approveStrategy(writer http.ResponseWriter, request *http.Reque
 
 func (s *Server) listPackages(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.Service.ListPackages(request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listEvidenceReferences(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListEvidenceReferences(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("evidence_id"),
+	)
 	if err != nil {
 		writeError(writer, err)
 		return
@@ -765,12 +1260,28 @@ func writeError(writer http.ResponseWriter, err error) {
 	retryable := true
 	var details []strategy.ValidationError
 	switch {
+	case errors.Is(err, strategy.ErrRevisionScopeAmbiguous):
+		status, code, message, retryable = 400, "REVISION_SCOPE_AMBIGUOUS", "请说明要修改的策略章节或明确要求整体重写", false
 	case errors.Is(err, strategy.ErrInvalidRequest):
 		status, code, message, retryable = 400, "INVALID_REQUEST", "请求参数无效", false
 	case errors.Is(err, strategy.ErrScopeRequired):
 		status, code, message, retryable = 403, "SCOPE_REQUIRED", "缺少所需的 Strategy 权限", false
 	case errors.Is(err, strategy.ErrFeatureDisabled):
 		status, code, message, retryable = 403, "FEATURE_DISABLED", "Strategy feature is disabled", false
+	case errors.Is(err, strategy.ErrCatalogChanged):
+		status, code, message, retryable = 409, "CATALOG_CHANGED", "创意业务目录已更新，请刷新推荐", false
+	case errors.Is(err, strategy.ErrBusinessNotSelectable):
+		status, code, message, retryable = 409, "BUSINESS_NOT_SELECTABLE", "该创意业务当前不可新选", false
+	case errors.Is(err, strategy.ErrTaskPlanBlocked):
+		status, code, message, retryable = 409, "TASK_PLAN_BLOCKED", "创意任务还有必须补充的信息", false
+		var blocked strategy.TaskPlanBlockedError
+		if errors.As(err, &blocked) {
+			details = blocked.Problems
+		}
+	case errors.Is(err, strategy.ErrReservedOutputField):
+		status, code, message, retryable = 422, "RESERVED_OUTPUT_FIELD", "任务策略包含 Creative 执行字段", false
+	case errors.Is(err, strategy.ErrProfileSkillMismatch):
+		status, code, message, retryable = 500, "PROFILE_SKILL_MISMATCH", "创意业务定义与 Skill 版本不一致", false
 	case errors.Is(err, strategy.ErrGenerationUnavailable):
 		status, code, message, retryable = 503, "GENERATION_PROVIDER_UNAVAILABLE", "真实策略生成服务尚未就绪", true
 	case errors.Is(err, strategy.ErrProjectAccessDenied):
@@ -789,6 +1300,8 @@ func writeError(writer http.ResponseWriter, err error) {
 		}
 	case errors.Is(err, strategy.ErrReviewStale):
 		status, code, message, retryable = 409, "REVIEW_STALE", "评审候选版本已经失效", false
+	case errors.Is(err, strategy.ErrReviewAssignment):
+		status, code, message, retryable = 403, "REVIEW_ASSIGNMENT_REQUIRED", "当前成员不是该评审的指定审批人", false
 	case errors.Is(err, strategy.ErrVersionConflict):
 		status, code, message, retryable = 412, "VERSION_CONFLICT", "资源已被其他操作更新", false
 	case errors.Is(err, strategy.ErrConcurrencyLimit):

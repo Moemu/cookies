@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,6 +55,27 @@ func TestSessionCookiesAreHttpOnlyAndSameSiteStrict(t *testing.T) {
 	expired := service.ExpiredCookie()
 	if expired.MaxAge != -1 || expired.Value != "" || !expired.HttpOnly || !expired.Secure {
 		t.Fatalf("unsafe expired session cookie: %#v", expired)
+	}
+}
+
+func TestScopesForOrganizationRoleDoesNotGrantManagementToMemberOrAuditor(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{"member", "auditor"} {
+		scopes, err := ScopesForOrganizationRole(role)
+		if err != nil {
+			t.Fatalf("ScopesForOrganizationRole(%q) error = %v", role, err)
+		}
+		actor := contract.ActorContext{Scopes: scopes}
+		if actor.HasScope("organization.members.manage") || actor.HasScope("project.members.manage") {
+			t.Fatalf("%s unexpectedly received membership management scopes: %v", role, scopes)
+		}
+	}
+}
+
+func TestScopesForOrganizationRoleRejectsUnknownRole(t *testing.T) {
+	t.Parallel()
+	if _, err := ScopesForOrganizationRole("super-admin"); !errors.Is(err, ErrActorInactive) {
+		t.Fatalf("error = %v, want ErrActorInactive", err)
 	}
 }
 

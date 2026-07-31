@@ -8,8 +8,29 @@ func TestApplyTextRouteConstraintsDefaultsToPromptJSON(t *testing.T) {
 	if err := applyTextRouteConstraints(&snapshot, []byte(`{"source_provider":"openai"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.TextResponseMode != TextResponsePromptJSON {
-		t.Fatalf("response mode = %q", snapshot.TextResponseMode)
+	if snapshot.TextResponseMode != TextResponsePromptJSON || snapshot.TextAPIMode != TextAPIChatCompletions {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestApplyTextRouteConstraintsReadsResponsesLifecycle(t *testing.T) {
+	t.Parallel()
+	var snapshot GatewayRouteSnapshot
+	err := applyTextRouteConstraints(&snapshot, []byte(`{
+		"api_mode":"responses",
+		"text_response_mode":"json_schema",
+		"max_output_tokens":8192,
+		"output_token_parameter":"max_output_tokens",
+		"reasoning_effort":"xhigh",
+		"background":true,
+		"poll_interval_ms":750
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TextAPIMode != TextAPIResponses || !snapshot.Background ||
+		snapshot.ReasoningEffort != "xhigh" || snapshot.PollIntervalMS != 750 {
+		t.Fatalf("snapshot = %#v", snapshot)
 	}
 }
 

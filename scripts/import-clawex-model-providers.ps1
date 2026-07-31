@@ -112,6 +112,7 @@ try {
         "COOKIES_STRATEGY_ENABLED" = "true"
         "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" = "true"
         "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" = "cookies.text.standard"
+        "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" = "cookies.text.standard"
         "COOKIES_STRATEGY_CRITIC_ENABLED" = "true"
         "COOKIES_STRATEGY_APPROVE_ENABLED" = "true"
         "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED" = "true"

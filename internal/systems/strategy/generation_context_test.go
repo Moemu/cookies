@@ -7,6 +7,8 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/knowledge"
+	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/strategy/promptkit"
 	strategyskills "github.com/shikanon/cookies/internal/systems/strategy/skills"
 )
 
@@ -155,6 +157,24 @@ func TestStrategyUserPromptOmitsDuplicatedConversationAndSkills(t *testing.T) {
 	}
 }
 
+func TestStrategyUserPromptV3SeparatesConfirmedFactsAndAssumptions(t *testing.T) {
+	t.Parallel()
+	prompt := strategyUserPrompt(GenerationContext{
+		ContractVersion: "strategy-generation-context/v2",
+		Brief:           BriefVersion{Snapshot: BriefDocument{Constraints: []string{"不得承诺疗效"}}},
+		Evidence: []EvidenceItem{
+			{FieldPath: "campaign.objective", Value: "获取线索", Confirmed: true},
+			{FieldPath: "budget.total", Value: "待确认预算", Confirmed: false},
+		},
+		PromptVersion: promptkit.GenerateV3,
+	})
+	for _, expected := range []string{`"confirmed_facts"`, `"open_assumptions"`, "不得承诺疗效", "获取线索", "待确认预算"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("prompt omitted %q: %s", expected, prompt)
+		}
+	}
+}
+
 func TestGenerationDocumentsResolvesDocumentsAndResearchArtifacts(t *testing.T) {
 	t.Parallel()
 	service := Service{Knowledge: stubKnowledgeReader{values: map[string]knowledge.Reference{
@@ -180,6 +200,75 @@ func TestGenerationDocumentsResolvesDocumentsAndResearchArtifacts(t *testing.T) 
 	if len(values) != 2 || values[0].Kind != "document" || values[1].Kind != "research_artifact" ||
 		len(values[1].Citations) != 1 {
 		t.Fatalf("knowledge excerpts = %#v", values)
+	}
+}
+
+func TestContextSelectorKeepsCoverageAndRanksBriefRelevantChunks(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{Snapshot: BriefDocument{
+		Brand:       BriefBrand{Name: "轻氧"},
+		Product:     BriefProduct{Name: "汽泡水", SellingPoints: []string{"零糖"}},
+		Campaign:    BriefCampaign{Objective: "新品认知"},
+		Audience:    BriefAudience{Primary: "健身人群"},
+		Proposition: "零糖清爽",
+	}}
+	filler := strings.Repeat("普通行业背景资料。", 170)
+	references := []KnowledgeExcerpt{
+		{ID: "doc_1", Title: "产品手册", Content: filler + "\n# 产品证据\n轻氧汽泡水面向健身人群，核心卖点是零糖清爽。" + filler},
+		{ID: "doc_2", Title: "渠道规范", Content: "所有新品认知内容都必须标注信息来源。"},
+	}
+	values := (DeterministicContextSelector{}).Select(brief, references)
+	if len(values) < 2 || len(values) > contextMaxChunks {
+		t.Fatalf("selected chunks = %d", len(values))
+	}
+	covered := map[string]bool{}
+	foundRelevant := false
+	for _, value := range values {
+		covered[value.ReferenceID] = true
+		if strings.Contains(value.Content, "轻氧汽泡水面向健身人群") {
+			foundRelevant = true
+			if value.RelevanceScore == 0 || value.StartLine < 1 || value.EndLine < value.StartLine {
+				t.Fatalf("relevant chunk metadata = %#v", value)
+			}
+		}
+	}
+	if !covered["doc_1"] || !covered["doc_2"] || !foundRelevant {
+		t.Fatalf("selected chunks = %#v", values)
+	}
+}
+
+func TestGenerationDocumentsForBriefUsesSelectorOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
+	reference := knowledge.Reference{
+		ID: "doc_1", Kind: "document", Title: "产品资料.md",
+		Content:     strings.Repeat("背景资料。", 250) + "轻氧零糖汽泡水",
+		ContentHash: strings.Repeat("a", 64),
+	}
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+	}
+	brief := BriefVersion{Snapshot: BriefDocument{
+		Product:      BriefProduct{Name: "轻氧零糖汽泡水"},
+		ReferenceIDs: []string{"doc_1"},
+	}}
+	legacy := Service{Knowledge: stubKnowledgeReader{values: map[string]knowledge.Reference{"doc_1": reference}}}
+	legacyValues, err := legacy.generationDocumentsForBrief(context.Background(), actor, "project_1", brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := legacy
+	selected.ContextSelectionEnabled = true
+	selectedValues, err := selected.generationDocumentsForBrief(context.Background(), actor, "project_1", brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyValues) != 1 || legacyValues[0].ReferenceID != "" {
+		t.Fatalf("legacy documents = %#v", legacyValues)
+	}
+	if len(selectedValues) == 0 || selectedValues[0].ReferenceID != "doc_1" ||
+		!strings.Contains(selectedValues[0].ID, "#chunk-") {
+		t.Fatalf("selected documents = %#v", selectedValues)
 	}
 }
 
@@ -213,6 +302,52 @@ func TestDeterministicStrategyBuildsDistinctPlansForEveryV2Platform(t *testing.T
 	}
 }
 
+func TestQualityRejectsDuplicatedPlatformPlansAndUnknownEvidence(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{
+		Snapshot: BriefDocument{
+			ContractVersion: "strategy-brief-version/v2",
+			Campaign:        BriefCampaign{Objective: "获取线索"},
+			Audience:        BriefAudience{Primary: "研发负责人"},
+			Proposition:     "缩短研发周期",
+			Channels:        []string{"xiaohongshu", "douyin"},
+			ReferenceIDs:    []string{"doc_1"},
+			Measurement:     BriefMeasurement{PrimaryKPI: "有效线索数"},
+		},
+	}
+	plan := PlatformPlan{
+		Role: "种草", AudienceAngle: "研发提效", ContentPillars: []string{"问题", "方案"},
+		Formats: []string{"案例"}, ConversionPath: "内容到咨询", Cadence: "每周",
+		PrimaryKPI: "有效线索数", CreativeIdeas: []string{"案例拆解"}, Constraints: []string{"不夸大"},
+	}
+	xiaohongshu := plan
+	xiaohongshu.Platform = "xiaohongshu"
+	douyin := plan
+	douyin.Platform = "douyin"
+	document := StrategyDocument{
+		ContractVersion: "strategy-draft/v2",
+		Objective:       "获取线索",
+		Audience:        StrategyAudience{Primary: "研发负责人", Insights: []string{"决策谨慎"}},
+		Proposition:     "缩短研发周期",
+		ChannelStrategy: []ChannelStrategy{
+			{Platform: "xiaohongshu", Role: "种草", Formats: []string{"案例"}},
+			{Platform: "douyin", Role: "种草", Formats: []string{"案例"}},
+		},
+		CreativeRecommendations: []string{"案例开场呈现问题", "展示解决路径和证据", "明确咨询行动入口"},
+		ExperimentMatrix:        []Experiment{{Hypothesis: "案例更有效", Variable: "开场", Metric: "有效线索数"}},
+		Measurement:             []string{"有效线索数"},
+		PlatformPlans:           []PlatformPlan{xiaohongshu, douyin},
+		EvidenceRefs:            []string{"doc_unknown"},
+		Lineage:                 StrategyLineage{BriefID: "brief_1", BriefVersion: 1, ProjectContextVersion: 1},
+	}
+	report := evaluateStrategyQuality(document, GenerationContext{Brief: brief})
+	joined := strings.Join(report.Errors, "\n")
+	if !strings.Contains(joined, "not meaningfully distinct") ||
+		!strings.Contains(joined, "unknown references") {
+		t.Fatalf("report = %#v", report)
+	}
+}
+
 type stubKnowledgeReader struct {
 	values map[string]knowledge.Reference
 }
@@ -239,5 +374,65 @@ func TestRetainAllowedRevisionSections(t *testing.T) {
 	if after.Objective != before.Objective || after.Measurement[0] != before.Measurement[0] ||
 		after.CreativeRecommendations[0] == before.CreativeRecommendations[0] {
 		t.Fatalf("retained revision = %#v; allowed=%v", after, allowed)
+	}
+}
+
+func TestRevisionScopeFailsClosedWhenInstructionIsAmbiguous(t *testing.T) {
+	t.Parallel()
+	scope := resolveRevisionScope("写得更年轻一点")
+	if scope.Resolved || scope.ExplicitAll || len(scope.Sections) != 0 {
+		t.Fatalf("scope = %#v", scope)
+	}
+}
+
+func TestRevisionScopeAllowsExplicitWholeStrategyRewrite(t *testing.T) {
+	t.Parallel()
+	scope := resolveRevisionScope("请整体重写整份策略")
+	if !scope.Resolved || !scope.ExplicitAll || len(scope.Sections) < 10 {
+		t.Fatalf("scope = %#v", scope)
+	}
+}
+
+func TestRevisionScopeRoutesNamedPlatformChangeToPlatformPlans(t *testing.T) {
+	t.Parallel()
+	scope := resolveRevisionScope("把小红书的内容节奏调整为首周种草、第二周测评扩散")
+	if !scope.Resolved || strings.Join(scope.Sections, ",") != "platform_plans" {
+		t.Fatalf("scope = %#v", scope)
+	}
+}
+
+func TestRepairSectionsAreLimitedToFailingAreas(t *testing.T) {
+	t.Parallel()
+	sections := repairSectionsForErrors([]string{
+		"platform plans do not cover the confirmed Brief",
+		"measurement does not include the confirmed primary KPI",
+	})
+	if strings.Join(sections, ",") != "platform_plans,measurement" {
+		t.Fatalf("sections = %#v", sections)
+	}
+}
+
+func TestModelCallAttemptCapturesPerCallValidationAndOutputHash(t *testing.T) {
+	t.Parallel()
+	attempt := modelCallAttempt(
+		"repair",
+		promptkit.RepairV2,
+		provider.SynchronousResponse{
+			ProviderCode: "ark", ModelAlias: "cookies.text.standard",
+			ModelVersion: "model-v1", RouteRevisionID: "route_1",
+			ResponseMode:     provider.TextResponseJSONSchema,
+			APIMode:          provider.TextAPIResponses,
+			StructuredOutput: []byte(`{"ok":true}`),
+			Usage: &provider.TokenUsage{
+				InputTokens: 10, OutputTokens: 3, TotalTokens: 13,
+			},
+		},
+		42,
+		[]string{"measurement is incomplete"},
+	)
+	if attempt.Purpose != "repair" || attempt.PromptVersion != promptkit.RepairV2 ||
+		attempt.ValidationPassed || len(attempt.ValidationErrors) != 1 ||
+		attempt.LatencyMS != 42 || attempt.Usage == nil || len(attempt.OutputHash) != 64 {
+		t.Fatalf("attempt = %#v", attempt)
 	}
 }

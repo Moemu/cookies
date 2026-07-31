@@ -22,7 +22,7 @@
 | [广告数据 Connector](./10-ad-data-connectors.md) | 平台授权、同步、原始数据、统一指标、归因、对账和数据质量 | 数据、后端、投放、分析 |
 | [媒体资产平台](./11-media-asset-platform.md) | 上传、扫描、转码、生成资产、授权、分发和删除 | 后端、创意、算法、运维 |
 | [Computer Use 运行时](./12-computer-use-runtime.md) | 受控设备、浏览器会话、人工接管、页面证据和紧急停机 | 架构、投放、安全、运维 |
-| [API 与领域事件契约](./13-api-event-contracts.md) | API 命名、错误、幂等、并发、SSE、事件目录和契约治理 | 全体研发 |
+| [API 与领域事件契约](./13-api-event-contracts.md) | API 命名、错误、幂等、并发、SSE、事件目录、契约治理和已实现广告 AIGC/AI 混剪 OpenAPI 覆盖范围 | 全体研发 |
 | [工程、运维与安全基线](./14-engineering-operations-security.md) | 环境、CI/CD、多租户、SLO、RPO/RTO、可观测性与 AI 合规 | 研发、运维、安全 |
 | [PRD 通用交互与质量要求](./15-prd-cross-cutting-requirements.md) | 页面状态、并发编辑、AI 披露、可追踪性、无障碍和运营能力 | 产品、设计、研发、测试 |
 | [文档补充说明与决策清单](./16-document-gap-closure.md) | 缺口关闭映射、剩余产品/技术决策和研发前门禁 | 产品、架构、项目负责人 |
@@ -32,6 +32,12 @@
 | [视频素材剪辑与开源框架方案](./21-video-material-editor-spec.md) | 素材剪辑子模块、编辑器布局、OpenCut/FFmpeg 选型、数据模型与 MVP | 产品、设计、前端、后端、音视频研发 |
 | [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md) | Project 管理、唯一工作台、八阶段落点、四模块逐页问题、整改计划与全面评估 | 产品、设计、前端、后端、测试 |
 | [Strategy × Creative 并行开发契约（已废止）](./23-strategy-creative-parallel-contracts-v2.md) | 仅保留为历史记录；前端已改为单一负责人，本文不再约束职责、路由或实施顺序 | 历史资料 |
+| [Strategy → Creative 开发契约 v2](./25-strategy-to-creative-development-contract-v2.md) | 冻结 StrategyPackage、CreativeHandoff、CreativeIntake、CreativeVideoIntake、稳定 Route ID 与三级 readiness 边界 | Strategy、Creative、后端、测试 |
+| [爆款复刻 MVP 技术实施方案](./plans/2026-07-28-viral-remake-mvp-technical-plan.md) | Strategy 未接线时以 manual Intake 跑通 Creative 爆款分析、原创改写、Provider 生成、Assets 入库和检查闭环 | Creative、平台、前端、后端、测试 |
+| [Kanon 前端 × Go 后端集成技术方案](./plans/2026-07-29-kanon-frontend-go-backend-integration-plan.md) | 冻结 Kanon 前端权威范围、cookies-platform Go 后端事实来源、适配 seam、Workbench 数据映射与分阶段验收 | 前端、后端、架构、测试 |
+| [广告 AIGC 与 AI 混剪开发知识沉淀](./23-ad-aigc-remix-development-knowledge.md) | 从飞书 Base 重点资料沉淀素材工厂、AI 混剪、RenderJob、VLM 质检、Agent/RAG、评测和合规开发知识 | 产品、架构、后端、前端、算法、音视频研发 |
+| [广告 AIGC 与 AI 混剪逐点技术方案](./24-ad-aigc-remix-technical-breakdown.md) | 将素材元数据、Shot、RenderJob、质检、爆款复刻、前贴、Agent、RAG、评测和反馈逐点拆成可研发落地的技术方案 | 产品、架构、后端、前端、算法、音视频研发 |
+| [本地演示与测试数据手册](./25-local-demo-runbook.md) | 默认测试身份、兼容服务账号密码、演示数据导入、对象存储和验证步骤 | 演示、测试、研发、运维 |
 | [广告策略库](./策略/README.md) | 素材洞察、漫剧制作、剪辑包装、商品与素材投放及全链路闭环策略 | 策略、创意、投放、数据、产品 |
 
 ## 系统划分

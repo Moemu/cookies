@@ -1,28 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// The compatibility service owns the legacy /api surface, while Creative and
+// /platform are served by the Go product API. Keep the more specific product
+// prefixes before /api so Vite does not route them to the compatibility service.
+const platformProxyTarget = process.env.VITE_PLATFORM_PROXY_TARGET ?? 'http://127.0.0.1:8080'
+const compatibilityApiProxyTarget = process.env.VITE_COMPAT_API_PROXY_TARGET ?? 'http://127.0.0.1:8787'
+
 export default defineConfig({
   plugins: [react()],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('/node_modules/lucide-react/')) return 'icons'
-          if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/') || id.includes('/node_modules/react-router')) {
-            return 'react-vendor'
-          }
-        },
-      },
-    },
-  },
   server: {
-    host: '127.0.0.1',
-    port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:8080',
-      '/platform': 'http://127.0.0.1:8080',
-      '/healthz': 'http://127.0.0.1:8080',
-      '/readyz': 'http://127.0.0.1:8080',
+      '/api/creative/v1': platformProxyTarget,
+      '/api/delivery/v1': platformProxyTarget,
+      '/api/insights/v1': platformProxyTarget,
+      '/api/strategy/v1': platformProxyTarget,
+      '/api': compatibilityApiProxyTarget,
+      '/platform': platformProxyTarget,
     },
   },
 })

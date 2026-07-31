@@ -23,6 +23,9 @@ export interface ArkConfig {
   readonly baseUrl: string;
   readonly configured: boolean;
   readonly models: typeof ARK_MODELS;
+  readonly source?: "environment" | "workspace";
+  readonly maskedApiKey?: string;
+  readonly updatedAt?: string;
 }
 
 export interface ArkProvider {
@@ -44,7 +47,12 @@ export function loadArkConfig(environment: NodeJS.ProcessEnv = process.env): Ark
   } catch {
     throw new Error("ARK_BASE_URL must be a valid HTTPS URL");
   }
-  if (url.protocol !== "https:") throw new Error("ARK_BASE_URL must use HTTPS");
+  const allowInsecureLocalProvider = environment.NODE_ENV === "test"
+    && environment.ARK_ALLOW_INSECURE_LOCAL_PROVIDER === "true"
+    && ["127.0.0.1", "localhost"].includes(url.hostname);
+  if (url.protocol !== "https:" && !allowInsecureLocalProvider) {
+    throw new Error("ARK_BASE_URL must use HTTPS");
+  }
 
   return { apiKey, baseUrl, configured: apiKey.length > 0, models: ARK_MODELS };
 }
@@ -58,6 +66,13 @@ export function publicCapabilities(config: ArkConfig): Record<string, unknown> {
       model,
       available: config.configured,
     })),
+    credential: config.configured
+      ? {
+        source: config.source ?? "environment",
+        maskedApiKey: config.maskedApiKey ?? maskSecret(config.apiKey),
+        updatedAt: config.updatedAt,
+      }
+      : undefined,
     checkedAt: new Date().toISOString(),
   };
 }
@@ -182,4 +197,10 @@ function normalizeMediaStatus(value: string | undefined): ProviderMediaStatus {
     default:
       return "unknown";
   }
+}
+
+export function maskSecret(value: string): string {
+  const secret = value.trim();
+  if (secret.length <= 8) return "••••••••";
+  return `••••••••${secret.slice(-4)}`;
 }

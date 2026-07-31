@@ -29,10 +29,15 @@ var ErrCredentialLocked = errors.New("credential temporarily locked")
 type PasswordSessionService struct {
 	DB         *sql.DB
 	Validator  ActorValidator
+	UserScopes UserScopeResolver
 	SessionTTL time.Duration
 	Secure     bool
 	Now        func() time.Time
 	NewID      ids.Generator
+}
+
+type UserScopeResolver interface {
+	ResolveUserScopes(context.Context, contract.OrganizationID, string) ([]contract.Scope, error)
 }
 
 type LoginResult struct {
@@ -113,7 +118,10 @@ func (s PasswordSessionService) Login(ctx context.Context, username, password st
 	actor := contract.ActorContext{
 		OrganizationID: organizationID,
 		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: userID},
-		Scopes:         adminScopes(),
+	}
+	actor.Scopes, err = s.resolveUserScopes(ctx, organizationID, userID)
+	if err != nil {
+		return LoginResult{}, ErrInvalidCredentials
 	}
 	if err := s.Validator.ValidateActor(ctx, actor); err != nil {
 		return LoginResult{}, ErrInvalidCredentials
@@ -162,6 +170,75 @@ func (s PasswordSessionService) Logout(ctx context.Context, token string) error 
 	return err
 }
 
+func (s PasswordSessionService) SwitchOrganization(ctx context.Context, token string, organizationID contract.OrganizationID) (LoginResult, error) {
+	if s.DB == nil || strings.TrimSpace(token) == "" || strings.TrimSpace(string(organizationID)) == "" {
+		return LoginResult{}, ErrUnauthenticated
+	}
+	now := s.now()
+	oldHash := sha256.Sum256([]byte(token))
+	var userID string
+	err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM identity_sessions
+		WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?`,
+		hex.EncodeToString(oldHash[:]), now).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LoginResult{}, ErrUnauthenticated
+	}
+	if err != nil {
+		return LoginResult{}, err
+	}
+	scopes, err := s.resolveUserScopes(ctx, organizationID, userID)
+	if err != nil {
+		return LoginResult{}, ErrActorInactive
+	}
+	actor := contract.ActorContext{
+		OrganizationID: organizationID,
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: userID},
+		Scopes:         scopes,
+	}
+	if err := actor.Validate(); err != nil {
+		return LoginResult{}, ErrUnauthenticated
+	}
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return LoginResult{}, err
+	}
+	nextToken := hex.EncodeToString(tokenBytes)
+	nextHash := sha256.Sum256([]byte(nextToken))
+	sessionID, err := s.newID("session")
+	if err != nil {
+		return LoginResult{}, err
+	}
+	expiresAt := now.Add(s.sessionTTL())
+	scopesJSON, err := json.Marshal(scopes)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE identity_sessions SET revoked_at = ?
+		WHERE token_hash = ? AND revoked_at IS NULL`, now, hex.EncodeToString(oldHash[:]))
+	if err != nil {
+		return LoginResult{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		return LoginResult{}, ErrUnauthenticated
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO identity_sessions
+		(id, organization_id, user_id, token_hash, scopes, expires_at, created_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		sessionID, organizationID, userID, hex.EncodeToString(nextHash[:]), scopesJSON, expiresAt, now, now); err != nil {
+		return LoginResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LoginResult{}, err
+	}
+	return LoginResult{Actor: actor, Token: nextToken, ExpiresAt: expiresAt}, nil
+}
+
 func (s PasswordSessionService) Authenticate(ctx context.Context, request *http.Request) (contract.ActorContext, error) {
 	if request == nil || s.DB == nil || s.Validator == nil {
 		return contract.ActorContext{}, ErrUnauthenticated
@@ -181,6 +258,10 @@ func (s PasswordSessionService) Authenticate(ctx context.Context, request *http.
 	}
 	actor.Principal.Kind = contract.PrincipalUser
 	if json.Unmarshal(scopesJSON, &actor.Scopes) != nil || actor.Validate() != nil {
+		return contract.ActorContext{}, ErrUnauthenticated
+	}
+	actor.Scopes, err = s.resolveUserScopes(ctx, actor.OrganizationID, actor.Principal.ID)
+	if err != nil {
 		return contract.ActorContext{}, ErrUnauthenticated
 	}
 	if err := s.Validator.ValidateActor(ctx, actor); err != nil {
@@ -227,12 +308,21 @@ func (s PasswordSessionService) newID(prefix string) (string, error) {
 	return ids.New(prefix)
 }
 
+func (s PasswordSessionService) resolveUserScopes(ctx context.Context, organizationID contract.OrganizationID, userID string) ([]contract.Scope, error) {
+	if s.UserScopes == nil {
+		return nil, ErrUnauthenticated
+	}
+	return s.UserScopes.ResolveUserScopes(ctx, organizationID, userID)
+}
+
 func normalizeUsername(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func adminScopes() []contract.Scope {
 	values := []string{
+		"identity.profile.write", "organization.read", "organization.members.read",
+		"organization.members.manage", "project.members.read", "project.members.manage",
 		"project.read", "project.write", "assets.read", "assets.write",
 		"provider.read", "provider.generate", "provider.job.create", "provider.text.generate",
 		"strategy.read", "strategy.write", "strategy.confirm", "strategy.review",
@@ -241,6 +331,40 @@ func adminScopes() []contract.Scope {
 		"insights.read", "insights.write", "insights.confirm",
 	}
 	return contract.ScopesFromStrings(values)
+}
+
+func memberScopes() []contract.Scope {
+	values := []string{
+		"identity.profile.write", "organization.read", "organization.members.read", "project.members.read",
+		"project.read", "project.write", "assets.read", "assets.write",
+		"provider.read", "provider.generate", "provider.job.create", "provider.text.generate",
+		"strategy.read", "strategy.write", "strategy.confirm", "strategy.review",
+		"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
+		"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",
+		"insights.read", "insights.write", "insights.confirm",
+	}
+	return contract.ScopesFromStrings(values)
+}
+
+func auditorScopes() []contract.Scope {
+	return contract.ScopesFromStrings([]string{
+		"identity.profile.write", "organization.read", "organization.members.read", "project.members.read",
+		"project.read", "assets.read", "provider.read", "strategy.read",
+		"strategy.package.read", "creative.read", "delivery.read", "insights.read",
+	})
+}
+
+func ScopesForOrganizationRole(role string) ([]contract.Scope, error) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner", "admin":
+		return adminScopes(), nil
+	case "member":
+		return memberScopes(), nil
+	case "auditor":
+		return auditorScopes(), nil
+	default:
+		return nil, ErrActorInactive
+	}
 }
 
 func duplicateKey(err error) bool {

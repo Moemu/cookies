@@ -49,6 +49,9 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		}
 		messages = append(messages, map[string]string{"role": string(message.Role), "content": message.Content})
 	}
+	if route.TextAPIMode == TextAPIResponses {
+		return a.generateResponses(ctx, request, route, token, messages)
+	}
 	body := map[string]any{"model": route.UpstreamModel, "messages": messages}
 	if len(request.OutputJSONSchema) > 0 {
 		var schema any
@@ -128,7 +131,7 @@ func (a *AdapterGatewayTextAdapter) GenerateText(ctx context.Context, request Te
 		return SynchronousResult{}, gatewayExecutionError("MODEL_RESPONSE_INVALID", "Adapter gateway response exceeded the safety limit")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return SynchronousResult{}, mapGatewayHTTPError(response.StatusCode)
+		return SynchronousResult{}, mapGatewayTextHTTPError(response.StatusCode)
 	}
 	var decoded struct {
 		Model string `json:"model"`
@@ -192,7 +195,8 @@ func (a *AdapterGatewayTextAdapter) InspectTextRoute(ctx context.Context, organi
 	}
 	return TextRouteInspection{
 		ModelAlias: modelAlias, UpstreamModel: route.UpstreamModel,
-		RouteRevisionID: route.RouteRevisionID, ResponseMode: route.TextResponseMode, Ready: true,
+		RouteRevisionID: route.RouteRevisionID, ResponseMode: route.TextResponseMode,
+		APIMode: route.TextAPIMode, Background: route.Background, Ready: true,
 	}, nil
 }
 

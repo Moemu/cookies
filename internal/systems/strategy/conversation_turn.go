@@ -310,22 +310,22 @@ func briefFieldPresent(document BriefDocument, field string) bool {
 }
 
 func conversationDecisionOutputSchema() json.RawMessage {
-	fieldPaths := `["brand.name","product.name","industry","region","language","campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi","reference_ids"]`
+	fieldPaths := `["brand.name","product.name","product.category","product.selling_points","product.evidence","industry","region","language","campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi","reference_ids","creative.tone","creative.mandatory_elements","creative.prohibited_claims"]`
 	return json.RawMessage(fmt.Sprintf(`{
 		"type":"object","additionalProperties":false,
 		"required":["intent","assistant_reply","operations","confirm_fields","follow_up_questions","warnings"],
 		"properties":{
-			"intent":{"enum":["greeting","provide_requirements","answer_question","correct_information","confirm_information","ask_question","off_topic"]},
+			"intent":{"type":"string","enum":["greeting","provide_requirements","answer_question","correct_information","confirm_information","ask_question","off_topic"]},
 			"assistant_reply":{"type":"string","minLength":1,"maxLength":800},
 			"operations":{"type":"array","maxItems":32,"items":{"type":"object",
 				"additionalProperties":false,"required":["op","field_path","value","confidence"],
-				"properties":{"op":{"const":"set"},"field_path":{"enum":%s},
-				"value":{"oneOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},
-				"confidence":{"enum":["low","medium","high"]}}}},
-			"confirm_fields":{"type":"array","maxItems":16,"items":{"enum":%s}},
+				"properties":{"op":{"type":"string","const":"set"},"field_path":{"type":"string","enum":%s},
+				"value":{"anyOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},
+				"confidence":{"type":"string","enum":["low","medium","high"]}}}},
+			"confirm_fields":{"type":"array","maxItems":16,"items":{"type":"string","enum":%s}},
 			"follow_up_questions":{"type":"array","maxItems":2,"items":{"type":"object",
 				"additionalProperties":false,"required":["field_path","text"],
-				"properties":{"field_path":{"enum":%s},"text":{"type":"string","minLength":1,"maxLength":160}}}},
+				"properties":{"field_path":{"type":"string","enum":%s},"text":{"type":"string","minLength":1,"maxLength":160}}}},
 			"warnings":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":200}}
 		}
 	}`, fieldPaths, fieldPaths, fieldPaths))

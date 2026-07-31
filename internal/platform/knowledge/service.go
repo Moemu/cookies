@@ -35,35 +35,50 @@ type ProjectReader interface {
 }
 
 type Service struct {
-	DB           *sql.DB
-	Projects     ProjectReader
-	Blobs        assets.BlobStore
-	Scanner      assets.ContentScanner
-	AssetsBucket string
-	Runner       ExternalResearchRunner
-	Now          func() time.Time
-	NewID        ids.Generator
+	DB                *sql.DB
+	Projects          ProjectReader
+	Blobs             assets.BlobStore
+	Scanner           assets.ContentScanner
+	AssetsBucket      string
+	Runner            ExternalResearchRunner
+	Scheduler         ResearchScheduler
+	DocumentParser    DocumentParser
+	DocumentScheduler DocumentParseScheduler
+	Now               func() time.Time
+	NewID             ids.Generator
 }
 
 type Document struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	Filename       string                  `json:"filename"`
-	MIMEType       string                  `json:"mime_type"`
-	SizeBytes      int64                   `json:"size_bytes"`
-	ContentSHA256  string                  `json:"content_sha256"`
-	TextSHA256     string                  `json:"text_sha256"`
-	ExtractedText  string                  `json:"extracted_text,omitempty"`
-	Status         string                  `json:"status"`
-	CreatedBy      string                  `json:"created_by"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
-	Blob           assets.ObjectLocation   `json:"-"`
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	Title             string                  `json:"title,omitempty"`
+	SourceURI         string                  `json:"source_uri,omitempty"`
+	SourceType        string                  `json:"source_type,omitempty"`
+	ChunkCount        int                     `json:"chunk_count,omitempty"`
+	ImportedBy        contract.Principal      `json:"imported_by,omitempty"`
+	Filename          string                  `json:"filename"`
+	MIMEType          string                  `json:"mime_type"`
+	SizeBytes         int64                   `json:"size_bytes"`
+	ContentSHA256     string                  `json:"content_sha256"`
+	TextSHA256        string                  `json:"text_sha256"`
+	ExtractedText     string                  `json:"extracted_text,omitempty"`
+	Status            string                  `json:"status"`
+	ParserCode        string                  `json:"parser_code,omitempty"`
+	ParserVersion     string                  `json:"parser_version,omitempty"`
+	ParseErrorCode    string                  `json:"parse_error_code,omitempty"`
+	ParseErrorMessage string                  `json:"parse_error_message,omitempty"`
+	ParseMetadata     json.RawMessage         `json:"parse_metadata,omitempty"`
+	ParsedAt          *time.Time              `json:"parsed_at,omitempty"`
+	CreatedBy         string                  `json:"created_by"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	Blob              assets.ObjectLocation   `json:"-"`
 }
 
 type ResearchRequest struct {
 	Mode            string   `json:"mode"`
+	Category        string   `json:"category,omitempty"`
 	Query           string   `json:"query"`
 	DocumentIDs     []string `json:"document_ids"`
 	DisclosedFields []string `json:"disclosed_fields"`
@@ -71,9 +86,12 @@ type ResearchRequest struct {
 }
 
 type ExternalResearchInput struct {
-	Mode      string             `json:"mode"`
-	Query     string             `json:"query"`
-	Documents []ExternalDocument `json:"documents"`
+	OrganizationID contract.OrganizationID `json:"organization_id"`
+	ProjectID      contract.ProjectID      `json:"project_id"`
+	Mode           string                  `json:"mode"`
+	Category       string                  `json:"category"`
+	Query          string                  `json:"query"`
+	Documents      []ExternalDocument      `json:"documents"`
 }
 
 type ExternalDocument struct {
@@ -83,30 +101,68 @@ type ExternalDocument struct {
 }
 
 type ExternalResearchResult struct {
-	Title     string   `json:"title"`
-	SourceURL string   `json:"source_url,omitempty"`
-	Content   string   `json:"content"`
-	Citations []string `json:"citations"`
+	Title            string                   `json:"title"`
+	SourceURL        string                   `json:"source_url,omitempty"`
+	Content          string                   `json:"content"`
+	Citations        []string                 `json:"citations"`
+	Sources          []ExternalResearchSource `json:"sources,omitempty"`
+	ProviderCode     string                   `json:"provider_code,omitempty"`
+	ModelVersion     string                   `json:"model_version,omitempty"`
+	ProviderResponse string                   `json:"provider_response_id,omitempty"`
+	Usage            *ResearchUsage           `json:"usage,omitempty"`
+}
+
+type ExternalResearchSource struct {
+	SourceClass     string          `json:"source_class"`
+	MediaType       string          `json:"media_type"`
+	Title           string          `json:"title"`
+	URL             string          `json:"url"`
+	PublishedAt     *time.Time      `json:"published_at,omitempty"`
+	StartIndex      int             `json:"start_index,omitempty"`
+	EndIndex        int             `json:"end_index,omitempty"`
+	ProviderLocator json.RawMessage `json:"provider_locator,omitempty"`
+}
+
+type ResearchUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	TotalTokens  int64 `json:"total_tokens"`
 }
 
 type ExternalResearchRunner interface {
 	Run(context.Context, ExternalResearchInput) ([]ExternalResearchResult, error)
 }
 
+type ResearchScheduler interface {
+	Schedule(context.Context, ResearchRun) error
+}
+
+type DocumentParseScheduler interface {
+	ScheduleDocumentParse(context.Context, Document) error
+}
+
 type ResearchRun struct {
-	ID              string                  `json:"id"`
-	OrganizationID  contract.OrganizationID `json:"organization_id"`
-	ProjectID       contract.ProjectID      `json:"project_id"`
-	Mode            string                  `json:"mode"`
-	Query           string                  `json:"query"`
-	DocumentIDs     []string                `json:"document_ids"`
-	DisclosedFields []string                `json:"disclosed_fields"`
-	Status          string                  `json:"status"`
-	ConfirmedBy     string                  `json:"confirmed_by"`
-	ConfirmedAt     time.Time               `json:"confirmed_at"`
-	ErrorCode       string                  `json:"error_code,omitempty"`
-	ErrorMessage    string                  `json:"error_message,omitempty"`
-	Artifacts       []ResearchArtifact      `json:"artifacts"`
+	ID                 string                  `json:"id"`
+	OrganizationID     contract.OrganizationID `json:"organization_id"`
+	ProjectID          contract.ProjectID      `json:"project_id"`
+	Mode               string                  `json:"mode"`
+	Category           string                  `json:"category"`
+	Query              string                  `json:"query"`
+	DocumentIDs        []string                `json:"document_ids"`
+	DisclosedFields    []string                `json:"disclosed_fields"`
+	DisclosedChunkIDs  []string                `json:"disclosed_chunk_ids"`
+	Status             string                  `json:"status"`
+	ConfirmedBy        string                  `json:"confirmed_by"`
+	ConfirmedAt        time.Time               `json:"confirmed_at"`
+	ErrorCode          string                  `json:"error_code,omitempty"`
+	ErrorMessage       string                  `json:"error_message,omitempty"`
+	ProviderCode       string                  `json:"provider_code,omitempty"`
+	ModelVersion       string                  `json:"model_version,omitempty"`
+	ProviderResponseID string                  `json:"provider_response_id,omitempty"`
+	Usage              *ResearchUsage          `json:"usage,omitempty"`
+	Artifacts          []ResearchArtifact      `json:"artifacts"`
+	CreatedAt          time.Time               `json:"created_at"`
+	UpdatedAt          time.Time               `json:"updated_at"`
 }
 
 type ResearchArtifact struct {
@@ -115,12 +171,35 @@ type ResearchArtifact struct {
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	ResearchRunID  string                  `json:"research_run_id"`
 	SourceType     string                  `json:"source_type"`
+	Category       string                  `json:"category"`
 	Title          string                  `json:"title"`
 	SourceURL      string                  `json:"source_url,omitempty"`
 	Content        string                  `json:"content"`
 	Citations      []string                `json:"citations"`
+	Sources        []ResearchSource        `json:"sources"`
 	ContentHash    string                  `json:"content_hash"`
 	CreatedAt      time.Time               `json:"created_at"`
+}
+
+type ResearchSource struct {
+	ID                 string                  `json:"id"`
+	OrganizationID     contract.OrganizationID `json:"organization_id"`
+	ProjectID          contract.ProjectID      `json:"project_id"`
+	ResearchRunID      string                  `json:"research_run_id"`
+	SourceClass        string                  `json:"source_class"`
+	MediaType          string                  `json:"media_type"`
+	Title              string                  `json:"title"`
+	URL                string                  `json:"url"`
+	CanonicalURL       string                  `json:"canonical_url"`
+	Domain             string                  `json:"domain"`
+	PublishedAt        *time.Time              `json:"published_at,omitempty"`
+	RetrievedAt        time.Time               `json:"retrieved_at"`
+	VerificationStatus string                  `json:"verification_status"`
+	ContentHash        string                  `json:"content_hash"`
+	StartIndex         int                     `json:"start_index"`
+	EndIndex           int                     `json:"end_index"`
+	SupportLevel       string                  `json:"support_level"`
+	ProviderLocator    json.RawMessage         `json:"provider_locator,omitempty"`
 }
 
 type Reference struct {
@@ -141,7 +220,8 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	}
 	filename = strings.TrimSpace(filepath.Base(filename))
 	extension := strings.ToLower(filepath.Ext(filename))
-	if filename == "" || len(filename) > 512 || (extension != ".md" && extension != ".docx") ||
+	if filename == "" || len(filename) > 512 ||
+		(extension != ".md" && extension != ".docx" && extension != ".pdf") ||
 		size < 1 || size > MaxDocumentBytes {
 		return Document{}, ErrInvalidDocument
 	}
@@ -152,12 +232,18 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	if err := s.Scanner.Scan(ctx, bytes.NewReader(content)); err != nil {
 		return Document{}, err
 	}
-	extracted, mimeType, err := extractDocument(extension, content)
-	if err != nil {
-		return Document{}, err
-	}
 	if declaredMIME != "" && !allowedMIME(extension, declaredMIME) {
 		return Document{}, ErrInvalidDocument
+	}
+	mimeType := defaultDocumentMIME(extension)
+	asyncParse := extension != ".md" && s.DocumentParser != nil && s.DocumentScheduler != nil
+	extracted := ""
+	if !asyncParse {
+		var err error
+		extracted, mimeType, err = extractDocument(extension, content)
+		if err != nil {
+			return Document{}, err
+		}
 	}
 	id, err := s.newID("knowledgedoc")
 	if err != nil {
@@ -173,17 +259,23 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	}
 	document := Document{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		Title: filename, SourceType: "docs",
 		Filename: filename, MIMEType: mimeType, SizeBytes: size,
 		ContentSHA256: hex.EncodeToString(contentSum[:]), TextSHA256: hex.EncodeToString(textSum[:]),
-		ExtractedText: extracted, Status: "ready", CreatedBy: actor.Principal.ID,
+		ExtractedText: extracted, Status: "parse_queued", CreatedBy: actor.Principal.ID,
 		CreatedAt: now, UpdatedAt: now, Blob: object.ObjectLocation,
 	}
+	if !asyncParse {
+		document.Status = "ready"
+	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO platform_knowledge_documents
-		(id, organization_id, project_id, filename, mime_type, size_bytes, content_sha256,
+		(id, organization_id, project_id, title, source_uri, source_type, chunk_count,
+		 filename, mime_type, size_bytes, content_sha256,
 		 text_sha256, extracted_text, object_provider, object_bucket, object_key,
 		 object_version_id, object_etag, status, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		document.ID, document.OrganizationID, document.ProjectID, document.Filename, document.MIMEType,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		document.ID, document.OrganizationID, document.ProjectID, document.Title, nil,
+		document.SourceType, document.ChunkCount, document.Filename, document.MIMEType,
 		document.SizeBytes, document.ContentSHA256, document.TextSHA256, document.ExtractedText,
 		object.Provider, object.Bucket, object.Key, object.VersionID, object.ETag, document.Status,
 		document.CreatedBy, document.CreatedAt, document.UpdatedAt)
@@ -191,15 +283,83 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 		_ = s.Blobs.Delete(ctx, object.ObjectLocation)
 		return Document{}, err
 	}
+	if asyncParse {
+		if err := s.DocumentScheduler.ScheduleDocumentParse(ctx, document); err != nil {
+			_, _ = s.DB.ExecContext(ctx, `DELETE FROM platform_knowledge_documents
+				WHERE organization_id = ? AND project_id = ? AND id = ?`,
+				document.OrganizationID, document.ProjectID, document.ID)
+			_ = s.Blobs.Delete(ctx, object.ObjectLocation)
+			return Document{}, err
+		}
+		return document, nil
+	}
+	parsed := ParsedDocument{
+		Text: extracted, MIMEType: mimeType, ParserCode: "native", ParserVersion: "1",
+		Metadata: json.RawMessage(`{}`),
+	}
+	chunks := chunksForParsedDocument(document, parsed)
+	if len(chunks) == 0 {
+		_, _ = s.DB.ExecContext(ctx, `DELETE FROM platform_knowledge_documents
+			WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			document.OrganizationID, document.ProjectID, document.ID)
+		_ = s.Blobs.Delete(ctx, object.ObjectLocation)
+		return Document{}, ErrInvalidDocument
+	}
+	if err := s.persistParsedDocument(ctx, document, parsed, chunks); err != nil {
+		_, _ = s.DB.ExecContext(ctx, `DELETE FROM platform_knowledge_documents
+			WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			document.OrganizationID, document.ProjectID, document.ID)
+		_ = s.Blobs.Delete(ctx, object.ObjectLocation)
+		return Document{}, err
+	}
+	document.ChunkCount = len(chunks)
+	document.ParserCode, document.ParserVersion = parsed.ParserCode, parsed.ParserVersion
+	document.ParsedAt = &now
 	return document, nil
 }
 
-func (s Service) ListDocuments(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]Document, error) {
+func (s Service) ImportDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request ImportDocumentRequest) (Document, error) {
+	if err := request.Validate(); err != nil {
+		return Document{}, err
+	}
+	filename := strings.TrimSpace(request.Title)
+	if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+		filename += ".md"
+	}
+	content := []byte(request.Text)
+	document, err := s.CreateDocument(ctx, actor, projectID, filename, "text/markdown", bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return Document{}, err
+	}
+	document.Title = strings.TrimSpace(request.Title)
+	document.SourceURI = strings.TrimSpace(request.SourceURI)
+	document.SourceType = normalizedSourceType(request.SourceType)
+	document.ChunkCount = max(document.ChunkCount, 1)
+	document.ImportedBy = actor.Principal
+	_, err = s.DB.ExecContext(ctx, `UPDATE platform_knowledge_documents
+		SET title = ?, source_uri = ?, source_type = ?, chunk_count = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		document.Title, nullable(document.SourceURI), document.SourceType, document.ChunkCount,
+		document.UpdatedAt, actor.OrganizationID, projectID, document.ID)
+	if err != nil {
+		_, _ = s.DB.ExecContext(ctx, `DELETE FROM platform_knowledge_documents
+			WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			actor.OrganizationID, projectID, document.ID)
+		_ = s.Blobs.Delete(ctx, document.Blob)
+		return Document{}, err
+	}
+	return document, nil
+}
+
+func (s Service) ListDocuments(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]Document, error) {
 	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
+	if limit < 1 || limit > 100 {
+		limit = 100
+	}
 	rows, err := s.DB.QueryContext(ctx, documentSelect+` WHERE organization_id = ? AND project_id = ?
-		ORDER BY created_at DESC`, actor.OrganizationID, projectID)
+		ORDER BY created_at DESC LIMIT ?`, actor.OrganizationID, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +374,19 @@ func (s Service) ListDocuments(ctx context.Context, actor contract.ActorContext,
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+
+func (s Service) Search(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request SearchRequest) ([]SearchResult, error) {
+	if request.Limit == 0 {
+		request.Limit = 10
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.searchChunks(ctx, actor.OrganizationID, projectID, nil, request.Query, request.Limit)
 }
 
 func (s Service) GetDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (Document, error) {
@@ -270,6 +443,13 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 		return ResearchRun{}, err
 	}
 	request.Mode = strings.ToLower(strings.TrimSpace(request.Mode))
+	if request.Mode == "" {
+		request.Mode = "web"
+	}
+	if !validResearchCategory(request.Category, true) {
+		return ResearchRun{}, ErrInvalidResearchRequest
+	}
+	request.Category = normalizedResearchCategory(request.Category)
 	request.Query = strings.TrimSpace(request.Query)
 	if !request.Confirmed {
 		return ResearchRun{}, ErrExternalConfirmationRequired
@@ -279,13 +459,14 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	if err != nil {
 		return ResearchRun{}, err
 	}
-	documents := make([]ExternalDocument, 0, len(request.DocumentIDs))
 	for _, id := range request.DocumentIDs {
 		value, err := s.GetDocument(ctx, actor, projectID, id)
 		if err != nil {
 			return ResearchRun{}, err
 		}
-		documents = append(documents, ExternalDocument{ID: value.ID, Filename: value.Filename, Content: value.ExtractedText})
+		if value.Status != "ready" || value.ChunkCount < 1 {
+			return ResearchRun{}, ErrInvalidResearchRequest
+		}
 	}
 	id, err := s.newID("researchrun")
 	if err != nil {
@@ -294,31 +475,75 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	now := s.now()
 	run := ResearchRun{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		Mode: request.Mode, Query: request.Query, DocumentIDs: append([]string(nil), request.DocumentIDs...),
+		Mode: request.Mode, Category: request.Category, Query: request.Query,
+		DocumentIDs:     append([]string(nil), request.DocumentIDs...),
 		DisclosedFields: append([]string(nil), request.DisclosedFields...), Status: "running",
 		ConfirmedBy: actor.Principal.ID, ConfirmedAt: now, Artifacts: []ResearchArtifact{},
+		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO platform_research_runs
-		(id, organization_id, project_id, mode, query_text, document_ids, disclosed_fields,
-		 status, confirmed_by, confirmed_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Query, jsonBytes(run.DocumentIDs),
-		jsonBytes(run.DisclosedFields), run.Status, run.ConfirmedBy, run.ConfirmedAt, now, now); err != nil {
+		(id, organization_id, project_id, mode, category, query_text, document_ids, disclosed_fields,
+		 disclosed_chunk_ids, status, confirmed_by, confirmed_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Category, run.Query, jsonBytes(run.DocumentIDs),
+		jsonBytes(run.DisclosedFields), jsonBytes(run.DisclosedChunkIDs),
+		run.Status, run.ConfirmedBy, run.ConfirmedAt, now, now); err != nil {
 		return ResearchRun{}, err
 	}
 	if s.Runner == nil {
 		run.Status, run.ErrorCode, run.ErrorMessage = "unavailable", "EXTERNAL_RUNNER_UNAVAILABLE", ErrExternalRunnerUnavailable.Error()
+		run.UpdatedAt = s.now()
 		_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, error_code = ?,
 			error_message = ?, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
-			run.Status, run.ErrorCode, run.ErrorMessage, s.now(), actor.OrganizationID, projectID, run.ID)
+			run.Status, run.ErrorCode, run.ErrorMessage, run.UpdatedAt, run.OrganizationID, run.ProjectID, run.ID)
 		return run, nil
 	}
-	results, err := s.Runner.Run(ctx, ExternalResearchInput{Mode: run.Mode, Query: run.Query, Documents: documents})
+	if s.Scheduler != nil {
+		if err := s.Scheduler.Schedule(ctx, run); err != nil {
+			run.Status, run.ErrorCode, run.ErrorMessage = "failed", "RESEARCH_SCHEDULE_FAILED", "研究任务暂时无法进入执行队列"
+			run.UpdatedAt = s.now()
+			_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, error_code = ?,
+				error_message = ?, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+				run.Status, run.ErrorCode, run.ErrorMessage, run.UpdatedAt, actor.OrganizationID, projectID, run.ID)
+		}
+		return run, nil
+	}
+	documents, err := s.selectResearchChunks(
+		ctx, run.OrganizationID, run.ProjectID, run.DocumentIDs, run.Query,
+	)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	return s.executeResearch(ctx, run, documents)
+}
+
+func (s Service) executeResearch(ctx context.Context, run ResearchRun, documents []ExternalDocument) (ResearchRun, error) {
+	run.DisclosedChunkIDs = make([]string, 0, len(documents))
+	for _, document := range documents {
+		run.DisclosedChunkIDs = append(run.DisclosedChunkIDs, document.ID)
+	}
+	run.UpdatedAt = s.now()
+	if _, err := s.DB.ExecContext(ctx, `UPDATE platform_research_runs
+		SET disclosed_chunk_ids = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ? AND status = 'running'`,
+		jsonBytes(run.DisclosedChunkIDs), run.UpdatedAt,
+		run.OrganizationID, run.ProjectID, run.ID); err != nil {
+		return ResearchRun{}, err
+	}
+	results, err := s.Runner.Run(ctx, ExternalResearchInput{
+		OrganizationID: run.OrganizationID,
+		ProjectID:      run.ProjectID,
+		Mode:           run.Mode,
+		Category:       run.Category,
+		Query:          run.Query,
+		Documents:      documents,
+	})
 	if err != nil {
 		run.Status, run.ErrorCode, run.ErrorMessage = "failed", "EXTERNAL_RESEARCH_FAILED", "外部研究调用失败"
+		run.UpdatedAt = s.now()
 		_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, error_code = ?,
 			error_message = ?, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
-			run.Status, run.ErrorCode, run.ErrorMessage, s.now(), actor.OrganizationID, projectID, run.ID)
+			run.Status, run.ErrorCode, run.ErrorMessage, run.UpdatedAt, run.OrganizationID, run.ProjectID, run.ID)
 		return run, nil
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -332,11 +557,21 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 			return ResearchRun{}, err
 		}
 		run.Artifacts = append(run.Artifacts, artifact)
+		if run.ProviderCode == "" {
+			run.ProviderCode = strings.TrimSpace(result.ProviderCode)
+			run.ModelVersion = strings.TrimSpace(result.ModelVersion)
+			run.ProviderResponseID = strings.TrimSpace(result.ProviderResponse)
+			run.Usage = result.Usage
+		}
 	}
 	run.Status = "succeeded"
-	if _, err := tx.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?, updated_at = ?
+	run.UpdatedAt = s.now()
+	if _, err := tx.ExecContext(ctx, `UPDATE platform_research_runs SET status = ?,
+		provider_code = ?, model_version = ?, provider_response_id = ?, usage_json = ?, updated_at = ?
 		WHERE organization_id = ? AND project_id = ? AND id = ?`,
-		run.Status, s.now(), actor.OrganizationID, projectID, run.ID); err != nil {
+		run.Status, nullable(run.ProviderCode), nullable(run.ModelVersion),
+		nullable(run.ProviderResponseID), nullableJSONValue(run.Usage), run.UpdatedAt,
+		run.OrganizationID, run.ProjectID, run.ID); err != nil {
 		return ResearchRun{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -345,8 +580,238 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	return run, nil
 }
 
+func (s Service) GetResearchRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ResearchRun, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return ResearchRun{}, err
+	}
+	return s.getResearchRun(ctx, actor.OrganizationID, projectID, id)
+}
+
+func (s Service) ListResearchRuns(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ResearchRun, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.DB.QueryContext(ctx, researchRunSelect+`
+		WHERE organization_id = ? AND project_id = ?
+		ORDER BY created_at DESC LIMIT ?`, actor.OrganizationID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []ResearchRun{}
+	for rows.Next() {
+		value, err := scanResearchRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].Artifacts, err = s.listResearchArtifacts(ctx, values[index].OrganizationID, values[index].ProjectID, values[index].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+const researchRunSelect = `SELECT id, organization_id, project_id, mode, query_text,
+	category, document_ids, disclosed_fields, disclosed_chunk_ids, status, confirmed_by, confirmed_at,
+	COALESCE(error_code, ''), COALESCE(error_message, ''),
+	COALESCE(provider_code, ''), COALESCE(model_version, ''),
+	COALESCE(provider_response_id, ''), usage_json, created_at, updated_at
+	FROM platform_research_runs`
+
+type researchRunScanner interface {
+	Scan(...any) error
+}
+
+func scanResearchRun(scanner researchRunScanner) (ResearchRun, error) {
+	var value ResearchRun
+	var documentIDs, disclosedFields, disclosedChunkIDs []byte
+	var usage []byte
+	err := scanner.Scan(
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Mode, &value.Query,
+		&value.Category, &documentIDs, &disclosedFields, &disclosedChunkIDs,
+		&value.Status, &value.ConfirmedBy, &value.ConfirmedAt,
+		&value.ErrorCode, &value.ErrorMessage, &value.ProviderCode, &value.ModelVersion,
+		&value.ProviderResponseID, &usage, &value.CreatedAt, &value.UpdatedAt,
+	)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	if err := json.Unmarshal(documentIDs, &value.DocumentIDs); err != nil {
+		return ResearchRun{}, err
+	}
+	if err := json.Unmarshal(disclosedFields, &value.DisclosedFields); err != nil {
+		return ResearchRun{}, err
+	}
+	if err := json.Unmarshal(disclosedChunkIDs, &value.DisclosedChunkIDs); err != nil {
+		return ResearchRun{}, err
+	}
+	if len(usage) > 0 {
+		value.Usage = &ResearchUsage{}
+		if err := json.Unmarshal(usage, value.Usage); err != nil {
+			return ResearchRun{}, err
+		}
+	}
+	value.Artifacts = []ResearchArtifact{}
+	return value, nil
+}
+
+func (s Service) getResearchRun(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (ResearchRun, error) {
+	value, err := scanResearchRun(s.DB.QueryRowContext(ctx, researchRunSelect+`
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		organizationID, projectID, strings.TrimSpace(id)))
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	value.Artifacts, err = s.listResearchArtifacts(ctx, organizationID, projectID, value.ID)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	return value, nil
+}
+
+func (s Service) listResearchArtifacts(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string) ([]ResearchArtifact, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, organization_id, project_id, research_run_id,
+		source_type, category, title, COALESCE(source_url, ''), content, citations, content_hash, created_at
+		FROM platform_research_artifacts
+		WHERE organization_id = ? AND project_id = ? AND research_run_id = ?
+		ORDER BY created_at ASC`, organizationID, projectID, runID)
+	if err != nil {
+		return nil, err
+	}
+	values := []ResearchArtifact{}
+	for rows.Next() {
+		var value ResearchArtifact
+		var citations []byte
+		if err := rows.Scan(
+			&value.ID, &value.OrganizationID, &value.ProjectID, &value.ResearchRunID,
+			&value.SourceType, &value.Category, &value.Title, &value.SourceURL, &value.Content, &citations,
+			&value.ContentHash, &value.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(citations, &value.Citations); err != nil {
+			return nil, err
+		}
+		value.Sources = []ResearchSource{}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].Sources, err = s.listArtifactSources(
+			ctx, string(organizationID), string(projectID), values[index].ID,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+func (s Service) ListResearchArtifacts(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, category string, limit int) ([]ResearchArtifact, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	query := `SELECT id, organization_id, project_id, research_run_id, source_type, category,
+		title, COALESCE(source_url, ''), content, citations, content_hash, created_at
+		FROM platform_research_artifacts
+		WHERE organization_id = ? AND project_id = ?`
+	args := []any{actor.OrganizationID, projectID}
+	if category = strings.ToLower(strings.TrimSpace(category)); category != "" && category != "all" {
+		if !validResearchCategory(category, false) {
+			return nil, ErrInvalidResearchRequest
+		}
+		query += ` AND category = ?`
+		args = append(args, normalizedResearchCategory(category))
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]ResearchArtifact, 0)
+	for rows.Next() {
+		value, err := scanResearchArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].Sources, err = s.listArtifactSources(
+			ctx, string(actor.OrganizationID), string(projectID), values[index].ID,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+func (s Service) GetResearchArtifact(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ResearchArtifact, error) {
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return ResearchArtifact{}, err
+	}
+	value, err := scanResearchArtifact(s.DB.QueryRowContext(ctx, `SELECT id, organization_id, project_id,
+		research_run_id, source_type, category, title, COALESCE(source_url, ''), content,
+		citations, content_hash, created_at FROM platform_research_artifacts
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		actor.OrganizationID, projectID, strings.TrimSpace(id)))
+	if err != nil {
+		return ResearchArtifact{}, err
+	}
+	value.Sources, err = s.listArtifactSources(ctx, string(actor.OrganizationID), string(projectID), value.ID)
+	return value, err
+}
+
+func scanResearchArtifact(scanner interface{ Scan(...any) error }) (ResearchArtifact, error) {
+	var value ResearchArtifact
+	var citations []byte
+	if err := scanner.Scan(
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.ResearchRunID,
+		&value.SourceType, &value.Category, &value.Title, &value.SourceURL, &value.Content,
+		&citations, &value.ContentHash, &value.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ResearchArtifact{}, ErrNotFound
+		}
+		return ResearchArtifact{}, err
+	}
+	if err := json.Unmarshal(citations, &value.Citations); err != nil {
+		return ResearchArtifact{}, err
+	}
+	value.Sources = []ResearchSource{}
+	return value, nil
+}
+
 func validateResearchRequest(request ResearchRequest) ([]string, []string, error) {
-	if (request.Mode != "web" && request.Mode != "mcp") || request.Query == "" ||
+	if request.Mode != "web" || request.Query == "" ||
 		len(request.Query) > 2000 || len(request.DocumentIDs) > 20 {
 		return nil, nil, ErrInvalidResearchRequest
 	}
@@ -399,18 +864,50 @@ func (s Service) insertArtifact(ctx context.Context, tx *sql.Tx, run ResearchRun
 	}
 	value := ResearchArtifact{
 		ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID,
-		ResearchRunID: run.ID, SourceType: run.Mode, Title: strings.TrimSpace(result.Title),
+		ResearchRunID: run.ID, SourceType: run.Mode, Category: run.Category,
+		Title:     strings.TrimSpace(result.Title),
 		SourceURL: strings.TrimSpace(result.SourceURL), Content: strings.TrimSpace(result.Content),
 		Citations: append([]string(nil), result.Citations...), ContentHash: hash, CreatedAt: s.now(),
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO platform_research_artifacts
-		(id, organization_id, project_id, research_run_id, source_type, title, source_url,
+		(id, organization_id, project_id, research_run_id, source_type, category, title, source_url,
 		 content, citations, content_hash, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.ResearchRunID, value.SourceType,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ResearchRunID, value.SourceType, value.Category,
 		value.Title, nullable(value.SourceURL), value.Content, jsonBytes(value.Citations),
 		value.ContentHash, value.CreatedAt)
-	return value, err
+	if err != nil {
+		return ResearchArtifact{}, err
+	}
+	value.Sources = make([]ResearchSource, 0, len(result.Sources))
+	for _, source := range result.Sources {
+		inserted, insertErr := s.insertResearchSource(ctx, tx, run, value.ID, source)
+		if insertErr != nil {
+			return ResearchArtifact{}, insertErr
+		}
+		value.Sources = append(value.Sources, inserted)
+	}
+	return value, nil
+}
+
+func normalizedResearchCategory(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "audience", "competitor", "industry":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "general"
+	}
+}
+
+func validResearchCategory(value string, allowEmpty bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return allowEmpty
+	case "general", "audience", "competitor", "industry":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractDocument(extension string, content []byte) (string, string, error) {
@@ -489,13 +986,33 @@ func allowedMIME(extension, value string) bool {
 	case ".docx":
 		return value == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
 			value == "application/octet-stream"
+	case ".pdf":
+		return value == "application/pdf" || value == "application/octet-stream"
 	default:
 		return false
 	}
 }
 
-const documentSelect = `SELECT id, organization_id, project_id, filename, mime_type, size_bytes,
-	content_sha256, text_sha256, extracted_text, status, created_by, created_at, updated_at,
+func defaultDocumentMIME(extension string) string {
+	switch extension {
+	case ".md":
+		return "text/markdown"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".pdf":
+		return "application/pdf"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+const documentSelect = `SELECT id, organization_id, project_id, title, COALESCE(source_uri, ''),
+	source_type, chunk_count, filename, mime_type, size_bytes,
+	content_sha256, text_sha256, extracted_text, status,
+	COALESCE(parser_code, ''), COALESCE(parser_version, ''),
+	COALESCE(parse_error_code, ''), COALESCE(parse_error_message, ''),
+	COALESCE(parse_metadata, JSON_OBJECT()), parsed_at,
+	created_by, created_at, updated_at,
 	object_provider, object_bucket, object_key, object_version_id, object_etag
 	FROM platform_knowledge_documents`
 
@@ -506,13 +1023,20 @@ type scanner interface {
 func scanDocument(row scanner) (Document, error) {
 	var value Document
 	var versionID, etag sql.NullString
+	var parsedAt sql.NullTime
 	err := row.Scan(
-		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Filename, &value.MIMEType,
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Title, &value.SourceURI,
+		&value.SourceType, &value.ChunkCount, &value.Filename, &value.MIMEType,
 		&value.SizeBytes, &value.ContentSHA256, &value.TextSHA256, &value.ExtractedText,
-		&value.Status, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt,
+		&value.Status, &value.ParserCode, &value.ParserVersion,
+		&value.ParseErrorCode, &value.ParseErrorMessage, &value.ParseMetadata, &parsedAt,
+		&value.CreatedBy, &value.CreatedAt, &value.UpdatedAt,
 		&value.Blob.Provider, &value.Blob.Bucket, &value.Blob.Key, &versionID, &etag,
 	)
 	value.Blob.VersionID, value.Blob.ETag = versionID.String, etag.String
+	if parsedAt.Valid {
+		value.ParsedAt = &parsedAt.Time
+	}
 	return value, err
 }
 
@@ -533,6 +1057,13 @@ func (s Service) newID(prefix string) (string, error) {
 func jsonBytes(value any) []byte {
 	encoded, _ := json.Marshal(value)
 	return encoded
+}
+
+func nullableJSONValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	return jsonBytes(value)
 }
 
 func nullable(value string) any {

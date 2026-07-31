@@ -1,13 +1,46 @@
-import { Check, CircleAlert, KeyRound, LockKeyhole, RotateCcw, ShieldCheck } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { Check, CircleAlert, KeyRound, LockKeyhole, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import { useModelConfig } from '../context/ModelConfigContext'
 
 export function ModelSettingsPage() {
-  const { providers, configuredCount, isLoading, refresh } = useModelConfig()
+  const { providers, configuredCount, isLoading, refresh, saveProvider, clearProvider } = useModelConfig()
   const selected = providers[0]
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('https://ark.cn-beijing.volces.com/api/v3')
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setIsSaving(true)
+    setNotice('')
+    setError('')
+    try {
+      await saveProvider({ apiKey, baseUrl })
+      setApiKey('')
+      setNotice('模型密钥已保存到服务端，本页面只保留掩码状态。')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '保存失败')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const clear = async () => {
+    setNotice('')
+    setError('')
+    try {
+      await clearProvider()
+      setNotice('已清除页面配置的工作区密钥，服务端将回退到环境变量配置。')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '清除失败')
+    }
+  }
 
   return <div className="model-settings-page">
     <header className="model-settings-heading">
-      <div><span>组织级能力</span><h1>模型能力</h1><p>浏览器只读取服务端能力状态。凭据仅由服务端的 <code>ARK_API_KEY</code> 环境变量提供。</p></div>
+      <div><span>组织级配置</span><h1>系统设置</h1><p>模型能力、默认规则和通知配置统一在此处管理；不会分散在策略、创意、洞察或投放模块。</p></div>
       <div className="provider-summary"><b>{configuredCount} / {providers.length || 1}</b><span>服务已配置</span></div>
     </header>
 
@@ -18,27 +51,44 @@ export function ModelSettingsPage() {
           <span className={`provider-status-dot ${provider.status === '已配置' ? 'configured' : ''}`}/>
           <span><b>{provider.name}</b><small>{provider.status}</small></span>
         </div>)}
-        <div className="provider-index-note"><ShieldCheck size={16}/><span><b>凭据隔离</b><small>API Key 不进入浏览器、Project 数据或导出包。</small></span></div>
+        <div className="provider-index-note"><ShieldCheck size={16}/><span><b>凭据隔离</b><small>保存后只返回掩码；Project、导出包和审计事件不包含密钥。</small></span></div>
+        <div className="provider-index-note"><ShieldCheck size={16}/><span><b>通用规则</b><small>通知、命名、审批、导出和默认规格均在本页维护。</small></span></div>
       </aside>
 
       <section className="provider-form">
         <div className="provider-form-title"><div><h2>{selected?.name ?? '正在读取能力'}</h2><p>{selected?.description ?? '等待服务端响应'}</p></div><span className={selected?.status === '已配置' ? 'config-status configured' : 'config-status'}>{selected?.status === '已配置' ? <Check size={14}/> : <CircleAlert size={14}/>} {selected?.status ?? '读取中'}</span></div>
-        <div className="secret-policy"><LockKeyhole size={18}/><div><b>只读安全边界</b><p>此页面没有 API Key 输入、保存、掩码或浏览器存储。请在启动服务端的环境中配置 <code>ARK_API_KEY</code>。</p></div></div>
+        <div className="secret-policy"><LockKeyhole size={18}/><div><b>服务端密钥边界</b><p>输入的 API Key 会写入本地 MVP 服务端 store，并覆盖当前进程的环境变量配置。页面永远不展示完整密钥。</p></div></div>
+
+        <form className="provider-fields" onSubmit={submit}>
+          <label>Provider API Key
+            <input value={apiKey} onChange={event => setApiKey(event.target.value)} type="password" placeholder={selected?.maskedApiKey ?? '输入新的 API Key'} autoComplete="off" required/>
+          </label>
+          <label>Base URL
+            <input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://ark.cn-beijing.volces.com/api/v3"/>
+          </label>
+          <div className="provider-actions inline">
+            <button className="secondary-button danger-text" type="button" onClick={() => void clear()} disabled={isSaving}><Trash2 size={15}/>清除页面配置</button>
+            <button className="secondary-button" type="button" onClick={() => void refresh()} disabled={isLoading || isSaving}><RotateCcw size={15}/>{isLoading ? '检查中…' : '刷新状态'}</button>
+            <button className="primary-button" type="submit" disabled={isSaving}><Save size={15}/>{isSaving ? '保存中…' : '保存密钥'}</button>
+          </div>
+        </form>
+
+        {notice ? <div className="config-notice">{notice}</div> : null}
+        {error ? <div className="config-notice error">{error}</div> : null}
 
         <div className="provider-metadata">
           <div><span>生效范围</span><b>服务端全部 Project</b></div>
+          <div><span>配置来源</span><b>{selected?.source === 'workspace' ? '页面工作区配置' : selected?.source === 'environment' ? '服务端环境变量' : '尚未配置'}</b></div>
+          <div><span>密钥状态</span><b>{selected?.maskedApiKey ?? '未保存'}</b></div>
           <div><span>最近检查</span><b>{selected?.lastVerifiedAt || '尚未连接'}</b></div>
           <div><span>调用策略</span><b>未配置时返回可诊断失败</b></div>
-        </div>
-        <div className="provider-actions">
-          <button className="secondary-button" onClick={() => void refresh()} disabled={isLoading}><RotateCcw size={15}/>{isLoading ? '检查中…' : '刷新状态'}</button>
         </div>
       </section>
 
       <aside className="model-settings-guide">
         <h3>接入规则</h3>
-        <ol><li><span>01</span><p><b>平台先可用</b>未配置 Provider 时仍可浏览项目和已有产物。</p></li><li><span>02</span><p><b>任务按需检查</b>生成请求由服务端统一校验环境配置。</p></li><li><span>03</span><p><b>没有浏览器密钥</b>响应和本地存储都不含密钥或其片段。</p></li></ol>
-        <div className="model-settings-audit"><span>安全边界</span><b>模型目录与健康状态是公开能力；凭据不会发送到浏览器。</b></div>
+        <ol><li><span>01</span><p><b>登录后配置</b>未登录不能读取或写入密钥配置。</p></li><li><span>02</span><p><b>任务按需检查</b>生成请求由服务端统一校验 Provider 状态。</p></li><li><span>03</span><p><b>掩码返回</b>响应和本地浏览器存储都不含完整密钥。</p></li></ol>
+        <div className="model-settings-audit"><span>默认账号</span><b>本地 MVP 默认使用 Admin / 123456，可通过服务端环境变量覆盖。</b></div>
       </aside>
     </div>
   </div>

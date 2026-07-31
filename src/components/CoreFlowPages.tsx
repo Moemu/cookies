@@ -5,7 +5,7 @@ import {
   Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiArtifact, type ApiAssetFeature, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult } from '../data/api'
+import { api, type ApiArtifact, type ApiKnowledgeDocument, type ApiKnowledgeSearchResult, type ApiProjectMediaAsset } from '../data/api'
 import type { DataState, SystemKey } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -41,12 +41,17 @@ function inWindow(occurredAt: string, window: string, latestTime: number): boole
   return !Number.isNaN(time) && time >= latestTime - days * 24 * 60 * 60 * 1000
 }
 
-function trendPoints(fields: Record<string, string | number>): number[] {
+function trendPoints(fields: Record<string, unknown>): number[] {
   if (typeof fields.points !== 'string') return []
   return fields.points
     .split(',')
     .map(value => Number(value.trim()))
     .filter(value => Number.isFinite(value))
+}
+
+function textOperationField(fields: Record<string, unknown>, key: string, fallback: string): string {
+  const value = fields[key]
+  return typeof value === 'string' ? value : fallback
 }
 
 export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataState; onOpenProject: OpenProject }) {
@@ -102,7 +107,7 @@ export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataSt
         projectId: currentProject.id,
         kind: 'document',
         status: 'ready',
-        content: `[insight] 投后分析报告 | 窗口：${window} | 平台：${platform} | 消耗：¥${spend.toLocaleString('zh-CN')} | 曝光：${impressions.toLocaleString('zh-CN')} | 平均 CTR：${averageCtr.toFixed(2)}% | 平均 CPL：¥${averageCpa.toFixed(1)} | 关键素材：${selected.name} | 趋势：${metric?.fields.summary ?? '无服务端趋势记录'} | 建议：${recommendation?.title ?? '无服务端建议动作'}`,
+        content: `[insight] 投后分析报告 | 窗口：${window} | 平台：${platform} | 消耗：¥${spend.toLocaleString('zh-CN')} | 曝光：${impressions.toLocaleString('zh-CN')} | 平均 CTR：${averageCtr.toFixed(2)}% | 平均 CPL：¥${averageCpa.toFixed(1)} | 关键素材：${selected.name} | 趋势：${metric ? textOperationField(metric.fields, 'summary', '无服务端趋势记录') : '无服务端趋势记录'} | 建议：${recommendation?.title ?? '无服务端建议动作'}`,
       })
       await reloadProjects()
       setNotice(`投后分析报告 ${report.id.slice(0, 8)} 已确认，可进入经验库沉淀。`)
@@ -113,7 +118,16 @@ export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataSt
     }
   }
 
-  return <StateBoundary state={state} onRetry={() => void refreshOperations()} onCreate={() => setNotice('数据源接入向导已打开')}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 投后分析"
+    emptyTitle="当前 Project 暂无投后运营记录"
+    emptyDetail="接入或导入广告平台运营记录后，这里会展示表现变化、原因和建议动作；不会用固定前端结论替代真实数据。"
+    errorDetail="投后运营记录读取失败。请确认服务端和数据源连接后重新拉取，已保存报告不会被覆盖。"
+    createLabel="打开数据接入向导"
+    onRetry={() => void refreshOperations()}
+    onCreate={() => setNotice('数据源接入向导已打开')}
+  >
     <div className="ad-insight-workspace">
       <section className="ad-insight-main">
         <div className="core-flow-toolbar">
@@ -128,7 +142,7 @@ export function PostLaunchAnalysisPage({ state, onOpenProject }: { state: DataSt
         {filtered.length ? <><div className="postlaunch-brief">
           <section className="postlaunch-conclusion">
             <span className="section-label">发生什么</span>
-            <h3>{metric?.fields.summary ?? '当前筛选范围内已汇总服务端广告表现。'}</h3>
+            <h3>{metric ? textOperationField(metric.fields, 'summary', '当前筛选范围内已汇总服务端广告表现。') : '当前筛选范围内已汇总服务端广告表现。'}</h3>
             <p>在 {window}、{platform} 范围内，{topPerformer?.name} 以 {topPerformer?.ctr}% CTR 领跑；{lowestCpa?.name} 的 CPL 为 ¥{lowestCpa?.cpa}，当前平均为 ¥{averageCpa.toFixed(1)}。</p>
             <div className="postlaunch-signal-line">
               <span><b>{averageCtr.toFixed(2)}%</b><small>平均 CTR</small></span>
@@ -197,8 +211,7 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
   const [query, setQuery] = useState('')
   const [type, setType] = useState('全部')
   const [selectedId, setSelectedId] = useState('')
-  const [artifacts, setArtifacts] = useState<ApiArtifact[]>([])
-  const [assetFeatures, setAssetFeatures] = useState<ApiAssetFeature[]>([])
+  const [assets, setAssets] = useState<ApiProjectMediaAsset[]>([])
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<ApiKnowledgeDocument[]>([])
   const [knowledgeResults, setKnowledgeResults] = useState<ApiKnowledgeSearchResult[]>([])
   const [assetState, setAssetState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -211,27 +224,21 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
         setKnowledgeDocuments(next.items)
         setKnowledgeResults([])
       } else {
-        const [next, features] = await Promise.all([
-          api.listArtifacts(currentProject.id),
-          api.listAssetFeatures(currentProject.id),
-        ])
-        setArtifacts(next.filter(artifact => artifact.kind === 'image' || artifact.kind === 'video'))
-        setAssetFeatures(features.items)
+        setAssets(await api.listProjectMediaAssets(currentProject.id))
       }
       setAssetState('ready')
     } catch {
-      setArtifacts([])
-      setAssetFeatures([])
+      setAssets([])
       setKnowledgeDocuments([])
       setKnowledgeResults([])
       setAssetState('error')
     }
   }, [currentProject.id, mode])
   useEffect(() => { void loadArtifacts() }, [loadArtifacts])
-  const filtered = useMemo(() => artifacts.filter(asset =>
+  const filtered = useMemo(() => assets.filter(asset =>
     (type === '全部' || assetType(asset) === type)
-    && `${asset.id} ${asset.content}`.toLowerCase().includes(query.trim().toLowerCase()),
-  ), [artifacts, query, type])
+    && `${asset.id} ${asset.mimeType} ${asset.kind}`.toLowerCase().includes(query.trim().toLowerCase()),
+  ), [assets, query, type])
   const filteredKnowledgeDocuments = useMemo(() => knowledgeDocuments.filter(document =>
     `${document.id} ${document.title} ${document.source_uri}`.toLowerCase().includes(query.trim().toLowerCase()),
   ), [knowledgeDocuments, query])
@@ -257,7 +264,6 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
     setSelectedId(current => filtered.some(asset => asset.id === current) ? current : filtered[0]?.id ?? '')
   }, [filtered])
   const selected = filtered.find(asset => asset.id === selectedId)
-  const selectedFeature = selected ? featureForAsset(selected, assetFeatures) : undefined
   const importProjectKnowledge = async () => {
     setAssetState('loading')
     try {
@@ -275,7 +281,16 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
 
   if (mode === 'knowledge') {
     const highlightedResult = knowledgeResults[0]
-    return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
+    return <StateBoundary
+      state={state}
+      contextLabel="素材洞察 / 经验沉淀"
+      emptyTitle="当前 Project 暂无知识文档"
+      emptyDetail="导入项目 docs 或复盘报告后，系统会提供可追溯的 citation 检索结果。"
+      errorDetail="知识库读取失败，请检查平台 API 后重新加载。"
+      createLabel="导入 Project Docs"
+      onRetry={() => { void loadArtifacts() }}
+      onCreate={() => { void importProjectKnowledge() }}
+    >
       <div className="asset-experience-workspace">
         <section className="asset-library-panel">
           <div className="core-flow-toolbar">
@@ -310,7 +325,14 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
     </StateBoundary>
   }
 
-  return <StateBoundary state={state} onRetry={() => { void loadArtifacts() }}>
+  return <StateBoundary
+    state={state}
+    contextLabel="素材洞察 / 素材管理"
+    emptyTitle="当前 Project 暂无已持久化素材"
+    emptyDetail="完成创意生成或上传素材后，这里会展示图片、视频、来源任务和多模态特征。"
+    errorDetail="素材读取失败，请确认 API 服务和资源接口可用后重新加载。"
+    onRetry={() => { void loadArtifacts() }}
+  >
     <div className="asset-experience-workspace">
       <section className="asset-library-panel">
         <div className="core-flow-toolbar">
@@ -325,46 +347,33 @@ export function AssetExperiencePage({ state, mode }: { state: DataState; mode: '
           {assetState === 'loading' ? <div className="panel-empty">正在读取当前 Project 的服务端产物…</div> : null}
           {assetState === 'error' ? <div className="panel-empty">素材读取失败，请重试。</div> : null}
           {assetState === 'ready' && !filtered.length ? <div className="panel-empty">{mode === 'assets' ? '当前 Project 暂无已持久化的图片或视频资产。' : '当前 Project 暂无已生成并持久化的经验结论。'}</div> : null}
-          {filtered.map(asset => { const feature = featureForAsset(asset, assetFeatures); return <button key={asset.id} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
+          {filtered.map(asset => <button key={`${asset.id}-${asset.version}`} className={selectedId === asset.id ? 'asset-analysis-card active' : 'asset-analysis-card'} onClick={() => setSelectedId(asset.id)}>
             <span className="asset-card-preview">{asset.kind === 'video' ? <Play size={18} fill="currentColor"/> : <Layers3 size={18}/>}<small>{assetType(asset)}</small></span>
-            <span><small>{asset.id.slice(0, 8)} · {asset.sourceJobId ? '生成任务产物' : '服务端存档'}</small><b>{assetTitle(asset)}</b><em>{feature ? featureSummary(feature) : '暂无多模态特征'}</em></span>
-          </button> })}
+            <span><small>{asset.id.slice(0, 12)} · v{asset.version} · 服务端存档</small><b>{assetTitle(asset)}</b><em>{assetMetadata(asset)}</em></span>
+          </button>)}
         </div>
       </section>
       <aside className="asset-analysis-detail">
-        {selected ? <><span className="section-label">服务端产物详情</span><h3>{assetTitle(selected)}</h3><p>{assetType(selected)} · {selected.status === 'ready' ? '已持久化' : '草稿'}</p>
-          <div className="feature-stack"><span>可追溯元数据</span><b>Artifact {selected.id}</b><b>版本 v{selected.version}</b><b>{selected.sourceJobId ? `来源任务 ${selected.sourceJobId}` : '非生成任务产物'}</b><b>更新时间 {new Date(selected.updatedAt).toLocaleString('zh-CN')}</b></div>
-          {selectedFeature ? <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>Hook {percent(selectedFeature.hookStrength)}</b><b>商品露出 {percent(selectedFeature.productVisibility)}</b><b>相似度风险 {riskLabel(selectedFeature.similarityRisk)}</b>{selectedFeature.sellingPoints.slice(0, 2).map(point => <b key={point}>卖点：{point}</b>)}</div> : <div className="feature-stack asset-feature-stack"><span>多模态素材特征</span><b>暂无特征，Planner 使用基础元数据降级。</b></div>}
-          <div className="experience-card"><BookOpenCheck size={18}/><span><small>产物内容</small><b>{selected.content}</b></span></div>
+        {selected ? <><span className="section-label">服务端素材详情</span><h3>{assetTitle(selected)}</h3><p>{assetType(selected)} · 已持久化 · v{selected.version}</p>
+          <div className="feature-stack"><span>可追溯元数据</span><b>Asset {selected.id}</b><b>{selected.mimeType}</b><b>{assetMetadata(selected)}</b><b>入库时间 {new Date(selected.createdAt).toLocaleString('zh-CN')}</b></div>
+          {selected.kind === 'video' ? <video className="project-asset-preview" controls preload="metadata" src={selected.contentUrl}>当前浏览器不支持视频预览。</video> : <a className="secondary-button full" href={selected.contentUrl} target="_blank" rel="noreferrer"><FileInput size={15}/>打开导入 Brief / 文档</a>}
         </> : <div className="panel-empty">选择当前 Project 的服务端产物后查看详情；系统不会以固定 CTR 或 AI 结论替代真实结果。</div>}
       </aside>
     </div>
   </StateBoundary>
 }
 
-function assetType(artifact: ApiArtifact): string {
+function assetType(artifact: ApiProjectMediaAsset): string {
   return artifact.kind === 'image' ? '图文' : artifact.kind === 'video' ? '视频' : '文档'
 }
 
-function assetTitle(artifact: ApiArtifact): string {
-  return artifact.content.replace(/^\[knowledge\]\s*/, '').slice(0, 48) || `${assetType(artifact)}产物`
+function assetTitle(artifact: ApiProjectMediaAsset): string {
+  if (artifact.mimeType === 'application/pdf') return 'Guerlain KOL Brief（导入 PDF）'
+  return artifact.kind === 'video' ? `导入演示视频 · ${artifact.id.slice(-8)}` : `${assetType(artifact)}产物`
 }
-
-function featureForAsset(asset: ApiArtifact, features: ApiAssetFeature[]): ApiAssetFeature | undefined {
-  return features
-    .filter(feature => feature.assetId === asset.id && feature.assetVersion === asset.version)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
-}
-
-function featureSummary(feature: ApiAssetFeature): string {
-  const sellingPoint = feature.sellingPoints[0] ? ` · ${feature.sellingPoints[0]}` : ''
-  return `Hook ${percent(feature.hookStrength)} · 商品露出 ${percent(feature.productVisibility)} · ${riskLabel(feature.similarityRisk)}${sellingPoint}`
-}
-
-function percent(value: number): string {
-  return `${Math.round(value * 100)}%`
-}
-
-function riskLabel(risk: ApiAssetFeature['similarityRisk']): string {
-  return risk === 'high' ? '高相似风险' : risk === 'medium' ? '中相似风险' : '低相似风险'
+function assetMetadata(asset: ApiProjectMediaAsset): string {
+  const dimensions = asset.width && asset.height ? `${asset.width} × ${asset.height}` : ''
+  const duration = asset.durationSeconds ? `${asset.durationSeconds.toFixed(1)} 秒` : ''
+  const size = asset.sizeBytes ? `${(asset.sizeBytes / 1024 / 1024).toFixed(1)} MB` : ''
+  return [dimensions, duration, size].filter(Boolean).join(' · ') || asset.mimeType
 }

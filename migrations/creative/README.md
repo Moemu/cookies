@@ -24,3 +24,10 @@ scenario.
 `20260723181200_creative_task_archive.up.sql` adds the `archived` task state.
 Archiving removes a task from the active Creative queue; it is not a hard
 delete, because drafts, versions, Provider jobs and Assets remain auditable.
+
+`20260731101000_creative_strategy_intake_v3.up.sql` changes Strategy-backed
+Intake identity from package-only to package + Handoff + Route + optional task
+overlay. `20260731102000_creative_direction_planning.up.sql` stores immutable
+LLM candidate batches and the explicitly confirmed CreativeDirection.
+`20260731103000_creative_intake_identity_index.up.sql` makes the canonical
+`input_identity_hash` the concurrency-safe deduplication key.

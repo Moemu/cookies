@@ -114,3 +114,127 @@ func TestConversationGreetingKeepsNaturalReplyAndLimitsQuestions(t *testing.T) {
 		t.Fatalf("questions = %#v", decision.FollowUpQuestions)
 	}
 }
+
+func TestConversationDecisionOutputSchemaUsesStrictCompatibleTypes(t *testing.T) {
+	t.Parallel()
+	var schema map[string]any
+	if err := json.Unmarshal(conversationDecisionOutputSchema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	if properties["intent"].(map[string]any)["type"] != "string" {
+		t.Fatal("intent enum must declare its string type")
+	}
+	operationProperties := properties["operations"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	for _, name := range []string{"op", "field_path", "confidence"} {
+		if operationProperties[name].(map[string]any)["type"] != "string" {
+			t.Fatalf("operation property %q must declare its string type", name)
+		}
+	}
+	value := operationProperties["value"].(map[string]any)
+	if _, ok := value["anyOf"]; !ok {
+		t.Fatal("operation value must use anyOf")
+	}
+	if _, ok := value["oneOf"]; ok {
+		t.Fatal("operation value must not use oneOf")
+	}
+	if properties["confirm_fields"].(map[string]any)["items"].(map[string]any)["type"] != "string" {
+		t.Fatal("confirm_fields items must declare their string type")
+	}
+	questionProperties := properties["follow_up_questions"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	if questionProperties["field_path"].(map[string]any)["type"] != "string" {
+		t.Fatal("follow-up field_path must declare its string type")
+	}
+}
+
+func TestConversationTurnMergesExplicitLabeledBriefFields(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{
+		ID: "msg_1", CreatedBy: "user_1",
+		Content: `品牌：轻氧
+产品：0 糖青柠气泡水
+行业：饮料 / 即饮消费品
+地区：中国大陆，一线与新一线城市
+语言：简体中文
+推广目标：夏季上新期间建立新品认知，提升品牌词搜索量和首购转化
+核心受众：22–35 岁、一线和新一线城市女性
+核心主张：0 糖清爽、青柠口感
+渠道：小红书、抖音
+预算：30 万元
+周期：2026-08-01 至 2026-08-31
+核心 KPI：品牌词搜索量提升 25%，首购转化率达到 3.5%
+约束条件：不得使用减肥、治疗表述；不得虚构检测数据`,
+	}
+	patch := mergeExplicitLabeledBriefOperations(draft, message, BriefPatch{})
+	updated, err := ApplyBriefPatch(draft, patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Document.Brand.Name != "轻氧" ||
+		updated.Document.Product.Name != "0 糖青柠气泡水" ||
+		updated.Document.Industry != "饮料 / 即饮消费品" ||
+		updated.Document.Audience.Primary != "22–35 岁、一线和新一线城市女性" ||
+		updated.Document.Proposition != "0 糖清爽、青柠口感" ||
+		updated.Document.Budget.Total != "30 万元" ||
+		updated.Document.Measurement.PrimaryKPI != "品牌词搜索量提升 25%，首购转化率达到 3.5%" {
+		t.Fatalf("explicit fields were not retained: %#v", updated.Document)
+	}
+	if len(updated.Document.Channels) != 2 || len(updated.Document.Constraints) != 2 {
+		t.Fatalf("channels or constraints were not retained: %#v", updated.Document)
+	}
+	for _, operation := range patch.Operations {
+		if operation.Confidence != "high" {
+			t.Fatalf("%s confidence = %q", operation.FieldPath, operation.Confidence)
+		}
+	}
+}
+
+func TestConversationTurnMergesExplicitNarrativeCNCBriefFields(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{
+		ID: "msg_cnc", CreatedBy: "user_1",
+		Content: `白域精工希望面向研发负责人和采购负责人推广高精密 CNC 加工服务，在小红书建立专业认知并获取销售咨询。
+
+核心能力包括：
+1. 最高可实现 ±0.01mm 加工精度；
+2. 历史订单准时交付率达到 98% 以上；
+3. 可承接铝合金、不锈钢等材料的打样和小批量加工。
+
+目前我们还不确定目标人群最关注哪些决策证据。`,
+	}
+	patch := mergeExplicitLabeledBriefOperations(draft, message, BriefPatch{Operations: []BriefPatchOperation{
+		{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"白域精工"`), Confidence: "high"},
+		{Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`["研发负责人","采购负责人"]`), Confidence: "high"},
+		{Op: "set", FieldPath: "channels", Value: json.RawMessage(`["xiaohongshu"]`), Confidence: "high"},
+	}})
+	if err := normalizeModelBriefPatch(&patch); err != nil {
+		t.Fatal(err)
+	}
+	for index := range patch.Operations {
+		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: message.ID}
+		patch.Operations[index].Confirmation = "unconfirmed"
+	}
+	updated, err := ApplyBriefPatch(draft, patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Document.Product.Name != "高精密 CNC 加工服务" ||
+		updated.Document.Product.Category != "CNC 加工" ||
+		updated.Document.Industry != "CNC 加工" {
+		t.Fatalf("narrative product fields were not retained: %#v", updated.Document.Product)
+	}
+	if len(updated.Document.Product.SellingPoints) != 3 {
+		t.Fatalf("selling points = %#v", updated.Document.Product.SellingPoints)
+	}
+	if len(updated.Document.Product.Evidence) != 2 {
+		t.Fatalf("evidence = %#v", updated.Document.Product.Evidence)
+	}
+}

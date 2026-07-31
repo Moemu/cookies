@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,10 +22,12 @@ const (
 )
 
 var (
-	ErrNotFound        = errors.New("delivery resource not found")
-	ErrInvalidRequest  = errors.New("delivery request is invalid")
-	ErrInvalidState    = errors.New("delivery resource is not in a state that allows this action")
-	ErrVersionConflict = errors.New("delivery resource version conflict")
+	ErrNotFound            = errors.New("delivery resource not found")
+	ErrInvalidRequest      = errors.New("delivery request is invalid")
+	ErrInvalidState        = errors.New("delivery resource is not in a state that allows this action")
+	ErrVersionConflict     = errors.New("delivery resource version conflict")
+	ErrPlanVersionConflict = errors.New("delivery plan version conflict")
+	ErrStalePlanVersion    = errors.New("delivery change set references a stale plan version")
 )
 
 type DeliveryPlanStatus string
@@ -50,18 +53,27 @@ const (
 	MetricSourceDemoFixture  = "demo_fixture"
 )
 
+// CreatePlanRequest accepts the #21 package-oriented fields and the mock
+// lifecycle draft fields. A request using PlanDraft is always explicitly mock.
 type CreatePlanRequest struct {
-	CreativePackageID string    `json:"creative_package_id"`
-	Name              string    `json:"name"`
-	Objective         string    `json:"objective"`
-	BudgetCents       int64     `json:"budget_cents"`
-	StartAt           time.Time `json:"start_at"`
-	EndAt             time.Time `json:"end_at"`
+	CreativePackageID string    `json:"creative_package_id,omitempty"`
+	BudgetCents       int64     `json:"budget_cents,omitempty"`
+	StartAt           time.Time `json:"start_at,omitempty"`
+	EndAt             time.Time `json:"end_at,omitempty"`
+	PlanDraft
+}
+
+func (r CreatePlanRequest) usesLifecycleDraft() bool {
+	return r.PlanDraft.Advertiser.ID != "" || r.PlanDraft.Schedule.Timezone != "" ||
+		r.PlanDraft.Budget.Currency != "" || len(r.PlanDraft.CreativeReferences) > 0
 }
 
 func (r CreatePlanRequest) Validate() error {
+	if r.usesLifecycleDraft() {
+		return r.PlanDraft.Validate()
+	}
 	if strings.TrimSpace(r.CreativePackageID) == "" || strings.TrimSpace(r.Name) == "" ||
-		strings.TrimSpace(r.Objective) == "" || r.BudgetCents <= 0 || r.StartAt.IsZero() ||
+		strings.TrimSpace(r.Objective) == "" || r.BudgetCents < 0 || r.StartAt.IsZero() ||
 		r.EndAt.IsZero() || !r.EndAt.After(r.StartAt) {
 		return ErrInvalidRequest
 	}
@@ -77,23 +89,31 @@ type CreativePackageSnapshot struct {
 	ContentHash       string `json:"content_hash"`
 }
 
+// DeliveryPlan remains the #21 current projection and also exposes the
+// immutable lifecycle snapshots needed by the plan editor.
 type DeliveryPlan struct {
-	ID                  string                  `json:"id"`
-	OrganizationID      contract.OrganizationID `json:"organization_id"`
-	ProjectID           contract.ProjectID      `json:"project_id"`
-	CreativePackageID   string                  `json:"creative_package_id"`
-	CreativePackageHash string                  `json:"creative_package_hash"`
-	CreativeVersionID   string                  `json:"creative_version_id"`
-	Name                string                  `json:"name"`
-	Objective           string                  `json:"objective"`
-	BudgetCents         int64                   `json:"budget_cents"`
-	StartAt             time.Time               `json:"start_at"`
-	EndAt               time.Time               `json:"end_at"`
-	Status              DeliveryPlanStatus      `json:"status"`
-	Version             int64                   `json:"version"`
-	CreatedBy           string                  `json:"created_by"`
-	CreatedAt           time.Time               `json:"created_at"`
-	UpdatedAt           time.Time               `json:"updated_at"`
+	ID                   string                  `json:"id"`
+	OrganizationID       contract.OrganizationID `json:"organization_id"`
+	ProjectID            contract.ProjectID      `json:"project_id"`
+	CreativePackageID    string                  `json:"creative_package_id"`
+	CreativePackageHash  string                  `json:"creative_package_hash"`
+	CreativeVersionID    string                  `json:"creative_version_id"`
+	Name                 string                  `json:"name"`
+	Objective            string                  `json:"objective"`
+	BudgetCents          int64                   `json:"budget_cents"`
+	StartAt              time.Time               `json:"start_at"`
+	EndAt                time.Time               `json:"end_at"`
+	Status               DeliveryPlanStatus      `json:"status"`
+	Version              int64                   `json:"version"`
+	Platform             string                  `json:"platform"`
+	Source               Source                  `json:"source"`
+	Scenario             Scenario                `json:"scenario"`
+	CurrentVersionNumber int                     `json:"current_version_number"`
+	CurrentVersion       DeliveryPlanVersion     `json:"current_version"`
+	Versions             []DeliveryPlanVersion   `json:"versions"`
+	CreatedBy            string                  `json:"created_by"`
+	CreatedAt            time.Time               `json:"created_at"`
+	UpdatedAt            time.Time               `json:"updated_at"`
 }
 
 type ChangeSet struct {
@@ -149,9 +169,6 @@ type RawMetrics struct {
 	SpendCents  int64 `json:"spend_cents"`
 }
 
-// DeliveryMetricSnapshot is an immutable observation bound to one execution
-// and the exact CreativePackage used by its DeliveryPlan. Demo snapshots are
-// deliberately and permanently labelled as simulated.
 type DeliveryMetricSnapshot struct {
 	ID                string                  `json:"id"`
 	OrganizationID    contract.OrganizationID `json:"organization_id"`
@@ -191,15 +208,17 @@ type ActiveProjectResolver interface {
 	RequireActiveContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 }
 
-// CreativePackageReader is the only seam from Delivery to Creative.
 type CreativePackageReader interface {
 	ReadCreativePackage(context.Context, contract.ActorContext, contract.ProjectID, string) (CreativePackageSnapshot, error)
 }
 
 type Repository interface {
-	CreatePlan(context.Context, DeliveryPlan) (DeliveryPlan, error)
+	CreatePlan(context.Context, DeliveryPlan, DeliveryPlanVersion) (DeliveryPlan, error)
+	UpdatePlan(context.Context, contract.OrganizationID, contract.ProjectID, string, int, DeliveryPlanVersion) (DeliveryPlan, error)
 	ListPlans(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]DeliveryPlan, error)
 	GetPlan(context.Context, contract.OrganizationID, contract.ProjectID, string) (DeliveryPlan, error)
+	ListPlanVersions(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]DeliveryPlanVersion, error)
+	GetPlanVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, int) (DeliveryPlanVersion, error)
 	CreateChangeSet(context.Context, ChangeSet) (ChangeSet, error)
 	ListChangeSets(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ChangeSet, error)
 	GetChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ChangeSet, error)
@@ -228,22 +247,78 @@ func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, pr
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return DeliveryPlan{}, err
 	}
-	pkg, err := s.Packages.ReadCreativePackage(ctx, actor, projectID, request.CreativePackageID)
-	if err != nil {
-		return DeliveryPlan{}, err
-	}
 	id, err := s.idGenerator()("deliveryplan")
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
 	now := s.now()
-	return s.Repository.CreatePlan(ctx, DeliveryPlan{
+	draft, pkg, err := s.createDraftAndPackage(ctx, actor, projectID, request)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	plan := DeliveryPlan{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		CreativePackageID: pkg.ID, CreativePackageHash: pkg.ContentHash, CreativeVersionID: pkg.CreativeVersionID,
-		Name: strings.TrimSpace(request.Name), Objective: strings.TrimSpace(request.Objective),
-		BudgetCents: request.BudgetCents, StartAt: request.StartAt, EndAt: request.EndAt,
-		Status: DeliveryPlanDraft, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
-	})
+		Name: draft.Name, Objective: draft.Objective, BudgetCents: draft.Budget.TotalMinor,
+		StartAt: draft.Schedule.StartAt, EndAt: draft.Schedule.EndAt,
+		Status: DeliveryPlanDraft, Version: 1, Platform: "ocean_engine_mock", Source: SourceMock,
+		Scenario: scenarioFor(draft), CurrentVersionNumber: 1,
+		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	version := versionFromDraft(plan, 1, draft, actor.Principal, now)
+	return s.Repository.CreatePlan(ctx, plan, version)
+}
+
+func (s Service) createDraftAndPackage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreatePlanRequest) (PlanDraft, CreativePackageSnapshot, error) {
+	if request.usesLifecycleDraft() {
+		draft := normalizeDraft(request.PlanDraft, scenarioFor(request.PlanDraft))
+		reference := CreativeReference{AssetID: "mock-unset", Version: 1}
+		if len(draft.CreativeReferences) > 0 {
+			reference = draft.CreativeReferences[0]
+		}
+		pkg := CreativePackageSnapshot{
+			ID: reference.AssetID, CreativeVersionID: strconv.Itoa(reference.Version),
+			ContentHash: fmt.Sprintf("mock:%s@%d", reference.AssetID, reference.Version),
+		}
+		return draft, pkg, nil
+	}
+	if s.Packages == nil {
+		return PlanDraft{}, CreativePackageSnapshot{}, fmt.Errorf("delivery creative package reader is required")
+	}
+	pkg, err := s.Packages.ReadCreativePackage(ctx, actor, projectID, request.CreativePackageID)
+	if err != nil {
+		return PlanDraft{}, CreativePackageSnapshot{}, err
+	}
+	draft := PlanDraft{
+		Name: request.Name, Objective: request.Objective,
+		Advertiser:         AdvertiserInput{ID: "mock-advertiser-001", Name: "Cookies Mock 广告主", Platform: "ocean_engine"},
+		Budget:             Budget{TotalMinor: request.BudgetCents, Currency: "CNY"},
+		Schedule:           Schedule{StartAt: request.StartAt, EndAt: request.EndAt, Timezone: "Asia/Shanghai"},
+		Tracking:           Tracking{LandingPage: "https://demo.cookies.local", PixelID: "PX-LOCAL", ConversionEvent: "conversion"},
+		CreativeReferences: []CreativeReference{{AssetID: pkg.ID, Version: 1, Confirmed: true}},
+	}
+	return normalizeDraft(draft, scenarioFor(draft)), pkg, nil
+}
+
+func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string, request UpdatePlanRequest) (DeliveryPlan, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return DeliveryPlan{}, err
+	}
+	if err := request.Validate(); err != nil || strings.TrimSpace(planID) == "" {
+		return DeliveryPlan{}, ErrInvalidRequest
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return DeliveryPlan{}, err
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, planID)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	if plan.Status != DeliveryPlanDraft {
+		return DeliveryPlan{}, ErrInvalidState
+	}
+	version := versionFromDraft(plan, request.ExpectedVersion+1, request.PlanDraft, actor.Principal, s.now())
+	return s.Repository.UpdatePlan(ctx, actor.OrganizationID, projectID, planID, request.ExpectedVersion, version)
 }
 
 func (s Service) ListPlans(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]DeliveryPlan, error) {
@@ -256,14 +331,64 @@ func (s Service) ListPlans(ctx context.Context, actor contract.ActorContext, pro
 	return s.Repository.ListPlans(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
 }
 
-func (s Service) GetPlanDetail(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string) (PlanDetail, error) {
+func (s Service) GetPlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string) (DeliveryPlan, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
-		return PlanDetail{}, err
+		return DeliveryPlan{}, err
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
-		return PlanDetail{}, err
+		return DeliveryPlan{}, err
 	}
-	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, planID)
+	return s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, planID)
+}
+
+func (s Service) ListPlanVersions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string) ([]DeliveryPlanVersion, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListPlanVersions(ctx, actor.OrganizationID, projectID, planID)
+}
+
+func (s Service) GetPlanVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string, version int) (DeliveryPlanVersion, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return DeliveryPlanVersion{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return DeliveryPlanVersion{}, err
+	}
+	return s.Repository.GetPlanVersion(ctx, actor.OrganizationID, projectID, planID, version)
+}
+
+func (s Service) RunPlanPreflight(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string) (PreflightResult, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return PreflightResult{}, err
+	}
+	plan, err := s.GetPlan(ctx, actor, projectID, planID)
+	if err != nil {
+		return PreflightResult{}, err
+	}
+	checks := RunPreflight(plan.CurrentVersion)
+	return preflightResult(plan.ID, plan.CurrentVersion, checks, s.now()), nil
+}
+
+func preflightResult(planID string, version DeliveryPlanVersion, checks []PreflightCheck, checkedAt time.Time) PreflightResult {
+	blocked := false
+	for _, check := range checks {
+		if !check.Passed && check.Severity == CheckSeverityError {
+			blocked = true
+			break
+		}
+	}
+	return PreflightResult{
+		PlanID: planID, PlanVersion: version.VersionNumber, Passed: !blocked, Blocked: blocked,
+		Checks: checks, Source: SourceMock, Scenario: version.Scenario, CheckedAt: checkedAt,
+	}
+}
+
+func (s Service) GetPlanDetail(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string) (PlanDetail, error) {
+	plan, err := s.GetPlan(ctx, actor, projectID, planID)
 	if err != nil {
 		return PlanDetail{}, err
 	}
@@ -326,10 +451,25 @@ func (s Service) Preflight(ctx context.Context, actor contract.ActorContext, pro
 	if value.Status != ChangeSetDraft {
 		return ChangeSet{}, ErrInvalidState
 	}
-	if _, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, value.PlanID); err != nil {
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, value.PlanID)
+	if err != nil {
 		return ChangeSet{}, err
 	}
-	return s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion, ChangeSetPreflightPassed, actor.Principal.ID, s.now())
+	if plan.Version != value.PlanVersion {
+		return ChangeSet{}, ErrStalePlanVersion
+	}
+	version, err := s.Repository.GetPlanVersion(ctx, actor.OrganizationID, projectID, value.PlanID, int(value.PlanVersion))
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	next := ChangeSetPreflightPassed
+	for _, check := range RunPreflight(version) {
+		if !check.Passed && check.Severity == CheckSeverityError {
+			next = ChangeSetPreflightFailed
+			break
+		}
+	}
+	return s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion, next, actor.Principal.ID, s.now())
 }
 
 func (s Service) Approve(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ChangeSet, error) {
@@ -359,6 +499,13 @@ func (s Service) Execute(ctx context.Context, actor contract.ActorContext, proje
 	}
 	if value.Status != ChangeSetApproved {
 		return ExecutionResult{}, ErrInvalidState
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, value.PlanID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if plan.Version != value.PlanVersion {
+		return ExecutionResult{}, ErrStalePlanVersion
 	}
 	executionID, err := s.idGenerator()("deliveryexecution")
 	if err != nil {
@@ -459,10 +606,6 @@ func (s Service) ListMetricSnapshots(ctx context.Context, actor contract.ActorCo
 	return s.Repository.ListMetricSnapshots(ctx, actor.OrganizationID, projectID, executionID, normalizeLimit(limit))
 }
 
-// ListExecutionEvidence is the narrow internal projection used by the
-// Delivery→Insights integration. The Insights service authorizes its own
-// caller before using this method; Delivery still enforces tenant and active
-// project boundaries here without requiring a second end-user Delivery scope.
 func (s Service) ListExecutionEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ExecutionResult, error) {
 	if s.Repository == nil || s.Projects == nil {
 		return nil, fmt.Errorf("delivery evidence dependencies are incomplete")
@@ -476,9 +619,6 @@ func (s Service) ListExecutionEvidence(ctx context.Context, actor contract.Actor
 	return s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
 }
 
-// ReadExecutionEvidence is the narrow cross-domain projection for Insights.
-// It deliberately carries immutable metric and CreativePackage lineage rather
-// than exposing Delivery's repository to another domain.
 func (s Service) ReadExecutionEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string) (ExecutionResult, *DeliveryMetricSnapshot, DeliveryPlan, error) {
 	if s.Repository == nil || s.Projects == nil {
 		return ExecutionResult{}, nil, DeliveryPlan{}, fmt.Errorf("delivery evidence dependencies are incomplete")
@@ -521,7 +661,7 @@ func (s Service) findExecution(ctx context.Context, organizationID contract.Orga
 }
 
 func (s Service) ready(actor contract.ActorContext, projectID contract.ProjectID, scope contract.Scope) error {
-	if s.Repository == nil || s.Projects == nil || s.Packages == nil {
+	if s.Repository == nil || s.Projects == nil {
 		return fmt.Errorf("delivery dependencies are incomplete")
 	}
 	if actor.OrganizationID == "" || projectID == "" || !actor.HasScope(scope) {

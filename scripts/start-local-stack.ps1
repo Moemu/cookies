@@ -1,37 +1,11 @@
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-
-function Test-HTTP([string]$url) {
-    try {
-        $response = Invoke-WebRequest `
-            -UseBasicParsing `
-            -Uri $url `
-            -TimeoutSec 2
-        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
-    }
-    catch {
-        return $false
-    }
-}
-
-function Test-ListeningPort([int]$port) {
-    return $null -ne (Get-NetTCPConnection `
-        -LocalPort $port `
-        -State Listen `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1)
-}
+. "$PSScriptRoot\local-acceptance-common.ps1"
 
 Push-Location $repoRoot
 try {
-    if (-not (Test-HTTP "http://127.0.0.1:8080/readyz")) {
-        & powershell -NoProfile -ExecutionPolicy Bypass `
-            -File "$PSScriptRoot\import-clawex-model-providers.ps1"
-        if ($LASTEXITCODE -ne 0) {
-            throw "Provider model import failed"
-        }
-        & powershell -NoProfile -ExecutionPolicy Bypass `
-            -File "$PSScriptRoot\start-local-adapter-provider.ps1"
+    if (-not (Test-LocalHTTP "http://127.0.0.1:8080/readyz")) {
+        & "$PSScriptRoot\start-local-adapter-provider.ps1"
         if ($LASTEXITCODE -ne 0) {
             throw "Cookies API startup failed"
         }
@@ -40,27 +14,33 @@ try {
         Write-Output "Cookies API is already running"
     }
 
-    if (-not (Test-Path "$repoRoot\web\node_modules")) {
-        & npm ci --prefix web
+    if (-not (Test-Path "$repoRoot\node_modules")) {
+        & npm.cmd ci
         if ($LASTEXITCODE -ne 0) {
             throw "Frontend dependency installation failed"
         }
     }
 
-    if (-not (Test-ListeningPort 5173)) {
+    if (-not (Test-LocalListeningPort 5173)) {
+        $frontendScript = Join-Path $repoRoot "scripts\start-local-frontend.ps1"
         Start-Process `
-            -FilePath "cmd.exe" `
-            -ArgumentList "/k", "npm run dev --prefix web" `
+            -FilePath "powershell.exe" `
+            -ArgumentList @(
+                "-NoExit",
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-File", "`"$frontendScript`""
+            ) `
             -WorkingDirectory $repoRoot
-        $deadline = (Get-Date).AddSeconds(30)
+        $deadline = (Get-Date).AddSeconds(60)
         do {
-            if (Test-ListeningPort 5173) {
+            if (Test-LocalHTTP "http://127.0.0.1:5173") {
                 break
             }
             Start-Sleep -Milliseconds 500
         } while ((Get-Date) -lt $deadline)
-        if (-not (Test-ListeningPort 5173)) {
-            throw "Frontend did not start on port 5173"
+        if (-not (Test-LocalHTTP "http://127.0.0.1:5173")) {
+            throw "Frontend did not become ready at http://127.0.0.1:5173 within 60 seconds"
         }
     }
     else {
@@ -71,14 +51,10 @@ try {
     Write-Output "Cookies local stack is ready:"
     Write-Output "  Frontend: http://127.0.0.1:5173"
     Write-Output "  Backend:  http://127.0.0.1:8080"
-    $mysqlPort = [Environment]::GetEnvironmentVariable(
-        "COOKIES_MYSQL_PORT",
-        "User"
-    )
-    if ([string]::IsNullOrWhiteSpace($mysqlPort)) {
-        $mysqlPort = "3307"
-    }
+    $mysqlPort = Get-LocalAcceptanceSetting "COOKIES_MYSQL_PORT" "3307"
     Write-Output "  MySQL:    127.0.0.1:$mysqlPort (Docker)"
+    Write-Output "  Text:     $script:SeedTextAlias -> $script:SeedTextModel"
+    Write-Output "  Login:    Admin / 123456 (unless overridden)"
 }
 finally {
     Pop-Location

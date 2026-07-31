@@ -1,0 +1,141 @@
+{
+  "contract_version": "creative-video-intake/v1",
+  "intake_id": "fixture_video_commerce_preroll_guerlain_v1",
+  "organization_id": "fixture_org",
+  "project_id": "fixture_project_guerlain",
+  "status": "fixture_ready",
+  "source": {
+    "kind": "fixture",
+    "fixture_id": "commerce-preroll-guerlain/v1",
+    "documents": [
+      {
+        "file_name": "【娇兰】brief.pdf",
+        "locator": "external://provided/guerlain-brief.pdf",
+        "sha256": "sha256:303e97a42018a9a59763a9785e4c59b24d8afa0b398d411b5eed76937dfe9535",
+        "page_refs": ["2", "4-7", "17-19", "25-27"],
+        "note": "固定开发样例仅选择娇兰第三代黄金复原蜜。"
+      }
+    ]
+  },
+  "campaign": {
+    "objective": "为抖音效果广告生成可测试的六秒电商前贴。",
+    "audience": "关注抗老修护与妆前服帖体验的干皮护肤人群。",
+    "core_message": "一次擦拭完成从雾面信息缺口到清晰商品定格的转化表达。",
+    "call_to_action": "进入娇兰官方渠道了解第三代黄金复原蜜",
+    "channels": ["douyin"],
+    "locale": "zh-CN"
+  },
+  "video": {
+    "mode": "commerce_preroll",
+    "purpose": "performance",
+    "target_duration_seconds": 6,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "variant_count": 1,
+    "hook_deadline_seconds": 1,
+    "audio_policy": "silent",
+    "transition": "hard_cut"
+  },
+  "product": {
+    "brand_name": "法国娇兰",
+    "product_name": "娇兰第三代黄金复原蜜",
+    "selling_points": [
+      "黑蜂蜂蜜等蜂制品修护肌底",
+      "肌肤呈现弹、润、亮",
+      "可用于妆前打底或混合底妆"
+    ],
+    "proof_points": [
+      "Brief 提供产品科技、使用方式和传播限制",
+      "实验与临床数据须保留适用范围及因人而异声明"
+    ],
+    "usage_scenarios": ["日常护肤", "妆前打底", "混合底妆"]
+  },
+  "creative": {
+    "concept": "雾面橱窗揭幕：先以同构图雾面首帧制造信息缺口，再用一次横向擦拭露出清晰商品，最后稳定定格。",
+    "tone": ["奢华", "温润", "可信", "克制"],
+    "visual_keywords": ["雾面玻璃", "暖金侧光", "固定构图", "商品正面", "清晰尾帧"],
+    "mandatory_elements": [
+      "瓶型、比例、颜色、透明材质、标签文字和蜂蜜标识保持真实",
+      "只执行一次横向擦拭动作",
+      "四秒后完整露出商品正面并稳定停留"
+    ],
+    "prohibited_claims": [
+      "不生成价格、促销、字幕或水印",
+      "不增加第二件商品",
+      "商品不穿模、不闪现、不漂移",
+      "手部不畸变"
+    ],
+    "reference_policy": "Brief 商品图用于固定样例规划；真实生成前须导入同项目且已授权的 AssetVersionRef。",
+    "similarity_policy": "仅继承品牌视觉语言和商品真实外观，不复制 Brief 版式、人物肖像或未授权内容。"
+  },
+  "source_assets": [
+    {
+      "role": "product_image",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "external://provided/guerlain-brief.pdf#page=4",
+      "rights_status": "confirmed",
+      "note": "用户确认以 Brief 中的高清正面商品图作为固定样例；运行时仍需导入稳定素材版本。"
+    },
+    {
+      "role": "main_video",
+      "required": true,
+      "availability": "missing",
+      "rights_status": "confirmed",
+      "note": "只阻塞最终拼接与投产，不阻塞六秒前贴规划和生成。"
+    }
+  ],
+  "claims": [
+    {
+      "text": "主推 SKU 为娇兰第三代黄金复原蜜。",
+      "status": "manual_confirmed",
+      "evidence_refs": ["manual_confirmation_2026_07_28"]
+    },
+    {
+      "text": "投放渠道为抖音，固定样例采用雾面橱窗揭幕。",
+      "status": "manual_confirmed",
+      "evidence_refs": ["manual_confirmation_2026_07_28"]
+    },
+    {
+      "text": "第三代黄金复原蜜的商品科技、使用场景与禁止沟通来自 Brief。",
+      "status": "brief_supported",
+      "evidence_refs": ["guerlain_product_page_4"]
+    }
+  ],
+  "evidence_refs": [
+    {
+      "id": "guerlain_product_page_4",
+      "source_type": "fixture_document",
+      "locator": "external://provided/guerlain-brief.pdf#page=4",
+      "note": "产品名称、卖点、使用方式、必提词和禁用沟通。"
+    },
+    {
+      "id": "manual_confirmation_2026_07_28",
+      "source_type": "manual_confirmation",
+      "locator": "conversation://2026-07-28/guerlain-commerce-preroll",
+      "note": "用户确认 SKU、渠道、CTA、模板、六秒、静音和单候选。"
+    }
+  ],
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": false,
+    "production_ready": false,
+    "missing_fields": [
+      "source_assets.product_image.asset_ref",
+      "source_assets.main_video.asset_ref"
+    ],
+    "blockers": [
+      "生成前须把 Brief 商品图导入为同项目 AssetVersionRef。",
+      "投产前须提供用于拼接的正版主视频 AssetVersionRef。",
+      "真实付费调用前须轮换已暴露的 Ark API Key 并安全配置新密钥。"
+    ],
+    "assumptions": []
+  },
+  "confirmation": {
+    "required": true,
+    "status": "confirmed",
+    "confirmed_by": "user",
+    "confirmed_at": "2026-07-28T09:00:00Z"
+  },
+  "created_at": "2026-07-28T06:00:00Z"
+}

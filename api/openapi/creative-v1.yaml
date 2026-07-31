@@ -14,6 +14,130 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/creative/v1/projects/{project_id}/commerce-preroll/sources:
+    get:
+      operationId: listCommercePrerollSources
+      summary: List immutable confirmed Brief and approved StrategyPackage versions available to commerce pre-roll planning.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Selectable Creative source versions, with the preferred version first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CreativeSourceOption'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /api/creative/v1/projects/{project_id}/commerce-preroll:prepare:
+    post:
+      operationId: prepareCommercePreroll
+      summary: Resolve one immutable source and compile a versioned commerce pre-roll prompt for one template.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PrepareCommercePrerollRequest'}
+      responses:
+        '200':
+          description: Deterministic prompt, frame plan and readiness for human confirmation.
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/commerce-preroll:ensure-fixture:
+    post:
+      operationId: ensureCommercePrerollFixtureWorkspace
+      summary: Idempotently materialize the versioned Guerlain fixture as a durable Creative workspace.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EnsureCommerceFixtureWorkspaceRequest'}
+      responses:
+        '200':
+          description: Existing or newly materialized commerce pre-roll workspace.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/commerce-preroll:
+    get:
+      operationId: getLatestCommercePrerollWorkspace
+      summary: Restore the latest durable commerce pre-roll workspace in the Project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Task, source Intake, latest Draft and generation Attempt lineage.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll:
+    get:
+      operationId: getCommercePrerollWorkspace
+      summary: Read one commerce pre-roll workspace by its real CreativeTask ID.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+      responses:
+        '200':
+          description: Commerce pre-roll workspace.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll-draft:
+    patch:
+      operationId: reviseCommercePrerollDraft
+      summary: Append a server-compiled commerce Prompt revision using optimistic concurrency.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateCommercePrerollDraftRequest'}
+      responses:
+        '200':
+          description: Workspace with its new latest Draft revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll:confirm-generation:
+    post:
+      operationId: confirmCommercePrerollGeneration
+      summary: Freeze and approve the current Prompt and first/last-frame GenerationSpec.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Workspace with an approval bound to the exact GenerationSpec hash.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-intakes:
     get:
       operationId: listCreativeIntakes
@@ -24,7 +148,7 @@ paths:
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createCreativeIntake
-      summary: Create a normalized manual CreativeIntake or explicitly start one from an immutable Strategy package.
+      summary: Create a normalized manual CreativeIntake or a v3 Strategy package intake with an optional task overlay.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
         required: true
@@ -35,6 +159,82 @@ paths:
         '201': {description: CreativeIntake created.}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:
+    get:
+      operationId: getCreativeIntake
+      summary: Get one Creative-owned frozen Intake snapshot, including task-strategy lineage when present.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200': {description: Frozen CreativeIntake snapshot.}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches:
+    post:
+      operationId: generateCreativeDirectionCandidates
+      summary: Generate schema-constrained CreativeDirection candidates from one frozen v3 Strategy intake.
+      description: >-
+        This is the first LLM-authored creative step. Strategy facts and
+        guardrails are immutable inputs; provider failures are returned and
+        never replaced with a fabricated fallback concept.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: intake_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                candidate_count: {type: integer, minimum: 2, maximum: 4, default: 3}
+      responses:
+        '201':
+          description: Immutable candidate batch.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-directions/{direction_id}/confirm:
+    post:
+      operationId: confirmCreativeDirection
+      summary: Confirm one CreativeDirection and supersede competing candidates for the same intake.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: direction_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Confirmed immutable CreativeDirection version.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/business-capabilities:
+    get:
+      operationId: listCreativeBusinessCapabilities
+      summary: List Creative-owned task-strategy handoff and production readiness for each business.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Capability states used to gate Strategy handoff actions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CreativeBusinessCapability'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-task:
     post:
       operationId: createCreativeTask
@@ -84,6 +284,70 @@ paths:
       responses:
         '204': {description: CreativeTask archived.}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake:
+    get:
+      operationId: getCreativeViralRemakeWorkspace
+      summary: Restore the persisted viral-remake task, immutable manual input snapshot, readiness and production lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200':
+          description: Restorable viral-remake workspace.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreativeTaskDetail'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake:analyze-reference:
+    post:
+      operationId: analyzeCreativeViralRemakeReference
+      summary: Derive audio and keyframes, analyze the reference through the Provider boundary, and persist an immutable five-dimension snapshot.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      responses:
+        '200':
+          description: AnalysisSnapshot and editable PromptDraft persisted as the next draft revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreativeTaskDetail'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake/prompt-draft:
+    patch:
+      operationId: updateCreativeViralRemakePrompt
+      summary: Persist edits to all five prompt dimensions using optimistic revision control.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateViralPromptRequest'}
+      responses:
+        '200': {description: Editable prompt persisted as the next draft revision.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake:confirm-generation:
+    post:
+      operationId: confirmCreativeViralRemakeGeneration
+      summary: Explicitly confirm reference rights and freeze an immutable PromptPackage for generation.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConfirmViralGenerationRequest'}
+      responses:
+        '200': {description: PromptPackage frozen and generation readiness enabled.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake/candidates/{candidate_id}:submit-review:
+    post:
+      operationId: submitCreativeViralRemakeCandidateReview
+      summary: Submit a successfully ingested candidate after all minimum lineage and rights checks pass.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - name: candidate_id
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '200': {description: Candidate marked reviewed and the task made ready for review.}
         '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}:draft:
     patch:
@@ -137,11 +401,7 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              properties:
-                model_alias: {type: string, minLength: 1, maxLength: 128}
+            schema: {$ref: '#/components/schemas/CreateVideoJobRequest'}
       responses:
         '202': {description: Provider video job created and registered to the CreativeTask.}
         '409': {$ref: '#/components/responses/Conflict'}
@@ -224,8 +484,18 @@ components:
     CreateCreativeIntakeRequest:
       type: object
       additionalProperties: false
-      required: [source, channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+      required: [source]
+      oneOf:
+        - properties: {source: {const: manual}}
+          required: [channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+        - properties: {source: {const: strategy_package}}
+          required: [strategy_package]
+        - properties:
+            contract_version: {const: creative-intake-create/v3}
+            source: {const: strategy_package}
+          required: [contract_version, strategy_package_ref, selected_route_id]
       properties:
+        contract_version: {const: creative-intake-create/v3}
         source: {enum: [manual, strategy_package]}
         strategy_package:
           type: object
@@ -235,7 +505,24 @@ components:
             package_id: {type: string, minLength: 1}
             package_version: {type: integer, minimum: 1}
             expected_content_hash: {type: string, minLength: 1}
-        channel: {const: xiaohongshu}
+        strategy_package_ref:
+          $ref: '../contracts/strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef'
+        selected_route_id: {type: string, minLength: 1}
+        task_overlay_ref:
+          type: object
+          additionalProperties: false
+          required: [overlay_id, content_hash]
+          properties:
+            overlay_id: {type: string, minLength: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        format: {enum: [image_text, video]}
+        performance_mode: {enum: [viral_remake]}
+        creative_routes:
+          type: array
+          maxItems: 1
+          items: {$ref: '#/components/schemas/CreativeVideoRoute'}
+        manual_viral_remake: {$ref: '#/components/schemas/ManualViralRemakeInput'}
+        channel: {enum: [xiaohongshu, douyin, kuaishou]}
         objective: {type: string, maxLength: 500}
         audience: {type: string, maxLength: 500}
         core_message: {type: string, maxLength: 1000}
@@ -245,11 +532,31 @@ components:
         visual_keywords: {type: array, items: {type: string}}
         mandatory_elements: {type: array, items: {type: string}}
         prohibited_claims: {type: array, items: {type: string}}
+    CreativeBusinessCapability:
+      type: object
+      additionalProperties: false
+      required: [business_code, display_name, status, can_create_task_immediately, production_inputs]
+      properties:
+        business_code: {type: string}
+        display_name: {type: string}
+        status: {enum: [available, preview, unsupported]}
+        format: {enum: [image_text, video]}
+        channel: {enum: [xiaohongshu, douyin, kuaishou]}
+        performance_mode: {type: string}
+        destination_area: {enum: [image-text, video]}
+        destination_view: {type: string}
+        can_create_task_immediately: {type: boolean}
+        production_inputs: {type: array, items: {type: string}}
+        limitation: {type: string}
     CreateCreativeTaskRequest:
       type: object
       additionalProperties: false
-      required: [content_type, focus]
+      required: [content_type]
+      anyOf:
+        - required: [focus]
+        - required: [direction_id]
       properties:
+        direction_id: {type: string, minLength: 1, maxLength: 96}
         content_type: {enum: [lifestyle, ingredient_explanation, usage_scenario, list_guide, comparison, custom]}
         focus: {type: string, minLength: 1, maxLength: 300}
         audience: {type: string, maxLength: 500}
@@ -265,8 +572,12 @@ components:
     CreateVideoTaskRequest:
       type: object
       additionalProperties: false
-      required: [route_index, channel, source_video, concept, prompt, call_to_action, mandatory_elements, prohibited_claims, confirm_route]
+      required: [channel, source_video, concept, prompt, call_to_action, mandatory_elements, prohibited_claims, confirm_route]
+      anyOf:
+        - required: [selected_route_id]
+        - required: [route_index]
       properties:
+        selected_route_id: {type: string, minLength: 1, maxLength: 128}
         route_index: {type: integer, minimum: 0}
         channel: {enum: [douyin, kuaishou]}
         source_video: {$ref: '#/components/schemas/AssetVersionRef'}
@@ -276,6 +587,111 @@ components:
         mandatory_elements: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
         prohibited_claims: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
         confirm_route: {type: boolean, const: true}
+    CreativeVideoRoute:
+      type: object
+      additionalProperties: false
+      required: [route_id, route_type, video_purpose, channels, reason, target_duration_seconds, aspect_ratio, source_asset_refs, evidence_refs, requires_human_confirmation]
+      properties:
+        route_id: {const: route_manual_viral_remake_v1}
+        route_type: {const: viral_remake}
+        video_purpose: {const: performance}
+        channels:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {enum: [douyin, kuaishou]}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        target_duration_seconds: {type: integer, minimum: 4, maximum: 60}
+        aspect_ratio: {const: '9:16'}
+        source_asset_refs:
+          type: array
+          items: {$ref: '#/components/schemas/AssetVersionRef'}
+        evidence_refs: {type: array, items: {type: string}}
+        requires_human_confirmation: {const: true}
+    ManualViralRemakeInput:
+      type: object
+      additionalProperties: false
+      required: [product_name, selling_points, user_instruction, reference_video, reference_video_rights]
+      properties:
+        product_name: {type: string, minLength: 1, maxLength: 300}
+        selling_points:
+          type: array
+          maxItems: 12
+          items: {type: string, minLength: 1, maxLength: 300}
+        user_instruction: {type: string, minLength: 1, maxLength: 2000}
+        reference_video: {$ref: '#/components/schemas/AssetVersionRef'}
+        reference_image: {$ref: '#/components/schemas/AssetVersionRef'}
+        reference_video_rights: {enum: [pending, confirmed]}
+        reference_image_rights: {enum: [pending, confirmed]}
+    CreativeTaskDetail:
+      type: object
+      additionalProperties: true
+      required: [task, intake, video_draft, production_jobs]
+      properties:
+        task: {type: object}
+        intake: {type: object}
+        video_draft:
+          type: object
+          required: [contract_version, task_id, revision, viral_remake]
+          properties:
+            contract_version: {const: creative-video-draft/v1}
+            task_id: {type: string}
+            revision: {type: integer, minimum: 1}
+            viral_remake: {$ref: '#/components/schemas/ViralRemakeDraft'}
+        production_jobs: {type: array, items: {type: object}}
+    ViralRemakeDraft:
+      type: object
+      additionalProperties: true
+      required: [contract_version, task_id, revision, status, selected_route_id, input_snapshot, input_hash, readiness, created_at, updated_at]
+      properties:
+        contract_version: {const: creative-viral-remake-draft/v1}
+        task_id: {type: string, minLength: 1}
+        revision: {type: integer, minimum: 1}
+        status: {enum: [waiting_for_analysis, analysis_ready, generation_ready, generating, candidate_ready, provider_failed, ready_for_review]}
+        selected_route_id: {const: route_manual_viral_remake_v1}
+        input_snapshot: {type: object}
+        input_hash: {type: string, minLength: 1}
+        readiness:
+          type: object
+          required: [planning_ready, generation_ready, production_ready, missing_fields, blockers]
+          properties:
+            planning_ready: {type: boolean}
+            generation_ready: {type: boolean}
+            production_ready: {type: boolean}
+            missing_fields: {type: array, items: {type: string}}
+            blockers: {type: array, items: {type: string}}
+        analysis_snapshot: {type: object}
+        prompt_draft: {type: object}
+        prompt_package: {type: object}
+        candidates:
+          type: array
+          items: {type: object}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    UpdateViralPromptRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, dimensions]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        dimensions:
+          type: object
+          additionalProperties: false
+          required: [task_goal_type, quality_style_lighting, environment_atmosphere, camera_content, music_sound]
+          properties:
+            task_goal_type: {type: string, minLength: 1}
+            quality_style_lighting: {type: string, minLength: 1}
+            environment_atmosphere: {type: string, minLength: 1}
+            camera_content: {type: string, minLength: 1}
+            music_sound: {type: string, minLength: 1}
+    ConfirmViralGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, confirm_reference_video_rights, confirm_reference_image_rights]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        confirm_reference_video_rights: {type: boolean, const: true}
+        confirm_reference_image_rights: {type: boolean}
     FreezeCreativeVersionRequest:
       type: object
       additionalProperties: false
@@ -290,6 +706,250 @@ components:
       properties:
         image_plan_order: {type: integer, minimum: 1, maximum: 12}
         model_alias: {type: string, minLength: 1, maxLength: 128}
+    CreateVideoJobRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        model_alias: {type: string, minLength: 1, maxLength: 128}
+        prompt: {$ref: '#/components/schemas/CreativeVideoPrompt'}
+        generation_spec: {$ref: '#/components/schemas/CreativeVideoGenerationSpec'}
+        approval: {$ref: '#/components/schemas/VideoGenerationApproval'}
+      dependentRequired:
+        prompt: [generation_spec, approval]
+        generation_spec: [prompt, approval]
+        approval: [prompt, generation_spec]
+    EnsureCommerceFixtureWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [template_ref, product_asset_ref, first_frame_asset_ref, last_frame_asset_ref]
+      properties:
+        template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+        product_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        first_frame_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        last_frame_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+    UpdateCommercePrerollDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, template_ref]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+        fidelity: {type: string, maxLength: 4000}
+        camera: {type: string, maxLength: 4000}
+        motion: {type: string, maxLength: 4000}
+        environment: {type: string, maxLength: 4000}
+        result: {type: string, maxLength: 4000}
+        guardrails:
+          type: array
+          maxItems: 40
+          items: {type: string, minLength: 1, maxLength: 500}
+    CommercePrerollWorkspace:
+      type: object
+      additionalProperties: true
+      required:
+        - task
+        - intake
+        - video_draft
+        - commerce_preroll_generation_attempts
+      properties:
+        task: {type: object}
+        intake: {type: object}
+        video_draft:
+          type: object
+          required: [contract_version, task_id, revision, commerce_preroll]
+          properties:
+            contract_version: {const: creative-video-draft/v1}
+            task_id: {type: string}
+            revision: {type: integer, minimum: 1}
+            commerce_preroll:
+              type: object
+              required: [contract_version, task_id, revision, input_snapshot, input_hash, plan, readiness]
+              properties:
+                contract_version: {const: creative-commerce-preroll-draft/v1}
+                task_id: {type: string}
+                revision: {type: integer, minimum: 1}
+                input_snapshot: {type: object}
+                input_hash: {$ref: '#/components/schemas/SHA256Ref'}
+                plan: {type: object}
+                approval: {$ref: '#/components/schemas/VideoGenerationApproval'}
+                readiness: {type: object}
+        commerce_preroll_generation_attempts:
+          type: array
+          items:
+            type: object
+            required: [id, task_id, draft_revision, template_ref, prompt_hash, generation_spec_hash, provider_job_id, created_at]
+            properties:
+              id: {type: string}
+              task_id: {type: string}
+              draft_revision: {type: integer, minimum: 1}
+              template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+              prompt_hash: {$ref: '#/components/schemas/SHA256Ref'}
+              generation_spec_hash: {$ref: '#/components/schemas/SHA256Ref'}
+              provider_job_id: {type: string}
+              retry_of_attempt_id: {type: string}
+              output_asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+              created_at: {type: string, format: date-time}
+    CreativeVideoPrompt:
+      type: object
+      additionalProperties: false
+      required: [contract_version, task_id, intake_version, template_ref, prompt_version, fidelity, camera, environment, timeline, guardrails, compiled_prompt, prompt_hash]
+      properties:
+        contract_version: {const: creative-video-prompt/v1}
+        task_id: {type: string, minLength: 1}
+        intake_version: {type: integer, minimum: 1}
+        template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+        product_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        prompt_version: {type: integer, minimum: 1}
+        fidelity: {type: string}
+        camera: {type: string}
+        environment: {type: string}
+        timeline:
+          type: array
+          items: {$ref: '#/components/schemas/PromptTimelineSegment'}
+        guardrails: {type: array, items: {type: string}}
+        compiled_prompt: {type: string, minLength: 1, maxLength: 12000, writeOnly: true}
+        prompt_hash: {$ref: '#/components/schemas/SHA256Ref'}
+    CreativeTemplateRef:
+      type: object
+      additionalProperties: false
+      required: [template_id, template_version]
+      properties:
+        template_id:
+          enum:
+            - commerce.product-cut
+            - commerce.window-reveal
+            - commerce.one-click
+            - commerce.miniature
+            - commerce.device-summon
+        template_version: {type: integer, const: 1}
+    CreativeSourceRef:
+      type: object
+      additionalProperties: false
+      required: [kind, id, version, content_hash]
+      properties:
+        kind: {enum: [confirmed_brief, strategy_package]}
+        id: {type: string, minLength: 1}
+        version: {type: integer, minimum: 1}
+        content_hash: {type: string, minLength: 1}
+    CommerceProductFacts:
+      type: object
+      additionalProperties: false
+      required:
+        - brand_name
+        - product_name
+        - selling_points
+        - tone
+        - visual_keywords
+        - mandatory_elements
+        - prohibited_claims
+        - product_asset_refs
+      properties:
+        brand_name: {type: string}
+        product_name: {type: string}
+        product_category: {type: string}
+        selling_points: {type: array, items: {type: string}}
+        tone: {type: array, items: {type: string}}
+        visual_keywords: {type: array, items: {type: string}}
+        mandatory_elements: {type: array, items: {type: string}}
+        prohibited_claims: {type: array, items: {type: string}}
+        product_asset_refs:
+          type: array
+          items: {$ref: '#/components/schemas/AssetVersionRef'}
+    CreativeSourceOption:
+      type: object
+      additionalProperties: false
+      required: [source_ref, status, product, confirmed_at, preferred]
+      properties:
+        source_ref: {$ref: '#/components/schemas/CreativeSourceRef'}
+        status: {enum: [confirmed, approved]}
+        product: {$ref: '#/components/schemas/CommerceProductFacts'}
+        confirmed_at: {type: string, format: date-time}
+        preferred: {type: boolean}
+    PrepareCommercePrerollRequest:
+      type: object
+      additionalProperties: false
+      required: [source_ref, template_ref]
+      properties:
+        source_ref: {$ref: '#/components/schemas/CreativeSourceRef'}
+        template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+        product_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+    PromptTimelineSegment:
+      type: object
+      additionalProperties: false
+      required: [start_seconds, end_seconds, purpose, instruction]
+      properties:
+        start_seconds: {type: number, minimum: 0}
+        end_seconds: {type: number, exclusiveMinimum: 0}
+        purpose: {enum: [information_gap, single_transformation, product_hold]}
+        instruction: {type: string, minLength: 1}
+    CreativeVideoGenerationSpec:
+      type: object
+      additionalProperties: false
+      required:
+        - contract_version
+        - task_id
+        - prompt_hash
+        - conditioning_assets
+        - duration_seconds
+        - aspect_ratio
+        - resolution
+        - audio_policy
+        - candidate_count
+        - generation_ready
+        - production_ready
+        - generation_spec_hash
+      properties:
+        contract_version: {const: creative-video-generation-spec/v1}
+        task_id: {type: string, minLength: 1}
+        prompt_hash: {$ref: '#/components/schemas/SHA256Ref'}
+        conditioning_assets:
+          type: array
+          minItems: 2
+          maxItems: 2
+          prefixItems:
+            - {$ref: '#/components/schemas/FirstFrameConditioningAsset'}
+            - {$ref: '#/components/schemas/LastFrameConditioningAsset'}
+        duration_seconds: {type: integer, const: 6}
+        aspect_ratio: {const: '9:16'}
+        resolution: {const: 720p}
+        audio_policy: {const: silent}
+        candidate_count: {type: integer, const: 1}
+        generation_ready: {type: boolean, const: true}
+        production_ready: {type: boolean, const: false}
+        generation_spec_hash: {$ref: '#/components/schemas/SHA256Ref'}
+    FirstFrameConditioningAsset:
+      type: object
+      additionalProperties: false
+      required: [role, asset_ref]
+      properties:
+        role: {const: first_frame}
+        asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+    LastFrameConditioningAsset:
+      type: object
+      additionalProperties: false
+      required: [role, asset_ref]
+      properties:
+        role: {const: last_frame}
+        asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+    VideoGenerationApproval:
+      type: object
+      additionalProperties: false
+      required: [contract_version, task_id, generation_spec_hash, confirmed_items, confirmed_by, confirmed_at]
+      properties:
+        contract_version: {const: creative-generation-approval/v1}
+        task_id: {type: string, minLength: 1}
+        generation_spec_hash: {$ref: '#/components/schemas/SHA256Ref'}
+        confirmed_items:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items: {enum: [product, template, motion, result, prompt, paid_generation]}
+        confirmed_by: {type: string, minLength: 1}
+        confirmed_at: {type: string, format: date-time}
+    SHA256Ref:
+      type: string
+      pattern: '^sha256:[a-f0-9]{64}$'
     BindImageAssetRequest:
       type: object
       additionalProperties: false

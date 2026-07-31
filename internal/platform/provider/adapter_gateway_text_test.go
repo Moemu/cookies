@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -42,6 +43,36 @@ func TestAdapterGatewayTextProducesStructuredOutput(t *testing.T) {
 	}
 	if result.ModelVersion != "text-v2" || string(result.StructuredOutput) != `{"operations":[]}` || result.Usage == nil || result.Usage.TotalTokens != 16 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestAdapterGatewayTextMapsRateLimitAsRetryableTextError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "rate limited", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	adapter, err := NewAdapterGatewayTextAdapter(
+		textRouteStub{snapshot: textRouteSnapshot(server.URL)},
+		credentialStub("test-token"),
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter.client = server.Client()
+	_, err = adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1",
+		ModelAlias:     "cookies.text.standard",
+		Messages:       []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+	})
+	var execution ExecutionError
+	if !errors.As(err, &execution) {
+		t.Fatalf("error = %T %v, want ExecutionError", err, err)
+	}
+	if execution.JobError.Code != "MODEL_RATE_LIMITED" || !execution.JobError.Retryable ||
+		execution.JobError.Message != "Adapter gateway rate limited the text request" {
+		t.Fatalf("job error = %#v", execution.JobError)
 	}
 }
 
@@ -240,6 +271,56 @@ func TestAdapterGatewayTextInspectionDoesNotInvokeModel(t *testing.T) {
 	if !inspection.Ready || inspection.RouteRevisionID != snapshot.RouteRevisionID ||
 		inspection.ResponseMode != TextResponseJSONSchema {
 		t.Fatalf("inspection = %#v", inspection)
+	}
+}
+
+func TestAdapterGatewayTextUsesBackgroundResponsesLifecycle(t *testing.T) {
+	t.Parallel()
+	var polls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.Method == http.MethodPost && request.URL.Path == "/v1/responses" {
+			var body map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			text, _ := body["text"].(map[string]any)
+			format, _ := text["format"].(map[string]any)
+			reasoning, _ := body["reasoning"].(map[string]any)
+			if body["background"] != true || format["type"] != "json_schema" || reasoning["effort"] != "high" {
+				t.Fatalf("Responses body = %#v", body)
+			}
+			_, _ = writer.Write([]byte(`{"id":"resp_1","model":"gpt-5.5-pro","status":"in_progress"}`))
+			return
+		}
+		if request.Method == http.MethodGet && request.URL.Path == "/v1/responses/resp_1" {
+			polls.Add(1)
+			_, _ = writer.Write([]byte(`{"id":"resp_1","model":"gpt-5.5-pro","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"summary\":\"ready\"}"}]}],"usage":{"input_tokens":20,"output_tokens":8,"total_tokens":28}}`))
+			return
+		}
+		t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+	}))
+	defer server.Close()
+	snapshot := textRouteSnapshot(server.URL)
+	snapshot.TextAPIMode = TextAPIResponses
+	snapshot.Background = true
+	snapshot.ReasoningEffort = "high"
+	snapshot.MaxOutputTokens = 4096
+	snapshot.OutputTokenParameter = TextOutputTokenParameterMaxOutputTokens
+	snapshot.PollIntervalMS = 100
+	adapter, _ := NewAdapterGatewayTextAdapter(textRouteStub{snapshot: snapshot}, credentialStub("token"), false)
+	adapter.client = server.Client()
+	result, err := adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1", ModelAlias: "cookies.text.deep_review", InvocationKey: "deep-review-1",
+		Messages:         []TextMessage{{Role: TextRoleSystem, Content: "Review."}, {Role: TextRoleUser, Content: "candidate"}},
+		OutputJSONSchema: []byte(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if polls.Load() != 1 || string(result.StructuredOutput) != `{"summary":"ready"}` ||
+		result.Usage == nil || result.Usage.TotalTokens != 28 {
+		t.Fatalf("result=%#v polls=%d", result, polls.Load())
 	}
 }
 

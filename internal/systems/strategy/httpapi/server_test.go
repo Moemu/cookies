@@ -18,6 +18,11 @@ func TestActionRoutesUseFrozenColonSyntax(t *testing.T) {
 		"/api/strategy/v1/strategy-drafts/strategy_1:revise",
 		"/api/strategy/v1/strategy-drafts/strategy_1:submit",
 		"/api/strategy/v1/strategy-drafts/strategy_1:approve",
+		"/api/strategy/v1/strategy-drafts/strategy_1:archive",
+		"/api/strategy/v1/strategy-drafts/strategy_1:restore",
+		"/api/strategy/v1/strategy-drafts/strategy_1:retry",
+		"/api/strategy/v1/tasks/task_1:discard",
+		"/api/strategy/v1/tasks/task_1:restore",
 		"/api/strategy/v1/strategy-reviews/review_1:return",
 		"/api/strategy/v1/agent-tasks/agent_1:cancel",
 	}
@@ -50,6 +55,49 @@ func TestCreativeHandoffRouteRejectsInvalidVersionBeforeService(t *testing.T) {
 		nil,
 	))
 	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestTaskAndDeepReviewRoutesRejectInvalidBodies(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	for _, path := range []string{
+		"/api/strategy/v1/projects/project_1/tasks",
+		"/api/strategy/v1/strategy-reviews/review_1/deep-analysis",
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{")))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	for _, path := range []string{
+		"/api/strategy/v1/projects/project_1/briefs",
+		"/api/strategy/v1/projects/project_1/briefs/brief_1",
+		"/api/strategy/v1/projects/project_1/strategy-drafts",
+		"/api/strategy/v1/projects/project_1/evidence-references",
+	} {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code == http.StatusNotFound {
+			t.Fatalf("%s was not mounted", path)
+		}
+	}
+}
+
+func TestRevisionScopeAmbiguousHasActionableError(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	writeError(response, strategy.ErrRevisionScopeAmbiguous)
+	if response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "REVISION_SCOPE_AMBIGUOUS") ||
+		!strings.Contains(response.Body.String(), "修改的策略章节") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

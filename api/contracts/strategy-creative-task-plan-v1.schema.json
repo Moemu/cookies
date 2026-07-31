@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-creative-task-plan-v1.schema.json",
+  "title": "Strategy creative task plan v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "id",
+    "project_id",
+    "brief_id",
+    "brief_version",
+    "brief_content_hash",
+    "status",
+    "business_code",
+    "business_generation",
+    "business_version",
+    "business_content_hash",
+    "skill_name",
+    "skill_version",
+    "skill_content_hash",
+    "selection_source",
+    "recommendation_snapshot",
+    "answers",
+    "completeness",
+    "current_revision",
+    "current_strategy_version",
+    "version"
+  ],
+  "properties": {
+    "id": {"$ref": "#/$defs/text"},
+    "organization_id": {"$ref": "#/$defs/text"},
+    "project_id": {"$ref": "#/$defs/text"},
+    "brief_id": {"$ref": "#/$defs/text"},
+    "brief_version": {"type": "integer", "minimum": 1},
+    "brief_content_hash": {"$ref": "#/$defs/sha256"},
+    "source_strategy_id": {"$ref": "#/$defs/text"},
+    "source_strategy_revision": {"type": "integer", "minimum": 1},
+    "source_strategy_content_hash": {"$ref": "#/$defs/sha256"},
+    "status": {"enum": ["collecting", "ready", "generating", "generated", "failed", "superseded"]},
+    "business_code": {"$ref": "#/$defs/code"},
+    "business_generation": {"type": "integer", "minimum": 1},
+    "business_version": {"$ref": "#/$defs/text"},
+    "business_content_hash": {"$ref": "#/$defs/sha256"},
+    "skill_name": {"$ref": "#/$defs/code"},
+    "skill_version": {"$ref": "#/$defs/text"},
+    "skill_content_hash": {"$ref": "#/$defs/hexHash"},
+    "selection_source": {"enum": ["recommended", "manual"]},
+    "recommendation_snapshot": {"type": "object"},
+    "answers": {"type": "object"},
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ready", "blockers", "warnings"],
+      "properties": {
+        "ready": {"type": "boolean"},
+        "blockers": {"type": "array", "items": {"$ref": "#/$defs/problem"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/problem"}}
+      }
+    },
+    "current_revision": {"type": "integer", "minimum": 1},
+    "current_strategy_version": {"type": "integer", "minimum": 0},
+    "current_agent_task_id": {"$ref": "#/$defs/text"},
+    "version": {"type": "integer", "minimum": 1},
+    "profile": {"$ref": "./strategy-creative-business-profile-v1.schema.json"},
+    "current_strategy": {"type": "object"},
+    "created_by": {"$ref": "#/$defs/text"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "code": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "hexHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "reason"],
+      "properties": {
+        "field": {"type": "string"},
+        "reason": {"$ref": "#/$defs/text"}
+      }
+    }
+  }
+}

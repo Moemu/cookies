@@ -1,21 +1,32 @@
 import {
+  attachKanonBriefProductAsset,
+  createKanonCommercePrerollVideo,
+  createKanonBrief,
+  createKanonPreparedCommercePrerollVideo,
   createKanonMedia,
   createKanonProject,
+  confirmKanonBrief,
+  ensureKanonGuerlainCommerceFixtureAssets,
   getKanonCapabilities,
   getKanonJob,
   listKanonArtifacts,
+  listKanonCommercePrerollSources,
   listKanonJobs,
   listKanonProjects,
   listKanonTasks,
   loadKanonAgencyWorkbench,
+  prepareKanonCommercePreroll,
   unsupportedKanonWrite,
-} from '../backend/kanon-api'
+} from '../backend/kanon-api.js'
+import type { CreativeIntakeStatus, CreativeTaskStatus } from '../contracts/creative'
+import { platformClient } from './platformClient.js'
 
 export type ApiProject = {
   id: string
   name: string
   brand: string
   objective: string
+  industry?: 'short_drama' | 'game' | 'ecommerce' | 'automotive_brand'
   runtime: {
     code: string
     product: string
@@ -30,6 +41,91 @@ export type ApiProject = {
   version: number
   createdAt: string
   updatedAt: string
+}
+
+export type ApiPublicInsightIndustryStat = {
+  name: string
+  count: number
+  views: number
+}
+
+export type ApiPublicInsightOverview = {
+  total_videos: number
+  total_views: number
+  average_like_rate: number
+  average_finish_rate: number
+  ai_ratio: number
+  industries: ApiPublicInsightIndustryStat[]
+  files: Array<{ filename: string; row_count: number; modified_at: string }>
+  loaded_at: string
+  data_dir: string
+}
+
+export type ApiPublicInsightFilterOption = {
+  value: string
+  count: number
+}
+
+export type ApiPublicInsightFilters = {
+  industries: ApiPublicInsightFilterOption[]
+  visual_styles: ApiPublicInsightFilterOption[]
+  ai_types: string[]
+  date_range: { min: string; max: string }
+}
+
+export type ApiPublicInsightVideoListItem = {
+  item_id: string
+  url: string
+  frame_first: string
+  item_title: string
+  item_create_day: string
+  author_cert_type: string
+  vv_all: number
+  like_cnt_all: number
+  comment_cnt_all: number
+  share_cnt_all: number
+  favourite_cnt_all: number
+  finish_vv_all: number
+  ctr: string
+  bounce_rate_map: string
+  has_ai_generated: string
+  industry: string
+  date: string
+  finish_rate: number
+  like_rate: number
+  playback_url: string
+}
+
+export type ApiPublicInsightVideoDetail = ApiPublicInsightVideoListItem & {
+  storyboard_structure: string
+  ai_creative_type: string
+  item_asr: string
+  item_ocr: string
+  first3s_visual_creative_type: string
+  main_visual_elements: string
+  shooting_scene: string
+  characters_relation: string
+  mentioned_brand: string
+  oral_product_desc: string
+  bgm_style: string
+  bgm_bpm: string
+  bgm_emotion: string
+  voice_type: string
+  speech_speed: string
+  oral_script: string
+  storyboard_prompt: string
+  visual_style: string
+  creative_highlight: string
+  source_file: string
+  storyboard: unknown[]
+}
+
+export type ApiPublicInsightVideoPage = {
+  items: ApiPublicInsightVideoListItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
 }
 
 export type ApiAgencyHealthStatus = 'healthy' | 'watch' | 'blocked'
@@ -171,6 +267,9 @@ export type ApiAssetVersionPointer = {
   organizationId: string
   projectId: string
   assetId: string
+  mediaKind?: 'image' | 'video'
+  contentUrl?: string
+  sourceJobId?: string
   workingVersion: number
   qualityCheckedVersion?: number
   humanConfirmedVersion?: number
@@ -206,9 +305,26 @@ export type ApiArtifact = {
   status: 'draft' | 'ready' | 'archived'
   content: string
   sourceJobId?: string
+  briefTaskId?: string
+  briefDraftVersion?: number
   version: number
   createdAt: string
   updatedAt: string
+}
+
+export type ApiProjectMediaAsset = {
+  id: string
+  projectId: string
+  version: number
+  kind: 'video' | 'image' | 'document'
+  sourceType?: 'upload' | 'provider_generated' | 'imported' | 'captured' | 'rendered'
+  mimeType: string
+  sizeBytes: number
+  durationSeconds?: number
+  width?: number
+  height?: number
+  createdAt: string
+  contentUrl: string
 }
 
 export type ApiAssetFeature = {
@@ -252,6 +368,241 @@ export type ApiGenerationJob = {
   updatedAt: string
 }
 
+export type ApiCommerceTemplateId =
+  | 'commerce.product-cut'
+  | 'commerce.window-reveal'
+  | 'commerce.one-click'
+  | 'commerce.miniature'
+  | 'commerce.device-summon'
+
+export type ApiCreativeSourceRef = {
+  kind: 'confirmed_brief' | 'strategy_package'
+  id: string
+  version: number
+  content_hash: string
+}
+
+export type ApiCommerceProductFacts = {
+  brand_name: string
+  product_name: string
+  product_category?: string
+  selling_points: string[]
+  tone: string[]
+  visual_keywords: string[]
+  mandatory_elements: string[]
+  prohibited_claims: string[]
+  product_asset_refs: Array<{ asset_id: string; version: number }>
+}
+
+export type ApiCreativeSourceOption = {
+  source_ref: ApiCreativeSourceRef
+  status: 'confirmed' | 'approved'
+  product: ApiCommerceProductFacts
+  confirmed_at: string
+  preferred: boolean
+}
+
+export type ApiTaskStrategyCreativeIntake = {
+  id: string
+  source: 'task_strategy'
+  status: 'draft' | CreativeIntakeStatus
+  request: {
+    format: 'image_text' | 'video'
+    performance_mode?: string
+    objective: string
+    audience: string
+    core_message: string
+    concept: string
+    task_strategy_input: {
+      business_code: string
+      business_strategy: Record<string, unknown>
+      guardrails: string[]
+      open_questions: string[]
+      media: Array<{
+        asset_ref: ApiAssetVersionRef
+        role: string
+        kind?: string
+        status: string
+        usefulness: string
+      }>
+      reference_use: {
+        locator?: string
+        rights_status: string
+        intended_use: string
+        warnings: string[]
+      }
+    }
+  }
+  missing_fields: string[]
+  warnings: string[]
+}
+
+export type ApiCreativeTaskHandoffDetail = {
+  task: {
+    id: string
+    intake_id: string
+    format: 'image_text' | 'video'
+    channel: string
+    status: string
+    direction: {
+      focus: string
+      audience: string
+      core_message: string
+      call_to_action: string
+    }
+  }
+  intake: ApiTaskStrategyCreativeIntake
+}
+
+export type ApiPreparedCommercePreroll = {
+  contract_version: 'creative-commerce-preroll-preparation/v1'
+  source_ref: ApiCreativeSourceRef
+  product: ApiCommerceProductFacts
+  plan: {
+    template: {
+      template_id: ApiCommerceTemplateId
+      template_version: 1
+    }
+    frame_plan: {
+      start_frame_kind: string
+      tail_frame_kind: string
+    }
+    prompt: {
+      fidelity: string
+      camera: string
+      environment: string
+      timeline: Array<{
+        start_seconds: number
+        end_seconds: number
+        purpose: 'information_gap' | 'single_transformation' | 'product_hold'
+        instruction: string
+      }>
+      guardrails: string[]
+      compiled_prompt: string
+      prompt_hash: string
+    }
+  }
+  readiness: {
+    planning_ready: boolean
+    generation_ready: boolean
+    blockers: string[]
+    warnings: string[]
+  }
+  prepared_at: string
+}
+
+export type ApiCommercePrerollWorkspace = {
+  task: {
+    id: string
+    status: CreativeTaskStatus
+    performance_mode: 'commerce_preroll'
+    updated_at: string
+  }
+  intake: {
+    id: string
+    version: number
+    request: {
+      objective: string
+      audience: string
+      core_message: string
+      call_to_action: string
+      manual_commerce_preroll: {
+        fixture_id: string
+        fixture_version: number
+        fixture_content_hash: string
+        brand_name: string
+        product_name: string
+        product_category?: string
+        selling_points: string[]
+        visual_keywords: string[]
+        product_asset_ref: ApiAssetVersionRef
+        first_frame_asset_ref: ApiAssetVersionRef
+        last_frame_asset_ref: ApiAssetVersionRef
+        template_ref: { template_id: ApiCommerceTemplateId; template_version: 1 }
+      }
+    }
+  }
+  video_draft: {
+    revision: number
+    prompt: string
+    commerce_preroll: {
+      contract_version: 'creative-commerce-preroll-draft/v1'
+      revision: number
+      input_hash: string
+      input_snapshot: {
+        fixture_id: string
+        fixture_version: number
+        fixture_content_hash: string
+        brand_name: string
+        product_name: string
+        product_category?: string
+        selling_points: string[]
+        visual_keywords: string[]
+        mandatory_elements: string[]
+        prohibited_claims: string[]
+        product_asset_ref: ApiAssetVersionRef
+        first_frame_asset_ref: ApiAssetVersionRef
+        last_frame_asset_ref: ApiAssetVersionRef
+      }
+      plan: {
+        template: { template_id: ApiCommerceTemplateId; template_version: 1 }
+        frame_plan: {
+          start_frame_kind: string
+          tail_frame_kind: string
+          product_asset_ref: ApiAssetVersionRef
+        }
+        prompt: {
+          prompt_version: number
+          fidelity: string
+          camera: string
+          environment: string
+          timeline: Array<{
+            start_seconds: number
+            end_seconds: number
+            purpose: 'information_gap' | 'single_transformation' | 'product_hold'
+            instruction: string
+          }>
+          guardrails: string[]
+          compiled_prompt: string
+          prompt_hash: string
+        }
+        generation_spec: {
+          generation_spec_hash: string
+          duration_seconds: 6
+          aspect_ratio: '9:16'
+          resolution: '720p'
+          generation_ready: boolean
+          production_ready: boolean
+        }
+      }
+      approval?: {
+        generation_spec_hash: string
+        confirmed_by: string
+        confirmed_at: string
+      }
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        missing_fields: string[]
+        blockers: string[]
+      }
+    }
+  }
+  commerce_preroll_generation_attempts?: Array<{
+    id: string
+    task_id: string
+    draft_revision: number
+    template_ref: { template_id: ApiCommerceTemplateId; template_version: 1 }
+    prompt_hash: string
+    generation_spec_hash: string
+    provider_job_id: string
+    retry_of_attempt_id?: string
+    output_asset_version?: ApiAssetVersionRef
+    created_at: string
+  }>
+}
+
 export type ApiVideoPurpose = 'preroll'
 export type ApiPrerollType = 'short_drama' | 'game' | 'commerce'
 
@@ -265,12 +616,36 @@ export type ApiShortDramaStoryContext = {
 export type ApiShortDramaPrerollCandidate = {
   id: string
   hookType: 'conflict' | 'reversal' | 'suspense' | 'selling_point_bridge'
+  executionAngle: 'dialogue_confrontation' | 'action_reveal' | 'reaction_escalation' | 'result_first'
+  executionAngleLabel: string
   score: number
-  scoreMeaning: 'hook_relevance'
+  scoreMeaning: 'editorial_quality_heuristic'
   evidence: string[]
+  primaryTestVariable: string
+  pacingProfile: string
+  visualGrammar: string
+  variantHypothesis: string
+  hookLine: string
   voiceover: string
+  storyboard: Array<{ startSeconds: number; endSeconds: number; visual: string; copy: string }>
   visualIntent: string
   transitionLine: string
+  promptPackage: {
+    compiledPrompt: string
+    contentHash: string
+    directorSpec: Record<string, string>
+    candidateBatchId?: string
+    promptCompilerVersion?: string
+    generationConfig: ApiShortDramaGenerationConfig
+    subtitleSpec: {
+      mode: string
+      max_lines: number
+      safe_area: string
+      keyword_emphasis: boolean
+      animation_density: string
+      contrast_policy: string
+    }
+  }
 }
 
 export type ApiShortDramaPrerollPlan = {
@@ -278,11 +653,250 @@ export type ApiShortDramaPrerollPlan = {
   candidates: ApiShortDramaPrerollCandidate[]
 }
 
+export type ApiShortDramaHookStrategy = 'conflict_reversal' | 'suspense_reveal' | 'identity_contrast' | 'selling_point_bridge'
+export type ApiShortDramaSubtitleStyle = 'high_contrast_dynamic' | 'brand_minimal'
+export type ApiShortDramaPaceProfile = 'auto' | 'punchy' | 'balanced' | 'suspense_hold'
+export type ApiShortDramaVariationIntent = 'balanced' | 'more_visual' | 'more_dialogue' | 'more_suspense'
+
+export type ApiShortDramaGenerationConfig = {
+  subtitle_style: ApiShortDramaSubtitleStyle
+  hook_strength: number
+  pace_profile: ApiShortDramaPaceProfile
+}
+
+type ApiShortDramaCandidateWire = {
+  id: string
+  hook_strategy: ApiShortDramaHookStrategy
+  execution_angle: ApiShortDramaPrerollCandidate['executionAngle']
+  primary_test_variable?: string
+  pacing_profile?: string
+  visual_grammar?: string
+  variant_hypothesis?: string
+  score: number
+  score_meaning: 'editorial_quality_heuristic'
+  evidence: string[]
+  hook_line: string
+  voiceover: string
+  storyboard: Array<{ start_seconds: number; end_seconds: number; visual: string; copy: string }>
+  visual_intent: string
+  transition_line: string
+  prompt_package: {
+    compiled_prompt: string
+    content_hash: string
+    director_spec: Record<string, string>
+    candidate_batch_id?: string
+    prompt_compiler_version?: string
+    generation_config?: ApiShortDramaGenerationConfig
+    subtitle_spec?: ApiShortDramaPrerollCandidate['promptPackage']['subtitleSpec']
+  }
+}
+
+export type ApiShortDramaPrerollWorkspace = {
+  task: { id: string; performance_mode: 'short_drama_preroll'; status: string }
+  video_draft: {
+    revision: number
+    short_drama_preroll: {
+      revision: number
+      selected_candidate_id?: string
+      input_snapshot: {
+        brief_id: string
+        brief_version: number
+        brief_name: string
+        story_title: string
+        synopsis: string
+        reviewed_selling_points: string[]
+        opening_line?: string
+        hook_strategy: ApiShortDramaHookStrategy
+        subtitle_style: ApiShortDramaSubtitleStyle
+        transition: 'hard_cut' | 'action_match' | 'audio_bridge'
+        hook_strength: number
+        pace_profile?: ApiShortDramaPaceProfile
+        call_to_action: string
+      }
+      readiness: { planning_ready: boolean; generation_ready: boolean; production_ready: boolean; blockers: string[] }
+      active_candidate_batch?: {
+        id: string
+        revision: number
+        planner_version: string
+        prompt_compiler_version: string
+        diversity_nonce: string
+        generation_config: ApiShortDramaGenerationConfig
+        variation_intent: ApiShortDramaVariationIntent
+        generated_candidate_count: number
+        candidates: ApiShortDramaCandidateWire[]
+        created_at: string
+      }
+      candidates: ApiShortDramaCandidateWire[]
+    }
+  }
+  short_drama_generation_attempts?: Array<{
+    id: string
+    task_id: string
+    draft_revision: number
+    candidate_batch_id: string
+    candidate_id: string
+    prompt_package_hash: string
+    generation_spec_hash: string
+    provider_job_id: string
+    output_asset_version?: ApiAssetVersionRef
+    created_at: string
+  }>
+}
+
+export type ApiCreateManualShortDramaPrerollInput = {
+  parentIntakeId?: string
+  briefId: string
+  briefVersion: number
+  briefName: string
+  title: string
+  synopsis: string
+  reviewedSellingPoints: string[]
+  openingLine?: string
+  hookStrategy: ApiShortDramaHookStrategy
+  subtitleStyle: ApiShortDramaSubtitleStyle
+  transition: 'hard_cut' | 'action_match' | 'audio_bridge'
+  hookStrength: number
+  paceProfile: ApiShortDramaPaceProfile
+  objective: string
+  audience: string
+  prohibitedClaims: string[]
+  callToAction: string
+}
+
 export type ApiShortDramaPrerollSnapshot = {
   planVersion: ApiShortDramaPrerollPlan['version']
   storyContext: Omit<ApiShortDramaStoryContext, 'openingLine'>
   selectedCandidate: ApiShortDramaPrerollCandidate
   prompt: string
+}
+
+export type ApiGameEvidenceMoment = {
+  id: string
+  kind: 'skill_choice' | 'wave_progress' | 'battle'
+  start_milliseconds: number
+  end_milliseconds: number
+  description: string
+  verified_copy: string[]
+}
+
+export type ApiGameHookMechanism =
+  | 'choice_challenge'
+  | 'tactical_tradeoff'
+  | 'wave_escalation'
+  | 'failure_reversal'
+  | 'merge_upgrade'
+  | 'reward_reveal'
+
+export type ApiGamePrerollCandidate = {
+  id: string
+  hook_mechanism: ApiGameHookMechanism
+  execution_angle: string
+  primary_test_variable: string
+  variant_hypothesis: string
+  score: number
+  score_meaning: 'evidence_grounded_hook_relevance'
+  hook_line: string
+  evidence_moment_ids: string[]
+  storyboard: Array<{
+    start_milliseconds: number
+    end_milliseconds: number
+    visual: string
+    copy: string
+    evidence_moment_id: string
+  }>
+  prompt_package: {
+    prompt_compiler_version: string
+    input_snapshot_hash: string
+    candidate_batch_id: string
+    candidate_id: string
+    generation_config: {
+      subtitle_style: 'high_contrast_dynamic' | 'brand_minimal'
+      hook_strength: number
+      pace_profile: 'punchy' | 'balanced'
+    }
+    director_spec: Record<string, string>
+    negative_constraints: string[]
+    compiled_prompt: string
+    content_hash: string
+  }
+}
+
+export type ApiGamePrerollWorkspace = {
+  task: { id: string; performance_mode: 'game_preroll'; status: string }
+  video_draft: {
+    revision: number
+    game_preroll: {
+      revision: number
+      selected_candidate_id?: string
+      input_snapshot: {
+        brief_id: string
+        brief_version: number
+        brief_name: string
+        game_name: string
+        gameplay_summary: string
+        source_video: ApiAssetVersionRef
+        source_video_rights: 'confirmed'
+        call_to_action: string
+        evidence_moments: ApiGameEvidenceMoment[]
+        allowed_mechanisms: ApiGameHookMechanism[]
+        prohibited_mechanisms: ApiGameHookMechanism[]
+      }
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        blockers: string[]
+      }
+      active_candidate_batch: {
+        id: string
+        revision: number
+        planner_version: string
+        prompt_compiler_version: string
+        generation_config: {
+          subtitle_style: 'high_contrast_dynamic' | 'brand_minimal'
+          hook_strength: number
+          pace_profile: 'punchy' | 'balanced'
+        }
+        generated_candidate_count: number
+        candidates: ApiGamePrerollCandidate[]
+        created_at: string
+      }
+      candidates: ApiGamePrerollCandidate[]
+    }
+  }
+  game_preroll_generation_attempts?: Array<{
+    id: string
+    task_id: string
+    draft_revision: number
+    candidate_batch_id: string
+    candidate_id: string
+    prompt_package_hash: string
+    generation_spec_hash: string
+    provider_job_id: string
+    output_asset_version?: ApiAssetVersionRef
+    created_at: string
+  }>
+}
+
+export type ApiCreateManualGamePrerollInput = {
+  briefId: string
+  briefVersion: number
+  briefName: string
+  gameName: string
+  gameplaySummary: string
+  sourceVideo: ApiAssetVersionRef
+  evidenceMoments: ApiGameEvidenceMoment[]
+  allowedMechanisms: ApiGameHookMechanism[]
+  prohibitedMechanisms: ApiGameHookMechanism[]
+  subtitleStyle: 'high_contrast_dynamic' | 'brand_minimal'
+  hookStrength: number
+  paceProfile: 'punchy' | 'balanced'
+  objective: string
+  audience: string
+  coreMessage: string
+  callToAction: string
+  mandatoryElements: string[]
+  prohibitedClaims: string[]
 }
 
 export type ApiPrerollScope = {
@@ -322,7 +936,7 @@ export type ApiAuditEvent = {
   projectId: string
   actor: string
   action: string
-  entityType: 'project' | 'business_task' | 'artifact' | 'generation_job' | 'change_set'
+  entityType: 'project' | 'business_task' | 'artifact' | 'generation_job' | 'change_set' | 'operational_record'
   entityId: string
   metadata: Record<string, unknown>
   createdAt: string
@@ -347,7 +961,7 @@ export type ApiOperationalRecord = {
   title: string
   status: string
   occurredAt: string
-  fields: Record<string, string | number>
+  fields: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -1742,6 +2356,133 @@ export type ApiAssetVersionRef = {
   version: number
 }
 
+export type ApiViralRemakeWorkspace = {
+  task: {
+    id: string
+    performance_mode: 'viral_remake'
+    status: string
+  }
+  intake: {
+    id: string
+    request: {
+      call_to_action: string
+      manual_viral_remake: {
+        product_name: string
+        selling_points: string[]
+        user_instruction: string
+        reference_video: ApiAssetVersionRef
+        reference_image?: ApiAssetVersionRef
+        reference_video_rights: 'pending' | 'confirmed'
+        reference_image_rights?: 'pending' | 'confirmed'
+      }
+    }
+  }
+  video_draft: {
+    revision: number
+    viral_remake: {
+      revision: number
+      status:
+        | 'waiting_for_analysis'
+        | 'analysis_ready'
+        | 'generation_ready'
+        | 'generating'
+        | 'candidate_ready'
+        | 'provider_failed'
+        | 'ready_for_review'
+      selected_route_id: 'route_manual_viral_remake_v1'
+      input_snapshot: {
+        reference_video: ApiAssetVersionRef
+        reference_image?: ApiAssetVersionRef
+        product_name: string
+        selling_points: string[]
+        call_to_action: string
+        user_instruction: string
+        reference_video_rights: 'pending' | 'confirmed'
+        reference_image_rights?: 'pending' | 'confirmed'
+      }
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        missing_fields: string[]
+        blockers: string[]
+      }
+      analysis_snapshot?: {
+        contract_version: 'creative-viral-analysis-snapshot/v1'
+        task_id: string
+        source_asset_ref: ApiAssetVersionRef
+        dimensions: Array<{
+          id: ApiVideoPromptDimension['id']
+          prompt: string
+          evidence_refs: string[]
+          confidence: number
+          source: 'ai_extracted'
+        }>
+        preserve_rules: string[]
+        replace_rules: string[]
+        transcript?: string
+        confidence: number
+        evidence_refs: string[]
+        model_lineage: {
+          model_alias: string
+          route_revision_id: string
+          prompt_version: string
+        }
+        content_hash: string
+        created_at: string
+      }
+      prompt_draft?: {
+        revision: number
+        dimensions: Record<ApiVideoPromptDimension['id'], string>
+        composite_prompt: string
+        updated_at: string
+      }
+      prompt_package?: {
+        contract_version: 'creative-viral-prompt-package/v1'
+        prompt_version: number
+        content_hash: string
+        composite_prompt: string
+        generation_spec: {
+          model_alias: string
+          duration_seconds: number
+          aspect_ratio: string
+          resolution: string
+          candidate_count: number
+        }
+        confirmed_by: string
+        confirmed_at: string
+      }
+      candidates: Array<{
+        id: string
+        provider_job_id: string
+        prompt_hash: string
+        status: 'queued' | 'running' | 'succeeded' | 'failed' | 'reviewed'
+        output_asset_ref?: ApiAssetVersionRef
+        checks: Array<{ code: string; passed: boolean; message: string }>
+        error_code?: string
+        error_message?: string
+        created_at: string
+        updated_at: string
+      }>
+    }
+  }
+  production_jobs: Array<{ provider_job_id: string; kind: string }>
+}
+
+export type ApiCreateManualViralRemakeInput = {
+  parentIntakeId?: string
+  sourceVideo: ApiAssetVersionRef
+  referenceImage?: ApiAssetVersionRef
+  productName: string
+  sellingPoints: string[]
+  callToAction: string
+  userInstruction: string
+  objective: string
+  audience: string
+  coreMessage: string
+  durationSeconds: number
+}
+
 export type ApiHitSegmentRole = 'hook' | 'problem' | 'proof' | 'offer' | 'cta'
 
 export type ApiHitAnalysis = {
@@ -1961,7 +2702,56 @@ export type ApiProviderCapabilities = {
     model: string
     available: boolean
   }>
+  credential?: {
+    source?: 'environment' | 'workspace'
+    maskedApiKey?: string
+    updatedAt?: string
+  }
   checkedAt: string
+}
+
+export type ApiAuthSession = {
+  authenticated: boolean
+  user?: {
+    id: string
+    email?: string
+    displayName: string
+  }
+  organization?: {
+    id: string
+    name: string
+    status: string
+  }
+  membership?: {
+    role: 'owner' | 'admin' | 'member' | 'auditor'
+    status: string
+    updatedAt: string
+  }
+  scopes?: string[]
+}
+
+type PlatformActor = {
+  organization_id: string
+  principal: { kind: 'user' | 'service'; id: string }
+  scopes: string[]
+}
+
+type PlatformRequestContext = {
+  actor: PlatformActor
+}
+
+type PlatformLoginResult = PlatformRequestContext & {
+  session_id: string
+}
+
+export type ApiProviderConfiguration = {
+  provider: 'ark'
+  status: 'configured' | 'not_configured'
+  baseUrl: string
+  source?: 'environment' | 'workspace'
+  maskedApiKey?: string
+  updatedAt?: string
+  capabilities: ApiProviderCapabilities
 }
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
@@ -1969,460 +2759,89 @@ const backendOrigin = viteEnv?.VITE_API_BASE_URL ?? ''
 const apiBase = `${backendOrigin}/api`
 const platformBase = `${backendOrigin}/platform/v1`
 
-export const agencyWorkbenchSample: ApiAgencyWorkbench = {
-  organizations: [{
-    id: 'org-demo-agency',
-    code: 'AGY',
-    name: '星河增长代理商',
-    owner: 'Mia Chen',
-    currency: 'CNY',
-    timezone: 'Asia/Shanghai',
-    updatedAt: '2026-07-27T08:00:00.000Z',
-  }],
-  clients: [
-    {
-      id: 'client-nova-lifestyle',
-      organizationId: 'org-demo-agency',
-      code: 'NOVA',
-      name: '诺瓦生活科技',
-      industry: '智能家居',
-      owner: 'Amelia Meng',
-      healthStatus: 'healthy',
-      updatedAt: '2026-07-27T07:40:00.000Z',
-    },
-    {
-      id: 'client-orbit-health',
-      organizationId: 'org-demo-agency',
-      code: 'ORBIT',
-      name: '环域健康',
-      industry: '消费医疗',
-      owner: 'Noah Xu',
-      healthStatus: 'watch',
-      updatedAt: '2026-07-27T07:35:00.000Z',
-    },
-  ],
-  brands: [
-    {
-      id: 'brand-nova-home',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      code: 'NOVA-HOME',
-      name: 'Nova Home',
-      category: '智能清洁',
-      productLines: ['扫拖机器人', '空气护理'],
-      owner: 'Lin Wei',
-      guidelineStatus: 'ready',
-      updatedAt: '2026-07-27T07:20:00.000Z',
-    },
-    {
-      id: 'brand-nova-kids',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      code: 'NOVA-KIDS',
-      name: 'Nova Kids',
-      category: '儿童陪伴硬件',
-      productLines: ['学习灯', '陪伴音箱'],
-      owner: 'Sofia Chen',
-      guidelineStatus: 'outdated',
-      updatedAt: '2026-07-26T09:10:00.000Z',
-    },
-    {
-      id: 'brand-orbit-care',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-orbit-health',
-      code: 'ORBIT-CARE',
-      name: 'Orbit Care',
-      category: '健康管理',
-      productLines: ['睡眠监测', '康复训练'],
-      owner: 'Noah Xu',
-      guidelineStatus: 'ready',
-      updatedAt: '2026-07-27T06:50:00.000Z',
-    },
-  ],
-  projects: [
-    {
-      id: 'project-nova-home-launch',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-home',
-      name: 'Nova Home 夏季清洁增长',
-      brand: 'Nova Home',
-      objective: '验证家庭清洁痛点素材，提升搜索与信息流线索效率。',
-      runtime: {
-        code: 'NOVA-HOME-2607',
-        product: '全屋扫拖机器人 S8',
-        stage: '素材人工确认',
-        progress: 64,
-        status: 'active',
-        owner: 'Lin Wei',
-        budget: 260000,
-        currency: 'CNY',
-        timezone: 'Asia/Shanghai',
-      },
-      progressDetail: {
-        stage: 'human_review',
-        stageLabel: '素材人工确认',
-        stagePercent: 60,
-        taskPercent: 64,
-        riskStatus: 'watch',
-        blocker: '2 条视频素材仍需处理质检问题',
-        updatedAt: '2026-07-27T07:50:00.000Z',
-      },
-      version: 3,
-      createdAt: '2026-07-18T02:00:00.000Z',
-      updatedAt: '2026-07-27T07:50:00.000Z',
-    },
-    {
-      id: 'project-nova-kids-presale',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-kids',
-      name: 'Nova Kids 开学季预售',
-      brand: 'Nova Kids',
-      objective: '围绕护眼与陪伴场景准备预售素材和账户测试计划。',
-      runtime: {
-        code: 'NOVA-KIDS-2608',
-        product: 'AI 学习灯 L2',
-        stage: '创意制作',
-        progress: 38,
-        status: 'active',
-        owner: 'Sofia Chen',
-        budget: 180000,
-        currency: 'CNY',
-        timezone: 'Asia/Shanghai',
-      },
-      progressDetail: {
-        stage: 'creative',
-        stageLabel: '创意制作',
-        stagePercent: 45,
-        taskPercent: 38,
-        riskStatus: 'healthy',
-        updatedAt: '2026-07-27T06:20:00.000Z',
-      },
-      version: 2,
-      createdAt: '2026-07-20T03:10:00.000Z',
-      updatedAt: '2026-07-27T06:20:00.000Z',
-    },
-    {
-      id: 'project-orbit-care-sleep',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-orbit-health',
-      brandId: 'brand-orbit-care',
-      name: 'Orbit Care 睡眠健康线索',
-      brand: 'Orbit Care',
-      objective: '验证睡眠监测教育素材，建立可扩量的获客计划。',
-      runtime: {
-        code: 'ORBIT-SLEEP-2607',
-        product: '睡眠监测贴片 Pro',
-        stage: '投放预检',
-        progress: 76,
-        status: 'active',
-        owner: 'Noah Xu',
-        budget: 320000,
-        currency: 'CNY',
-        timezone: 'Asia/Shanghai',
-      },
-      progressDetail: {
-        stage: 'delivery',
-        stageLabel: '投放预检',
-        stagePercent: 35,
-        taskPercent: 76,
-        riskStatus: 'blocked',
-        blocker: '腾讯广告账户追踪状态异常',
-        updatedAt: '2026-07-27T07:10:00.000Z',
-      },
-      version: 4,
-      createdAt: '2026-07-12T01:30:00.000Z',
-      updatedAt: '2026-07-27T07:10:00.000Z',
-    },
-  ],
-  adAccountBindings: [
-    {
-      id: 'binding-nova-home-juliang',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-home',
-      projectIds: ['project-nova-home-launch'],
-      platform: '巨量引擎',
-      accountName: 'Nova Home 巨量演示账户',
-      accountDisplayId: 'JLY-DEMO-NOVA-001',
-      currency: 'CNY',
-      timezone: 'Asia/Shanghai',
-      permissionStatus: 'normal',
-      loginStatus: 'normal',
-      trackingStatus: 'normal',
-      owner: 'Noah Xu',
-      boundAssetIds: ['asset-nova-home-hook', 'asset-nova-home-proof'],
-      lastSyncedAt: '2026-07-27T07:55:00.000Z',
-    },
-    {
-      id: 'binding-nova-kids-kuaishou',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-nova-lifestyle',
-      brandId: 'brand-nova-kids',
-      projectIds: ['project-nova-kids-presale'],
-      platform: '快手磁力',
-      accountName: 'Nova Kids 快手演示账户',
-      accountDisplayId: 'KS-DEMO-NOVA-018',
-      currency: 'CNY',
-      timezone: 'Asia/Shanghai',
-      permissionStatus: 'normal',
-      loginStatus: 'warning',
-      trackingStatus: 'normal',
-      owner: 'Sofia Chen',
-      boundAssetIds: ['asset-nova-kids-scene'],
-      lastSyncedAt: '2026-07-27T06:05:00.000Z',
-    },
-    {
-      id: 'binding-orbit-care-tencent',
-      organizationId: 'org-demo-agency',
-      clientId: 'client-orbit-health',
-      brandId: 'brand-orbit-care',
-      projectIds: ['project-orbit-care-sleep'],
-      platform: '腾讯广告',
-      accountName: 'Orbit Care 腾讯演示账户',
-      accountDisplayId: 'TX-DEMO-ORBIT-026',
-      currency: 'CNY',
-      timezone: 'Asia/Shanghai',
-      permissionStatus: 'normal',
-      loginStatus: 'normal',
-      trackingStatus: 'expired',
-      owner: 'Noah Xu',
-      boundAssetIds: ['asset-orbit-sleep-education', 'asset-orbit-sleep-proof'],
-      lastSyncedAt: '2026-07-26T23:30:00.000Z',
-    },
-  ],
-  qualityCheckRuns: [
-    {
-      id: 'qc-nova-home-hook-v2',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-hook',
-      assetVersion: 2,
-      status: 'failed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-15',
-      summary: '画面卖点清晰，但价格权益口径与 Brief 不一致，需要修改。',
-      issues: [{
-        id: 'issue-nova-home-price',
-        severity: 'major',
-        rule: '价格权益一致性',
-        evidence: '第 6 秒字幕出现未在 Brief 中确认的限时优惠。',
-        suggestion: '删除价格承诺，改为“预约领取清洁方案”。',
-      }],
-      createdAt: '2026-07-27T05:10:00.000Z',
-      completedAt: '2026-07-27T05:12:00.000Z',
-    },
-    {
-      id: 'qc-nova-home-proof-v1',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-proof',
-      assetVersion: 1,
-      status: 'passed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-15',
-      summary: '品牌露出、产品画面和 CTA 均满足当前项目要求。',
-      issues: [],
-      createdAt: '2026-07-26T09:00:00.000Z',
-      completedAt: '2026-07-26T09:02:00.000Z',
-    },
-    {
-      id: 'qc-orbit-sleep-proof-v3',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-orbit-care-sleep',
-      assetId: 'asset-orbit-sleep-proof',
-      assetVersion: 3,
-      status: 'passed',
-      model: 'demo-quality-vision-v1',
-      ruleVersion: 'agency-material-rules-2026-07',
-      promptVersion: 'material-check-2026-07-15',
-      summary: '医学表述使用“辅助观察”，未出现诊断承诺。',
-      issues: [],
-      createdAt: '2026-07-27T03:40:00.000Z',
-      completedAt: '2026-07-27T03:44:00.000Z',
-    },
-  ],
-  materialConfirmations: [
-    {
-      id: 'confirm-nova-home-proof-v1',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      qualityCheckRunId: 'qc-nova-home-proof-v1',
-      assetId: 'asset-nova-home-proof',
-      assetVersion: 1,
-      status: 'confirmed',
-      scope: 'Nova Home 夏季清洁增长 / 信息流素材',
-      confirmedBy: 'Lin Wei',
-      note: '可进入投放计划，需保留当前字幕版本。',
-      createdAt: '2026-07-26T09:30:00.000Z',
-    },
-    {
-      id: 'confirm-nova-home-hook-v2',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      qualityCheckRunId: 'qc-nova-home-hook-v2',
-      assetId: 'asset-nova-home-hook',
-      assetVersion: 2,
-      status: 'changes_requested',
-      scope: 'Nova Home 夏季清洁增长 / 短视频钩子',
-      confirmedBy: 'Amelia Meng',
-      note: '请移除未经确认的优惠口径后再提交新版本。',
-      createdAt: '2026-07-27T05:40:00.000Z',
-    },
-    {
-      id: 'confirm-orbit-sleep-proof-v3',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-orbit-care-sleep',
-      qualityCheckRunId: 'qc-orbit-sleep-proof-v3',
-      assetId: 'asset-orbit-sleep-proof',
-      assetVersion: 3,
-      status: 'confirmed',
-      scope: 'Orbit Care 睡眠健康线索 / 腾讯广告教育素材',
-      confirmedBy: 'Noah Xu',
-      note: '允许用于预检，但需先修复账户追踪异常。',
-      createdAt: '2026-07-27T04:10:00.000Z',
-    },
-  ],
-  assetVersionPointers: [
-    {
-      id: 'pointer-nova-home-hook',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-hook',
-      workingVersion: 3,
-      qualityCheckedVersion: 2,
-      versions: [
-        {
-          version: 3,
-          createdBy: 'Lin Wei',
-          sourceTaskId: 'creative-nova-home-hook-fix',
-          sourceType: 'manual_edit',
-          sourceLabel: '人工字幕返修',
-          createdAt: '2026-07-27T06:00:00.000Z',
-          changeSummary: '移除未经确认的限时优惠口径，保留清洁痛点钩子。',
+type AgencyWorkbenchOptions = {
+  projectIds?: string[]
+  includeDemoProject?: boolean
+}
+
+const emptyAgencyWorkbench: ApiAgencyWorkbench = {
+  organizations: [],
+  clients: [],
+  brands: [],
+  projects: [],
+  adAccountBindings: [],
+  qualityCheckRuns: [],
+  materialConfirmations: [],
+  assetVersionPointers: [],
+}
+
+async function loadPersistedAgencyWorkbench(projectIds: string[]): Promise<ApiAgencyWorkbench> {
+  const results = await Promise.all([...new Set(projectIds)].map(async projectId => {
+    const [snapshot, workbench, mediaAssets] = await Promise.all([
+      platformClient.getProjectSnapshot(projectId),
+      platformClient.getWorkbench(projectId),
+      platformClient.listProjectMediaAssets(projectId),
+    ])
+    return workbench ? workbenchFromResponse(snapshot.project, workbench, mediaAssets) : emptyAgencyWorkbench
+  }))
+  return results.reduce<ApiAgencyWorkbench>((all, current) => ({
+    organizations: [...all.organizations, ...current.organizations], clients: [...all.clients, ...current.clients], brands: [...all.brands, ...current.brands], projects: [...all.projects, ...current.projects], adAccountBindings: [...all.adAccountBindings, ...current.adAccountBindings], qualityCheckRuns: [...all.qualityCheckRuns, ...current.qualityCheckRuns], materialConfirmations: [...all.materialConfirmations, ...current.materialConfirmations], assetVersionPointers: [...all.assetVersionPointers, ...current.assetVersionPointers],
+  }), emptyAgencyWorkbench)
+}
+
+function workbenchFromResponse(
+  project: ApiProject,
+  response: import('./platformClient.js').PlatformProjectWorkbench,
+  mediaAssets: ApiProjectMediaAsset[],
+): ApiAgencyWorkbench {
+  const { organization, client, brand, project: progress } = response
+  const mediaByAssetVersion = new Map(mediaAssets.map(asset => [`${asset.id}:${asset.version}`, asset]))
+  return {
+    organizations: [{ id: organization.id, code: organization.code, name: organization.name, owner: organization.owner, currency: organization.currency as 'CNY', timezone: organization.timezone as 'Asia/Shanghai', updatedAt: organization.updated_at }],
+    clients: [{ id: client.id, organizationId: client.organization_id, code: client.code, name: client.name, industry: client.industry, owner: client.owner, healthStatus: client.health_status as ApiAgencyHealthStatus, updatedAt: client.updated_at }],
+    brands: [{ id: brand.id, organizationId: brand.organization_id, clientId: brand.client_id, code: brand.code, name: brand.name, category: brand.category, productLines: brand.product_lines, owner: brand.owner, guidelineStatus: brand.guideline_status as ApiBrand['guidelineStatus'], updatedAt: brand.updated_at }],
+    projects: [{ ...project, organizationId: progress.organization_id, clientId: progress.client_id, brandId: progress.brand_id, progressDetail: { stage: progress.stage as ApiProjectProgressStage, stageLabel: progress.stage_label, stagePercent: progress.stage_percent, taskPercent: progress.task_percent, riskStatus: progress.risk_status as ApiAgencyHealthStatus, blocker: progress.blocker || undefined, updatedAt: progress.updated_at } }],
+    adAccountBindings: response.ad_account_bindings.map(item => ({ id: item.id, organizationId: item.organization_id, clientId: item.client_id, brandId: item.brand_id, projectIds: [project.id], platform: item.platform as ApiAdPlatform, accountName: item.account_name, accountDisplayId: item.account_display_id, currency: item.currency as 'CNY', timezone: item.timezone as 'Asia/Shanghai', permissionStatus: item.permission_status as ApiBindingHealthStatus, loginStatus: item.login_status as ApiBindingHealthStatus, trackingStatus: item.tracking_status as ApiBindingHealthStatus, owner: item.owner, boundAssetIds: item.bound_asset_ids, lastSyncedAt: item.last_synced_at })),
+    qualityCheckRuns: response.quality_check_runs.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiQualityCheckStatus, model: item.model, ruleVersion: item.rule_version, promptVersion: item.prompt_version, summary: item.summary, issues: item.issues.map(issue => ({ id: issue.id, severity: issue.severity as ApiQualityIssueSeverity, rule: issue.rule, evidence: issue.evidence, suggestion: issue.suggestion })), createdAt: item.created_at, completedAt: item.completed_at ?? undefined })),
+    materialConfirmations: response.material_confirmations.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, qualityCheckRunId: item.quality_check_run_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiMaterialConfirmationStatus, scope: item.scope, confirmedBy: item.confirmed_by, note: item.note, createdAt: item.created_at })),
+    assetVersionPointers: response.asset_version_pointers.map(item => {
+      const media = mediaByAssetVersion.get(`${item.asset_id}:${item.working_version}`)
+      return {
+        id: item.id,
+        organizationId: item.organization_id,
+        projectId: item.project_id,
+        assetId: item.asset_id,
+        mediaKind: media?.kind === 'document' ? undefined : media?.kind,
+        contentUrl: media?.contentUrl,
+        workingVersion: item.working_version,
+        qualityCheckedVersion: item.quality_checked_version ?? undefined,
+        humanConfirmedVersion: item.human_confirmed_version ?? undefined,
+        deliveryVersion: item.delivery_version ?? undefined,
+        versions: item.versions.map(version => ({
+          version: version.version,
+          createdBy: version.created_by,
+          sourceTaskId: version.source_task_id,
+          sourceType: version.source_type as ApiAssetVersionRecord['sourceType'],
+          sourceLabel: version.source_label,
+          createdAt: version.created_at,
+          changeSummary: version.change_summary,
+        })),
+        authorization: {
+          platforms: item.authorization.platforms as ApiAdPlatform[],
+          regions: item.authorization.regions,
+          rightsHolder: item.authorization.rights_holder,
+          expiresAt: item.authorization.expires_at,
+          note: item.authorization.note,
         },
-        {
-          version: 2,
-          createdBy: 'demo-quality-vision-v1',
-          sourceTaskId: 'creative-nova-home-hook-gen',
-          sourceType: 'model_generation',
-          sourceLabel: 'AI 生成短视频钩子',
-          createdAt: '2026-07-27T05:00:00.000Z',
-          changeSummary: '生成 9:16 钩子视频，新增权益字幕。',
+        deliveryTarget: {
+          platform: item.delivery_target.platform as ApiAdPlatform,
+          region: item.delivery_target.region,
         },
-        {
-          version: 1,
-          createdBy: 'Lin Wei',
-          sourceTaskId: 'creative-nova-home-hook-draft',
-          sourceType: 'manual_edit',
-          sourceLabel: '脚本初稿',
-          createdAt: '2026-07-26T10:30:00.000Z',
-          changeSummary: '建立家庭清洁痛点开场与产品露出。',
-        },
-      ],
-      authorization: {
-        platforms: ['巨量引擎'],
-        regions: ['中国大陆'],
-        rightsHolder: 'Nova Home',
-        expiresAt: '2026-09-30T15:59:59.000Z',
-        note: '仅限 Nova Home 夏季清洁增长项目的信息流素材测试。',
-      },
-      deliveryTarget: {
-        platform: '巨量引擎',
-        region: '中国大陆',
-      },
-      owner: 'Lin Wei',
-      updatedAt: '2026-07-27T06:00:00.000Z',
-    },
-    {
-      id: 'pointer-nova-home-proof',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-nova-home-launch',
-      assetId: 'asset-nova-home-proof',
-      workingVersion: 1,
-      qualityCheckedVersion: 1,
-      humanConfirmedVersion: 1,
-      deliveryVersion: 1,
-      versions: [
-        {
-          version: 1,
-          createdBy: 'Lin Wei',
-          sourceTaskId: 'creative-nova-home-proof-edit',
-          sourceType: 'manual_edit',
-          sourceLabel: '产品证明段剪辑',
-          createdAt: '2026-07-26T08:40:00.000Z',
-          changeSummary: '保留产品清洁前后对比和标准 CTA。',
-        },
-      ],
-      authorization: {
-        platforms: ['巨量引擎', '腾讯广告'],
-        regions: ['中国大陆', '中国香港'],
-        rightsHolder: 'Nova Home',
-        expiresAt: '2026-10-31T15:59:59.000Z',
-        note: '授权覆盖清洁产品证明段，可用于当前项目交付包。',
-      },
-      deliveryTarget: {
-        platform: '巨量引擎',
-        region: '中国大陆',
-      },
-      owner: 'Lin Wei',
-      updatedAt: '2026-07-26T09:30:00.000Z',
-    },
-    {
-      id: 'pointer-orbit-sleep-proof',
-      organizationId: 'org-demo-agency',
-      projectId: 'project-orbit-care-sleep',
-      assetId: 'asset-orbit-sleep-proof',
-      workingVersion: 3,
-      qualityCheckedVersion: 3,
-      humanConfirmedVersion: 3,
-      versions: [
-        {
-          version: 3,
-          createdBy: 'Noah Xu',
-          sourceTaskId: 'creative-orbit-proof-medical-copy',
-          sourceType: 'manual_edit',
-          sourceLabel: '医学口径人工修订',
-          createdAt: '2026-07-27T03:30:00.000Z',
-          changeSummary: '将诊断承诺改为辅助观察表述。',
-        },
-        {
-          version: 2,
-          createdBy: 'demo-quality-vision-v1',
-          sourceTaskId: 'creative-orbit-proof-gen',
-          sourceType: 'model_generation',
-          sourceLabel: 'AI 生成教育素材',
-          createdAt: '2026-07-26T11:20:00.000Z',
-          changeSummary: '生成睡眠监测教育素材初版。',
-        },
-        {
-          version: 1,
-          createdBy: 'Noah Xu',
-          sourceTaskId: 'creative-orbit-proof-script',
-          sourceType: 'manual_edit',
-          sourceLabel: '脚本导入',
-          createdAt: '2026-07-25T09:00:00.000Z',
-          changeSummary: '导入客户提供的睡眠健康教育脚本。',
-        },
-      ],
-      authorization: {
-        platforms: ['巨量引擎'],
-        regions: ['中国大陆'],
-        rightsHolder: 'Orbit Care',
-        expiresAt: '2026-08-31T15:59:59.000Z',
-        note: '当前授权未覆盖腾讯广告，因此不可设为腾讯广告交付版本。',
-      },
-      deliveryTarget: {
-        platform: '腾讯广告',
-        region: '中国大陆',
-      },
-      owner: 'Noah Xu',
-      updatedAt: '2026-07-27T04:10:00.000Z',
-    },
-  ],
+        owner: item.owner,
+        updatedAt: item.updated_at,
+      }
+    }),
+  }
 }
 
 // 后端对同一类冲突只回一句「当前状态不允许该操作」，具体原因不在响应体里。
@@ -2442,19 +2861,55 @@ export class ApiRequestError extends Error {
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
+    credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const payload = await response.json() as T | { error?: { message?: string; code?: string } }
+  const payloadText = await response.text()
+  const payload = payloadText ? JSON.parse(payloadText) as T | { error?: { message?: string; code?: string } } : undefined
   if (!response.ok) {
-    const error = payload as { error?: { message?: string; code?: string } }
+    const error = (payload ?? {}) as { error?: { message?: string; code?: string } }
     throw new ApiRequestError(error.error?.message ?? 'API 请求失败', response.status, error.error?.code ?? '')
   }
   return payload as T
 }
 
+function authSessionFromActor(actor: PlatformActor, username?: string): ApiAuthSession {
+  const identity = username?.trim() || actor.principal.id
+  return {
+    authenticated: true,
+    user: { id: actor.principal.id, email: '', displayName: identity },
+  }
+}
+
 async function platformRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
   const response = await fetch(`${platformBase}${path}`, {
+    method,
+    credentials: 'include',
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(headers ?? {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const payloadText = await response.text()
+  const payload = payloadText ? JSON.parse(payloadText) as T | { error?: { message?: string } } : undefined
+  if (!response.ok) {
+    const error = (payload ?? {}) as { error?: { message?: string } }
+    throw new Error(error.error?.message ?? '平台 API 请求失败')
+  }
+  return payload as T
+}
+
+class CreativeApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'CreativeApiError'
+  }
+}
+
+async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
+  const response = await fetch(`${backendOrigin}/api/creative/v1${path}`, {
     method,
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -2462,12 +2917,617 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const payload = await response.json() as T | { error?: { message?: string } }
+  const responseText = await response.text()
+  let payload: T | { error?: { message?: string; request_id?: string } }
+  try {
+    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; request_id?: string } } : {}
+  } catch {
+    throw new Error(`Creative API 返回了无法解析的响应（HTTP ${response.status}）`)
+  }
   if (!response.ok) {
-    const error = payload as { error?: { message?: string } }
-    throw new Error(error.error?.message ?? '平台 API 请求失败')
+    const error = payload as { error?: { message?: string; request_id?: string } }
+    const requestId = error.error?.request_id ? `（request_id: ${error.error.request_id}）` : ''
+    throw new CreativeApiError(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`, response.status)
   }
   return payload as T
+}
+
+function getTaskStrategyCreativeIntake(projectId: string, intakeId: string) {
+  return creativeRequest<ApiTaskStrategyCreativeIntake>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}`,
+  )
+}
+
+function getCreativeTaskHandoffDetail(projectId: string, taskId: string) {
+  return creativeRequest<ApiCreativeTaskHandoffDetail>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}`,
+  )
+}
+
+async function putUploadedAsset(url: string, headers: Record<string, string>, file: File) {
+  const requestHeaders = new Headers()
+  for (const [name, value] of Object.entries(headers)) {
+    const normalized = name.toLowerCase()
+    if (normalized !== 'host' && normalized !== 'content-length') requestHeaders.set(name, value)
+  }
+  if (!requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', file.type)
+  const target = url.startsWith('/') ? `${backendOrigin}${url}` : url
+  const response = await fetch(target, { method: 'PUT', headers: requestHeaders, body: file })
+  if (!response.ok) throw new Error(`素材上传失败（HTTP ${response.status}）`)
+}
+
+async function uploadProjectAsset(projectId: string, file: File): Promise<ApiAssetVersionRef> {
+  const path = `/projects/${encodeURIComponent(projectId)}/assets/uploads`
+  const created = await platformRequest<{
+    session: { id: string; project_asset_ref: null | { asset_version: ApiAssetVersionRef } }
+    upload: null | { url: string; method: 'PUT'; headers: Record<string, string> }
+  }>(path, 'POST', {
+    filename: file.name,
+    declared_mime_type: file.type,
+    declared_size_bytes: file.size,
+    declared_sha256: null,
+  }, { 'Idempotency-Key': `viral-upload-${Date.now()}-${Math.random().toString(36).slice(2)}` })
+  const existing = created.session.project_asset_ref?.asset_version
+  if (existing) return existing
+  if (!created.upload) throw new Error('素材上传会话没有返回可用的上传地址。')
+  await putUploadedAsset(created.upload.url, created.upload.headers, file)
+  const completed = await platformRequest<{
+    project_asset_ref: null | { asset_version: ApiAssetVersionRef }
+  }>(`${path}/${encodeURIComponent(created.session.id)}:finalize`, 'POST')
+  const result = completed.project_asset_ref?.asset_version
+  if (!result) throw new Error('素材已经上传，但没有生成可用的 AssetVersionRef。')
+  return result
+}
+
+async function createManualViralRemakeWorkspace(
+  projectId: string,
+  input: ApiCreateManualViralRemakeInput,
+): Promise<ApiViralRemakeWorkspace> {
+  const duration = Math.min(60, Math.max(4, Math.round(input.durationSeconds)))
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual',
+      parent_intake_id: input.parentIntakeId,
+      format: 'video',
+      performance_mode: 'viral_remake',
+      channel: 'douyin',
+      objective: input.objective,
+      audience: input.audience,
+      core_message: input.coreMessage,
+      call_to_action: input.callToAction,
+      concept: input.userInstruction,
+      tone: ['清晰', '高节奏'],
+      visual_keywords: ['高停留开场', '产品证明', '原创表达'],
+      mandatory_elements: [],
+      prohibited_claims: ['不得复用原片人物、商标、字幕、音乐或逐字台词'],
+      creative_routes: [{
+        route_id: 'route_manual_viral_remake_v1',
+        route_type: 'viral_remake',
+        video_purpose: 'performance',
+        channels: ['douyin'],
+        reason: '用户在 Creative 爆款复刻工作区明确选择该路线',
+        target_duration_seconds: duration,
+        aspect_ratio: '9:16',
+        source_asset_refs: [input.sourceVideo, ...(input.referenceImage ? [input.referenceImage] : [])],
+        evidence_refs: [],
+        requires_human_confirmation: true,
+      }],
+      manual_viral_remake: {
+        product_name: input.productName,
+        selling_points: input.sellingPoints.filter(Boolean),
+        user_instruction: input.userInstruction,
+        reference_video: input.sourceVideo,
+        reference_image: input.referenceImage,
+        reference_video_rights: 'pending',
+        reference_image_rights: input.referenceImage ? 'pending' : undefined,
+      },
+    },
+    { 'Idempotency-Key': `manual-viral-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_viral_remake_v1',
+      channel: 'douyin',
+      source_video: input.sourceVideo,
+      concept: input.userInstruction,
+      prompt: '等待 Phase 2 视频理解后编译五维提示词',
+      call_to_action: input.callToAction,
+      mandatory_elements: [],
+      prohibited_claims: ['不得复制原片受保护表达'],
+      confirm_route: true,
+    },
+  )
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}/viral-remake`,
+  )
+}
+
+async function createManualShortDramaPrerollWorkspace(
+  projectId: string,
+  input: ApiCreateManualShortDramaPrerollInput,
+): Promise<ApiShortDramaPrerollWorkspace> {
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual', parent_intake_id: input.parentIntakeId,
+      format: 'video', performance_mode: 'short_drama_preroll', channel: 'douyin',
+      objective: input.objective, audience: input.audience,
+      core_message: input.reviewedSellingPoints.filter(Boolean).join('；'), call_to_action: input.callToAction,
+      concept: '短剧导流广告前贴', tone: ['紧凑', '悬念'], visual_keywords: ['人物连续', '高对比字幕', 'CTA 收束'],
+      mandatory_elements: [], prohibited_claims: input.prohibitedClaims,
+      creative_routes: [{
+        route_id: 'route_manual_short_drama_preroll_v1', route_type: 'short_drama_preroll', video_purpose: 'performance',
+        channels: ['douyin'], reason: '用户在短剧前贴工作区明确选择本地预置 Brief', target_duration_seconds: 6,
+        aspect_ratio: '9:16', source_asset_refs: [], evidence_refs: [], requires_human_confirmation: true,
+      }],
+      manual_short_drama_preroll: {
+        brief_id: input.briefId, brief_version: input.briefVersion, brief_name: input.briefName,
+        story_title: input.title, synopsis: input.synopsis, reviewed_selling_points: input.reviewedSellingPoints.filter(Boolean),
+        opening_line: input.openingLine || undefined, hook_strategy: input.hookStrategy, subtitle_style: input.subtitleStyle,
+        transition: input.transition, hook_strength: input.hookStrength, pace_profile: input.paceProfile, character_references: [],
+      },
+    },
+    { 'Idempotency-Key': `manual-short-drama-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_short_drama_preroll_v1', channel: 'douyin',
+      concept: '短剧导流广告前贴', prompt: '等待人工选择短剧候选后由服务端编译 PromptPackage',
+      call_to_action: input.callToAction, mandatory_elements: [], prohibited_claims: ['不得虚构未确认剧情事实'], confirm_route: true,
+    },
+  )
+  return creativeRequest<ApiShortDramaPrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}/short-drama-preroll`,
+  )
+}
+
+async function selectShortDramaPrerollCandidate(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  candidateId: string,
+): Promise<ApiShortDramaPrerollWorkspace> {
+  return creativeRequest<ApiShortDramaPrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll:select-candidate`,
+    'POST',
+    { expected_revision: expectedRevision, candidate_id: candidateId },
+    { 'Idempotency-Key': `short-drama-select-${taskId}-${expectedRevision}-${candidateId}` },
+  )
+}
+
+async function regenerateShortDramaPrerollCandidates(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  generationConfig: ApiShortDramaGenerationConfig,
+  variationIntent: ApiShortDramaVariationIntent = 'balanced',
+): Promise<ApiShortDramaPrerollWorkspace> {
+  return creativeRequest<ApiShortDramaPrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll:regenerate-candidates`,
+    'POST',
+    {
+      expected_revision: expectedRevision,
+      generation_config: generationConfig,
+      variation_intent: variationIntent,
+    },
+    {
+      'Idempotency-Key': [
+        'short-drama-regenerate',
+        taskId,
+        expectedRevision,
+        generationConfig.subtitle_style,
+        generationConfig.hook_strength,
+        generationConfig.pace_profile,
+        variationIntent,
+      ].join('-'),
+    },
+  )
+}
+
+async function createShortDramaPrerollVideoJob(
+  projectId: string,
+  taskId: string,
+  draftRevision: number,
+  candidateId: string,
+): Promise<ApiGenerationJob> {
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    { model_alias: 'cookies.video.standard' },
+    { 'Idempotency-Key': `short-drama-video-${taskId}-${draftRevision}-${candidateId}` },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getShortDramaPrerollVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  const job = await platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getLatestShortDramaPrerollWorkspace(projectId: string): Promise<ApiShortDramaPrerollWorkspace | null> {
+  try {
+    return await creativeRequest<ApiShortDramaPrerollWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/creative-workspaces/short-drama-preroll`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
+function commerceRequestFingerprint(value: unknown) {
+  const text = JSON.stringify(value)
+  let hash = 2166136261
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+async function ensureCommercePrerollFixtureWorkspace(
+  projectId: string,
+): Promise<ApiCommercePrerollWorkspace> {
+  const assets = await ensureKanonGuerlainCommerceFixtureAssets(projectId)
+  return creativeRequest<ApiCommercePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-workspaces/commerce-preroll:ensure-fixture`,
+    'POST',
+    {
+      template_ref: {
+        template_id: 'commerce.window-reveal',
+        template_version: 1,
+      },
+      product_asset_ref: assets.productAsset,
+      first_frame_asset_ref: assets.firstFrame,
+      last_frame_asset_ref: assets.lastFrame,
+    },
+    { 'Idempotency-Key': `commerce-fixture-${projectId}-guerlain-v1` },
+  )
+}
+
+async function getLatestCommercePrerollWorkspace(
+  projectId: string,
+): Promise<ApiCommercePrerollWorkspace | null> {
+  try {
+    return await creativeRequest<ApiCommercePrerollWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/creative-workspaces/commerce-preroll`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
+async function updateCommercePrerollDraft(
+  projectId: string,
+  taskId: string,
+  input: {
+    expected_revision: number
+    template_ref: { template_id: ApiCommerceTemplateId; template_version: 1 }
+    fidelity?: string
+    camera?: string
+    motion?: string
+    environment?: string
+    result?: string
+    guardrails?: string[]
+  },
+): Promise<ApiCommercePrerollWorkspace> {
+  return creativeRequest<ApiCommercePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/commerce-preroll-draft`,
+    'PATCH',
+    input,
+    {
+      'Idempotency-Key': [
+        'commerce-draft',
+        taskId,
+        input.expected_revision,
+        commerceRequestFingerprint(input),
+      ].join('-'),
+    },
+  )
+}
+
+async function confirmCommercePrerollGeneration(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+): Promise<ApiCommercePrerollWorkspace> {
+  return creativeRequest<ApiCommercePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/commerce-preroll:confirm-generation`,
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `commerce-confirm-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function createCommercePrerollWorkspaceVideoJob(
+  projectId: string,
+  workspace: ApiCommercePrerollWorkspace,
+): Promise<ApiGenerationJob> {
+  const taskId = workspace.task.id
+  const draft = workspace.video_draft.commerce_preroll
+  const attemptOrdinal = (workspace.commerce_preroll_generation_attempts?.length ?? 0) + 1
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    { model_alias: 'cookies.video.standard' },
+    {
+      'Idempotency-Key': [
+        'commerce-video',
+        taskId,
+        draft.revision,
+        attemptOrdinal,
+        draft.plan.generation_spec.generation_spec_hash.slice(-12),
+      ].join('-'),
+    },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function createManualGamePrerollWorkspace(
+  projectId: string,
+  input: ApiCreateManualGamePrerollInput,
+): Promise<ApiGamePrerollWorkspace> {
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual',
+      format: 'video',
+      performance_mode: 'game_preroll',
+      channel: 'douyin',
+      objective: input.objective,
+      audience: input.audience,
+      core_message: input.coreMessage,
+      call_to_action: input.callToAction,
+      concept: input.briefName,
+      tone: ['紧张', '清晰', '真实玩法'],
+      visual_keywords: ['技能三选一', '波次推进', '竖屏塔防'],
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+      creative_routes: [{
+        route_id: 'route_manual_game_preroll_v1',
+        route_type: 'game_preroll',
+        video_purpose: 'performance',
+        channels: ['douyin'],
+        reason: '用户确认使用《保卫向日葵》授权实录固定样例跑通游戏前贴',
+        target_duration_seconds: 6,
+        aspect_ratio: '9:16',
+        source_asset_refs: [input.sourceVideo],
+        evidence_refs: input.evidenceMoments.map(moment => moment.id),
+        requires_human_confirmation: true,
+      }],
+      manual_game_preroll: {
+        brief_id: input.briefId,
+        brief_version: input.briefVersion,
+        brief_name: input.briefName,
+        game_name: input.gameName,
+        gameplay_summary: input.gameplaySummary,
+        source_video: input.sourceVideo,
+        source_video_rights: 'confirmed',
+        evidence_moments: input.evidenceMoments,
+        allowed_mechanisms: input.allowedMechanisms,
+        prohibited_mechanisms: input.prohibitedMechanisms,
+        subtitle_style: input.subtitleStyle,
+        hook_strength: input.hookStrength,
+        pace_profile: input.paceProfile,
+      },
+    },
+    { 'Idempotency-Key': `manual-game-preroll-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_game_preroll_v1',
+      channel: 'douyin',
+      source_video: input.sourceVideo,
+      concept: input.briefName,
+      prompt: '等待人工选择游戏前贴候选后由服务端编译 PromptPackage',
+      call_to_action: input.callToAction,
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+      confirm_route: true,
+    },
+  )
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}`,
+  )
+}
+
+async function selectGamePrerollCandidate(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  candidateId: string,
+): Promise<ApiGamePrerollWorkspace> {
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/game-preroll:select-candidate`,
+    'POST',
+    { expected_revision: expectedRevision, candidate_id: candidateId },
+    { 'Idempotency-Key': `game-preroll-select-${taskId}-${expectedRevision}-${candidateId}` },
+  )
+}
+
+async function regenerateGamePrerollCandidates(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+): Promise<ApiGamePrerollWorkspace> {
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/game-preroll:regenerate-candidates`,
+    'POST',
+    {
+      expected_revision: expectedRevision,
+      generation_config: {
+        subtitle_style: 'high_contrast_dynamic',
+        hook_strength: 4,
+        pace_profile: 'punchy',
+      },
+    },
+    { 'Idempotency-Key': `game-preroll-regenerate-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function createGamePrerollVideoJob(
+  projectId: string,
+  taskId: string,
+  draftRevision: number,
+  candidateId: string,
+): Promise<ApiGenerationJob> {
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    { model_alias: 'cookies.video.standard' },
+    { 'Idempotency-Key': `game-preroll-video-${taskId}-${draftRevision}-${candidateId}` },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getLatestGamePrerollWorkspace(projectId: string): Promise<ApiGamePrerollWorkspace | null> {
+  try {
+    return await creativeRequest<ApiGamePrerollWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/creative-workspaces/game-preroll`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
+async function getGamePrerollVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  const job = await platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getLatestViralRemakeWorkspace(projectId: string): Promise<ApiViralRemakeWorkspace | null> {
+  const result = await creativeRequest<{ items: Array<{ id: string; performance_mode?: string; status: string }> }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=100`,
+  )
+  const task = result.items.find(item => item.performance_mode === 'viral_remake' && item.status !== 'archived')
+  if (!task) return null
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(task.id)}/viral-remake`,
+  )
+}
+
+async function getViralRemakeWorkspace(projectId: string, taskId: string): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake`,
+  )
+}
+
+async function analyzeViralRemake(projectId: string, taskId: string): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake:analyze-reference`,
+    'POST',
+    undefined,
+    { 'Idempotency-Key': `viral-analysis-${taskId}-${Date.now()}` },
+  )
+}
+
+async function updateViralPrompt(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  dimensions: Record<ApiVideoPromptDimension['id'], string>,
+): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake/prompt-draft`,
+    'PATCH',
+    { expected_revision: expectedRevision, dimensions },
+  )
+}
+
+async function confirmViralGeneration(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+  confirmReferenceImageRights: boolean,
+): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake:confirm-generation`,
+    'POST',
+    {
+      expected_revision: expectedRevision,
+      confirm_reference_video_rights: true,
+      confirm_reference_image_rights: confirmReferenceImageRights,
+    },
+    { 'Idempotency-Key': `viral-confirm-${taskId}-${expectedRevision}` },
+  )
+}
+
+type ApiProviderJobWire = {
+  id: string
+  project_id: string
+  kind: string
+  execution_status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  provider_status: string
+  project_asset_refs: Array<{ asset_version: ApiAssetVersionRef }>
+  error?: { message?: string }
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+function mapViralProviderJob(job: ApiProviderJobWire): ApiGenerationJob {
+  const providerStatus = job.provider_status
+  let status: ApiGenerationJob['status'] = 'queued'
+  if (job.execution_status === 'failed' || providerStatus === 'failed' || providerStatus === 'expired') status = 'failed'
+  else if (job.execution_status === 'cancelled' || providerStatus === 'cancelled') status = 'cancelled'
+  else if (job.execution_status === 'succeeded' || providerStatus === 'succeeded' || providerStatus === 'partially_succeeded') status = 'succeeded'
+  else if (job.execution_status === 'running' || providerStatus !== 'submitted') status = 'running'
+  return {
+    id: job.id,
+    projectId: job.project_id,
+    artifactKind: 'video',
+    status,
+    model: 'cookies.video.standard',
+    diagnostic: job.error?.message,
+    artifactId: job.project_asset_refs.at(-1)?.asset_version.asset_id,
+    version: job.version,
+    createdAt: job.created_at,
+    updatedAt: job.updated_at,
+  }
+}
+
+async function createViralVideoJob(projectId: string, taskId: string): Promise<ApiGenerationJob> {
+  const job = await creativeRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:video-job`,
+    'POST',
+    {},
+    { 'Idempotency-Key': `viral-video-${taskId}-${Date.now()}` },
+  )
+  return mapViralProviderJob(job)
+}
+
+async function getViralVideoJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  const job = await platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  )
+  return mapViralProviderJob(job)
+}
+
+async function submitViralCandidateReview(
+  projectId: string,
+  taskId: string,
+  candidateId: string,
+): Promise<ApiViralRemakeWorkspace> {
+  return creativeRequest<ApiViralRemakeWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/viral-remake/candidates/${encodeURIComponent(candidateId)}:submit-review`,
+    'POST',
+  )
 }
 
 function projectQuery(projectId?: string): string {
@@ -2706,12 +3766,140 @@ export function buildRemixPrerollInput(
 }
 
 export const api = {
-  listAgencyWorkbench: loadKanonAgencyWorkbench,
+  listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
+    // Workbench data always follows the caller's accessible Project scope.
+    // includeDemoProject is retained as a compatibility hint, but it must not
+    // introduce a hard-coded Project outside the current identity.
+    const projectIds = options.projectIds ?? []
+    return loadPersistedAgencyWorkbench(projectIds)
+  },
+  getSession: async () => authSessionFromActor((await platformRequest<PlatformRequestContext>('/context')).actor),
+  login: async (input: { username: string; password: string }) => {
+    const result = await platformRequest<PlatformLoginResult>('/auth/login', 'POST', {
+      username: input.username,
+      password: input.password,
+    })
+    return authSessionFromActor(result.actor, input.username)
+  },
+  logout: async () => {
+    await platformRequest<void>('/auth/logout', 'POST')
+    return { authenticated: false }
+  },
   getCapabilities: getKanonCapabilities,
-  listProjects: listKanonProjects,
-  createProject: createKanonProject,
-  updateProject: async (_id: string, _input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective'>>) =>
-    Promise.reject<ApiProject>(unsupportedKanonWrite('项目编辑')),
+  getProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration'),
+  updateProviderConfiguration: (input: { apiKey: string; baseUrl?: string }) =>
+    request<ApiProviderConfiguration>('/provider/configuration', 'PUT', input),
+  deleteProviderConfiguration: () => request<ApiProviderConfiguration>('/provider/configuration', 'DELETE'),
+  getPublicInsightOverview: () => request<ApiPublicInsightOverview>('/public-insights/overview'),
+  getPublicInsightFilters: () => request<ApiPublicInsightFilters>('/public-insights/filters'),
+  listPublicInsightVideos: (input: {
+    page?: number
+    pageSize?: number
+    keyword?: string
+    industry?: string
+    aiGenerated?: string
+    visualStyle?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  } = {}) => {
+    const search = new URLSearchParams({
+      page: String(input.page ?? 1),
+      page_size: String(input.pageSize ?? 20),
+      keyword: input.keyword ?? '',
+      industry: input.industry ?? '',
+      ai_generated: input.aiGenerated ?? '全部',
+      visual_style: input.visualStyle ?? '',
+      sort_by: input.sortBy ?? 'vv_all',
+      sort_order: input.sortOrder ?? 'desc',
+    })
+    return request<ApiPublicInsightVideoPage>(`/public-insights/videos?${search.toString()}`)
+  },
+  getPublicInsightVideo: (itemId: string) =>
+    request<ApiPublicInsightVideoDetail>(`/public-insights/videos/${encodeURIComponent(itemId)}`),
+  listProjects: () => platformClient.listProjects(),
+  getProjectSnapshot: (projectId: string) => platformClient.getProjectSnapshot(projectId),
+  listProjectMediaAssets: (projectId: string) => platformClient.listProjectMediaAssets(projectId),
+  runMaterialQualityCheck: async (projectId: string, assetId: string, version: number) => {
+    const item = await platformRequest<{
+      id: string
+      organization_id: string
+      project_id: string
+      asset_id: string
+      asset_version: number
+      status: string
+      model: string
+      rule_version: string
+      prompt_version: string
+      summary: string
+      issues: Array<{ id: string; severity: string; rule: string; evidence: string; suggestion: string }>
+      created_at: string
+      completed_at?: string
+    }>(
+      `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}/quality-checks`,
+      'POST',
+      {},
+      { 'Idempotency-Key': `material-qc-${projectId}-${assetId}-${version}` },
+    )
+    return {
+      id: item.id,
+      organizationId: item.organization_id,
+      projectId: item.project_id,
+      assetId: item.asset_id,
+      assetVersion: item.asset_version,
+      status: item.status as ApiQualityCheckStatus,
+      model: item.model,
+      ruleVersion: item.rule_version,
+      promptVersion: item.prompt_version,
+      summary: item.summary,
+      issues: item.issues.map(issue => ({ ...issue, severity: issue.severity as ApiQualityIssueSeverity })),
+      createdAt: item.created_at,
+      completedAt: item.completed_at,
+    } satisfies ApiQualityCheckRun
+  },
+  recordMaterialConfirmation: async (projectId: string, assetId: string, version: number, input: { status: ApiMaterialConfirmationStatus; scope: string; note: string }) => {
+    const item = await platformRequest<{
+      id: string
+      organization_id: string
+      project_id: string
+      quality_check_run_id: string
+      asset_id: string
+      asset_version: number
+      status: string
+      scope: string
+      confirmed_by: string
+      note: string
+      created_at: string
+    }>(
+      `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}/confirmations`,
+      'POST',
+      input,
+      { 'Idempotency-Key': `material-confirm-${projectId}-${assetId}-${version}-${input.status}` },
+    )
+    return {
+      id: item.id,
+      organizationId: item.organization_id,
+      projectId: item.project_id,
+      qualityCheckRunId: item.quality_check_run_id,
+      assetId: item.asset_id,
+      assetVersion: item.asset_version,
+      status: item.status as ApiMaterialConfirmationStatus,
+      scope: item.scope,
+      confirmedBy: item.confirmed_by,
+      note: item.note,
+      createdAt: item.created_at,
+    } satisfies ApiMaterialConfirmation
+  },
+  setMaterialDeliveryVersion: (projectId: string, assetId: string, version: number) =>
+    platformRequest(
+      `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/version-pointer`,
+      'PATCH',
+      { delivery_version: version },
+      { 'Idempotency-Key': `material-delivery-${projectId}-${assetId}-${version}` },
+    ),
+  createProject: (input: Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>) =>
+    platformClient.createProject(input),
+  updateProject: (id: string, input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>> & { expectedContextVersion?: number }) =>
+    platformClient.updateProject(id, input),
   listArtifacts: (projectId?: string) =>
     projectId ? listKanonArtifacts(projectId) : Promise.resolve([]),
   listPrerollArtifacts: async (scope: ApiPrerollScope) =>
@@ -2733,6 +3921,7 @@ export const api = {
     sourceArtifactIds?: string[]
   }) => Promise.reject<ApiBusinessTask>(unsupportedKanonWrite(`“${input.name}”任务创建`)),
   updateTask: (
+    projectId: string,
     id: string,
     input: Partial<Pick<ApiBusinessTask, 'name' | 'objective' | 'status' | 'sourceTaskIds' | 'sourceArtifactIds' | 'outputArtifactIds'>>,
   ) => Promise.reject<ApiBusinessTask>(unsupportedKanonWrite(`任务 ${id} 更新`)),
@@ -2762,15 +3951,34 @@ export const api = {
   cancelJob: async (id: string, _scope?: ApiPrerollScope) =>
     Promise.reject<ApiGenerationJob>(unsupportedKanonWrite(`模型作业 ${id} 取消`)),
   generateBrief: async (_projectId: string, _prompt: string) =>
-    Promise.reject<{ job: ApiGenerationJob; artifact: ApiArtifact }>(
-      unsupportedKanonWrite('一键生成 Brief'),
-    ),
+    createKanonBrief(_projectId, _prompt),
+  confirmBrief: (artifact: ApiArtifact) => confirmKanonBrief(artifact),
+  attachBriefProductAsset: (artifact: ApiArtifact, asset: ApiAssetVersionRef) =>
+    attachKanonBriefProductAsset(artifact, asset),
   createMedia: (
     projectId: string,
     kind: 'image' | 'video',
     prompt: string,
     briefId: string,
   ) => createKanonMedia(projectId, kind, prompt, briefId),
+  createCommercePrerollVideo: (
+    projectId: string,
+    prompt: string,
+    briefId: string,
+  ) => createKanonCommercePrerollVideo(projectId, prompt, briefId),
+  createPreparedCommercePrerollVideo: (
+    projectId: string,
+    prompt: string,
+    sourceId: string,
+    productAsset: { asset_id: string; version: number },
+  ) => createKanonPreparedCommercePrerollVideo(projectId, prompt, sourceId, productAsset),
+  listCommercePrerollSources: (projectId: string) =>
+    listKanonCommercePrerollSources(projectId),
+  prepareCommercePreroll: (
+    projectId: string,
+    source: ApiCreativeSourceOption,
+    templateId: ApiCommerceTemplateId,
+  ) => prepareKanonCommercePreroll(projectId, source, templateId),
   createPrerollVideo: (
     scope: ApiPrerollScope,
     prompt: string,
@@ -2799,12 +4007,12 @@ export const api = {
       `已审核卖点：${storyContext.reviewedSellingPoints.join('；')}`,
       storyContext.openingLine ? `开场台词：${storyContext.openingLine}` : '',
       `候选方案：${candidateId}（${planVersion}）`,
-      '生成 9:16、6 秒、静音可理解的短剧广告前贴，并保留稳定拼接点。',
+      '生成 9:16、独立 6 秒、静音可理解的短剧广告前贴，并以清晰 CTA 收束。',
     ].filter(Boolean).join('。'),
     briefId,
   ).then(job => ({ ...job, purpose: scope.purpose, prerollType: scope.prerollType })),
   listAuditEvents: (projectId?: string) =>
-    request<ApiAuditEvent[]>(`/audit-events${projectQuery(projectId)}`),
+    projectId ? platformClient.listAuditEvents(projectId) : Promise.resolve([]),
   listOperations: (projectId: string) =>
     request<ApiOperationalRecord[]>(`/projects/${encodeURIComponent(projectId)}/operations`),
   listRemixEvalCases: (projectId: string) =>
@@ -2838,6 +4046,35 @@ export const api = {
     platformRequest<{ quality_report: ApiQualityReport | null }>(`/projects/${encodeURIComponent(projectId)}/remix-render-jobs/${encodeURIComponent(jobId)}/quality-report`),
   createHitAnalysis: (projectId: string, input: ApiCreateHitAnalysisInput) =>
     platformRequest<ApiHitAnalysis>(`/projects/${encodeURIComponent(projectId)}/remix-hit-analyses`, 'POST', input),
+  uploadProjectAsset,
+  createManualViralRemakeWorkspace,
+  createManualShortDramaPrerollWorkspace,
+  getTaskStrategyCreativeIntake,
+  getCreativeTaskHandoffDetail,
+  selectShortDramaPrerollCandidate,
+  regenerateShortDramaPrerollCandidates,
+  createShortDramaPrerollVideoJob,
+  getShortDramaPrerollVideoJob,
+  getLatestShortDramaPrerollWorkspace,
+  ensureCommercePrerollFixtureWorkspace,
+  getLatestCommercePrerollWorkspace,
+  updateCommercePrerollDraft,
+  confirmCommercePrerollGeneration,
+  createCommercePrerollWorkspaceVideoJob,
+  createManualGamePrerollWorkspace,
+  selectGamePrerollCandidate,
+  regenerateGamePrerollCandidates,
+  createGamePrerollVideoJob,
+  getLatestGamePrerollWorkspace,
+  getGamePrerollVideoJob,
+  getLatestViralRemakeWorkspace,
+  getViralRemakeWorkspace,
+  analyzeViralRemake,
+  updateViralPrompt,
+  confirmViralGeneration,
+  createViralVideoJob,
+  getViralVideoJob,
+  submitViralCandidateReview,
   getHitAnalysis: (projectId: string, analysisId: string) =>
     platformRequest<ApiHitAnalysis>(`/projects/${encodeURIComponent(projectId)}/remix-hit-analyses/${encodeURIComponent(analysisId)}`),
   createProductMapping: (projectId: string, input: ApiCreateProductMappingInput) =>

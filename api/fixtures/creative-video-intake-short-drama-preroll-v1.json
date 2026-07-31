@@ -1,0 +1,98 @@
+{
+  "contract_version": "creative-video-intake/v1",
+  "intake_id": "fixture_video_short_drama_preroll_v1",
+  "organization_id": "fixture_org",
+  "project_id": "fixture_project_short_drama",
+  "status": "fixture_ready",
+  "source": {
+    "kind": "fixture",
+    "fixture_id": "short-drama-preroll/v1",
+    "documents": [
+      {
+        "file_name": "short-drama-preroll-fixture.md",
+        "locator": "fixture://briefs/short-drama-preroll-v1",
+        "page_refs": ["story-context"],
+        "note": "虚构开发样例，不代表真实客户、作品或投放授权。"
+      }
+    ]
+  },
+  "campaign": {
+    "objective": "在六秒内建立冲突、反转和继续观看理由。",
+    "audience": "偏好都市职场逆袭题材的短视频用户。",
+    "core_message": "关键证据将在正片中改变人物当前困境。",
+    "call_to_action": "继续观看正片",
+    "channels": ["douyin", "kuaishou"],
+    "locale": "zh-CN"
+  },
+  "video": {
+    "mode": "short_drama_preroll",
+    "purpose": "performance",
+    "target_duration_seconds": 6,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "variant_count": 3,
+    "hook_deadline_seconds": 1,
+    "audio_policy": "generated_audio",
+    "transition": "action_match"
+  },
+  "product": {
+    "brand_name": "虚构短剧项目",
+    "product_name": "《最后一份合约》",
+    "selling_points": ["首秒合同危机", "人物关系反转", "正片开场连续"],
+    "proof_points": ["候选需保留已审核故事上下文", "末帧动作与正片首镜匹配"],
+    "usage_scenarios": ["短剧信息流投放"]
+  },
+  "creative": {
+    "concept": "让主角在首秒收到解约通知，在最后一秒露出能够逆转局势的证据。",
+    "tone": ["紧张", "克制", "反转"],
+    "visual_keywords": ["消息弹窗", "人物停顿", "证据特写", "动作匹配"],
+    "mandatory_elements": ["静音可理解", "人物关系清晰", "结尾存在稳定拼接点"],
+    "prohibited_claims": ["不得虚构正片不存在的剧情", "不得逐字复用未授权台词"],
+    "reference_policy": "仅参考正片人物关系、服装连续性和开场动作，不扩写未经确认的剧情事实。",
+    "similarity_policy": "候选之间必须使用不同冲突机制，并避免复制其他短剧的具体表达。"
+  },
+  "source_assets": [
+    {
+      "role": "main_video",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://assets/short-drama-opening.mp4",
+      "rights_status": "fixture_only",
+      "note": "仅用于接口、页面和测试替身；生产环境必须替换为同 Project 的 AssetVersionRef。"
+    }
+  ],
+  "claims": [
+    {
+      "text": "前贴必须与已审核故事上下文和正片开场保持连续。",
+      "status": "assumption",
+      "evidence_refs": ["fixture_short_drama_story"]
+    }
+  ],
+  "evidence_refs": [
+    {
+      "id": "fixture_short_drama_story",
+      "source_type": "fixture_document",
+      "locator": "fixture://briefs/short-drama-preroll-v1#story-context",
+      "note": "用于测试故事上下文、候选生成和人工选择流程。"
+    }
+  ],
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false,
+    "missing_fields": ["source.strategy_package_ref", "source_assets.main_video.production_ref"],
+    "blockers": ["仅为开发 fixture，不能冻结为正式 CreativeVersion 或进入交付。"],
+    "assumptions": [
+      {
+        "field": "campaign.audience",
+        "value": "都市职场逆袭题材用户",
+        "reason": "为测试候选差异化而设置的虚构受众。"
+      }
+    ]
+  },
+  "confirmation": {
+    "required": true,
+    "status": "unconfirmed"
+  },
+  "created_at": "2026-07-28T06:00:00Z"
+}

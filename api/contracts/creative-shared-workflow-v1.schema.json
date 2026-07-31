@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-shared-workflow-v1.schema.json",
+  "title": "creative-shared-workflow/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "frozen_on", "contracts", "route_profiles", "states"],
+  "properties": {
+    "contract_version": {"const": "creative-shared-workflow/v1"},
+    "frozen_on": {"const": "2026-07-31"},
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intake_create", "intake", "planning_context", "direction_candidate_batch", "direction"],
+      "properties": {
+        "intake_create": {"const": "creative-intake-create/v3"},
+        "intake": {"const": "creative-intake/v3"},
+        "planning_context": {"const": "creative-planning-context/v1"},
+        "direction_candidate_batch": {"const": "creative-direction-candidate-batch/v1"},
+        "direction": {"const": "creative-direction/v1"}
+      }
+    },
+    "route_profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_text", "brand_video"],
+      "properties": {
+        "image_text": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deliverable_type", "purpose"],
+          "properties": {
+            "deliverable_type": {"const": "image_text"},
+            "purpose": {"const": "brand"}
+          }
+        },
+        "brand_video": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deliverable_type", "purpose", "performance_mode"],
+          "properties": {
+            "deliverable_type": {"const": "video"},
+            "purpose": {"const": "brand"},
+            "performance_mode": {"const": "brand_video"}
+          }
+        }
+      }
+    },
+    "states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intake", "direction_batch", "direction", "task", "creative_version"],
+      "properties": {
+        "intake": {"$ref": "#/$defs/intakeMachine"},
+        "direction_batch": {"$ref": "#/$defs/directionBatchMachine"},
+        "direction": {"$ref": "#/$defs/directionMachine"},
+        "task": {"$ref": "#/$defs/taskMachine"},
+        "creative_version": {"$ref": "#/$defs/versionMachine"}
+      }
+    }
+  },
+  "$defs": {
+    "stateList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "intakeMachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "terminal", "transitions"],
+      "properties": {
+        "initial": {"$ref": "#/$defs/stateList"},
+        "terminal": {"$ref": "#/$defs/stateList"},
+        "transitions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["needs_clarification", "ready", "superseded"],
+          "properties": {
+            "needs_clarification": {"$ref": "#/$defs/stateList"},
+            "ready": {"$ref": "#/$defs/stateList"},
+            "superseded": {"$ref": "#/$defs/stateList"}
+          }
+        }
+      }
+    },
+    "directionBatchMachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "terminal", "transitions"],
+      "properties": {
+        "initial": {"$ref": "#/$defs/stateList"},
+        "terminal": {"$ref": "#/$defs/stateList"},
+        "transitions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generating", "ready", "failed"],
+          "properties": {
+            "generating": {"$ref": "#/$defs/stateList"},
+            "ready": {"$ref": "#/$defs/stateList"},
+            "failed": {"$ref": "#/$defs/stateList"}
+          }
+        }
+      }
+    },
+    "directionMachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "terminal", "transitions"],
+      "properties": {
+        "initial": {"$ref": "#/$defs/stateList"},
+        "terminal": {"$ref": "#/$defs/stateList"},
+        "transitions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate", "confirmed", "superseded"],
+          "properties": {
+            "candidate": {"$ref": "#/$defs/stateList"},
+            "confirmed": {"$ref": "#/$defs/stateList"},
+            "superseded": {"$ref": "#/$defs/stateList"}
+          }
+        }
+      }
+    },
+    "taskMachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "terminal", "transitions"],
+      "properties": {
+        "initial": {"$ref": "#/$defs/stateList"},
+        "terminal": {"$ref": "#/$defs/stateList"},
+        "transitions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["draft", "in_progress", "generating", "generated", "rendering", "ready_for_review", "approved", "delivered", "archived"],
+          "properties": {
+            "draft": {"$ref": "#/$defs/stateList"},
+            "in_progress": {"$ref": "#/$defs/stateList"},
+            "generating": {"$ref": "#/$defs/stateList"},
+            "generated": {"$ref": "#/$defs/stateList"},
+            "rendering": {"$ref": "#/$defs/stateList"},
+            "ready_for_review": {"$ref": "#/$defs/stateList"},
+            "approved": {"$ref": "#/$defs/stateList"},
+            "delivered": {"$ref": "#/$defs/stateList"},
+            "archived": {"$ref": "#/$defs/stateList"}
+          }
+        }
+      }
+    },
+    "versionMachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "terminal", "transitions"],
+      "properties": {
+        "initial": {"$ref": "#/$defs/stateList"},
+        "terminal": {"$ref": "#/$defs/stateList"},
+        "transitions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["created", "checked", "approved", "superseded"],
+          "properties": {
+            "created": {"$ref": "#/$defs/stateList"},
+            "checked": {"$ref": "#/$defs/stateList"},
+            "approved": {"$ref": "#/$defs/stateList"},
+            "superseded": {"$ref": "#/$defs/stateList"}
+          }
+        }
+      }
+    }
+  }
+}

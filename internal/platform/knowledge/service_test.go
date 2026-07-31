@@ -75,7 +75,7 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 		{
 			name: "document content declared",
 			request: ResearchRequest{
-				Mode: "mcp", Query: "竞品研究", DocumentIDs: []string{"doc_1"},
+				Mode: "web", Query: "竞品研究", DocumentIDs: []string{"doc_1"},
 				DisclosedFields: []string{"query", "document_content"},
 			},
 		},
@@ -84,6 +84,13 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 			request: ResearchRequest{
 				Mode: "web", Query: "行业案例", DocumentIDs: []string{"doc_1"},
 				DisclosedFields: []string{"query"},
+			},
+			wantError: true,
+		},
+		{
+			name: "mcp is not a public research mode",
+			request: ResearchRequest{
+				Mode: "mcp", Query: "竞品研究", DisclosedFields: []string{"query"},
 			},
 			wantError: true,
 		},
@@ -112,6 +119,24 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 				t.Fatalf("error = %v, want invalid=%t", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestResearchCategoryIsExplicitAndBounded(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"", "general", "audience", "competitor", "industry", " Audience "} {
+		if !validResearchCategory(value, true) {
+			t.Fatalf("category %q should be valid", value)
+		}
+	}
+	for _, value := range []string{"creative", "brand", "unknown"} {
+		if validResearchCategory(value, true) {
+			t.Fatalf("category %q should be rejected", value)
+		}
+	}
+	if normalizedResearchCategory("") != "general" ||
+		normalizedResearchCategory(" Competitor ") != "competitor" {
+		t.Fatal("research category normalization changed unexpectedly")
 	}
 }
 

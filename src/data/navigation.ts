@@ -14,14 +14,12 @@ export const systems: SystemDefinition[] = [
     key: 'strategy', label: '需求与策略', shortLabel: '策略', icon: BrainCircuit,
     statement: '把模糊需求转化为可追溯、可执行的广告策略。',
     nav: [
-      { id: 'tasks', label: '策略任务', icon: ListChecks, group: '工作', layout: 'workspace', description: '创建真实持久化任务，串联 Brief、研究证据、策略版本与评审结果。', views: ['全部任务', '进行中', '待评审', '已完成'] },
-      { id: 'workspaces', label: '策略工作区', icon: FolderKanban, group: '工作', layout: 'workspace', description: '在对话、Brief、研究、策略、实验与评审之间保持同一上下文。', views: ['概览', '对话', 'Brief', '研究', '策略', '实验', '评审', '变更记录'] },
+      { id: 'tasks', label: '策略任务', icon: ListChecks, group: '工作', layout: 'workspace', description: '创建真实持久化任务，串联 Brief、研究证据、策略版本与评审结果。', views: ['全部任务', '进行中', '待评审', '已完成', '已归档'] },
+      { id: 'workspaces', label: '策略工作区', icon: FolderKanban, group: '工作', layout: 'workspace', description: '在对话、Brief、研究、策略、创意任务策略、实验与评审之间保持同一上下文。', views: ['概览', '对话', 'Brief', '研究', '策略', '创意任务策略', '实验', '评审', '变更记录'] },
       { id: 'briefs', label: '需求中心', icon: ClipboardCheck, group: '资产与方法', layout: 'table', description: '管理 Brief 完整度、来源、冲突、确认与版本。', views: ['Brief 列表', '待补充', '待确认', '版本库', '冲突队列'] },
       { id: 'strategies', label: '策略中心', icon: Target, group: '资产与方法', layout: 'analysis', description: '沉淀方向、受众、主张、渠道预算与实验方案。', views: ['策略库', '渠道策略', '方案对比', '实验方案', '版本库'] },
       { id: 'research', label: '研究洞察', icon: FileSearch, group: '资产与方法', layout: 'analysis', description: '组织受众、竞品、行业研究和可引用证据。', views: ['受众', '竞品', '行业', '资料来源', '研究任务'] },
       { id: 'reviews', label: '评审中心', icon: BadgeCheck, group: '协作', layout: 'table', description: '集中处理待评审内容、评论、审批与变更。', views: ['待我评审', '我发起的', '评论与提及', '已完成', '变更记录'] },
-      { id: 'operations', label: '能力运营', icon: Bot, group: '治理', layout: 'operations', description: '治理领域 Skills、模板、字段规则和评测集。', views: ['领域 Skills', '行业模板', '字段规则', '评测集', '质量看板'] },
-      { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '配置字段、状态、通知和导出规范。', views: ['字段配置', '状态规则', '通知', '导出模板'] },
     ],
   },
   {
@@ -34,8 +32,6 @@ export const systems: SystemDefinition[] = [
       { id: 'production', label: '制作中心', icon: Aperture, group: '创作', layout: 'operations', description: '管理图片、视频、音频生成与渲染队列。', views: ['图片生成', '视频生成', '音频生成', '渲染队列', '源素材', '失败任务'] },
       { id: 'reviews', label: '素材检查', icon: BadgeCheck, group: '协作与输出', layout: 'workspace', description: '按素材版本完成大模型质检、人工确认和退回占位。', views: ['全部素材', '待质检', '未通过', '待人工确认', '已确认'] },
       { id: 'deliveries', label: '交付中心', icon: PackageCheck, group: '协作与输出', layout: 'table', description: '生成稳定发布包、投放包和授权清单。', views: ['待交付', '发布包', '投放包', '下载记录', '停用版本'] },
-      { id: 'operations', label: '创意运营', icon: Sparkles, group: '治理', layout: 'operations', description: '治理渠道规则、Skills、模板、品牌规则映射和 Remix-MMLU 评测集。', views: ['渠道规则', '领域 Skills', '模板', '品牌规则映射', '评测集', '质量看板'] },
-      { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '配置默认规格、命名、通知、评审与交付规则。', views: ['默认规格', '命名规则', '通知', '评审流', '交付规则'] },
     ],
   },
   {
@@ -79,10 +75,8 @@ export const systems: SystemDefinition[] = [
       { id: 'monitoring', label: '监控告警', icon: Activity, group: '监控与优化', layout: 'analysis', description: '监控预算、效果、平台、拒审、追踪和素材疲劳。', views: ['需行动', '预算', '效果', '平台状态', '拒审', '追踪', '素材疲劳'] },
       { id: 'optimization', label: '优化中心', icon: TrendingUp, group: '监控与优化', layout: 'analysis', description: '评估建议、预计影响、ChangeSet 和观察结果。', views: ['待处理建议', '已采纳', '观察中', '已拒绝', '效果跟踪'] },
       { id: 'accounts', label: '账户与环境', icon: UsersRound, group: '资源', layout: 'table', description: '管理广告账户、平台资产、权限和执行环境。', views: ['广告账户', '平台资产', '权限', '登录状态', '执行设备'] },
-      { id: 'approvals', label: '审批中心', icon: FileCheck2, group: '治理', layout: 'workspace', description: '审查预算、上线、暂停、扩量和紧急动作。', views: ['待我审批', '我发起的', '预算', '上线', '暂停与扩量', '已完成'] },
-      { id: 'evidence', label: '证据与审计', icon: Archive, group: '治理', layout: 'operations', description: '保存执行时间线、截图、结构化日志和前后差异。', views: ['执行时间线', '页面截图', '结构化日志', '前后差异', '导出'] },
-      { id: 'platform', label: '平台能力运营', icon: MonitorCog, group: '治理', layout: 'operations', description: '治理平台 Skills、适配、回归、版本与故障开关。', views: ['能力矩阵', '页面适配', '回归测试', '版本发布', '故障开关'] },
-      { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '配置预算护栏、风险等级、通知与监控频率。', views: ['预算护栏', '风险等级', '通知', '监控频率', '命名规则'] },
+      { id: 'approvals', label: '审批中心', icon: FileCheck2, group: '审批与审计', layout: 'workspace', description: '审查预算、上线、暂停、扩量和紧急动作。', views: ['待我审批', '我发起的', '预算', '上线', '暂停与扩量', '已完成'] },
+      { id: 'evidence', label: '证据与审计', icon: Archive, group: '审批与审计', layout: 'operations', description: '保存执行时间线、截图、结构化日志和前后差异。', views: ['执行时间线', '页面截图', '结构化日志', '前后差异', '导出'] },
     ],
   },
 ]

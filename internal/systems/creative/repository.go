@@ -15,6 +15,14 @@ var (
 	ErrProviderJobConflict = errors.New("production job already registered with a different provider job")
 	ErrVersionConflict     = errors.New("creative resource version conflict")
 	ErrInvalidState        = errors.New("creative resource is not in a state that allows this action")
+	// Viral analysis failures are intentionally classified at the domain seam so
+	// HTTP clients can distinguish a retryable model-gateway issue from an
+	// invalid or unreadable source video without receiving provider internals.
+	ErrViralAnalysisSourceUnavailable   = errors.New("viral analysis source video is unavailable")
+	ErrViralAnalysisPreparationFailed   = errors.New("viral analysis video preparation failed")
+	ErrViralAnalysisProviderUnavailable = errors.New("viral analysis provider is unavailable")
+	ErrViralAnalysisProviderRejected    = errors.New("viral analysis provider rejected the request")
+	ErrViralAnalysisResponseInvalid     = errors.New("viral analysis provider returned an invalid response")
 )
 
 type Repository interface {
@@ -25,6 +33,8 @@ type Repository interface {
 	CreateVideoTask(context.Context, CreativeTask, VideoDraft) (CreativeTask, error)
 	ListTasks(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativeTask, error)
 	GetTaskDetail(context.Context, contract.OrganizationID, contract.ProjectID, string) (TaskDetail, error)
+	CreateShortDramaGenerationAttempt(context.Context, contract.OrganizationID, contract.ProjectID, ShortDramaGenerationAttempt) (ShortDramaGenerationAttempt, error)
+	CreateGamePrerollGenerationAttempt(context.Context, contract.OrganizationID, contract.ProjectID, GamePrerollGenerationAttempt) (GamePrerollGenerationAttempt, error)
 	ArchiveTask(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) error
 	ReviseDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ImageTextDraft) (ImageTextDraft, error)
 	RegisterProductionJob(context.Context, contract.OrganizationID, contract.ProjectID, string, ProductionJob) error
@@ -40,4 +50,11 @@ type Repository interface {
 	ApproveVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, CreativeApproval) (CreativeVersion, error)
 	CreatePackage(context.Context, CreativePackage) (CreativePackage, error)
 	ListPackages(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativePackage, error)
+}
+
+// ViralRemakeRepository is a narrow seam for append-only video-draft
+// revisions. It is separate from the base Repository so other Creative test
+// adapters do not need to understand the viral-remake workflow.
+type ViralRemakeRepository interface {
+	ReviseVideoDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, VideoDraft, TaskStatus) (VideoDraft, error)
 }

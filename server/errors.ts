@@ -1,5 +1,6 @@
 export type ErrorCode =
   | "VALIDATION_ERROR"
+  | "UNAUTHENTICATED"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "INVALID_STATE_TRANSITION"
@@ -40,6 +41,8 @@ export function errorStatus(code: ErrorCode): number {
     case "INVALID_JSON":
     case "BRIEF_NOT_CONFIRMED":
       return 400;
+    case "UNAUTHENTICATED":
+      return 401;
     case "NOT_FOUND":
     case "ROUTE_NOT_FOUND":
       return 404;

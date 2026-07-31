@@ -1,0 +1,42 @@
+{
+  "business_code": "wechat_official_article",
+  "generation": 1,
+  "version": "1.0.0",
+  "display_name": "公众号文章",
+  "summary": "面向中长内容、完整论证、品牌表达和私域承接的文章任务。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 20,
+  "match_rules": [
+    {"id":"channel_wechat","field":"channels","operator":"contains","values":["wechat_ecosystem"],"weight":40,"reason":"目标渠道包含微信生态"},
+    {"id":"context_depth","field":"content_context","operator":"in","values":["education","deep_explanation","unknown"],"weight":25,"reason":"任务需要较完整的信息解释"},
+    {"id":"objective_consideration","field":"objective_type","operator":"in","values":["awareness","consideration","lead"],"weight":20,"reason":"适合品牌观点、用户教育或私域承接"},
+    {"id":"deliverable_video","field":"deliverable_type","operator":"equals","values":["video"],"weight":-25,"reason":"视频交付与公众号文章不直接匹配"}
+  ],
+  "questions": [
+    {"id":"reader_value","label":"读者看完最应该获得什么价值？","type":"textarea","required_for":"strategy","validation":{"max_length":800}},
+    {"id":"brand_position","label":"品牌在这个议题上的立场是什么？","type":"textarea","required_for":"strategy","validation":{"max_length":800}},
+    {"id":"source_requirements","label":"哪些数据或事实必须标注来源？","type":"textarea","required_for":"strategy","validation":{"max_length":1000}},
+    {"id":"private_domain_path","label":"文章希望如何承接到私域或落地页？","type":"textarea","required_for":"production","validation":{"max_length":500}}
+  ],
+  "requirements": {
+    "strategy": ["文章目标","目标读者","核心主题","可引用事实和来源","CTA 意图"],
+    "production": ["头图和配图素材","必要声明","落地页或私域承接信息"]
+  },
+  "output_fields": [
+    {"key":"core_argument","label":"核心论点","type":"string","required":true,"max_length":300,"description":"文章需要建立的单一核心论点。"},
+    {"key":"argument_structure","label":"论证结构","type":"string_array","required":true,"max_items":6,"description":"信息层级和论证顺序，不是具体大纲。"},
+    {"key":"evidence_boundary","label":"证据边界","type":"string_array","required":true,"max_items":8,"description":"可以引用的事实类型和必须注明来源的内容。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["topic_research","structure_analysis"],
+    "production_confirmations": ["quotation_rights","image_rights"]
+  },
+  "skill_name": "creative_task.wechat_official_article",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}

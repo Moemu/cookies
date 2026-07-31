@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-creative-task-overlay-v1.schema.json",
+  "title": "strategy-creative-task-overlay/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "overlay_id", "organization_id", "project_id", "package_ref", "handoff_ref", "selected_route_id", "task_strategy_ref", "objective_refinement", "audience_refinement", "message_priorities", "strategy_dimensions", "hypotheses", "guardrails", "open_questions", "content_hash", "created_at"],
+  "properties": {
+    "contract_version": {"const": "strategy-creative-task-overlay/v1"},
+    "overlay_id": {"$ref": "#/$defs/text"},
+    "organization_id": {"$ref": "#/$defs/text"},
+    "project_id": {"$ref": "#/$defs/text"},
+    "package_ref": {"$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef"},
+    "handoff_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "content_hash"],
+      "properties": {
+        "contract_version": {"const": "strategy-creative-handoff/v1"},
+        "content_hash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "selected_route_id": {"$ref": "#/$defs/text"},
+    "task_strategy_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_id", "version", "content_hash"],
+      "properties": {
+        "plan_id": {"$ref": "#/$defs/text"},
+        "version": {"type": "integer", "minimum": 1},
+        "content_hash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "objective_refinement": {"type": "string"},
+    "audience_refinement": {"type": "string"},
+    "message_priorities": {"$ref": "#/$defs/stringList"},
+    "strategy_dimensions": {
+      "type": "object",
+      "not": {
+        "anyOf": [
+          {"required": ["concept"]},
+          {"required": ["hook"]},
+          {"required": ["script"]},
+          {"required": ["storyboard"]},
+          {"required": ["shot"]},
+          {"required": ["prompt"]}
+        ]
+      }
+    },
+    "hypotheses": {"$ref": "#/$defs/stringList"},
+    "guardrails": {"$ref": "#/$defs/stringList"},
+    "open_questions": {"$ref": "#/$defs/stringList"},
+    "content_hash": {"$ref": "#/$defs/sha256"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "not": {
+    "anyOf": [
+      {"required": ["concept"]},
+      {"required": ["hook"]},
+      {"required": ["script"]},
+      {"required": ["storyboard"]},
+      {"required": ["shot"]},
+      {"required": ["prompt"]}
+    ]
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stringList": {"type": "array", "items": {"$ref": "#/$defs/text"}, "uniqueItems": true}
+  }
+}

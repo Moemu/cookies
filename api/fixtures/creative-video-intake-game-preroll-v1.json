@@ -1,0 +1,98 @@
+{
+  "contract_version": "creative-video-intake/v1",
+  "intake_id": "fixture_video_game_preroll_v1",
+  "organization_id": "fixture_org",
+  "project_id": "fixture_project_game",
+  "status": "fixture_ready",
+  "source": {
+    "kind": "fixture",
+    "fixture_id": "game-preroll/v1",
+    "documents": [
+      {
+        "file_name": "game-preroll-fixture.md",
+        "locator": "fixture://briefs/game-preroll-v1",
+        "page_refs": ["gameplay-objective"],
+        "note": "虚构开发样例，不代表真实游戏、素材或投放授权。"
+      }
+    ]
+  },
+  "campaign": {
+    "objective": "用可读目标、失败反馈和即时逆转建立试玩兴趣。",
+    "audience": "喜欢轻策略和即时挑战反馈的移动游戏用户。",
+    "core_message": "一次正确操作即可扭转失败局面。",
+    "call_to_action": "立即挑战",
+    "channels": ["douyin", "kuaishou"],
+    "locale": "zh-CN"
+  },
+  "video": {
+    "mode": "game_preroll",
+    "purpose": "performance",
+    "target_duration_seconds": 6,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "variant_count": 3,
+    "hook_deadline_seconds": 1,
+    "audio_policy": "generated_audio",
+    "transition": "hard_cut"
+  },
+  "product": {
+    "brand_name": "虚构游戏工作室",
+    "product_name": "《星港守卫》",
+    "selling_points": ["目标一眼可读", "失败反馈明确", "操作后即时逆转"],
+    "proof_points": ["所有玩法画面必须来自真实可复现机制"],
+    "usage_scenarios": ["移动游戏信息流买量"]
+  },
+  "creative": {
+    "concept": "先展示资源即将耗尽的失败状态，再通过一次关键操作完成逆转。",
+    "tone": ["紧迫", "爽快", "清晰"],
+    "visual_keywords": ["倒计时", "失败红框", "单次操作", "胜利反馈"],
+    "mandatory_elements": ["玩法目标可读", "失败原因可理解", "结果可复现"],
+    "prohibited_claims": ["不得伪造玩法", "不得承诺不存在的奖励", "不得使用未授权第三方 IP"],
+    "reference_policy": "参考真实玩法录屏中的 UI、操作和反馈，不改变玩法规则。",
+    "similarity_policy": "仅复用挑战结构，不复制其他游戏广告的角色、UI 或具体镜头。"
+  },
+  "source_assets": [
+    {
+      "role": "gameplay_video",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://assets/gameplay-failure-to-win.mp4",
+      "rights_status": "fixture_only",
+      "note": "开发替身；正式生成必须绑定经过玩法真实性确认的 AssetVersionRef。"
+    }
+  ],
+  "claims": [
+    {
+      "text": "广告中展示的挑战和奖励必须能够在真实游戏内复现。",
+      "status": "assumption",
+      "evidence_refs": ["fixture_gameplay_rule"]
+    }
+  ],
+  "evidence_refs": [
+    {
+      "id": "fixture_gameplay_rule",
+      "source_type": "fixture_document",
+      "locator": "fixture://briefs/game-preroll-v1#gameplay-objective",
+      "note": "用于测试玩法真实性门禁。"
+    }
+  ],
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false,
+    "missing_fields": ["source.strategy_package_ref", "source_assets.gameplay_video.production_ref"],
+    "blockers": ["仅为开发 fixture，玩法、奖励和素材授权均未经过真实项目确认。"],
+    "assumptions": [
+      {
+        "field": "campaign.call_to_action",
+        "value": "立即挑战",
+        "reason": "用于测试 CTA 生成和检查。"
+      }
+    ]
+  },
+  "confirmation": {
+    "required": true,
+    "status": "unconfirmed"
+  },
+  "created_at": "2026-07-28T06:00:00Z"
+}
