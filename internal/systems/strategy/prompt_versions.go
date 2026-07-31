@@ -10,7 +10,7 @@ func (s Service) conversationPromptVersion() string {
 	if value := strings.TrimSpace(s.ConversationPromptVersion); value != "" {
 		return value
 	}
-	return promptkit.ConversationV4
+	return promptkit.ConversationV5
 }
 
 func (s Service) generatePromptVersion() string {

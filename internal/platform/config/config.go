@@ -348,7 +348,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	repairPromptDefault := "strategy.repair.v1"
 	if environment == EnvironmentLocal || environment == EnvironmentTest {
 		generatePromptDefault = "strategy.generate.v3"
-		conversationPromptDefault = "strategy.conversation.v4"
+		conversationPromptDefault = "strategy.conversation.v5"
 		revisePromptDefault = "strategy.revise.v3"
 		reviewPromptDefault = "strategy.review.deep.v2"
 		repairPromptDefault = "strategy.repair.v2"
@@ -605,7 +605,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Strategy.ConversationPromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION must not be empty")
 	}
-	if !oneOf(c.Strategy.ConversationPromptVersion, "strategy.conversation.v3", "strategy.conversation.v4") {
+	if !oneOf(c.Strategy.ConversationPromptVersion, "strategy.conversation.v3", "strategy.conversation.v4", "strategy.conversation.v5") {
 		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION is unsupported")
 	}
 	if strings.TrimSpace(c.Strategy.RevisePromptVersion) == "" {
