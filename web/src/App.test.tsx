@@ -105,7 +105,8 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '个人资料' }))
     expect(await screen.findByRole('heading', { name: '个人资料' })).toBeInTheDocument()
     expect(screen.getAllByText('本地用户')).toHaveLength(2)
-    expect(screen.getByText('本地组织')).toBeInTheDocument()
+    // 组织名在顶栏的「组织 / 项目 / 模块」里也出现一次，这里只断言资料页里的那一处。
+    expect(screen.getAllByRole('definition').map((item) => item.textContent)).toContain('本地组织')
   })
 
   it('hides unauthorized modules and gives a recoverable 403 on a direct URL', async () => {

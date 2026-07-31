@@ -1,0 +1,385 @@
+/*
+ * 素材洞察的版式对齐参考产品 cookies-k：
+ * 一整块带边框的面板，内部靠分隔线切段，正文字号小、行高密；
+ * 而不是若干圆角卡片各自浮在留白里。
+ * 只作用在 .insight-workspace 之下，智能投放那侧沿用原来的卡片式。
+ */
+
+/* 左右留白沿用 .outcome-workspace；上方留白由页头自己带，这里去掉。 */
+.outcome-workspace.insight-workspace {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  padding-top: 0;
+}
+
+/* ---- 页头：面包屑 + 标题 + 右侧说明 ---- */
+
+.insight-page-head {
+  align-items: flex-end;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  min-height: 112px;
+  padding: 24px 0 18px;
+}
+
+.insight-workspace .insight-page-head h1 {
+  font-size: 24px;
+  letter-spacing: -.02em;
+  line-height: 32px;
+  margin: 0;
+}
+
+.insight-workspace .breadcrumb {
+  color: var(--ds-text-muted);
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+
+.insight-page-head p {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 5px 0 0;
+  max-width: 720px;
+}
+
+.insight-page-head__note {
+  color: var(--ds-text-subtle);
+  flex: none;
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 260px;
+  text-align: right;
+}
+
+/* ---- 二级页签：下划线式，不是胶囊按钮 ---- */
+
+.insight-tabs {
+  border-bottom: 1px solid var(--ds-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px;
+  min-height: 44px;
+}
+
+.insight-tabs a {
+  align-items: center;
+  color: var(--ds-text-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 5px;
+  position: relative;
+  text-decoration: none;
+}
+
+.insight-tabs a:hover {
+  color: var(--ds-text);
+}
+
+.insight-tabs a.insight-tabs__item--active {
+  color: var(--ds-accent-hover);
+  font-weight: 650;
+}
+
+.insight-tabs a.insight-tabs__item--active::after {
+  background: var(--ds-accent);
+  bottom: -1px;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+/* 尚未开放的视图照样列出来，但一眼看得出点进去没有内容。 */
+.insight-tabs a.insight-tabs__item--planned {
+  color: var(--ds-text-subtle);
+}
+
+.insight-tabs a small {
+  color: var(--ds-text-subtle);
+  font-size: 11px;
+}
+
+/* ---- 面板与工具条 ---- */
+
+/* 参考产品的面板是直角的，不是圆角卡片；页签和面板之间留 20px。 */
+.insight-panel {
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  margin-top: 20px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.insight-toolbar {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--ds-border);
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  padding: 20px 22px;
+}
+
+.insight-toolbar h2 {
+  font-size: 19px;
+  letter-spacing: -.025em;
+  margin: 6px 0 0;
+}
+
+.insight-toolbar p {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 6px 0 0;
+  max-width: 620px;
+}
+
+.insight-toolbar__context {
+  border-left: 1px solid var(--ds-border);
+  display: grid;
+  flex: none;
+  max-width: 240px;
+  padding-left: 16px;
+}
+
+.insight-toolbar__context small {
+  color: var(--ds-text-subtle);
+  font-size: 11px;
+}
+
+.insight-toolbar__context b {
+  font-size: 13px;
+  line-height: 1.4;
+  margin-top: 3px;
+}
+
+.insight-section-label {
+  color: var(--ds-text-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .05em;
+}
+
+/* ---- 投前洞察：左表格 + 右详情 ---- */
+
+.prelaunch-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 318px;
+  min-height: 520px;
+}
+
+.prelaunch-main {
+  border-right: 1px solid var(--ds-border);
+  display: grid;
+  align-content: start;
+  min-width: 0;
+}
+
+.prelaunch-filterbar {
+  align-items: center;
+  background: var(--ds-surface-subtle);
+  border-bottom: 1px solid var(--ds-border);
+  display: flex;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 18px;
+}
+
+.prelaunch-search {
+  align-items: center;
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-sm);
+  display: flex;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px;
+  width: 300px;
+}
+
+.prelaunch-search span {
+  color: var(--ds-text-subtle);
+  flex: none;
+}
+
+.prelaunch-search input {
+  background: transparent;
+  border: 0;
+  color: var(--ds-text);
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+  outline: 0;
+}
+
+.prelaunch-filterbar > span {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.prelaunch-table {
+  min-width: 0;
+}
+
+.prelaunch-row {
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--ds-border);
+  background: transparent;
+  color: var(--ds-text);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(240px, 1.35fr) 92px minmax(170px, 1fr) 78px;
+  min-height: 70px;
+  padding: 0 18px;
+  text-align: left;
+  width: 100%;
+}
+
+.prelaunch-row.prelaunch-row--header {
+  background: var(--ds-canvas);
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 34px;
+}
+
+button.prelaunch-row {
+  cursor: pointer;
+  font: inherit;
+}
+
+button.prelaunch-row:hover {
+  background: var(--ds-surface-subtle);
+}
+
+button.prelaunch-row.prelaunch-row--active {
+  background: var(--ds-accent-subtle);
+  box-shadow: inset 0 -1px var(--ds-accent);
+}
+
+.prelaunch-row > span {
+  font-size: 12px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.prelaunch-row > span:first-child b,
+.prelaunch-row > span:first-child small {
+  display: block;
+}
+
+.prelaunch-row > span:first-child b {
+  font-size: 13px;
+}
+
+.prelaunch-row > span:first-child small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  margin-top: 5px;
+}
+
+.prelaunch-empty {
+  color: var(--ds-text-muted);
+  padding: 60px 24px;
+  text-align: center;
+}
+
+.prelaunch-detail {
+  align-content: start;
+  display: grid;
+  min-width: 0;
+  padding: 20px;
+}
+
+.prelaunch-detail h3 {
+  font-size: 17px;
+  line-height: 1.4;
+  margin: 7px 0 0;
+}
+
+.prelaunch-detail > p {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.prelaunch-fact {
+  border-bottom: 1px solid var(--ds-border);
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 22px 1fr;
+  padding: 15px 0;
+}
+
+.prelaunch-fact > span[aria-hidden] {
+  color: var(--ds-accent);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.prelaunch-fact small {
+  color: var(--ds-text-subtle);
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.prelaunch-fact b {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.65;
+}
+
+/* 适用边界是"什么时候不该用这条结论"，用警示色和事实块区分开。 */
+.prelaunch-boundary {
+  background: var(--ds-warning-subtle);
+  border: 1px solid var(--ds-warning);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text);
+  display: grid;
+  font-size: 12px;
+  gap: 9px;
+  grid-template-columns: 22px 1fr;
+  line-height: 1.55;
+  margin: 14px 0;
+  padding: 11px;
+}
+
+.prelaunch-boundary > span[aria-hidden] {
+  color: var(--ds-warning);
+}
+
+.prelaunch-boundary small {
+  color: var(--ds-text-muted);
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+/* ---- 面板内的通用区块（复用在报告中心、投后分析等视图） ---- */
+
+.insight-panel__body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 22px;
+}
+
+@media (max-width: 1180px) {
+  .prelaunch-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .prelaunch-main {
+    border-bottom: 1px solid var(--ds-border);
+    border-right: 0;
+  }
+}

@@ -67,6 +67,32 @@ paths:
                 $ref: '#/components/schemas/InsightReport'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/reports/{report_id}:drop-finding:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ReportID'
+    post:
+      summary: Drop or restore one auto-filled finding
+      description: |
+        报告里的发现是系统自动带入的，人只做删减——加不了新的一条。
+        写进去的每条发现都得能回溯到某次对比、某个实验或某条经验，
+        手打一条就断了这个链子。只有草稿能改。
+      operationId: dropInsightReportFinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropReportFinding'
+      responses:
+        '200':
+          description: Report with the finding marked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/reports/{report_id}:create-experience:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -97,9 +123,223 @@ paths:
       operationId: listExperiences
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          description: Filter by lifecycle status. Omit to include every revision.
+          schema:
+            $ref: '#/components/schemas/ExperienceStatus'
       responses:
         '200':
-          description: Confirmed project experience.
+          description: Project experience, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    post:
+      summary: Confirm an experience so downstream Skills may quote it
+      operationId: confirmExperience
+      requestBody:
+        $ref: '#/components/requestBodies/ExpectedVersion'
+      responses:
+        '200':
+          description: Confirmed experience. A superseded predecessor is retired atomically.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}:reject:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    post:
+      summary: Reject a pending experience without deleting it
+      operationId: rejectExperience
+      requestBody:
+        $ref: '#/components/requestBodies/ExperienceTransition'
+      responses:
+        '200':
+          description: Retired experience, still auditable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}:request-review:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    post:
+      summary: Flag a confirmed experience as needing review
+      operationId: requestExperienceReview
+      requestBody:
+        $ref: '#/components/requestBodies/ExperienceTransition'
+      responses:
+        '200':
+          description: Experience moved to needs_review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}:retire:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    post:
+      summary: Retire an experience (logical delete)
+      operationId: retireExperience
+      requestBody:
+        $ref: '#/components/requestBodies/ExperienceTransition'
+      responses:
+        '200':
+          description: Retired experience. Its reference history stays readable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}:revise:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    post:
+      summary: Append a new revision instead of overwriting the conclusion
+      operationId: reviseExperience
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviseExperience'
+      responses:
+        '201':
+          description: Pending revision. It supersedes its predecessor only once confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}:record-reference:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    post:
+      summary: Record how a downstream consumer used the experience
+      operationId: recordExperienceReference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordExperienceReference'
+      responses:
+        '201':
+          description: Reference record with adoption feedback.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperienceReference'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experience-references:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List downstream references of every experience in the project
+      operationId: listProjectExperienceReferences
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Reference records across all experiences, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceReference'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}/references:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    get:
+      summary: List downstream references of one experience
+      operationId: listExperienceReferences
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Reference records, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceReference'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}/audits:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    get:
+      summary: List the status trail of one experience
+      operationId: listExperienceAudits
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Append-only status trail, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceAudit'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/{experience_id}/lineage:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExperienceID'
+    get:
+      summary: List every revision of one conclusion
+      operationId: listExperienceLineage
+      responses:
+        '200':
+          description: Revisions of the lineage, oldest first.
           content:
             application/json:
               schema:
@@ -116,8 +356,35 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
     get:
-      summary: Get pre-launch experience references
+      summary: Get pre-launch insight cards
       operationId: getPreLaunchInsights
+      description: |
+        Projects confirmed experience into 洞察卡 for the next cycle. Filters
+        narrow by the current Project's channel / creative type / objective;
+        experiences that never declared an applicability scope are excluded
+        while a filter is set and counted in unscoped_excluded, so they are
+        never dropped silently.
+      parameters:
+        - name: channel
+          in: query
+          schema: { type: string, maxLength: 96 }
+        - name: creative_type
+          in: query
+          schema: { type: string, maxLength: 96 }
+        - name: objective
+          in: query
+          schema: { type: string, maxLength: 96 }
+        - name: q
+          in: query
+          description: Free-text match over conclusion, conditions, action and content features.
+          schema: { type: string, maxLength: 200 }
+        - name: cross_channel
+          in: query
+          description: |
+            Cross-channel comparison is off by default (PRD 03 §10.3②) because
+            channel metrics are not directly comparable. Set true only after
+            the user explicitly asks for a merged view.
+          schema: { type: string, enum: ['true', 'false'] }
       responses:
         '200':
           description: Confirmed experience references for the next cycle.
@@ -142,6 +409,1152 @@ paths:
                 $ref: '#/components/schemas/PerformanceOverview'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/feature-schemas:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List the six type-specific feature systems
+      description: >-
+        Reference data from 03 §5. Each asset type carries only the fields its own
+        content supports, which is what stops a video hook field from being asked
+        of a WeChat article (03 §15②).
+      operationId: listFeatureSchemas
+      responses:
+        '200':
+          description: Feature systems in PRD order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FeatureSchema'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/feature-matrix:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Compare several assets on their shared features
+      description: >-
+        Mixed-type comparisons are narrowed to the keys every selected type
+        declares, and the response states that narrowing in `disclosure`.
+      operationId: getFeatureMatrix
+      parameters:
+        - name: asset_ids
+          in: query
+          required: true
+          description: Repeatable or comma separated; 1..50 assets.
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Feature matrix over the selected assets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureMatrix'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List analysable assets
+      description: >-
+        Every visible library tab is a different query here (22 §8.3): 全部素材 has
+        no filter, 待匹配 filters on `awaiting_match`, 待提取 on `analysable`, and
+        版本关系 on `lineage_id`.
+      operationId: listInsightAssets
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          description: Repeatable or comma separated analysis statuses.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/AnalysisStatus'
+          style: form
+          explode: true
+        - name: asset_type
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/AssetType'
+          style: form
+          explode: true
+        - name: source_kind
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/AssetSourceKind'
+          style: form
+          explode: true
+        - name: lineage_id
+          in: query
+          description: Restrict to one creative's revision chain.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matching assets, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Index a creative revision for analysis
+      description: >-
+        An empty `lineage_id` starts a new lineage; a known one appends a revision
+        so the same creative keeps one identity across edits (AM-001).
+      operationId: indexInsightAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IndexAsset'
+      responses:
+        '201':
+          description: Indexed asset revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    get:
+      summary: Get one asset revision
+      operationId: getInsightAsset
+      responses:
+        '200':
+          description: One asset revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}/lineage:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    get:
+      summary: List every revision of the same creative
+      operationId: listInsightAssetLineage
+      responses:
+        '200':
+          description: Revisions in ascending order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}/features:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    get:
+      summary: List one asset's extracted features
+      description: >-
+        Both layers are returned: the AI inference and the human conclusion for
+        the same key are separate rows and neither overwrites the other (§14).
+      operationId: listInsightAssetFeatures
+      responses:
+        '200':
+          description: Features of one asset, both layers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AssetFeature'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      summary: Write the human conclusion layer
+      description: >-
+        PATCH rather than PUT: it adds or replaces the human row only and leaves
+        the AI row beside it untouched (AM-006). Confidence is rejected here —
+        a person's conclusion carries no machine confidence.
+      operationId: patchInsightAssetFeatures
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchFeatures'
+      responses:
+        '200':
+          description: All features of the asset after the patch.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AssetFeature'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:identify-type:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Identify the asset's content type
+      description: >-
+        AM-004. An AI answer must carry a confidence level and a human answer must
+        not. Changing the type after features exist is refused, because the old
+        feature system's values would be orphaned.
+      operationId: identifyInsightAssetType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentifyAssetType'
+      responses:
+        '200':
+          description: Asset with its type identified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:extract-features:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Write the AI inference layer
+      description: >-
+        AM-005. Every key must belong to this asset type's own feature system and
+        every value must match the kind that system declares, so the write is
+        rejected before it reaches storage rather than producing a meaningless
+        comparison later (03 §15②).
+      operationId: extractInsightAssetFeatures
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractFeatures'
+      responses:
+        '200':
+          description: All features of the asset after extraction.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AssetFeature'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:analyze:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Run AI feature extraction on the asset
+      description: >-
+        AM-005, the AI half. The model is asked for exactly this asset type's own
+        feature system, and its answer only ever writes the AI inference layer —
+        the asset lands in 待确认 and waits for a person (03 §14, 09 §8).
+
+        Only a human action reaches this endpoint. Nothing enqueues extraction
+        automatically: an auto-filled review queue is a review queue nobody reads,
+        and review is the only quality gate this module has.
+
+        `content` is required because the asset library stores an asset's identity
+        and state, not its body — the caller supplies the text or shot description
+        to analyse.
+      operationId: analyzeInsightAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeAsset'
+      responses:
+        '200':
+          description: The run that was recorded, plus the features it wrote.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeAssetResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}/analysis-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+      - $ref: '#/components/parameters/AnalysisRunStatusFilter'
+      - $ref: '#/components/parameters/Limit'
+    get:
+      summary: Analysis history of one asset
+      description: >-
+        Backs 素材详情页「数据与方法」 (03 §82): every conclusion must be traceable to the
+        asset, the data cut-off, the metric version and the Skill/algorithm version.
+        Failed runs are listed too — a success rate that only counts successes is
+        always 100%.
+      operationId: listInsightAssetAnalysisRuns
+      responses:
+        '200':
+          description: Runs for this asset, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalysisRun'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/analysis-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AnalysisRunKindFilter'
+      - $ref: '#/components/parameters/AnalysisRunStatusFilter'
+      - $ref: '#/components/parameters/Limit'
+    get:
+      summary: Analysis runs across the project
+      description: >-
+        Backs 分析任务成功率、P95 时长和数据新鲜度 in 能力运营 (03 §310).
+      operationId: listInsightAnalysisRuns
+      responses:
+        '200':
+          description: Runs in the project, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalysisRun'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Confirm the content analysis
+      description: >-
+        Refused while any AI value is still unreviewed, so 已确认 always means a
+        person looked at every field (AM-006). Requires the confirm scope.
+      operationId: confirmInsightAssetAnalysis
+      requestBody:
+        $ref: '#/components/requestBodies/AssetTransition'
+      responses:
+        '200':
+          description: Confirmed asset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:request-review:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Send a confirmed analysis back for review
+      operationId: requestInsightAssetReview
+      requestBody:
+        $ref: '#/components/requestBodies/AssetTransitionWithReason'
+      responses:
+        '200':
+          description: Asset moved to 待复审.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/{asset_id}:retire:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AssetID'
+    post:
+      summary: Retire an asset revision
+      description: Logical retirement — the row and its features stay readable.
+      operationId: retireInsightAsset
+      requestBody:
+        $ref: '#/components/requestBodies/AssetTransitionWithReason'
+      responses:
+        '200':
+          description: Retired asset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/asset-mappings:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List platform-object mappings
+      description: The 待匹配 queue filters this on `status=unmatched` (AM-003).
+      operationId: listInsightAssetMappings
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/MappingStatus'
+          style: form
+          explode: true
+        - name: platform
+          in: query
+          schema: { type: string }
+        - name: asset_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matching mappings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AssetMapping'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Register a platform creative or ad
+      description: >-
+        Omitting `asset_id` files the object in the 待匹配 queue rather than
+        guessing which asset revision it belongs to.
+      operationId: registerInsightAssetMapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterAssetMapping'
+      responses:
+        '201':
+          description: Registered mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetMapping'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/asset-mappings/{mapping_id}:resolve:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MappingID'
+    post:
+      summary: Point a queued platform object at an asset revision
+      description: >-
+        Matching requires an `asset_id`; ignoring requires a reason. Both are
+        recorded with the deciding user, so the match is auditable (AM-003).
+      operationId: resolveInsightAssetMapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveAssetMapping'
+      responses:
+        '200':
+          description: Resolved mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetMapping'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/data-sources:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List ad-data sources
+      description: >-
+        Backs 数据接入 · 数据源 and 字段映射 — the same rows read through two
+        lenses (doc10 §2/§8).
+      operationId: listInsightDataSources
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/DataSourceStatus'
+          style: form
+          explode: true
+        - name: platform
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Platform'
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Matching data sources.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DataSource'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Register a data source
+      description: >-
+        A new source starts as draft and cannot import until a field mapping
+        exists. `credential_ref` is a key into the secret service — a raw token
+        is rejected, never stored (doc10 §9).
+      operationId: registerInsightDataSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDataSource'
+      responses:
+        '201':
+          description: Registered data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataSource'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/data-sources/{data_source_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/DataSourceID'
+    get:
+      summary: Read one data source
+      operationId: getInsightDataSource
+      responses:
+        '200':
+          description: The data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataSource'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      summary: Update caliber, field mapping or lifecycle
+      description: >-
+        The 接入向导 sends only the step it just finished, which is why this is
+        PATCH. Activating without a field mapping is refused.
+      operationId: updateInsightDataSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDataSource'
+      responses:
+        '200':
+          description: Updated data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataSource'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/data-sources/{data_source_id}:set-quality:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/DataSourceID'
+    post:
+      summary: Record a data-quality state
+      description: >-
+        doc10 §11. Anything other than healthy must carry a reason, because the
+        state is shown next to every number the source feeds, and doc10 §12.4
+        stops those numbers from producing a strong conclusion.
+      operationId: setInsightDataSourceQuality
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetDataSourceQuality'
+      responses:
+        '200':
+          description: Updated data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataSource'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/import-batches:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List import batches
+      description: Backs 数据接入 · 导入任务 and 同步记录, filtered by kind (doc10 §7).
+      operationId: listInsightImportBatches
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: data_source_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/ImportStatus'
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Matching batches, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ImportBatch'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Import canonical daily metrics
+      description: >-
+        Re-sending the same `(platform object, stat date, caliber)` overwrites
+        that row rather than adding to it (doc10 §7 幂等键), and a repeat of the
+        same `content_hash` over the same window is refused outright (§8) — file
+        a `correction` batch instead. Bad rows are rejected individually: the
+        batch still commits the rest and returns 201 with `status: partial`, so
+        the caller has a batch id to inspect `errors` with.
+      operationId: importInsightMetrics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportMetrics'
+      responses:
+        '201':
+          description: The batch, including partial success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/metric-overview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Post-launch metric overview
+      description: >-
+        Backs 投后分析 · 指标总览 (20 §4.1 一个主图表 + 素材矩阵 + 解释区). The
+        payload always carries the four things that section requires on screen:
+        数据窗口 (`window`)、样本量 (`totals.impressions`)、口径 (`caliber`) 和
+        置信范围 (`confidence` + `ctr_interval`). Both window ends default to the
+        last 30 days ending today and are echoed back, so two people reading the
+        same chart are never reading two different periods.
+      operationId: getInsightMetricOverview
+      parameters:
+        - name: start
+          in: query
+          schema: { type: string, format: date }
+        - name: end
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The overview for the requested window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricOverview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/performance-analysis:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Post-launch variant / trend / fatigue / anomaly / driver analysis
+      description: |
+        投后分析除总览外的五个二级视图（素材对比、趋势、疲劳、异常、驱动因素）共用
+        这一个响应。和 metric-overview 分开，是因为总览只读指标事实，这里还要读素材
+        特征；五个视图不再各自读一次，否则「趋势里看到的」和「疲劳里算的」会来自两次
+        不同的读取，对不上时没人解释得清。
+
+
+        全篇只有一条纪律：**能不能归因，和差异有多大，是两件事**。任何一条结论都带
+        `confidence` 和一句 `note` 说明为什么是这个档位；`comparisons[].verdict` 只有
+        在「只改了一个特征 + 两侧样本都够 + 置信区间不重叠」时才会是 `attributable`
+        (AM-009)。
+      operationId: getInsightPerformanceAnalysis
+      parameters:
+        - name: start
+          in: query
+          schema: { type: string, format: date }
+        - name: end
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The five analyses for the requested window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceAnalysis'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/capability-operations:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Capability operations governance surface
+      description: |
+        能力运营的五个二级视图（特征体系 · 指标字典 · 分析 Skills · 评测集 · 质量看板）
+        共用这一个响应。20 §4.1 给这个模块的职责是「防止特征碎片化和指标口径漂移，
+        支持算法升级与回归」，22 §6.2 限定只有分析运营角色可见。
+
+
+        **这个模块不建表**。特征体系读 `features.go` 的六套 schema，指标字典是 Go 里
+        声明的常量，Skill 健康度和评测集从已有的特征行现算。可编辑的口径是没有意义的
+        口径——它能被人静默改掉，而 03 §14 要求口径变更后能重算且不静默改写历史结论。
+
+
+        `evaluations` 有一条必须写在前面的边界：**它不是独立评测集**。样本全部来自人工
+        复核记录，回答的是「被人看过的地方机器错了多少」，不是整体准确率。没人复核过的
+        提取一条都不计入——把它们算成「机器对了」，准确率会随提取量自动上涨。样本少于
+        10 条时 `accuracy` 恒为 0 且 `confidence` 为 `low_sample`，前端此时必须藏起
+        准确率而不是显示一个「100%」。
+
+
+        `merge_candidates` 是候选不是结论：只有全项目仅一条素材用过的取值才会进队列，
+        系统不做语义猜测。把两个真正不同的取值合并，比词表碎片化更糟。
+      operationId: getInsightCapabilityOperations
+      parameters:
+        - name: start
+          in: query
+          schema: { type: string, format: date }
+        - name: end
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The governance snapshot for the requested window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityOperations'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/settings:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Insight system settings (read-only)
+      description: |
+        系统设置的五个二级视图（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）
+        共用这一个响应。20 §121 给 MVP 的定位是「可采用保守默认值」，并要求
+        「重要阈值显示影响说明和默认推荐；不使用仪表盘布局」；22 §239 记的问题
+        正是「缺少实际阈值影响说明」。
+
+
+        **这个端点只读，没有配对的写接口，也不读库。** 返回的每个值都是代码常量本身，
+        不是抄过来的副本——抄一份迟早会和代码对不上，那时候这一页就从说明变成误导。
+        改阈值要走代码评审：03 §17.3 把「最低样本由全局规则还是行业模板配置」列为
+        待确认，在那条定下来之前开放写接口，等于先替它选了答案。
+
+
+        路径上带 `project_id` 只为沿用同一套鉴权（需要 `insights.read`）。
+        `project_scoped` 恒为 `false`：这些值对整个部署生效，不因项目而不同。
+
+
+        分组的 `state` 有两个取值。`in_effect` 表示这一组的值现在真的在生效，
+        页面上的判定就是按它们做的；`not_built` 表示这一组还没有任何东西，此时
+        `items` 为空而 `missing` 说明缺什么。**前端必须把两者渲染成不同的样子**——
+        「通知」一组当前是 `not_built`，把它画成一张空表单，读的人会以为通知在后台
+        默默生效，而实际上代码里没有一处会主动往外发消息。
+      operationId: getInsightSettings
+      responses:
+        '200':
+          description: The thresholds and rules currently in effect.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightSettings'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/data-quality:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Data quality queue
+      description: >-
+        doc10 §10 写的是 `GET /api/insights/v1/data-quality`；这里挂在 project 下，
+        因为质量问题全部由某个 Project 的数据源和指标算出，不带 project 服务端得替
+        调用方猜项目。文档冲突已登记在功能基线 §8。
+
+
+        六个二级视图（新鲜度·缺失·异常·口径·对账·修复队列）共用这一个响应，不拆成
+        六个端点：它们共用同一套排序和队列判断，拆开会让「队列里还有几条」在不同视图
+        里算出不同的数。前端按 `issues[].kind` 过滤，角标读 `by_kind`。
+
+
+        问题本身不入库，每次实时算出；`state` 是把实时检测结果与库里的处置记录比对
+        后的结论，其中 `reopened` 表示有人报了修但问题在那之后又被观测到。
+      operationId: getInsightDataQuality
+      parameters:
+        - name: start
+          in: query
+          schema: { type: string, format: date }
+        - name: end
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The quality report for the requested window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityReport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/data-quality/dispositions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Record a disposition on a quality issue
+      description: >-
+        记一次处置：跟进中 / 已修复 / 已忽略，三者都必须写明依据 (PRD §12 可追溯)。
+        同一条问题再次处置是覆盖同一行并抬高 version，所以这里不是幂等创建也没有
+        DELETE——撤销处置也是一次处置，「谁在什么时候改了主意」不该从记录里消失。
+      operationId: resolveInsightQualityIssue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveQualityIssue'
+      responses:
+        '201':
+          description: The stored disposition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityDisposition'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List experiments
+      description: >-
+        实验列表（03 §7.3 / AM-009）。返回的每个实验都带它的分组，不单独出分组端点：
+        一个实验离开它的分组没有意义，分两次读只会让列表页在两次请求之间显示
+        「有实验、没有组」的中间状态。
+
+
+        这里不带读数（样本量、对比、判定）——那些要按窗口聚合日指标，列表页
+        逐个实验算一遍会很慢，而列表页也用不上。要读数请打详情。
+      operationId: listInsightExperiments
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ExperimentStatus'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Experiments in this project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      summary: Register an experiment
+      description: >-
+        建实验就是**事先登记**：被测变量、分组、每组最低展示量，全部在看到结果之前定下。
+        这是实验中心和投后分析「驱动因素」的唯一区别——那边是事后从已投数据里认出来的
+        对照，排除不掉「这批素材本来就是被人挑出来投的」这个选择效应，所以只能说到相关。
+
+
+        分组和实验一次建完：分两步建的话，中间那个「只有一组」的状态没有任何意义，
+        却要多一套校验去容忍它。至少两组、恰好一个基线组，取值和名字都不能重复。
+
+
+        `variable_key` 必须是 `asset_type` 那套特征体系里的字段，且不能是自由文本——
+        自由文本的取值两条素材几乎不可能一样，分出来全是单元素组。
+      operationId: createInsightExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExperiment'
+      responses:
+        '201':
+          description: The registered experiment, in draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Experiment detail with a live readout
+      description: >-
+        实验本身加上此刻的读数：每组的样本量、够不够事先定的门槛、以及过了门槛的
+        那些对比。
+
+
+        **没有单独的「样本检查」端点。** 样本量是这一页唯一要回答的问题，另开一个
+        端点会让页面在两次请求之间拿到对不上的两个数，而用户不知道该信哪个。
+
+
+        读数每次现算，不落库：落库就会出现「页面显示的样本数是三天前的」。
+
+
+        `comparisons[].blocked` 为 true 时 `result` 一定不存在。这是有意的——样本
+        不达标却把 CTR 差异显示出来，人会先看见数字再看见提示，然后记住数字。
+      operationId: getInsightExperiment
+      responses:
+        '200':
+          description: The experiment and its current readout.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperimentDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}:start:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Freeze the groups and start the experiment
+      description: >-
+        **这一步是整个实验中心的支点。** 开跑之后分组冻结，谁也不能再往表现好的那组
+        补素材。少了这个冻结，「事先登记」只是个说法，结论的可信度和事后凑对没有区别。
+
+
+        每一组都必须已经有素材——开跑之后就补不上了。
+      operationId: startInsightExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expected_version: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: The experiment, now running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}:conclude:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Conclude the experiment
+      description: >-
+        两个前提缺一不可：样本过了事先定的门槛（系统卡门槛），人写了解读（人负责说明）。
+
+
+        **入参里没有判定。** 判定由系统按门槛和区间给出——判定要是能传，事先定的
+        门槛就形同虚设。人只写 `interpretation`：只留一个判定，读的人无从知道这条
+        结论该怎么用。
+
+
+        样本没到门槛时返回 409：那时候下结论等于「凑够了就说显著」。
+      operationId: concludeInsightExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConcludeExperiment'
+      responses:
+        '200':
+          description: The concluded experiment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}/variants/{variant_id}/assets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variant_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Put an asset into a group
+      description: >-
+        人从素材库挑，系统把关。三道关：
+
+
+        1. 素材类型必须和实验登记的一致——两套特征体系不一样，放一起比不出这个变量。
+        2. 素材在被测变量上的取值必须和这一组的 `variable_value` 对得上，对不上直接拦。
+           放错组的素材会让整次实验比的都不是登记的那个变量。
+        3. `controlled_keys` 里的特征和已入组素材不一致时**只给黄牌**（`warnings`），
+           不拦。真实素材很难只差一个变量，硬拦会让实验一个也建不起来；但不说出来，
+           结论就会被当成干净的对照。
+
+
+        素材还没有被测变量的结论时也拦，并提示先去内容分析补上——不知道取值就不知道
+        它该进哪一组。
+
+
+        只在 `draft` 状态可用。已开跑返回 409。
+      operationId: attachInsightExperimentAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [asset_id]
+              properties:
+                asset_id: { type: string }
+      responses:
+        '200':
+          description: The updated group, plus any warnings raised by the controlled features.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachExperimentAssetResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/insight-experiments/{experiment_id}/variants/{variant_id}/assets/{asset_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: experiment_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: variant_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: asset_id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      summary: Remove an asset from a group
+      description: 只在 `draft` 状态可用。已开跑返回 409——冻结是双向的，移出和加入一样会改变对照。
+      operationId: detachInsightExperimentAsset
+      responses:
+        '200':
+          description: The updated group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperimentVariant'
+        default:
+          $ref: '#/components/responses/Problem'
 components:
   securitySchemes:
     sessionCookie:
@@ -159,10 +1572,40 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ExperienceID:
+      name: experience_id
+      in: path
+      required: true
+      schema: { type: string }
     Limit:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    AssetID:
+      name: asset_id
+      in: path
+      required: true
+      schema: { type: string }
+    MappingID:
+      name: mapping_id
+      in: path
+      required: true
+      schema: { type: string }
+    DataSourceID:
+      name: data_source_id
+      in: path
+      required: true
+      schema: { type: string }
+    AnalysisRunKindFilter:
+      name: kind
+      in: query
+      schema: { type: string, enum: [feature_extraction] }
+    AnalysisRunStatusFilter:
+      name: status
+      in: query
+      description: Comma separated. Omit to see every run, failures included.
+      schema: { type: string }
+      example: failed
   requestBodies:
     ExpectedVersion:
       required: true
@@ -174,6 +1617,45 @@ components:
             required: [expected_version]
             properties:
               expected_version: { type: integer, minimum: 1 }
+    ExperienceTransition:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version, reason]
+            properties:
+              expected_version: { type: integer, minimum: 1 }
+              reason: { type: string, minLength: 1, maxLength: 1000 }
+    AssetTransition:
+      description: >-
+        Reason is optional here: confirming carries a default sentence, so the
+        UI is not made to invent one.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version]
+            properties:
+              expected_version: { type: integer, minimum: 1 }
+              reason: { type: string, maxLength: 1000 }
+    AssetTransitionWithReason:
+      description: >-
+        Reversing or retiring a conclusion always needs a stated reason — that
+        sentence is what the next reader has to go on.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version, reason]
+            properties:
+              expected_version: { type: integer, minimum: 1 }
+              reason: { type: string, minLength: 1, maxLength: 1000 }
   responses:
     Problem:
       description: Problem details.
@@ -188,6 +1670,59 @@ components:
       required: [execution_id]
       properties:
         execution_id: { type: string }
+        summary: { type: string }
+        findings:
+          type: array
+          items: { type: string }
+        window:
+          allOf:
+            - $ref: '#/components/schemas/ReportWindow'
+          description: |
+            要定格的数据窗口，来自投后分析页当前选的那一屏。省略时报告照旧生成，
+            只是没有 `digest`。两端要么都给要么都不给：只给一端会被拒绝，
+            因为后端补上另一端等于替人挑了半个窗口，而报告上会写得像是他自己选的。
+    ReportWindow:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        start: { type: string, format: date }
+        end: { type: string, format: date }
+    DropReportFinding:
+      type: object
+      additionalProperties: false
+      required: [expected_version, index, dropped]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        index: { type: integer, minimum: 0 }
+        dropped:
+          type: boolean
+          description: |
+            true 是删掉，false 是撤销删掉。条目不会被物理移除——报告要能说清
+            「系统给了什么、人拿掉了哪几条」。
+    ReportFinding:
+      type: object
+      description: |
+        报告里的一条发现。四块（素材表现 / 实验结论 / 相关经验 / 下一轮建议）
+        按 `kind` 分组，顺序即 `ReportSectionKind` 的枚举顺序。
+      required: [kind, text, dropped]
+      properties:
+        kind:
+          type: string
+          enum: [asset_performance, experiment, experience, recommendation]
+        text: { type: string }
+        strength:
+          allOf:
+            - $ref: '#/components/schemas/VariantVerdict'
+          description: 出自素材对比的发现才有。用来排序：可归因的排在方向性前面。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        source_ref:
+          type: string
+          description: 这条发现的来源 ID（实验或经验），供前端跳回去核对。
+        dropped:
+          type: boolean
+          description: 被人工删掉的条目留在数组里，只是标记为 true。
     CreateExperience:
       type: object
       additionalProperties: false
@@ -203,6 +1738,26 @@ components:
           type: array
           maxItems: 20
           items: { type: string, maxLength: 500 }
+        card_type:
+          allOf:
+            - $ref: '#/components/schemas/InsightCardType'
+          description: Defaults to hypothesis when omitted — the most conservative cell, so the API never claims more than the author did.
+        confidence:
+          allOf:
+            - $ref: '#/components/schemas/ConfidenceLevel'
+          description: Defaults to directional when omitted.
+        recommended_action:
+          type: string
+          maxLength: 1000
+          description: Required when card_type is recommendation.
+        applicability:
+          $ref: '#/components/schemas/Applicability'
+        data_basis:
+          allOf:
+            - $ref: '#/components/schemas/DataBasis'
+          description: Required when card_type is fact or statistic — those two are quotable as evidence.
+        content_basis:
+          $ref: '#/components/schemas/ContentBasis'
     DeliveryExecutionSnapshot:
       type: object
       required: [id, change_set_id, plan_id, creative_package_id, mode, evidence_id, evidence_summary]
@@ -253,40 +1808,268 @@ components:
         findings:
           type: array
           items: { type: string }
+          description: 旧报告的读法，保留不动。新报告读 `digest`。
+        digest:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportFinding'
+          description: 定格的四块发现。老报告为空数组。
+        window_start:
+          type: string
+          format: date
+          description: 定格的数据窗口起点。老报告没有窗口概念，此时为空——空比编一个进去诚实。
+        window_end: { type: string, format: date }
         version: { type: integer, minimum: 1 }
         created_by: { type: string }
         confirmed_by: { type: string }
         confirmed_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ExperienceStatus:
+      type: string
+      description: |
+        Lifecycle of an organisational conclusion. A new conclusion starts as
+        pending; only confirmed is quotable downstream; retired is a logical
+        delete that keeps the row readable.
+      enum: [pending, confirmed, needs_review, retired]
+    ReviseExperience:
+      type: object
+      additionalProperties: false
+      required: [expected_version, conclusion, conditions, counterexamples]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        conclusion: { type: string, maxLength: 2000 }
+        conditions:
+          type: array
+          maxItems: 20
+          items: { type: string, maxLength: 500 }
+        counterexamples:
+          type: array
+          maxItems: 20
+          items: { type: string, maxLength: 500 }
+        reason: { type: string, maxLength: 1000 }
+        card_type:
+          $ref: '#/components/schemas/InsightCardType'
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        recommended_action: { type: string, maxLength: 1000 }
+        applicability:
+          $ref: '#/components/schemas/Applicability'
+        data_basis:
+          $ref: '#/components/schemas/DataBasis'
+        content_basis:
+          $ref: '#/components/schemas/ContentBasis'
+    RecordExperienceReference:
+      type: object
+      additionalProperties: false
+      required: [consumer_kind, consumer_id, outcome]
+      properties:
+        consumer_kind: { type: string, minLength: 1, maxLength: 32 }
+        consumer_id: { type: string, minLength: 1, maxLength: 96 }
+        outcome:
+          $ref: '#/components/schemas/ExperienceReferenceOutcome'
+        note: { type: string, maxLength: 1000 }
+    ExperienceReferenceOutcome:
+      type: string
+      description: How the downstream consumer treated the quoted conclusion.
+      enum: [referenced, adopted, modified, rejected]
     Experience:
       type: object
-      required: [id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, lineage_id, revision, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, status_reason, status_changed_by, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
+        lineage_id: { type: string, description: Shared by every revision of one conclusion. }
+        revision: { type: integer, minimum: 1 }
+        supersedes_id: { type: string }
+        superseded_by_id: { type: string }
         report_id: { type: string }
         source_execution_id: { type: string }
         source_evidence_id: { type: string }
         source_metric_snapshot_id: { type: string }
         conclusion: { type: string }
+        card_type:
+          $ref: '#/components/schemas/InsightCardType'
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        recommended_action: { type: string }
         conditions:
           type: array
           items: { type: string }
         counterexamples:
           type: array
           items: { type: string }
-        status: { type: string, enum: [confirmed] }
+        applicability:
+          $ref: '#/components/schemas/Applicability'
+        data_basis:
+          $ref: '#/components/schemas/DataBasis'
+        content_basis:
+          $ref: '#/components/schemas/ContentBasis'
+        status:
+          $ref: '#/components/schemas/ExperienceStatus'
+        status_reason: { type: string }
+        status_changed_by: { type: string }
+        status_changed_at: { type: string, format: date-time }
+        confirmed_by: { type: string }
+        confirmed_at: { type: string, format: date-time }
         version: { type: integer, minimum: 1 }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ExperienceAudit:
+      type: object
+      required: [id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        experience_id: { type: string }
+        from_status: { type: string, description: Empty when the experience was first deposited. }
+        to_status:
+          $ref: '#/components/schemas/ExperienceStatus'
+        reason: { type: string }
+        actor_id: { type: string }
+        created_at: { type: string, format: date-time }
+    ExperienceReference:
+      type: object
+      required: [id, organization_id, project_id, experience_id, consumer_kind, consumer_id, outcome, note, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        experience_id: { type: string }
+        consumer_kind: { type: string }
+        consumer_id: { type: string }
+        outcome:
+          $ref: '#/components/schemas/ExperienceReferenceOutcome'
+        note: { type: string }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    InsightCardType:
+      type: string
+      description: |
+        Fact / statistical observation / hypothesis / recommendation. This is
+        the boundary PRD 03 §2 目标⑥ asks the module to hold: a correlation is
+        not a cause, and a human conclusion is not a measurement.
+      enum: [fact, statistic, hypothesis, recommendation]
+    Applicability:
+      type: object
+      description: |
+        The filterable half of 适用范围. The free-text half stays in conditions:
+        one is used to narrow the list, the other to explain it to a human.
+      properties:
+        brands: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        products: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        channels: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        creative_types: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        objectives: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        audiences: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        time_range_note: { type: string, maxLength: 200 }
+    DataBasis:
+      type: object
+      description: The quantitative half of 数据依据.
+      properties:
+        asset_count: { type: integer, minimum: 0 }
+        sample_size: { type: integer, minimum: 0 }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        metrics: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        baseline: { type: string, maxLength: 200 }
+    ContentBasis:
+      type: object
+      description: 内容依据 — which creative features the conclusion rests on.
+      properties:
+        features: { type: array, maxItems: 30, items: { type: string, maxLength: 96 } }
+        example_asset_versions: { type: array, maxItems: 20, items: { type: string, maxLength: 96 } }
+        note: { type: string, maxLength: 1000 }
+    InsightCard:
+      type: object
+      description: |
+        The 洞察卡 projection of one confirmed experience (PRD 03 §8.1). All nine
+        fields are carried; missing_fields names the ones the author never filled
+        in, because hiding an incomplete card reads as "the library is empty".
+      required: [experience_id, lineage_id, revision, conclusion, type, type_label, applicability, conditions, data_basis, content_basis, confidence, confidence_hint, counterexamples, recommended_action, status, missing_fields, reference_count, updated_at]
+      properties:
+        experience_id: { type: string }
+        lineage_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        conclusion: { type: string }
+        type:
+          $ref: '#/components/schemas/InsightCardType'
+        type_label: { type: string }
+        applicability:
+          $ref: '#/components/schemas/Applicability'
+        conditions: { type: array, items: { type: string } }
+        data_basis:
+          $ref: '#/components/schemas/DataBasis'
+        content_basis:
+          $ref: '#/components/schemas/ContentBasis'
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        confidence_hint: { type: string }
+        counterexamples: { type: array, items: { type: string } }
+        recommended_action: { type: string }
+        status:
+          $ref: '#/components/schemas/ExperienceStatus'
+        missing_fields: { type: array, items: { type: string } }
+        reference_count: { type: integer, minimum: 0 }
+        updated_at: { type: string, format: date-time }
+    FeaturePattern:
+      type: object
+      description: |
+        How often one creative feature shows up across confirmed conclusions.
+        Deliberately a count, not a ranking — appearing often can just mean it
+        was tried often.
+      required: [feature, card_count, channels, best_confidence, conclusions]
+      properties:
+        feature: { type: string }
+        card_count: { type: integer, minimum: 1 }
+        channels: { type: array, items: { type: string } }
+        best_confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        conclusions: { type: array, items: { type: string } }
     PreLaunchInsight:
       type: object
-      required: [project_id, experience_references, disclosure]
+      required: [project_id, cards, patterns, facets, unscoped_excluded, mixed_channels, cross_channel_comparison, quality_checked, strong_conclusions_allowed, experience_references, disclosure]
       properties:
         project_id: { type: string }
+        cards:
+          type: array
+          items:
+            $ref: '#/components/schemas/InsightCard'
+        patterns:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturePattern'
+        facets:
+          type: object
+          description: Values actually present in this Project's confirmed experience, for building filters.
+          required: [channels, creative_types, objectives]
+          properties:
+            channels: { type: array, items: { type: string } }
+            creative_types: { type: array, items: { type: string } }
+            objectives: { type: array, items: { type: string } }
+        unscoped_excluded:
+          type: integer
+          minimum: 0
+          description: Confirmed experiences hidden by the filter because they never declared an applicability scope.
+        mixed_channels:
+          type: array
+          items: { type: string }
+          description: Channels spanned by the returned cards. More than one means side-by-side comparison is not safe.
+        cross_channel_comparison: { type: boolean }
+        quality_checked:
+          type: boolean
+          description: False when the data-quality gate could not be evaluated; the UI must say "unknown" rather than imply a pass.
+        strong_conclusions_allowed:
+          type: boolean
+          description: False when a blocking data-quality issue is open (PRD 03 §10.3③).
+        quality_blockers:
+          type: array
+          items: { type: string }
         experience_references:
           type: array
           items:
@@ -317,3 +2100,1723 @@ components:
             details:
               type: array
               items: { type: object }
+    AnalysisStatus:
+      type: string
+      description: |
+        分析状态链 (03 §11.1): 待数据 → 待匹配 → 可分析 → 分析中 → 待确认 →
+        已确认 / 待复审 / 已失效. retired is a logical delete — the row stays
+        readable so anything that quoted it remains auditable.
+      enum: [awaiting_data, awaiting_match, analysable, analysing, pending_confirmation, confirmed, needs_review, retired]
+    AssetType:
+      type: string
+      description: |
+        The six identifiable content types of AM-004. Each carries its own
+        feature system, which is why a type may not be changed once features
+        exist: the old system's values would be orphaned.
+      enum: [xiaohongshu_note, wechat_article, brand_ad, digital_human_ad, preroll_ad, hit_replica_ad]
+    AssetSourceKind:
+      type: string
+      description: Where an indexed asset came from (AM-001).
+      enum: [creative, upload, external]
+    FeatureSource:
+      type: string
+      description: >-
+        The two data layers 03 §14 keeps apart. An AI inference and a human
+        conclusion for the same key are separate rows; neither overwrites the
+        other, so re-running extraction cannot erase a person's decision.
+      enum: [ai, human]
+    Confidence:
+      type: string
+      description: Required on the AI layer, forbidden on the human layer (03 §5 末).
+      enum: [low, medium, high]
+    ReviewState:
+      type: string
+      description: >-
+        On an AI row this stays pending — the review is recorded by the human
+        row that appears beside it. On that human row, confirmed 表示认可 AI 的
+        判断，rejected 表示推翻它并给出自己的取值.
+      enum: [pending, confirmed, rejected]
+    MappingStatus:
+      type: string
+      description: unmatched is the 待匹配 queue; ignored is a deliberate set-aside (AM-003).
+      enum: [unmatched, matched, ignored]
+    FeatureValueKind:
+      type: string
+      description: >-
+        Decides which member of FeatureValue is meaningful, and must equal the
+        kind the asset type's schema declares for the key — that is what keeps
+        a 时长 from being stored as free text.
+      enum: [text, tags, enum, enum_multi, number, bool, duration_seconds]
+    FeatureValue:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          $ref: '#/components/schemas/FeatureValueKind'
+        text: { type: string, maxLength: 2000 }
+        terms:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 100 }
+        number: { type: number }
+        bool: { type: boolean }
+    FeatureInput:
+      type: object
+      additionalProperties: false
+      required: [key, value]
+      properties:
+        key: { type: string, minLength: 1 }
+        value:
+          $ref: '#/components/schemas/FeatureValue'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        review_state:
+          $ref: '#/components/schemas/ReviewState'
+    InsightAsset:
+      type: object
+      required: [id, organization_id, project_id, lineage_id, revision, title, source_kind, analysis_status, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        lineage_id:
+          type: string
+          description: Stable identity of one creative across its revisions (AM-001).
+        revision: { type: integer, minimum: 1 }
+        title: { type: string }
+        source_kind:
+          $ref: '#/components/schemas/AssetSourceKind'
+        source_ref: { type: string }
+        source_job_id: { type: string }
+        platform_asset_id: { type: string }
+        platform_asset_version: { type: integer }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        asset_type_source:
+          $ref: '#/components/schemas/FeatureSource'
+        asset_type_confidence:
+          $ref: '#/components/schemas/Confidence'
+        analysis_status:
+          $ref: '#/components/schemas/AnalysisStatus'
+        analysis_status_reason: { type: string }
+        analysis_status_changed_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AssetMapping:
+      type: object
+      required: [id, organization_id, project_id, platform, platform_object_kind, platform_object_id, status, version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        platform: { type: string }
+        platform_object_kind: { type: string, enum: [creative, ad] }
+        platform_object_id: { type: string }
+        platform_object_name: { type: string }
+        asset_id: { type: string }
+        status:
+          $ref: '#/components/schemas/MappingStatus'
+        match_source: { type: string, enum: [auto, human] }
+        matched_by: { type: string }
+        matched_at: { type: string, format: date-time }
+        note: { type: string }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AssetFeature:
+      type: object
+      required: [id, organization_id, project_id, asset_id, asset_type, key, value, source, review_state, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        asset_id: { type: string }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        key: { type: string }
+        value:
+          $ref: '#/components/schemas/FeatureValue'
+        source:
+          $ref: '#/components/schemas/FeatureSource'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        review_state:
+          $ref: '#/components/schemas/ReviewState'
+        skill_id: { type: string }
+        skill_version: { type: string }
+        extracted_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FeatureField:
+      type: object
+      required: [key, label, group, kind]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        group:
+          type: string
+          description: PRD sub-heading this field came from; the UI renders a section per group.
+        kind:
+          $ref: '#/components/schemas/FeatureValueKind'
+        vocabulary:
+          type: array
+          description: >-
+            An empty list on an enum field is deliberate: vocabulary maintenance
+            belongs to 能力运营 → 特征体系 (03 §5 末), so the field ships open and
+            off-vocabulary terms are only rejected once a list exists.
+          items: { type: string }
+        unit: { type: string }
+        note: { type: string }
+    FeatureSchema:
+      type: object
+      required: [asset_type, label, source, fields]
+      properties:
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        label: { type: string }
+        source:
+          type: string
+          description: The PRD section this feature system was transcribed from.
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureField'
+    FeatureMatrixCell:
+      type: object
+      required: [asset_id, source, review_state, value]
+      properties:
+        asset_id: { type: string }
+        source:
+          $ref: '#/components/schemas/FeatureSource'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        review_state:
+          $ref: '#/components/schemas/ReviewState'
+        value:
+          $ref: '#/components/schemas/FeatureValue'
+    FeatureMatrixRow:
+      type: object
+      required: [key, label, group, kind, cells]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        group: { type: string }
+        kind:
+          $ref: '#/components/schemas/FeatureValueKind'
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureMatrixCell'
+    FeatureMatrix:
+      type: object
+      required: [assets, asset_types, rows, disclosure]
+      properties:
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/InsightAsset'
+        asset_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetType'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureMatrixRow'
+        disclosure:
+          type: string
+          description: >-
+            States which keys were compared and why others were left out, so a
+            mixed-type comparison never looks more complete than it is.
+    IndexAsset:
+      type: object
+      additionalProperties: false
+      required: [title, source_kind]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 255 }
+        source_kind:
+          $ref: '#/components/schemas/AssetSourceKind'
+        source_ref: { type: string, maxLength: 512 }
+        source_job_id: { type: string }
+        lineage_id:
+          type: string
+          maxLength: 96
+          description: Empty starts a new lineage; a known one appends a revision.
+        platform_asset_id:
+          type: string
+          description: Give this together with platform_asset_version, or give neither.
+        platform_asset_version: { type: integer }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        asset_type_source:
+          $ref: '#/components/schemas/FeatureSource'
+        asset_type_confidence:
+          $ref: '#/components/schemas/Confidence'
+    IdentifyAssetType:
+      type: object
+      additionalProperties: false
+      required: [expected_version, asset_type, source]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        source:
+          $ref: '#/components/schemas/FeatureSource'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        reason: { type: string, maxLength: 1000 }
+    ExtractFeatures:
+      type: object
+      additionalProperties: false
+      required: [expected_version, skill_id, features]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        skill_id: { type: string, minLength: 1 }
+        skill_version: { type: string }
+        features:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FeatureInput'
+          description: >-
+            Every key must belong to this asset's own feature system; a video
+            hook field on a WeChat article is rejected (03 §15②). Every entry
+            must carry a confidence.
+    PatchFeatures:
+      type: object
+      additionalProperties: false
+      required: [expected_version, features]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        features:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FeatureInput'
+          description: >-
+            Writes the human layer only. Entries must not carry a confidence —
+            a person's conclusion has no machine confidence.
+        reason: { type: string, maxLength: 1000 }
+    AnalyzeAsset:
+      type: object
+      additionalProperties: false
+      required: [expected_version, content]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        content:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: >-
+            The text to analyse: the article body for written assets, the script
+            or shot description for video. Required, and supplied by the caller —
+            the asset library stores identity and state, not the asset body. The
+            cap is about cost and explainability, not performance: over very long
+            inputs a model reports what the piece mentions rather than what it is.
+        note:
+          type: string
+          maxLength: 1000
+          description: Human context, e.g. "this is the vertical recut, same footage as A".
+    AnalyzeAssetResult:
+      type: object
+      required: [run, features]
+      properties:
+        run:
+          $ref: '#/components/schemas/AnalysisRun'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetFeature'
+          description: Every feature of the asset after the run, both layers.
+        dropped_fields:
+          type: array
+          items: { type: string }
+          description: >-
+            Answers that were discarded, one human-readable reason each. Always
+            surface these: a few missing features look like "the model didn't see
+            it", while the real cause may be a format mismatch — that is a bug to
+            fix, not a model limitation.
+    AnalysisRun:
+      type: object
+      description: >-
+        One analysis task, append-only. Records the input, the method, the Skill
+        version, the result and the error (03 §113/§304/§344 acceptance 12).
+        The input's full text is deliberately absent — only its hash and shape are
+        kept (09 §7).
+      required: [id, kind, asset_id, status, asset_type, started_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        kind: { type: string, enum: [feature_extraction] }
+        asset_id: { type: string }
+        status: { type: string, enum: [running, succeeded, failed] }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        skill_id: { type: string }
+        skill_version: { type: string }
+        skill_content_hash: { type: string }
+        prompt_version: { type: string }
+        provider_code: { type: string }
+        model_alias:
+          type: string
+          description: A capability alias, never a vendor model ID (10 §凭据只存引用).
+        model_version: { type: string }
+        route_revision_id: { type: string }
+        response_mode: { type: string }
+        generation_mode: { type: string, enum: [model, template] }
+        input_hash: { type: string }
+        input_summary:
+          type: object
+          description: Shape of the input only — character counts and field counts, no text.
+        result_hash: { type: string }
+        feature_count: { type: integer }
+        dropped_fields:
+          type: array
+          items: { type: string }
+        data_through:
+          type: string
+          format: date-time
+          description: Data cut-off. Absent for content-only runs, which read no metrics.
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        latency_ms: { type: integer }
+        error_code: { type: string }
+        error_message: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RegisterAssetMapping:
+      type: object
+      additionalProperties: false
+      required: [platform, platform_object_kind, platform_object_id]
+      properties:
+        platform: { type: string, minLength: 1, maxLength: 32 }
+        platform_object_kind: { type: string, enum: [creative, ad] }
+        platform_object_id: { type: string, minLength: 1, maxLength: 191 }
+        platform_object_name: { type: string, maxLength: 255 }
+        asset_id:
+          type: string
+          description: Omit to file the object in the 待匹配 queue.
+        match_source:
+          type: string
+          enum: [auto, human]
+          description: Required whenever asset_id is given.
+        note: { type: string, maxLength: 1000 }
+    ResolveAssetMapping:
+      type: object
+      additionalProperties: false
+      required: [expected_version, status]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        status:
+          $ref: '#/components/schemas/MappingStatus'
+        asset_id:
+          type: string
+          description: >-
+            Required when status is matched, and must be empty otherwise — an
+            unmatched or ignored row may not keep a stale asset pointer.
+        note:
+          type: string
+          maxLength: 1000
+          description: Required when status is ignored.
+    Platform:
+      type: string
+      description: 首期覆盖的投放平台 (doc10 §1).
+      enum: [douyin, kuaishou, xiaohongshu, wechat, tencent_ads, other]
+    IngestMode:
+      type: string
+      description: |
+        接入方式 (doc10 §2)，按可靠性排序：官方 API 优先，页面读取只作受控补充。
+      enum: [api, service_account, file_import, computer_use, business]
+    DataSourceStatus:
+      type: string
+      description: >-
+        draft 未启用 / active 同步中 / paused 已暂停 / revoked 已撤销授权。数据源
+        在字段映射填好之前不能离开 draft。
+      enum: [draft, active, paused, revoked]
+    QualityStatus:
+      type: string
+      description: |
+        数据质量状态 (doc10 §11)。除 healthy 外的任何取值都必须带 quality_note，
+        并且按 §12.4 会阻止该数据源的数字生成强洞察或自动优化动作。
+      enum: [healthy, delayed, partial, mapping_incomplete, tracking_broken, reconciling, blocked]
+    ImportKind:
+      type: string
+      description: >-
+        sync 增量同步 / backfill 历史回补 / file 文件导入 / correction 更正批次。
+        更正批次是重复哈希被拦下后唯一被认可的重导方式 (doc10 §8)。
+      enum: [sync, backfill, file, correction]
+    ImportStatus:
+      type: string
+      description: partial 表示部分行被拒但其余已入库，被拒原因在 errors 里。
+      enum: [pending, running, succeeded, partial, failed]
+    ConfidenceLevel:
+      type: string
+      description: |
+        置信提示 (03 §9)：sufficient 充分 / directional 方向性 /
+        low_sample 样本不足 / confounded 存在混杂。刻意不是数字——PRD 要的是
+        一个非分析师也能读懂的定性提示。
+      enum: [sufficient, directional, low_sample, confounded]
+    MetricCaliber:
+      type: object
+      description: >-
+        口径 (doc10 §6)：两个数字可以并排放之前必须一致的东西。任一项不同，总览
+        就会把 comparable 置为 false 并写明原因，而不是让前端自己判断。
+      required: [time_zone, currency, attribution_window, metric_schema_version]
+      properties:
+        time_zone: { type: string, description: 'IANA 时区，默认 Asia/Shanghai' }
+        currency: { type: string, minLength: 3, maxLength: 3, description: 'ISO 三位币种代码' }
+        attribution_window: { type: string, description: '归因窗口，未指定时为 platform_default' }
+        metric_schema_version: { type: string }
+    MetricCounts:
+      type: object
+      description: >-
+        Canonical 原始计数，全部为整数。金额一律以「分」为单位存整数，避免浮点在
+        汇总时漂移。
+      required: [impressions, clicks, conversions, video_views, video_completions, spend_cents, revenue_cents]
+      properties:
+        impressions: { type: integer, minimum: 0 }
+        clicks: { type: integer, minimum: 0 }
+        conversions: { type: integer, minimum: 0 }
+        video_views: { type: integer, minimum: 0 }
+        video_completions: { type: integer, minimum: 0 }
+        spend_cents: { type: integer, minimum: 0 }
+        revenue_cents: { type: integer, minimum: 0 }
+    MetricRates:
+      type: object
+      description: |
+        派生指标 (doc10 §6)。**字段缺失表示「不可用」，不是 0**——分母为零时本 API
+        不返回该字段，前端必须显示「不可用」，不得把它当成 0 参与排序或比较。
+        因此这里没有任何 required 字段。
+      properties:
+        ctr: { type: number, description: '点击 / 曝光；曝光为 0 时缺失' }
+        cvr: { type: number, description: '转化 / 点击；点击为 0 时缺失' }
+        completion_rate: { type: number, description: '完播 / 播放；播放为 0 时缺失' }
+        cpa_cents: { type: number, description: '花费 / 转化（分）；转化为 0 时缺失' }
+        cpm_cents: { type: number, description: '千次曝光花费（分）；曝光为 0 时缺失' }
+        roas: { type: number, description: '收入 / 花费；花费为 0 时缺失' }
+    RateInterval:
+      type: object
+      description: >-
+        比率的置信区间（Wilson 区间）。20 §4.1 要求置信范围与图表同屏：样本越小
+        区间越宽，读者才看得出「这个差异可能只是噪声」。
+      required: [low, high]
+      properties:
+        low: { type: number }
+        high: { type: number }
+    MetricWindow:
+      type: object
+      description: 数据窗口，两端都含。总览始终原样回显它。
+      required: [start, end]
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+    DataSource:
+      type: object
+      description: >-
+        doc10 §3 DataSource + Connection，去掉一切机密：credential_ref 是密钥服务
+        的引用键，凭据本身永不落业务库 (§9)。
+      required: [id, organization_id, project_id, platform, ingest_mode, status, quality_status, caliber, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        platform:
+          $ref: '#/components/schemas/Platform'
+        account_label: { type: string }
+        account_ref: { type: string, description: '平台账户标识；同一项目下同平台同账户只能接入一次' }
+        ingest_mode:
+          $ref: '#/components/schemas/IngestMode'
+        credential_ref: { type: string, description: '密钥服务里的引用键，不是凭据本身' }
+        status:
+          $ref: '#/components/schemas/DataSourceStatus'
+        quality_status:
+          $ref: '#/components/schemas/QualityStatus'
+        quality_note: { type: string }
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        field_mapping:
+          type: object
+          additionalProperties: { type: string }
+          description: 平台报表列名 → canonical 指标名 (doc10 §8)。为空时不允许导入。
+        data_through: { type: string, format: date-time, description: '已覆盖到的数据日期；历史回补不会把它拉回去' }
+        last_synced_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ImportBatch:
+      type: object
+      description: 一次同步、一个文件、一次回补或一次更正，带 doc10 §7 要求每批记录的计数。
+      required: [id, organization_id, project_id, data_source_id, kind, status, requested_rows, accepted_rows, rejected_rows, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        data_source_id: { type: string }
+        kind:
+          $ref: '#/components/schemas/ImportKind'
+        status:
+          $ref: '#/components/schemas/ImportStatus'
+        source_label: { type: string }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        content_hash: { type: string, description: '相同哈希 + 相同导入范围默认阻止重复导入 (doc10 §8)' }
+        requested_rows: { type: integer, minimum: 0 }
+        accepted_rows: { type: integer, minimum: 0 }
+        rejected_rows: { type: integer, minimum: 0 }
+        error_summary: { type: string }
+        errors:
+          type: array
+          items: { type: string }
+          description: 逐行拒绝原因，形如「第 2 行：…」，供前端定位问题行。
+        corrects_batch_id: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ImportResult:
+      type: object
+      required: [batch, new_mappings]
+      properties:
+        batch:
+          $ref: '#/components/schemas/ImportBatch'
+        new_mappings:
+          type: integer
+          minimum: 0
+          description: 本批次新登记进 待匹配 队列的平台对象数（register_objects 为 true 时）。
+    AssetPerformance:
+      type: object
+      description: >-
+        素材矩阵的一行。asset_id 为空表示这一行是未匹配对象的汇总——它的花费照样
+        计入总盘，但 attributable 为 false，不能承载创意级结论 (doc10 §5)。
+      required: [asset_title, objects, counts, rates, attributable, confidence]
+      properties:
+        asset_id: { type: string }
+        asset_title: { type: string }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        objects: { type: integer, minimum: 0, description: '归入这一行的平台对象数' }
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+        attributable: { type: boolean }
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+    PerformancePoint:
+      type: object
+      required: [date, counts, rates]
+      properties:
+        date: { type: string, format: date }
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+    PlatformTotal:
+      type: object
+      required: [platform, label, counts, rates]
+      properties:
+        platform:
+          $ref: '#/components/schemas/Platform'
+        label: { type: string, description: '平台中文名，直接可显示' }
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+    SourceHealth:
+      type: object
+      description: 每个参与本窗口的数据源的新鲜度与质量，必须与图表同屏 (doc10 §11)。
+      required: [data_source_id, platform, label, quality_status, freshness_days]
+      properties:
+        data_source_id: { type: string }
+        platform:
+          $ref: '#/components/schemas/Platform'
+        label: { type: string }
+        quality_status:
+          $ref: '#/components/schemas/QualityStatus'
+        quality_note: { type: string }
+        data_through: { type: string, format: date-time }
+        freshness_days: { type: integer, minimum: 0, description: '距今落后的天数' }
+    MetricOverview:
+      type: object
+      description: |
+        投后分析 · 指标总览的载荷，形状照 20 §4.1「一个主图表 + 素材矩阵 + 解释区」。
+        四件必须上屏的东西各有归属：数据窗口 = window，样本量 = totals.impressions，
+        口径 = caliber，置信范围 = confidence 与 ctr_interval。
+      required: [window, caliber, comparable, totals, rates, confidence, confidence_note, series, assets, unmatched_objects, unmatched_spend_cents, sources, platforms]
+      properties:
+        window:
+          $ref: '#/components/schemas/MetricWindow'
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        caliber_conflicts:
+          type: array
+          items: { type: string }
+          description: 非空表示窗口内混了不同口径的数据，此时不给合并排行。
+        comparable:
+          type: boolean
+          description: 口径不一致时为 false——跨平台比较默认关闭 (doc10 §6)。
+        comparable_reason: { type: string }
+        totals:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+        ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        confidence_note: { type: string, description: '一句话解释为什么是这个置信档位。' }
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/PerformancePoint'
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetPerformance'
+        unmatched_objects: { type: integer, minimum: 0 }
+        unmatched_spend_cents:
+          type: integer
+          minimum: 0
+          description: 未匹配对象的花费。计入总盘，但不参与创意级结论 (doc10 §5)。
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceHealth'
+        warnings:
+          type: array
+          items: { type: string }
+          description: 数据延迟、追踪异常、样本不足等需要读者先看到的提示。
+        platforms:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformTotal'
+    VariantVerdict:
+      type: string
+      description: |
+        AM-009 的判定阶梯，从严到松。**只有 `attributable` 是「能归到这个变量」**，
+        其余四档都是「不能」，只是不能的理由不同：
+
+
+        - `attributable` 只改了一个特征、两侧样本都够、置信区间不重叠
+        - `directional` 方向看得出，但区间重叠或样本只到方向性档
+        - `confounded` 同时改了多个特征，或两侧特征完全一致（差异来自特征之外）
+        - `low_sample` 任一侧曝光不足 1000，不谈差异
+        - `no_features` 至少一边没有内容特征，无从判断改了什么
+      enum: [attributable, directional, confounded, low_sample, no_features]
+    FeatureDiff:
+      type: object
+      description: 两个素材之间某个特征的取值差异。未记录的一侧写作「（未记录）」而不是空串。
+      required: [key, label, group, baseline, variant, human_only]
+      properties:
+        key: { type: string }
+        label: { type: string, description: 中文标签，直接可显示 }
+        group: { type: string }
+        baseline: { type: string }
+        variant: { type: string }
+        human_only:
+          type: boolean
+          description: 该特征只能人工判定（AM-006），AI 不产出，缺失属正常。
+    VariantComparison:
+      type: object
+      description: |
+        素材对比 (03 §7.3 / AM-009)。同类型素材两两配对，先识别变量再谈差异。
+        `changed_features` 长度 > 1 时 verdict 一定是 `confounded`——差异归不到其中
+        任何一个变量上，哪怕数字差得很多。
+      required: [baseline_asset_id, baseline_title, variant_asset_id, variant_title, changed_features, controlled_count, baseline_counts, variant_counts, baseline_rates, variant_rates, intervals_overlap, verdict, confidence, note]
+      properties:
+        baseline_asset_id: { type: string }
+        baseline_title: { type: string }
+        variant_asset_id: { type: string }
+        variant_title: { type: string }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        changed_features:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureDiff'
+        controlled_count:
+          type: integer
+          minimum: 0
+          description: 两侧取值相同的特征数量——受控变量越多，单变量判定越可信。
+        baseline_counts:
+          $ref: '#/components/schemas/MetricCounts'
+        variant_counts:
+          $ref: '#/components/schemas/MetricCounts'
+        baseline_rates:
+          $ref: '#/components/schemas/MetricRates'
+        variant_rates:
+          $ref: '#/components/schemas/MetricRates'
+        baseline_ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        variant_ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        intervals_overlap:
+          type: boolean
+          description: 任一侧区间算不出来时按 true 处理——不知道差异是否显著，就不能说它显著。
+        ctr_lift: { type: number, description: '相对提升；基线为 0 或缺失时本字段缺失，不退化为 0。' }
+        verdict:
+          $ref: '#/components/schemas/VariantVerdict'
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string, description: 一句话说明为什么是这个判定。 }
+    AssetTrend:
+      type: object
+      description: 单个素材在窗口内的逐日走势。`direction` 为 unknown 表示天数不足或前半段无曝光，不能当成持平。
+      required: [asset_id, asset_title, points, active_days, direction, confidence, note]
+      properties:
+        asset_id: { type: string }
+        asset_title: { type: string }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/PerformancePoint'
+        active_days: { type: integer, minimum: 0, description: 真正有数据的天数，不是窗口长度。 }
+        direction:
+          type: string
+          enum: [rising, flat, declining, unknown]
+        ctr_change: { type: number, description: 后半段相对前半段的点击率变化；算不出时缺失。 }
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string }
+    FatigueSeverity:
+      type: string
+      description: |
+        03 §7.4 素材疲劳。`likely` 只在两项条件同时成立时给出（曝光放大且点击率下滑，
+        或点击率下滑且单次成本上升）；单项恶化只到 `watch`。
+      enum: [none, watch, likely]
+    FatigueSignal:
+      type: object
+      description: |
+        把窗口按「有数据的天数」对半切开后的前后对比。`alternative_explanations` 一定
+        非空——其中「受众变化」永远排除不了：当前没有接入受众构成数据，人群变了和素材
+        看腻了在数字上长得一样。
+      required: [asset_id, asset_title, first_half, second_half, first_rates, last_rates, severity, confidence, note]
+      properties:
+        asset_id: { type: string }
+        asset_title: { type: string }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        first_half:
+          $ref: '#/components/schemas/MetricCounts'
+        second_half:
+          $ref: '#/components/schemas/MetricCounts'
+        first_rates:
+          $ref: '#/components/schemas/MetricRates'
+        last_rates:
+          $ref: '#/components/schemas/MetricRates'
+        ctr_change: { type: number }
+        cpa_change: { type: number }
+        impression_change: { type: number }
+        severity:
+          $ref: '#/components/schemas/FatigueSeverity'
+        alternative_explanations:
+          type: array
+          items: { type: string }
+          description: 没能排除的其他解释。这里列的是「排除不了」，不是「已排除」。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string }
+    AnomalyKind:
+      type: string
+      description: spike 高于常态 / drop 低于常态 / gap 当天完全没有数据。
+      enum: [spike, drop, gap]
+    MetricAnomaly:
+      type: object
+      description: |
+        用中位数与 MAD（而非均值与标准差）判定偏离，阈值 3.5，且要求窗口内至少 5 天
+        有数据。用标准差的话，一次大促尖峰会把标准差本身抬高，之后什么都不再异常。
+      required: [date, scope, metric, kind, observed, median, deviation, note]
+      properties:
+        date: { type: string, format: date }
+        scope:
+          type: string
+          enum: [project, asset]
+        asset_id: { type: string }
+        asset_title: { type: string }
+        metric: { type: string }
+        kind:
+          $ref: '#/components/schemas/AnomalyKind'
+        observed: { type: number }
+        median: { type: number }
+        deviation: { type: number, description: 偏离中位数多少个 MAD。 }
+        note: { type: string }
+    FeatureDriver:
+      type: object
+      description: |
+        驱动因素：某个特征取值的素材组，与其余素材的对比。**这不是因果**——
+        `covarying_features` 列出组内完全同向变化的其他特征，非空时 confidence 一律
+        降为 confounded，因为无法区分是本特征还是它们在起作用。
+      required: [key, label, group, value, assets, rest_assets, counts, rest_counts, rates, rest_rates, intervals_overlap, confidence, note]
+      properties:
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        key: { type: string }
+        label: { type: string }
+        group: { type: string }
+        value: { type: string, description: 该组的特征取值 }
+        assets: { type: integer, minimum: 0, description: 组内素材数，少于 2 个不出结论。 }
+        rest_assets: { type: integer, minimum: 0 }
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rest_counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+        rest_rates:
+          $ref: '#/components/schemas/MetricRates'
+        ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        rest_ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        intervals_overlap: { type: boolean }
+        ctr_lift: { type: number }
+        covarying_features:
+          type: array
+          items: { type: string }
+          description: 与本特征完全同向变化的其他特征，分不开谁在起作用。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string }
+    PerformanceAnalysis:
+      type: object
+      description: 投后分析五个二级视图的共用载荷。
+      required: [window, caliber, comparable, comparisons, trends, fatigue, anomalies, drivers, assets_in_window, assets_with_features]
+      properties:
+        window:
+          $ref: '#/components/schemas/MetricWindow'
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        comparable:
+          type: boolean
+          description: |
+            口径不一致时为 false。此时所有 `attributable` 判定会被降级为 directional：
+            差异可能整个来自口径，而不是变量。
+        comparable_reason: { type: string }
+        comparisons:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariantComparison'
+        trends:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetTrend'
+        fatigue:
+          type: array
+          items:
+            $ref: '#/components/schemas/FatigueSignal'
+        anomalies:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricAnomaly'
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureDriver'
+        assets_in_window: { type: integer, minimum: 0 }
+        assets_with_features:
+          type: integer
+          minimum: 0
+          description: 其中有内容特征的素材数。它远小于 assets_in_window 时，对比和驱动因素都会大面积空着。
+        notes:
+          type: array
+          items: { type: string }
+          description: 影响整份分析可读性的前置提示（口径冲突、特征覆盖不足等）。
+    QualityIssueKind:
+      type: string
+      description: |
+        质量问题的五个类别，对应数据质量的前五个二级视图（第六个「修复队列」是跨类别的
+        队列视图，不是第六个类别）。
+      enum: [freshness, missing, anomaly, caliber, reconciliation]
+    QualitySeverity:
+      type: string
+      description: |
+        blocking 会让整个 Project 暂停强结论与自动优化 (PRD §10.3、doc10 §12.4)；
+        warning 结论仍可给出但必须带着这条一起看；info 只记一笔。
+      enum: [blocking, warning, info]
+    QualityIssueState:
+      type: string
+      description: |
+        问题当前的处置状态。open 与 reopened 不入库，由实时检测与处置记录比对算出：
+
+
+        - `open` 还没人碰过
+        - `acknowledged` 有人在跟，仍留在修复队列
+        - `resolved` 已修复且此后没再被观测到
+        - `ignored` 判定这条不用管，再次检出也不弹回来
+        - `reopened` 报了修但问题在那之后又出现——必须被看见，否则点一次「已修复」
+          就能让问题永久消失
+      enum: [open, acknowledged, resolved, ignored, reopened]
+    QualityDispositionState:
+      type: string
+      description: 能被写进库的三种处置，是 QualityIssueState 的子集。
+      enum: [acknowledged, resolved, ignored]
+    QualityDisposition:
+      type: object
+      description: 库里那一行：谁、什么时候、把哪条问题标成了什么、依据是什么。
+      required: [id, organization_id, project_id, fingerprint, issue_kind, state, note, observed_through, version, decided_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        fingerprint: { type: string }
+        issue_kind:
+          $ref: '#/components/schemas/QualityIssueKind'
+        state:
+          $ref: '#/components/schemas/QualityDispositionState'
+        note: { type: string, maxLength: 1000 }
+        observed_through:
+          type: string
+          format: date-time
+          description: 处置发生时该问题的最新观测时间。检测到更晚的观测就说明问题又发生了。
+        version: { type: integer, minimum: 1 }
+        decided_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    QualityIssue:
+      type: object
+      description: 检测器实时算出的一条问题，叠加处置状态后返回。
+      required: [fingerprint, kind, severity, title, detail, suggestion, scope_label, affected_spend_cents, last_observed_at, state]
+      properties:
+        fingerprint:
+          type: string
+          description: >-
+            同一个问题反复出现时保持不变，处置记录才跟得住。**不含数据窗口**——含了的话
+            换一次窗口指纹就变，处置永远跟不住同一个问题。
+        kind:
+          $ref: '#/components/schemas/QualityIssueKind'
+        severity:
+          $ref: '#/components/schemas/QualitySeverity'
+        title: { type: string, description: '一句话说清出了什么事。' }
+        detail: { type: string, description: '可核对的具体数字。' }
+        suggestion:
+          type: string
+          description: 下一步该查什么 (PRD §10.3「先建议检查追踪、匹配和同步」)，不要只报警不给动作。
+        scope_label: { type: string }
+        data_source_id: { type: string }
+        platform:
+          $ref: '#/components/schemas/Platform'
+        affected_spend_cents: { type: integer, minimum: 0 }
+        affected_days: { type: integer, minimum: 0 }
+        stat_date: { type: string, format: date }
+        last_observed_at:
+          type: string
+          format: date-time
+          description: 处置时由前端原样回传，用来判断处置之后问题有没有再出现。
+        state:
+          $ref: '#/components/schemas/QualityIssueState'
+        disposition:
+          $ref: '#/components/schemas/QualityDisposition'
+    QualityReport:
+      type: object
+      description: |
+        数据质量六视图的载荷。20 §4.1：问题队列为主，影响范围和修复状态为辅，
+        错误与延迟置顶——issues 已按「在队列里 → 严重度 → 影响花费」排好序。
+      required: [window, generated_at, issues, by_kind, open_count, queue_count, strong_conclusions_allowed]
+      properties:
+        window:
+          $ref: '#/components/schemas/MetricWindow'
+        generated_at: { type: string, format: date-time }
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityIssue'
+        by_kind:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          description: 五个类别视图的角标，只数还留在修复队列里的。
+        open_count: { type: integer, minimum: 0, description: 'open 加 reopened 的条数。' }
+        queue_count: { type: integer, minimum: 0 }
+        strong_conclusions_allowed:
+          type: boolean
+          description: >-
+            为 false 时投前与投后都不应给出强结论或自动优化动作 (PRD §10.3、doc10 §12.4)。
+            已被忽略的问题不参与判断——那是有人明确判过它不影响结论。
+        blocked_reason: { type: string }
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceHealth'
+          description: 新鲜度视图的底表：每个数据源截止到哪天、滞后多少。
+    MetricKind:
+      type: string
+      enum: [fact, derived]
+      description: >-
+        `fact` 是平台事实计数，可以跨天相加；`derived` 是派生比率，只能用「总量除总量」
+        重算。把每天的比率平均起来是另一个数，而且几乎总是错的。
+    CaliberFactor:
+      type: string
+      enum: [time_zone, currency, attribution_window, metric_schema_version]
+      description: doc10 §6 的四个口径要素。
+    MetricDictionaryEntry:
+      type: object
+      required: [key, label, kind, definition, source, day_count, total, comparable]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        kind:
+          $ref: '#/components/schemas/MetricKind'
+        unit: { type: string }
+        definition: { type: string }
+        formula: { type: string, description: '派生指标的计算式，事实指标没有。' }
+        caliber_factors:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaliberFactor'
+          description: 这个指标的口径依赖哪些要素。只有依赖的要素冲突了才会影响它的可比性。
+        source: { type: string, description: 口径出处（文档章节）。 }
+        day_count: { type: integer, minimum: 0, description: '本项目实际有多少天导过这个指标。0 表示一条都没有，和「有值但为 0」不是一回事。' }
+        total: { type: number, description: '事实指标是窗口内合计，派生指标是用合计重算出的比率。' }
+        comparable:
+          type: boolean
+          description: 为 false 表示不同数据源在这个指标依赖的口径要素上不一致，跨源对比前必须先展示差异 (03 §7)。
+        conflict_notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaliberFactor'
+    CaliberConflict:
+      type: object
+      required: [factor, label, values, note]
+      properties:
+        factor:
+          $ref: '#/components/schemas/CaliberFactor'
+        label: { type: string }
+        values: { type: array, items: { type: string }, description: 各数据源当前的取值。 }
+        note: { type: string, description: 这条不一致会让哪些数字对不上。 }
+    FeatureValueUsage:
+      type: object
+      required: [value, asset_count]
+      properties:
+        value: { type: string }
+        asset_count: { type: integer, minimum: 0 }
+    FeatureFieldUsage:
+      type: object
+      description: 一个特征字段的定义加上它在本项目的实际使用情况。
+      required: [key, label, group, kind, governed, asset_count, distinct_values]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        group: { type: string }
+        kind:
+          $ref: '#/components/schemas/FeatureValueKind'
+        vocabulary: { type: array, items: { type: string } }
+        unit: { type: string }
+        note: { type: string }
+        governed:
+          type: boolean
+          description: >-
+            词表已发布。为 false 的枚举字段目前接受任何取值 (03 §5 末把词表发布权
+            交给本模块的管理员)，这正是碎片化的敞口。
+        asset_count: { type: integer, minimum: 0, description: 有多少条素材填了这个字段。 }
+        distinct_values: { type: integer, minimum: 0, description: 生效值去重后的取值数。 }
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureValueUsage'
+          description: >-
+            按使用量降序，最多 12 个。统计用**生效值**：同一条素材上人工结论覆盖机器结论
+            (03 §14)，机器的旧值不再计入，否则「机器写 A、人改成 B」会被数成两个取值。
+        merge_candidates:
+          type: array
+          items: { type: string }
+          description: 全项目只有一条素材用过的取值。是候选不是结论——它可能是同义碎片，也可能就是那条素材独有。
+        off_vocabulary:
+          type: array
+          items: { type: string }
+          description: 词表发布之前存下来的、不在词表内的存量取值。
+    FeatureSystemHealth:
+      type: object
+      required: [asset_type, label, source, asset_count, field_count, used_field_count, open_enum_count, fields]
+      properties:
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        label: { type: string }
+        source: { type: string }
+        asset_count: { type: integer, minimum: 0 }
+        field_count: { type: integer, minimum: 0 }
+        used_field_count: { type: integer, minimum: 0 }
+        open_enum_count: { type: integer, minimum: 0, description: 还没发布词表的枚举字段数。 }
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureFieldUsage'
+    SkillHealth:
+      type: object
+      required: [skill_id, skill_version, extraction_count, asset_count, field_keys, high_confidence, medium_confidence, low_confidence, latest]
+      properties:
+        skill_id: { type: string }
+        skill_version: { type: string }
+        extraction_count: { type: integer, minimum: 0 }
+        asset_count: { type: integer, minimum: 0 }
+        field_keys: { type: array, items: { type: string } }
+        high_confidence: { type: integer, minimum: 0 }
+        medium_confidence: { type: integer, minimum: 0 }
+        low_confidence: { type: integer, minimum: 0 }
+        first_extracted_at: { type: string, format: date-time }
+        last_extracted_at: { type: string, format: date-time }
+        latest:
+          type: boolean
+          description: >-
+            按最近一次提取时间判定在用，不按版本号字符串排序——字符串排序会把 v9 排在
+            v10 后面。历史版本提的特征还在库里，所以旧版本也会列出来。
+    EvaluationExample:
+      type: object
+      required: [asset_id, feature_key, label, ai_value, human_value]
+      properties:
+        asset_id: { type: string }
+        asset_title: { type: string }
+        feature_key: { type: string }
+        label: { type: string }
+        ai_value: { type: string }
+        human_value: { type: string }
+    FieldEvaluation:
+      type: object
+      required: [key, label, reviewed, agreed]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        reviewed: { type: integer, minimum: 0 }
+        agreed: { type: integer, minimum: 0 }
+    SkillEvaluation:
+      type: object
+      description: |
+        一个 Skill 版本的人机一致率。**不是独立评测集**：样本全部来自人工复核记录，
+        回答的是「被人看过的地方机器错了多少」。
+
+
+        一致与否按取值文本判定，不看 `review_state`——人工行的 `review_state` 默认就是
+        `confirmed`，写一个完全不同的值也还是 `confirmed`，拿它当「认可了 AI」会把改写
+        数成一致。`rejected` 是人明确推翻，无论取值是否碰巧相同都算不一致。
+      required: [skill_id, skill_version, reviewed, agreed, disagreed, accuracy, confidence, note]
+      properties:
+        skill_id: { type: string }
+        skill_version: { type: string }
+        reviewed: { type: integer, minimum: 0, description: 有人工结论对照的提取条数。没人看过的不算。 }
+        agreed: { type: integer, minimum: 0 }
+        disagreed: { type: integer, minimum: 0 }
+        accuracy:
+          type: number
+          description: 样本少于 10 条时恒为 0，此时前端必须藏起这个数而不是显示 0%。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string, description: 为什么是这个置信档位。 }
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldEvaluation'
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvaluationExample'
+          description: 机器与人写得不一样的具体例子，最多 20 条。看不到例子的准确率没法改进 Skill。
+    OperationsTodo:
+      type: object
+      required: [kind, severity, title, detail]
+      properties:
+        kind: { type: string, description: 'vocabulary / merge / caliber / evaluation 之一。' }
+        severity: { type: string }
+        title: { type: string }
+        detail: { type: string }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        feature_key: { type: string }
+    OperationsDashboard:
+      type: object
+      description: 质量看板。数字全部由同一次计算得出，和另外四个视图必然对得上。
+      required: [feature_field_total, feature_field_used, open_vocabulary_fields, merge_candidate_count, off_vocabulary_count, caliber_conflict_count, skill_version_count, evaluation_samples, todos]
+      properties:
+        feature_field_total: { type: integer, minimum: 0 }
+        feature_field_used: { type: integer, minimum: 0 }
+        open_vocabulary_fields: { type: integer, minimum: 0 }
+        merge_candidate_count: { type: integer, minimum: 0 }
+        off_vocabulary_count: { type: integer, minimum: 0 }
+        caliber_conflict_count: { type: integer, minimum: 0 }
+        skill_version_count: { type: integer, minimum: 0 }
+        evaluation_samples: { type: integer, minimum: 0 }
+        todos:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsTodo'
+          description: >-
+            词表待办只覆盖**已经有人用过**的开放枚举字段。把六套 schema 里所有没发布词表
+            的字段都列进来，真正在散的那几个会被埋掉。
+    SettingItem:
+      type: object
+      required: [key, label, value, effect, recommended, deviates, source, basis]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value:
+          type: string
+          description: 现在生效的值，已格式化成人能读的样子（含单位）。
+        effect:
+          type: string
+          description: >-
+            调大调小会发生什么。20 §121 要求「重要阈值显示影响说明」——写「会影响置信度」
+            没有意义，这里要写清楚哪一句话会从「有结论」变成「没结论」。
+        recommended:
+          type: string
+          description: 默认推荐值。
+        deviates:
+          type: boolean
+          description: >-
+            当前值偏离了推荐值，页面要提示「有人调过它」。由服务端判定，客户端不要自己
+            拿 value 和 recommended 比字符串：确认权限那组两边说的是不同的事
+            （这个权限管到哪些操作 vs 该发给谁），字面永远不同，一比就会给每一条都
+            打上凭空造出来的告警。
+        source:
+          type: string
+          description: 这个值在代码里的位置，例如 `internal/systems/insights/connectors.go:267`。
+        basis:
+          type: string
+          description: >-
+            文档依据。没有依据的阈值会显式写「无文档指定值」——那本身就是个待办，
+            留空则看不出是没依据还是忘了写。
+    SettingGroup:
+      type: object
+      required: [key, label, state, summary, missing, items]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        state:
+          type: string
+          enum: [in_effect, not_built]
+          description: >-
+            `in_effect` 这一组的值现在真的在生效；`not_built` 这一组还没有任何东西，
+            此时 items 为空、missing 说明缺什么。两者必须渲染成不同的样子。
+        summary: { type: string }
+        missing:
+          type: array
+          items: { type: string }
+          description: 只在 state 为 not_built 时有内容：缺的到底是什么、现在怎么替代。
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettingItem'
+    InsightSettings:
+      type: object
+      required: [generated_at, editable, editable_note, project_scoped, groups]
+      properties:
+        generated_at: { type: string, format: date-time }
+        editable:
+          type: boolean
+          description: >-
+            恒为 false。前端据此决定不渲染任何输入框——渲染一个改不动的输入框，
+            比直接说「这里改不了」更让人恼火。
+        editable_note:
+          type: string
+          description: 为什么只读、想改要走什么路径。
+        project_scoped:
+          type: boolean
+          description: 恒为 false。这些值对整个部署生效，路径上的 project_id 只用于鉴权。
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettingGroup'
+          description: 顺序与导航上的五个二级视图一致（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）。
+    CapabilityOperations:
+      type: object
+      required: [window, generated_at, feature_systems, metrics, caliber_conflicts, skills, evaluations, dashboard]
+      properties:
+        window:
+          $ref: '#/components/schemas/MetricWindow'
+        generated_at: { type: string, format: date-time }
+        feature_systems:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureSystemHealth'
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricDictionaryEntry'
+        caliber_conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaliberConflict'
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillHealth'
+        evaluations:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillEvaluation'
+        dashboard:
+          $ref: '#/components/schemas/OperationsDashboard'
+    ResolveQualityIssue:
+      type: object
+      additionalProperties: false
+      required: [fingerprint, issue_kind, state, note, observed_through]
+      properties:
+        fingerprint: { type: string, minLength: 1, maxLength: 191 }
+        issue_kind:
+          $ref: '#/components/schemas/QualityIssueKind'
+        state:
+          $ref: '#/components/schemas/QualityDispositionState'
+        note:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 三种处置都要写理由：认领要说谁在跟、标记已修要说怎么修的、判定可忽略更要说为什么。
+        observed_through:
+          type: string
+          format: date-time
+          description: >-
+            回传前端当时看到的那条问题的 `last_observed_at`。由客户端回传而不是服务端取
+            now，是为了让「你处置的是你看到的那个版本」成立——中间问题若又恶化，处置不会
+            连带把新情况也盖掉。
+    RegisterDataSource:
+      type: object
+      additionalProperties: false
+      required: [platform, ingest_mode]
+      properties:
+        platform:
+          $ref: '#/components/schemas/Platform'
+        account_label: { type: string, maxLength: 255 }
+        account_ref: { type: string, maxLength: 191 }
+        ingest_mode:
+          $ref: '#/components/schemas/IngestMode'
+        credential_ref:
+          type: string
+          maxLength: 191
+          description: >-
+            密钥服务里的引用键。看起来像凭据本身的值（Bearer 头、access_token、
+            过长的随机串）会被拒绝：凭据不入业务库 (doc10 §9)。
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        field_mapping:
+          type: object
+          additionalProperties: { type: string }
+    UpdateDataSource:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        status:
+          $ref: '#/components/schemas/DataSourceStatus'
+        account_label: { type: string, maxLength: 255 }
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        field_mapping:
+          type: object
+          additionalProperties: { type: string }
+          description: 整体替换。启用数据源前必须非空。
+    SetDataSourceQuality:
+      type: object
+      additionalProperties: false
+      required: [expected_version, quality_status]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        quality_status:
+          $ref: '#/components/schemas/QualityStatus'
+        note:
+          type: string
+          maxLength: 1000
+          description: healthy 以外的取值必填——读者要知道这个数字为什么不能全信。
+    MetricRow:
+      type: object
+      additionalProperties: false
+      required: [platform_object_kind, platform_object_id, stat_date, counts]
+      properties:
+        platform_object_kind: { type: string, enum: [creative, ad] }
+        platform_object_id: { type: string, minLength: 1, maxLength: 191 }
+        platform_object_name: { type: string, maxLength: 255 }
+        stat_date:
+          type: string
+          format: date
+          description: 按数据源时区聚合后的当地日期，YYYY-MM-DD。
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        raw:
+          type: object
+          additionalProperties: true
+          description: 平台原始字段留档，便于口径变更后回溯。
+    ImportMetrics:
+      type: object
+      additionalProperties: false
+      required: [data_source_id, kind, rows]
+      properties:
+        data_source_id: { type: string }
+        kind:
+          $ref: '#/components/schemas/ImportKind'
+        source_label: { type: string, maxLength: 255 }
+        content_hash:
+          type: string
+          maxLength: 128
+          description: 文件内容哈希；与相同导入范围组合后用于阻止重复导入 (doc10 §8)。
+        corrects_batch_id: { type: string, description: 'kind 为 correction 时指向被更正的批次。' }
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/MetricRow'
+        register_objects:
+          type: boolean
+          description: >-
+            为 true 时把行里出现的、尚未登记的平台对象写入 待匹配 队列，而不是猜它
+            属于哪个素材版本。
+
+    ExperimentStatus:
+      type: string
+      enum: [draft, running, concluded]
+      description: >-
+        `draft` 设计中，变量/分组/门槛都还能改；`running` 已开跑，**分组冻结**；
+        `concluded` 已下结论，连人写的解读一起冻住。冻结这件事是「事先登记」的
+        全部依据——没有它，谁都可以在看完数据之后往表现好的那组补两条素材。
+    ExperimentVerdict:
+      type: string
+      enum: [supported, refuted, inconclusive]
+      description: >-
+        系统给的判定，不是人写的解读。`supported` 区间不重叠且变体更好；
+        `refuted` 区间不重叠但变体更差；`inconclusive` 区间重叠，样本再多也
+        只能说没看出差别。
+    GroupComparison:
+      type: object
+      description: >-
+        组间比较结果。**实验中心和投后分析「驱动因素」共用同一套算法**，两者的
+        差别只在 note 的措辞：事先登记的分组能说到「归因到这个变量」，事后凑出
+        的分组只能说到「相关」。共用一套是为了让这两页永远不会给出互相矛盾的判定。
+      required: [counts, rest_counts, rates, rest_rates, intervals_overlap, covarying_features, confidence, note]
+      properties:
+        counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rest_counts:
+          $ref: '#/components/schemas/MetricCounts'
+        rates:
+          $ref: '#/components/schemas/MetricRates'
+        rest_rates:
+          $ref: '#/components/schemas/MetricRates'
+        ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        rest_ctr_interval:
+          $ref: '#/components/schemas/RateInterval'
+        intervals_overlap:
+          type: boolean
+          description: 为 true 时差异可能只是波动，不管相对差看起来有多大。
+        ctr_lift: { type: number, description: '点击率相对变化；任一侧分母为 0 时缺失' }
+        covarying_features:
+          type: array
+          items: { type: string }
+          description: >-
+            这一组在被测变量之外还整齐地不同的特征。非空时差异不能只算到被测变量
+            头上。事先登记的实验这里恒为空——混杂由入组那道关把守，不在事后翻账。
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        note: { type: string, description: '给人读的一句话，说明这条判定为什么是这个强度。' }
+    ExperimentVariant:
+      type: object
+      description: 实验的一组。基线组有且只有一个。
+      required: [id, organization_id, project_id, experiment_id, name, variable_value, is_baseline, asset_ids, position, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        experiment_id: { type: string }
+        name: { type: string, maxLength: 64 }
+        variable_value:
+          type: string
+          maxLength: 200
+          description: 这一组在被测变量上的取值。入组素材必须和它对得上。
+        is_baseline: { type: boolean }
+        asset_ids:
+          type: array
+          items: { type: string }
+        position: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Experiment:
+      type: object
+      description: 一次事先登记的对照实验（03 §7.3 / AM-009）。
+      required: [id, organization_id, project_id, title, hypothesis, asset_type, variable_key, variable_label, controlled_keys, min_impressions, window_start, window_end, status, version, created_by, created_at, updated_at, variants]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        title: { type: string, maxLength: 200 }
+        hypothesis: { type: string, maxLength: 2000 }
+        source_experience_id:
+          type: string
+          description: >-
+            假设的出处：投前洞察的假设卡「拿去验证」过来时带上。为空表示空白新建，
+            也就是「这条假设没有出处」。实验有结论之后靠它知道该回头更新哪张卡。
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        variable_key: { type: string, description: '被测变量，必须是这个素材类型特征体系里的字段，且不能是自由文本。' }
+        variable_label: { type: string }
+        controlled_keys:
+          type: array
+          items: { type: string }
+          description: 要求各组一致的其他特征。不一致不拦，入组时给黄牌。
+        min_impressions:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            **事先**定的每组最低展示量。事后再定门槛等于允许「凑够了就说显著」，
+            所以开跑之后不能改。
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        status:
+          $ref: '#/components/schemas/ExperimentStatus'
+        verdict:
+          $ref: '#/components/schemas/ExperimentVerdict'
+        interpretation: { type: string, maxLength: 2000, description: '人写的解读。判定由系统给，解读由人负责，两者分开存。' }
+        concluded_by: { type: string }
+        concluded_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        version: { type: integer, format: int64 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExperimentVariant'
+    VariantSample:
+      type: object
+      description: >-
+        一组的样本量，以及够不够事先定的门槛。**这一层永远返回**，包括不够的时候：
+        知道还差多少才知道还要投多久。不够时被藏起来的是对比数字，不是样本数字。
+      required: [variant_id, name, variable_value, is_baseline, assets, assets_with_data, impressions, clicks, meets_threshold, short_by]
+      properties:
+        variant_id: { type: string }
+        name: { type: string }
+        variable_value: { type: string }
+        is_baseline: { type: boolean }
+        assets: { type: integer, description: '这一组里的素材条数' }
+        assets_with_data: { type: integer, description: '其中窗口内真的有投放数据的条数' }
+        impressions: { type: integer, format: int64 }
+        clicks: { type: integer, format: int64 }
+        meets_threshold: { type: boolean, description: '为 false 时，这一组参与的所有对比都不出数字。' }
+        short_by: { type: integer, format: int64, description: '还差多少次展示到门槛。' }
+    ExperimentComparison:
+      type: object
+      description: 某个变体组 vs 基线组。
+      required: [variant_id, variant_name, variant_value, baseline_id, baseline_name, baseline_value, blocked]
+      properties:
+        variant_id: { type: string }
+        variant_name: { type: string }
+        variant_value: { type: string }
+        baseline_id: { type: string }
+        baseline_name: { type: string }
+        baseline_value: { type: string }
+        blocked:
+          type: boolean
+          description: >-
+            **为 true 时 result 和 verdict 一定不存在。** 这是有意的：样本不达标却
+            显示 CTR 差异，人会先看见数字再看见提示，然后记住数字。
+        blocker: { type: string, description: '拦下的原因，含还差多少展示。' }
+        result:
+          $ref: '#/components/schemas/GroupComparison'
+        verdict:
+          $ref: '#/components/schemas/ExperimentVerdict'
+    ExperimentReadout:
+      type: object
+      description: 实验详情页的全部读数。每次现算，不落库。
+      required: [window, caliber, comparable, samples, comparisons, ready, notes]
+      properties:
+        window:
+          $ref: '#/components/schemas/MetricWindow'
+        caliber:
+          $ref: '#/components/schemas/MetricCaliber'
+        comparable:
+          type: boolean
+          description: 沿用投后分析的口径判定：窗口内混了币种/归因窗口/指标版本/平台时为 false。
+        comparable_reason: { type: string }
+        samples:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariantSample'
+        comparisons:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExperimentComparison'
+        ready:
+          type: boolean
+          description: 每一组都过了门槛才为 true。为 false 时下结论会被拒绝。
+        verdict:
+          $ref: '#/components/schemas/ExperimentVerdict'
+        notes:
+          type: array
+          items: { type: string }
+    ExperimentDetail:
+      type: object
+      required: [experiment, readout]
+      properties:
+        experiment:
+          $ref: '#/components/schemas/Experiment'
+        readout:
+          $ref: '#/components/schemas/ExperimentReadout'
+    CreateVariant:
+      type: object
+      additionalProperties: false
+      required: [name, variable_value]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        variable_value: { type: string, minLength: 1, maxLength: 200 }
+        is_baseline: { type: boolean }
+    CreateExperiment:
+      type: object
+      additionalProperties: false
+      required: [title, asset_type, variable_key, min_impressions, window_start, window_end, variants]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        hypothesis: { type: string, maxLength: 2000 }
+        source_experience_id: { type: string, description: '投前洞察假设卡「拿去验证」时带上；空白新建时留空。' }
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        variable_key: { type: string, minLength: 1 }
+        controlled_keys:
+          type: array
+          items: { type: string }
+        min_impressions: { type: integer, format: int64, minimum: 1 }
+        window_start: { type: string, format: date }
+        window_end: { type: string, format: date }
+        variants:
+          type: array
+          minItems: 2
+          maxItems: 8
+          description: 至少两组，且恰好一组 is_baseline。只有一组就没有对照，也就没有实验。
+          items:
+            $ref: '#/components/schemas/CreateVariant'
+    AttachExperimentAssetResult:
+      type: object
+      description: >-
+        变量取值对不上是硬拦（返回错误）；控住的变量不一致只给黄牌。真实素材很难只差
+        一个变量，硬拦会让实验一个都建不起来，不说又会让结论被当成干净对照。
+      required: [variant, warnings]
+      properties:
+        variant:
+          $ref: '#/components/schemas/ExperimentVariant'
+        warnings:
+          type: array
+          items: { type: string }
+    ConcludeExperiment:
+      type: object
+      additionalProperties: false
+      required: [interpretation]
+      description: >-
+        **没有 verdict 字段。** 判定由系统按事先定的门槛和置信区间给出——判定要是
+        能传，门槛就形同虚设。
+      properties:
+        expected_version: { type: integer, format: int64 }
+        interpretation:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 人写的解读。只留一个判定，读的人无从知道这条结论该怎么用。

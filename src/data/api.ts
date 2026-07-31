@@ -434,6 +434,1196 @@ export type ApiKnowledgeSearchResult = {
   citations: ApiKnowledgeCitation[]
 }
 
+// 复盘报告（03 AM-015）。一次投放执行对应一份报告：汇总素材表现、结论，
+// 确认之后从它沉淀经验。后端权威定义在 internal/systems/insights/service.go。
+export type ApiReportStatus = 'draft' | 'confirmed'
+
+// 一次投放执行。后端权威定义在 api/openapi/delivery-v1.yaml 的 ExecutionResult。
+// 这里只取报告要用到的几个字段：挑投放时人要看的是「哪天跑的、跑了什么」。
+export type ApiDeliveryExecutionResult = {
+  execution: {
+    id: string
+    change_set_id: string
+    status: string
+    mode: string
+    executed_by: string
+    started_at: string
+    completed_at: string
+  }
+  evidence: {
+    id: string
+    execution_id: string
+    summary: string
+    mode: string
+    reversible: boolean
+    created_at: string
+  }
+}
+
+// 报告里的一条发现。四块按 kind 分组，顺序即下面这个联合类型的顺序。
+// 后端权威定义在 internal/systems/insights/report_digest.go。
+export type ApiReportSectionKind = 'asset_performance' | 'experiment' | 'experience' | 'recommendation'
+
+export type ApiReportFinding = {
+  kind: ApiReportSectionKind
+  text: string
+  // 出自素材对比的发现才有。可归因的排在方向性前面。
+  strength?: ApiVariantVerdict
+  confidence?: ApiConfidenceLevel
+  // 这条发现的来源 ID（实验或经验），供人跳回去核对。
+  source_ref?: string
+  // 被人工删掉的条目留在数组里，只是标记为 true——报告要能说清
+  // 「系统给了什么、人拿掉了哪几条」。
+  dropped: boolean
+}
+
+export type ApiInsightReport = {
+  id: string
+  organization_id: string
+  project_id: string
+  execution_id: string
+  delivery_mode: string
+  evidence_id: string
+  evidence_summary: string
+  metric_snapshot_id: string
+  creative_package_id: string
+  // 模拟投放的报告不能和真实投放的报告混着看：结论的分量不一样。
+  is_simulated: boolean
+  dataset_version: string
+  status: ApiReportStatus
+  summary: string
+  // 旧报告的读法，保留不动。新报告读 digest。
+  findings: string[]
+  // 定格的四块发现。老报告是空数组。
+  digest?: ApiReportFinding[]
+  // 定格的数据窗口。老报告没有窗口概念，这两个字段为空。
+  window_start?: string
+  window_end?: string
+  version: number
+  created_by: string
+  confirmed_by?: string
+  confirmed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiExperienceStatus = 'pending' | 'confirmed' | 'needs_review' | 'retired'
+
+export type ApiExperience = {
+  id: string
+  organization_id: string
+  project_id: string
+  lineage_id: string
+  revision: number
+  supersedes_id?: string
+  superseded_by_id?: string
+  report_id: string
+  source_execution_id: string
+  source_evidence_id: string
+  source_metric_snapshot_id: string
+  conclusion: string
+  conditions: string[]
+  counterexamples: string[]
+  // 洞察卡九字段（03 §8.1）在 Experience 上是全的，投前洞察的 /prelaunch 只是它的投影。
+  // 经验库详情要靠这几项判断一条结论该不该确认，缺了就只能看结论一句话点确认。
+  card_type: ApiInsightCardType
+  confidence: ApiConfidenceLevel
+  recommended_action: string
+  applicability: ApiApplicability
+  data_basis: ApiDataBasis
+  content_basis: ApiContentBasis
+  status: ApiExperienceStatus
+  status_reason: string
+  status_changed_by: string
+  status_changed_at?: string
+  confirmed_by?: string
+  confirmed_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiExperienceAudit = {
+  id: string
+  organization_id: string
+  project_id: string
+  experience_id: string
+  from_status: string
+  to_status: ApiExperienceStatus
+  reason: string
+  actor_id: string
+  created_at: string
+}
+
+// 引用之后发生了什么。四挡是有序的：只是引用 → 照做 → 改了之后用 → 没采纳。
+export type ApiExperienceReferenceOutcome = 'referenced' | 'adopted' | 'modified' | 'rejected'
+
+export type ApiExperienceReference = {
+  id: string
+  organization_id: string
+  project_id: string
+  experience_id: string
+  consumer_kind: string
+  consumer_id: string
+  outcome: string
+  note: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// 投前洞察卡（03 §8.1 九字段）。洞察卡不是一张新表，是经验库的投影：
+// 后端权威定义在 internal/systems/insights/prelaunch.go，契约见 api/openapi/insights-v1.yaml。
+
+// 类型承担 03 §2 目标⑥：把事实、计算、推断和人的结论分开。
+// 只有 fact 和 statistic 能被下游当证据引用——拿假设当证据是循环论证。
+export type ApiInsightCardType = 'fact' | 'statistic' | 'hypothesis' | 'recommendation'
+
+export type ApiApplicability = {
+  brands?: string[]
+  products?: string[]
+  channels?: string[]
+  creative_types?: string[]
+  objectives?: string[]
+  audiences?: string[]
+  time_range_note?: string
+}
+
+export type ApiDataBasis = {
+  asset_count?: number
+  sample_size?: number
+  window_start?: string
+  window_end?: string
+  metrics?: string[]
+  baseline?: string
+}
+
+export type ApiContentBasis = {
+  features?: string[]
+  example_asset_versions?: string[]
+  note?: string
+}
+
+/** 修订请求体（AM-013）。对应后端 insights.ReviseExperienceRequest。 */
+export type ReviseExperienceBody = {
+  expected_version: number
+  reason: string
+  conclusion: string
+  conditions: string[]
+  counterexamples: string[]
+  card_type: ApiInsightCardType
+  confidence: ApiConfidenceLevel
+  recommended_action: string
+  applicability: ApiApplicability
+  data_basis: ApiDataBasis
+  content_basis: ApiContentBasis
+}
+
+export type ApiInsightCard = {
+  experience_id: string
+  lineage_id: string
+  revision: number
+  conclusion: string
+  type: ApiInsightCardType
+  type_label: string
+  applicability: ApiApplicability
+  conditions: string[]
+  data_basis: ApiDataBasis
+  content_basis: ApiContentBasis
+  confidence: ApiConfidenceLevel
+  confidence_hint: string
+  counterexamples: string[]
+  recommended_action: string
+  status: ApiExperienceStatus
+  // 九字段没填全的卡照样返回，缺哪几项写在这里。藏起来会让人以为经验库是空的。
+  missing_fields: string[]
+  reference_count: number
+  updated_at: string
+}
+
+export type ApiFeaturePattern = {
+  feature: string
+  card_count: number
+  channels: string[]
+  // 取最强置信而不是平均：一条充分证据和一条样本不足不该被平均成方向性。
+  best_confidence: ApiConfidenceLevel
+  conclusions: string[]
+}
+
+export type ApiPreLaunchFacets = {
+  channels: string[]
+  creative_types: string[]
+  objectives: string[]
+}
+
+export type ApiPreLaunchInsight = {
+  project_id: string
+  cards: ApiInsightCard[]
+  patterns: ApiFeaturePattern[]
+  facets: ApiPreLaunchFacets
+  // 筛选期间被排除的「没写适用范围」的经验条数。不静默丢弃。
+  unscoped_excluded: number
+  mixed_channels: string[]
+  cross_channel_comparison: boolean
+  // quality_checked=false 表示这一次没能做数据质量校验，不是「校验通过」。
+  quality_checked: boolean
+  strong_conclusions_allowed: boolean
+  quality_blockers: string[]
+  experience_references: ApiExperience[]
+  disclosure: string
+}
+
+export type ApiPreLaunchFilter = {
+  channel?: string
+  creative_type?: string
+  objective?: string
+  q?: string
+  cross_channel?: boolean
+}
+
+// 分析素材库与内容分析（03 §9 AM-001~006）。后端权威定义在
+// internal/systems/insights/assets.go 与 features.go，契约见 api/openapi/insights-v1.yaml。
+
+export type ApiAnalysisStatus =
+  | 'awaiting_data' | 'awaiting_match' | 'analysable' | 'analysing'
+  | 'pending_confirmation' | 'confirmed' | 'needs_review' | 'retired'
+
+export type ApiInsightAssetType =
+  | 'xiaohongshu_note' | 'wechat_article' | 'brand_ad'
+  | 'digital_human_ad' | 'preroll_ad' | 'hit_replica_ad'
+
+export type ApiAssetSourceKind = 'creative' | 'upload' | 'external'
+
+/** AI 推断与人工结论是两层，互不覆盖（03 §14）。 */
+export type ApiFeatureSource = 'ai' | 'human'
+
+export type ApiConfidence = 'low' | 'medium' | 'high'
+
+// authored 是「AI 没提过这一项，人第一个填的」，和 rejected（有推断但人不认）分开。
+// 混成一个值会让人手填的特征被投后分析当成被否掉的推断丢掉。
+export type ApiReviewState = 'pending' | 'confirmed' | 'rejected' | 'authored'
+
+export type ApiMappingStatus = 'unmatched' | 'matched' | 'ignored'
+
+export type ApiFeatureValueKind =
+  | 'text' | 'tags' | 'enum' | 'enum_multi' | 'number' | 'bool' | 'duration_seconds'
+
+export type ApiFeatureValue = {
+  kind: ApiFeatureValueKind
+  text?: string
+  terms?: string[]
+  number?: number
+  bool?: boolean
+}
+
+export type ApiInsightAsset = {
+  id: string
+  organization_id: string
+  project_id: string
+  lineage_id: string
+  revision: number
+  title: string
+  source_kind: ApiAssetSourceKind
+  source_ref?: string
+  source_job_id?: string
+  platform_asset_id?: string
+  platform_asset_version?: number
+  asset_type?: ApiInsightAssetType
+  asset_type_source?: ApiFeatureSource
+  asset_type_confidence?: ApiConfidence
+  analysis_status: ApiAnalysisStatus
+  analysis_status_reason?: string
+  analysis_status_changed_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 登记素材的请求体。对应后端 insights.IndexAssetRequest。
+ *
+ * `lineage_id` 留空就是新建一条血缘；填上现有素材的 lineage_id，就是给那条创意
+ * 加一个新版本——修订号由后端接着排，人不用管。这是「同一条创意改了三版」和
+ * 「三条不同创意」的唯一区别，填错了投后分析会把它们混着比。
+ */
+export type IndexInsightAssetBody = {
+  title: string
+  source_kind: ApiAssetSourceKind
+  source_ref?: string
+  lineage_id?: string
+  asset_type?: ApiInsightAssetType
+  asset_type_source?: ApiFeatureSource
+  asset_type_confidence?: ApiConfidence
+}
+
+export type ApiInsightAssetMapping = {
+  id: string
+  organization_id: string
+  project_id: string
+  platform: string
+  platform_object_kind: string
+  platform_object_id: string
+  platform_object_name?: string
+  asset_id?: string
+  status: ApiMappingStatus
+  match_source?: string
+  matched_by?: string
+  matched_at?: string
+  note?: string
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export type ApiInsightAssetFeature = {
+  id: string
+  organization_id: string
+  project_id: string
+  asset_id: string
+  asset_type: ApiInsightAssetType
+  key: string
+  value: ApiFeatureValue
+  source: ApiFeatureSource
+  confidence?: ApiConfidence
+  review_state: ApiReviewState
+  skill_id?: string
+  skill_version?: string
+  extracted_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// 写入用的特征条目：AI 层必须带 confidence，人工层必须不带（internal/systems/insights/assets.go FeatureInput）。
+export type ApiFeatureInput = {
+  key: string
+  value: ApiFeatureValue
+  confidence?: ApiConfidence
+  review_state?: ApiReviewState
+}
+
+// 一次分析任务的留痕。这里没有输入正文，只有它的指纹和规模——
+// 外部返回的内容和输入全文都不入日志（doc09 §7）。
+export type ApiAnalysisRun = {
+  id: string
+  kind: 'feature_extraction'
+  asset_id: string
+  status: 'running' | 'succeeded' | 'failed'
+  asset_type: ApiInsightAssetType
+  skill_id?: string
+  skill_version?: string
+  skill_content_hash?: string
+  prompt_version?: string
+  provider_code?: string
+  model_alias?: string
+  model_version?: string
+  generation_mode?: 'model' | 'template'
+  input_hash?: string
+  result_hash?: string
+  feature_count: number
+  dropped_fields?: string[]
+  data_through?: string
+  prompt_tokens: number
+  completion_tokens: number
+  latency_ms: number
+  error_code?: string
+  error_message?: string
+  started_at: string
+  finished_at?: string
+  created_by: string
+}
+
+export type ApiAnalyzeAssetResult = {
+  run: ApiAnalysisRun
+  features: ApiInsightAssetFeature[]
+  dropped_fields?: string[]
+}
+
+export type ApiFeatureField = {
+  key: string
+  label: string
+  group: string
+  kind: ApiFeatureValueKind
+  vocabulary?: string[]
+  unit?: string
+  note?: string
+}
+
+export type ApiFeatureSchema = {
+  asset_type: ApiInsightAssetType
+  label: string
+  source: string
+  fields: ApiFeatureField[]
+}
+
+export type ApiFeatureMatrixCell = {
+  asset_id: string
+  source: ApiFeatureSource
+  confidence?: ApiConfidence
+  review_state: ApiReviewState
+  value: ApiFeatureValue
+}
+
+export type ApiFeatureMatrixRow = {
+  key: string
+  label: string
+  group: string
+  kind: ApiFeatureValueKind
+  cells: ApiFeatureMatrixCell[]
+}
+
+export type ApiFeatureMatrix = {
+  assets: ApiInsightAsset[]
+  asset_types: ApiInsightAssetType[]
+  rows: ApiFeatureMatrixRow[]
+  disclosure: string
+}
+
+export type ApiInsightAssetFilter = {
+  statuses?: ApiAnalysisStatus[]
+  assetTypes?: ApiInsightAssetType[]
+  sourceKinds?: ApiAssetSourceKind[]
+  lineageId?: string
+  limit?: number
+}
+
+// 数据接入与投后分析指标（10-ad-data-connectors.md）。后端权威定义在
+// internal/systems/insights/connectors.go，契约见 api/openapi/insights-v1.yaml。
+
+export type ApiPlatform = 'douyin' | 'kuaishou' | 'xiaohongshu' | 'wechat' | 'tencent_ads' | 'other'
+
+export type ApiIngestMode = 'api' | 'service_account' | 'file_import' | 'computer_use' | 'business'
+
+export type ApiDataSourceStatus = 'draft' | 'active' | 'paused' | 'revoked'
+
+/** doc10 §11。healthy 以外的任何取值都会阻止这个数据源的数字生成强结论（§12.4）。 */
+export type ApiQualityStatus =
+  | 'healthy' | 'delayed' | 'partial' | 'mapping_incomplete'
+  | 'tracking_broken' | 'reconciling' | 'blocked'
+
+export type ApiImportKind = 'sync' | 'backfill' | 'file' | 'correction'
+
+export type ApiImportStatus = 'pending' | 'running' | 'succeeded' | 'partial' | 'failed'
+
+/** 置信提示的四个档位（03 §9），刻意不是数字。 */
+export type ApiConfidenceLevel = 'sufficient' | 'directional' | 'low_sample' | 'confounded'
+
+/** 口径：两个数字并排放之前必须一致的东西（doc10 §6）。 */
+export type ApiMetricCaliber = {
+  time_zone: string
+  currency: string
+  attribution_window: string
+  metric_schema_version: string
+}
+
+export type ApiMetricCounts = {
+  impressions: number
+  clicks: number
+  conversions: number
+  video_views: number
+  video_completions: number
+  spend_cents: number
+  revenue_cents: number
+}
+
+/**
+ * 派生指标。字段缺失表示「不可用」——分母为零时后端不返回该字段（doc10 §6）。
+ * 前端必须显示「不可用」，不能当成 0 参与排序或比较。
+ */
+export type ApiMetricRates = {
+  ctr?: number
+  cvr?: number
+  completion_rate?: number
+  cpa_cents?: number
+  cpm_cents?: number
+  roas?: number
+}
+
+export type ApiRateInterval = { low: number; high: number }
+
+export type ApiDataSource = {
+  id: string
+  organization_id: string
+  project_id: string
+  platform: ApiPlatform
+  account_label?: string
+  account_ref?: string
+  ingest_mode: ApiIngestMode
+  credential_ref?: string
+  status: ApiDataSourceStatus
+  quality_status: ApiQualityStatus
+  quality_note?: string
+  caliber: ApiMetricCaliber
+  field_mapping?: Record<string, string>
+  data_through?: string
+  last_synced_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiImportBatch = {
+  id: string
+  organization_id: string
+  project_id: string
+  data_source_id: string
+  kind: ApiImportKind
+  status: ApiImportStatus
+  source_label?: string
+  window_start?: string
+  window_end?: string
+  content_hash?: string
+  requested_rows: number
+  accepted_rows: number
+  rejected_rows: number
+  error_summary?: string
+  errors?: string[]
+  corrects_batch_id?: string
+  started_at?: string
+  finished_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiAssetMetricPerformance = {
+  asset_id?: string
+  asset_title: string
+  asset_type?: ApiInsightAssetType
+  objects: number
+  counts: ApiMetricCounts
+  rates: ApiMetricRates
+  attributable: boolean
+  confidence: ApiConfidenceLevel
+}
+
+export type ApiPerformancePoint = {
+  date: string
+  counts: ApiMetricCounts
+  rates: ApiMetricRates
+}
+
+export type ApiPlatformTotal = {
+  platform: ApiPlatform
+  label: string
+  counts: ApiMetricCounts
+  rates: ApiMetricRates
+}
+
+export type ApiSourceHealth = {
+  data_source_id: string
+  platform: ApiPlatform
+  label: string
+  quality_status: ApiQualityStatus
+  quality_note?: string
+  data_through?: string
+  freshness_days: number
+}
+
+export type ApiMetricOverview = {
+  window: { start: string; end: string }
+  caliber: ApiMetricCaliber
+  caliber_conflicts?: string[]
+  comparable: boolean
+  comparable_reason?: string
+  totals: ApiMetricCounts
+  rates: ApiMetricRates
+  ctr_interval?: ApiRateInterval
+  confidence: ApiConfidenceLevel
+  confidence_note: string
+  series: ApiPerformancePoint[]
+  assets: ApiAssetMetricPerformance[]
+  unmatched_objects: number
+  unmatched_spend_cents: number
+  sources: ApiSourceHealth[]
+  warnings?: string[]
+  platforms: ApiPlatformTotal[]
+}
+
+/**
+ * AM-009 的判定阶梯，从严到松。**只有 attributable 是「能归到这个变量」**，
+ * 其余四档都是「不能」，只是不能的理由不同。
+ */
+export type ApiVariantVerdict = 'attributable' | 'directional' | 'confounded' | 'low_sample' | 'no_features'
+
+/** 两个素材之间某个特征的取值差异。未记录的一侧写作「（未记录）」。 */
+export type ApiFeatureDiff = {
+  key: string
+  label: string
+  group: string
+  baseline: string
+  variant: string
+  /** 该特征只能人工判定（AM-006），AI 不产出，缺失属正常。 */
+  human_only: boolean
+}
+
+/**
+ * 素材对比（03 §7.3 / AM-009）。changed_features 长度 > 1 时 verdict 一定是
+ * confounded——差异归不到其中任何一个变量上，哪怕数字差得很多。
+ */
+export type ApiVariantComparison = {
+  baseline_asset_id: string
+  baseline_title: string
+  variant_asset_id: string
+  variant_title: string
+  asset_type?: ApiInsightAssetType
+  changed_features: ApiFeatureDiff[]
+  /** 两侧取值相同的特征数量——受控变量越多，单变量判定越可信。 */
+  controlled_count: number
+  baseline_counts: ApiMetricCounts
+  variant_counts: ApiMetricCounts
+  baseline_rates: ApiMetricRates
+  variant_rates: ApiMetricRates
+  baseline_ctr_interval?: ApiRateInterval
+  variant_ctr_interval?: ApiRateInterval
+  /** 任一侧区间算不出来时为 true——不知道差异是否显著，就不能说它显著。 */
+  intervals_overlap: boolean
+  ctr_lift?: number
+  verdict: ApiVariantVerdict
+  confidence: ApiConfidenceLevel
+  note: string
+}
+
+/** direction 为 unknown 表示天数不足或前半段无曝光，不能当成持平。 */
+export type ApiAssetTrend = {
+  asset_id: string
+  asset_title: string
+  asset_type?: ApiInsightAssetType
+  points: ApiPerformancePoint[]
+  /** 真正有数据的天数，不是窗口长度。 */
+  active_days: number
+  direction: 'rising' | 'flat' | 'declining' | 'unknown'
+  ctr_change?: number
+  confidence: ApiConfidenceLevel
+  note: string
+}
+
+/** likely 需要两项条件同时成立；单项恶化只到 watch。 */
+export type ApiFatigueSeverity = 'none' | 'watch' | 'likely'
+
+export type ApiFatigueSignal = {
+  asset_id: string
+  asset_title: string
+  asset_type?: ApiInsightAssetType
+  first_half: ApiMetricCounts
+  second_half: ApiMetricCounts
+  first_rates: ApiMetricRates
+  last_rates: ApiMetricRates
+  ctr_change?: number
+  cpa_change?: number
+  impression_change?: number
+  severity: ApiFatigueSeverity
+  /** 没能排除的其他解释。这里列的是「排除不了」，不是「已排除」。 */
+  alternative_explanations?: string[]
+  confidence: ApiConfidenceLevel
+  note: string
+}
+
+export type ApiAnomalyKind = 'spike' | 'drop' | 'gap'
+
+/** 用中位数与 MAD 判定偏离（阈值 3.5），不用均值与标准差：一次大促尖峰会把标准差本身抬高。 */
+export type ApiMetricAnomaly = {
+  date: string
+  scope: 'project' | 'asset'
+  asset_id?: string
+  asset_title?: string
+  metric: string
+  kind: ApiAnomalyKind
+  observed: number
+  median: number
+  /** 偏离中位数多少个 MAD。 */
+  deviation: number
+  note: string
+}
+
+/**
+ * 驱动因素：某个特征取值的素材组与其余素材的对比。**这不是因果**——
+ * covarying_features 非空时 confidence 一律降为 confounded。
+ */
+export type ApiFeatureDriver = {
+  asset_type?: ApiInsightAssetType
+  key: string
+  label: string
+  group: string
+  value: string
+  assets: number
+  rest_assets: number
+  counts: ApiMetricCounts
+  rest_counts: ApiMetricCounts
+  rates: ApiMetricRates
+  rest_rates: ApiMetricRates
+  ctr_interval?: ApiRateInterval
+  rest_ctr_interval?: ApiRateInterval
+  intervals_overlap: boolean
+  ctr_lift?: number
+  /** 与本特征完全同向变化的其他特征，分不开谁在起作用。 */
+  covarying_features?: string[]
+  confidence: ApiConfidenceLevel
+  note: string
+}
+
+/**
+ * 投后分析五个二级视图（素材对比 / 趋势 / 疲劳 / 异常 / 驱动因素）的共用载荷。
+ * 五个视图共用一次返回，否则「趋势里看到的」和「疲劳里算的」会来自两次不同的读取。
+ */
+export type ApiPerformanceAnalysis = {
+  window: { start: string; end: string }
+  caliber: ApiMetricCaliber
+  /** 口径不一致时为 false，所有 attributable 会被降级为 directional。 */
+  comparable: boolean
+  comparable_reason?: string
+  comparisons: ApiVariantComparison[]
+  trends: ApiAssetTrend[]
+  fatigue: ApiFatigueSignal[]
+  anomalies: ApiMetricAnomaly[]
+  drivers: ApiFeatureDriver[]
+  assets_in_window: number
+  /** 其中有内容特征的素材数。远小于 assets_in_window 时，对比和驱动因素都会大面积空着。 */
+  assets_with_features: number
+  notes?: string[]
+}
+
+/** 质量问题的五个类别，对应数据质量的前五个二级视图。第六个「修复队列」是跨类别的队列视图。 */
+export type ApiDataQualityIssueKind = 'freshness' | 'missing' | 'anomaly' | 'caliber' | 'reconciliation'
+
+/** blocking 会让整个 Project 暂停强结论与自动优化（PRD §10.3、doc10 §12.4）。 */
+export type ApiDataQualitySeverity = 'blocking' | 'warning' | 'info'
+
+/**
+ * 问题当前的处置状态。open 与 reopened 不入库，由后端把实时检测结果和处置记录比对算出。
+ * reopened = 有人报了修但问题在那之后又被观测到——这件事必须被看见，
+ * 否则点一次「已修复」就能让问题永久消失。
+ */
+export type ApiDataQualityIssueState = 'open' | 'acknowledged' | 'resolved' | 'ignored' | 'reopened'
+
+/** 能被写进库的三种处置，是 ApiDataQualityIssueState 的子集。 */
+export type ApiDataQualityDispositionState = 'acknowledged' | 'resolved' | 'ignored'
+
+export type ApiDataQualityDisposition = {
+  id: string
+  organization_id: string
+  project_id: string
+  fingerprint: string
+  issue_kind: ApiDataQualityIssueKind
+  state: ApiDataQualityDispositionState
+  note: string
+  observed_through: string
+  version: number
+  decided_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiDataQualityIssue = {
+  /** 同一个问题反复出现时保持不变，且不含数据窗口——换窗口看到的还是同一条。 */
+  fingerprint: string
+  kind: ApiDataQualityIssueKind
+  severity: ApiDataQualitySeverity
+  title: string
+  detail: string
+  /** 下一步该查什么。PRD §10.3 要求不能只报警不给动作。 */
+  suggestion: string
+  scope_label: string
+  data_source_id?: string
+  platform?: ApiPlatform
+  affected_spend_cents: number
+  affected_days?: number
+  stat_date?: string
+  /** 处置时要原样回传，后端靠它判断处置之后问题有没有再出现。 */
+  last_observed_at: string
+  state: ApiDataQualityIssueState
+  disposition?: ApiDataQualityDisposition
+}
+
+export type ApiDataQualityReport = {
+  window: { start: string; end: string }
+  generated_at: string
+  /** 已按「在队列里 → 严重度 → 影响花费」排好序（20 §4.1 错误与延迟置顶）。 */
+  issues: ApiDataQualityIssue[]
+  by_kind: Partial<Record<ApiDataQualityIssueKind, number>>
+  open_count: number
+  queue_count: number
+  strong_conclusions_allowed: boolean
+  blocked_reason?: string
+  sources?: ApiSourceHealth[]
+}
+
+// ---- 能力运营（03 §一级导航；20 §4.1）----
+// 五个二级视图共用一次请求。这个模块一张表都不建：特征体系读后端的六套 schema，
+// 指标字典是后端声明的常量，Skill 与评测集从已有的特征行现算。
+
+/** `fact` 可跨天相加；`derived` 只能用「总量除总量」重算，日均比率是另一个数。 */
+export type ApiMetricKind = 'fact' | 'derived'
+
+export type ApiCaliberFactor = 'time_zone' | 'currency' | 'attribution_window' | 'metric_schema_version'
+
+export type ApiMetricDictionaryEntry = {
+  key: string
+  label: string
+  kind: ApiMetricKind
+  unit?: string
+  definition: string
+  formula?: string
+  /** 这个指标的口径依赖哪些要素；只有依赖的要素冲突了才会影响它。 */
+  caliber_factors?: ApiCaliberFactor[]
+  source: string
+  /** 本项目实际有多少天导过。0 表示一条都没有，和「有值但为 0」不是一回事。 */
+  day_count: number
+  total: number
+  /** false 表示各数据源在它依赖的口径要素上不一致，跨源对比前要先展示差异（03 §7）。 */
+  comparable: boolean
+  conflict_notes?: ApiCaliberFactor[]
+}
+
+export type ApiCaliberConflict = {
+  factor: ApiCaliberFactor
+  label: string
+  values: string[]
+  note: string
+}
+
+export type ApiFeatureValueUsage = {
+  value: string
+  asset_count: number
+}
+
+export type ApiFeatureFieldUsage = ApiFeatureField & {
+  /** 词表已发布。false 的枚举字段目前接受任何取值，这正是碎片化的敞口。 */
+  governed: boolean
+  asset_count: number
+  distinct_values: number
+  /** 按使用量降序，最多 12 个。统计用生效值：人工结论覆盖机器结论，机器旧值不再计入。 */
+  values?: ApiFeatureValueUsage[]
+  /** 全项目只有一条素材用过的取值。是候选不是结论——系统不做语义猜测。 */
+  merge_candidates?: string[]
+  off_vocabulary?: string[]
+}
+
+export type ApiFeatureSystemHealth = {
+  asset_type: ApiInsightAssetType
+  label: string
+  source: string
+  asset_count: number
+  field_count: number
+  used_field_count: number
+  open_enum_count: number
+  fields: ApiFeatureFieldUsage[]
+}
+
+export type ApiSkillHealth = {
+  skill_id: string
+  skill_version: string
+  extraction_count: number
+  asset_count: number
+  field_keys: string[]
+  high_confidence: number
+  medium_confidence: number
+  low_confidence: number
+  first_extracted_at?: string
+  last_extracted_at?: string
+  /** 按最近一次提取时间判在用，不按版本号字符串排序（否则 v9 会排在 v10 后面）。 */
+  latest: boolean
+}
+
+export type ApiEvaluationExample = {
+  asset_id: string
+  asset_title?: string
+  feature_key: string
+  label: string
+  ai_value: string
+  human_value: string
+}
+
+export type ApiFieldEvaluation = {
+  key: string
+  label: string
+  reviewed: number
+  agreed: number
+}
+
+/**
+ * 一个 Skill 版本的人机一致率。**不是独立评测集**：样本全部来自人工复核记录，
+ * 回答的是「被人看过的地方机器错了多少」，不是整体准确率。没人复核过的提取一条都
+ * 不计入——算成「机器对了」，准确率会随提取量自动上涨。
+ */
+export type ApiSkillEvaluation = {
+  skill_id: string
+  skill_version: string
+  reviewed: number
+  agreed: number
+  disagreed: number
+  /** 样本少于 10 条时恒为 0，此时要藏起这个数而不是显示 0%。 */
+  accuracy: number
+  confidence: ApiConfidenceLevel
+  note: string
+  fields?: ApiFieldEvaluation[]
+  examples?: ApiEvaluationExample[]
+}
+
+export type ApiOperationsTodo = {
+  kind: string
+  severity: string
+  title: string
+  detail: string
+  asset_type?: ApiInsightAssetType
+  feature_key?: string
+}
+
+export type ApiOperationsDashboard = {
+  feature_field_total: number
+  feature_field_used: number
+  open_vocabulary_fields: number
+  merge_candidate_count: number
+  off_vocabulary_count: number
+  caliber_conflict_count: number
+  skill_version_count: number
+  evaluation_samples: number
+  /** 词表待办只覆盖已经有人用过的开放枚举字段，否则真正在散的那几个会被埋掉。 */
+  todos: ApiOperationsTodo[]
+}
+
+export type ApiCapabilityOperations = {
+  window: { start: string; end: string }
+  generated_at: string
+  feature_systems: ApiFeatureSystemHealth[]
+  metrics: ApiMetricDictionaryEntry[]
+  caliber_conflicts: ApiCaliberConflict[]
+  skills: ApiSkillHealth[]
+  evaluations: ApiSkillEvaluation[]
+  dashboard: ApiOperationsDashboard
+}
+
+/**
+ * 一条设置。effect 和 recommended 不是可选注释：20 §121 要求「重要阈值显示影响说明
+ * 和默认推荐」，22 §239 记的问题正是「缺少实际阈值影响说明」。
+ */
+export type ApiSettingItem = {
+  key: string
+  label: string
+  /** 现在生效的值，后端已格式化好（含单位），前端不要再拼。 */
+  value: string
+  effect: string
+  recommended: string
+  /**
+   * 当前值偏离了推荐值，页面要提示「有人调过它」。由后端判定，前端不要自己拿
+   * value 和 recommended 比字符串——确认权限那组两边说的是不同的事（管到哪些操作
+   * vs 该发给谁），字面永远不同，一比就会给每一条都打上凭空造出来的告警。
+   */
+  deviates: boolean
+  /** 值在代码里的位置，例如 internal/systems/insights/connectors.go:267。 */
+  source: string
+  /** 文档依据；没有依据会显式写「无文档指定值」，不会留空。 */
+  basis: string
+}
+
+/**
+ * `draft` 设计中，变量/分组/门槛都还能改；`running` 已开跑，**分组冻结**；
+ * `concluded` 已下结论。冻结是「事先登记」的全部依据——没有它，谁都能在看完数据
+ * 之后往表现好的那组补两条素材。
+ */
+export type ApiExperimentStatus = 'draft' | 'running' | 'concluded'
+
+/** 系统给的判定，不是人写的解读。 */
+export type ApiExperimentVerdict = 'supported' | 'refuted' | 'inconclusive'
+
+/**
+ * 组间比较结果。实验中心和投后分析「驱动因素」共用同一套算法，差别只在 note 的
+ * 措辞：事先登记的分组能说到「归因到这个变量」，事后凑出的分组只能说到「相关」。
+ */
+export type ApiGroupComparison = {
+  counts: ApiMetricCounts
+  rest_counts: ApiMetricCounts
+  rates: ApiMetricRates
+  rest_rates: ApiMetricRates
+  ctr_interval?: ApiRateInterval
+  rest_ctr_interval?: ApiRateInterval
+  /** 为 true 时差异可能只是波动，不管相对差看起来有多大。 */
+  intervals_overlap: boolean
+  ctr_lift?: number
+  /** 事先登记的实验这里恒为空：混杂由入组那道关把守，不在事后翻账。 */
+  covarying_features?: string[]
+  confidence: ApiConfidenceLevel
+  note: string
+}
+
+export type ApiExperimentVariant = {
+  id: string
+  organization_id: string
+  project_id: string
+  experiment_id: string
+  name: string
+  /** 这一组在被测变量上的取值。入组素材必须和它对得上。 */
+  variable_value: string
+  is_baseline: boolean
+  asset_ids: string[]
+  position: number
+  created_at: string
+  updated_at: string
+}
+
+export type ApiExperiment = {
+  id: string
+  organization_id: string
+  project_id: string
+  title: string
+  hypothesis: string
+  /** 假设的出处：投前洞察的假设卡「拿去验证」过来时带上；为空表示空白新建。 */
+  source_experience_id?: string
+  asset_type: ApiInsightAssetType
+  variable_key: string
+  variable_label: string
+  /** 要求各组一致的其他特征。不一致不拦，入组时给黄牌。 */
+  controlled_keys: string[]
+  /** **事先**定的每组最低展示量。开跑之后不能改。 */
+  min_impressions: number
+  window_start: string
+  window_end: string
+  status: ApiExperimentStatus
+  verdict?: ApiExperimentVerdict
+  /** 人写的解读。判定由系统给，解读由人负责，两者分开存。 */
+  interpretation?: string
+  concluded_by?: string
+  concluded_at?: string
+  started_at?: string
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+  variants: ApiExperimentVariant[]
+}
+
+/**
+ * 一组的样本量。**这一层永远有数**，包括不够的时候：知道还差多少才知道还要投多久。
+ * 不够时被藏起来的是对比数字，不是样本数字。
+ */
+export type ApiVariantSample = {
+  variant_id: string
+  name: string
+  variable_value: string
+  is_baseline: boolean
+  assets: number
+  assets_with_data: number
+  impressions: number
+  clicks: number
+  meets_threshold: boolean
+  short_by: number
+}
+
+export type ApiExperimentComparison = {
+  variant_id: string
+  variant_name: string
+  variant_value: string
+  baseline_id: string
+  baseline_name: string
+  baseline_value: string
+  /**
+   * **为 true 时 result 和 verdict 一定不存在。** 样本不达标却显示 CTR 差异，
+   * 人会先看见数字再看见提示，然后记住数字。
+   */
+  blocked: boolean
+  blocker?: string
+  result?: ApiGroupComparison
+  verdict?: ApiExperimentVerdict
+}
+
+export type ApiExperimentReadout = {
+  window: { start: string; end: string }
+  caliber: ApiMetricCaliber
+  comparable: boolean
+  comparable_reason?: string
+  samples: ApiVariantSample[]
+  comparisons: ApiExperimentComparison[]
+  /** 每一组都过了门槛才为 true。为 false 时下结论会被拒绝。 */
+  ready: boolean
+  verdict?: ApiExperimentVerdict
+  notes: string[]
+}
+
+export type ApiExperimentDetail = {
+  experiment: ApiExperiment
+  readout: ApiExperimentReadout
+}
+
+export type ApiCreateVariantInput = {
+  name: string
+  variable_value: string
+  is_baseline?: boolean
+}
+
+export type ApiCreateExperimentInput = {
+  title: string
+  hypothesis?: string
+  source_experience_id?: string
+  asset_type: ApiInsightAssetType
+  variable_key: string
+  controlled_keys?: string[]
+  min_impressions: number
+  window_start: string
+  window_end: string
+  /** 至少两组，且恰好一组 is_baseline。只有一组就没有对照，也就没有实验。 */
+  variants: ApiCreateVariantInput[]
+}
+
+export type ApiAttachExperimentAssetResult = {
+  variant: ApiExperimentVariant
+  /** 变量取值对不上是硬拦（抛错）；控住的变量不一致只到这里，不拦。 */
+  warnings: string[]
+}
+
+export type ApiSettingGroup = {
+  key: string
+  label: string
+  /** in_effect 现在真的在生效；not_built 还没有任何东西，此时 items 为空。 */
+  state: 'in_effect' | 'not_built'
+  summary: string
+  /** 只在 not_built 时有内容。 */
+  missing: string[]
+  items: ApiSettingItem[]
+}
+
+export type ApiInsightSettings = {
+  generated_at: string
+  /** 恒为 false。不要因此渲染禁用输入框——改不动的输入框比一句「这里改不了」更恼人。 */
+  editable: boolean
+  editable_note: string
+  /** 恒为 false：这些值对整个部署生效，路径上的 project 只用于鉴权。 */
+  project_scoped: boolean
+  groups: ApiSettingGroup[]
+}
+
+/** 一行 canonical 日指标。stat_date 是数据源时区下的当地日期 YYYY-MM-DD。 */
+export type ApiMetricRow = {
+  platform_object_kind: string
+  platform_object_id: string
+  platform_object_name?: string
+  stat_date: string
+  counts: ApiMetricCounts
+  raw?: Record<string, unknown>
+}
+
+export type ApiImportResult = {
+  batch: ApiImportBatch
+  new_mappings: number
+}
+
+export type ApiDataSourceFilter = {
+  statuses?: ApiDataSourceStatus[]
+  platforms?: ApiPlatform[]
+  limit?: number
+}
+
+export type ApiImportBatchFilter = {
+  dataSourceId?: string
+  statuses?: ApiImportStatus[]
+  limit?: number
+}
+
 export type ApiRemixRenderJob = {
   id: string
   organization_id: string
@@ -1235,16 +2425,30 @@ export const agencyWorkbenchSample: ApiAgencyWorkbench = {
   ],
 }
 
+// 后端对同一类冲突只回一句「当前状态不允许该操作」，具体原因不在响应体里。
+// 把状态码和错误码带出来，页面才有机会按场景说人话；message 保持原样，老的 catch 不受影响。
+export class ApiRequestError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(message: string, status: number, code: string) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.status = status
+    this.code = code
+  }
+}
+
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const payload = await response.json() as T | { error?: { message?: string } }
+  const payload = await response.json() as T | { error?: { message?: string; code?: string } }
   if (!response.ok) {
-    const error = payload as { error?: { message?: string } }
-    throw new Error(error.error?.message ?? 'API 请求失败')
+    const error = payload as { error?: { message?: string; code?: string } }
+    throw new ApiRequestError(error.error?.message ?? 'API 请求失败', response.status, error.error?.code ?? '')
   }
   return payload as T
 }
@@ -1679,4 +2883,368 @@ export const api = {
     platformRequest<{ query: string; items: ApiKnowledgeSearchResult[] }>(
       `/projects/${encodeURIComponent(projectId)}/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`,
     ),
+  listReports: (projectId: string, limit = 100) =>
+    request<{ items: ApiInsightReport[] }>(`${insightProjectPath(projectId)}/reports?limit=${limit}`),
+  // 投放执行清单。定格报告时要问「这份报告算哪次投放」，答案只能从这里挑——
+  // 让人手打一个执行 ID，打错了报告就挂在了另一次投放上，而两边都不会报错。
+  listDeliveryExecutions: (projectId: string, limit = 50) =>
+    request<{ items: ApiDeliveryExecutionResult[] }>(
+      `/delivery/v1/projects/${encodeURIComponent(projectId)}/executions?limit=${limit}`,
+    ),
+  // 定格一份复盘报告。window 传的是投后分析页当前选的那两个日期——
+  // 人看到什么就定格什么，不让后端另挑一个窗口。
+  createReport: (projectId: string, body: { execution_id: string; window: { start: string; end: string } }) =>
+    request<ApiInsightReport>(`${insightProjectPath(projectId)}/reports`, 'POST', body),
+  // 人工删减。加不了新的一条：写进报告的每条发现都得能回溯到某次对比、
+  // 某个实验或某条经验，手打一条就断了这个链子。
+  dropReportFinding: (
+    projectId: string,
+    reportId: string,
+    body: { expected_version: number; index: number; dropped: boolean },
+  ) =>
+    request<ApiInsightReport>(
+      `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:drop-finding`, 'POST', body,
+    ),
+  confirmReport: (projectId: string, reportId: string, expectedVersion: number) =>
+    request<ApiInsightReport>(
+      `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:confirm`, 'POST',
+      { expected_version: expectedVersion },
+    ),
+  // 从复盘沉淀经验。九字段能填多少填多少：复盘是最有依据的一次，
+  // 这里少填一个字段，后面投前洞察里那张卡就永远缺一格。
+  createExperienceFromReport: (
+    projectId: string,
+    reportId: string,
+    body: {
+      expected_report_version: number
+      conclusion: string
+      conditions?: string[]
+      counterexamples?: string[]
+      card_type?: ApiInsightCardType
+      confidence?: ApiConfidenceLevel
+      recommended_action?: string
+      applicability?: ApiApplicability
+      data_basis?: ApiDataBasis
+      content_basis?: ApiContentBasis
+    },
+  ) => request<ApiExperience>(
+    `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:create-experience`, 'POST', body,
+  ),
+  listExperiences: (projectId: string, status?: ApiExperienceStatus, limit = 100) => {
+    const search = new URLSearchParams({ limit: String(limit) })
+    if (status) search.set('status', status)
+    return request<{ items: ApiExperience[] }>(
+      `${insightProjectPath(projectId)}/experiences?${search.toString()}`,
+    )
+  },
+  listExperienceAudits: (projectId: string, experienceId: string, limit = 50) =>
+    request<{ items: ApiExperienceAudit[] }>(
+      `${insightExperiencePath(projectId, experienceId)}/audits?limit=${limit}`,
+    ),
+  listExperienceReferences: (projectId: string, experienceId: string, limit = 50) =>
+    request<{ items: ApiExperienceReference[] }>(
+      `${insightExperiencePath(projectId, experienceId)}/references?limit=${limit}`,
+    ),
+  listProjectExperienceReferences: (projectId: string, limit = 100) =>
+    request<{ items: ApiExperienceReference[] }>(
+      `${insightProjectPath(projectId)}/experience-references?limit=${limit}`,
+    ),
+  listExperienceLineage: (projectId: string, experienceId: string) =>
+    request<{ items: ApiExperience[] }>(
+      `${insightExperiencePath(projectId, experienceId)}/lineage`,
+    ),
+  confirmExperience: (projectId: string, experienceId: string, expectedVersion: number) =>
+    request<ApiExperience>(
+      `${insightExperiencePath(projectId, experienceId)}:confirm`, 'POST',
+      { expected_version: expectedVersion },
+    ),
+  rejectExperience: (projectId: string, experienceId: string, expectedVersion: number, reason: string) =>
+    request<ApiExperience>(
+      `${insightExperiencePath(projectId, experienceId)}:reject`, 'POST',
+      { expected_version: expectedVersion, reason },
+    ),
+  requestExperienceReview: (projectId: string, experienceId: string, expectedVersion: number, reason: string) =>
+    request<ApiExperience>(
+      `${insightExperiencePath(projectId, experienceId)}:request-review`, 'POST',
+      { expected_version: expectedVersion, reason },
+    ),
+  retireExperience: (projectId: string, experienceId: string, expectedVersion: number, reason: string) =>
+    request<ApiExperience>(
+      `${insightExperiencePath(projectId, experienceId)}:retire`, 'POST',
+      { expected_version: expectedVersion, reason },
+    ),
+  // 修订不是编辑：后端会新建一条修订并把旧的那条标成被取代，两条都留着。
+  // 所以这里必须把九个字段整份发过去——没发的字段不是「保持不变」，是「新版本里没有」。
+  reviseExperience: (projectId: string, experienceId: string, body: ReviseExperienceBody) =>
+    request<ApiExperience>(
+      `${insightExperiencePath(projectId, experienceId)}:revise`, 'POST', body,
+    ),
+  // AM-014 的闭环：下游引用了哪条结论、最后是照做还是改了还是没采纳，
+  // 记在经验自己身上，而不是只在 Brief 里留一句话。
+  recordExperienceReference: (
+    projectId: string,
+    experienceId: string,
+    body: { consumer_kind: string; consumer_id: string; outcome: ApiExperienceReferenceOutcome; note?: string },
+  ) => request<ApiExperienceReference>(
+    `${insightExperiencePath(projectId, experienceId)}:record-reference`, 'POST', body,
+  ),
+  // 分析素材库的每个视图都是一次不同的查询，而不是同一批数据换个标签（22 §8.3）。
+  listInsightAssets: (projectId: string, filter: ApiInsightAssetFilter = {}) => {
+    const search = new URLSearchParams({ limit: String(filter.limit ?? 100) })
+    filter.statuses?.forEach(status => search.append('status', status))
+    filter.assetTypes?.forEach(assetType => search.append('asset_type', assetType))
+    filter.sourceKinds?.forEach(sourceKind => search.append('source_kind', sourceKind))
+    if (filter.lineageId) search.set('lineage_id', filter.lineageId)
+    return request<{ items: ApiInsightAsset[] }>(
+      `${insightProjectPath(projectId)}/assets?${search.toString()}`,
+    )
+  },
+  // 登记一个素材。正常情况下素材由创意模块产出后自动流进来，但外部投放的素材
+  // （别处剪的片子、代理商给的图文）没有那条通路，只能人在这里手工登记，
+  // 否则平台回流的广告对象认不到任何素材上，它的花费就永远算不到人头上。
+  indexInsightAsset: (projectId: string, body: IndexInsightAssetBody) =>
+    request<ApiInsightAsset>(`${insightProjectPath(projectId)}/assets`, 'POST', body),
+  getInsightAsset: (projectId: string, assetId: string) =>
+    request<ApiInsightAsset>(`${insightAssetPath(projectId, assetId)}`),
+  listInsightAssetLineage: (projectId: string, assetId: string) =>
+    request<{ items: ApiInsightAsset[] }>(`${insightAssetPath(projectId, assetId)}/lineage`),
+  listInsightAssetFeatures: (projectId: string, assetId: string) =>
+    request<{ items: ApiInsightAssetFeature[] }>(`${insightAssetPath(projectId, assetId)}/features`),
+  // 人工结论另起一行写入，不改 AI 那一层，后台再跑也不会盖掉（03 AM-006、§14）。
+  patchInsightAssetFeatures: (
+    projectId: string,
+    assetId: string,
+    body: { expected_version: number; features: ApiFeatureInput[]; reason: string },
+  ) => request<{ items: ApiInsightAssetFeature[] }>(`${insightAssetPath(projectId, assetId)}/features`, 'PATCH', body),
+  // AI 提特征。**只有人点按钮才会调到这里**：登记素材时自动排队会把复核队列
+  // 灌满没人要看的结果，而复核是这套东西唯一的质量闸门（03 AM-005）。
+  // content 必须由调用方带上——素材库存的是素材的身份和状态，不存正文。
+  analyzeInsightAsset: (
+    projectId: string,
+    assetId: string,
+    body: { expected_version: number; content: string; note?: string },
+  ) => request<ApiAnalyzeAssetResult>(`${insightAssetPath(projectId, assetId)}:analyze`, 'POST', body),
+  // 分析历史。失败的也在里面：只列成功的话，成功率永远是 100%。
+  listInsightAssetAnalysisRuns: (projectId: string, assetId: string, limit = 20) =>
+    request<{ items: ApiAnalysisRun[] }>(
+      `${insightAssetPath(projectId, assetId)}/analysis-runs?limit=${limit}`,
+    ),
+  identifyInsightAssetType: (
+    projectId: string,
+    assetId: string,
+    body: { expected_version: number; asset_type: ApiInsightAssetType; source: ApiFeatureSource; confidence?: ApiConfidence; reason: string },
+  ) => request<ApiInsightAsset>(`${insightAssetPath(projectId, assetId)}:identify-type`, 'POST', body),
+  listInsightAssetMappings: (projectId: string, status?: ApiMappingStatus, limit = 100) => {
+    const search = new URLSearchParams({ limit: String(limit) })
+    if (status) search.set('status', status)
+    return request<{ items: ApiInsightAssetMapping[] }>(
+      `${insightProjectPath(projectId)}/asset-mappings?${search.toString()}`,
+    )
+  },
+  // 认领：把一个平台对象认到某个素材版本上，或者明确忽略它。认领之后它的花费
+  // 才算得到这一版素材头上（doc10 §5）。
+  resolveInsightAssetMapping: (
+    projectId: string,
+    mappingId: string,
+    body: { expected_version: number; status: ApiMappingStatus; asset_id?: string; note: string },
+  ) => request<ApiInsightAssetMapping>(
+    `${insightProjectPath(projectId)}/asset-mappings/${encodeURIComponent(mappingId)}:resolve`, 'POST', body),
+  listFeatureSchemas: (projectId: string) =>
+    request<{ items: ApiFeatureSchema[] }>(`${insightProjectPath(projectId)}/feature-schemas`),
+  getFeatureMatrix: (projectId: string, assetIds: string[]) =>
+    request<ApiFeatureMatrix>(
+      `${insightProjectPath(projectId)}/feature-matrix?asset_ids=${encodeURIComponent(assetIds.join(','))}`,
+    ),
+  // 数据接入（doc10）。五个视图各自是一次不同的查询：数据源与字段映射读同一批行
+  // 但看不同字段，导入任务与同步记录是同一张表按 kind 过滤（22 §8.3）。
+  listDataSources: (projectId: string, filter: ApiDataSourceFilter = {}) => {
+    const search = new URLSearchParams({ limit: String(filter.limit ?? 100) })
+    filter.statuses?.forEach(status => search.append('status', status))
+    filter.platforms?.forEach(platform => search.append('platform', platform))
+    return request<{ items: ApiDataSource[] }>(
+      `${insightProjectPath(projectId)}/data-sources?${search.toString()}`,
+    )
+  },
+  getDataSource: (projectId: string, dataSourceId: string) =>
+    request<ApiDataSource>(insightDataSourcePath(projectId, dataSourceId)),
+  registerDataSource: (
+    projectId: string,
+    body: {
+      platform: ApiPlatform
+      ingest_mode: ApiIngestMode
+      account_label?: string
+      account_ref?: string
+      credential_ref?: string
+      caliber?: ApiMetricCaliber
+      field_mapping?: Record<string, string>
+    },
+  ) => request<ApiDataSource>(`${insightProjectPath(projectId)}/data-sources`, 'POST', body),
+  updateDataSource: (
+    projectId: string,
+    dataSourceId: string,
+    body: {
+      expected_version: number
+      status?: ApiDataSourceStatus
+      account_label?: string
+      caliber?: ApiMetricCaliber
+      field_mapping?: Record<string, string>
+    },
+  ) => request<ApiDataSource>(insightDataSourcePath(projectId, dataSourceId), 'PATCH', body),
+  setDataSourceQuality: (
+    projectId: string,
+    dataSourceId: string,
+    body: { expected_version: number; quality_status: ApiQualityStatus; note?: string },
+  ) => request<ApiDataSource>(`${insightDataSourcePath(projectId, dataSourceId)}:set-quality`, 'POST', body),
+  listImportBatches: (projectId: string, filter: ApiImportBatchFilter = {}) => {
+    const search = new URLSearchParams({ limit: String(filter.limit ?? 100) })
+    if (filter.dataSourceId) search.set('data_source_id', filter.dataSourceId)
+    filter.statuses?.forEach(status => search.append('status', status))
+    return request<{ items: ApiImportBatch[] }>(
+      `${insightProjectPath(projectId)}/import-batches?${search.toString()}`,
+    )
+  },
+  // 部分成功也会正常返回：批次建出来了，被拒的行在 batch.errors 里逐条说明。
+  importMetrics: (
+    projectId: string,
+    body: {
+      data_source_id: string
+      kind: ApiImportKind
+      rows: ApiMetricRow[]
+      source_label?: string
+      content_hash?: string
+      corrects_batch_id?: string
+      register_objects?: boolean
+    },
+  ) => request<ApiImportResult>(`${insightProjectPath(projectId)}/import-batches`, 'POST', body),
+  // 窗口写在 URL 里而不是让后端偷偷默认，20 §4.1 要求数据窗口必须能被看到。
+  getMetricOverview: (projectId: string, start?: string, end?: string) => {
+    const search = new URLSearchParams()
+    if (start) search.set('start', start)
+    if (end) search.set('end', end)
+    const query = search.toString()
+    return request<ApiMetricOverview>(
+      `${insightProjectPath(projectId)}/metric-overview${query ? `?${query}` : ''}`,
+    )
+  },
+  // 和 getMetricOverview 分成两个请求，但五个视图共用这一次返回：
+  // 拆开的话「趋势里看到的」和「疲劳里算的」会来自两次读取，对不上时没人解释得清。
+  getPerformanceAnalysis: (projectId: string, start?: string, end?: string) => {
+    const search = new URLSearchParams()
+    if (start) search.set('start', start)
+    if (end) search.set('end', end)
+    const query = search.toString()
+    return request<ApiPerformanceAnalysis>(
+      `${insightProjectPath(projectId)}/performance-analysis${query ? `?${query}` : ''}`,
+    )
+  },
+  // cross_channel 只认字面 true：跨渠道比较默认关闭（03 §10.3②），
+  // 缺参数、空串、"false" 都是关闭，不做 truthy 判断。
+  getPreLaunch: (projectId: string, filter: ApiPreLaunchFilter = {}) => {
+    const search = new URLSearchParams()
+    if (filter.channel) search.set('channel', filter.channel)
+    if (filter.creative_type) search.set('creative_type', filter.creative_type)
+    if (filter.objective) search.set('objective', filter.objective)
+    if (filter.q) search.set('q', filter.q)
+    if (filter.cross_channel) search.set('cross_channel', 'true')
+    const query = search.toString()
+    return request<ApiPreLaunchInsight>(
+      `${insightProjectPath(projectId)}/prelaunch${query ? `?${query}` : ''}`,
+    )
+  },
+  // 六个二级视图共用这一次请求：它们共用同一套排序和队列判断，
+  // 拆成六个请求会让「队列里还有几条」在不同视图里算出不同的数。
+  getDataQuality: (projectId: string, start?: string, end?: string) => {
+    const search = new URLSearchParams()
+    if (start) search.set('start', start)
+    if (end) search.set('end', end)
+    const query = search.toString()
+    return request<ApiDataQualityReport>(
+      `${insightProjectPath(projectId)}/data-quality${query ? `?${query}` : ''}`,
+    )
+  },
+  // 五个二级视图共用这一次请求：它们算的是同一批素材、特征、数据源和日指标，
+  // 拆开会让治理面上「特征数」和「待办数」在不同视图里对不上。
+  getCapabilityOperations: (projectId: string, start?: string, end?: string) => {
+    const search = new URLSearchParams()
+    if (start) search.set('start', start)
+    if (end) search.set('end', end)
+    const query = search.toString()
+    return request<ApiCapabilityOperations>(
+      `${insightProjectPath(projectId)}/capability-operations${query ? `?${query}` : ''}`,
+    )
+  },
+  // 系统设置整页只读，所以只有 get 没有 put。这些值不来自数据库，全部是代码常量本身，
+  // 每次请求现算——中间隔一层存储，就会有页面和代码对不上的那一天。
+  getInsightSettings: (projectId: string) =>
+    request<ApiInsightSettings>(`${insightProjectPath(projectId)}/settings`),
+  // observed_through 要回传界面上那条问题的 last_observed_at，不要用当前时间：
+  // 「你处置的是你看到的那个版本」靠它成立，中间问题若又恶化不会被一并盖掉。
+  resolveQualityIssue: (
+    projectId: string,
+    body: {
+      fingerprint: string
+      issue_kind: ApiDataQualityIssueKind
+      state: ApiDataQualityDispositionState
+      note: string
+      observed_through: string
+    },
+  ) => request<ApiDataQualityDisposition>(
+    `${insightProjectPath(projectId)}/data-quality/dispositions`, 'POST', body,
+  ),
+
+  listInsightExperiments: (projectId: string, status?: ApiExperimentStatus, limit = 50) => {
+    const search = new URLSearchParams({ limit: String(limit) })
+    if (status) search.set('status', status)
+    return request<{ items: ApiExperiment[] }>(
+      `${insightProjectPath(projectId)}/insight-experiments?${search.toString()}`,
+    )
+  },
+  createInsightExperiment: (projectId: string, body: ApiCreateExperimentInput) =>
+    request<ApiExperiment>(`${insightProjectPath(projectId)}/insight-experiments`, 'POST', body),
+  // 样本量没有单独的端点：它是详情的一部分，每次现算跟着详情一起回。两个端点会让
+  // 「样本检查」和「实验结论」拿到对不上的数字，而这一页唯一要回答的就是够不够。
+  getInsightExperiment: (projectId: string, experimentId: string) =>
+    request<ApiExperimentDetail>(insightExperimentPath(projectId, experimentId)),
+  attachInsightExperimentAsset: (projectId: string, experimentId: string, variantId: string, assetId: string) =>
+    request<ApiAttachExperimentAssetResult>(
+      `${insightExperimentPath(projectId, experimentId)}/variants/${encodeURIComponent(variantId)}/assets`,
+      'POST', { asset_id: assetId },
+    ),
+  detachInsightExperimentAsset: (projectId: string, experimentId: string, variantId: string, assetId: string) =>
+    request<ApiExperimentVariant>(
+      `${insightExperimentPath(projectId, experimentId)}/variants/${encodeURIComponent(variantId)}/assets/${encodeURIComponent(assetId)}`,
+      'DELETE',
+    ),
+  startInsightExperiment: (projectId: string, experimentId: string, expectedVersion: number) =>
+    request<ApiExperiment>(
+      `${insightExperimentPath(projectId, experimentId)}:start`, 'POST', { expected_version: expectedVersion },
+    ),
+  // 入参里没有 verdict：判定要是能传，事先定的门槛就形同虚设。人只写解读。
+  concludeInsightExperiment: (projectId: string, experimentId: string, expectedVersion: number, interpretation: string) =>
+    request<ApiExperiment>(
+      `${insightExperimentPath(projectId, experimentId)}:conclude`, 'POST',
+      { expected_version: expectedVersion, interpretation },
+    ),
+}
+
+// Insights 走 /api/insights/v1；request() 已经带上 /api 前缀。
+function insightProjectPath(projectId: string): string {
+  return `/insights/v1/projects/${encodeURIComponent(projectId)}`
+}
+
+// 动作端点形如 .../experiences/{id}:confirm，冒号是路径的一部分，不参与编码。
+function insightExperiencePath(projectId: string, experienceId: string): string {
+  return `${insightProjectPath(projectId)}/experiences/${encodeURIComponent(experienceId)}`
+}
+
+function insightExperimentPath(projectId: string, experimentId: string): string {
+  return `${insightProjectPath(projectId)}/insight-experiments/${encodeURIComponent(experimentId)}`
+}
+
+function insightAssetPath(projectId: string, assetId: string): string {
+  return `${insightProjectPath(projectId)}/assets/${encodeURIComponent(assetId)}`
+}
+
+function insightDataSourcePath(projectId: string, dataSourceId: string): string {
+  return `${insightProjectPath(projectId)}/data-sources/${encodeURIComponent(dataSourceId)}`
 }

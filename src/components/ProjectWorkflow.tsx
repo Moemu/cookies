@@ -16,6 +16,7 @@ import {
 import { useProject } from '../context/ProjectContext'
 import { calculateProjectProgress, progressPercentLabel, progressReasonLabel } from '../lib/project-progress'
 import type { BusinessTaskType, ProjectProgressStage, ProjectRecord, SystemKey } from '../types'
+import { shortId } from '../data/shortId'
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
 type WorkflowState = 'completed' | 'active' | 'pending' | 'blocked'
@@ -170,7 +171,7 @@ function deriveWorkflow(project: ProjectRecord): WorkflowStage[] {
       output: '已确认 Brief + 策略任务', gate: 'Brief 已确认，策略任务已创建',
       owner: '品牌负责人 / 策略', system: 'strategy', navId: 'tasks', cta: '进入需求与策略',
       rawComplete: strategyReady,
-      evidence: strategyReady ? `Brief ${project.artifacts.brief.version} 已确认，策略任务 ${strategyTask?.id.slice(0, 8)}` : '需要完成 Brief 确认并创建策略任务。',
+      evidence: strategyReady ? `Brief ${project.artifacts.brief.version} 已确认，策略任务 ${shortId(strategyTask?.id)}` : '需要完成 Brief 确认并创建策略任务。',
     },
     {
       id: 2, title: '脚本创作', summary: '输出脚本 · 任务指派', icon: ClipboardCheck,

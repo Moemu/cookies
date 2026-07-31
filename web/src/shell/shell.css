@@ -108,8 +108,38 @@
 
 .project-switcher {
   position: relative;
+  display: grid;
   min-width: 0;
+  align-content: center;
   margin-left: auto;
+}
+
+/* 项目名下面那行"组织 / 项目 / 模块"，用 / 分隔，末尾不带。 */
+.top-context-chain {
+  display: flex;
+  max-width: 420px;
+  align-items: center;
+  gap: 5px;
+  color: var(--ds-text-subtle);
+  padding: 0 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.top-context-chain span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-context-chain span::after {
+  content: "/";
+  margin-left: 5px;
+  color: var(--ds-border-strong);
+}
+
+.top-context-chain span:last-child::after {
+  content: "";
+  margin-left: 0;
 }
 
 .project-trigger {
@@ -259,6 +289,91 @@
   background: var(--ds-border);
 }
 
+/* 顶栏搜索：搜当前身份能看到的项目，按 / 直接聚焦。 */
+.global-search {
+  position: relative;
+  display: flex;
+  width: 210px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-subtle);
+  padding: 0 9px;
+  height: 32px;
+}
+
+.global-search:focus-within {
+  border-color: var(--ds-accent);
+  background: var(--ds-surface);
+}
+
+.global-search svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--ds-text-subtle);
+}
+
+.global-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.global-search kbd {
+  flex: none;
+  border: 1px solid var(--ds-border);
+  border-radius: 3px;
+  color: var(--ds-text-subtle);
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.global-search__results {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface);
+  box-shadow: var(--ds-shadow-menu);
+}
+
+.global-search__results a {
+  display: grid;
+  gap: 2px;
+  color: var(--ds-text);
+  padding: 8px 11px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.global-search__results a:hover {
+  background: var(--ds-surface-subtle);
+}
+
+.global-search__results small {
+  color: var(--ds-text-subtle);
+  font-size: 11px;
+}
+
+.global-search__results p {
+  margin: 0;
+  color: var(--ds-text-subtle);
+  padding: 10px 11px;
+  font-size: 12px;
+}
+
 .utility-button {
   display: grid;
   width: 32px;
@@ -296,28 +411,30 @@
 
 .sidebar__module {
   display: flex;
-  min-height: 50px;
+  min-height: 58px;
   align-items: center;
   gap: 9px;
   margin: 0 -11px 8px;
   border-bottom: 1px solid var(--ds-border);
   color: var(--ds-text);
-  padding: 0 16px;
-  font-size: 13px;
+  padding: 0 20px;
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .sidebar__module svg {
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   color: var(--ds-accent);
 }
 
 .sidebar__section-label {
   display: block;
-  margin: 14px 9px 5px;
-  color: var(--ds-text-subtle);
-  font-size: 9px;
-  font-weight: 740;
+  margin: 13px 0 2px;
+  color: var(--ds-text-muted);
+  padding: 4px 10px 6px;
+  font-size: 10px;
+  font-weight: 650;
   letter-spacing: .08em;
 }
 
@@ -329,36 +446,56 @@
 
 .sidebar .nav-item {
   display: flex;
-  min-height: 35px;
+  min-height: 38px;
   align-items: center;
   gap: 10px;
-  border-radius: var(--ds-radius-xs);
-  color: var(--ds-text-muted);
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 620;
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text);
+  padding: 0 11px;
+  font-size: 13px;
+  font-weight: 500;
   text-decoration: none;
 }
 
 .sidebar .nav-item svg {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+
+/* 尚未开放的入口照样列出来，但要一眼看出它点进去没有内容。 */
+.sidebar .nav-item__badge {
+  margin-left: auto;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-xs);
+  padding: 1px 5px;
+  color: var(--ds-text-subtle);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
 }
 
 .sidebar .nav-item:hover {
-  color: var(--ds-accent);
+  color: var(--ds-text);
   background: var(--ds-surface-subtle);
 }
 
-.sidebar .nav-item--active {
-  color: var(--ds-accent);
-  background: var(--ds-accent-subtle);
-  box-shadow: inset 2px 0 0 var(--ds-accent);
+/* 当前入口用实心主色块，和参考产品一致：一眼能定位到自己在哪。 */
+.sidebar .nav-item--active,
+.sidebar .nav-item--active:hover {
+  color: oklch(1 0 0);
+  background: var(--ds-accent);
+  font-weight: 600;
+}
+
+.sidebar .nav-item--active .nav-item__badge {
+  border-color: oklch(1 0 0 / 45%);
+  color: oklch(1 0 0 / 85%);
 }
 
 .sidebar__footer {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   margin-top: auto;
   border-top: 1px solid var(--ds-border);
   padding: 14px 9px 0;
@@ -366,16 +503,80 @@
 
 .sidebar__footer span {
   color: var(--ds-text-subtle);
-  font-size: 8px;
-  font-weight: 740;
+  font-size: 11px;
 }
 
 .sidebar__footer strong {
   overflow: hidden;
-  color: var(--ds-text-muted);
-  font-size: 9px;
+  color: var(--ds-text);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 收起侧栏：正文需要宽度的时候把导航压成一列图标。 */
+.sidebar__collapse {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 10px;
+  margin: 12px -11px -14px;
+  margin-top: auto;
+  border: 0;
+  border-top: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text-muted);
+  padding: 0 21px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar__collapse:hover {
+  color: var(--ds-accent);
+  background: var(--ds-surface-subtle);
+}
+
+.sidebar__collapse svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.app-shell--sidebar-collapsed .shell-body {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
+.app-shell--sidebar-collapsed .sidebar {
+  padding: 0 8px 14px;
+}
+
+.app-shell--sidebar-collapsed .sidebar__module,
+.app-shell--sidebar-collapsed .sidebar .nav-item,
+.app-shell--sidebar-collapsed .sidebar__collapse {
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+.app-shell--sidebar-collapsed .sidebar__module {
+  margin: 0 -8px 8px;
+}
+
+.app-shell--sidebar-collapsed .sidebar__collapse {
+  margin: auto -8px -14px;
+}
+
+.app-shell--sidebar-collapsed .sidebar__module strong,
+.app-shell--sidebar-collapsed .sidebar__section-label,
+.app-shell--sidebar-collapsed .sidebar .nav-item span,
+.app-shell--sidebar-collapsed .sidebar .nav-item__badge,
+.app-shell--sidebar-collapsed .sidebar__footer,
+.app-shell--sidebar-collapsed .sidebar__collapse span {
+  display: none;
+}
+
+.app-shell--sidebar-collapsed .sidebar .module-nav {
+  margin-bottom: 8px;
 }
 
 .workspace-frame {
@@ -385,8 +586,34 @@
 }
 
 .workspace {
-  min-height: calc(100vh - var(--ds-topbar-height));
+  flex: 1;
+  min-height: calc(100vh - var(--ds-topbar-height) - 36px);
   background: var(--ds-canvas);
+}
+
+/* 底部状态条：走到哪个模块都能看到当前项目是哪个、什么时候更新的。 */
+.statusbar {
+  display: flex;
+  min-height: 36px;
+  flex: none;
+  align-items: center;
+  gap: 28px;
+  border-top: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text-muted);
+  padding: 0 28px;
+  font-size: 10px;
+}
+
+.statusbar span {
+  border-right: 1px solid var(--ds-border);
+  padding-right: 26px;
+}
+
+.statusbar strong {
+  margin-left: auto;
+  color: var(--ds-text);
+  font-weight: 650;
 }
 
 .workspace-alert {

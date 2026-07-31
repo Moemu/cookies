@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { creativeTaskPath, creativeTasksPath, deliveryPath, insightsPath, projectHomePath, projectManagePath, strategyPath } from '../../app/routes'
+import { creativeTaskPath, creativeTasksPath, deliveryPath, insightPath, projectHomePath, projectManagePath, strategyPath } from '../../app/routes'
 import { listProjectAssets } from '../assets/api'
 import { listCreativeIntakes, listCreativePackages, listCreativeTasks, listCreativeVersions } from '../creative/api'
 import type { CreativeIntake, CreativePackage, CreativeTask, CreativeVersion } from '../creative/types'
@@ -105,7 +105,7 @@ export function ProjectHomePage({ project }: ProjectPageProps) {
       listDeliveryPlans(projectId, controller.signal),
       listDeliveryExecutions(projectId, controller.signal),
       listInsightReports(projectId, controller.signal),
-      listExperiences(projectId, controller.signal),
+      listExperiences(projectId, undefined, controller.signal),
     ]).then(([workspaces, packages, intakes, tasks, assets, versions, creativePackages, deliveryPlans, executions, reports, experiences]) => {
       if (controller.signal.aborted) return
       const failedCount = [workspaces, packages, intakes, tasks, assets, versions, creativePackages, deliveryPlans, executions, reports, experiences].filter((result) => result.status === 'rejected').length
@@ -153,8 +153,8 @@ export function ProjectHomePage({ project }: ProjectPageProps) {
     { number: 4, name: '剪辑出片', description: '当前项目只有图文任务，视频 EditTask 尚未接入', href: '', available: false, complete: false, skipped: true },
     { number: 5, name: '广告评审', description: `${snapshot.creativePackages.length} 个 CreativePackage`, href: latestTask ? creativeTaskPath(projectId, latestTask.id, 'review') : creativeTasksPath(projectId), available: Boolean(latestTask), complete: snapshot.creativePackages.length > 0 },
     { number: 6, name: '广告投放', description: `${snapshot.deliveryPlans.length} 个计划 · ${snapshot.executions.length} 次受控执行`, href: deliveryPath(projectId), available: true, complete: snapshot.executions.length > 0 },
-    { number: 7, name: '投放后分析', description: `${snapshot.reports.length} 份复盘报告`, href: insightsPath(projectId, 'reports'), available: true, complete: snapshot.reports.some((item) => item.status === 'confirmed') },
-    { number: 8, name: '经验沉淀', description: `${snapshot.experiences.length} 条已确认经验`, href: insightsPath(projectId, 'experiences'), available: true, complete: snapshot.experiences.length > 0 },
+    { number: 7, name: '投放后分析', description: `${snapshot.reports.length} 份复盘报告`, href: insightPath(projectId, 'reports'), available: true, complete: snapshot.reports.some((item) => item.status === 'confirmed') },
+    { number: 8, name: '经验沉淀', description: `${snapshot.experiences.length} 条已确认经验`, href: insightPath(projectId, 'experiences'), available: true, complete: snapshot.experiences.length > 0 },
   ]
 
   return <section className="project-home">

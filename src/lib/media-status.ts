@@ -1,3 +1,5 @@
+import { shortId } from '../data/shortId'
+
 export type CreativeArtifactStatus = '草稿' | '待确认' | '排队中' | '制作中' | '已完成' | '生成失败' | '已取消'
 
 export interface MediaArtifact {
@@ -64,7 +66,7 @@ export function presentCreativeStatus(
       status: '已完成',
       summary: artifact.content || `${artifact.kind === 'video' ? '视频' : '图片'}资产已保存，可用于后续投放模拟。`,
       owner: artifact.sourceJobId ? 'AI 生成 · 服务端资产' : '服务端资产',
-      sourceVersion: artifact.sourceJobId ? `AI 生成任务 ${artifact.sourceJobId.slice(0, 8)} · 生成于 ${formatDate(artifact.updatedAt)}` : undefined,
+      sourceVersion: artifact.sourceJobId ? `AI 生成任务 ${shortId(artifact.sourceJobId)} · 生成于 ${formatDate(artifact.updatedAt)}` : undefined,
       updatedAt: formatDate(artifact.updatedAt),
     }
   }

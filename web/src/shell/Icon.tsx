@@ -1,4 +1,4 @@
-export type IconName = 'home' | 'target' | 'pen' | 'chart' | 'send' | 'settings' | 'list' | 'image' | 'database' | 'check' | 'package' | 'user'
+export type IconName = 'home' | 'target' | 'pen' | 'chart' | 'send' | 'settings' | 'list' | 'image' | 'database' | 'check' | 'package' | 'user' | 'menu' | 'search'
 
 type IconProps = {
   name: IconName
@@ -42,5 +42,9 @@ export function Icon({ name }: IconProps) {
       return <svg {...common}><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></svg>
     case 'user':
       return <svg {...common}><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></svg>
+    case 'menu':
+      return <svg {...common}><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+    case 'search':
+      return <svg {...common}><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
   }
 }

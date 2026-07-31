@@ -138,10 +138,32 @@ func main() {
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
+	// 文本模型出口。Strategy 和 Insights 共用同一个网关适配器和同一个能力别名——
+	// 它们要的是同一件事：调一次文本模型。**目前也共用同一个开关**
+	// （COOKIES_STRATEGY_REAL_PROVIDER_ENABLED），这是个遗留：
+	// 想单独关掉素材洞察的提取而留着策略生成，现在做不到。
+	var textProvider *provider.Service
+	if cfg.Strategy.RealProviderEnabled {
+		textAdapter, err := buildTextAdapter(cfg, db)
+		if err != nil {
+			log.Fatalf("configure Provider text adapter: %v", err)
+		}
+		textProvider = &provider.Service{TextAdapter: textAdapter}
+	}
 	insightsService := &insights.Service{
-		Repository: insights.MySQLRepository{DB: db},
-		Projects:   projectService,
-		Delivery:   deliveryinsights.Reader{Service: deliveryService},
+		Repository:  insights.MySQLRepository{DB: db},
+		Assets:      insights.MySQLRepository{DB: db},
+		Connectors:  insights.MySQLRepository{DB: db},
+		Runs:        insights.MySQLRepository{DB: db},
+		Experiments: insights.MySQLRepository{DB: db},
+		Projects:    projectService,
+		Delivery:    deliveryinsights.Reader{Service: deliveryService},
+	}
+	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
+	// 库里一条编造的特征，代价远大于一次失败的提取。
+	if textProvider != nil {
+		insightsService.Text = textProvider
+		insightsService.TextModelAlias = cfg.Strategy.TextModelAlias
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
@@ -165,14 +187,6 @@ func main() {
 		}
 	}
 	if cfg.Strategy.Enabled {
-		var textProvider *provider.Service
-		if cfg.Strategy.RealProviderEnabled {
-			textAdapter, err := buildTextAdapter(cfg, db)
-			if err != nil {
-				log.Fatalf("configure Provider text adapter: %v", err)
-			}
-			textProvider = &provider.Service{TextAdapter: textAdapter}
-		}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, PromptVersion: cfg.Strategy.PromptVersion,
