@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/systems/delivery"
 )
 
@@ -39,6 +40,15 @@ func TestDeliveryHTTPExposesPlanAndControlledActions(t *testing.T) {
 	}
 }
 
+func TestDeliveryHTTPMapsProjectIsolationDenial(t *testing.T) {
+	response := httptest.NewRecorder()
+	request := authenticatedRequest(http.MethodGet, "/api/delivery/v1/projects/project_other/plans/plan_1", "")
+	writeError(response, request, identity.ErrProjectAccessDenied)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "PROJECT_ACCESS_DENIED") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -61,8 +71,23 @@ type applicationStub struct {
 func (s *applicationStub) CreatePlan(context.Context, contract.ActorContext, contract.ProjectID, delivery.CreatePlanRequest) (delivery.DeliveryPlan, error) {
 	return s.plan, nil
 }
+func (s *applicationStub) UpdatePlan(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdatePlanRequest) (delivery.DeliveryPlan, error) {
+	return s.plan, nil
+}
 func (s *applicationStub) ListPlans(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryPlan, error) {
 	return []delivery.DeliveryPlan{s.plan}, nil
+}
+func (s *applicationStub) GetPlan(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryPlan, error) {
+	return s.plan, nil
+}
+func (s *applicationStub) ListPlanVersions(context.Context, contract.ActorContext, contract.ProjectID, string) ([]delivery.DeliveryPlanVersion, error) {
+	return s.plan.Versions, nil
+}
+func (s *applicationStub) GetPlanVersion(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryPlanVersion, error) {
+	return s.plan.CurrentVersion, nil
+}
+func (s *applicationStub) RunPlanPreflight(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PreflightResult, error) {
+	return delivery.PreflightResult{PlanID: s.plan.ID, Source: delivery.SourceMock}, nil
 }
 func (s *applicationStub) GetPlanDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlanDetail, error) {
 	return delivery.PlanDetail{Plan: s.plan}, nil
