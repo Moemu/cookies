@@ -131,44 +131,9 @@ func (r MySQLRepository) ConfirmReport(ctx context.Context, organizationID contr
 // CreateExperience writes the conclusion and its opening audit row together so
 // a 待确认 experience can never exist without a trail (PRD §11.2).
 func (r MySQLRepository) CreateExperience(ctx context.Context, value Experience, audit ExperienceAudit) (Experience, error) {
-	conditions, err := json.Marshal(value.Conditions)
-	if err != nil {
-		return Experience{}, err
-	}
-	counterexamples, err := json.Marshal(value.Counterexamples)
-	if err != nil {
-		return Experience{}, err
-	}
-	applicability, err := json.Marshal(value.Applicability)
-	if err != nil {
-		return Experience{}, err
-	}
-	dataBasis, err := json.Marshal(value.DataBasis)
-	if err != nil {
-		return Experience{}, err
-	}
-	contentBasis, err := json.Marshal(value.ContentBasis)
-	if err != nil {
-		return Experience{}, err
-	}
-	err = r.inTx(ctx, func(tx *sql.Tx) error {
-		if _, execErr := tx.ExecContext(ctx, `INSERT INTO insight_experiences (
-			id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id,
-			report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id,
-			conclusion, card_type, confidence, recommended_action,
-			conditions, counterexamples, applicability, data_basis, content_basis,
-			status, status_reason, status_changed_by, status_changed_at,
-			confirmed_by, confirmed_at, version, created_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
-			value.ID, value.OrganizationID, value.ProjectID, value.LineageID, value.Revision,
-			nullableString(value.SupersedesID),
-			value.ReportID, value.SourceExecutionID, value.SourceEvidenceID, value.SourceMetricSnapshotID,
-			value.Conclusion, value.CardType, value.Confidence, value.RecommendedAction,
-			conditions, counterexamples, applicability, dataBasis, contentBasis,
-			value.Status, value.StatusReason,
-			value.StatusChangedBy, value.StatusChangedAt,
-			value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt); execErr != nil {
-			return execErr
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		if txErr := insertExperienceTx(ctx, tx, value); txErr != nil {
+			return txErr
 		}
 		return insertExperienceAudit(ctx, tx, audit)
 	})
@@ -176,6 +141,74 @@ func (r MySQLRepository) CreateExperience(ctx context.Context, value Experience,
 		return Experience{}, err
 	}
 	return value, nil
+}
+
+// ReviseExperience appends a revision and, when the predecessor was never
+// confirmed, retires it in the same transaction. Two 待确认 rows of one lineage
+// must never sit in the candidate queue together: they read as two independent
+// conclusions, and confirming the older one silently discards the revision.
+func (r MySQLRepository) ReviseExperience(ctx context.Context, input ReviseExperienceInput) (Experience, error) {
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		if txErr := insertExperienceTx(ctx, tx, input.Value); txErr != nil {
+			return txErr
+		}
+		if txErr := insertExperienceAudit(ctx, tx, input.Audit); txErr != nil {
+			return txErr
+		}
+		if input.RetireSource == nil {
+			return nil
+		}
+		if _, txErr := transitionExperienceTx(ctx, tx, *input.RetireSource); txErr != nil {
+			return txErr
+		}
+		_, txErr := tx.ExecContext(ctx, `UPDATE insight_experiences SET superseded_by_id = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			input.Value.ID, input.RetireSource.OrganizationID, input.RetireSource.ProjectID, input.RetireSource.ID)
+		return txErr
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	return input.Value, nil
+}
+
+func insertExperienceTx(ctx context.Context, tx *sql.Tx, value Experience) error {
+	conditions, err := json.Marshal(value.Conditions)
+	if err != nil {
+		return err
+	}
+	counterexamples, err := json.Marshal(value.Counterexamples)
+	if err != nil {
+		return err
+	}
+	applicability, err := json.Marshal(value.Applicability)
+	if err != nil {
+		return err
+	}
+	dataBasis, err := json.Marshal(value.DataBasis)
+	if err != nil {
+		return err
+	}
+	contentBasis, err := json.Marshal(value.ContentBasis)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO insight_experiences (
+		id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id,
+		report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id,
+		conclusion, card_type, confidence, recommended_action,
+		conditions, counterexamples, applicability, data_basis, content_basis,
+		status, status_reason, status_changed_by, status_changed_at,
+		confirmed_by, confirmed_at, version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.LineageID, value.Revision,
+		nullableString(value.SupersedesID),
+		value.ReportID, value.SourceExecutionID, value.SourceEvidenceID, value.SourceMetricSnapshotID,
+		value.Conclusion, value.CardType, value.Confidence, value.RecommendedAction,
+		conditions, counterexamples, applicability, dataBasis, contentBasis,
+		value.Status, value.StatusReason,
+		value.StatusChangedBy, value.StatusChangedAt,
+		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	return err
 }
 
 // ListExperiences filters by lifecycle status when one is given; an empty

@@ -520,12 +520,39 @@ func (r RegisterDataSourceRequest) validate() error {
 	if strings.TrimSpace(r.AccountRef) == "" {
 		return fmt.Errorf("%w: 平台账户标识不能为空", ErrInvalidRequest)
 	}
+	if !storableRef(r.AccountRef) {
+		return fmt.Errorf("%w: 账户标识只能用英文字母、数字和 - _ . : / @，不能有中文或空格"+
+			"——它要和平台后台里的账户 ID 一模一样。想给它起个看得懂的名字，填在「账户名称」里", ErrInvalidRequest)
+	}
 	// doc10 §9：凭据本身不进业务库。这里只能收一个引用键，收到疑似令牌就拒绝，
 	// 免得调用方图省事把 access_token 直接塞进来。
+	// 这一条要排在字符集检查前面：粘进来的令牌多半也带空格，先报「字符不对」
+	// 会让人以为把空格删掉就能存——那正是最不该存进来的东西。
 	if looksLikeSecret(r.CredentialRef) {
 		return fmt.Errorf("%w: credential_ref 只能是密钥服务的引用键，不能是凭据本身", ErrInvalidRequest)
 	}
+	if !storableRef(r.CredentialRef) {
+		return fmt.Errorf("%w: 凭据引用键只能用英文字母、数字和 - _ . : / @，不能有中文或空格", ErrInvalidRequest)
+	}
 	return r.Caliber.withDefaults().validate()
+}
+
+// storableRef 挡的是「存不进去」这件事本身。account_ref 和 credential_ref 在库里是
+// ascii 列（唯一键要按字节比，不能受排序规则影响），填中文不会被截断，是整条 SQL 直接
+// 报 Error 3988——而人在页面上看到的只有「服务暂时不可用，请稍后重试」，于是会一直重试
+// 同一个填法。在这里挡下来，才说得出到底哪儿不对。
+//
+// 允许的这几个符号来自真实的账户标识和引用键写法（vault://douyin/brand-main）。
+func storableRef(value string) bool {
+	for _, char := range strings.TrimSpace(value) {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		case strings.ContainsRune("-_.:/@", char):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func looksLikeSecret(value string) bool {

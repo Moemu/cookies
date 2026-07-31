@@ -8,14 +8,16 @@ import {
   type ApiDataSourceStatus,
   type ApiImportBatch,
   type ApiIngestMode,
+  type ApiInsightAsset,
   type ApiInsightAssetMapping,
   type ApiMetricRow,
   type ApiPlatform,
   type ApiQualityStatus,
 } from '../data/api'
-import { hashText, parseMetricCsv } from '../data/metricCsv'
+import { builtInAliasesOf, hashText, metricColumns, parseMetricCsv } from '../data/metricCsv'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
+import { MappingResolveForm } from './AssetLibraryPage'
 import { shortId } from '../data/shortId'
 
 /**
@@ -108,6 +110,8 @@ export function DataConnectionsPage({ state, activeView }: { state: DataState; a
   const [sources, setSources] = useState<ApiDataSource[]>([])
   const [batches, setBatches] = useState<ApiImportBatch[]>([])
   const [mappings, setMappings] = useState<ApiInsightAssetMapping[]>([])
+  // 改归属时要从现有素材版本里挑，不能让人手填 ID。只在素材映射视图取。
+  const [assets, setAssets] = useState<ApiInsightAsset[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [query, setQuery] = useState('')
   const [notice, setNotice] = useState('')
@@ -119,8 +123,12 @@ export function DataConnectionsPage({ state, activeView }: { state: DataState; a
     setListState('loading')
     try {
       if (target === 'asset-mapping') {
-        const next = await api.listInsightAssetMappings(currentProject.id)
-        setMappings(next.items)
+        const [mappingPage, assetPage] = await Promise.all([
+          api.listInsightAssetMappings(currentProject.id),
+          api.listInsightAssets(currentProject.id, {}),
+        ])
+        setMappings(mappingPage.items)
+        setAssets(assetPage.items)
       } else if (target === 'imports' || target === 'syncs') {
         // 同一张表，两种来源：同步是系统跑的，导入是人发起的（doc10 §7）。
         const [batchPage, sourcePage] = await Promise.all([
@@ -139,6 +147,7 @@ export function DataConnectionsPage({ state, activeView }: { state: DataState; a
       setSources([])
       setBatches([])
       setMappings([])
+      setAssets([])
       setListState('error')
       setNotice(cause instanceof Error ? cause.message : '数据接入读取失败。')
     }
@@ -254,7 +263,8 @@ export function DataConnectionsPage({ state, activeView }: { state: DataState; a
         {target === 'field-mapping' ? <FieldMappingDetail source={selectedSource} busy={busy} projectId={currentProject.id} onWrite={runWrite}/> : null}
         {target === 'imports' ? <ImportDetail batch={selectedBatch} sources={sources} busy={busy} projectId={currentProject.id} onWrite={runWrite}/> : null}
         {target === 'syncs' ? <SyncDetail batch={selectedBatch} sources={sources}/> : null}
-        {target === 'asset-mapping' ? <AssetMappingDetail mapping={selectedMapping}/> : null}
+        {target === 'asset-mapping' ? <AssetMappingDetail mapping={selectedMapping} assets={assets}
+          projectId={currentProject.id} onDone={message => { setNotice(message); void loadList() }}/> : null}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </aside>
     </div>
@@ -349,8 +359,9 @@ function DataSourceDetail({ source, busy, projectId, onWrite, onCreated }: {
       <input value={accountLabel} onChange={event => setAccountLabel(event.target.value)} placeholder="例如：品牌主账户"/>
     </label>
     <label className="experience-reason">
-      <small>账户标识（同一项目下同平台同账户只能接一次）</small>
-      <input value={accountRef} onChange={event => setAccountRef(event.target.value)} placeholder="例如：1234567890"/>
+      <small>账户标识 · 平台后台里的账户 ID（同一项目下同平台同账户只能接一次）</small>
+      <input value={accountRef} onChange={event => setAccountRef(event.target.value)} placeholder="例如：1234567890 或 adv-1234567890"/>
+      <small>只能用英文字母、数字和 - _ . : / @。中文名字填上面的「账户名称」。</small>
     </label>
     <label className="experience-reason">
       <small>凭据引用键（不是凭据本身）</small>
@@ -371,27 +382,47 @@ function FieldMappingDetail({ source, busy, projectId, onWrite }: {
   projectId: string
   onWrite: (label: string, work: () => Promise<unknown>, explain?: (code: string) => string) => Promise<void>
 }) {
-  const [draft, setDraft] = useState('')
+  // 一个指标名一格，人只填自己报表里的表头。以前是让人在文本框里手拼
+  // 「平台列名 = 指标名」——等号那套格式是给机器看的，人还得记住十一个英文名
+  // 怎么拼，打错一个字母就是一次失败的导入，而报错只会说「这列对不上」。
+  const [columns, setColumns] = useState<Record<string, string>>({})
 
-  useEffect(() => { setDraft(mappingToText(source?.field_mapping)) }, [source])
+  useEffect(() => { setColumns(mappingToColumns(source?.field_mapping)) }, [source])
 
   if (!source) return <div className="panel-empty">左侧选一个数据源，配置它的报表列名怎么对到统一指标名。</div>
 
+  const filled = Object.values(columns).filter(value => value.trim()).length
+
   return <>
     <span className="section-label">字段映射</span><h3>{sourceName(source)}</h3>
-    <p>把平台报表里的列名，对到系统统一的指标名。没对上的列会被忽略，对错了会算出错误的花费。</p>
-    <div className="prelaunch-fact"><Database size={17}/><span><small>统一指标名</small><b>impressions 曝光 · clicks 点击 · conversions 转化 · video_views 播放 · video_completions 完播 · spend_cents 花费（分）· revenue_cents 收入（分）</b></span></div>
-    <label className="experience-reason">
-      <small>每行一条，格式「平台列名 = 统一指标名」</small>
-      <textarea value={draft} onChange={event => setDraft(event.target.value)} rows={8} placeholder={'展现数 = impressions\n点击数 = clicks\n消耗(分) = spend_cents'}/>
-    </label>
+    <p>左边填你报表里的表头原文，一字不差。留空表示这份报表没有这一项——不是错误，系统按「这个平台不提供」处理。</p>
+
+    <div className="mapping-form">
+      {metricColumns.map(column => {
+        const aliases = builtInAliasesOf(column.key)
+        return <label key={column.key} className={column.required ? 'mapping-field required' : 'mapping-field'}>
+          <small>
+            {column.label}
+            {column.required ? ' · 必填' : ''}
+            {column.note ? ` · ${column.note}` : ''}
+          </small>
+          <input
+            value={columns[column.key] ?? ''}
+            onChange={event => setColumns(current => ({ ...current, [column.key]: event.target.value }))}
+            // 内置别名当占位符：表头正好是这几个写法之一就不用填，留空也认得出来。
+            placeholder={aliases.length ? `${aliases[0]}（这几个写法已内置认得，可留空）` : '你报表里的表头'}/>
+          <em>{column.key}</em>
+        </label>
+      })}
+    </div>
+
     <div className="prelaunch-actions">
       <button className="primary-button full" disabled={busy} onClick={() => void onWrite('字段映射', () =>
         api.updateDataSource(projectId, source.id, {
-          expected_version: source.version, field_mapping: textToMapping(draft),
-        }))}>{busy ? '处理中…' : '保存字段映射'}</button>
+          expected_version: source.version, field_mapping: columnsToMapping(columns),
+        }))}>{busy ? '处理中…' : `保存字段映射（填了 ${filled} 项）`}</button>
     </div>
-    <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>整体替换</small>保存会用这里的内容整体覆盖原映射，不是增量合并。</span></div>
+    <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>整体替换</small>保存会用这里的内容整体覆盖原映射，不是增量合并。清空某一格就是把那条映射删掉。</span></div>
   </>
 }
 
@@ -506,7 +537,16 @@ function SyncDetail({ batch, sources }: { batch?: ApiImportBatch; sources: ApiDa
 
 // --- 素材映射 ---
 
-function AssetMappingDetail({ mapping }: { mapping?: ApiInsightAssetMapping }) {
+/**
+ * 这里是全部平台对象（含已认领的），所以改归属只能在这一屏做——「分析素材库 ·
+ * 待匹配」查的是未认领队列，认领完那条就从队列里消失了。
+ */
+function AssetMappingDetail({ mapping, assets, projectId, onDone }: {
+  mapping?: ApiInsightAssetMapping
+  assets: ApiInsightAsset[]
+  projectId: string
+  onDone: (message: string) => void
+}) {
   if (!mapping) return <div className="panel-empty">左侧选一个平台对象，查看它归到了哪个素材版本。</div>
   return <>
     <span className="section-label">素材映射</span><h3>{mapping.platform_object_name || mapping.platform_object_id}</h3>
@@ -515,6 +555,8 @@ function AssetMappingDetail({ mapping }: { mapping?: ApiInsightAssetMapping }) {
     <div className="prelaunch-fact"><Database size={17}/><span><small>怎么认的</small><b>{mapping.match_source === 'human' ? `人工指定${mapping.matched_by ? ` · ${mapping.matched_by}` : ''}` : mapping.match_source === 'auto' ? '系统自动匹配' : '尚未匹配'}{mapping.matched_at ? ` · ${formatTime(mapping.matched_at)}` : ''}</b></span></div>
     {mapping.note ? <div className="prelaunch-fact"><CircleCheck size={17}/><span><small>备注</small><b>{mapping.note}</b></span></div> : null}
     {mapping.status !== 'matched' ? <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>没认领的后果</small>它的花费仍然计入总盘，但不会算到任何素材头上，也不能支撑「这条创意更好」这类结论。认领在「分析素材库 · 待匹配」里做。</span></div> : null}
+    <MappingResolveForm key={mapping.id} mapping={mapping} assets={assets} projectId={projectId} onDone={onDone}/>
+    {mapping.status === 'matched' ? <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>改归属会动历史数字</small>这条对象过往所有天的花费都会跟着换主人，不是从今天起才改。原来那一版素材的投后结论如果已经出过报告，报告里的数字不会自动更新——那是定格的快照，得重新出一份。</span></div> : null}
   </>
 }
 
@@ -591,17 +633,27 @@ function freshnessLabel(source: ApiDataSource): string {
   return `落后 ${days} 天`
 }
 
-function mappingToText(mapping?: Record<string, string>): string {
-  return Object.entries(mapping ?? {}).map(([column, metric]) => `${column} = ${metric}`).join('\n')
+/**
+ * 存的是「平台列名 → 指标名」，表单要的是「指标名 → 平台列名」，这里翻过来。
+ *
+ * 同一个指标被两个列名映射（一份报表里「消耗」和「花费」两列都指向花费）在表单里
+ * 表达不了，这里只取第一个。真出现这种报表，那两列本身就该先在平台侧合并。
+ */
+function mappingToColumns(mapping?: Record<string, string>): Record<string, string> {
+  const columns: Record<string, string> = {}
+  for (const [column, metric] of Object.entries(mapping ?? {})) {
+    if (!columns[metric]) columns[metric] = column
+  }
+  return columns
 }
 
-function textToMapping(text: string): Record<string, string> {
+function columnsToMapping(columns: Record<string, string>): Record<string, string> {
   const mapping: Record<string, string> = {}
-  text.split('\n').forEach(line => {
-    const [column, metric] = line.split('=')
-    if (!column?.trim() || !metric?.trim()) return
-    mapping[column.trim()] = metric.trim()
-  })
+  for (const [metric, column] of Object.entries(columns)) {
+    // 留空是「这份报表没有这一项」，不写进映射；写进去会变成一条空键的映射，
+    // 解析时每一列都能匹配上它。
+    if (column.trim()) mapping[column.trim()] = metric
+  }
   return mapping
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, BookOpenCheck, Check, CircleAlert, CircleCheck, Database, Layers3, Lightbulb, Link2, PencilLine, RefreshCw, Search, ShieldCheck, Target } from 'lucide-react'
+import { ArrowRight, BookOpenCheck, Check, CircleAlert, CircleCheck, Database, Film, Layers3, Lightbulb, Link2, PencilLine, RefreshCw, Search, ShieldCheck, Target } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import { api, type ApiExperience, type ApiExperienceAudit, type ApiExperienceReference, type ApiExperienceStatus, type ReviseExperienceBody } from '../data/api'
 import { ExperienceReviseForm } from './ExperienceReviseForm'
@@ -10,6 +10,8 @@ import {
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
 import { shortId } from '../data/shortId'
+import { consumerLabel, outcomeLabel } from '../data/experienceReference'
+import { useInsightAssets } from '../data/useInsightAssets'
 
 type ViewTarget = ApiExperienceStatus | 'references'
 
@@ -33,7 +35,7 @@ const emptyHints: Record<ViewTarget, string> = {
   confirmed: '当前 Project 暂无已确认经验。只有已确认的结论才允许被下游引用。',
   needs_review: '当前 Project 暂无待复审经验。已确认结论出现反例时可申请复审。',
   retired: '当前 Project 暂无已失效经验。失效是逻辑删除，记录仍可追溯。',
-  references: '当前 Project 暂无引用记录。经验被 Brief 或创意任务引用后会出现在这里。',
+  references: '当前 Project 暂无引用记录。经验被 Brief、创意任务或实验引用后会出现在这里。',
 }
 
 export function ExperienceLibraryPage({ state, activeView }: { state: DataState; activeView: string }) {
@@ -50,6 +52,8 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
   const [busy, setBusy] = useState(false)
   const [revising, setRevising] = useState(false)
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
+  // 经验里存的样例素材是一串 ID。要显示成人能读的名字，得有这张对照表。
+  const assetIndex = useInsightAssets(currentProject.id)
 
   const loadList = useCallback(async () => {
     if (!currentProject.id) return
@@ -143,15 +147,22 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
     if (!selected) return
     setBusy(true)
     try {
+      const wasPending = selected.status === 'pending'
       const next = await api.reviseExperience(currentProject.id, selected.id, body)
       setRevising(false)
       await loadList()
-      // 修订出来的是一条新记录，旧的那条被标成被取代后就不在这个列表里了。
+      // 修订出来的是一条新记录，旧的那条不一定还在当前这个列表里：它要么已经退休
+      // （前身本来就没确认过），要么还挂在「已确认」那一栏等着交班。
       // 不把选中项挪过去，右边会空掉一屏，看着像是刚才那一下把东西弄丢了。
       setSelectedId(next.id)
+      // 前身的去向必须写清楚。退休和「还在用」是两回事，含糊过去，
+      // 下次有人找不到旧那条会以为被删了。
+      const previous = wasPending
+        ? '原来那一版没确认过，已经退休，在「已退休」里还能查到。'
+        : '原来那一版继续可引用，等这一版被确认后才交班。'
       setNotice(next.status === target
-        ? `已保存为第 ${next.revision} 次修订，原来那条保留可查。`
-        : `已保存为第 ${next.revision} 次修订，它回到「${statusLabels[next.status]}」等人确认；原来那条保留可查。`)
+        ? `已保存为第 ${next.revision} 次修订。${previous}`
+        : `已保存为第 ${next.revision} 次修订，它回到「${statusLabels[next.status]}」等人确认。${previous}`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '修订失败，请稍后重试。')
     } finally {
@@ -177,8 +188,8 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
             {listState === 'error' ? <div className="panel-empty">引用记录读取失败，请重试。</div> : null}
             {listState === 'ready' && !filteredReferences.length ? <div className="panel-empty">{emptyHints.references}</div> : null}
             {filteredReferences.map(reference => <div role="listitem" key={reference.id} className="prelaunch-row">
-              <span><b>{reference.consumer_kind} · {shortId(reference.consumer_id)}</b><small>经验 {shortId(reference.experience_id)} · {formatTime(reference.created_at)}</small></span>
-              <span>{reference.outcome || '未记录'}</span>
+              <span><b>{consumerLabel(reference.consumer_kind)} · {shortId(reference.consumer_id)}</b><small>经验 {shortId(reference.experience_id)} · {formatTime(reference.created_at)}</small></span>
+              <span>{outcomeLabel(reference)}</span>
               <span>{reference.note || '无备注'}</span>
               <span><Link2 size={14}/>v{reference.version}</span>
             </div>)}
@@ -187,7 +198,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
         <aside className="prelaunch-detail">
           <span className="section-label">说明</span><h3>引用记录是经验价值的唯一证据</h3>
           <p>没有引用记录的经验，无法证明它影响过任何一次决策。</p>
-          <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>怎么产生</small><b>在投前洞察页把结论「引用到 Brief」或「引用到创意任务」，会在这里留下一条记录。</b></span></div>
+          <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>怎么产生</small><b>在投前洞察页把结论「引用到 Brief」或「引用到创意任务」，会在这里留下一条记录。实验中心给一条实验下结论时，判定也会自动记回它验证的那条经验。</b></span></div>
           <div className="prelaunch-fact"><Database size={17}/><span><small>为什么保留失效经验的记录</small><b>经验失效后引用历史仍然可读，便于回溯当时依据的是哪个版本的结论。</b></span></div>
           {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
         </aside>
@@ -231,6 +242,9 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
           <div className="prelaunch-fact"><Target size={17}/><span><small>适用范围</small><b>{describeApplicability(selected.applicability)}</b></span></div>
           <div className="prelaunch-fact"><Database size={17}/><span><small>数据依据</small><b>{describeDataBasis(selected.data_basis)}</b></span></div>
           <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>内容依据</small><b>{describeContentBasis(selected.content_basis)}</b></span></div>
+          {/* 样例素材单独一行，而且换成名字。只写「示例素材 3 个」，
+              看到这条经验的人还是不知道该去看哪三条片子。 */}
+          {selected.content_basis.example_asset_versions?.length ? <div className="prelaunch-fact"><Film size={17}/><span><small>样例素材</small><b>{selected.content_basis.example_asset_versions.map(assetIndex.labelOf).join('、')}</b></span></div> : null}
           {selected.recommended_action ? <div className="prelaunch-fact"><ArrowRight size={17}/><span><small>建议动作</small><b>{selected.recommended_action}</b></span></div> : null}
           <div className="prelaunch-fact"><CircleCheck size={17}/><span><small>适用条件</small><b>{selected.conditions.length ? selected.conditions.join('；') : '未填写。没有适用条件的结论不应被直接套用。'}</b></span></div>
           <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>风险与反例</small>{selected.counterexamples.length ? selected.counterexamples.join('；') : '未记录反例。'}</span></div>
@@ -263,7 +277,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
             </div>
           </> : <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>无可用动作</small>已失效经验是逻辑删除，保留可读但不再参与流转。</span></div>}
 
-          <div className="reference-count"><BookOpenCheck size={15}/><span><b>{references.length} 条引用记录</b><small>{references.length ? references.map(reference => `${reference.consumer_kind}`).join('、') : '尚未被任何环节引用'}</small></span></div>
+          <div className="reference-count"><BookOpenCheck size={15}/><span><b>{references.length} 条引用记录</b><small>{references.length ? references.map(reference => consumerLabel(reference.consumer_kind)).join('、') : '尚未被任何环节引用'}</small></span></div>
 
           <div className="feature-stack">
             <span>状态变更记录</span>

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleAlert, FlaskConical, Layers3, Lock, RefreshCw, Ruler, TriangleAlert } from 'lucide-react'
+import { BookOpenCheck, CircleAlert, FlaskConical, Layers3, Lock, RefreshCw, Ruler, TriangleAlert } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import {
   api,
   type ApiConfidenceLevel,
+  type ApiExperience,
   type ApiExperiment,
   type ApiExperimentComparison,
   type ApiExperimentDetail,
@@ -17,6 +18,7 @@ import {
   type ApiVariantSample,
 } from '../data/api'
 import type { DataState } from '../types'
+import { shortId } from '../data/shortId'
 import { ExperimentCreateForm } from './ExperimentCreateForm'
 import { StateBoundary } from './StateBoundary'
 
@@ -143,6 +145,7 @@ export function ExperimentCenterPage({ state, activeView }: { state: DataState; 
   const [schemas, setSchemas] = useState<ApiFeatureSchema[]>([])
   const [candidates, setCandidates] = useState<ApiInsightAsset[]>([])
   const [matrix, setMatrix] = useState<ApiFeatureMatrix | null>(null)
+  const [sourceExperience, setSourceExperience] = useState<ApiExperience | null>(null)
   const [handoff, setHandoff] = useState<ExperimentHandoff | null>(null)
   const [creating, setCreating] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
@@ -206,6 +209,19 @@ export function ExperimentCenterPage({ state, activeView }: { state: DataState; 
     return () => { cancelled = true }
   }, [currentProject.id, detail?.experiment.asset_type, target])
 
+  // 出处：这次实验验的是哪条经验。实验一直记着这个 ID 却从不显示，人在这一页只看得到
+  // 一句假设，看不出它是从投前洞察哪张卡拿过来的——而结论要写回去的正是那张卡。
+  // 用血缘接口按 ID 取：经验没有单条读取的端点，血缘里一定包含它自己。
+  useEffect(() => {
+    const sourceId = detail?.experiment.source_experience_id
+    if (!currentProject.id || !sourceId) { setSourceExperience(null); return }
+    let cancelled = false
+    void api.listExperienceLineage(currentProject.id, sourceId)
+      .then(page => { if (!cancelled) setSourceExperience((page.items ?? []).find(item => item.id === sourceId) ?? null) })
+      .catch(() => { if (!cancelled) setSourceExperience(null) })
+    return () => { cancelled = true }
+  }, [currentProject.id, detail?.experiment.source_experience_id])
+
   const experimentAssetIds = useMemo(
     () => (detail?.experiment.variants ?? []).flatMap(variant => variant.asset_ids ?? []),
     [detail],
@@ -261,7 +277,9 @@ export function ExperimentCenterPage({ state, activeView }: { state: DataState; 
   const concludeExperiment = () => run(async () => {
     if (!detail) return
     await api.concludeInsightExperiment(currentProject.id, selectedId, detail.experiment.version, interpretation.trim())
-    setNotice('结论已登记。判定和解读一起冻住，之后只能读不能改。')
+    setNotice(detail.experiment.source_experience_id
+      ? '结论已登记，并且记回了它验证的那条经验——去「经验库 · 引用记录」能看到这次实验判了什么。'
+      : '结论已登记。判定和解读一起冻住，之后只能读不能改。')
     await Promise.all([loadDetail(selectedId), loadList()])
   })
 
@@ -357,6 +375,15 @@ export function ExperimentCenterPage({ state, activeView }: { state: DataState; 
             被测变量「{experiment.variable_label}」·
             {assetTypeLabels[experiment.asset_type]}
           </b></span></div>
+          {experiment.source_experience_id ? <div className="prelaunch-fact"><BookOpenCheck size={17}/><span>
+            <small>出处 · 这次验的是哪条经验</small><b>
+              {sourceExperience
+                ? `${sourceExperience.conclusion}（第 ${sourceExperience.revision} 版）`
+                : `经验 ${shortId(experiment.source_experience_id)}（当前读不到，可能已失效）`}
+              {experiment.status === 'concluded'
+                ? ' · 这次的判定已记回这条经验，在经验库的「引用记录」里能查到。'
+                : ' · 下结论后，判定会自动记回这条经验。'}
+            </b></span></div> : null}
           <div className="prelaunch-fact"><Layers3 size={17}/><span><small>观察窗口</small><b>
             {formatDate(readout.window.start)} ~ {formatDate(readout.window.end)} ·
             每组门槛 {formatCount(experiment.min_impressions)} 次展示
@@ -492,8 +519,13 @@ function VariableMatrix({ detail, matrix }: { detail: ApiExperimentDetail; matri
   if (!assetIds.length) return <div className="panel-empty">各组还没有素材，摊不开矩阵。先去「A/B 变体」把素材放进去。</div>
   if (!matrix) return <div className="panel-empty">正在读取素材特征…</div>
 
+  // 哪一组当参照。基线组是建实验时人指定的那一组，控住的特征以它为准；
+  // 没标基线就退回第一组，总得有个比较的原点。
+  const baselineIndex = Math.max(0, experiment.variants.findIndex(variant => variant.is_baseline))
+
   const rows = keys.map(key => {
     const row = matrix.rows?.find(item => item.key === key)
+    const tested = key === experiment.variable_key
     const cells = experiment.variants.map(variant => {
       const values = (variant.asset_ids ?? []).map(assetId => {
         const cell = row?.cells?.find(item => item.asset_id === assetId)
@@ -502,13 +534,27 @@ function VariableMatrix({ detail, matrix }: { detail: ApiExperimentDetail; matri
       const distinct = Array.from(new Set(values))
       return { variantId: variant.id, values: distinct, mixed: distinct.length > 1 }
     })
+    // 组内一致还不够，跨组也得看。只看组内的话，「A 组全是有字幕、B 组全是无字幕」
+    // 这种最典型的混杂一格黄都不会亮，而脚注还写着「出现不同说明不止一个变量在变」——
+    // 等于发了张假的通行证。
+    const signature = (index: number) => cells[index]?.values.join(' / ') ?? ''
+    const reference = signature(baselineIndex)
+    const marked = cells.map((cell, index) => ({
+      ...cell,
+      // 控住的特征：和基线组不一样，就是这次比较里变的不止一个变量。
+      offBaseline: !tested && index !== baselineIndex && signature(index) !== reference,
+      // 被测变量：和另一组取值相同，就是这两组根本没形成对照。
+      duplicated: tested && cells.some((_, other) => other !== index && signature(other) === signature(index)),
+    }))
     return {
       key,
-      label: row?.label ?? (key === experiment.variable_key ? experiment.variable_label : key),
-      tested: key === experiment.variable_key,
-      cells,
+      label: row?.label ?? (tested ? experiment.variable_label : key),
+      tested,
+      cells: marked,
     }
   })
+
+  const conflicted = rows.filter(row => row.cells.some(cell => cell.mixed || cell.offBaseline || cell.duplicated))
 
   return <div className="experiment-matrix" role="table" aria-label="变量矩阵">
     <div className="experiment-matrix-row header" role="row">
@@ -522,14 +568,19 @@ function VariableMatrix({ detail, matrix }: { detail: ApiExperimentDetail; matri
         <b>{row.label}</b>
         <small>{row.tested ? '被测变量' : '要求控住'}</small>
       </span>
-      {row.cells.map(cell => <span role="cell" key={cell.variantId} className={cell.mixed ? 'mixed' : ''}>
+      {row.cells.map(cell => <span role="cell" key={cell.variantId} className={cell.mixed || cell.offBaseline || cell.duplicated ? 'mixed' : ''}>
         {cell.values.join(' / ') || '未记录'}
         {cell.mixed ? <small>组内就不一致</small> : null}
+        {cell.offBaseline ? <small>和基线组不一样</small> : null}
+        {cell.duplicated ? <small>和另一组取值相同</small> : null}
       </span>)}
     </div>)}
     <p className="experiment-matrix-foot">
-      被测变量那一行各组必须不同——不同才有对照。其余各行各组应当相同；出现不同，
+      被测变量那一行各组必须不同——不同才有对照。其余各行要和基线组一样；不一样就标黄，
       说明这次比较里不止一个变量在变，结论要连它一起解释。
+      {conflicted.length
+        ? ` 本次有 ${conflicted.length} 行没对齐：${conflicted.map(row => row.label).join('、')}。`
+        : ' 本次各行都对齐了。'}
     </p>
   </div>
 }

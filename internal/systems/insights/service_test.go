@@ -247,6 +247,65 @@ func TestProjectReferenceListSpansAllExperiences(t *testing.T) {
 	}
 }
 
+func TestConcludedExperimentReportsBackToItsSourceExperience(t *testing.T) {
+	t.Parallel()
+	// 「拿去验证」把假设送进实验中心，实验下了结论就必须回到这条经验上。
+	// 少了这一步，一条被推翻的假设在经验库里还是原样躺着，下一个人照着它继续做。
+	service := testService()
+	actor := testActor()
+	experience := confirmedExperience(t, service, actor)
+	experiment := Experiment{
+		ID: "insightexperiment_1", OrganizationID: actor.OrganizationID, ProjectID: "project_1",
+		Title: "钩子类型 A/B", SourceExperienceID: experience.ID,
+		Status: ExperimentConcluded, Verdict: VerdictRefuted,
+		Interpretation: "换成问题式开场之后点击率反而更低，这条假设先不要外推。",
+	}
+	service.noteExperimentOnSourceExperience(context.Background(), actor, "project_1", experiment)
+
+	values, err := service.ListExperienceReferences(context.Background(), actor, "project_1", experience.ID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 {
+		t.Fatalf("实验下结论后经验上应有一条引用记录: %#v", values)
+	}
+	got := values[0]
+	// 判定是「推翻」，引用结果就得是「没采纳」——记成引用过，等于把证伪的结果藏起来。
+	if got.ConsumerKind != "experiment" || got.ConsumerID != experiment.ID || got.Outcome != ReferenceRejected {
+		t.Fatalf("reference=%#v", got)
+	}
+	if !strings.Contains(got.Note, "钩子类型 A/B") || !strings.Contains(got.Note, "推翻这条假设") ||
+		!strings.Contains(got.Note, experiment.Interpretation) {
+		t.Fatalf("备注要能独立读懂是哪次实验、判了什么、人怎么解读: %q", got.Note)
+	}
+
+	// 空白新建的实验没有出处，不该凭空往哪条经验上记一笔。
+	service.noteExperimentOnSourceExperience(context.Background(), actor, "project_1", Experiment{
+		ID: "insightexperiment_2", Status: ExperimentConcluded, Verdict: VerdictSupported,
+	})
+	all, err := service.ListProjectExperienceReferences(context.Background(), actor, "project_1", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("没有出处的实验不该产生引用记录: %#v", all)
+	}
+}
+
+func TestExperimentVerdictMapsToReferenceOutcome(t *testing.T) {
+	t.Parallel()
+	// 「看不出差别」既没证实也没推翻。把它记成采纳或没采纳，都是替人下了实验没下的判断。
+	for verdict, want := range map[ExperimentVerdict]ExperienceReferenceOutcome{
+		VerdictSupported:    ReferenceAdopted,
+		VerdictRefuted:      ReferenceRejected,
+		VerdictInconclusive: ReferenceReferenced,
+	} {
+		if got := experimentReferenceOutcome(verdict); got != want {
+			t.Fatalf("verdict=%q outcome=%q want=%q", verdict, got, want)
+		}
+	}
+}
+
 func TestExperienceTransitionRejectsStaleVersion(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -255,6 +314,112 @@ func TestExperienceTransitionRejectsStaleVersion(t *testing.T) {
 	if _, err := service.RetireExperience(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
 		ExpectedVersion: experience.Version - 1, Reason: "版本已过期。",
 	}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestExperienceInheritsTheReportWindow(t *testing.T) {
+	t.Parallel()
+	// 经验卡上「统计窗口」这一格，录入表单里没有，也不该有——报告已经定格了
+	// 这个判断基于哪一段数据。不自动带过来，这一格就永远是空的，
+	// 引用这条经验的人无从判断它说的是哪一段时间的事。
+	service := testService()
+	actor := testActor()
+	repository, ok := service.Repository.(*memoryRepository)
+	if !ok {
+		t.Fatal("测试仓库类型变了")
+	}
+	report, err := service.CreateReport(context.Background(), actor, "project_1", CreateReportRequest{ExecutionID: "deliveryexecution_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 窗口本来是建报告时由投后分析那一步定格的。这里直接补上，
+	// 免得把整条分析链拖进这个用例。
+	stored := repository.reports[report.ID]
+	stored.WindowStart, stored.WindowEnd = "2026-07-01", "2026-07-20"
+	repository.reports[report.ID] = stored
+	report, err = service.ConfirmReport(context.Background(), actor, "project_1", report.ID, report.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	experience, err := service.CreateExperience(context.Background(), actor, "project_1", report.ID, report.Version, CreateExperienceRequest{
+		Conclusion: "面对新品种草时，首图保持单一利益点。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if experience.DataBasis.WindowStart == nil || experience.DataBasis.WindowEnd == nil {
+		t.Fatalf("经验要继承报告的统计窗口，实际是 %#v", experience.DataBasis)
+	}
+	if got := experience.DataBasis.WindowStart.Format("2006-01-02"); got != "2026-07-01" {
+		t.Fatalf("窗口起点=%s", got)
+	}
+	if got := experience.DataBasis.WindowEnd.Format("2006-01-02"); got != "2026-07-20" {
+		t.Fatalf("窗口终点=%s", got)
+	}
+	revision, err := service.ReviseExperience(context.Background(), actor, "project_1", experience.ID, ReviseExperienceRequest{
+		ExpectedVersion: experience.Version,
+		Conclusion:      "面对新品种草时，首图保持单一利益点，并在标题重复该利益点。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision.DataBasis.WindowStart == nil || revision.DataBasis.WindowEnd == nil {
+		t.Fatalf("修订改的是说法不是数据来源，窗口不能在这一步丢掉：%#v", revision.DataBasis)
+	}
+}
+
+func TestRevisingAnUnconfirmedExperienceRetiresIt(t *testing.T) {
+	t.Parallel()
+	// 修订一条还没确认的经验时，前身必须当场退休。两版同时挂在待确认队列里，
+	// 看上去就是两条各自独立的经验；确认了旧的那一版，刚补进去的内容全丢，
+	// 而且没有任何地方会提示丢了。
+	service := testService()
+	actor := testActor()
+	report, err := service.CreateReport(context.Background(), actor, "project_1", CreateReportRequest{ExecutionID: "deliveryexecution_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err = service.ConfirmReport(context.Background(), actor, "project_1", report.ID, report.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := service.CreateExperience(context.Background(), actor, "project_1", report.ID, report.Version, CreateExperienceRequest{
+		Conclusion: "面对新品种草时，首图保持单一利益点。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := service.ReviseExperience(context.Background(), actor, "project_1", original.ID, ReviseExperienceRequest{
+		ExpectedVersion: original.Version,
+		Conclusion:      "面对新品种草时，首图保持单一利益点，并在标题重复该利益点。",
+		Reason:          "补充标题层面的适用条件。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := service.ListExperiences(context.Background(), actor, "project_1", ExperiencePending, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != revision.ID {
+		t.Fatalf("待确认队列里只该剩最新那一版，实际是 %#v", pending)
+	}
+	lineage, err := service.ListExperienceLineage(context.Background(), actor, "project_1", revision.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lineage) != 2 {
+		t.Fatalf("两版都要留在同一条脉络里可查，实际是 %#v", lineage)
+	}
+	previous := lineage[0]
+	if previous.ID != original.ID || previous.Status != ExperienceRetired || previous.SupersededByID != revision.ID {
+		t.Fatalf("前身要退休并指向新版本，实际是 %#v", previous)
+	}
+	// 退休了就不能再从它身上修订，否则会分出一条谁也说不清的支线。
+	if _, err := service.ReviseExperience(context.Background(), actor, "project_1", original.ID, ReviseExperienceRequest{
+		ExpectedVersion: previous.Version, Conclusion: "再改一版。",
+	}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -508,6 +673,19 @@ func (r *memoryRepository) CreateExperience(_ context.Context, value Experience,
 	r.experiences[value.ID] = value
 	r.order = append(r.order, value.ID)
 	r.audits = append(r.audits, audit)
+	return value, nil
+}
+func (r *memoryRepository) ReviseExperience(ctx context.Context, input ReviseExperienceInput) (Experience, error) {
+	value, err := r.CreateExperience(ctx, input.Value, input.Audit)
+	if err != nil || input.RetireSource == nil {
+		return value, err
+	}
+	retired, err := r.TransitionExperience(ctx, *input.RetireSource)
+	if err != nil {
+		return Experience{}, err
+	}
+	retired.SupersededByID = value.ID
+	r.experiences[retired.ID] = retired
 	return value, nil
 }
 func (r *memoryRepository) ListExperiences(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, status ExperienceStatus, _ int) ([]Experience, error) {

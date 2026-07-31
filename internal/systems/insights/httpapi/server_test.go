@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -361,6 +363,8 @@ type applicationStub struct {
 	reportWindow      insights.MetricWindow
 	droppedIndex      int
 	droppedFlag       bool
+
+	registerErr error
 }
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {
@@ -485,7 +489,7 @@ func (s *applicationStub) GetFeatureMatrix(_ context.Context, _ contract.ActorCo
 	return insights.FeatureMatrix{Assets: assets, Disclosure: "仅比较各类型都有的共同特征。"}, nil
 }
 func (s *applicationStub) RegisterDataSource(context.Context, contract.ActorContext, contract.ProjectID, insights.RegisterDataSourceRequest) (insights.DataSource, error) {
-	return s.dataSource, nil
+	return s.dataSource, s.registerErr
 }
 func (s *applicationStub) ListDataSources(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, filter insights.DataSourceFilter) ([]insights.DataSource, error) {
 	s.dataSourceFilter = filter
@@ -609,6 +613,32 @@ func TestInsightsHTTPExposesDataIngestionSurface(t *testing.T) {
 	}
 	if app.importedRows != 1 {
 		t.Fatalf("导入的行应当原样传到服务层：%d", app.importedRows)
+	}
+}
+
+// 业务层写在哨兵后面的那句中文要原样送到前端。
+//
+// 前端就是把 message 贴给用户看的。以前这里一律换成「请求参数无效」，人填错账户标识、
+// 口径还是窗口，看到的都是同一句，只能靠猜。而内部错误那一支带的是数据库原文，
+// 一个字都不能漏出去。
+func TestErrorMessageCarriesTheHumanReadableReason(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{registerErr: fmt.Errorf("%w: 账户标识只能用英文字母、数字和 - _ . : / @", insights.ErrInvalidRequest)}
+	server := New(app)
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/data-sources",
+		`{"platform":"douyin","account_ref":"品牌主账户","ingest_mode":"api"}`))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "账户标识只能用英文字母") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	app.registerErr = errors.New("Error 3988: Conversion from collation utf8mb4_general_ci into ascii_bin impossible")
+	internal := httptest.NewRecorder()
+	server.ServeHTTP(internal, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/data-sources",
+		`{"platform":"douyin","account_ref":"品牌主账户","ingest_mode":"api"}`))
+	if internal.Code != http.StatusInternalServerError || strings.Contains(internal.Body.String(), "ascii_bin") {
+		t.Fatalf("内部错误的原文不能出现在响应里：status=%d body=%s", internal.Code, internal.Body.String())
 	}
 }
 

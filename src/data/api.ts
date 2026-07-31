@@ -742,6 +742,23 @@ export type ApiInsightAsset = {
   updated_at: string
 }
 
+/**
+ * 登记素材的请求体。对应后端 insights.IndexAssetRequest。
+ *
+ * `lineage_id` 留空就是新建一条血缘；填上现有素材的 lineage_id，就是给那条创意
+ * 加一个新版本——修订号由后端接着排，人不用管。这是「同一条创意改了三版」和
+ * 「三条不同创意」的唯一区别，填错了投后分析会把它们混着比。
+ */
+export type IndexInsightAssetBody = {
+  title: string
+  source_kind: ApiAssetSourceKind
+  source_ref?: string
+  lineage_id?: string
+  asset_type?: ApiInsightAssetType
+  asset_type_source?: ApiFeatureSource
+  asset_type_confidence?: ApiConfidence
+}
+
 export type ApiInsightAssetMapping = {
   id: string
   organization_id: string
@@ -2982,6 +2999,11 @@ export const api = {
       `${insightProjectPath(projectId)}/assets?${search.toString()}`,
     )
   },
+  // 登记一个素材。正常情况下素材由创意模块产出后自动流进来，但外部投放的素材
+  // （别处剪的片子、代理商给的图文）没有那条通路，只能人在这里手工登记，
+  // 否则平台回流的广告对象认不到任何素材上，它的花费就永远算不到人头上。
+  indexInsightAsset: (projectId: string, body: IndexInsightAssetBody) =>
+    request<ApiInsightAsset>(`${insightProjectPath(projectId)}/assets`, 'POST', body),
   getInsightAsset: (projectId: string, assetId: string) =>
     request<ApiInsightAsset>(`${insightAssetPath(projectId, assetId)}`),
   listInsightAssetLineage: (projectId: string, assetId: string) =>

@@ -277,12 +277,66 @@ func (s Service) ConcludeExperiment(ctx context.Context, actor contract.ActorCon
 		return Experiment{}, fmt.Errorf("%w: 样本还没到事先定的门槛（每组 %s 次展示），现在下结论等于「凑够了就说显著」",
 			ErrInvalidState, countText(experiment.MinImpressions))
 	}
-	return s.Experiments.UpdateExperimentStatus(ctx, UpdateExperimentStatusInput{
+	concluded, err := s.Experiments.UpdateExperimentStatus(ctx, UpdateExperimentStatusInput{
 		OrganizationID: actor.OrganizationID, ProjectID: projectID, ID: experimentID,
 		ExpectedVersion: request.ExpectedVersion, From: ExperimentRunning, To: ExperimentConcluded,
 		Verdict: readout.Verdict, Interpretation: interpretation,
 		ActorID: actor.Principal.ID, Now: s.now(),
 	})
+	if err != nil {
+		return Experiment{}, err
+	}
+	s.noteExperimentOnSourceExperience(ctx, actor, projectID, concluded)
+	return concluded, nil
+}
+
+// noteExperimentOnSourceExperience 把实验结论记回它验证的那条经验。
+//
+// 「拿去验证」原本是单向的：实验记下了自己的出处，经验那边什么都不知道。结果是一条
+// 假设被实验推翻之后，经验库里它还原样躺着，看的人无从知道已经验过了，下一个人还会
+// 照着它做。这里补的是回程——引用记录在经验库和投前洞察都看得到。
+//
+// 不看经验当前状态：这条记录说的是「这次实验验的是它」，是已经发生的事实。就算这条
+// 经验后来被退休，事实也不会因此消失，反而更该留着。
+//
+// 写失败不回滚结论：实验已经落库并冻住了，这时候返回错误，人再点一次只会看到
+// 「只有已开跑的实验能下结论」，等于把结论卡死在一个改不动的状态里。少一条引用记录
+// 是可以补的缺口，卡死不是。
+func (s Service) noteExperimentOnSourceExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experiment Experiment) {
+	if strings.TrimSpace(experiment.SourceExperienceID) == "" {
+		return
+	}
+	experience, err := s.Repository.GetExperience(ctx, actor.OrganizationID, projectID, experiment.SourceExperienceID)
+	if err != nil {
+		return
+	}
+	id, err := s.idGenerator()("experienceref")
+	if err != nil {
+		return
+	}
+	now := s.now()
+	note := fmt.Sprintf("实验「%s」%s。解读：%s",
+		experiment.Title, experimentVerdictText(experiment.Verdict), experiment.Interpretation)
+	_, _ = s.Repository.CreateExperienceReference(ctx, ExperienceReference{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, ExperienceID: experience.ID,
+		ConsumerKind: "experiment", ConsumerID: experiment.ID,
+		// 解读最长 2000 字，引用备注这一列只有 1000——不截会被数据库整条打回。
+		Outcome: experimentReferenceOutcome(experiment.Verdict), Note: truncateRunes(note, 1000),
+		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+// experimentReferenceOutcome 把系统判定翻成经验库的引用结果。
+// 「看不出差别」只能记成引用过——它既没证实也没推翻，记成任何一边都是替人下判断。
+func experimentReferenceOutcome(verdict ExperimentVerdict) ExperienceReferenceOutcome {
+	switch verdict {
+	case VerdictSupported:
+		return ReferenceAdopted
+	case VerdictRefuted:
+		return ReferenceRejected
+	default:
+		return ReferenceReferenced
+	}
 }
 
 // --- 读数计算 ---

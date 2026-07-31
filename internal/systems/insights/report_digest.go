@@ -269,10 +269,14 @@ func experimentFindings(experiments []Experiment) []ReportFinding {
 // 编——而是明写它们对不上，并指出这正是实验中心存在的理由。
 func directionFindings(comparisons []VariantComparison) []ReportFinding {
 	type direction struct {
-		text       string // 「反差、问题 → 利益」
+		text       string // 「反差、问题 → 利益」，箭头指向赢的那一边
 		count      int
 		sourceRef  string
 		confidence ConfidenceLevel
+		// lift 是赢的一边相对输的一边高多少，恒为正。它和 VariantComparison.CTRLift
+		// 不是一个数：那个是 variant 相对 baseline，方向翻转后不能取负数——
+		// 相对变化不对称（3.23% 比 1.89% 高 71%，1.89% 比 3.23% 低 41.5%）。
+		lift *float64
 	}
 	type variable struct {
 		label      string
@@ -298,6 +302,24 @@ func directionFindings(comparisons []VariantComparison) []ReportFinding {
 			froms = append(froms, diff.Baseline)
 			tos = append(tos, diff.Variant)
 		}
+		// 方向按「哪边赢」定，不能照抄 baseline → variant。
+		//
+		// baseline 只是配对时花费更高的那一个（buildComparisons 把素材按花费排序后
+		// 两两配对，排在前面的当 baseline），和表现好坏毫无关系。照抄的结果是：
+		// A 版点击率 3.23%、B 版 1.89%，报告却写「下一轮继续按「钩子类型（问题 → 利益）」
+		// 这个方向做」——把输了 41% 的那一版推荐给下一轮，而且盖着「可归因」的章。
+		high, low := item.VariantRates.CTR, item.BaselineRates.CTR
+		winner, loser, sourceRef := tos, froms, item.VariantAssetID
+		if high == nil || low == nil {
+			// 判成可归因的前提是两边都过了充分样本门槛，CTR 不可能算不出来。
+			// 真走到这里说明判定机器改过了，这时候宁可少一条建议也不能瞎猜方向。
+			continue
+		}
+		if *high < *low {
+			high, low = low, high
+			winner, loser, sourceRef = froms, tos, item.BaselineAssetID
+		}
+
 		varKey := strings.Join(keys, "+")
 		entry := byVariable[varKey]
 		if entry == nil {
@@ -305,13 +327,14 @@ func directionFindings(comparisons []VariantComparison) []ReportFinding {
 			byVariable[varKey] = entry
 			order = append(order, varKey)
 		}
-		dirText := fmt.Sprintf("%s → %s", strings.Join(froms, "、"), strings.Join(tos, "、"))
+		dirText := fmt.Sprintf("%s → %s", strings.Join(loser, "、"), strings.Join(winner, "、"))
 		if existing := entry.directions[dirText]; existing != nil {
 			existing.count++
 			continue
 		}
 		entry.directions[dirText] = &direction{
-			text: dirText, count: 1, sourceRef: item.VariantAssetID, confidence: item.Confidence,
+			text: dirText, count: 1, sourceRef: sourceRef, confidence: item.Confidence,
+			lift: relativeChange(low, high),
 		}
 		entry.order = append(entry.order, dirText)
 	}
@@ -340,6 +363,11 @@ func directionFindings(comparisons []VariantComparison) []ReportFinding {
 		if only.count > 1 {
 			text = fmt.Sprintf("下一轮可以继续按「%s（%s）」这个方向做：本轮有 %d 组素材对比都指向它，且都是可归因的差异。",
 				entry.label, only.text, only.count)
+		}
+		// 把幅度写出来，读的人才知道这条建议值不值得为它改流程：
+		// 「相对高 2%」和「相对高 71%」是两件事，光看方向分不出来。
+		if only.lift != nil {
+			text += fmt.Sprintf("箭头指向的那一边，本轮点击率相对高 %.1f%%。", *only.lift*100)
 		}
 		findings = append(findings, ReportFinding{
 			Kind:       SectionRecommendation,

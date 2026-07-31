@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ArrowRight, BookOpenCheck, CircleAlert, CircleCheck, Database, FileInput,
+  ArrowRight, BookOpenCheck, CircleAlert, CircleCheck, Database, FileInput, Film,
   FlaskConical, Layers3, Lightbulb, Link2, RefreshCw, Search, ShieldCheck, Target,
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
@@ -19,6 +19,8 @@ import type { DataState, SystemKey } from '../types'
 import { stashExperimentHandoff } from './ExperimentCenterPage'
 import { StateBoundary } from './StateBoundary'
 import { shortId } from '../data/shortId'
+import { consumerLabel, outcomeLabel } from '../data/experienceReference'
+import { useInsightAssets } from '../data/useInsightAssets'
 
 /**
  * 投前洞察（03-material-insight-system.md §8，导航见 19 §5.2）。
@@ -82,24 +84,7 @@ const emptyHints: Record<ViewTarget, string> = {
   recommendation: '当前筛选下没有建议类结论。建议通常在复盘报告确认时沉淀，可以先去报告中心看看有没有待确认的复盘。',
   pattern: '还没有足够的已确认结论来统计特征。特征来自内容依据字段，如果结论里没写清依据了哪些内容特征，这里就是空的。',
   risk: '当前筛选下没有未验证的假设，也没有带反例或置信偏弱的结论。这不代表没有风险，只代表还没有人把风险写下来。',
-  reference: '这个项目还没有任何引用记录。从左边的证据或建议视图里引用一条，这里就会出现。',
-}
-
-// consumer_kind 后端没有受控词表（自由文本，≤32 字），这里只翻译已知的几种，
-// 其余原样显示——猜错比显示英文更糟。
-const consumerLabels: Record<string, string> = {
-  brief: 'Brief',
-  strategy: '策略',
-  creative_task: '创意任务',
-  creative: '创意',
-  report: '报告',
-}
-
-const outcomeLabels: Record<string, string> = {
-  referenced: '已引用',
-  adopted: '照做了',
-  modified: '改了之后用的',
-  rejected: '没采纳',
+  reference: '这个项目还没有任何引用记录。从左边的证据或建议视图里引用一条，或者让一次实验下结论，这里就会出现。',
 }
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
@@ -122,6 +107,8 @@ export function PreLaunchInsightPage({ state, activeView, onOpenProject }: {
   const [notice, setNotice] = useState('')
   const [busyTarget, setBusyTarget] = useState<'brief' | 'creative' | ''>('')
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
+  // 洞察卡里的样例素材是一串 ID，这张对照表把它换成人能读的名字。
+  const assetIndex = useInsightAssets(currentProject.id)
 
   const load = useCallback(async () => {
     if (!currentProject.id) return
@@ -314,7 +301,7 @@ export function PreLaunchInsightPage({ state, activeView, onOpenProject }: {
             ? '这个视图统计的是特征出现次数，没有单条结论可选。要看某个特征背后的结论，切到「策略证据」按关键词搜。'
             : '引用记录是只读的：它记录已经发生过的引用，不能在这里补记。'}</div>
           : selected
-            ? <CardDetail card={selected} busy={busyTarget} onCite={cite} onVerify={verify}/>
+            ? <CardDetail card={selected} busy={busyTarget} onCite={cite} onVerify={verify} assetLabel={assetIndex.labelOf}/>
             : <div className="panel-empty">左边选一条结论，查看它的九个字段和适用边界。</div>}
         {selected && (target === 'evidence' || target === 'recommendation' || target === 'risk')
           ? <button className="text-button prelaunch-deeplink"
@@ -385,20 +372,21 @@ function ReferenceTable({ references, cards }: { references: ApiExperienceRefere
         {/* 引用记录会比当前筛选出的卡更多：被引用的可能是旧版本，也可能已失效或被筛掉。
             这些记录必须留着——引用发生在当时，不因为结论后来变了就当没发生过。 */}
         <b>{conclusions.get(reference.experience_id) ?? '（引用的是旧版本或已失效的结论，当前列表里看不到它）'}</b>
-        <small>{reference.experience_id}</small>
+        <small>经验 {shortId(reference.experience_id)}</small>
       </span>
-      <span>{consumerLabels[reference.consumer_kind] ?? reference.consumer_kind}</span>
-      <span>{outcomeLabels[reference.outcome] ?? reference.outcome}</span>
+      <span>{consumerLabel(reference.consumer_kind)}</span>
+      <span>{outcomeLabel(reference)}</span>
       <span>{formatTime(reference.created_at)}</span>
     </div>)}
   </div>
 }
 
-function CardDetail({ card, busy, onCite, onVerify }: {
+function CardDetail({ card, busy, onCite, onVerify, assetLabel }: {
   card: ApiInsightCard
   busy: 'brief' | 'creative' | ''
   onCite: (card: ApiInsightCard, consumer: 'brief' | 'creative') => Promise<void>
   onVerify: (card: ApiInsightCard) => void
+  assetLabel: (assetId: string) => string
 }) {
   // 只有事实和统计观察能被当证据引用（03 §2 目标⑥）。假设和建议也允许引用，
   // 但要先告诉引用的人它的分量不一样，否则 Brief 里会出现「根据经验」而背后是猜测。
@@ -412,6 +400,11 @@ function CardDetail({ card, busy, onCite, onVerify }: {
     <div className="prelaunch-fact"><Target size={17}/><span><small>适用范围</small><b>{describeApplicability(card.applicability)}</b></span></div>
     <div className="prelaunch-fact"><Database size={17}/><span><small>数据依据</small><b>{describeDataBasis(card.data_basis)}</b></span></div>
     <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>内容依据</small><b>{describeContentBasis(card.content_basis)}</b></span></div>
+    {/* 样例素材换成名字单独列出来。要照着这条经验做下一版创意的人，
+        第一件事就是去看这几条片子长什么样；只给个数量他还得再问一遍。 */}
+    {card.content_basis.example_asset_versions?.length
+      ? <div className="prelaunch-fact"><Film size={17}/><span><small>样例素材</small><b>{card.content_basis.example_asset_versions.map(assetLabel).join('、')}</b></span></div>
+      : null}
     {/* 提示文案由后端给（ConfidenceLevel.Hint）：这句话决定别人敢拿它做什么，
         前端再写一份迟早会和后端说得不一样。 */}
     <div className="prelaunch-fact"><ShieldCheck size={17}/><span><small>置信提示</small><b>

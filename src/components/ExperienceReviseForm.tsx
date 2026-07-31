@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Save, X } from 'lucide-react'
 import type {
   ApiApplicability, ApiConfidenceLevel, ApiContentBasis, ApiDataBasis,
   ApiExperience, ApiInsightCardType, ReviseExperienceBody,
 } from '../data/api'
 import { cardTypeLabels, cardTypeMeaning, confidenceLabels } from '../data/insightCard'
+import { useProject } from '../context/ProjectContext'
+import { useInsightAssets } from '../data/useInsightAssets'
+import { shortId } from '../data/shortId'
 
 /**
  * 补齐一条经验的依据。
@@ -37,8 +40,27 @@ export function ExperienceReviseForm({ experience, busy, onCancel, onSubmit }: {
   const [metrics, setMetrics] = useState(joinList(experience.data_basis.metrics))
   const [baseline, setBaseline] = useState(experience.data_basis.baseline ?? '')
   const [features, setFeatures] = useState(joinList(experience.content_basis.features))
-  const [examples, setExamples] = useState(joinList(experience.content_basis.example_asset_versions))
+  // 样例素材存的是素材 ID，只能从素材库里挑，不能手打。手打出来的串谁也验证不了，
+  // 显示时又换不回名字，这一格就白填了。
+  const [examples, setExamples] = useState<string[]>(experience.content_basis.example_asset_versions ?? [])
+  const [assetQuery, setAssetQuery] = useState('')
   const [contentNote, setContentNote] = useState(experience.content_basis.note ?? '')
+  const { currentProject } = useProject()
+  const { assets, loading: assetsLoading } = useInsightAssets(currentProject.id)
+
+  const visibleAssets = useMemo(() => {
+    const keyword = assetQuery.trim().toLowerCase()
+    if (!keyword) return assets
+    return assets.filter(asset => `${asset.title} ${asset.id}`.toLowerCase().includes(keyword))
+  }, [assets, assetQuery])
+
+  // 早先手打进来的 ID 现在可能在素材库里找不到（打错了，或者素材被换了血缘）。
+  // 换成选择器不能把它们悄悄抹掉——那等于替人删了他填过的东西。列出来让人自己决定。
+  const strays = useMemo(() => examples.filter(id => !assets.some(asset => asset.id === id)),
+    [examples, assets])
+
+  const toggleExample = (id: string) => setExamples(current =>
+    current.includes(id) ? current.filter(item => item !== id) : [...current, id])
   const [conditions, setConditions] = useState(experience.conditions.join('\n'))
   const [counterexamples, setCounterexamples] = useState(experience.counterexamples.join('\n'))
   const [reason, setReason] = useState('')
@@ -67,7 +89,7 @@ export function ExperienceReviseForm({ experience, busy, onCancel, onSubmit }: {
     }
     const contentBasis: ApiContentBasis = {
       features: splitList(features),
-      example_asset_versions: splitList(examples),
+      example_asset_versions: examples,
       note: contentNote.trim(),
     }
     onSubmit({
@@ -134,7 +156,25 @@ export function ExperienceReviseForm({ experience, busy, onCancel, onSubmit }: {
     <span className="section-label">内容依据 · 指的是素材上的什么</span>
     <div className="revise-grid">
       <label><small>特征</small><input value={features} onChange={event => setFeatures(event.target.value)} placeholder="钩子类型, 开场节奏"/></label>
-      <label><small>样例素材版本</small><input value={examples} onChange={event => setExamples(event.target.value)} placeholder="assetversion_xxx"/></label>
+    </div>
+
+    <div className="asset-picker">
+      <small>样例素材 · 这条结论看的是哪几条素材（已选 {examples.length} 条）</small>
+      <input aria-label="搜索素材" value={assetQuery} onChange={event => setAssetQuery(event.target.value)} placeholder="按名字或 ID 搜素材"/>
+      <div className="asset-picker-list" role="group" aria-label="样例素材">
+        {assetsLoading ? <p className="revise-hint">正在读取当前 Project 的素材…</p> : null}
+        {!assetsLoading && !assets.length ? <p className="revise-hint">当前 Project 还没有登记素材，先去「分析素材库」登记，这里才挑得到。</p> : null}
+        {!assetsLoading && assets.length && !visibleAssets.length ? <p className="revise-hint">没有匹配的素材。</p> : null}
+        {visibleAssets.map(asset => <label key={asset.id} className="asset-picker-item">
+          <input type="checkbox" checked={examples.includes(asset.id)} onChange={() => toggleExample(asset.id)}/>
+          <span><b>{asset.title}</b><small>v{asset.revision} · {shortId(asset.id)}</small></span>
+        </label>)}
+      </div>
+      {strays.length ? <p className="revise-hint">
+        另有 {strays.length} 个填过但在当前素材库里找不到的 ID（{strays.map(shortId).join('、')}），会照原样保留。
+        要去掉的话，点一下它自己：
+        {strays.map(id => <button key={id} type="button" className="text-button" onClick={() => toggleExample(id)}>{shortId(id)}</button>)}
+      </p> : null}
     </div>
     <label className="experience-reason"><small>内容备注</small>
       <input value={contentNote} onChange={event => setContentNote(event.target.value)} placeholder="例如：三条样例都是前 3 秒出人脸"/>

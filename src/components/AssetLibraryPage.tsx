@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleAlert, CircleCheck, Database, GitBranch, Layers3, Lightbulb, Link2, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { CircleAlert, CircleCheck, Database, GitBranch, Layers3, Lightbulb, Link2, Plus, RefreshCw, Search, Sparkles } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import {
   api,
   type ApiAnalysisStatus,
+  type ApiAssetSourceKind,
   type ApiConfidence,
   type ApiFeatureSchema,
   type ApiFeatureValue,
@@ -91,6 +92,7 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
   const [selectedId, setSelectedId] = useState('')
   const [query, setQuery] = useState('')
   const [notice, setNotice] = useState('')
+  const [indexing, setIndexing] = useState(false)
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
 
   const loadList = useCallback(async () => {
@@ -129,7 +131,8 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
   }, [currentProject.id, target])
 
   useEffect(() => { void loadList() }, [loadList])
-  useEffect(() => { setNotice(''); setQuery('') }, [target])
+  // 换视图就把表单收起来：填到一半切走再切回来，人会以为还在填刚才那一条。
+  useEffect(() => { setNotice(''); setQuery(''); setIndexing(false) }, [target])
 
   const keyword = query.trim().toLowerCase()
 
@@ -215,7 +218,12 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
       <section className="prelaunch-main">
         <div className="core-flow-toolbar">
           <div><span className="section-label">ASSET LIBRARY</span><h2>{header.title}</h2><p>当前 Project：{currentProject.name}。{header.lead}</p></div>
-          <button className="secondary-button" disabled={listState === 'loading'} onClick={() => { void loadList() }}><RefreshCw size={15}/>刷新</button>
+          <div className="prelaunch-actions inline">
+            {target === 'all' || target === 'lineage'
+              ? <button className="secondary-button" disabled={listState === 'loading'} onClick={() => { setNotice(''); setIndexing(true) }}><Plus size={15}/>登记素材</button>
+              : null}
+            <button className="secondary-button" disabled={listState === 'loading'} onClick={() => { void loadList() }}><RefreshCw size={15}/>刷新</button>
+          </div>
         </div>
         <div className="prelaunch-filterbar">
           <div className="search-field"><Search size={15}/><input aria-label="搜索分析素材库" value={query} onChange={event => setQuery(event.target.value)} placeholder={header.placeholder}/></div>
@@ -258,7 +266,16 @@ export function AssetLibraryPage({ state, activeView }: { state: DataState; acti
       </section>
 
       <aside className="prelaunch-detail">
-        {selectedAsset ? <>
+        {indexing ? <AssetIndexForm
+          assets={assets}
+          projectId={currentProject.id}
+          busy={listState === 'loading'}
+          onCancel={() => setIndexing(false)}
+          onDone={asset => {
+            setIndexing(false)
+            setNotice(`已登记「${asset.title}」，现在是${statusLabels[asset.analysis_status]}。${asset.asset_type ? '接下来去内容分析给它提特征。' : '先在这里确定它的内容类型，才知道要提哪套特征。'}`)
+            void loadList().then(() => setSelectedId(asset.id))
+          }}/> : selectedAsset ? <>
           <span className="section-label">素材版本</span><h3>{selectedAsset.title}</h3>
           <p>{shortId(selectedAsset.id)} · 第 {selectedAsset.revision} 版 · {statusLabels[selectedAsset.analysis_status]}</p>
           <div className="prelaunch-fact"><Layers3 size={17}/><span><small>内容类型</small><b>
@@ -396,19 +413,128 @@ function formatTime(value: string): string {
 }
 
 /**
+ * 登记一个素材。
+ *
+ * 创意模块产出的素材会自己流进来，但外部投放的（别处剪的片子、代理商给的图文）
+ * 没有那条通路。少了这个入口，平台回流的广告对象就没有任何素材可以认领过去，
+ * 花费只能挂在总盘上，后面的内容分析、对比、报告全都无从谈起。
+ *
+ * 内容类型可以先不填：填了才知道要提哪套特征，但认不准就先留着「待识别」，
+ * 比随便挑一个然后按错的特征表去提取要好。
+ */
+function AssetIndexForm({ assets, projectId, busy, onCancel, onDone }: {
+  assets: ApiInsightAsset[]
+  projectId: string
+  busy: boolean
+  onCancel: () => void
+  onDone: (asset: ApiInsightAsset) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [sourceKind, setSourceKind] = useState<ApiAssetSourceKind>('upload')
+  const [sourceRef, setSourceRef] = useState('')
+  const [assetType, setAssetType] = useState<ApiInsightAssetType | ''>('')
+  const [lineageId, setLineageId] = useState('')
+  const [error, setError] = useState('')
+  const [working, setWorking] = useState(false)
+
+  // 同一条创意的多个版本共用一个 lineage_id，列表里只需要露出每条血缘的最新一版。
+  const lineages = useMemo(() => {
+    const latest = new Map<string, ApiInsightAsset>()
+    for (const asset of assets) {
+      const seen = latest.get(asset.lineage_id)
+      if (!seen || asset.revision > seen.revision) latest.set(asset.lineage_id, asset)
+    }
+    return [...latest.values()]
+  }, [assets])
+
+  const submit = async () => {
+    if (!title.trim()) {
+      setError('先给它一个标题，后面所有地方都靠这个名字认人。')
+      return
+    }
+    setError('')
+    setWorking(true)
+    try {
+      const asset = await api.indexInsightAsset(projectId, {
+        title: title.trim(),
+        source_kind: sourceKind,
+        source_ref: sourceRef.trim() || undefined,
+        lineage_id: lineageId || undefined,
+        // 类型是人在这儿挑的，就照实记成人工判定——记成 AI 推断的话，
+        // 复核队列会以为这项已经有机器意见了，而实际上没有。
+        asset_type: assetType || undefined,
+        asset_type_source: assetType ? 'human' : undefined,
+      })
+      onDone(asset)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '登记失败，请稍后重试。')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return <>
+    <span className="section-label">登记一个素材</span>
+    <p>创意模块产出的素材会自己进来。这里登记的是外部素材——别处剪的片子、代理商给的图文，不登记就没法把平台上的广告认到它头上。</p>
+    {/* 沿用经验库修订表单的字段写法（.experience-revise）：标签在上、输入框整行。
+        右边这一栏窄，标签和输入框并排会把输入框挤到只剩十几个字符宽。 */}
+    <div className="experience-revise">
+      <label className="experience-reason"><small>标题</small>
+        <input value={title} onChange={event => setTitle(event.target.value)} placeholder="例如：夏季新品 数字人口播 A"/>
+      </label>
+      <div className="revise-grid">
+        <label><small>来源</small>
+          <select value={sourceKind} onChange={event => setSourceKind(event.target.value as ApiAssetSourceKind)}>
+            {(Object.keys(sourceKindLabels) as ApiAssetSourceKind[]).map(kind => <option key={kind} value={kind}>{sourceKindLabels[kind]}</option>)}
+          </select>
+        </label>
+        <label><small>内容类型（认不准就留空）</small>
+          <select value={assetType} onChange={event => setAssetType(event.target.value as ApiInsightAssetType | '')}>
+            <option value="">待识别</option>
+            {(Object.keys(assetTypeLabels) as ApiInsightAssetType[]).map(type => <option key={type} value={type}>{assetTypeLabels[type]}</option>)}
+          </select>
+        </label>
+      </div>
+      <label className="experience-reason"><small>来源说明（可留空）</small>
+        <input value={sourceRef} onChange={event => setSourceRef(event.target.value)} placeholder="例如：外部剪辑 20260720 交付批次"/>
+      </label>
+      <label className="experience-reason"><small>属于哪条创意</small>
+        <select value={lineageId} onChange={event => setLineageId(event.target.value)}>
+          <option value="">新的一条创意</option>
+          {lineages.map(asset => <option key={asset.lineage_id} value={asset.lineage_id}>
+            {asset.title} 的下一版（现在第 {asset.revision} 版）
+          </option>)}
+        </select>
+      </label>
+    </div>
+    {error ? <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>没有登记成功</small>{error}</span></div> : null}
+    <div className="prelaunch-actions">
+      <button className="primary-button full" disabled={busy || working} onClick={() => void submit()}>{working ? '登记中…' : '登记'}</button>
+      <button className="secondary-button full" disabled={working} onClick={onCancel}>取消</button>
+    </div>
+  </>
+}
+
+/**
  * 认领一个平台对象（doc10 §5）。认领之后这条广告的花费才算得到某一版素材头上；
  * 不认领它照样计入总盘，只是撑不起「这条创意更好」这类结论。
  *
  * 忽略也是一个正当结果——测试广告、非本项目投放，明确标掉比一直挂在队列里干净。
  * 两种动作都要写理由：后面看到某个素材的数字时，得能回溯它凭什么算进来。
+ *
+ * 已认领的对象也要能改（「数据接入 → 素材映射」复用了这个表单）。认错归属在真实
+ * 业务里很常见——投放同学换了素材没说、平台创意名和交付件对不上。之前认领一次
+ * 就锁死，错了只能去数据库改，而错误的归属会一路污染投后分析和经验。
  */
-function MappingResolveForm({ mapping, assets, projectId, onDone }: {
+export function MappingResolveForm({ mapping, assets, projectId, onDone }: {
   mapping: ApiInsightAssetMapping
   assets: ApiInsightAsset[]
   projectId: string
   onDone: (message: string) => void
 }) {
-  const [assetId, setAssetId] = useState('')
+  const claimed = mapping.status === 'matched'
+  // 改认领时把当前归属带出来：人要改的往往只是其中一项，让他从空白重选容易选错。
+  const [assetId, setAssetId] = useState(mapping.asset_id ?? '')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -429,7 +555,11 @@ function MappingResolveForm({ mapping, assets, projectId, onDone }: {
         asset_id: status === 'matched' ? assetId : undefined,
         note: note.trim(),
       })
-      onDone(status === 'matched' ? '已认领，这条对象的花费从现在起算到所选素材版本上。' : '已忽略，它的花费仍计入总盘但不归属任何素材。')
+      onDone(status === 'matched'
+        ? claimed
+          ? '已改认领。这条对象过往的花费会整体重算到新选的素材版本上，原来那一版的数字会相应减少。'
+          : '已认领，这条对象的花费从现在起算到所选素材版本上。'
+        : '已忽略，它的花费仍计入总盘但不归属任何素材。')
     } catch (cause) {
       onDone(cause instanceof Error ? cause.message : '认领失败，请稍后重试。')
     } finally {
@@ -438,7 +568,7 @@ function MappingResolveForm({ mapping, assets, projectId, onDone }: {
   }
 
   return <div className="feature-stack">
-    <span>认领这个平台对象</span>
+    <span>{claimed ? '改这个平台对象的归属' : '认领这个平台对象'}</span>
     <label className="field">归到哪个素材版本
       <select value={assetId} onChange={event => setAssetId(event.target.value)}>
         <option value="">未选择</option>
@@ -448,9 +578,10 @@ function MappingResolveForm({ mapping, assets, projectId, onDone }: {
       </select>
     </label>
     <label className="field">依据（会连同操作人一起记下来）
-      <input value={note} onChange={event => setNote(event.target.value)} placeholder="例如：平台创意名与 v2 交付件一致，投放同学确认"/>
+      <input value={note} onChange={event => setNote(event.target.value)}
+        placeholder={claimed ? '例如：原先认错了，平台创意名对应的是 B 版交付件' : '例如：平台创意名与 v2 交付件一致，投放同学确认'}/>
     </label>
-    <button className="primary-button full" disabled={busy} onClick={() => void resolve('matched')}>认领到这一版</button>
+    <button className="primary-button full" disabled={busy} onClick={() => void resolve('matched')}>{claimed ? '改到这一版' : '认领到这一版'}</button>
     <button className="secondary-button full" disabled={busy} onClick={() => void resolve('ignored')}>不属于本项目，忽略</button>
   </div>
 }

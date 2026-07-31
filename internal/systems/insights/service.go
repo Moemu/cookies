@@ -381,6 +381,18 @@ type ConfirmExperienceInput struct {
 	SupersedeAuditID string
 }
 
+// ReviseExperienceInput appends a revision to a lineage. RetireSource is set
+// only when the predecessor is still 待确认 — an unconfirmed row nobody can
+// quote yet, so retiring it costs nothing and keeps the candidate queue down to
+// one version per conclusion. A confirmed predecessor stays live instead: it is
+// what downstream still quotes, and it only hands over when the revision itself
+// is confirmed (ConfirmExperience).
+type ReviseExperienceInput struct {
+	Value        Experience
+	Audit        ExperienceAudit
+	RetireSource *TransitionExperienceInput
+}
+
 type Repository interface {
 	CreateReport(context.Context, InsightReport) (InsightReport, error)
 	ListReports(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]InsightReport, error)
@@ -388,6 +400,7 @@ type Repository interface {
 	ConfirmReport(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (InsightReport, error)
 	UpdateReportDigest(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, []ReportFinding, time.Time) (InsightReport, error)
 	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
+	ReviseExperience(context.Context, ReviseExperienceInput) (Experience, error)
 	ListExperiences(context.Context, contract.OrganizationID, contract.ProjectID, ExperienceStatus, int) ([]Experience, error)
 	GetExperience(context.Context, contract.OrganizationID, contract.ProjectID, string) (Experience, error)
 	ListExperienceLineage(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]Experience, error)
@@ -586,6 +599,13 @@ func (s Service) CreateExperience(ctx context.Context, actor contract.ActorConte
 	}
 	now := s.now()
 	card := request.withCardDefaults()
+	// 统计窗口跟着报告走，不让人手抄。报告已经定格了「这个判断基于哪一段数据」，
+	// 再让人在经验里填一遍，只会填错或者干脆不填——录入表单也确实没给这一格。
+	// 结果就是每条经验的窗口永远是空的，看到经验的人无从判断它是哪一段时间的事。
+	basis := card.DataBasis
+	if basis.WindowStart == nil && basis.WindowEnd == nil {
+		basis.WindowStart, basis.WindowEnd = reportWindow(report)
+	}
 	// A newly deposited conclusion starts as 待确认. Only an explicit confirm
 	// makes it quotable downstream.
 	value := Experience{
@@ -597,7 +617,7 @@ func (s Service) CreateExperience(ctx context.Context, actor contract.ActorConte
 		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
 		CardType: card.CardType, Confidence: card.Confidence,
 		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
-		Applicability:     card.Applicability, DataBasis: card.DataBasis, ContentBasis: card.ContentBasis,
+		Applicability:     card.Applicability, DataBasis: basis, ContentBasis: card.ContentBasis,
 		StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
 		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -606,6 +626,21 @@ func (s Service) CreateExperience(ctx context.Context, actor contract.ActorConte
 		FromStatus: "", ToStatus: ExperiencePending, Reason: "从已确认复盘报告沉淀，等待人工确认。",
 		ActorID: actor.Principal.ID, CreatedAt: now,
 	})
+}
+
+// reportWindow 把报告定格的窗口解析回时间。报告里存的是日期串，早期报告根本没有
+// 窗口；解析不出来就返回空，宁可这一格空着，也不能凭空填一个日期上去——经验被引用时
+// 没人会回头核对它。
+func reportWindow(report InsightReport) (*time.Time, *time.Time) {
+	start, err := time.Parse("2006-01-02", report.WindowStart)
+	if err != nil {
+		return nil, nil
+	}
+	end, err := time.Parse("2006-01-02", report.WindowEnd)
+	if err != nil {
+		return nil, nil
+	}
+	return &start, &end
 }
 
 // ConfirmExperience promotes 待确认 or 待复审 to 已确认. Confirming a revision
@@ -722,6 +757,12 @@ func (s Service) ReviseExperience(ctx context.Context, actor contract.ActorConte
 		reason = fmt.Sprintf("修订自 %s 第 %d 版。", source.ID, source.Revision)
 	}
 	card := request.card()
+	// 修订改的是结论的说法，不是它的数据来源——报告、执行、快照都照抄前一版，
+	// 统计窗口也一样。这一格修订表单里没有，不接着传就会在修订这一步丢掉。
+	basis := card.DataBasis
+	if basis.WindowStart == nil && basis.WindowEnd == nil {
+		basis.WindowStart, basis.WindowEnd = source.DataBasis.WindowStart, source.DataBasis.WindowEnd
+	}
 	value := Experience{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		LineageID: source.LineageID, Revision: next + 1, SupersedesID: source.ID,
@@ -732,15 +773,33 @@ func (s Service) ReviseExperience(ctx context.Context, actor contract.ActorConte
 		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
 		CardType: card.CardType, Confidence: card.Confidence,
 		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
-		Applicability:     card.Applicability, DataBasis: card.DataBasis, ContentBasis: card.ContentBasis,
+		Applicability:     card.Applicability, DataBasis: basis, ContentBasis: card.ContentBasis,
 		StatusReason: reason, StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
 		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	}
-	return s.Repository.CreateExperience(ctx, value, ExperienceAudit{
+	input := ReviseExperienceInput{Value: value, Audit: ExperienceAudit{
 		ID: auditID, OrganizationID: actor.OrganizationID, ProjectID: projectID, ExperienceID: id,
 		FromStatus: "", ToStatus: ExperiencePending, Reason: reason,
 		ActorID: actor.Principal.ID, CreatedAt: now,
-	})
+	}}
+	// 修订一条还没确认的经验时，前身必须跟着退休。留着它，待确认队列里就并排
+	// 躺着同一条经验的两版，看不出该确认哪一个；确认了旧的那一版，刚补的内容
+	// 就白补了。前身从没被确认过，也就没人引用过它，退休不会拿掉任何在用的东西。
+	if source.Status == ExperiencePending {
+		retireAuditID, idErr := s.idGenerator()("experienceaudit")
+		if idErr != nil {
+			return Experience{}, idErr
+		}
+		input.RetireSource = &TransitionExperienceInput{
+			OrganizationID: actor.OrganizationID, ProjectID: projectID, ID: source.ID,
+			ExpectedVersion: source.Version,
+			From:            []ExperienceStatus{ExperiencePending},
+			To:              ExperienceRetired,
+			Reason:          fmt.Sprintf("已被第 %d 版取代。", value.Revision),
+			ActorID:         actor.Principal.ID, Now: now, AuditID: retireAuditID,
+		}
+	}
+	return s.Repository.ReviseExperience(ctx, input)
 }
 
 // RecordExperienceReference closes the AM-014 loop: a downstream consumer says

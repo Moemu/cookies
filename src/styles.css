@@ -997,6 +997,25 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .prelaunch-boundary > svg { color: oklch(.55 .13 78); }
 .prelaunch-boundary span, .prelaunch-boundary small { display: block; }
 .prelaunch-actions { display: grid; gap: 8px; }
+/* 工具栏里的一组按钮横着排。默认那条是竖排（详情面板用），放在标题右边会顶成两行。 */
+.prelaunch-actions.inline { display: flex; gap: 8px; }
+
+/* 字段映射表单：一个指标一格。指标的英文名压在输入框下面当脚注——
+   人填的时候不需要它，但导入报错时报的是这个名字，得能对得上。 */
+.mapping-form { margin: 12px 0 4px; }
+.mapping-field { display: block; margin-bottom: 10px; }
+.mapping-field small { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.mapping-field input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 10px;
+}
+.mapping-field input:focus { border-color: var(--cobalt); outline: none; }
+.mapping-field em {
+  display: block; margin-top: 3px; color: var(--muted); font-style: normal; font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.mapping-field.required small { color: var(--text); font-weight: 600; }
+.mapping-field.required input { border-left: 2px solid var(--cobalt); }
 .sample-banner { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; margin-bottom: 14px; padding: 11px 13px; border: 1px solid oklch(.82 .12 55); background: oklch(.955 .05 62); color: var(--text); }
 .sample-banner > svg { color: oklch(.55 .17 42); margin-top: 1px; }
 .sample-banner span, .sample-banner b, .sample-banner small { display: block; }
@@ -1036,15 +1055,36 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .experience-revise > .section-label { display: block; margin-top: 14px; }
 .experience-revise .revise-hint { margin: -4px 0 6px; color: var(--muted); font-size: 9px; }
 .experience-revise .experience-reason input,
+.experience-revise .experience-reason select,
 .revise-grid input, .revise-grid select {
   width: 100%; padding: 8px 10px; border: 1px solid var(--line);
   background: var(--surface); color: var(--text); font: inherit; font-size: 10px;
 }
 .experience-revise .experience-reason input:focus,
+.experience-revise .experience-reason select:focus,
 .revise-grid input:focus, .revise-grid select:focus { border-color: var(--cobalt); outline: none; }
 .revise-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 10px; }
 .revise-grid label { display: block; min-width: 0; }
 .revise-grid small { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+/* 样例素材从素材库里勾，不给输入框：这一格存的是素材 ID，手打的串没人能验证，
+   显示时也换不回名字。列表限高滚动，素材多的项目不能把整个表单顶下去。 */
+.asset-picker { margin: 8px 0 10px; }
+.asset-picker > small { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+.asset-picker > input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 10px;
+}
+.asset-picker > input:focus { border-color: var(--cobalt); outline: none; }
+.asset-picker-list { max-height: 168px; margin-top: 6px; overflow-y: auto; border: 1px solid var(--line); }
+.asset-picker-list .revise-hint { margin: 0; padding: 10px; }
+.asset-picker-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.asset-picker-item:last-child { border-bottom: none; }
+.asset-picker-item:hover { background: var(--surface-2, rgba(0, 0, 0, 0.03)); }
+.asset-picker-item input { width: 12px; height: 12px; flex: none; accent-color: var(--cobalt); }
+.asset-picker-item span { min-width: 0; }
+.asset-picker-item b { display: block; font-size: 10px; }
+.asset-picker-item small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+.asset-picker .text-button { height: auto; margin-left: 4px; font-size: 9px; }
 .prelaunch-deeplink { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 12px 0; padding: 8px 0; color: var(--cobalt-dark); font-size: 10px; }
 /* 跨渠道比较的开关长在提示里，不在工具栏里：打开它是接受一个前提，不是换个筛选。 */
 .prelaunch-crosschannel { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 9px; cursor: pointer; }

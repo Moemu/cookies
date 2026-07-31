@@ -34,7 +34,7 @@ const structuralColumns = new Set([
  * 内置别名。表头允许写中文，省得每次导入前先去改一遍平台导出的文件。
  * 这是**兜底**，不是权威——数据源上配的 field_mapping 优先。
  */
-const columnAliases: Record<string, string> = {
+export const columnAliases: Record<string, string> = {
   对象类型: 'platform_object_kind',
   对象ID: 'platform_object_id',
   对象名称: 'platform_object_name',
@@ -51,6 +51,38 @@ const columnAliases: Record<string, string> = {
   花费分: 'spend_cents',
   消耗分: 'spend_cents',
   收入分: 'revenue_cents',
+}
+
+/**
+ * 给「字段映射」界面用的列名清单。
+ *
+ * 和上面两张集合、这张别名表同源，不另抄一份：抄一份出来，改了解析器忘了改界面，
+ * 人照着界面配出来的映射就会被解析器当成认不出的列拦掉，而错在界面上看不出来。
+ *
+ * `required` 的两个必须露出来。之前界面只列了七个数值指标，人无从知道「广告ID」
+ * 该对到什么名字上，而少了它整份表都导不进去——这是卡死，不是不好用。
+ */
+export type MetricColumn = { key: string; label: string; required?: boolean; note?: string }
+
+export const metricColumns: MetricColumn[] = [
+  { key: 'platform_object_id', label: '哪条广告（平台上的 ID）', required: true },
+  { key: 'stat_date', label: '哪一天', required: true, note: '写成 2026-07-20 这样' },
+  { key: 'platform_object_kind', label: '是广告还是创意', note: '不填按广告算' },
+  { key: 'platform_object_name', label: '平台上的名字' },
+  { key: 'impressions', label: '曝光' },
+  { key: 'clicks', label: '点击' },
+  { key: 'conversions', label: '转化' },
+  { key: 'video_views', label: '播放', note: '只有视频有' },
+  { key: 'video_completions', label: '完播', note: '只有视频有' },
+  { key: 'spend_cents', label: '花费', note: '单位是分，报表里是元要先乘 100' },
+  { key: 'revenue_cents', label: '收入', note: '单位是分，要电商回传才有' },
+]
+
+/** 系统内置认得的中文写法，反查成 canonical 名 → 别名列表。表头写这些就不用配映射。 */
+export function builtInAliasesOf(canonical: string): string[] {
+  return Object.entries(columnAliases)
+    .filter(([, target]) => target === canonical)
+    .map(([alias]) => alias)
 }
 
 /**

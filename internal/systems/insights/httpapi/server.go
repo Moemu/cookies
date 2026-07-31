@@ -457,18 +457,39 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
+// detailOr 取业务层写在哨兵错误后面的那句中文。
+//
+// 服务层几乎每处校验都写了一句人能直接读的话（「账户标识只能用英文字母…」），可这里
+// 以前一律换成「请求参数无效」——不管填错的是账户标识、口径还是窗口，人看到的都是
+// 同一句，只能靠猜。业务层那些话写了也白写。
+//
+// 只对这四个哨兵透传：INTERNAL 那一支带的是数据库和驱动的原文，那种东西不能出现在
+// 页面上。哨兵的英文前缀对不上（例如包成了「read report: ...」）就退回原来的默认句，
+// 宁可笼统，也不把内部措辞漏出去。
+func detailOr(err error, sentinel error, fallback string) string {
+	detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), sentinel.Error()+": "))
+	if detail == "" || detail == err.Error() {
+		return fallback
+	}
+	return detail
+}
+
 func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	status, code, message := http.StatusInternalServerError, "INTERNAL", "服务暂时不可用，请稍后重试"
 	retryable := true
 	switch {
 	case errors.Is(err, insights.ErrInvalidRequest):
-		status, code, message, retryable = http.StatusBadRequest, "INVALID_REQUEST", "请求参数无效", false
+		status, code, retryable = http.StatusBadRequest, "INVALID_REQUEST", false
+		message = detailOr(err, insights.ErrInvalidRequest, "请求参数无效")
 	case errors.Is(err, insights.ErrNotFound):
-		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "洞察资源不存在", false
+		status, code, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", false
+		message = detailOr(err, insights.ErrNotFound, "洞察资源不存在")
 	case errors.Is(err, insights.ErrInvalidState):
-		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "当前状态不允许该操作", false
+		status, code, retryable = http.StatusConflict, "INVALID_STATE", false
+		message = detailOr(err, insights.ErrInvalidState, "当前状态不允许该操作")
 	case errors.Is(err, insights.ErrVersionConflict):
-		status, code, message, retryable = http.StatusPreconditionFailed, "VERSION_CONFLICT", "资源已被更新，请刷新后重试", false
+		status, code, retryable = http.StatusPreconditionFailed, "VERSION_CONFLICT", false
+		message = detailOr(err, insights.ErrVersionConflict, "资源已被更新，请刷新后重试")
 	case strings.Contains(err.Error(), "scope is required"):
 		status, code, message, retryable = http.StatusForbidden, "SCOPE_REQUIRED", "缺少所需的洞察权限", false
 	}

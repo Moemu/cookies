@@ -128,10 +128,15 @@ func TestDigestMergesSameDirection(t *testing.T) {
 	// 逐条推出去就是同一句话抄三遍，读的人分不清这是三条独立发现还是一条被重复了。
 	// 而「有几组对比支持它」必须留在句子里——那才是这条建议值多少钱的关键。
 	diff := []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "问题", Variant: "利益"}}
+	// 三对都是 variant 赢，所以归并出来的方向都是「问题 → 利益」。
+	// 点击率不能省：方向是按哪边赢定的，没有点击率就定不出方向。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
-		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff},
-		{VariantTitle: "v3", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff},
-		{VariantTitle: "v5", BaselineTitle: "v3", Verdict: VerdictAttributable, ChangedFeatures: diff},
+		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff,
+			BaselineRates: ratesWithCTR(0.02), VariantRates: ratesWithCTR(0.03)},
+		{VariantTitle: "v3", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff,
+			BaselineRates: ratesWithCTR(0.02), VariantRates: ratesWithCTR(0.031)},
+		{VariantTitle: "v5", BaselineTitle: "v3", Verdict: VerdictAttributable, ChangedFeatures: diff,
+			BaselineRates: ratesWithCTR(0.021), VariantRates: ratesWithCTR(0.033)},
 	}}
 	var recommendations []string
 	for _, finding := range buildReportDigest(analysis, nil, nil) {
@@ -150,10 +155,16 @@ func TestDigestMergesSameDirection(t *testing.T) {
 func TestDigestRefusesToRecommendConflictingDirections(t *testing.T) {
 	// 同一个变量的两个相反方向都被判成可归因时，绝不能各推一条建议——
 	// 那是在同一节里叫人往两个相反的方向走，还都盖着「可归因」的章。
+	// 两对都是 variant 赢，但赢的取值一个是「利益」一个是「问题」——
+	// 归一到「哪边赢」之后方向依然相反，这才是真的打架。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
 		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable,
+			BaselineRates:   ratesWithCTR(0.02),
+			VariantRates:    ratesWithCTR(0.03),
 			ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "问题", Variant: "利益"}}},
 		{VariantTitle: "v4", BaselineTitle: "v2", Verdict: VerdictAttributable,
+			BaselineRates:   ratesWithCTR(0.02),
+			VariantRates:    ratesWithCTR(0.03),
 			ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "利益", Variant: "问题"}}},
 	}}
 	var recommendations []ReportFinding
@@ -173,5 +184,45 @@ func TestDigestRefusesToRecommendConflictingDirections(t *testing.T) {
 	}
 	if !strings.Contains(recommendations[0].Text, "实验中心") {
 		t.Fatalf("方向解不开时必须指向实验中心，实际是：%s", recommendations[0].Text)
+	}
+}
+
+func ratesWithCTR(value float64) MetricRates {
+	return MetricRates{CTR: &value}
+}
+
+func TestDigestRecommendsTheWinningDirection(t *testing.T) {
+	// 这条盯的是一个真出过的错：建议的方向照抄了 baseline → variant，
+	// 而 baseline 只是配对时花费更高的那一个，和表现好坏没有关系。
+	// 结果报告写着「继续按（问题 → 利益）这个方向做」，而利益那一版点击率低了 41%。
+	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{{
+		VariantTitle: "B版", BaselineTitle: "A版", Verdict: VerdictAttributable,
+		VariantAssetID: "asset_b", BaselineAssetID: "asset_a",
+		BaselineRates:   ratesWithCTR(0.0323),
+		VariantRates:    ratesWithCTR(0.0189),
+		ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "问题", Variant: "利益"}},
+	}}}
+	var recommendation ReportFinding
+	for _, finding := range buildReportDigest(analysis, nil, nil) {
+		if finding.Kind == SectionRecommendation && finding.Strength == VerdictAttributable {
+			recommendation = finding
+		}
+	}
+	if recommendation.Text == "" {
+		t.Fatal("可归因的对比必须推出一条建议")
+	}
+	if !strings.Contains(recommendation.Text, "利益 → 问题") {
+		t.Fatalf("建议要指向赢的那一边（问题），实际是：%s", recommendation.Text)
+	}
+	if strings.Contains(recommendation.Text, "问题 → 利益") {
+		t.Fatalf("建议指向了输的那一边，实际是：%s", recommendation.Text)
+	}
+	// 幅度按「赢的相对输的高多少」算，不是把 -41.5% 取个负号。
+	// 相对变化不对称：3.23% 比 1.89% 高 70.9%，反过来只低 41.5%。
+	if !strings.Contains(recommendation.Text, "70.9%") {
+		t.Fatalf("幅度要按赢的一边相对输的一边算，实际是：%s", recommendation.Text)
+	}
+	if recommendation.SourceRef != "asset_a" {
+		t.Fatalf("出处要指向赢的那条素材，实际是 %q", recommendation.SourceRef)
 	}
 }

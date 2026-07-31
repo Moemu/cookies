@@ -80,6 +80,30 @@ func TestRegisterDataSourceRefusesRawCredentials(t *testing.T) {
 	}
 }
 
+func TestRegisterDataSourceExplainsWhyChineseAccountRefIsRejected(t *testing.T) {
+	t.Parallel()
+	// 账户标识和凭据引用键在库里是 ascii 列。填中文不是被截断，是整条 SQL 报错，
+	// 而人在页面上只会看到「服务暂时不可用，请稍后重试」，于是原样再试一次。
+	// 这里必须在进库之前拦下来，并且说清楚该填什么。
+	service := testConnectorService()
+	actor := testActor()
+	_, err := service.RegisterDataSource(context.Background(), actor, "project_1", RegisterDataSourceRequest{
+		Platform: PlatformDouyin, AccountLabel: "主账户", AccountRef: "品牌主账户",
+		IngestMode: IngestAPI, CredentialRef: "vault://douyin/adv_1",
+	})
+	if !errors.Is(err, ErrInvalidRequest) || !strings.Contains(err.Error(), "账户标识") ||
+		!strings.Contains(err.Error(), "账户名称") {
+		t.Fatalf("中文账户标识要被拒绝，并指出该填哪一格：error=%v", err)
+	}
+	// 真实的账户 ID 和引用键长这样，不能被误伤。
+	if _, err := service.RegisterDataSource(context.Background(), actor, "project_1", RegisterDataSourceRequest{
+		Platform: PlatformDouyin, AccountLabel: "主账户", AccountRef: "adv-1234567890",
+		IngestMode: IngestAPI, CredentialRef: "vault://douyin/brand-main",
+	}); err != nil {
+		t.Fatalf("常见写法不该被拦：%v", err)
+	}
+}
+
 func TestNewDataSourceStartsAsDraftAndNeedsFieldMappingBeforeActivation(t *testing.T) {
 	t.Parallel()
 	service := testConnectorService()
