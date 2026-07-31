@@ -31,6 +31,35 @@ func TestFrozenCreativeContractFixtures(t *testing.T) {
 	}
 	assertRouteExists(t, ready, selectedRouteID)
 	assertReadyIntakeState(t, intake)
+
+	baseV3 := readFixture(t, "creative-intake-create-v3-base.json")
+	overlayCreate := readFixture(t, "creative-intake-create-v3-overlay.json")
+	mismatchCreate := readFixture(t, "creative-intake-create-v3-overlay-mismatch.json")
+	overlay := readFixture(t, "strategy-creative-task-overlay-v1-ready.json")
+	assertContentHash(t, overlay)
+	assertSameJSONValue(t, "v3 base strategy_package_ref", baseV3["strategy_package_ref"], readyRef)
+	assertSameJSONValue(t, "v3 overlay strategy_package_ref", overlayCreate["strategy_package_ref"], readyRef)
+	assertSameJSONValue(t, "overlay package_ref", overlay["package_ref"], readyRef)
+	if overlayCreate["selected_route_id"] != overlay["selected_route_id"] {
+		t.Fatal("ready v3 overlay fixture route does not match its task overlay")
+	}
+	if mismatchCreate["selected_route_id"] == overlay["selected_route_id"] {
+		t.Fatal("mismatch fixture must exercise route-lineage rejection")
+	}
+}
+
+func assertContentHash(t *testing.T, value map[string]any) {
+	t.Helper()
+	expected := requiredString(t, value, "content_hash")
+	hashInput := cloneJSONMap(t, value)
+	delete(hashInput, "content_hash")
+	actual, err := contract.NewContentHash(hashInput)
+	if err != nil {
+		t.Fatalf("canonicalize content: %v", err)
+	}
+	if string(actual) != expected {
+		t.Fatalf("content_hash mismatch: fixture=%s calculated=%s", expected, actual)
+	}
 }
 
 func readFixture(t *testing.T, name string) map[string]any {

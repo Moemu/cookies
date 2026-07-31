@@ -8,7 +8,7 @@
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "tsx --test test/*.test.ts",
-    "contract:check": "go test ./internal/platform/contract",
+    "contract:check": "tsx --test test/strategy-creative-contracts.test.ts && go test ./internal/platform/contract ./internal/integrations/strategycreative",
     "go:migrate": "go run ./cmd/cookies-migrate",
     "go:seed": "go run ./cmd/cookies-seed",
     "server": "tsx --env-file=.env server/index.ts",
@@ -32,6 +32,8 @@
     "@types/node": "^26.1.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
     "tsx": "^4.23.1",
     "typescript": "5.9.3"
   },

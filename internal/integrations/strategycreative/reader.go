@@ -129,6 +129,82 @@ func productFactsFromBrief(brief strategy.BriefVersion, document strategy.Strate
 }
 
 func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reference creative.StrategyPackageReference) (creative.StrategyPackageSnapshot, error) {
+	handoff, err := r.Service.GetCreativeHandoff(
+		ctx, actor, projectID, reference.PackageID, reference.PackageVersion,
+	)
+	if err != nil {
+		return creative.StrategyPackageSnapshot{}, err
+	}
+	if !strings.EqualFold(string(handoff.PackageRef.PackageContentHash), strings.TrimSpace(reference.ExpectedContentHash)) {
+		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy package content hash no longer matches the selected version")
+	}
+	if expected := strings.TrimSpace(reference.HandoffContractVersion); expected != "" &&
+		expected != handoff.ContractVersion {
+		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy handoff contract no longer matches the selected version")
+	}
+	if expected := strings.TrimSpace(reference.ExpectedHandoffHash); expected != "" &&
+		!strings.EqualFold(string(handoff.HandoffContentHash), expected) {
+		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy handoff content hash no longer matches the selected version")
+	}
+
+	audience := ""
+	bestPriority := int(^uint(0) >> 1)
+	for _, segment := range handoff.CreativeView.AudienceSegments {
+		if segment.Priority < bestPriority {
+			audience, bestPriority = segment.Label, segment.Priority
+		}
+	}
+	mandatory := make([]string, 0)
+	prohibited := make([]string, 0)
+	for _, guardrail := range handoff.CreativeView.Guardrails {
+		switch guardrail.Kind {
+		case "mandatory":
+			mandatory = append(mandatory, guardrail.Text)
+		case "prohibited":
+			prohibited = append(prohibited, guardrail.Text)
+		}
+	}
+	cta := ""
+	if len(handoff.CreativeView.Communication.ApprovedCTAs) > 0 {
+		cta = handoff.CreativeView.Communication.ApprovedCTAs[0]
+	}
+	routes := make([]creative.CreativeRouteSnapshot, 0, len(handoff.Routes))
+	for _, route := range handoff.Routes {
+		routeType := route.PerformanceMode
+		if route.DeliverableType == "image_text" {
+			routeType = "image_text"
+		} else if routeType == "" {
+			routeType = "pre_roll"
+		}
+		routes = append(routes, creative.CreativeRouteSnapshot{
+			RouteID: route.RouteID, RouteType: routeType, VideoPurpose: route.Purpose,
+			Channels: append([]string{}, route.Channels...), Reason: route.Reason,
+			TargetDurationSeconds: route.Spec.TargetDurationSeconds, AspectRatio: route.Spec.AspectRatio,
+			EvidenceRefs:              append([]string{}, route.ClaimRefs...),
+			RequiresHumanConfirmation: route.DeliverableType == "video",
+			ReadinessStatus:           route.RouteReadiness.Status,
+		})
+	}
+	handoffSnapshot, err := json.Marshal(handoff)
+	if err != nil {
+		return creative.StrategyPackageSnapshot{}, fmt.Errorf("encode Strategy handoff snapshot: %w", err)
+	}
+	return creative.StrategyPackageSnapshot{
+		PackageID: handoff.PackageRef.PackageID, PackageVersion: handoff.PackageRef.PackageVersion,
+		ContentHash:            string(handoff.PackageRef.PackageContentHash),
+		HandoffContractVersion: handoff.ContractVersion, HandoffContentHash: string(handoff.HandoffContentHash),
+		CreativeReady: handoff.UpstreamReadiness.Status == "ready",
+		Objective:     handoff.CreativeView.Objective.Statement, Audience: audience,
+		CoreMessage:  handoff.CreativeView.Communication.SingleMindedProposition,
+		CallToAction: cta, Tone: append([]string{}, handoff.CreativeView.Communication.ToneConstraints...),
+		Mandatory: appendUnique(mandatory), Prohibited: appendUnique(prohibited),
+		CreativeRoutes: routes, HandoffSnapshot: handoffSnapshot,
+	}, nil
+}
+
+// readPackageProjectionLegacy is retained temporarily for migration tests and
+// old snapshots. New handoffs must use ReadForCreative above.
+func (r Reader) readPackageProjectionLegacy(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reference creative.StrategyPackageReference) (creative.StrategyPackageSnapshot, error) {
 	value, err := r.Service.GetPackage(ctx, actor, projectID, reference.PackageID, reference.PackageVersion)
 	if err != nil {
 		return creative.StrategyPackageSnapshot{}, err
@@ -283,6 +359,47 @@ func (r Reader) ReadTaskStrategyForCreative(
 			PromptVersion:         document.Lineage.PromptVersion,
 			ProjectContextVersion: document.Lineage.ProjectContextVersion,
 		},
+	}, nil
+}
+
+func (r Reader) ReadTaskOverlayForCreative(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	reference creative.TaskOverlayReference,
+) (creative.TaskOverlaySnapshot, error) {
+	value, err := r.Service.GetCreativeTaskOverlay(ctx, actor, projectID, reference.OverlayID)
+	if err != nil {
+		return creative.TaskOverlaySnapshot{}, err
+	}
+	if !strings.EqualFold(value.ContentHash, strings.TrimSpace(reference.ExpectedContentHash)) {
+		return creative.TaskOverlaySnapshot{}, fmt.Errorf("task overlay content hash no longer matches the selected version")
+	}
+	rawSnapshot, err := json.Marshal(value)
+	if err != nil {
+		return creative.TaskOverlaySnapshot{}, fmt.Errorf("encode task overlay snapshot: %w", err)
+	}
+	return creative.TaskOverlaySnapshot{
+		ContractVersion: value.ContractVersion, OverlayID: value.OverlayID,
+		ContentHash: value.ContentHash,
+		PackageRef: creative.StrategyPackageReference{
+			PackageID: value.PackageRef.PackageID, PackageVersion: value.PackageRef.PackageVersion,
+			ExpectedContentHash:    value.PackageRef.PackageContentHash,
+			HandoffContractVersion: value.PackageRef.HandoffContractVersion,
+			ExpectedHandoffHash:    value.PackageRef.HandoffContentHash,
+		},
+		SelectedRouteID:         value.SelectedRouteID,
+		TaskStrategyPlanID:      value.TaskStrategyRef.PlanID,
+		TaskStrategyVersion:     value.TaskStrategyRef.Version,
+		TaskStrategyContentHash: value.TaskStrategyRef.ContentHash,
+		ObjectiveRefinement:     value.ObjectiveRefinement,
+		AudienceRefinement:      value.AudienceRefinement,
+		MessagePriorities:       append([]string{}, value.MessagePriorities...),
+		StrategyDimensions:      cloneAnyMap(value.StrategyDimensions),
+		Hypotheses:              append([]string{}, value.Hypotheses...),
+		Guardrails:              append([]string{}, value.Guardrails...),
+		OpenQuestions:           append([]string{}, value.OpenQuestions...),
+		RawSnapshot:             rawSnapshot,
 	}, nil
 }
 

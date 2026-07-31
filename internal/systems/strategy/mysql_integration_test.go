@@ -471,6 +471,30 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		handoff.HandoffContentHash.Validate() != nil {
 		t.Fatalf("unexpected creative handoff: %#v", handoff)
 	}
+	if len(handoff.Routes) == 0 {
+		t.Fatal("approved package has no Creative route for v2 task planning")
+	}
+	packageBoundPlan, duplicate, err := service.CreateCreativeTaskPlan(
+		ctx, actor, contract.IdempotencyKey("creative_plan_v2_"+suffix), projectID,
+		strategy.CreateCreativeTaskPlanRequest{
+			ContractVersion: "strategy-creative-task-plan/v2",
+			StrategyPackage: &strategy.CreativeTaskPlanPackageReference{
+				PackageID: published.PackageID, PackageVersion: published.Version,
+				PackageContentHash:     string(published.ContentHash),
+				HandoffContractVersion: handoff.ContractVersion,
+				HandoffContentHash:     string(handoff.HandoffContentHash),
+			},
+			SelectedRouteID: handoff.Routes[0].RouteID,
+			BusinessCode:    "xiaohongshu_image_text", SelectionSource: "recommended",
+			CatalogHash: recommendation.CatalogHash,
+		},
+	)
+	if err != nil || duplicate ||
+		packageBoundPlan.ContractVersion != "strategy-creative-task-plan/v2" ||
+		packageBoundPlan.PackageRef == nil || packageBoundPlan.HandoffRef == nil ||
+		packageBoundPlan.SelectedRouteID != handoff.Routes[0].RouteID {
+		t.Fatalf("create package-bound task plan: plan=%#v duplicate=%v err=%v", packageBoundPlan, duplicate, err)
+	}
 	if _, err := service.GetCreativeHandoff(ctx, actor, contract.ProjectID("other_project"), published.PackageID, published.Version); !errors.Is(err, strategy.ErrProjectAccessDenied) {
 		t.Fatalf("cross-project handoff read error = %v", err)
 	}

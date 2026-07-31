@@ -1,0 +1,69 @@
+{
+  "contract_version": "creative-task-strategy/v2",
+  "plan_ref": {
+    "plan_id": "strategy_task_plan_01",
+    "revision": 1,
+    "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "package_ref": {
+    "package_id": "strategy_package_03",
+    "package_version": 3,
+    "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handoff_contract_version": "strategy-creative-handoff/v1",
+    "handoff_content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "handoff_ref": {
+    "contract_version": "strategy-creative-handoff/v1",
+    "content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "selected_route_id": "route_xhs_image_text",
+  "business_ref": {
+    "business_code": "xiaohongshu_image_text",
+    "profile_version": 1
+  },
+  "objective": "验证真实使用场景是否提升有效咨询意愿。",
+  "audience": {
+    "base_segment": "25—35 岁高线城市功效护肤人群",
+    "task_slice": "首次接触新品且需要可信证据的人群"
+  },
+  "core_message": "先呈现真实使用场景，再使用已批准证据解释产品价值。",
+  "message_hierarchy": [
+    "真实使用场景",
+    "已批准的功效证据"
+  ],
+  "hypotheses": [
+    {
+      "hypothesis_id": "hypothesis_scene_first_01",
+      "statement": "场景先行比产品先行更容易建立代入感。"
+    }
+  ],
+  "business_strategy": {
+    "message_priority": "scene_then_evidence",
+    "experiment_variable": "opening_structure"
+  },
+  "claims_and_evidence": [
+    "claim_guerlain_repair_01",
+    "claim_evidence_07"
+  ],
+  "asset_requirements": [
+    {
+      "role": "product_image",
+      "required_stage": "generation"
+    }
+  ],
+  "guardrails": [
+    "不得使用未经批准的绝对化功效承诺"
+  ],
+  "reference_use": {
+    "allowed_ref_ids": [
+      "client_brief_04",
+      "prelaunch_insight_03"
+    ]
+  },
+  "open_questions": [],
+  "lineage": {
+    "brief_id": "brief_01",
+    "brief_version": 4,
+    "project_context_version": 7
+  }
+}

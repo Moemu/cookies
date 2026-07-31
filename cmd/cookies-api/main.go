@@ -124,7 +124,21 @@ func main() {
 	creativeService := &creative.Service{
 		Repository: creativeRepository, ViralRemakes: creativeRepository,
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
-		CommerceWorkspaces: creativeRepository,
+		CommerceWorkspaces: creativeRepository, Directions: creativeRepository,
+	}
+	if cfg.Creative.DirectionPlanningEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure CreativeDirection planner: %v", textAdapterErr)
+		}
+		creativeService.DirectionPlanner = creative.ModelCreativeDirectionPlanner{
+			Text:       &provider.Service{TextAdapter: textAdapter},
+			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
+		}
+		log.Printf(
+			"CreativeDirection planning configured: model_alias=%s routes=xiaohongshu_image_text",
+			cfg.Creative.DirectionPlannerModelAlias,
+		)
 	}
 	if cfg.Creative.ShortDramaModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -332,6 +346,7 @@ func main() {
 		creativeService.Sources = strategyCreativeReader
 		if cfg.Strategy.CreativeTaskPlanningEnabled {
 			creativeService.TaskStrategies = strategyCreativeReader
+			creativeService.TaskOverlays = strategyCreativeReader
 		}
 		if cfg.Strategy.PackageToCreativeEnabled {
 			creativeService.StrategyPackages = strategyCreativeReader

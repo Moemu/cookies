@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,11 @@ import (
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
+
+type creativeDirectionManager interface {
+	GenerateDirectionCandidates(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateDirectionRequest) (creative.CreativeDirectionBatch, error)
+	ConfirmDirection(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionVersion, error)
+}
 
 func (s *Server) listCommercePrerollSources(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
@@ -196,6 +202,10 @@ func (s *Server) createCreativeIntake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", fmt.Sprintf("/api/creative/v1/projects/%s/creative-intakes/%s", r.PathValue("project_id"), value.ID))
+	if view, viewErr := value.V3View(); viewErr == nil {
+		writeJSON(w, http.StatusCreated, view)
+		return
+	}
 	writeJSON(w, http.StatusCreated, value)
 }
 
@@ -222,6 +232,55 @@ func (s *Server) getCreativeIntake(w http.ResponseWriter, r *http.Request) {
 	value, err := s.creative.GetIntake(
 		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
 		r.PathValue("intake_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if view, viewErr := value.V3View(); viewErr == nil {
+		writeJSON(w, http.StatusOK, view)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) createCreativeDirectionBatch(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(creativeDirectionManager)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.GenerateDirectionRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.GenerateDirectionCandidates(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("intake_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf(
+		"/api/creative/v1/projects/%s/creative-direction-batches/%s",
+		r.PathValue("project_id"), value.ID,
+	))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) confirmCreativeDirection(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(creativeDirectionManager)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.ConfirmDirection(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("direction_id"),
 	)
 	if err != nil {
 		s.writeServiceError(w, r, err)

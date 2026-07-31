@@ -148,7 +148,7 @@ paths:
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createCreativeIntake
-      summary: Create a normalized manual CreativeIntake or explicitly hand off an immutable Strategy package or CreativeTaskStrategyVersion.
+      summary: Create a normalized manual CreativeIntake or a v3 Strategy package intake with an optional task overlay.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
         required: true
@@ -168,6 +168,55 @@ paths:
         '200': {description: Frozen CreativeIntake snapshot.}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches:
+    post:
+      operationId: generateCreativeDirectionCandidates
+      summary: Generate schema-constrained CreativeDirection candidates from one frozen v3 Strategy intake.
+      description: >-
+        This is the first LLM-authored creative step. Strategy facts and
+        guardrails are immutable inputs; provider failures are returned and
+        never replaced with a fabricated fallback concept.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: intake_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                candidate_count: {type: integer, minimum: 2, maximum: 4, default: 3}
+      responses:
+        '201':
+          description: Immutable candidate batch.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-directions/{direction_id}/confirm:
+    post:
+      operationId: confirmCreativeDirection
+      summary: Confirm one CreativeDirection and supersede competing candidates for the same intake.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: direction_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Confirmed immutable CreativeDirection version.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/business-capabilities:
     get:
       operationId: listCreativeBusinessCapabilities
@@ -441,10 +490,13 @@ components:
           required: [channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
         - properties: {source: {const: strategy_package}}
           required: [strategy_package]
-        - properties: {source: {const: task_strategy}}
-          required: [task_strategy]
+        - properties:
+            contract_version: {const: creative-intake-create/v3}
+            source: {const: strategy_package}
+          required: [contract_version, strategy_package_ref, selected_route_id]
       properties:
-        source: {enum: [manual, strategy_package, task_strategy]}
+        contract_version: {const: creative-intake-create/v3}
+        source: {enum: [manual, strategy_package]}
         strategy_package:
           type: object
           additionalProperties: false
@@ -453,14 +505,16 @@ components:
             package_id: {type: string, minLength: 1}
             package_version: {type: integer, minimum: 1}
             expected_content_hash: {type: string, minLength: 1}
-        task_strategy:
+        strategy_package_ref:
+          $ref: '../contracts/strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef'
+        selected_route_id: {type: string, minLength: 1}
+        task_overlay_ref:
           type: object
           additionalProperties: false
-          required: [plan_id, strategy_version, expected_content_hash]
+          required: [overlay_id, content_hash]
           properties:
-            plan_id: {type: string, minLength: 1}
-            strategy_version: {type: integer, minimum: 1}
-            expected_content_hash: {type: string, minLength: 1}
+            overlay_id: {type: string, minLength: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
         format: {enum: [image_text, video]}
         performance_mode: {enum: [viral_remake]}
         creative_routes:
@@ -497,8 +551,12 @@ components:
     CreateCreativeTaskRequest:
       type: object
       additionalProperties: false
-      required: [content_type, focus]
+      required: [content_type]
+      anyOf:
+        - required: [focus]
+        - required: [direction_id]
       properties:
+        direction_id: {type: string, minLength: 1, maxLength: 96}
         content_type: {enum: [lifestyle, ingredient_explanation, usage_scenario, list_guide, comparison, custom]}
         focus: {type: string, minLength: 1, maxLength: 300}
         audience: {type: string, maxLength: 500}

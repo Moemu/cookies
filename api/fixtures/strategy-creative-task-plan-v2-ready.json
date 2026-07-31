@@ -1,0 +1,30 @@
+{
+  "contract_version": "strategy-creative-task-plan/v2",
+  "id": "strategy_task_plan_01",
+  "project_id": "project_01",
+  "package_ref": {
+    "package_id": "strategy_package_03",
+    "package_version": 3,
+    "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handoff_contract_version": "strategy-creative-handoff/v1",
+    "handoff_content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "handoff_ref": {
+    "contract_version": "strategy-creative-handoff/v1",
+    "content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "selected_route_id": "route_xhs_image_text",
+  "status": "generated",
+  "business_code": "xiaohongshu_image_text",
+  "answers": {
+    "task_objective": "验证真实使用场景是否提升有效咨询意愿",
+    "audience_slice": "首次接触新品且需要可信证据的人群"
+  },
+  "completeness": {
+    "status": "ready",
+    "missing_fields": []
+  },
+  "current_revision": 1,
+  "current_strategy_version": 1,
+  "version": 1
+}
