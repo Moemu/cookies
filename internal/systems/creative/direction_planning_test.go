@@ -99,6 +99,46 @@ func TestGenerateDirectionCandidatesHasNoProviderFallback(t *testing.T) {
 	}
 }
 
+func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) {
+	service := testService()
+	intake := CreativeIntake{
+		ContractVersion: CreativeIntakeV3ContractVersion,
+		ID:              "intake_brand_video", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: IntakeSourceStrategyPackage, Status: IntakeReady,
+		InputIdentityHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Request: CreateIntakeRequest{
+			Source: IntakeSourceStrategyPackage, SelectedRouteID: "route_brand_video",
+			Objective: "建立品牌认知", Audience: "研发负责人", CoreMessage: "精度可被验证",
+			CreativeRoutes: []CreativeRouteSnapshot{{
+				RouteID: "route_brand_video", RouteType: CreativeRouteBrandVideo,
+				VideoPurpose: "brand", Channels: []string{"douyin"},
+				Reason: "建立长期品牌记忆", TargetDurationSeconds: 30, AspectRatio: "16:9",
+				RequiresHumanConfirmation: true, ReadinessStatus: "ready",
+			}},
+		},
+	}
+	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	service.DirectionPlanner = &directionPlannerStub{result: DirectionPlannerResult{
+		Model: "test-model", PromptVersion: "creative-direction/brand-video-v1",
+		Candidates: []DirectionCandidate{
+			{Concept: "让精度被看见", CreativeRationale: "用工序证据建立信任", MessagePlan: []string{"承诺到证据"}, ExecutionOutline: []string{"工序与检测"}, GuardrailTrace: []string{"不虚构检测结论"}},
+			{Concept: "每一微米都有来路", CreativeRationale: "把过程透明转为品牌记忆", MessagePlan: []string{"细节到全局"}, ExecutionOutline: []string{"微距到交付"}, GuardrailTrace: []string{"保护客户图纸"}},
+		},
+	}}
+	service.Directions = &directionRepositoryStub{}
+
+	batch, err := service.GenerateDirectionCandidates(
+		context.Background(), testRequestContext().Actor, "project_1", intake.ID,
+		GenerateDirectionRequest{CandidateCount: 2},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.Status != DirectionBatchReady || batch.Candidates[0].RouteID != "route_brand_video" {
+		t.Fatalf("unexpected brand-video direction batch: %+v", batch)
+	}
+}
+
 func TestV3StrategyIntakeSupportsBaseAndMatchingTaskOverlay(t *testing.T) {
 	service := testService()
 	handoffJSON := []byte(`{

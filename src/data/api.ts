@@ -18,6 +18,7 @@ import {
   prepareKanonCommercePreroll,
   unsupportedKanonWrite,
 } from '../backend/kanon-api.js'
+import type { CreativeIntakeStatus, CreativeTaskStatus } from '../contracts/creative'
 import { platformClient } from './platformClient.js'
 
 export type ApiProject = {
@@ -404,7 +405,7 @@ export type ApiCreativeSourceOption = {
 export type ApiTaskStrategyCreativeIntake = {
   id: string
   source: 'task_strategy'
-  status: 'draft' | 'needs_clarification' | 'ready' | 'superseded'
+  status: 'draft' | CreativeIntakeStatus
   request: {
     format: 'image_text' | 'video'
     performance_mode?: string
@@ -493,7 +494,7 @@ export type ApiPreparedCommercePreroll = {
 export type ApiCommercePrerollWorkspace = {
   task: {
     id: string
-    status: 'draft' | 'in_progress' | 'ready_for_review' | 'generating' | 'generated' | 'archived'
+    status: CreativeTaskStatus
     performance_mode: 'commerce_preroll'
     updated_at: string
   }
