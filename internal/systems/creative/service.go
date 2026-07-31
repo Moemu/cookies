@@ -85,6 +85,10 @@ type Service struct {
 	CommerceWorkspaces                  CommerceWorkspaceRepository
 	DirectionPlanner                    CreativeDirectionPlanner
 	Directions                          DirectionRepository
+	ImageTextDraftPlanner               ImageTextDraftPlanner
+	ImageRenderer                       *ImageTextRenderer
+	ImageBaseAssets                     ImageBaseAssetReader
+	RenderedImages                      RenderedImageWriter
 	AllowLegacyTaskStrategyIntakeWrites bool
 	NewID                               ids.Generator
 	Now                                 func() time.Time

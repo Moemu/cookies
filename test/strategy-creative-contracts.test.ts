@@ -34,6 +34,12 @@ const fixtureContracts = [
   ["creative-direction-candidate-batch-v1-ready.json", "creative-direction-candidate-batch-v1.schema.json"],
   ["creative-direction-candidate-batch-v1-failed.json", "creative-direction-candidate-batch-v1.schema.json"],
   ["creative-shared-workflow-v1-frozen.json", "creative-shared-workflow-v1.schema.json"],
+  ["creative-image-text-draft-v2.json", "creative-image-text-draft-v2.schema.json"],
+  ["creative-image-prompt-package-v1.json", "creative-image-prompt-package-v1.schema.json"],
+  ["creative-image-generation-attempt-v1.json", "creative-image-generation-attempt-v1.schema.json"],
+  ["creative-image-slot-selection-v1.json", "creative-image-slot-selection-v1.schema.json"],
+  ["creative-image-render-spec-v1.json", "creative-image-render-spec-v1.schema.json"],
+  ["creative-image-text-workspace-v1.json", "creative-image-text-workspace-v1.schema.json"],
 ] as const;
 
 const ajv = new Ajv2020({
@@ -133,6 +139,54 @@ test("the frontend consumes the frozen Creative contract versions and state grap
   assert.equal(canTransitionCreativeState("direction", "confirmed", "candidate"), false);
   assert.equal(canTransitionCreativeState("task", "archived", "draft"), false);
   assert.equal(canTransitionCreativeState("creative_version", "checked", "approved"), true);
+});
+
+test("shared workflow stays format-neutral while format contracts own their schemas", () => {
+  const frozen = readJSON(join(fixturesDirectory, "creative-shared-workflow-v1-frozen.json"));
+  const validateFrozen = validatorFor("creative-shared-workflow-v1.schema.json");
+
+  assert.deepEqual(Object.keys(frozen.route_profiles as object).sort(), ["brand_video", "image_text"]);
+  assert.deepEqual(
+    Object.keys(frozen.contracts as object).sort(),
+    ["direction", "direction_candidate_batch", "intake", "intake_create", "planning_context"],
+  );
+
+  const formatLeak = clone(frozen);
+  (formatLeak as Record<string, unknown>).image_plan = [];
+  assert.equal(validateFrozen(formatLeak), false, "shared workflow accepted an image-text draft field");
+
+  const routeDrift = clone(frozen);
+  const routeProfiles = routeDrift.route_profiles as Record<string, Record<string, unknown>>;
+  routeProfiles.image_text.performance_mode = "brand_video";
+  assert.equal(validateFrozen(routeDrift), false, "image-text route accepted brand-video mode");
+
+  const versionedFormatContracts = [
+    ["creative-image-text-draft-v2.schema.json", "creative-image-text-draft/v2"],
+    ["creative-image-prompt-package-v1.schema.json", "creative-image-prompt-package/v1"],
+    ["creative-image-generation-attempt-v1.schema.json", "creative-image-generation-attempt/v1"],
+    ["creative-image-slot-selection-v1.schema.json", "creative-image-slot-selection/v1"],
+    ["creative-image-render-spec-v1.schema.json", "creative-image-render-spec/v1"],
+    ["creative-image-text-workspace-v1.schema.json", "creative-image-text-workspace/v1"],
+  ] as const;
+  for (const [schemaFilename, version] of versionedFormatContracts) {
+    const schema = readJSON(join(contractsDirectory, schemaFilename));
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(schema.additionalProperties, false, `${schemaFilename} must remain strict`);
+    assert.equal(properties.contract_version.const, version, `${schemaFilename} version drifted`);
+  }
+});
+
+test("shared intake rejects image-text and brand-video implementation details", () => {
+  const create = readJSON(join(fixturesDirectory, "creative-intake-create-v3-base.json"));
+  const validateCreate = validatorFor("creative-intake-create-v3.schema.json");
+
+  for (const field of ["image_plan", "prompt_package", "script", "storyboard", "provider_parameters"]) {
+    assert.equal(
+      validateCreate({ ...create, [field]: "must remain format-owned" }),
+      false,
+      `shared intake accepted ${field}`,
+    );
+  }
 });
 
 test("every OpenAPI contract reference resolves to a checked-in schema", () => {

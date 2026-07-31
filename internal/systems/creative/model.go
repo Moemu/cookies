@@ -131,7 +131,8 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == CreativeRouteImageText {
 		if len(r.Channels) != 1 || r.Channels[0] != string(ChannelXiaohongshu) ||
 			r.AspectRatio != "3:4" || strings.TrimSpace(r.RouteID) == "" ||
-			strings.TrimSpace(r.Reason) == "" {
+			strings.TrimSpace(r.Reason) == "" || r.VideoPurpose != "" ||
+			r.TargetDurationSeconds != 0 {
 			return fmt.Errorf("creative image-text route is incomplete")
 		}
 		return nil
@@ -589,15 +590,20 @@ type CreativeDirection struct {
 }
 
 type ImageTextDraft struct {
-	TaskID          string          `json:"task_id"`
-	Version         int64           `json:"version"`
-	Status          string          `json:"status"`
-	TitleCandidates []string        `json:"title_candidates"`
-	Body            string          `json:"body"`
-	Topics          []string        `json:"topics"`
-	CoverCopy       string          `json:"cover_copy"`
-	ImagePlan       []ImagePlanItem `json:"image_plan"`
-	CreatedAt       time.Time       `json:"created_at"`
+	ContractVersion         string                 `json:"contract_version,omitempty"`
+	TaskID                  string                 `json:"task_id"`
+	Version                 int64                  `json:"version"`
+	GenerationSourceVersion *int64                 `json:"generation_source_version,omitempty"`
+	DirectionRef            *ImageTextDirectionRef `json:"direction_ref,omitempty"`
+	InputIdentityHash       string                 `json:"input_identity_hash,omitempty"`
+	Status                  string                 `json:"status"`
+	TitleCandidates         []string               `json:"title_candidates"`
+	SelectedTitle           string                 `json:"selected_title,omitempty"`
+	Body                    string                 `json:"body"`
+	Topics                  []string               `json:"topics"`
+	CoverCopy               string                 `json:"cover_copy"`
+	ImagePlan               []ImagePlanItem        `json:"image_plan"`
+	CreatedAt               time.Time              `json:"created_at"`
 }
 
 // ReviseDraftRequest replaces the editable content of the current draft. The
@@ -842,11 +848,19 @@ func (v CreativeVersion) Validate() error {
 }
 
 type ImagePlanItem struct {
-	Order       int                       `json:"order"`
-	Purpose     string                    `json:"purpose"`
-	VisualBrief string                    `json:"visual_brief"`
-	Caption     string                    `json:"caption"`
-	AssetRef    *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+	Order        int                       `json:"order"`
+	Role         string                    `json:"role,omitempty"`
+	Purpose      string                    `json:"purpose"`
+	VisualBrief  string                    `json:"visual_brief"`
+	Caption      string                    `json:"caption"`
+	OverlayCopy  string                    `json:"overlay_copy,omitempty"`
+	LayoutPreset string                    `json:"layout_preset,omitempty"`
+	AssetRef     *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+}
+
+type ImageTextDirectionRef struct {
+	DirectionID string `json:"direction_id"`
+	ContentHash string `json:"content_hash"`
 }
 
 type ProductionJob struct {
