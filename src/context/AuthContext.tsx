@@ -4,7 +4,7 @@ import { api, type ApiAuthSession } from '../data/api'
 interface AuthValue {
   session: ApiAuthSession
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -28,8 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  const login = useCallback(async (email: string, password: string) => {
-    setSession(await api.login({ email, password }))
+  const login = useCallback(async (username: string, password: string) => {
+    setSession(await api.login({ username, password }))
   }, [])
 
   const logout = useCallback(async () => {

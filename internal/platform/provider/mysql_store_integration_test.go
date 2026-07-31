@@ -1,15 +1,99 @@
 package provider
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+func TestMySQLGatewayConfigStoreResolvesVersionedEncryptedRoute(t *testing.T) {
+	dsn := os.Getenv("COOKIES_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("COOKIES_TEST_MYSQL_DSN is not configured")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatalf("open MySQL: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatalf("ping MySQL: %v", err)
+	}
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000"), ".", "")
+	connectionID, connectionRevisionID := "connection_"+suffix, "connection_revision_"+suffix
+	credentialID, routeID, routeRevisionID := "credential_"+suffix, "route_"+suffix, "route_revision_"+suffix
+	modelAlias := "cookies.image.integration." + suffix
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x35}, 32))
+	cipher, err := NewAESGCMCredentialCipher(key, "integration-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, nonce, keyVersion, err := cipher.Encrypt([]byte("adapter-integration-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_connections
+		(id, connection_code, connection_type, current_revision_id, status) VALUES (?, ?, 'adapter_gateway', NULL, 'enabled')`,
+		connectionID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec("UPDATE provider_model_routes SET current_revision_id = NULL WHERE id = ?", routeID)
+		_, _ = db.Exec("DELETE FROM provider_model_route_revisions WHERE id = ?", routeRevisionID)
+		_, _ = db.Exec("DELETE FROM provider_model_routes WHERE id = ?", routeID)
+		_, _ = db.Exec("DELETE FROM provider_credentials WHERE id = ?", credentialID)
+		_, _ = db.Exec("UPDATE provider_connections SET current_revision_id = NULL WHERE id = ?", connectionID)
+		_, _ = db.Exec("DELETE FROM provider_connection_revisions WHERE id = ?", connectionRevisionID)
+		_, _ = db.Exec("DELETE FROM provider_connections WHERE id = ?", connectionID)
+	})
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_connection_revisions
+		(id, connection_id, revision_number, base_url, timeout_seconds, max_response_bytes)
+		VALUES (?, ?, 1, 'https://adapter.example/v1', 210, 41943040)`, connectionRevisionID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), "UPDATE provider_connections SET current_revision_id = ? WHERE id = ?", connectionRevisionID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_credentials
+		(id, connection_id, credential_version, ciphertext, nonce, key_version, status, active_from)
+		VALUES (?, ?, 1, ?, ?, ?, 'active', UTC_TIMESTAMP(6))`,
+		credentialID, connectionID, ciphertext, nonce, keyVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_model_routes
+		(id, organization_id, capability, model_alias, current_revision_id, status)
+		VALUES (?, NULL, 'image.generate', ?, NULL, 'enabled')`, routeID, modelAlias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_model_route_revisions
+		(id, route_id, revision_number, connection_id, connection_revision_id, upstream_model)
+		VALUES (?, ?, 1, ?, ?, 'gpt-image-2')`,
+		routeRevisionID, routeID, connectionID, connectionRevisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), "UPDATE provider_model_routes SET current_revision_id = ? WHERE id = ?", routeRevisionID, routeID); err != nil {
+		t.Fatal(err)
+	}
+
+	store := MySQLGatewayConfigStore{DB: db, Cipher: cipher}
+	snapshot, err := store.ResolveImageRoute(t.Context(), "org_integration", modelAlias)
+	if err != nil || snapshot.ConnectionRevisionID != connectionRevisionID || snapshot.CredentialID != credentialID {
+		t.Fatalf("ResolveImageRoute() = %+v, %v", snapshot, err)
+	}
+	token, err := store.ResolveGatewayCredential(t.Context(), snapshot.CredentialID, snapshot.CredentialVersion)
+	if err != nil || token != "adapter-integration-token" {
+		t.Fatalf("ResolveGatewayCredential() = %q, %v", token, err)
+	}
+}
 
 func TestMySQLStoreUsesProviderIdempotencyScope(t *testing.T) {
 	dsn := os.Getenv("COOKIES_TEST_MYSQL_DSN")
@@ -82,6 +166,42 @@ func TestMySQLStoreUsesProviderIdempotencyScope(t *testing.T) {
 	}
 	if len(loaded.Outputs) != 1 || loaded.Outputs[0].Ref.OutputID != "output_1" || loaded.Outputs[0].Status != OutputReady {
 		t.Fatalf("Get() outputs = %+v, want persisted ready output", loaded.Outputs)
+	}
+	loaded.Route = testGatewayRoute()
+	loaded.SubmissionState = SubmissionInFlight
+	loaded.AdapterRequestID = "adapter-request-integration"
+	deadline := now.Add(210 * time.Second)
+	loaded.ExecutionDeadlineAt = &deadline
+	loaded.SubmittedAt = &now
+	loaded.Job.UpdatedAt = now.Add(2 * time.Second)
+	if _, err := store.Update(t.Context(), loaded); err != nil {
+		t.Fatalf("Update() gateway snapshot error = %v", err)
+	}
+	loaded, err = store.Get(t.Context(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID)
+	if err != nil || loaded.Route == nil || loaded.Route.UpstreamModel != "gpt-image-2" ||
+		loaded.SubmissionState != SubmissionInFlight || loaded.ExecutionDeadlineAt == nil {
+		t.Fatalf("Get() gateway snapshot = %+v, err=%v", loaded, err)
+	}
+	objectHandles := ObjectOutputHandleStore{DB: db, Blobs: assets.NewMemoryBlobStore(), Bucket: "provider-output-integration"}
+	ref, err := NewOutputRef(adapterGatewayProviderCode, loaded.Job.ID, "object_output_1", "image/png", fakeImagePNG, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRef := contract.ProjectRef{OrganizationID: loaded.Job.OrganizationID, ProjectID: loaded.Job.ProjectID, ProjectContextVersion: loaded.ProjectContextVersion}
+	if err := objectHandles.Put(t.Context(), projectRef, ref, fakeImagePNG); err != nil {
+		t.Fatalf("ObjectOutputHandleStore.Put() error = %v", err)
+	}
+	stream, metadata, err := objectHandles.Open(t.Context(), projectRef, ref)
+	if err != nil {
+		t.Fatalf("ObjectOutputHandleStore.Open() error = %v", err)
+	}
+	got, readErr := io.ReadAll(stream)
+	_ = stream.Close()
+	if readErr != nil || !bytes.Equal(got, fakeImagePNG) || metadata.SHA256 != *ref.DeclaredSHA256 {
+		t.Fatalf("ObjectOutputHandleStore.Open() bytes=%d metadata=%+v err=%v", len(got), metadata, readErr)
+	}
+	if err := objectHandles.Delete(t.Context(), loaded.Job.OrganizationID, loaded.Job.ProjectID, loaded.Job.ID, ref.OutputID); err != nil {
+		t.Fatalf("ObjectOutputHandleStore.Delete() error = %v", err)
 	}
 }
 

@@ -1,146 +1,784 @@
-// Package creative owns creative-plan business state. It only calls Provider's
-// public application seam and never handles vendor URLs or asset storage.
 package creative
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
-	"github.com/shikanon/cookies/internal/platform/provider"
-	"github.com/shikanon/cookies/internal/systems/strategy"
-	"github.com/shikanon/cookies/internal/systems/strategy/prompts"
+	"github.com/shikanon/cookies/internal/platform/media"
 )
 
-type MediaType string
-
-const (
-	MediaImage MediaType = "image"
-	MediaVideo MediaType = "video"
-)
-
-var (
-	ErrPlanNotFound        = errors.New("creative plan not found")
-	ErrStrategyNotApproved = errors.New("creative plan requires an approved strategy")
-)
-
-type Plan struct {
-	ID               string                  `json:"id"`
-	OrganizationID   contract.OrganizationID `json:"organization_id"`
-	ProjectID        contract.ProjectID      `json:"project_id"`
-	StrategyOutputID string                  `json:"strategy_output_id"`
-	MediaType        MediaType               `json:"media_type"`
-	Variant          int                     `json:"variant"`
-	Prompt           string                  `json:"prompt"`
-	ModelAlias       string                  `json:"model_alias"`
-	CreatedAt        time.Time               `json:"created_at"`
+type ActiveProjectResolver interface {
+	RequireActiveContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 }
 
-type Store interface {
-	Create(context.Context, Plan) (Plan, error)
-	Get(context.Context, contract.OrganizationID, contract.ProjectID, string) (Plan, error)
+// StrategyPackageReader is Creative's sole dependency on Strategy. Its
+// implementation is composed at process startup and must return an immutable,
+// authorization-checked package snapshot rather than exposing Strategy tables.
+type StrategyPackageReader interface {
+	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, StrategyPackageReference) (StrategyPackageSnapshot, error)
 }
 
-type StrategyReader interface {
-	GetStrategy(context.Context, contract.OrganizationID, contract.ProjectID, string) (strategy.StrategyOutput, error)
-	GetProposal(context.Context, contract.OrganizationID, contract.ProjectID, string) (strategy.Proposal, error)
+type AssetReader interface {
+	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
 }
 
-type ProviderJobs interface {
-	CreateImageJob(context.Context, provider.CreateImageJobRequest) (contract.ProviderJob, bool, error)
+type CreativeAssetSnapshot struct {
+	Ref      contract.AssetVersionRef
+	Kind     contract.AssetKind
+	MIMEType string
+	Ready    bool
 }
 
-type CreatePlanRequest struct {
-	StrategyOutputID string    `json:"strategy_output_id"`
-	MediaType        MediaType `json:"media_type"`
-	Variant          int       `json:"variant"`
-	ModelAlias       string    `json:"model_alias"`
+type StrategyPackageSnapshot struct {
+	PackageID      string
+	PackageVersion int64
+	ContentHash    string
+	CreativeReady  bool
+	Objective      string
+	Audience       string
+	CoreMessage    string
+	Concept        string
+	Tone           []string
+	VisualKeywords []string
+	Mandatory      []string
+	Prohibited     []string
+	CreativeRoutes []CreativeRouteSnapshot
 }
 
 type Service struct {
-	Store      Store
-	Strategies StrategyReader
-	Jobs       ProviderJobs
-	NewID      ids.Generator
-	Now        func() time.Time
+	Repository       Repository
+	ViralRemakes     ViralRemakeRepository
+	ViralAnalyzer    ViralReferenceAnalyzer
+	Projects         ActiveProjectResolver
+	StrategyPackages StrategyPackageReader
+	Sources          CreativeSourceReader
+	Assets           AssetReader
+	Composer         media.VideoComposer
+	RenderedAssets   RenderedAssetWriter
+	RenderScheduler  RenderScheduler
+	NewID            ids.Generator
+	Now              func() time.Time
 }
 
-func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, request CreatePlanRequest) (Plan, error) {
-	if s.Store == nil || s.Strategies == nil {
-		return Plan{}, fmt.Errorf("creative store and strategy reader are required")
+func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateVideoTaskRequest) (CreativeTask, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
 	}
-	if err := actor.Validate(); err != nil || project.ValidateBrandBound() != nil || actor.OrganizationID != project.OrganizationID {
-		return Plan{}, fmt.Errorf("authorized brand-bound project is required")
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeTask{}, fmt.Errorf("%s scope is required", ScopeWrite)
 	}
-	if request.MediaType != MediaImage && request.MediaType != MediaVideo || request.Variant < 1 || strings.TrimSpace(request.ModelAlias) == "" {
-		return Plan{}, fmt.Errorf("strategy output ID, valid media type, positive variant, and model alias are required")
+	if err := request.Validate(); err != nil {
+		return CreativeTask{}, err
 	}
-	strategyOutput, err := s.Strategies.GetStrategy(ctx, actor.OrganizationID, project.ProjectID, request.StrategyOutputID)
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeTask{}, err
+	}
+	intake, err := s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
 	if err != nil {
-		return Plan{}, err
+		return CreativeTask{}, err
 	}
-	if !strategyOutput.Approved() {
-		return Plan{}, ErrStrategyNotApproved
+	if intake.Status != IntakeReady {
+		return CreativeTask{}, ErrIntakeNotReady
 	}
-	proposal, err := s.Strategies.GetProposal(ctx, actor.OrganizationID, project.ProjectID, strategyOutput.ProposalID)
+	route, err := selectedVideoRoute(intake, request)
 	if err != nil {
-		return Plan{}, err
+		return CreativeTask{}, err
 	}
-	prompt := prompts.BuildImagePrompt(proposal.Input, request.Variant)
-	if request.MediaType == MediaVideo {
-		prompt = prompts.BuildVideoPrompt(proposal.Input, request.Variant)
+	if err := route.Validate(); err != nil {
+		return CreativeTask{}, err
 	}
-	id, err := s.newID()("creativeplan")
+	channelAllowed := false
+	for _, channel := range route.Channels {
+		if channel == string(request.Channel) {
+			channelAllowed = true
+			break
+		}
+	}
+	if !channelAllowed {
+		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
+	}
+	if route.RouteType != PerformanceModeShortDramaPreroll {
+		if s.Assets == nil {
+			return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
+		}
+		source, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, request.SourceVideo)
+		if readErr != nil {
+			return CreativeTask{}, readErr
+		}
+		if !source.Ready || source.Kind != contract.AssetVideo || source.MIMEType != "video/mp4" || source.Ref != request.SourceVideo {
+			return CreativeTask{}, fmt.Errorf("source_video must be a ready MP4 in the same project")
+		}
+	}
+	var viralDraft *ViralRemakeDraft
+	var shortDramaDraft *ShortDramaPrerollDraft
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
+			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
+		}
+		if referenceImage := intake.Request.ManualViralRemake.ReferenceImage; referenceImage != nil {
+			image, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, *referenceImage)
+			if readErr != nil {
+				return CreativeTask{}, readErr
+			}
+			if !image.Ready || image.Kind != contract.AssetImage || image.Ref != *referenceImage {
+				return CreativeTask{}, fmt.Errorf("reference_image must be a ready image in the same project")
+			}
+		}
+	}
+	id, err := s.idGenerator()("creativetask")
 	if err != nil {
-		return Plan{}, err
+		return CreativeTask{}, err
 	}
-	return s.Store.Create(ctx, Plan{
-		ID: id, OrganizationID: actor.OrganizationID, ProjectID: project.ProjectID, StrategyOutputID: request.StrategyOutputID,
-		MediaType: request.MediaType, Variant: request.Variant, Prompt: prompt, ModelAlias: request.ModelAlias, CreatedAt: s.now(),
+	now := s.now()
+	task := CreativeTask{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intake.ID,
+		Format: FormatVideo, Channel: request.Channel, VideoPurpose: route.VideoPurpose, PerformanceMode: route.RouteType,
+		Status: TaskDraft, Direction: CreativeDirection{
+			Focus: request.Concept, Audience: intake.Request.Audience, CoreMessage: intake.Request.CoreMessage,
+			CallToAction: request.CallToAction, Concept: request.Concept,
+			Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...),
+		},
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	draft := VideoDraft{
+		ContractVersion: "creative-video-draft/v1", TaskID: task.ID, Revision: 1,
+		Concept: request.Concept, Prompt: request.Prompt, DurationSeconds: route.TargetDurationSeconds,
+		AspectRatio: route.AspectRatio, Resolution: "720p", SourceVideo: request.SourceVideo,
+		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
+		CallToAction: request.CallToAction, CreatedAt: now,
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+		manual := intake.Request.ManualViralRemake
+		snapshot := ViralRemakeInputSnapshot{
+			Source: intake.Source, SelectedRouteID: route.RouteID,
+			ReferenceVideo: request.SourceVideo, ReferenceImage: manual.ReferenceImage,
+			ProductName: manual.ProductName, SellingPoints: append([]string{}, manual.SellingPoints...),
+			CallToAction: request.CallToAction, UserInstruction: manual.UserInstruction,
+			MandatoryElements:    append([]string{}, request.Mandatory...),
+			ProhibitedClaims:     append([]string{}, request.Prohibited...),
+			ReferenceVideoRights: manual.ReferenceVideoRights, ReferenceImageRights: manual.ReferenceImageRights,
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize viral remake input: %w", hashErr)
+		}
+		blockers := []string{"analysis_snapshot", "confirmed_prompt_package", "provider_video_route"}
+		if manual.ReferenceVideoRights != RightsConfirmed {
+			blockers = append(blockers, "reference_video_rights")
+		}
+		if manual.ReferenceImage != nil && manual.ReferenceImageRights != RightsConfirmed {
+			blockers = append(blockers, "reference_image_rights")
+		}
+		viralDraft = &ViralRemakeDraft{
+			ContractVersion: "creative-viral-remake-draft/v1", TaskID: task.ID, Revision: 1,
+			Status: ViralWaitingForAnalysis, SelectedRouteID: route.RouteID,
+			InputSnapshot: snapshot, InputHash: inputHash,
+			Readiness: CreativeReadiness{
+				PlanningReady: true, GenerationReady: false, ProductionReady: false,
+				MissingFields: []string{}, Blockers: blockers,
+			},
+			Candidates: []ViralCandidate{}, CreatedAt: now, UpdatedAt: now,
+		}
+		draft.ViralRemake = viralDraft
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeShortDramaPreroll {
+		manual := intake.Request.ManualShortDramaPreroll
+		if manual == nil {
+			return CreativeTask{}, fmt.Errorf("manual short drama preroll input is required")
+		}
+		snapshot := ShortDramaPrerollInputSnapshot{
+			Source: intake.Source, SelectedRouteID: route.RouteID,
+			BriefID: manual.BriefID, BriefVersion: manual.BriefVersion, BriefName: manual.BriefName,
+			StoryTitle: manual.StoryTitle, Synopsis: manual.Synopsis,
+			ReviewedSellingPoints: append([]string{}, manual.ReviewedSellingPoints...), OpeningLine: manual.OpeningLine,
+			HookStrategy: manual.HookStrategy, SubtitleStyle: manual.SubtitleStyle, Transition: manual.Transition,
+			HookStrength: manual.HookStrength, CallToAction: request.CallToAction,
+			CharacterReferences: append([]contract.AssetVersionRef{}, manual.CharacterReferences...),
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize short drama input: %w", hashErr)
+		}
+		candidates, planErr := planShortDramaCandidates(snapshot, "sha256:"+inputHash)
+		if planErr != nil {
+			return CreativeTask{}, planErr
+		}
+		shortDramaDraft = &ShortDramaPrerollDraft{
+			ContractVersion: "creative-short-drama-preroll-draft/v1", TaskID: task.ID, Revision: 1,
+			SelectedRouteID: route.RouteID, InputSnapshot: snapshot, InputHash: "sha256:" + inputHash,
+			Readiness: CreativeReadiness{
+				PlanningReady: true, GenerationReady: false, ProductionReady: false,
+				MissingFields: []string{}, Blockers: []string{"selected_candidate"},
+			},
+			Candidates: candidates, CreatedAt: now, UpdatedAt: now,
+		}
+		draft.ShortDramaPreroll = shortDramaDraft
+		draft.Prompt = candidates[0].PromptPackage.CompiledPrompt
+	}
+	if err := draft.Validate(); err != nil {
+		return CreativeTask{}, err
+	}
+	return s.Repository.CreateVideoTask(ctx, task, draft)
+}
+
+func selectedVideoRoute(intake CreativeIntake, request CreateVideoTaskRequest) (CreativeRouteSnapshot, error) {
+	if request.SelectedRouteID != "" {
+		for _, route := range intake.Request.CreativeRoutes {
+			if route.RouteID == request.SelectedRouteID {
+				return route, nil
+			}
+		}
+		return CreativeRouteSnapshot{}, fmt.Errorf("selected_route_id is not present in the Creative intake")
+	}
+	if intake.Source != IntakeSourceStrategyPackage || request.RouteIndex < 0 || request.RouteIndex >= len(intake.Request.CreativeRoutes) {
+		return CreativeRouteSnapshot{}, ErrIntakeNotReady
+	}
+	return intake.Request.CreativeRoutes[request.RouteIndex], nil
+}
+
+func (s Service) CreateIntake(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, key contract.IdempotencyKey, request CreateIntakeRequest) (CreativeIntake, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeIntake{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if err := requestContext.Validate(); err != nil {
+		return CreativeIntake{}, err
+	}
+	if !requestContext.Actor.HasScope(ScopeWrite) {
+		return CreativeIntake{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := key.Validate(); err != nil {
+		return CreativeIntake{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return CreativeIntake{}, err
+	}
+	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	if project.OrganizationID != requestContext.Actor.OrganizationID || project.ProjectID != projectID {
+		return CreativeIntake{}, fmt.Errorf("resolved project context does not match request scope")
+	}
+	strategyReady := true
+	if request.Source == IntakeSourceStrategyPackage {
+		if s.StrategyPackages == nil {
+			return CreativeIntake{}, fmt.Errorf("strategy package intake is unavailable")
+		}
+		snapshot, readErr := s.StrategyPackages.ReadForCreative(ctx, requestContext.Actor, projectID, *request.StrategyPackage)
+		if readErr != nil {
+			return CreativeIntake{}, readErr
+		}
+		request = resolvedStrategyPackageRequest(request.StrategyPackage, snapshot)
+		if err := request.validateContent(); err != nil {
+			return CreativeIntake{}, err
+		}
+		for _, route := range request.CreativeRoutes {
+			if err := route.Validate(); err != nil {
+				return CreativeIntake{}, err
+			}
+		}
+		strategyReady = snapshot.CreativeReady
+	}
+	hash, err := contract.CanonicalJSONHash(request)
+	if err != nil {
+		return CreativeIntake{}, fmt.Errorf("canonicalize creative intake: %w", err)
+	}
+	intakeID, err := s.idGenerator()("creativeintake")
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	now := s.now()
+	missing := request.missingFields()
+	status := IntakeReady
+	confirmedBy := requestContext.Actor.Principal.ID
+	if len(missing) > 0 {
+		status, confirmedBy = IntakeNeedsClarification, ""
+	}
+	if !strategyReady {
+		status, confirmedBy = IntakeNeedsClarification, ""
+		missing = append(missing, "strategy_package.creative_ready")
+	}
+	value := CreativeIntake{
+		ID: intakeID, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, Source: request.Source, Status: status,
+		Request: request, MissingFields: missing, Warnings: []string{}, ConfirmedBy: confirmedBy, Principal: requestContext.Actor.Principal,
+		IdempotencyKey: key, RequestHash: hash, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	stored, _, err := s.Repository.CreateIntake(ctx, value)
+	return stored, err
+}
+
+func resolvedStrategyPackageRequest(reference *StrategyPackageReference, snapshot StrategyPackageSnapshot) CreateIntakeRequest {
+	concept := strings.TrimSpace(snapshot.Concept)
+	if concept == "" {
+		concept = strings.TrimSpace(snapshot.CoreMessage)
+	}
+	return CreateIntakeRequest{
+		Source: IntakeSourceStrategyPackage, StrategyPackage: reference, Channel: ChannelXiaohongshu,
+		Objective: snapshot.Objective, Audience: snapshot.Audience, CoreMessage: snapshot.CoreMessage,
+		CallToAction: "了解更多并收藏这份内容", Concept: concept,
+		Tone: append([]string{}, snapshot.Tone...), VisualKeywords: append([]string{}, snapshot.VisualKeywords...),
+		Mandatory: append([]string{}, snapshot.Mandatory...), Prohibited: append([]string{}, snapshot.Prohibited...),
+		CreativeRoutes: append([]CreativeRouteSnapshot{}, snapshot.CreativeRoutes...),
+	}
+}
+
+func (s Service) ListIntakes(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]CreativeIntake, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListIntakes(ctx, actor.OrganizationID, projectID, normalizedLimit(limit))
+}
+
+func (s Service) CreateTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, intakeID string, request CreateTaskRequest) (CreativeTask, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeTask{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeTask{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return CreativeTask{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeTask{}, err
+	}
+	intake, err := s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	if intake.Status != IntakeReady {
+		return CreativeTask{}, ErrIntakeNotReady
+	}
+	id, err := s.idGenerator()("creativetask")
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	now := s.now()
+	direction := CreativeDirection{ContentType: request.ContentType, Focus: strings.TrimSpace(request.Focus), Audience: firstNonEmpty(request.Audience, intake.Request.Audience), CoreMessage: firstNonEmpty(request.CoreMessage, intake.Request.CoreMessage), CallToAction: firstNonEmpty(request.CallToAction, intake.Request.CallToAction), Concept: strings.TrimSpace(request.Focus), Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...)}
+	task := CreativeTask{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intake.ID, Format: FormatImageText, Channel: intake.Request.Channel, Status: TaskDraft, Direction: direction, Version: 1, CreatedAt: now, UpdatedAt: now}
+	draft := composeXiaohongshuDraft(task.ID, intake, direction, now)
+	stored, err := s.Repository.CreateTask(ctx, task, draft)
+	if err != nil {
+		return CreativeTask{}, err
+	}
+	return stored, nil
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func (s Service) ListTasks(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]CreativeTask, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListTasks(ctx, actor.OrganizationID, projectID, normalizedLimit(limit))
+}
+
+func (s Service) GetTaskDetail(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string) (TaskDetail, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return TaskDetail{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return TaskDetail{}, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return TaskDetail{}, err
+	}
+	return s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+}
+
+// ArchiveTask removes a task from the active Creative queue without deleting
+// its drafts, frozen versions, Provider jobs, or Asset lineage. Those records
+// are evidence used by downstream systems and must remain traceable.
+func (s Service) ArchiveTask(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string) error {
+	if s.Repository == nil || s.Projects == nil {
+		return fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return err
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return err
+	}
+	if detail.Task.Status == TaskArchived {
+		return ErrInvalidState
+	}
+	return s.Repository.ArchiveTask(ctx, actor.OrganizationID, projectID, taskID, s.now())
+}
+
+// ReviseDraft creates the next editable revision. It does not mutate an older
+// revision, so a previously frozen CreativeVersion continues to point at the
+// exact content that was reviewed.
+func (s Service) ReviseDraft(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, request ReviseDraftRequest) (ImageTextDraft, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return ImageTextDraft{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return ImageTextDraft{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return ImageTextDraft{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ImageTextDraft{}, err
+	}
+	draft := request.Draft(taskID, request.ExpectedVersion+1, s.now())
+	return s.Repository.ReviseDraft(ctx, actor.OrganizationID, projectID, taskID, request.ExpectedVersion, draft)
+}
+
+// BindImageAsset advances the editable draft after the HTTP composition layer
+// has verified that ref is a ready asset in the same project. Creative stores
+// only the reference so Assets remains the source of truth for media bytes.
+func (s Service) BindImageAsset(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, request BindImageAssetRequest) (ImageTextDraft, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return ImageTextDraft{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return ImageTextDraft{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := request.Validate(); err != nil {
+		return ImageTextDraft{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ImageTextDraft{}, err
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return ImageTextDraft{}, err
+	}
+	if detail.Task.Status == TaskArchived || detail.Draft.Version != request.ExpectedDraftVersion {
+		if detail.Task.Status == TaskArchived {
+			return ImageTextDraft{}, ErrInvalidState
+		}
+		return ImageTextDraft{}, ErrVersionConflict
+	}
+	if request.ImagePlanOrder > len(detail.Draft.ImagePlan) {
+		return ImageTextDraft{}, fmt.Errorf("image_plan_order does not exist in this draft")
+	}
+	updated := detail.Draft
+	updated.Version++
+	updated.CreatedAt = s.now()
+	ref := request.AssetRef
+	updated.ImagePlan[request.ImagePlanOrder-1].AssetRef = &ref
+	return s.Repository.ReviseDraft(ctx, actor.OrganizationID, projectID, taskID, request.ExpectedDraftVersion, updated)
+}
+
+func (s Service) RegisterCoverImageJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID, providerJobID string) error {
+	return s.RegisterImagePlanJob(ctx, actor, projectID, taskID, 1, providerJobID)
+}
+
+func (s Service) RegisterVideoJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID, providerJobID string) error {
+	if s.Repository == nil || s.Projects == nil {
+		return fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(providerJobID) == "" {
+		return fmt.Errorf("provider job ID is required")
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return err
+	}
+	if detail.Task.Format != FormatVideo || detail.VideoDraft == nil || detail.Task.Status == TaskArchived {
+		return ErrInvalidState
+	}
+	return s.Repository.RegisterProductionJob(ctx, actor.OrganizationID, projectID, taskID, ProductionJob{
+		TaskID: taskID, Kind: "video_generate", ProviderJobID: providerJobID, CreatedAt: s.now(),
 	})
 }
 
-func (s Service) CreateImageJob(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, planID string, width, height int, key contract.IdempotencyKey) (contract.ProviderJob, bool, error) {
-	if s.Store == nil || s.Jobs == nil {
-		return contract.ProviderJob{}, false, fmt.Errorf("creative store and provider jobs are required")
+func (s Service) RegisterImagePlanJob(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, imagePlanOrder int, providerJobID string) error {
+	if s.Repository == nil || s.Projects == nil {
+		return fmt.Errorf("creative dependencies are incomplete")
 	}
-	plan, err := s.Store.Get(ctx, actor.OrganizationID, project.ProjectID, planID)
+	if !actor.HasScope(ScopeWrite) {
+		return fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return err
+	}
+	if imagePlanOrder < 1 || imagePlanOrder > 12 || strings.TrimSpace(providerJobID) == "" {
+		return fmt.Errorf("provider job ID is required")
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, taskID)
 	if err != nil {
-		return contract.ProviderJob{}, false, err
+		return err
 	}
-	if plan.MediaType != MediaImage {
-		return contract.ProviderJob{}, false, fmt.Errorf("only image plans can create image jobs")
+	if detail.Task.Status == TaskArchived || imagePlanOrder > len(detail.Draft.ImagePlan) {
+		return ErrInvalidState
 	}
-	hash, err := contract.CanonicalJSONHash(struct {
-		PlanID string `json:"plan_id"`
-		Width  int    `json:"width"`
-		Height int    `json:"height"`
-	}{planID, width, height})
-	if err != nil {
-		return contract.ProviderJob{}, false, err
-	}
-	return s.Jobs.CreateImageJob(ctx, provider.CreateImageJobRequest{
-		Actor: actor, Project: project, IdempotencyKey: key, RequestHash: hash, ModelAlias: plan.ModelAlias,
-		SourceSystem: "creative", SourceTaskID: plan.ID, Input: provider.ImageGenerationInput{Prompt: plan.Prompt, Width: width, Height: height},
-	})
+	return s.Repository.RegisterProductionJob(ctx, actor.OrganizationID, projectID, taskID, ProductionJob{TaskID: taskID, Kind: imagePlanJobKind(imagePlanOrder, providerJobID), ProviderJobID: providerJobID, CreatedAt: s.now()})
 }
 
-func (s Service) GetPlan(ctx context.Context, org contract.OrganizationID, projectID contract.ProjectID, planID string) (Plan, error) {
-	if s.Store == nil {
-		return Plan{}, fmt.Errorf("creative store is required")
+// FreezeVersion creates the stable Creative-owned artifact consumed by later
+// Delivery and Insights modules. It deliberately snapshots the current draft
+// instead of exposing a mutable task or a Provider job as a cross-system ref.
+func (s Service) FreezeVersion(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, taskID string, request FreezeVersionRequest, key contract.IdempotencyKey) (CreativeVersion, bool, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeVersion{}, false, fmt.Errorf("creative dependencies are incomplete")
 	}
-	return s.Store.Get(ctx, org, projectID, planID)
+	if err := requestContext.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if !requestContext.Actor.HasScope(ScopeWrite) {
+		return CreativeVersion{}, false, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if err := key.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if err := request.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, requestContext.Actor.OrganizationID, projectID, taskID)
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	var imageSnapshot ImageTextDraft
+	var videoSnapshot *VideoVersionSnapshot
+	draftVersion := request.DraftVersion
+	if detail.Task.Format == FormatVideo {
+		if detail.VideoDraft == nil || detail.VideoDraft.Revision != request.DraftVersion {
+			return CreativeVersion{}, false, ErrVersionConflict
+		}
+		if strings.TrimSpace(request.RenderJobID) == "" {
+			return CreativeVersion{}, false, fmt.Errorf("render_job_id is required for a video version")
+		}
+		render, renderErr := s.Repository.GetRenderJob(ctx, requestContext.Actor.OrganizationID, projectID, request.RenderJobID)
+		if renderErr != nil {
+			return CreativeVersion{}, false, renderErr
+		}
+		if render.TaskID != taskID || render.Status != RenderSucceeded || render.OutputAsset == nil {
+			return CreativeVersion{}, false, ErrInvalidState
+		}
+		providerJobID := ""
+		for _, job := range detail.ProductionJobs {
+			if job.Kind == "video_generate" {
+				providerJobID = job.ProviderJobID
+			}
+		}
+		videoSnapshot = &VideoVersionSnapshot{
+			ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
+			VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
+			StrategyPackage: detail.Intake.Request.StrategyPackage, DraftRevision: detail.VideoDraft.Revision,
+			SourceVideo: detail.VideoDraft.SourceVideo, GeneratedPreRoll: render.PreRollVideo,
+			FinalVideo: render.OutputAsset.AssetVersion, ProviderJobID: providerJobID, RenderJobID: render.ID,
+		}
+		if err := videoSnapshot.Validate(); err != nil {
+			return CreativeVersion{}, false, err
+		}
+	} else {
+		if detail.Draft.Version != request.DraftVersion {
+			return CreativeVersion{}, false, ErrVersionConflict
+		}
+		imageSnapshot = detail.Draft
+	}
+	hashInput := struct {
+		TaskID       string                `json:"creative_task_id"`
+		DraftVersion int64                 `json:"draft_version"`
+		Format       CreativeFormat        `json:"format"`
+		Channel      CreativeChannel       `json:"channel"`
+		Image        ImageTextDraft        `json:"image_text_snapshot,omitempty"`
+		Video        *VideoVersionSnapshot `json:"video_snapshot,omitempty"`
+	}{TaskID: detail.Task.ID, DraftVersion: draftVersion, Format: detail.Task.Format, Channel: detail.Task.Channel, Image: imageSnapshot, Video: videoSnapshot}
+	contentHash, err := contract.NewContentHash(hashInput)
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	requestHash, err := contract.CanonicalJSONHash(request)
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	id, err := s.idGenerator()("creativeversion")
+	if err != nil {
+		return CreativeVersion{}, false, err
+	}
+	value := CreativeVersion{
+		ID: id, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, TaskID: taskID,
+		Format: detail.Task.Format, Version: draftVersion, DraftVersion: draftVersion, Status: CreativeVersionCreated,
+		Snapshot: imageSnapshot, VideoSnapshot: videoSnapshot, ContentHash: contentHash, CreatedBy: requestContext.Actor.Principal.ID,
+		CreatedAt: s.now(), IdempotencyKey: key, RequestHash: requestHash,
+	}
+	if err := value.Validate(); err != nil {
+		return CreativeVersion{}, false, err
+	}
+	return s.Repository.CreateVersion(ctx, value)
 }
 
-func (s Service) newID() ids.Generator {
-	if s.NewID != nil {
-		return s.NewID
+// CheckVersion validates a frozen version without changing it. The Phase-1
+// rules intentionally cover only delivery blockers that are deterministic:
+// every planned image must have a project Asset reference, prohibited claims
+// must not appear in copy, and every mandatory element must be represented.
+func (s Service) CheckVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativeVersion, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeVersion{}, fmt.Errorf("creative dependencies are incomplete")
 	}
-	return ids.New
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeVersion{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeVersion{}, err
+	}
+	version, err := s.Repository.GetVersion(ctx, actor.OrganizationID, projectID, versionID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if version.Status != CreativeVersionCreated && version.Status != CreativeVersionChecked {
+		return CreativeVersion{}, ErrInvalidState
+	}
+	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, version.TaskID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	check := evaluateVersion(version, detail.Intake, actor.Principal.ID, s.now())
+	return s.Repository.RecordVersionCheck(ctx, actor.OrganizationID, projectID, versionID, check)
+}
+
+// ListVersions restores immutable Creative history after a browser refresh.
+// taskID is optional so the Project stage summary can use the same read model.
+func (s Service) ListVersions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, limit int) ([]CreativeVersion, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	return s.Repository.ListVersions(ctx, actor.OrganizationID, projectID, strings.TrimSpace(taskID), limit)
+}
+
+// ListPackages exposes only Creative's immutable handoff objects. Delivery
+// never needs to inspect Creative drafts or tables.
+func (s Service) ListPackages(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]CreativePackage, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return nil, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	return s.Repository.ListPackages(ctx, actor.OrganizationID, projectID, limit)
+}
+
+func (s Service) ApproveVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativeVersion, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativeVersion{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativeVersion{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeVersion{}, err
+	}
+	version, err := s.Repository.GetVersion(ctx, actor.OrganizationID, projectID, versionID)
+	if err != nil {
+		return CreativeVersion{}, err
+	}
+	if version.Status != CreativeVersionChecked || version.Check == nil || !version.Check.Passed {
+		return CreativeVersion{}, ErrInvalidState
+	}
+	return s.Repository.ApproveVersion(ctx, actor.OrganizationID, projectID, versionID, CreativeApproval{ApprovedBy: actor.Principal.ID, ApprovedAt: s.now()})
+}
+
+func (s Service) DeliverVersion(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, versionID string) (CreativePackage, error) {
+	if s.Repository == nil || s.Projects == nil {
+		return CreativePackage{}, fmt.Errorf("creative dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return CreativePackage{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativePackage{}, err
+	}
+	version, err := s.Repository.GetVersion(ctx, actor.OrganizationID, projectID, versionID)
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	if version.Status != CreativeVersionApproved {
+		return CreativePackage{}, ErrInvalidState
+	}
+	id, err := s.idGenerator()("creativepackage")
+	if err != nil {
+		return CreativePackage{}, err
+	}
+	value := CreativePackage{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, CreativeVersionID: version.ID, Format: version.Format, ContentHash: version.ContentHash, Snapshot: version.Snapshot, VideoSnapshot: version.VideoSnapshot, CreatedBy: actor.Principal.ID, CreatedAt: s.now()}
+	return s.Repository.CreatePackage(ctx, value)
+}
+
+// Provider jobs are immutable attempts. Including the Provider job identity
+// permits retrying only a failed image-plan position while preserving every
+// prior attempt for audit and avoiding a shared mutable "latest job" field.
+func imagePlanJobKind(order int, providerJobID string) string {
+	return fmt.Sprintf("image_plan_%d_job_%s", order, providerJobID)
+}
+
+func evaluateVersion(version CreativeVersion, intake CreativeIntake, actorID string, now time.Time) CreativeCheck {
+	blockers := make([]string, 0)
+	warnings := make([]string, 0)
+	if version.Format == FormatVideo {
+		if version.VideoSnapshot == nil || version.VideoSnapshot.Validate() != nil {
+			blockers = append(blockers, "video production lineage is incomplete")
+		}
+		return CreativeCheck{Passed: len(blockers) == 0, Blockers: blockers, Warnings: warnings, CheckedBy: actorID, CheckedAt: now}
+	}
+	for _, item := range version.Snapshot.ImagePlan {
+		if item.AssetRef == nil {
+			blockers = append(blockers, fmt.Sprintf("image_plan[%d] has no bound project asset", item.Order))
+		}
+	}
+	copyText := strings.ToLower(strings.Join(append(append([]string{}, version.Snapshot.TitleCandidates...), version.Snapshot.Body, version.Snapshot.CoverCopy, strings.Join(version.Snapshot.Topics, " ")), " "))
+	for _, prohibited := range intake.Request.Prohibited {
+		if needle := strings.ToLower(strings.TrimSpace(prohibited)); needle != "" && strings.Contains(copyText, needle) {
+			blockers = append(blockers, fmt.Sprintf("prohibited claim appears in copy: %s", prohibited))
+		}
+	}
+	for _, mandatory := range intake.Request.Mandatory {
+		if needle := strings.ToLower(strings.TrimSpace(mandatory)); needle != "" && !strings.Contains(copyText, needle) {
+			warnings = append(warnings, fmt.Sprintf("mandatory element is not found in text: %s", mandatory))
+		}
+	}
+	return CreativeCheck{Passed: len(blockers) == 0, Blockers: blockers, Warnings: warnings, CheckedBy: actorID, CheckedAt: now}
 }
 
 func (s Service) now() time.Time {
@@ -148,4 +786,48 @@ func (s Service) now() time.Time {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+func (s Service) idGenerator() ids.Generator {
+	if s.NewID != nil {
+		return s.NewID
+	}
+	return ids.New
+}
+func normalizedLimit(limit int) int {
+	if limit < 1 {
+		return 50
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+func composeXiaohongshuDraft(taskID string, intake CreativeIntake, direction CreativeDirection, now time.Time) ImageTextDraft {
+	r := intake.Request
+	message := strings.TrimSpace(direction.CoreMessage)
+	concept := strings.TrimSpace(direction.Concept)
+	if concept == "" {
+		concept = "把产品价值放进真实使用场景"
+	}
+	titles := []string{message + "：这次想认真说清楚", "不只是一句卖点，" + message, "给" + strings.TrimSpace(r.Audience) + "的一份实用说明"}
+	cover := message
+	if len([]rune(cover)) > 18 {
+		cover = string([]rune(cover)[:18])
+	}
+	body := fmt.Sprintf("最近在为%s整理一个更清楚的表达：%s。\n\n%s\n\n先从真实场景出发，再把值得被看见的细节说具体。%s", strings.TrimSpace(r.Audience), message, concept, ctaSentence(r.CallToAction))
+	topics := []string{"#品牌内容", "#创意灵感", "#好内容值得被看见"}
+	return ImageTextDraft{TaskID: taskID, Version: 1, Status: "draft", TitleCandidates: titles, Body: body, Topics: topics, CoverCopy: cover, ImagePlan: []ImagePlanItem{
+		{Order: 1, Purpose: "封面", VisualBrief: concept + "，突出核心信息：" + message, Caption: cover},
+		{Order: 2, Purpose: "场景", VisualBrief: "目标人群的真实使用场景，画面自然可信", Caption: "从一个具体场景开始"},
+		{Order: 3, Purpose: "价值", VisualBrief: "以细节或产品体验证明核心信息", Caption: message},
+		{Order: 4, Purpose: "行动", VisualBrief: "干净的品牌收束画面，留出行动引导区域", Caption: strings.TrimSpace(r.CallToAction)},
+	}, CreatedAt: now}
+}
+
+func ctaSentence(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "欢迎把你的想法留在评论区。"
+	}
+	return "如果你也在关注这件事，" + strings.TrimSpace(value) + "。"
 }

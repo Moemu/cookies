@@ -1,0 +1,11 @@
+{
+  "id": "missing-budget-boundary",
+  "scenario": "预算尚未确认",
+  "objective": "验证新品市场兴趣",
+  "audience": "有明确场景痛点的早期用户",
+  "proposition": "降低完成核心任务的时间成本",
+  "channels": ["xiaohongshu"],
+  "primary_kpi": "高意向互动数",
+  "missing_fields": ["budget.total"],
+  "expected_signals": ["预算待确认", "最小验证", "停止条件"]
+}

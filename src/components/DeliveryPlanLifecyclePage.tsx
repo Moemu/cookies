@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CircleAlert, CircleCheck, History, Plus, RotateCcw, Save, Send, Wrench } from 'lucide-react'
+import { CircleAlert, CircleCheck, FilePlus, History, Plus, Save, Send, Wrench } from 'lucide-react'
 import {
   deliveryPlanApi,
   type DeliveryPlan,
   type DeliveryPlanDraft,
+  type DeliveryScenario,
   type DeliveryPlanVersion,
   type DeliveryPreflightResult,
 } from '../api/delivery'
@@ -13,6 +14,29 @@ import { StateBoundary } from './StateBoundary'
 
 const planSections = ['目标与账户', '预算与排期', '追踪', '素材引用', '投前检查'] as const
 type PlanSection = typeof planSections[number]
+
+const scenarioLabels: Record<DeliveryScenario | 'unsaved_draft', string> = {
+  golden_path: '黄金路径',
+  budget_zero: '预算为 0',
+  creative_unconfirmed: '素材待确认',
+  tracking_missing: '追踪缺失',
+  incomplete_draft: '草稿不完整',
+  project_plan_list: '计划列表',
+  unsaved_draft: '未保存草稿',
+}
+
+const preflightCheckLabels: Record<DeliveryPreflightResult['checks'][number]['code'], string> = {
+  advertiser_available: '广告主可用',
+  budget_positive: '预算大于 0',
+  schedule_valid: '排期有效',
+  creative_present: '素材引用完整',
+  creative_confirmed: '素材已确认',
+  tracking_complete: '追踪配置完整',
+}
+
+function scenarioMetadata(scenario: DeliveryScenario | 'unsaved_draft') {
+  return `${scenarioLabels[scenario]} · scenario=${scenario}`
+}
 
 export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const { currentProject } = useProject()
@@ -42,7 +66,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     void deliveryPlanApi.list(projectId).then(records => {
       if (!active) return
       setPlans(records)
-      const latest = records.at(-1)
+      const latest = records[0]
       if (latest) {
         setSelectedId(latest.id)
         setDraft(draftFromVersion(latest.currentVersion))
@@ -166,7 +190,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           >
             <span>{plan.id}</span>
             <b>{plan.currentVersion.name}</b>
-            <small>V{plan.currentVersionNumber} · scenario={plan.scenario}</small>
+            <small>V{plan.currentVersionNumber} · {scenarioMetadata(plan.scenario)}</small>
           </button>)}
           {!plans.length ? <div className="panel-empty">当前 Project 还没有服务端计划。</div> : null}
         </div>
@@ -182,7 +206,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           </div>
           <div className="mock-source-stack">
             <span className="source-chip">source=mock</span>
-            <span className="source-chip">scenario={selectedPlan?.scenario ?? 'unsaved_draft'}</span>
+            <span className="source-chip">{scenarioMetadata(selectedPlan?.scenario ?? 'unsaved_draft')}</span>
           </div>
         </header>
 
@@ -200,7 +224,12 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
 
         <footer className="delivery-editor-actions">
           <span>{dirty ? '有未保存修改' : selectedPlan ? `已保存 V${selectedPlan.currentVersionNumber}` : '等待创建'}</span>
-          <button className="secondary-button" onClick={beginNew} disabled={busy}><RotateCcw size={15}/>新建草稿</button>
+          <button
+            className="secondary-button"
+            title="创建空白 mock 草稿，不继承当前表单内容"
+            onClick={beginNew}
+            disabled={busy}
+          ><FilePlus size={15}/>新建空白草稿</button>
           <button className="secondary-button" onClick={() => void save()} disabled={busy || (!dirty && !isNew)}><Save size={15}/>{isNew ? '保存草稿' : '保存新版本'}</button>
           <button className="primary-button" onClick={() => void runPreflight()} disabled={busy || !selectedPlan || dirty}><Send size={15}/>运行服务端预检</button>
         </footer>
@@ -297,12 +326,12 @@ function PreflightPanel({ result, onRepair }: { result?: DeliveryPreflightResult
   return <div className="server-preflight-panel">
     <header>
       <div>{result.blocked ? <CircleAlert size={22}/> : <CircleCheck size={22}/>}<span><b>{result.blocked ? '服务端预检阻断' : '服务端预检通过'}</b><small>V{result.planVersion} · {new Date(result.checkedAt).toLocaleString('zh-CN')}</small></span></div>
-      <div className="mock-source-stack"><span className="source-chip">source={result.source}</span><span className="source-chip">scenario={result.scenario}</span></div>
+      <div className="mock-source-stack"><span className="source-chip">source={result.source}</span><span className="source-chip">{scenarioMetadata(result.scenario)}</span></div>
     </header>
     <div className="preflight-checks" role="list" aria-label="服务端投前检查结果">
       {result.checks.map(check => <article key={check.code} className={`preflight-check ${check.passed ? 'passed' : check.severity}`}>
         <span className="preflight-severity">{check.passed ? 'pass' : check.severity}</span>
-        <div><b>{check.code}</b><p>{check.message}</p></div>
+        <div><b>{preflightCheckLabels[check.code]}</b><small>{check.code}</small><p>{check.message}</p></div>
         {!check.passed && check.repair ? <button aria-label={`修复 ${check.code}`} onClick={() => onRepair(check.repair!)}><Wrench size={14}/>{check.repair.label}</button> : null}
       </article>)}
     </div>

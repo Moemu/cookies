@@ -35,7 +35,8 @@ func (s GeneratedIntakeService) Create(ctx context.Context, requestContext contr
 	if err := request.Validate(); err != nil {
 		return GeneratedIntake{}, err
 	}
-	if !allowedDeclaredAssetMIME(request.Output.DeclaredMIMEType) || request.Output.DeclaredSizeBytes > maxBytesForMIME(request.Output.DeclaredMIMEType) {
+	_, maxBytes, supported := generatedAssetPolicy(request.Output.DeclaredMIMEType)
+	if !supported || request.Output.DeclaredSizeBytes > maxBytes {
 		return GeneratedIntake{}, ErrUnsupportedAsset
 	}
 	now := s.now()
@@ -177,14 +178,18 @@ func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake Genera
 	if err := metadata.Validate(); err != nil {
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_INVALID", Message: "provider returned invalid output metadata", Retryable: false}
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, MaxVideoBytes+1))
+	_, maxBytes, supported := generatedAssetPolicy(intake.Request.Output.DeclaredMIMEType)
+	if !supported {
+		return AssetCommit{}, &contract.JobError{Code: "ASSET_TYPE_UNSUPPORTED", Message: "provider output type is unsupported", Retryable: false}
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
 	cancelFetch()
 	if err != nil {
 		return AssetCommit{}, &contract.JobError{Code: "PROVIDER_OUTPUT_READ_FAILED", Message: "failed to read provider output", Retryable: true}
 	}
 	digest := sha256.Sum256(data)
 	actualSHA := hex.EncodeToString(digest[:])
-	if int64(len(data)) > maxBytesForMIME(metadata.MIMEType) || metadata.SizeBytes != int64(len(data)) || metadata.SHA256 != actualSHA {
+	if int64(len(data)) > maxBytes || metadata.SizeBytes != int64(len(data)) || metadata.SHA256 != actualSHA {
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_MISMATCH", Message: "provider output bytes do not match provider metadata", Retryable: false}
 	}
 	declared := intake.Request.Output
@@ -197,7 +202,7 @@ func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake Genera
 	}
 	commit, err := w.Upload.ingestStoredObject(ctx, intake.OrganizationID, intake.ProjectID, intake.TargetAssetID, intake.TargetBlobID,
 		intake.Request.Provenance.ProjectContextVersion, contract.AssetSourceProviderGenerated, location.ObjectLocation,
-		intake.ProviderJobID, intake.OutputID, intake.TraceID)
+		intake.ProviderJobID, intake.OutputID, "", intake.TraceID)
 	if err != nil {
 		// Keep malware detections isolated in the quarantine bucket for its
 		// short lifecycle/forensic policy; discard ordinary failed staging.

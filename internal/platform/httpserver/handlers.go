@@ -5,17 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/remix"
+	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
 const maxJSONBody = 1 << 20
@@ -27,6 +31,168 @@ func (s *Server) currentIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := s.identities.GetCurrent(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var body struct {
+		DisplayName string `json:"display_name"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.accounts.UpdateCurrentUser(r.Context(), rc.Actor, body.DisplayName)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.accounts.ListOrganizations(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) listOrganizationMembers(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if string(rc.Actor.OrganizationID) != r.PathValue("organization_id") {
+		s.writeServiceError(w, r, identity.ErrMembershipForbidden)
+		return
+	}
+	values, err := s.accounts.ListOrganizationMembers(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) addOrganizationMember(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if string(rc.Actor.OrganizationID) != r.PathValue("organization_id") {
+		s.writeServiceError(w, r, identity.ErrMembershipForbidden)
+		return
+	}
+	var body struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.accounts.AddOrganizationMember(r.Context(), rc.Actor, body.UserID, body.Role)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) updateOrganizationMember(w http.ResponseWriter, r *http.Request) {
+	if s.accounts == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if string(rc.Actor.OrganizationID) != r.PathValue("organization_id") {
+		s.writeServiceError(w, r, identity.ErrMembershipForbidden)
+		return
+	}
+	var body identity.UpdateOrganizationMembershipRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.accounts.UpdateOrganizationMember(r.Context(), rc.Actor, r.PathValue("user_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listProjectMembers(w http.ResponseWriter, r *http.Request) {
+	if s.projectMembers == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.projectMembers.ListProjectMembers(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) addProjectMember(w http.ResponseWriter, r *http.Request) {
+	if s.projectMembers == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var body struct {
+		PrincipalKind contract.PrincipalKind `json:"principal_kind"`
+		PrincipalID   string                 `json:"principal_id"`
+		Role          string                 `json:"role"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.projectMembers.AddProjectMember(r.Context(), rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		contract.Principal{Kind: body.PrincipalKind, ID: body.PrincipalID}, body.Role)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) updateProjectMember(w http.ResponseWriter, r *http.Request) {
+	if s.projectMembers == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	var body project.UpdateProjectMembershipRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	value, err := s.projectMembers.UpdateProjectMember(r.Context(), rc.Actor,
+		contract.ProjectID(r.PathValue("project_id")),
+		contract.Principal{Kind: contract.PrincipalKind(r.PathValue("principal_kind")), ID: r.PathValue("principal_id")}, body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -169,6 +335,125 @@ func (s *Server) projectWorkbench(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) providerCapabilities(w http.ResponseWriter, r *http.Request) {
+	if s.providerConfig == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	items, err := s.providerConfig.ListCapabilities(r.Context(), rc.Actor.OrganizationID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	configured := false
+	var checkedAt time.Time
+	for _, item := range items {
+		if item.Available {
+			configured = true
+		}
+		if item.UpdatedAt.After(checkedAt) {
+			checkedAt = item.UpdatedAt
+		}
+	}
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":     "cookies-provider-gateway",
+		"status":       map[bool]string{true: "configured", false: "not_configured"}[configured],
+		"capabilities": items,
+		"credential": map[string]any{
+			"source":         "workspace",
+			"masked_api_key": map[bool]string{true: "encrypted", false: ""}[configured],
+		},
+		"checked_at": checkedAt,
+	})
+}
+
+func (s *Server) runWorkbenchQualityCheck(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	version, err := positivePathVersion(r.PathValue("version"))
+	if err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.RunWorkbenchQualityCheck(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), project.RunWorkbenchQualityCheckRequest{
+		AssetID: r.PathValue("asset_id"), AssetVersion: version,
+	})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) recordWorkbenchMaterialConfirmation(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	version, err := positivePathVersion(r.PathValue("version"))
+	if err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	var body project.RecordWorkbenchMaterialConfirmationRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	body.AssetID, body.AssetVersion = r.PathValue("asset_id"), version
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.RecordWorkbenchMaterialConfirmation(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) updateWorkbenchAssetPointer(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body project.UpdateWorkbenchAssetPointerRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	body.AssetID = r.PathValue("asset_id")
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpdateWorkbenchAssetPointer(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func positivePathVersion(value string) (int, error) {
+	version, err := strconv.Atoi(value)
+	if err != nil || version < 1 {
+		return 0, fmt.Errorf("version must be a positive integer")
+	}
+	return version, nil
 }
 
 func (s *Server) listProjectTasks(w http.ResponseWriter, r *http.Request) {
@@ -1310,6 +1595,86 @@ func (s *Server) searchKnowledge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"query": request.Query, "items": value})
 }
 
+func (s *Server) listKnowledgeResearchRuns(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.badRequest(w, r, fmt.Errorf("limit must be between 1 and 100"))
+			return
+		}
+		limit = value
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ListResearchRuns(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getKnowledgeResearchRun(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetResearchRun(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("research_run_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listKnowledgeResearchArtifacts(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit, ok := boundedLimit(w, r, 50, 100)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ListResearchArtifacts(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.URL.Query().Get("category"), limit,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getKnowledgeResearchArtifact(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetResearchArtifact(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("artifact_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	decoder := json.NewDecoder(r.Body)
@@ -1355,7 +1720,23 @@ func writerHeaderNoStore(w http.ResponseWriter) { w.Header().Set("Cache-Control"
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, message, retryable := http.StatusInternalServerError, "INTERNAL", "The service could not complete the request.", true
 	switch {
-	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound), errors.Is(err, knowledge.ErrNotFound), errors.Is(err, agent.ErrNotFound):
+	case errors.Is(err, identity.ErrMembershipForbidden):
+		status, code, message, retryable = http.StatusForbidden, "MEMBERSHIP_OPERATION_FORBIDDEN", "当前身份无权执行该成员操作。", false
+	case errors.Is(err, identity.ErrMembershipNotFound), errors.Is(err, identity.ErrUserNotFound):
+		status, code, message, retryable = http.StatusNotFound, "IDENTITY_RESOURCE_NOT_FOUND", "指定的用户或成员关系不存在。", false
+	case errors.Is(err, identity.ErrLastOwner):
+		status, code, message, retryable = http.StatusConflict, "LAST_OWNER_REQUIRED", "组织必须保留至少一名有效 owner。", false
+	case errors.Is(err, identity.ErrMembershipConflict):
+		status, code, message, retryable = http.StatusConflict, "MEMBERSHIP_CHANGED", "成员信息已发生变化，请刷新后重试。", false
+	case errors.Is(err, project.ErrMembershipForbidden):
+		status, code, message, retryable = http.StatusForbidden, "PROJECT_MEMBERSHIP_OPERATION_FORBIDDEN", "当前身份无权管理该项目成员。", false
+	case errors.Is(err, project.ErrMembershipNotFound):
+		status, code, message, retryable = http.StatusNotFound, "PROJECT_MEMBERSHIP_NOT_FOUND", "指定的项目成员关系不存在。", false
+	case errors.Is(err, project.ErrLastOwner):
+		status, code, message, retryable = http.StatusConflict, "PROJECT_LAST_OWNER_REQUIRED", "项目必须保留至少一名有效 owner。", false
+	case errors.Is(err, project.ErrMembershipConflict):
+		status, code, message, retryable = http.StatusConflict, "PROJECT_MEMBERSHIP_CHANGED", "项目成员信息已发生变化，请刷新后重试。", false
+	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound), errors.Is(err, knowledge.ErrNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, agent.ErrRunNotFound):
 		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "The scoped resource does not exist.", false
 	case errors.Is(err, assets.ErrIdempotencyConflict), errors.Is(err, remix.ErrIdempotencyConflict):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, "The idempotency key conflicts with an earlier request.", false
@@ -1379,10 +1760,28 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusUnprocessableEntity, contract.ErrorAssetIntakeFailed, "Only JPEG and PNG assets within the size limit are supported.", false
 	case errors.Is(err, assets.ErrProjectContextStale):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_CONTEXT_STALE", "The requested project context version is stale.", false
-	case errors.Is(err, remix.ErrInvalidMapping):
-		status, code, message, retryable = http.StatusBadRequest, "INVALID_REQUEST", "The product mapping does not satisfy the remix contract.", false
-	case errors.Is(err, remix.ErrPrerollNotReady):
-		status, code, message, retryable = http.StatusConflict, "PREROLL_NOT_READY", "The preroll must pass quality gate before it can be applied.", false
+	case errors.Is(err, creative.ErrNotFound):
+		status, code, message, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", "The scoped Creative resource does not exist.", false
+	case errors.Is(err, creative.ErrIdempotencyConflict):
+		status, code, message, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, "The idempotency key conflicts with an earlier Creative request.", false
+	case errors.Is(err, creative.ErrIntakeNotReady):
+		status, code, message, retryable = http.StatusConflict, "INTAKE_NEEDS_CLARIFICATION", "The Creative intake needs the missing fields before a task can be created.", false
+	case errors.Is(err, creative.ErrProviderJobConflict):
+		status, code, message, retryable = http.StatusConflict, "PRODUCTION_JOB_CONFLICT", "A different cover production job already exists for this task.", false
+	case errors.Is(err, creative.ErrInvalidState):
+		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The Creative resource is not in a valid state for this operation.", false
+	case errors.Is(err, creative.ErrVersionConflict):
+		status, code, message, retryable = http.StatusPreconditionFailed, "CREATIVE_VERSION_CONFLICT", "The Creative draft changed. Refresh the task and try again.", false
+	case errors.Is(err, creative.ErrViralAnalysisSourceUnavailable):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE", "爆款源视频不可读取，请重新上传后再拆解。", false
+	case errors.Is(err, creative.ErrViralAnalysisPreparationFailed):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "VIRAL_ANALYSIS_VIDEO_UNREADABLE", "源视频无法抽帧分析，请上传可正常播放的视频后重试。", false
+	case errors.Is(err, creative.ErrViralAnalysisProviderRejected):
+		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_REQUEST_REJECTED", "视觉分析模型拒绝了本次请求，请检查模型配置或更换源视频。", false
+	case errors.Is(err, creative.ErrViralAnalysisProviderUnavailable):
+		status, code, message, retryable = http.StatusServiceUnavailable, "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", "视觉分析模型网关暂时不可用，请稍后重试。", true
+	case errors.Is(err, creative.ErrViralAnalysisResponseInvalid):
+		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_RESPONSE_INVALID", "视觉分析模型未返回可用的五维拆解结果，请稍后重试。", true
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
 	case errors.Is(err, project.ErrVersionConflict):
@@ -1393,6 +1792,9 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusBadRequest, "BRAND_NOT_FOUND", "The selected brand does not exist in this organization.", false
 	case errors.Is(err, project.ErrProductNotFound):
 		status, code, message, retryable = http.StatusBadRequest, "PRODUCT_NOT_FOUND", "A selected product does not exist in this organization.", false
+	}
+	if status == http.StatusInternalServerError {
+		log.Printf("request %s failed: %v", requestIDFrom(r.Context()), err)
 	}
 	writeProblem(w, status, contract.Error{Code: code, Message: message, RequestID: requestIDFrom(r.Context()), Retryable: retryable})
 }

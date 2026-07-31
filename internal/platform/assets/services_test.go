@@ -413,6 +413,115 @@ func TestGeneratedIntakeRetriesTransientFailureThenRecordsAsset(t *testing.T) {
 	}
 }
 
+func TestGeneratedIntakeCompletesMP4AsVideoAsset(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 27, 8, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	projects := fakeProjects{organization: "org_1", project: "project_1", version: 7}
+	ids := sequenceIDs()
+	data := []byte{
+		0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm',
+		0x00, 0x00, 0x02, 0x00, 'i', 's', 'o', 'm', 'm', 'p', '4', '2',
+	}
+	digest := sha256.Sum256(data)
+	hash := hex.EncodeToString(digest[:])
+	request := GeneratedAssetIntakeRequest{
+		ProviderJobID: "video_job_1",
+		Output: contract.ProviderOutputRef{
+			ProviderCode: "fake-video", ProviderJobID: "video_job_1", OutputID: "output_1",
+			RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "video/mp4",
+			DeclaredSizeBytes: int64(len(data)), DeclaredSHA256: &hash,
+		},
+		Provenance: GenerationProvenance{
+			Capability: "video.generate", ProviderCode: "fake-video", ModelAlias: "cookies.video.standard", ModelVersion: "fake-video-v1",
+			SourceAssetRefs: []contract.AssetVersionRef{}, ProjectContextVersion: 7, GeneratedAt: now,
+		},
+	}
+	rc := testRequestContext("org_1", "project_1")
+	service := GeneratedIntakeService{Repository: repo, Projects: projects, Now: func() time.Time { return now }, NewID: ids}
+	intake, err := service.Create(context.Background(), rc, "project_1", "provider-video-output-1", request)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	upload := UploadService{
+		Repository: repo, Projects: projects, Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{},
+		QuarantineBucket: "quarantine", AssetsBucket: "assets", Now: func() time.Time { return now }, NewID: ids,
+		VideoProbe: fakeVideoProbe{metadata: VideoMetadata{
+			DurationMS: 5000, WidthPixels: 720, HeightPixels: 1280, FrameRate: "25/1", VideoCodec: "h264", AudioCodec: "aac",
+		}},
+	}
+	worker := GeneratedIntakeWorker{
+		Repository: repo, Projects: projects,
+		Fetcher: fakeFetcher{data: data, metadata: contract.OutputMetadata{MIMEType: "video/mp4", SizeBytes: int64(len(data)), SHA256: hash}},
+		Upload:  upload, Actor: rc.Actor, Now: func() time.Time { return now },
+	}
+	if processed, err := worker.ProcessOnce(context.Background(), "worker_video_1"); err != nil || !processed {
+		t.Fatalf("ProcessOnce() = (%v, %v)", processed, err)
+	}
+	stored, err := service.Get(context.Background(), rc.Actor, "project_1", intake.ID)
+	if err != nil || stored.ProjectAssetRef == nil {
+		t.Fatalf("Get() = (%+v, %v)", stored, err)
+	}
+	asset, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", stored.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset.Asset.Kind != contract.AssetVideo || asset.Version.MIMEType != "video/mp4" {
+		t.Fatalf("generated MP4 asset = %+v", asset)
+	}
+	if asset.Version.DurationMS != 5000 || asset.Version.VideoCodec != "h264" || asset.Version.WidthPixels != 720 {
+		t.Fatalf("generated video metadata = %+v", asset.Version)
+	}
+}
+
+func TestRenderedVideoIntakeIsIdempotentByRenderJob(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 27, 8, 30, 0, 0, time.UTC)
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository:       repository,
+		Projects:         fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs:            NewMemoryBlobStore(),
+		Scanner:          NoopScanner{},
+		QuarantineBucket: "quarantine",
+		AssetsBucket:     "assets",
+		Now:              func() time.Time { return now },
+		NewID:            sequenceIDs(),
+		VideoProbe: fakeVideoProbe{metadata: VideoMetadata{
+			DurationMS: 17000, WidthPixels: 720, HeightPixels: 1280, FrameRate: "25/1", VideoCodec: "h264", AudioCodec: "aac",
+		}},
+	}
+	contents := append([]byte{0, 0, 0, 24}, []byte("ftypisom-rendered")...)
+	requestContext := testRequestContext("org_1", "project_1")
+	first, err := service.IngestRenderedVideo(context.Background(), requestContext, "project_1", "renderjob_1", bytes.NewReader(contents), int64(len(contents)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.IngestRenderedVideo(context.Background(), requestContext, "project_1", "renderjob_1", bytes.NewReader(contents), int64(len(contents)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("render retry created a second asset: first=%+v second=%+v", first, second)
+	}
+	asset, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset.Version.SourceType != contract.AssetSourceRendered || asset.Version.RenderJobID != "renderjob_1" {
+		t.Fatalf("render lineage was not preserved: %+v", asset.Version)
+	}
+}
+
+type fakeVideoProbe struct {
+	metadata VideoMetadata
+	err      error
+}
+
+func (p fakeVideoProbe) Probe(context.Context, []byte) (VideoMetadata, error) {
+	return p.metadata, p.err
+}
+
 func TestGeneratedIntakeCannotCrossOrganization(t *testing.T) {
 	service := GeneratedIntakeService{Repository: newFakeRepository(), Projects: fakeProjects{organization: "org_1", project: "project_1", version: 1}}
 	request := GeneratedAssetIntakeRequest{ProviderJobID: "job", Output: contract.ProviderOutputRef{ProviderCode: "fake", ProviderJobID: "job", OutputID: "out", RetrievalExpiresAt: time.Now().Add(time.Hour), DeclaredMIMEType: "image/png", DeclaredSizeBytes: 1}, Provenance: GenerationProvenance{Capability: "image.generate", ProviderCode: "fake", ModelAlias: "m", ModelVersion: "v", SourceAssetRefs: []contract.AssetVersionRef{}, ProjectContextVersion: 1, GeneratedAt: time.Now()}}
@@ -598,9 +707,19 @@ func (r *fakeRepository) FailIntake(_ context.Context, v GeneratedIntake, e cont
 	r.intakes[v.ID] = v
 	return nil
 }
+func (r *fakeRepository) CompleteRender(_ context.Context, renderJobID string, c AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.assets {
+		if existing.Asset.OrganizationID == c.OrganizationID && existing.Version.RenderJobID == renderJobID {
+			return existing.Ref, nil
+		}
+	}
+	return r.commit(c, now), nil
+}
 func (r *fakeRepository) commit(c AssetCommit, now time.Time) contract.ProjectAssetRef {
 	ref := contract.ProjectAssetRef{ProjectID: c.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: c.AssetID, Version: c.Version}}
-	r.assets[string(c.OrganizationID)+"/"+string(c.ProjectID)+"/"+string(c.AssetID)] = ProjectAsset{Ref: ref, Asset: Asset{ID: c.AssetID, OrganizationID: c.OrganizationID, Kind: c.Kind, Status: AssetReady, OwnerSystem: c.OwnerSystem, LatestVersion: c.Version, CreatedAt: now, UpdatedAt: now}, Version: AssetVersion{OrganizationID: c.OrganizationID, AssetID: c.AssetID, Version: c.Version, Status: AssetReady, SourceType: c.SourceType, MIMEType: c.MIMEType, SizeBytes: c.SizeBytes, SHA256: c.SHA256, WidthPixels: c.WidthPixels, HeightPixels: c.HeightPixels, Media: c.Media, ProviderJobID: c.ProviderJobID, ProviderOutputID: c.ProviderOutputID, ProjectContextVersion: c.ProjectContextVersion, Blob: c.Location, CreatedAt: now}, CreatedAt: now}
+	r.assets[string(c.OrganizationID)+"/"+string(c.ProjectID)+"/"+string(c.AssetID)] = ProjectAsset{Ref: ref, Asset: Asset{ID: c.AssetID, OrganizationID: c.OrganizationID, Kind: c.Kind, Status: AssetReady, OwnerSystem: c.OwnerSystem, LatestVersion: c.Version, CreatedAt: now, UpdatedAt: now}, Version: AssetVersion{OrganizationID: c.OrganizationID, AssetID: c.AssetID, Version: c.Version, Status: AssetReady, SourceType: c.SourceType, MIMEType: c.MIMEType, SizeBytes: c.SizeBytes, SHA256: c.SHA256, WidthPixels: c.WidthPixels, HeightPixels: c.HeightPixels, Media: c.Media, DurationMS: c.DurationMS, FrameRate: c.FrameRate, VideoCodec: c.VideoCodec, AudioCodec: c.AudioCodec, RenderJobID: c.RenderJobID, ProviderJobID: c.ProviderJobID, ProviderOutputID: c.ProviderOutputID, ProjectContextVersion: c.ProjectContextVersion, Blob: c.Location, CreatedAt: now}, CreatedAt: now}
 	for _, relation := range c.Relations {
 		relation.CreatedAt = now
 		key := relationKey(c.OrganizationID, c.ProjectID, relation.OutputAsset)

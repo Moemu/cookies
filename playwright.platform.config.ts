@@ -8,6 +8,7 @@ const localChromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
 
 const localGoEnv = {
   COOKIES_ENV: 'local',
+  COOKIES_PASSWORD_AUTH_ENABLED: 'false',
   COOKIES_HTTP_ADDR: ':18080',
   COOKIES_MYSQL_DSN: 'cookies:cookies_local_development_only@tcp(127.0.0.1:3306)/cookies?parseTime=true&multiStatements=true',
   COOKIES_LOCAL_ORGANIZATION_ID: 'org_local',
@@ -19,8 +20,10 @@ const localGoEnv = {
     'project.write',
     'assets.read',
     'assets.write',
-    'delivery.plan.read',
-    'delivery.plan.write',
+    'delivery.read',
+    'delivery.write',
+    'delivery.approve',
+    'delivery.execute',
     'provider.job.create',
     'provider.text.generate',
     'provider.vision.understand',
@@ -40,13 +43,13 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `${mysqlCommand} && go run ./cmd/cookies-seed && go run ./cmd/cookies-api`,
+      command: `${mysqlCommand} && go run ./cmd/cookies-migrate && go run ./cmd/cookies-seed && go run ./cmd/cookies-api`,
       url: `${apiBaseURL}/healthz`,
       env: {
         ...process.env,
         ...localGoEnv,
       },
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 120_000,
     },
     {
@@ -56,7 +59,7 @@ export default defineConfig({
         ...process.env,
         VITE_PLATFORM_PROXY_TARGET: apiBaseURL,
       },
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 60_000,
     },
   ],

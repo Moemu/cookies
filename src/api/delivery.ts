@@ -91,7 +91,7 @@ export type DeliveryPlan = {
   currentVersionNumber: number
   currentVersion: DeliveryPlanVersion
   versions: DeliveryPlanVersion[]
-  createdBy: { kind: 'user' | 'service'; id: string }
+  createdBy: string
   createdAt: string
   updatedAt: string
 }
@@ -153,7 +153,7 @@ type WireDeliveryPlan = {
   current_version_number: number
   current_version: WireDeliveryPlanVersion
   versions: WireDeliveryPlanVersion[]
-  created_by: { kind: 'user' | 'service'; id: string }
+  created_by: string
   created_at: string
   updated_at: string
 }
@@ -175,31 +175,30 @@ type WirePreflightResult = {
   checked_at: string
 }
 
-const deliveryPlanBase = '/api/delivery/v1'
-
 export const deliveryPlanApi = {
   async list(projectId: string): Promise<DeliveryPlan[]> {
     const response = await deliveryPlanRequest<{ items: WireDeliveryPlan[]; source: DeliverySource; scenario: DeliveryScenario }>(
-      `/plans?project_id=${encodeURIComponent(projectId)}`,
+      projectId,
+      '/plans',
     )
     return (response.items ?? []).map(toDeliveryPlan)
   },
   async create(projectId: string, draft: DeliveryPlanDraft): Promise<DeliveryPlan> {
-    const response = await deliveryPlanRequest<WireDeliveryPlan>('/plans', {
+    const response = await deliveryPlanRequest<WireDeliveryPlan>(projectId, '/plans', {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectId, ...toWireDraft(draft) }),
+      body: JSON.stringify(toWireDraft(draft)),
     })
     return toDeliveryPlan(response)
   },
   async update(projectId: string, planId: string, expectedVersion: number, draft: DeliveryPlanDraft): Promise<DeliveryPlan> {
-    const response = await deliveryPlanRequest<WireDeliveryPlan>(`/plans/${encodeURIComponent(planId)}?project_id=${encodeURIComponent(projectId)}`, {
+    const response = await deliveryPlanRequest<WireDeliveryPlan>(projectId, `/plans/${encodeURIComponent(planId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ expected_version: expectedVersion, ...toWireDraft(draft) }),
     })
     return toDeliveryPlan(response)
   },
   async preflight(projectId: string, planId: string): Promise<DeliveryPreflightResult> {
-    const response = await deliveryPlanRequest<WirePreflightResult>(`/plans/${encodeURIComponent(planId)}/preflight?project_id=${encodeURIComponent(projectId)}`, { method: 'POST' })
+    const response = await deliveryPlanRequest<WirePreflightResult>(projectId, `/plans/${encodeURIComponent(planId)}/preflight`, { method: 'POST' })
     return {
       planId: response.plan_id,
       planVersion: response.plan_version,
@@ -213,10 +212,10 @@ export const deliveryPlanApi = {
   },
 }
 
-async function deliveryPlanRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function deliveryPlanRequest<T>(projectId: string, path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
-  const response = await fetch(`${deliveryPlanBase}${path}`, { credentials: 'include', ...init, headers })
+  const response = await fetch(`/api/delivery/v1/projects/${encodeURIComponent(projectId)}${path}`, { credentials: 'include', ...init, headers })
   const payload = await response.json() as T | { error?: { code?: string; message?: string } }
   if (!response.ok) {
     const problem = payload as { error?: { code?: string; message?: string } }

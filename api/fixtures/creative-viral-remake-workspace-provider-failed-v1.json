@@ -1,0 +1,18 @@
+{
+  "contract_version": "creative-viral-remake-workspace/v1",
+  "task_id": "creativetask_viral_provider_failed",
+  "revision": 5,
+  "status": "provider_failed",
+  "selected_route_id": "route_manual_viral_remake_v1",
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false
+  },
+  "blockers": ["provider_job_failed"],
+  "error": {
+    "code": "PROVIDER_JOB_FAILED",
+    "message": "The video provider did not complete this candidate."
+  },
+  "recoverable": true
+}

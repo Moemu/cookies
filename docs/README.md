@@ -31,6 +31,10 @@
 | [四大模块子板块分析](./20-module-submodule-analysis.md) | 每个子板块的功能、必要性、价值、优先级、角色与展示形式 | 产品、设计、研发、业务负责人 |
 | [视频素材剪辑与开源框架方案](./21-video-material-editor-spec.md) | 素材剪辑子模块、编辑器布局、OpenCut/FFmpeg 选型、数据模型与 MVP | 产品、设计、前端、后端、音视频研发 |
 | [Project 中心化页面路径整改规划](./22-project-centered-navigation-remediation-plan.md) | Project 管理、唯一工作台、八阶段落点、四模块逐页问题、整改计划与全面评估 | 产品、设计、前端、后端、测试 |
+| [Strategy × Creative 并行开发契约（已废止）](./23-strategy-creative-parallel-contracts-v2.md) | 仅保留为历史记录；前端已改为单一负责人，本文不再约束职责、路由或实施顺序 | 历史资料 |
+| [Strategy → Creative 开发契约 v2](./25-strategy-to-creative-development-contract-v2.md) | 冻结 StrategyPackage、CreativeHandoff、CreativeIntake、CreativeVideoIntake、稳定 Route ID 与三级 readiness 边界 | Strategy、Creative、后端、测试 |
+| [爆款复刻 MVP 技术实施方案](./plans/2026-07-28-viral-remake-mvp-technical-plan.md) | Strategy 未接线时以 manual Intake 跑通 Creative 爆款分析、原创改写、Provider 生成、Assets 入库和检查闭环 | Creative、平台、前端、后端、测试 |
+| [Kanon 前端 × Go 后端集成技术方案](./plans/2026-07-29-kanon-frontend-go-backend-integration-plan.md) | 冻结 Kanon 前端权威范围、cookies-platform Go 后端事实来源、适配 seam、Workbench 数据映射与分阶段验收 | 前端、后端、架构、测试 |
 | [广告 AIGC 与 AI 混剪开发知识沉淀](./23-ad-aigc-remix-development-knowledge.md) | 从飞书 Base 重点资料沉淀素材工厂、AI 混剪、RenderJob、VLM 质检、Agent/RAG、评测和合规开发知识 | 产品、架构、后端、前端、算法、音视频研发 |
 | [广告 AIGC 与 AI 混剪逐点技术方案](./24-ad-aigc-remix-technical-breakdown.md) | 将素材元数据、Shot、RenderJob、质检、爆款复刻、前贴、Agent、RAG、评测和反馈逐点拆成可研发落地的技术方案 | 产品、架构、后端、前端、算法、音视频研发 |
 | [本地演示与测试数据手册](./25-local-demo-runbook.md) | 默认测试身份、兼容服务账号密码、演示数据导入、对象存储和验证步骤 | 演示、测试、研发、运维 |

@@ -1,0 +1,17 @@
+{
+  "name": "channel.xiaohongshu",
+  "version": "v1.0.0",
+  "kind": "platform",
+  "match": ["xiaohongshu", "小红书"],
+  "instructions": [
+    "明确小红书在用户决策链路中的角色，区分种草、搜索承接和转化辅助。",
+    "内容形式必须描述用户场景、笔记结构和可信证据，不得只罗列图文或视频。",
+    "建议至少包含一个搜索意图或评论互动设计，但不得承诺平台算法结果。",
+    "所有产品功效、销量或对比结论必须来自已确认事实，否则标记为假设。"
+  ],
+  "quality_checks": [
+    "channel_strategy 必须说明平台角色和具体内容形式。",
+    "creative_recommendations 至少覆盖开篇、证据表达和行动引导。",
+    "experiment_matrix 至少验证一个内容表达变量。"
+  ]
+}

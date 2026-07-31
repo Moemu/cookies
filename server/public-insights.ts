@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { DomainError } from "./errors.js";
 
 const DEFAULT_DATA_DIR = resolve(process.cwd(), "data/insights/public_data_insight_source_export");
@@ -185,12 +185,12 @@ async function loadPublicInsightStore() {
       const itemId = cleanText(raw.item_id);
       if (!itemId || seen.has(itemId)) continue;
       seen.add(itemId);
-      rows.push(normalizeRow(raw, root, path.split("/").at(-1) ?? "unknown.csv"));
+      rows.push(normalizeRow(raw, root, basename(path)));
       rowCount += 1;
     }
     const fileStat = await stat(path);
     files.push({
-      filename: path.split("/").at(-1) ?? "unknown.csv",
+      filename: basename(path),
       row_count: rowCount,
       modified_at: fileStat.mtime.toISOString(),
     });

@@ -16,18 +16,19 @@ func TestOpenAPIContractCoversPlanLifecyclePreflightAndErrors(t *testing.T) {
 	}
 	contract := string(contents)
 	required := []string{
-		"/api/delivery/v1/plans:",
-		"/api/delivery/v1/plans/{plan_id}:",
-		"/api/delivery/v1/plans/{plan_id}/versions:",
-		"/api/delivery/v1/plans/{plan_id}/versions/{version}:",
-		"/api/delivery/v1/plans/{plan_id}/preflight:",
+		"/api/delivery/v1/projects/{project_id}/plans:",
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}:",
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions:",
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}:",
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/preflight:",
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}:create-change-set:",
 		"DeliveryPlanVersion:",
 		"PreflightResult:",
 		"VERSION_CONFLICT",
-		"PROJECT_ACCESS_DENIED",
-		"source=mock",
-		"x-required-scope: delivery.plan.read",
-		"x-required-scope: delivery.plan.write",
+		"STALE_PLAN_VERSION",
+		"const: mock",
+		"const: local_simulation",
+		"const: demo_fixture",
 	}
 	for _, expected := range required {
 		if !strings.Contains(contract, expected) {

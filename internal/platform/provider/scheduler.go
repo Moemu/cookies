@@ -17,6 +17,7 @@ import (
 const (
 	imageExecutionJobKind     = "provider.image.execute"
 	imageExecutionMaxAttempts = 100
+	videoExecutionJobKind     = "provider.video.execute"
 )
 
 // NewRuntimeWorker returns the shared worker configuration required for
@@ -26,6 +27,7 @@ func NewRuntimeWorker(store jobruntime.Store, service Service) jobruntime.Worker
 		Store: store,
 		Handlers: map[string]jobruntime.Handler{
 			imageExecutionJobKind: RuntimeHandler(service),
+			videoExecutionJobKind: RuntimeHandler(service),
 		},
 	}
 }
@@ -58,6 +60,10 @@ func (s JobRuntimeScheduler) Schedule(ctx context.Context, providerJob contract.
 		now = s.Now
 	}
 	createdAt := now().UTC()
+	executionKind, err := providerExecutionKind(providerJob.Kind)
+	if err != nil {
+		return err
+	}
 	payload, err := json.Marshal(struct {
 		ProviderJobID string `json:"provider_job_id"`
 	}{ProviderJobID: providerJob.ID})
@@ -72,7 +78,7 @@ func (s JobRuntimeScheduler) Schedule(ctx context.Context, providerJob contract.
 	_, _, err = s.Store.Enqueue(ctx, jobruntime.CreateRequest{
 		Job: contract.Job{
 			ID:             executionJobID,
-			Kind:           imageExecutionJobKind,
+			Kind:           executionKind,
 			OrganizationID: providerJob.OrganizationID,
 			ProjectID:      providerJob.ProjectID,
 			Status:         contract.JobQueued,
@@ -95,7 +101,7 @@ func (s JobRuntimeScheduler) Schedule(ctx context.Context, providerJob contract.
 // remains on ProviderJob, which can itself be a domain-level failure.
 func RuntimeHandler(service Service) jobruntime.Handler {
 	return func(ctx context.Context, claim jobruntime.Claim) (jobruntime.Result, error) {
-		if claim.Job.Kind != imageExecutionJobKind {
+		if claim.Job.Kind != imageExecutionJobKind && claim.Job.Kind != videoExecutionJobKind {
 			return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_JOB_KIND_INVALID", Message: "Provider handler received an unsupported job kind", Retryable: false}}
 		}
 		var payload struct {
@@ -105,12 +111,18 @@ func RuntimeHandler(service Service) jobruntime.Handler {
 			return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_JOB_PAYLOAD_INVALID", Message: "Provider execution payload is invalid", Retryable: false}}
 		}
 		if _, err := service.RecordImageExecutionAttempt(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID, claim.Job.AttemptCount, claim.Job.MaxAttempts); err != nil {
-			return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "PROVIDER_ATTEMPT_RECORD_FAILED", Message: "Could not record the provider execution attempt", Retryable: true}}
+			return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: time.Now().UTC().Add(providerPollDelay)}
 		}
 		if claim.Job.AttemptCount >= claim.Job.MaxAttempts {
 			return exhaustedProviderExecution(service, ctx, claim, payload.ProviderJobID)
 		}
-		_, deferredUntil, err := service.ExecuteImageJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID)
+		var deferredUntil *time.Time
+		var err error
+		if claim.Job.Kind == videoExecutionJobKind {
+			_, deferredUntil, err = service.ExecuteVideoJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID)
+		} else {
+			_, deferredUntil, err = service.ExecuteImageJob(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, payload.ProviderJobID)
+		}
 		if err != nil {
 			var providerError ExecutionError
 			if errors.As(err, &providerError) && !providerError.JobError.Retryable {
@@ -131,6 +143,17 @@ func RuntimeHandler(service Service) jobruntime.Handler {
 			return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: *deferredUntil}
 		}
 		return jobruntime.Result{}, nil
+	}
+}
+
+func providerExecutionKind(providerJobKind string) (string, error) {
+	switch providerJobKind {
+	case imageGenerateJobKind, imageEditJobKind:
+		return imageExecutionJobKind, nil
+	case videoGenerateJobKind:
+		return videoExecutionJobKind, nil
+	default:
+		return "", fmt.Errorf("provider job kind %q is not supported by the runtime", providerJobKind)
 	}
 }
 

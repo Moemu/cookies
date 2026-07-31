@@ -3,26 +3,6 @@ import { expect, test, type Page } from '@playwright/test'
 const primaryProjectId = 'project_investor_precision_evidence'
 const otherProjectId = 'project_local'
 
-test.beforeEach(async ({ page }) => {
-  await page.route('**/api/session', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        authenticated: true,
-        user: { id: 'local-user', email: 'demo@cookies.local', displayName: 'Local Admin' },
-      }),
-    })
-  })
-  await page.route('**/api/provider/capabilities', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ provider: 'fake', status: 'configured', capabilities: [], checkedAt: new Date().toISOString() }),
-    })
-  })
-})
-
 test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检', async ({ page, request }) => {
   const suffix = Date.now().toString(36)
   const goldenName = `E2E 黄金计划 ${suffix}`
@@ -34,7 +14,20 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   expect(workspaceBox?.height).toBeLessThanOrEqual(720)
   await expect(page.locator('.delivery-plan-scroll')).toHaveCSS('overflow-y', 'auto')
   await expect(page.locator('.delivery-plan-form')).toHaveCSS('overflow-y', 'auto')
+  const blankDraftButton = page.getByRole('button', { name: '新建空白草稿', exact: true })
+  await expect(blankDraftButton.locator('svg.lucide-file-plus')).toBeVisible()
+  await page.getByLabel('计划名称').fill(`不应继承 ${suffix}`)
+  await blankDraftButton.click()
+  await expect(page.getByLabel('计划名称')).not.toHaveValue(`不应继承 ${suffix}`)
   await startNewPlan(page, goldenName)
+  const targetFieldControlOffsets = await page.locator('.delivery-field-grid > label').evaluateAll(labels =>
+    labels.map(label => {
+      const control = label.querySelector('input, textarea, select')
+      if (!control) throw new Error('delivery field label is missing its control')
+      return Math.round(control.getBoundingClientRect().top - label.getBoundingClientRect().top)
+    }),
+  )
+  expect(Math.max(...targetFieldControlOffsets) - Math.min(...targetFieldControlOffsets)).toBeLessThanOrEqual(1)
   await expect(page.getByRole('button', { name: '保存草稿', exact: true })).toBeInViewport()
   await expect(page.getByText('source=mock').first()).toBeVisible()
 
@@ -46,7 +39,7 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await page.getByLabel('素材 Asset ID').fill(`asset-e2e-${suffix}`)
 
   const createResponsePromise = page.waitForResponse(response =>
-    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/delivery/v1/plans',
+    response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/delivery/v1/projects/${primaryProjectId}/plans`,
   )
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   const createResponse = await createResponsePromise
@@ -62,7 +55,7 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await page.getByRole('button', { name: '预算与排期', exact: true }).click()
   await page.getByLabel('总预算').fill('4200')
   const updateResponsePromise = page.waitForResponse(response =>
-    response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/delivery/v1/plans/${planId}`,
+    response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/delivery/v1/projects/${primaryProjectId}/plans/${planId}`,
   )
   await page.getByRole('button', { name: '保存新版本', exact: true }).click()
   const updateResponse = await updateResponsePromise
@@ -79,9 +72,9 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await expect(page.getByText('历史快照 · V1')).toBeVisible()
   await expect(page.locator('.version-snapshot').getByText('¥3,000.00')).toBeVisible()
 
-  const crossProject = await request.get(`/api/delivery/v1/plans/${planId}?project_id=${otherProjectId}`)
-  expect(crossProject.status()).toBe(403)
-  expect(await crossProject.json()).toMatchObject({ error: { code: 'PROJECT_ACCESS_DENIED' } })
+  const crossProject = await request.get(`/api/delivery/v1/projects/${otherProjectId}/plans/${planId}`)
+  expect(crossProject.status()).toBe(404)
+  expect(await crossProject.json()).toMatchObject({ error: { code: 'RESOURCE_NOT_FOUND' } })
   await page.goto(`/projects/${otherProjectId}/delivery/plans`)
   await expect(page.getByText(goldenName)).toHaveCount(0)
 
@@ -142,7 +135,7 @@ async function createScenarioPlan(page: Page, name: string, configure: () => Pro
   await startNewPlan(page, name)
   await configure()
   const createResponsePromise = page.waitForResponse(response =>
-    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/delivery/v1/plans',
+    response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/delivery/v1/projects/${primaryProjectId}/plans`,
   )
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   const response = await createResponsePromise
@@ -154,7 +147,7 @@ async function createScenarioPlan(page: Page, name: string, configure: () => Pro
 
 async function waitForPreflight(page: Page, planId: string) {
   const response = await page.waitForResponse(candidate =>
-    candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === `/api/delivery/v1/plans/${planId}/preflight`,
+    candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === `/api/delivery/v1/projects/${primaryProjectId}/plans/${planId}/preflight`,
   )
   expect(response.status()).toBe(200)
   return response.json() as Promise<{

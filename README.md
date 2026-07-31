@@ -66,19 +66,19 @@ The performance-video workspace includes a controlled short-drama preroll path:
 
 The candidate score describes hook-mechanism relevance only. It is not a conversion or delivery-performance prediction. The optional opening line is used only to prevent verbatim reuse and is not stored in the persisted candidate snapshot or generated prompt.
 
-This MVP does **not** support video uploads, VLM/video understanding, mixed-video editing, real advertising delivery, or browser-managed provider credentials. Use only story context and selling points that have already been reviewed for the intended project.
+This MVP does **not** support video uploads, VLM/video understanding, production-grade video rendering, real advertising delivery, or browser-managed provider credentials. AI remix currently produces a persisted edit plan and a simulated render job; it does not emit a final encoded video. Use only story context and selling points that have already been reviewed for the intended project.
 
 ## Quick start
 
-Prerequisites: Node.js 20 or later, npm, Go, and Docker. Clone the repository, then install dependencies and seed the Go demo:
+The Kanon root frontend is now the primary product shell. Business state comes
+from the existing Go API and MySQL; the root Node demo server is not required.
 
-```bash
-git clone --recurse-submodules https://github.com/shikanon/cookies.git
-cd cookies
-cp .env.example .env
-npm ci
-docker compose up -d --wait mysql
-npm run go:seed
+Prerequisites: Go, Docker Desktop, Node.js 20 or later, and npm. In PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d mysql
+go run ./cmd/cookies-migrate
 ```
 
 ### Importing a complete local demo dataset
@@ -99,51 +99,39 @@ When `COOKIES_BLOB_PROVIDER=filesystem`, the objects are stored under
 use TOS configuration for a deployed environment. The source data itself is
 not copied into the repository.
 
-Start the TypeScript compatibility login API in one terminal:
-
-```bash
-npm run server
-```
-
 Start the Go `cookies-api` in a second terminal:
 
-```bash
+```powershell
 go run ./cmd/cookies-api
 ```
 
 Start the Vite frontend in a third terminal, then open the printed `http://127.0.0.1:5173` URL:
 
-```bash
+```powershell
+npm install
 npm run dev
 ```
 
-The frontend keeps browser requests same-origin: Vite proxies `/api` to the TypeScript compatibility service at `http://127.0.0.1:8787` for the demo session, and `/platform` to Go at `http://127.0.0.1:8080` for the product workspace. Configure `VITE_COMPAT_API_PROXY_TARGET` and `VITE_PLATFORM_PROXY_TARGET` when either local service uses another port; leave `VITE_API_BASE_URL` empty for this setup.
+Open `http://127.0.0.1:5173`. Vite proxies `/api`, `/platform`, `/healthz`,
+and `/readyz` to the Go API at `http://127.0.0.1:8080`, so the browser uses a
+single origin. The root frontend is the only maintained React application.
 
-On macOS, `./scripts/dev.sh` runs the full local loop: start MySQL, apply migrations, seed the canonical Go investor demo, then start the Go API and Vite frontend. Use `./scripts/dev.sh --prepare-only` to run only migrations and seed.
+## Provider configuration
 
-The TypeScript MVP compatibility server (`npm run server`) owns the local demo-login session. Its ignored `data/mvp-store.json` state is not the product workspace authority after equivalent Go `/platform/v1` endpoints are available. Run it alongside the Go API for the local login-to-workspace walkthrough.
+Provider credentials remain server-side. Configure image or video routes using
+the repository scripts and Provider Credential Broker; never place provider
+keys in frontend code, browser storage, committed `.env` files, or logs.
 
-## Ark configuration
-
-Copy `.env.example` to `.env`, set the value locally, then load it in the shell that starts the Go API:
-
-```bash
-# Set ARK_API_KEY in .env locally, then:
-set -a && source .env && set +a
-go run ./cmd/cookies-api
-```
-
-`ARK_API_KEY` is optional for browsing the seeded walkthrough, reviewing preflight, approving the demo ChangeSet, and reading audit events. When it is absent, the app exposes a clear server-derived `not_configured` status and disables new AI generation; it never asks for, stores, masks, or returns a browser API key. Do not commit `.env` or real credentials.
-
-The TS MVP compatibility server maps text, image, video, and embedding capability to the documented Ark model catalog in `server/ark-provider.ts`. `ARK_BASE_URL` is optional and defaults to the Ark HTTPS endpoint.
+The frontend calls only capability aliases such as `cookies.image.standard`
+and `cookies.video.standard`. The Go Provider Gateway owns the concrete
+provider, model, credential, retry, job, and asset-intake behavior.
 
 ## Verification
 
 Run the local quality gates before changing the MVP:
 
-```bash
-npm run check:server
-npm run test:server
+```powershell
+go test ./...
 npm run build
 ```
 

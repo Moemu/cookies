@@ -1,0 +1,53 @@
+{
+  "contract_version": "strategy-package/v1",
+  "package_id": "strategypackage_01",
+  "package_version": 1,
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "strategy_id": "strategy_01",
+  "strategy_revision": 1,
+  "brief": {
+    "brief_id": "brief_01",
+    "version": 1
+  },
+  "strategy": {
+    "contract_version": "strategy-draft/v1",
+    "objective": "提升新品在研发负责人人群中的认知",
+    "audience": {
+      "primary": "制造企业研发负责人",
+      "insights": ["重视可验证的数据和真实落地案例"]
+    },
+    "proposition": "用可验证的效率提升缩短研发周期",
+    "channel_strategy": [
+      {
+        "platform": "xiaohongshu",
+        "role": "建立专业认知并承接搜索决策",
+        "formats": ["图文笔记"]
+      }
+    ],
+    "creative_recommendations": ["用研发流程前后对比建立可信度"],
+    "constraints": ["不得使用无法证实的效果承诺"],
+    "budget_and_cadence": {"budget": "CNY 100000", "cadence": "两周测试"},
+    "experiment_matrix": [],
+    "measurement": ["有效线索数"],
+    "assumptions_and_gaps": [],
+    "lineage": {
+      "brief_id": "brief_01",
+      "brief_version": 1,
+      "project_context_version": 3,
+      "skill_versions": {"strategy.strategy.generate": "v1.0.0"}
+    }
+  },
+  "readiness": {
+    "publish_blockers": [],
+    "creative_ready": true,
+    "delivery_ready": true,
+    "insights_ready": true
+  },
+  "approval": {
+    "review_id": "strategyreview_01",
+    "approved_by": "user_01",
+    "approved_at": "2026-07-23T08:00:00Z",
+    "content_hash": "sha256:647d1ac651302ddf519b7834075680ff1ceae92807bbf9f7202525b19ece6bbd"
+  }
+}

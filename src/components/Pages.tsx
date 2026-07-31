@@ -280,11 +280,15 @@ function MaterialCheckWorkspace({ state, activeView, objectId, onOpenProject }: 
         </span>
       </div>
       <div className="material-preview-frame">
-        <div className="material-preview-card">
-          <span>ASSET</span>
-          <b>{selectedItem.pointer.assetId}</b>
-          <small>当前预览版本 v{selectedVersion}</small>
-        </div>
+        {selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'video'
+          ? <video key={`${selectedItem.pointer.assetId}-v${selectedVersion}`} controls playsInline preload="metadata" src={selectedItem.pointer.contentUrl} aria-label={`${selectedItem.title}素材检查预览`}/>
+          : selectedItem.pointer.contentUrl && selectedItem.pointer.mediaKind === 'image'
+            ? <img src={selectedItem.pointer.contentUrl} alt={`${selectedItem.title}素材检查预览`}/>
+            : <div className="material-preview-card">
+              <span>ASSET</span>
+              <b>{selectedItem.pointer.assetId}</b>
+              <small>当前预览版本 v{selectedVersion}</small>
+            </div>}
       </div>
       <div className="material-version-strip" aria-label="素材版本">
         {selectedItem.versions.map(version => {

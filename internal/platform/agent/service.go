@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("agent run not found")
+	ErrRunNotFound  = errors.New("agent run not found")
 	ErrInvalidState = errors.New("agent run state does not allow this operation")
 )
 
@@ -60,7 +60,7 @@ func (s *MemoryStore) Get(ctx context.Context, actor contract.ActorContext, proj
 	defer s.mu.RUnlock()
 	run, ok := s.runs[id]
 	if !ok || run.OrganizationID != actor.OrganizationID || run.ProjectID != projectID {
-		return AgentRun{}, ErrNotFound
+		return AgentRun{}, ErrRunNotFound
 	}
 	return cloneRun(run), nil
 }

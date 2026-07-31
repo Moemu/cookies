@@ -1,0 +1,8 @@
+{
+  "id": "commerce-conversion",
+  "objective": "提升新品成交",
+  "audience": "有明确改善需求的新客",
+  "proposition": "提供可验证的使用效果",
+  "channels": ["xiaohongshu"],
+  "expected_signals": ["决策阻力", "证据", "转化效率"]
+}

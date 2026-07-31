@@ -8,14 +8,11 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-type PlanStatus string
 type Source string
 type Scenario string
 type CheckSeverity string
 
 const (
-	PlanStatusDraft PlanStatus = "draft"
-
 	SourceMock Source = "mock"
 
 	ScenarioGoldenPath          Scenario = "golden_path"
@@ -96,27 +93,6 @@ type DeliveryPlanVersion struct {
 	CreatedAt             time.Time               `json:"created_at"`
 }
 
-type DeliveryPlan struct {
-	ID                   string                  `json:"id"`
-	OrganizationID       contract.OrganizationID `json:"organization_id"`
-	ProjectID            contract.ProjectID      `json:"project_id"`
-	Status               PlanStatus              `json:"status"`
-	Platform             string                  `json:"platform"`
-	Source               Source                  `json:"source"`
-	Scenario             Scenario                `json:"scenario"`
-	CurrentVersionNumber int                     `json:"current_version_number"`
-	CurrentVersion       DeliveryPlanVersion     `json:"current_version"`
-	Versions             []DeliveryPlanVersion   `json:"versions"`
-	CreatedBy            contract.Principal      `json:"created_by"`
-	CreatedAt            time.Time               `json:"created_at"`
-	UpdatedAt            time.Time               `json:"updated_at"`
-}
-
-type CreatePlanRequest struct {
-	ProjectID contract.ProjectID `json:"project_id"`
-	PlanDraft
-}
-
 type UpdatePlanRequest struct {
 	ExpectedVersion int `json:"expected_version"`
 	PlanDraft
@@ -157,13 +133,6 @@ type PlanVersionList struct {
 	Items    []DeliveryPlanVersion `json:"items"`
 	Source   Source                `json:"source"`
 	Scenario Scenario              `json:"scenario"`
-}
-
-func (request CreatePlanRequest) Validate() error {
-	if strings.TrimSpace(string(request.ProjectID)) == "" {
-		return fmt.Errorf("project_id is required")
-	}
-	return request.PlanDraft.Validate()
 }
 
 func (request UpdatePlanRequest) Validate() error {
@@ -245,4 +214,9 @@ func draftFromVersion(version DeliveryPlanVersion) PlanDraft {
 		CreativeReferences:    append([]CreativeReference(nil), version.CreativeReferences...),
 		SourceStrategyVersion: version.SourceStrategyVersion,
 	}
+}
+
+func cloneVersion(version DeliveryPlanVersion) DeliveryPlanVersion {
+	version.CreativeReferences = append([]CreativeReference(nil), version.CreativeReferences...)
+	return version
 }

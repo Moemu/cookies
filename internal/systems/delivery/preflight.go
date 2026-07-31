@@ -2,6 +2,8 @@ package delivery
 
 import "strings"
 
+// RunPreflight is the single authoritative rule engine used by both the Plan
+// preview endpoint and the ChangeSet execution gate.
 func RunPreflight(version DeliveryPlanVersion) []PreflightCheck {
 	trackingPresent := strings.TrimSpace(version.Tracking.LandingPage) != "" &&
 		strings.TrimSpace(version.Tracking.PixelID) != "" &&

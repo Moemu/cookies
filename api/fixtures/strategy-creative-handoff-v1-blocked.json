@@ -1,0 +1,90 @@
+{
+  "contract_version": "strategy-creative-handoff/v1",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "package_ref": {
+    "package_id": "strategy_package_04",
+    "package_version": 1,
+    "package_content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "approved_at": "2026-07-28T06:30:00Z"
+  },
+  "handoff_content_hash": "sha256:abed8d652f17179d07eb3a079a6c1379ca63ca32bb73e1382eeaa9665497e153",
+  "creative_view": {
+    "market": "CN",
+    "language": "zh-CN",
+    "objective": {
+      "objective_type": "brand",
+      "statement": "建立新品认知。",
+      "success_signals": []
+    },
+    "audience_segments": [],
+    "product_and_offer": {
+      "product_ref_ids": [
+        "product_02"
+      ],
+      "campaign_mechanism": "新品上市",
+      "offer_text": "",
+      "landing_destination": ""
+    },
+    "communication": {
+      "single_minded_proposition": "",
+      "message_hierarchy": [],
+      "cta_intent": "",
+      "approved_ctas": [],
+      "tone_constraints": []
+    },
+    "guardrails": [],
+    "claims": [],
+    "assets": [],
+    "creative_hypotheses": [],
+    "open_questions": [
+      {
+        "code": "audience_missing",
+        "stage": "planning",
+        "path": "creative_view.audience_segments",
+        "message": "至少需要一个有明确优先级的受众分群。",
+        "source": "strategy",
+        "source_ref_ids": [
+          "client_brief_05"
+        ]
+      }
+    ],
+    "source_refs": [
+      {
+        "ref_id": "client_brief_05",
+        "ref_type": "client_brief",
+        "producer": "strategy",
+        "resource_uri": "/api/strategy/v1/projects/project_01/briefs/brief_02/versions/1",
+        "version": "1",
+        "content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "observed_at": "2026-07-28T01:00:00Z"
+      }
+    ]
+  },
+  "routes": [],
+  "upstream_readiness": {
+    "status": "blocked",
+    "blockers": [
+      {
+        "code": "audience_missing",
+        "stage": "planning",
+        "path": "creative_view.audience_segments",
+        "message": "至少需要一个有明确优先级的受众分群。",
+        "source": "strategy",
+        "source_ref_ids": [
+          "client_brief_05"
+        ]
+      },
+      {
+        "code": "creative_route_missing",
+        "stage": "planning",
+        "path": "routes",
+        "message": "至少需要一条 Creative Route。",
+        "source": "strategy",
+        "source_ref_ids": []
+      }
+    ],
+    "warnings": []
+  },
+  "published_at": "2026-07-28T06:30:00Z"
+}

@@ -1,0 +1,24 @@
+{
+  "contract_version": "strategy-brief-version/v2",
+  "brand": {"name": "Cookies Studio"},
+  "product": {"name": "研发协作平台", "evidence": ["knowledgedoc_01"]},
+  "industry": "企业软件",
+  "region": "中国大陆",
+  "language": "简体中文",
+  "campaign": {"objective": "获取制造企业销售线索"},
+  "audience": {"primary": "制造企业研发负责人", "pain_points": ["跨团队协作慢"], "scenarios": ["新品研发"], "exclusions": []},
+  "proposition": "用可验证的流程协作缩短研发周期",
+  "channels": ["xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"],
+  "budget": {"total": "CNY 100000"},
+  "schedule": {"window": "两周验证"},
+  "constraints": ["不得承诺无法验证的结果"],
+  "measurement": {"primary_kpi": "有效线索数"},
+  "platform_briefs": [
+    {"platform": "xiaohongshu", "role": "专业认知", "content_formats": ["图文笔记"], "conversion_path": "搜索到表单", "primary_kpi": "有效咨询"},
+    {"platform": "douyin", "role": "兴趣激发", "content_formats": ["短视频"], "conversion_path": "视频到落地页", "primary_kpi": "有效线索"},
+    {"platform": "taobao_tmall", "role": "商品承接", "content_formats": ["详情页"], "conversion_path": "商品页咨询", "primary_kpi": "咨询率"},
+    {"platform": "wechat_ecosystem", "role": "信任培育", "content_formats": ["公众号"], "conversion_path": "文章到企微", "primary_kpi": "新增企微"}
+  ],
+  "creative": {"tone": ["专业", "可信"], "mandatory_elements": ["真实案例"], "prohibited_claims": ["保证提升"]},
+  "reference_ids": ["knowledgedoc_01"]
+}
