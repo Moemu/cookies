@@ -1,0 +1,44 @@
+{
+  "business_code": "commerce_preroll",
+  "generation": 1,
+  "version": "1.0.0",
+  "display_name": "电商前贴",
+  "summary": "在极短时间内完成商品识别、卖点证明和转化引导的前贴任务。",
+  "lifecycle": "active",
+  "selectable": true,
+  "display_order": 50,
+  "match_rules": [
+    {"id":"objective_conversion","field":"objective_type","operator":"in","values":["conversion","sales"],"weight":40,"reason":"任务以商品转化或销售为目标"},
+    {"id":"channel_commerce","field":"channels","operator":"in","values":["douyin","kuaishou","taobao_tmall"],"weight":25,"reason":"目标渠道适合短视频商品转化"},
+    {"id":"has_product","field":"asset_roles","operator":"contains","values":["product_image"],"weight":15,"reason":"已有商品素材可以建立保真要求"},
+    {"id":"deliverable_video","field":"deliverable_type","operator":"in","values":["video","unknown"],"weight":15,"reason":"前贴需要视频交付"}
+  ],
+  "questions": [
+    {"id":"selling_point_priority","label":"核心卖点的优先顺序是什么？","type":"textarea","required_for":"strategy","brief_source_path":"product.selling_points","validation":{"max_length":800}},
+    {"id":"offer_facts","label":"价格、优惠、赠品和期限有哪些已确认事实？","type":"textarea","required_for":"strategy","validation":{"max_length":1000}},
+    {"id":"conversion_action","label":"希望用户下一步做什么？","type":"single_select","required_for":"strategy","options":[{"value":"purchase","label":"购买"},{"value":"visit","label":"进入落地页"},{"value":"coupon","label":"领取优惠"},{"value":"live","label":"进入直播间"}]},
+    {"id":"product_image","label":"商品图片","type":"asset_ref","required_for":"production"},
+    {"id":"main_video","label":"用于最终拼接的正片","type":"asset_ref","required_for":"production"}
+  ],
+  "requirements": {
+    "strategy": ["品牌、商品和 SKU","卖点及优先级","优惠事实","证据","CTA 意图"],
+    "production": ["商品图片","正片","包装和 Logo","时长、画幅和分辨率"]
+  },
+  "output_fields": [
+    {"key":"conversion_message","label":"转化主张","type":"string","required":true,"max_length":300,"description":"单一核心转化主张。"},
+    {"key":"message_sequence","label":"信息顺序","type":"string_array","required":true,"max_items":6,"description":"商品、卖点、证据和 CTA 的优先顺序。"},
+    {"key":"opening_mechanisms","label":"前贴机制","type":"string_array","required":true,"max_items":4,"description":"商品动作、痛点或结果先行等抽象机制。"},
+    {"key":"product_fidelity","label":"商品保真","type":"string_array","required":true,"max_items":8,"description":"包装、文字、外观和声明的保真要求。"}
+  ],
+  "reference_policy": {
+    "allows_unknown_for_strategy": true,
+    "allowed_strategy_uses": ["mechanism_analysis","category_reference"],
+    "production_confirmations": ["product_asset_rights","claim_evidence","offer_validity"]
+  },
+  "skill_name": "creative_task.commerce_preroll",
+  "skill_version": "v1.0.0",
+  "owner": "strategy",
+  "reviewed_by": "creative-business-review",
+  "reviewed_at": "2026-07-30T00:00:00Z",
+  "published_at": "2026-07-30T00:00:00Z"
+}

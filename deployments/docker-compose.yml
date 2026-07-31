@@ -16,5 +16,11 @@ services:
       timeout: 3s
       retries: 20
 
+  tika:
+    image: apache/tika:3.2.3.0
+    restart: unless-stopped
+    ports:
+      - "${COOKIES_TIKA_BIND_ADDRESS:-127.0.0.1}:${COOKIES_TIKA_PORT:-9998}:9998"
+
 volumes:
   mysql-data:

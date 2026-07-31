@@ -41,14 +41,28 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 		strategyPackageVersion = intake.Request.StrategyPackage.PackageVersion
 		strategyPackageHash = intake.Request.StrategyPackage.ExpectedContentHash
 	}
+	taskStrategyPlanID := ""
+	taskStrategyVersion := int64(0)
+	taskStrategyHash := ""
+	if intake.Request.TaskStrategy != nil {
+		taskStrategyPlanID = intake.Request.TaskStrategy.PlanID
+		taskStrategyVersion = intake.Request.TaskStrategy.StrategyVersion
+		taskStrategyHash = intake.Request.TaskStrategy.ExpectedContentHash
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO creative_intakes (
 		id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 		request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash,
-		strategy_package_id, strategy_package_version, strategy_package_content_hash, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?)`,
+		strategy_package_id, strategy_package_version, strategy_package_content_hash,
+		task_strategy_plan_id, task_strategy_version, task_strategy_content_hash,
+		version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?,
+		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
+		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?)`,
 		intake.ID, intake.OrganizationID, intake.ProjectID, intake.Principal.Kind, intake.Principal.ID, intake.Source, intake.Status,
 		request, missing, warnings, intake.ConfirmedBy, intake.IdempotencyKey, intake.RequestHash,
-		strategyPackageID, strategyPackageVersion, strategyPackageHash, intake.Version, intake.CreatedAt, intake.UpdatedAt)
+		strategyPackageID, strategyPackageVersion, strategyPackageHash,
+		taskStrategyPlanID, taskStrategyVersion, taskStrategyHash,
+		intake.Version, intake.CreatedAt, intake.UpdatedAt)
 	if err == nil {
 		return intake, false, nil
 	}
@@ -70,6 +84,15 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 		}
 		if !errors.Is(packageErr, sql.ErrNoRows) {
 			return CreativeIntake{}, false, packageErr
+		}
+	}
+	if intake.Source == IntakeSourceTaskStrategy && intake.Request.TaskStrategy != nil {
+		existing, strategyErr := r.getIntakeByTaskStrategy(ctx, intake.OrganizationID, intake.ProjectID, *intake.Request.TaskStrategy)
+		if strategyErr == nil {
+			return existing, true, nil
+		}
+		if !errors.Is(strategyErr, sql.ErrNoRows) {
+			return CreativeIntake{}, false, strategyErr
 		}
 	}
 	return CreativeIntake{}, false, getErr
@@ -300,7 +323,19 @@ func (r MySQLRepository) GetTaskDetail(ctx context.Context, organizationID contr
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	return TaskDetail{Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft, ProductionJobs: jobs}, nil
+	attempts, err := r.shortDramaGenerationAttempts(ctx, organizationID, projectID, taskID)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	gameAttempts, err := r.gamePrerollGenerationAttempts(ctx, organizationID, projectID, taskID)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	return TaskDetail{
+		Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft,
+		ProductionJobs: jobs, ShortDramaGenerationAttempts: attempts,
+		GamePrerollGenerationAttempts: gameAttempts,
+	}, nil
 }
 
 func (r MySQLRepository) ReviseDraft(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, taskID string, expectedVersion int64, draft ImageTextDraft) (ImageTextDraft, error) {
@@ -449,6 +484,60 @@ func (r MySQLRepository) RegisterProductionJob(ctx context.Context, organization
 		return ErrProviderJobConflict
 	}
 	return nil
+}
+
+func (r MySQLRepository) CreateShortDramaGenerationAttempt(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	attempt ShortDramaGenerationAttempt,
+) (ShortDramaGenerationAttempt, error) {
+	if r.DB == nil {
+		return ShortDramaGenerationAttempt{}, fmt.Errorf("creative MySQL database is required")
+	}
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO creative_short_drama_generation_attempts (
+		id, organization_id, project_id, task_id, draft_revision, candidate_batch_id, candidate_id,
+		prompt_package_hash, generation_spec_hash, provider_job_id, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		attempt.ID, organizationID, projectID, attempt.TaskID, attempt.DraftRevision,
+		attempt.CandidateBatchID, attempt.CandidateID, attempt.PromptPackageHash,
+		attempt.GenerationSpecHash, attempt.ProviderJobID, attempt.CreatedAt,
+	)
+	if err == nil {
+		return attempt, nil
+	}
+	var mysqlError *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlError) || mysqlError.Number != 1062 {
+		return ShortDramaGenerationAttempt{}, err
+	}
+	return r.shortDramaGenerationAttemptByProviderJob(ctx, organizationID, projectID, attempt.ProviderJobID)
+}
+
+func (r MySQLRepository) CreateGamePrerollGenerationAttempt(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	attempt GamePrerollGenerationAttempt,
+) (GamePrerollGenerationAttempt, error) {
+	if r.DB == nil {
+		return GamePrerollGenerationAttempt{}, fmt.Errorf("creative MySQL database is required")
+	}
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO creative_game_preroll_generation_attempts (
+		id, organization_id, project_id, task_id, draft_revision, candidate_batch_id, candidate_id,
+		prompt_package_hash, generation_spec_hash, provider_job_id, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		attempt.ID, organizationID, projectID, attempt.TaskID, attempt.DraftRevision,
+		attempt.CandidateBatchID, attempt.CandidateID, attempt.PromptPackageHash,
+		attempt.GenerationSpecHash, attempt.ProviderJobID, attempt.CreatedAt,
+	)
+	if err == nil {
+		return attempt, nil
+	}
+	var mysqlError *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlError) || mysqlError.Number != 1062 {
+		return GamePrerollGenerationAttempt{}, err
+	}
+	return r.gamePrerollGenerationAttemptByProviderJob(ctx, organizationID, projectID, attempt.ProviderJobID)
 }
 
 func (r MySQLRepository) CreateVersion(ctx context.Context, value CreativeVersion) (CreativeVersion, bool, error) {
@@ -799,6 +888,10 @@ func (r MySQLRepository) getIntakeByStrategyPackage(ctx context.Context, organiz
 	return scanIntake(r.DB.QueryRowContext(ctx, creativeIntakeSelect+` WHERE organization_id = ? AND project_id = ? AND source_type = ? AND strategy_package_id = ? AND strategy_package_version = ? AND strategy_package_content_hash = ?`, organizationID, projectID, IntakeSourceStrategyPackage, reference.PackageID, reference.PackageVersion, reference.ExpectedContentHash))
 }
 
+func (r MySQLRepository) getIntakeByTaskStrategy(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, reference TaskStrategyReference) (CreativeIntake, error) {
+	return scanIntake(r.DB.QueryRowContext(ctx, creativeIntakeSelect+` WHERE organization_id = ? AND project_id = ? AND source_type = ? AND task_strategy_plan_id = ? AND task_strategy_version = ? AND task_strategy_content_hash = ?`, organizationID, projectID, IntakeSourceTaskStrategy, reference.PlanID, reference.StrategyVersion, reference.ExpectedContentHash))
+}
+
 func (r MySQLRepository) getVersionByIdempotency(ctx context.Context, value CreativeVersion) (CreativeVersion, error) {
 	version, err := scanCreativeVersion(r.DB.QueryRowContext(ctx, creativeVersionSelect+` WHERE organization_id = ? AND project_id = ? AND created_by = ? AND idempotency_key = ?`, value.OrganizationID, value.ProjectID, value.CreatedBy, value.IdempotencyKey))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -870,4 +963,142 @@ func (r MySQLRepository) productionJobs(ctx context.Context, organizationID cont
 		jobs = append(jobs, job)
 	}
 	return jobs, rows.Err()
+}
+
+func (r MySQLRepository) shortDramaGenerationAttempts(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	taskID string,
+) ([]ShortDramaGenerationAttempt, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT
+		id, task_id, draft_revision, candidate_batch_id, candidate_id, prompt_package_hash,
+		generation_spec_hash, provider_job_id, output_asset_id, output_asset_version, created_at
+		FROM creative_short_drama_generation_attempts
+		WHERE organization_id = ? AND project_id = ? AND task_id = ?
+		ORDER BY created_at, id`, organizationID, projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	attempts := make([]ShortDramaGenerationAttempt, 0)
+	for rows.Next() {
+		attempt, scanErr := scanShortDramaGenerationAttempt(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		attempts = append(attempts, attempt)
+	}
+	return attempts, rows.Err()
+}
+
+func (r MySQLRepository) shortDramaGenerationAttemptByProviderJob(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	providerJobID string,
+) (ShortDramaGenerationAttempt, error) {
+	return scanShortDramaGenerationAttempt(r.DB.QueryRowContext(ctx, `SELECT
+		id, task_id, draft_revision, candidate_batch_id, candidate_id, prompt_package_hash,
+		generation_spec_hash, provider_job_id, output_asset_id, output_asset_version, created_at
+		FROM creative_short_drama_generation_attempts
+		WHERE organization_id = ? AND project_id = ? AND provider_job_id = ?`,
+		organizationID, projectID, providerJobID))
+}
+
+type shortDramaGenerationAttemptScanner interface {
+	Scan(...any) error
+}
+
+func scanShortDramaGenerationAttempt(scanner shortDramaGenerationAttemptScanner) (ShortDramaGenerationAttempt, error) {
+	var attempt ShortDramaGenerationAttempt
+	var outputAssetID sql.NullString
+	var outputAssetVersion sql.NullInt64
+	if err := scanner.Scan(
+		&attempt.ID, &attempt.TaskID, &attempt.DraftRevision, &attempt.CandidateBatchID,
+		&attempt.CandidateID, &attempt.PromptPackageHash, &attempt.GenerationSpecHash,
+		&attempt.ProviderJobID, &outputAssetID, &outputAssetVersion, &attempt.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ShortDramaGenerationAttempt{}, ErrNotFound
+		}
+		return ShortDramaGenerationAttempt{}, err
+	}
+	if outputAssetID.Valid && outputAssetVersion.Valid {
+		ref := contract.AssetVersionRef{
+			AssetID: contract.AssetID(outputAssetID.String),
+			Version: outputAssetVersion.Int64,
+		}
+		attempt.OutputAssetVersion = &ref
+	}
+	return attempt, nil
+}
+
+func (r MySQLRepository) gamePrerollGenerationAttempts(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	taskID string,
+) ([]GamePrerollGenerationAttempt, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT
+		id, task_id, draft_revision, candidate_batch_id, candidate_id, prompt_package_hash,
+		generation_spec_hash, provider_job_id, output_asset_id, output_asset_version, created_at
+		FROM creative_game_preroll_generation_attempts
+		WHERE organization_id = ? AND project_id = ? AND task_id = ?
+		ORDER BY created_at, id`, organizationID, projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	attempts := make([]GamePrerollGenerationAttempt, 0)
+	for rows.Next() {
+		attempt, scanErr := scanGamePrerollGenerationAttempt(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		attempts = append(attempts, attempt)
+	}
+	return attempts, rows.Err()
+}
+
+func (r MySQLRepository) gamePrerollGenerationAttemptByProviderJob(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	providerJobID string,
+) (GamePrerollGenerationAttempt, error) {
+	return scanGamePrerollGenerationAttempt(r.DB.QueryRowContext(ctx, `SELECT
+		id, task_id, draft_revision, candidate_batch_id, candidate_id, prompt_package_hash,
+		generation_spec_hash, provider_job_id, output_asset_id, output_asset_version, created_at
+		FROM creative_game_preroll_generation_attempts
+		WHERE organization_id = ? AND project_id = ? AND provider_job_id = ?`,
+		organizationID, projectID, providerJobID))
+}
+
+type gamePrerollGenerationAttemptScanner interface {
+	Scan(...any) error
+}
+
+func scanGamePrerollGenerationAttempt(scanner gamePrerollGenerationAttemptScanner) (GamePrerollGenerationAttempt, error) {
+	var attempt GamePrerollGenerationAttempt
+	var outputAssetID sql.NullString
+	var outputAssetVersion sql.NullInt64
+	if err := scanner.Scan(
+		&attempt.ID, &attempt.TaskID, &attempt.DraftRevision, &attempt.CandidateBatchID,
+		&attempt.CandidateID, &attempt.PromptPackageHash, &attempt.GenerationSpecHash,
+		&attempt.ProviderJobID, &outputAssetID, &outputAssetVersion, &attempt.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return GamePrerollGenerationAttempt{}, ErrNotFound
+		}
+		return GamePrerollGenerationAttempt{}, err
+	}
+	if outputAssetID.Valid && outputAssetVersion.Valid {
+		ref := contract.AssetVersionRef{
+			AssetID: contract.AssetID(outputAssetID.String),
+			Version: outputAssetVersion.Int64,
+		}
+		attempt.OutputAssetVersion = &ref
+	}
+	return attempt, nil
 }

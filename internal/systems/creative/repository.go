@@ -33,6 +33,8 @@ type Repository interface {
 	CreateVideoTask(context.Context, CreativeTask, VideoDraft) (CreativeTask, error)
 	ListTasks(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativeTask, error)
 	GetTaskDetail(context.Context, contract.OrganizationID, contract.ProjectID, string) (TaskDetail, error)
+	CreateShortDramaGenerationAttempt(context.Context, contract.OrganizationID, contract.ProjectID, ShortDramaGenerationAttempt) (ShortDramaGenerationAttempt, error)
+	CreateGamePrerollGenerationAttempt(context.Context, contract.OrganizationID, contract.ProjectID, GamePrerollGenerationAttempt) (GamePrerollGenerationAttempt, error)
 	ArchiveTask(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) error
 	ReviseDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ImageTextDraft) (ImageTextDraft, error)
 	RegisterProductionJob(context.Context, contract.OrganizationID, contract.ProjectID, string, ProductionJob) error

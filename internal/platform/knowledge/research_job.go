@@ -49,7 +49,7 @@ func (s JobRuntimeResearchScheduler) Schedule(ctx context.Context, run ResearchR
 			ID: jobID, Kind: ResearchJobKind,
 			OrganizationID: run.OrganizationID, ProjectID: run.ProjectID,
 			Status: contract.JobQueued, Progress: 0, Cancellable: true,
-			AttemptCount: 0, MaxAttempts: 2, Version: 1,
+			AttemptCount: 0, MaxAttempts: 1, Version: 1,
 			CreatedAt: now().UTC(), UpdatedAt: now().UTC(),
 		},
 		Payload:        payload,
@@ -83,18 +83,15 @@ func (s Service) HandleResearchJob(ctx context.Context, claim jobruntime.Claim) 
 		s.markResearchTerminal(ctx, run, "unavailable", "EXTERNAL_RUNNER_UNAVAILABLE", ErrExternalRunnerUnavailable.Error())
 		return jobruntime.Result{Ref: &ref}, nil
 	}
-	documents := make([]ExternalDocument, 0, len(run.DocumentIDs))
-	for _, id := range run.DocumentIDs {
-		document, err := scanDocument(s.DB.QueryRowContext(ctx, documentSelect+`
-			WHERE organization_id = ? AND project_id = ? AND id = ?`,
-			run.OrganizationID, run.ProjectID, id))
-		if err != nil {
-			s.markResearchTerminal(ctx, run, "failed", "RESEARCH_DOCUMENT_UNAVAILABLE", "研究所引用的内部资料已不可用")
-			return jobruntime.Result{Ref: &ref}, nil
-		}
-		documents = append(documents, ExternalDocument{
-			ID: document.ID, Filename: document.Filename, Content: document.ExtractedText,
-		})
+	documents, err := s.selectResearchChunks(
+		ctx, run.OrganizationID, run.ProjectID, run.DocumentIDs, run.Query,
+	)
+	if err != nil {
+		s.markResearchTerminal(
+			ctx, run, "failed", "RESEARCH_DOCUMENT_UNAVAILABLE",
+			"研究所选择的内部资料片段已不可用",
+		)
+		return jobruntime.Result{Ref: &ref}, nil
 	}
 	if _, err := s.executeResearch(ctx, run, documents); err != nil {
 		s.markResearchTerminal(ctx, run, "failed", "RESEARCH_PERSIST_FAILED", "研究结果持久化失败")

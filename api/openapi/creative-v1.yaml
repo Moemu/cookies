@@ -47,6 +47,97 @@ paths:
           description: Deterministic prompt, frame plan and readiness for human confirmation.
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/commerce-preroll:ensure-fixture:
+    post:
+      operationId: ensureCommercePrerollFixtureWorkspace
+      summary: Idempotently materialize the versioned Guerlain fixture as a durable Creative workspace.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EnsureCommerceFixtureWorkspaceRequest'}
+      responses:
+        '200':
+          description: Existing or newly materialized commerce pre-roll workspace.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/commerce-preroll:
+    get:
+      operationId: getLatestCommercePrerollWorkspace
+      summary: Restore the latest durable commerce pre-roll workspace in the Project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Task, source Intake, latest Draft and generation Attempt lineage.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll:
+    get:
+      operationId: getCommercePrerollWorkspace
+      summary: Read one commerce pre-roll workspace by its real CreativeTask ID.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+      responses:
+        '200':
+          description: Commerce pre-roll workspace.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll-draft:
+    patch:
+      operationId: reviseCommercePrerollDraft
+      summary: Append a server-compiled commerce Prompt revision using optimistic concurrency.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateCommercePrerollDraftRequest'}
+      responses:
+        '200':
+          description: Workspace with its new latest Draft revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll:confirm-generation:
+    post:
+      operationId: confirmCommercePrerollGeneration
+      summary: Freeze and approve the current Prompt and first/last-frame GenerationSpec.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Workspace with an approval bound to the exact GenerationSpec hash.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommercePrerollWorkspace'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-intakes:
     get:
       operationId: listCreativeIntakes
@@ -57,7 +148,7 @@ paths:
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createCreativeIntake
-      summary: Create a normalized manual CreativeIntake or explicitly start one from an immutable Strategy package.
+      summary: Create a normalized manual CreativeIntake or explicitly hand off an immutable Strategy package or CreativeTaskStrategyVersion.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
         required: true
@@ -68,6 +159,33 @@ paths:
         '201': {description: CreativeIntake created.}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:
+    get:
+      operationId: getCreativeIntake
+      summary: Get one Creative-owned frozen Intake snapshot, including task-strategy lineage when present.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200': {description: Frozen CreativeIntake snapshot.}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/business-capabilities:
+    get:
+      operationId: listCreativeBusinessCapabilities
+      summary: List Creative-owned task-strategy handoff and production readiness for each business.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Capability states used to gate Strategy handoff actions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CreativeBusinessCapability'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-task:
     post:
       operationId: createCreativeTask
@@ -317,9 +435,16 @@ components:
     CreateCreativeIntakeRequest:
       type: object
       additionalProperties: false
-      required: [source, channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+      required: [source]
+      oneOf:
+        - properties: {source: {const: manual}}
+          required: [channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
+        - properties: {source: {const: strategy_package}}
+          required: [strategy_package]
+        - properties: {source: {const: task_strategy}}
+          required: [task_strategy]
       properties:
-        source: {enum: [manual, strategy_package]}
+        source: {enum: [manual, strategy_package, task_strategy]}
         strategy_package:
           type: object
           additionalProperties: false
@@ -327,6 +452,14 @@ components:
           properties:
             package_id: {type: string, minLength: 1}
             package_version: {type: integer, minimum: 1}
+            expected_content_hash: {type: string, minLength: 1}
+        task_strategy:
+          type: object
+          additionalProperties: false
+          required: [plan_id, strategy_version, expected_content_hash]
+          properties:
+            plan_id: {type: string, minLength: 1}
+            strategy_version: {type: integer, minimum: 1}
             expected_content_hash: {type: string, minLength: 1}
         format: {enum: [image_text, video]}
         performance_mode: {enum: [viral_remake]}
@@ -345,6 +478,22 @@ components:
         visual_keywords: {type: array, items: {type: string}}
         mandatory_elements: {type: array, items: {type: string}}
         prohibited_claims: {type: array, items: {type: string}}
+    CreativeBusinessCapability:
+      type: object
+      additionalProperties: false
+      required: [business_code, display_name, status, can_create_task_immediately, production_inputs]
+      properties:
+        business_code: {type: string}
+        display_name: {type: string}
+        status: {enum: [available, preview, unsupported]}
+        format: {enum: [image_text, video]}
+        channel: {enum: [xiaohongshu, douyin, kuaishou]}
+        performance_mode: {type: string}
+        destination_area: {enum: [image-text, video]}
+        destination_view: {type: string}
+        can_create_task_immediately: {type: boolean}
+        production_inputs: {type: array, items: {type: string}}
+        limitation: {type: string}
     CreateCreativeTaskRequest:
       type: object
       additionalProperties: false
@@ -511,6 +660,77 @@ components:
         prompt: [generation_spec, approval]
         generation_spec: [prompt, approval]
         approval: [prompt, generation_spec]
+    EnsureCommerceFixtureWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [template_ref, product_asset_ref, first_frame_asset_ref, last_frame_asset_ref]
+      properties:
+        template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+        product_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        first_frame_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        last_frame_asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+    UpdateCommercePrerollDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, template_ref]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+        fidelity: {type: string, maxLength: 4000}
+        camera: {type: string, maxLength: 4000}
+        motion: {type: string, maxLength: 4000}
+        environment: {type: string, maxLength: 4000}
+        result: {type: string, maxLength: 4000}
+        guardrails:
+          type: array
+          maxItems: 40
+          items: {type: string, minLength: 1, maxLength: 500}
+    CommercePrerollWorkspace:
+      type: object
+      additionalProperties: true
+      required:
+        - task
+        - intake
+        - video_draft
+        - commerce_preroll_generation_attempts
+      properties:
+        task: {type: object}
+        intake: {type: object}
+        video_draft:
+          type: object
+          required: [contract_version, task_id, revision, commerce_preroll]
+          properties:
+            contract_version: {const: creative-video-draft/v1}
+            task_id: {type: string}
+            revision: {type: integer, minimum: 1}
+            commerce_preroll:
+              type: object
+              required: [contract_version, task_id, revision, input_snapshot, input_hash, plan, readiness]
+              properties:
+                contract_version: {const: creative-commerce-preroll-draft/v1}
+                task_id: {type: string}
+                revision: {type: integer, minimum: 1}
+                input_snapshot: {type: object}
+                input_hash: {$ref: '#/components/schemas/SHA256Ref'}
+                plan: {type: object}
+                approval: {$ref: '#/components/schemas/VideoGenerationApproval'}
+                readiness: {type: object}
+        commerce_preroll_generation_attempts:
+          type: array
+          items:
+            type: object
+            required: [id, task_id, draft_revision, template_ref, prompt_hash, generation_spec_hash, provider_job_id, created_at]
+            properties:
+              id: {type: string}
+              task_id: {type: string}
+              draft_revision: {type: integer, minimum: 1}
+              template_ref: {$ref: '#/components/schemas/CreativeTemplateRef'}
+              prompt_hash: {$ref: '#/components/schemas/SHA256Ref'}
+              generation_spec_hash: {$ref: '#/components/schemas/SHA256Ref'}
+              provider_job_id: {type: string}
+              retry_of_attempt_id: {type: string}
+              output_asset_version: {$ref: '#/components/schemas/AssetVersionRef'}
+              created_at: {type: string, format: date-time}
     CreativeVideoPrompt:
       type: object
       additionalProperties: false

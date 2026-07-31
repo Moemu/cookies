@@ -30,7 +30,7 @@ export default function App() {
 
   useEffect(() => {
     if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
-    rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view))
+    rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view, route.contextId))
   }, [route])
 
   if (isAuthLoading) return <div className="login-page"><div className="page-notice">正在检查登录状态…</div></div>
@@ -58,7 +58,7 @@ export default function App() {
     : routeNeedsProject && !routeProjectReady ? <ProjectRouteBoundary targetProjectId={route.projectId!} diagnostic={routeDiagnostic} state={projectRouteState} onRetry={() => { void reloadProjects(route.projectId) }}/>
     : route.isProjectHome ? <ProjectFlowDashboard onOpenProject={openProject} onManageProject={manageProject}/>
     : route.isProjectManagement ? <ProjectManagementPage onOpenWorkbench={id => openProject(id)} onOpenProject={openProject}/>
-    : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>
+    : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} contextId={route.contextId} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>
 
   return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
     {content}

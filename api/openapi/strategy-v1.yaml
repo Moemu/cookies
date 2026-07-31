@@ -11,6 +11,227 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/strategy/v1/projects/{project_id}/creative-businesses:
+    get:
+      operationId: listStrategyCreativeBusinesses
+      summary: List the current immutable Strategy-owned creative business catalog.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Current business profiles and a catalog hash used for optimistic selection.
+          headers:
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalog_hash, items]
+                properties:
+                  catalog_hash: {$ref: '#/components/schemas/SHA256'}
+                  items:
+                    type: array
+                    items: {$ref: '../contracts/strategy-creative-business-profile-v1.schema.json'}
+                additionalProperties: false
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/creative-businesses/{business_code}:
+    get:
+      operationId: getStrategyCreativeBusiness
+      summary: Read one current creative business profile.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/BusinessCode'}
+      responses:
+        '200':
+          description: One immutable business profile.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-creative-business-profile-v1.schema.json'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/creative-business-recommendations:
+    post:
+      operationId: recommendStrategyCreativeBusinesses
+      summary: Rank current business profiles deterministically from a confirmed BriefVersion.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brief_id, brief_version]
+              properties:
+                brief_id: {type: string, minLength: 1}
+                brief_version: {type: integer, minimum: 1}
+                limit: {type: integer, minimum: 1, maximum: 3, default: 3}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Evidence-gated recommendations plus the exact Brief and media signals used.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreativeBusinessRecommendationSnapshot'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/creative-task-plans:
+    get:
+      operationId: listStrategyCreativeTaskPlans
+      summary: List task plans, optionally scoped to one Brief.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: brief_id, in: query, required: false, schema: {type: string}}
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStrategyCreativeTaskPlan
+      summary: Freeze one user-selected business, its recommendation snapshot, Brief, optional Strategy revision, profile, and Skill.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brief_id, brief_version, business_code, selection_source, catalog_hash]
+              properties:
+                brief_id: {type: string, minLength: 1}
+                brief_version: {type: integer, minimum: 1}
+                source_strategy:
+                  type: object
+                  required: [strategy_id, revision]
+                  properties:
+                    strategy_id: {type: string, minLength: 1}
+                    revision: {type: integer, minimum: 1}
+                  additionalProperties: false
+                business_code: {type: string, minLength: 1}
+                selection_source: {enum: [recommended, manual]}
+                catalog_hash: {$ref: '#/components/schemas/SHA256'}
+              additionalProperties: false
+      responses:
+        '201':
+          description: Newly created plan.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-creative-task-plan-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/creative-task-plans/{plan_id}:
+    get:
+      operationId: getStrategyCreativeTaskPlan
+      summary: Read a task plan with its frozen profile and current generated strategy.
+      parameters: [{$ref: '#/components/parameters/PlanID'}]
+      responses:
+        '200':
+          description: Current mutable plan aggregate.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-creative-task-plan-v1.schema.json'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/creative-task-plans/{plan_id}/answers:
+    patch:
+      operationId: patchStrategyCreativeTaskPlanAnswers
+      summary: Patch only business-specific incremental answers with optimistic concurrency.
+      parameters:
+        - {$ref: '#/components/parameters/PlanID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+        - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, operations]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                operations:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [op, question_id]
+                    properties:
+                      op: {enum: [set, remove]}
+                      question_id: {type: string, minLength: 1}
+                      value: {}
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        '200':
+          description: Updated plan.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-creative-task-plan-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/creative-task-plans/{plan_id}:generate':
+    post:
+      operationId: generateStrategyCreativeTaskStrategy
+      summary: Queue generation of an immutable creative-task-strategy/v1.
+      parameters:
+        - {$ref: '#/components/parameters/PlanID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+        - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, expected_revision]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                expected_revision: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/JSONResource'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/creative-task-plans/{plan_id}/strategy-versions:
+    get:
+      operationId: listStrategyCreativeTaskStrategyVersions
+      summary: List immutable task strategy versions for a plan.
+      parameters: [{$ref: '#/components/parameters/PlanID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONList'}
+  /api/strategy/v1/creative-task-plans/{plan_id}/strategy-versions/{version}:
+    get:
+      operationId: getStrategyCreativeTaskStrategyVersion
+      summary: Read one immutable task strategy version.
+      parameters:
+        - {$ref: '#/components/parameters/PlanID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Immutable strategy version envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plan_id, version, document, content_hash]
+                properties:
+                  plan_id: {type: string}
+                  version: {type: integer, minimum: 1}
+                  document: {$ref: '../contracts/strategy-creative-task-strategy-v1.schema.json'}
+                  content_hash: {$ref: '#/components/schemas/SHA256'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/creative-task-plans/{plan_id}/strategy-versions/{version}/export.md:
+    get:
+      operationId: exportStrategyCreativeTaskStrategyMarkdown
+      summary: Export one immutable task strategy as human-readable Markdown.
+      parameters:
+        - {$ref: '#/components/parameters/PlanID'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Markdown task strategy export.
+          content:
+            text/markdown:
+              schema: {type: string}
+        '404': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/workspaces:
     post:
       operationId: createStrategyWorkspace
@@ -534,6 +755,8 @@ components:
     StrategyID: {name: strategy_id, in: path, required: true, schema: {type: string, minLength: 1}}
     ReviewID: {name: review_id, in: path, required: true, schema: {type: string, minLength: 1}}
     PackageID: {name: package_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    BusinessCode: {name: business_code, in: path, required: true, schema: {type: string, minLength: 1}}
+    PlanID: {name: plan_id, in: path, required: true, schema: {type: string, minLength: 1}}
     Version: {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
     Revision: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}}
   requestBodies:
@@ -581,3 +804,88 @@ components:
                   retryable: {type: boolean}
                   details: {type: array, items: {type: object}}
             additionalProperties: false
+  schemas:
+    SHA256:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
+    AssetVersionRef:
+      type: object
+      additionalProperties: false
+      required: [asset_id, version]
+      properties:
+        asset_id: {type: string, minLength: 1}
+        version: {type: integer, minimum: 1}
+    CreativeMediaInput:
+      type: object
+      additionalProperties: false
+      required: [asset_ref, role, origin, kind, status, usefulness, strategy_uses, observations, limitations]
+      properties:
+        asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        role: {type: string}
+        origin: {type: string}
+        kind: {type: string}
+        mime_type: {type: string}
+        status: {type: string}
+        width_pixels: {type: integer, minimum: 0}
+        height_pixels: {type: integer, minimum: 0}
+        duration_seconds: {type: number, minimum: 0}
+        usefulness: {enum: [semantic, production_only, unavailable]}
+        strategy_uses: {type: array, items: {type: string}}
+        observations: {type: array, items: {type: string}}
+        limitations: {type: array, items: {type: string}}
+    CreativeMediaAssessment:
+      type: object
+      additionalProperties: false
+      required: [items, semantic_count, production_only_count, unavailable_count, warnings]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CreativeMediaInput'}}
+        semantic_count: {type: integer, minimum: 0}
+        production_only_count: {type: integer, minimum: 0}
+        unavailable_count: {type: integer, minimum: 0}
+        warnings: {type: array, items: {type: string}}
+    CreativeBusinessRecommendation:
+      type: object
+      additionalProperties: false
+      required: [business_code, display_name, score, eligible, confidence, reasons, missing_signals, warnings, exclusion_reasons, profile_ref]
+      properties:
+        business_code: {type: string}
+        display_name: {type: string}
+        rank: {type: integer, minimum: 1}
+        score: {type: integer}
+        eligible: {type: boolean}
+        confidence: {enum: [high, medium, low]}
+        reasons: {type: array, items: {type: string}}
+        missing_signals: {type: array, items: {type: string}}
+        warnings: {type: array, items: {type: string}}
+        exclusion_reasons: {type: array, items: {type: string}}
+        profile_ref: {type: object}
+    CreativeBusinessRecommendationSnapshot:
+      type: object
+      additionalProperties: false
+      required: [policy_version, catalog_hash, brief_id, brief_version, brief_hash, signals, media, recommended, alternatives]
+      properties:
+        policy_version: {type: string}
+        catalog_hash: {$ref: '#/components/schemas/SHA256'}
+        brief_id: {type: string}
+        brief_version: {type: integer, minimum: 1}
+        brief_hash: {$ref: '#/components/schemas/SHA256'}
+        signals:
+          type: object
+          additionalProperties: false
+          required: [objective_type, channels, deliverable_type, deliverable_types, industry, asset_roles, reference_present, content_context, brand_goal, product_image_count, product_video_count, analyzed_asset_count]
+          properties:
+            objective_type: {type: string}
+            channels: {type: array, items: {type: string}}
+            deliverable_type: {type: string}
+            deliverable_types: {type: array, items: {type: string}}
+            industry: {type: string}
+            asset_roles: {type: array, items: {type: string}}
+            reference_present: {type: boolean}
+            content_context: {type: string}
+            brand_goal: {type: boolean}
+            product_image_count: {type: integer, minimum: 0}
+            product_video_count: {type: integer, minimum: 0}
+            analyzed_asset_count: {type: integer, minimum: 0}
+        media: {$ref: '#/components/schemas/CreativeMediaAssessment'}
+        recommended: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/CreativeBusinessRecommendation'}}
+        alternatives: {type: array, items: {$ref: '#/components/schemas/CreativeBusinessRecommendation'}}

@@ -41,5 +41,11 @@ func (s Service) HandleAgentTaskFinalFailure(task agent.Task, _ contract.JobErro
 			SET status = 'failed', updated_at = UTC_TIMESTAMP(6)
 			WHERE organization_id = ? AND project_id = ? AND id = ? AND status = 'pending'`,
 			task.OrganizationID, task.ProjectID, input.AnalysisID)
+	case AgentKindCreativeTaskGenerate:
+		_, _ = s.DB.ExecContext(ctx, `UPDATE strategy_creative_task_plans
+			SET status = 'failed', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+			WHERE organization_id = ? AND project_id = ? AND id = ?
+			  AND status = 'generating' AND current_agent_task_id = ?`,
+			task.OrganizationID, task.ProjectID, task.SourceID, task.ID)
 	}
 }

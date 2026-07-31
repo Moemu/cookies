@@ -1,14 +1,47 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Download, ExternalLink, FileText, Film, Image, Music2, Play, RotateCcw, Save, Scissors, Send, ShieldCheck, Sparkles, Subtitles, ThumbsDown, ThumbsUp, Video, Volume2, WandSparkles } from 'lucide-react'
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  CircleCheck,
+  ClipboardCheck,
+  Download,
+  ExternalLink,
+  FileText,
+  Film,
+  Image,
+  Music2,
+  Play,
+  RotateCcw,
+  Save,
+  Scissors,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Subtitles,
+  ThumbsDown,
+  ThumbsUp,
+  Video,
+  Volume2,
+  WandSparkles,
+} from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, commerceTemplateApiId, guerlainPromptCopy, hookStoryboard } from '../data/commerceHooks'
-import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiCreativeSourceOption, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPreparedCommercePreroll, type ApiPrerollScope, type ApiProjectMediaAsset, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaHookStrategy, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaPrerollWorkspace, type ApiShortDramaStoryContext, type ApiViralRemakeWorkspace, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
+import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiCommercePrerollWorkspace, type ApiCreativeSourceOption, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPreparedCommercePreroll, type ApiPrerollScope, type ApiProjectMediaAsset, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaGenerationConfig, type ApiShortDramaHookStrategy, type ApiShortDramaPaceProfile, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaPrerollWorkspace, type ApiShortDramaStoryContext, type ApiShortDramaSubtitleStyle, type ApiTaskStrategyCreativeIntake, type ApiViralRemakeWorkspace, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
 import { industryProfile } from '../data/industry-profiles'
 import { findLocalShortDramaBrief, localShortDramaBriefs, shortDramaVideoLabel } from '../data/shortDramaBriefs'
+import { GamePrerollWorkspace } from './GamePrerollWorkspace'
+import {
+  TaskStrategyHandoffBanner,
+  taskStrategyPerformanceMode,
+  useTaskStrategyCreativeIntake,
+  useTaskStrategyTaskHandoffDetail,
+} from '../features/creative/TaskStrategyHandoff'
 
 export { DeliveryPlanLifecyclePage as DeliveryPlanPage } from './DeliveryPlanLifecyclePage'
 
@@ -36,6 +69,8 @@ export function ImageTextCreationPage({ state, activeTaskId }: { state: DataStat
   const [job, setJob] = useState<ApiGenerationJob | null>(null)
   const [confirmedBriefId, setConfirmedBriefId] = useState('')
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
+  const handoffDetail = useTaskStrategyTaskHandoffDetail(currentProject.id, activeTaskId)
+  const inheritedFocus = handoffDetail?.task.direction.focus
   const pages = ['封面主张', '精度证据', '制造场景', '行动引导']
   const configuredProvider = providers.find(provider => provider.status === '已配置')
   const save = async () => {
@@ -48,6 +83,9 @@ export function ImageTextCreationPage({ state, activeTaskId }: { state: DataStat
       setNotice(cause instanceof Error ? cause.message : '保存创意版本失败，请重试。')
     }
   }
+  useEffect(() => {
+    if (inheritedFocus) setHeadline(inheritedFocus.slice(0, 24))
+  }, [inheritedFocus])
   useEffect(() => {
     let active = true
     void Promise.all([api.listArtifacts(currentProject.id), api.listJobs(currentProject.id)]).then(([artifacts, jobs]) => {
@@ -89,7 +127,7 @@ export function ImageTextCreationPage({ state, activeTaskId }: { state: DataStat
   }
   return <StateBoundary state={state} onRetry={() => setNotice('已重新加载')} onCreate={() => setNotice('已创建空白画板')}><div className="image-editor-specialized">
     <aside className="creative-structure"><div className="surface-toolbar"><h3>图文结构</h3><button aria-label="新增图文页面"><Image size={16}/></button></div>{pages.map((page, index) => <button key={page} className={selected === index ? 'creative-page active' : 'creative-page'} onClick={() => setSelected(index)}><span>{String(index + 1).padStart(2, '0')}</span><b>{page}</b><small>{index === 0 ? '主视觉' : index === 3 ? 'CTA' : '内容页'}</small></button>)}<div className="version-block"><span>来源</span><b>{currentProject.artifacts.strategy.version}</b><small>{currentProject.artifacts.strategy.summary}</small></div></aside>
-    <section className="image-canvas-workspace"><div className="canvas-toolbar light"><span>{activeTask ? `${activeTask.name} · 图文 v1.${version}` : `${currentProject.name} · 图文 v1.${version}`}</span><div><button onClick={() => setNotice('预览链接已生成')}><ExternalLink size={14}/>预览</button><button onClick={() => setNotice('PNG 导出任务已创建')}><Download size={14}/>导出</button></div></div>{activeTask ? <div className="creative-task-banner"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}<div className="portrait-stage"><div className="social-poster"><img src="/assets/white-precision-cnc.png" alt="CNC 设备加工高精度金属零件"/><div className="poster-copy"><small>WHITE PRECISION</small><h2>{headline}</h2><p>±0.01mm 精度 · 98%+ 准时交付</p></div><span className="poster-index">0{selected + 1} / 04</span></div></div><div className="page-strip">{pages.map((page, index) => <button key={page} className={selected === index ? 'active' : ''} onClick={() => setSelected(index)}><span>{index + 1}</span>{page}</button>)}</div></section>
+    <section className="image-canvas-workspace"><div className="canvas-toolbar light"><span>{activeTask ? `${activeTask.name} · 图文 v1.${version}` : `${currentProject.name} · 图文 v1.${version}`}</span><div><button onClick={() => setNotice('预览链接已生成')}><ExternalLink size={14}/>预览</button><button onClick={() => setNotice('PNG 导出任务已创建')}><Download size={14}/>导出</button></div></div>{handoffDetail ? <TaskStrategyHandoffBanner intake={handoffDetail.intake}/> : activeTask ? <div className="creative-task-banner"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}<div className="portrait-stage"><div className="social-poster"><img src="/assets/white-precision-cnc.png" alt="CNC 设备加工高精度金属零件"/><div className="poster-copy"><small>WHITE PRECISION</small><h2>{headline}</h2><p>±0.01mm 精度 · 98%+ 准时交付</p></div><span className="poster-index">0{selected + 1} / 04</span></div></div><div className="page-strip">{pages.map((page, index) => <button key={page} className={selected === index ? 'active' : ''} onClick={() => setSelected(index)}><span>{index + 1}</span>{page}</button>)}</div></section>
     <aside className="creative-inspector"><div className="surface-toolbar"><h3>页面属性</h3><span className="status success"><span/>品牌检查通过</span></div><label>渠道与画幅<select value={channel} onChange={event => setChannel(event.target.value)}><option>小红书 4:5</option><option>公众号 16:9</option><option>信息流 1:1</option></select></label><label>主标题<textarea value={headline} onChange={event => setHeadline(event.target.value)} maxLength={24}/><small>{headline.length} / 24 字</small></label><div className="check-list"><span><Check size={14}/>安全区未遮挡</span><span><Check size={14}/>核心信息有证据</span><span><Check size={14}/>品牌用语一致</span></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置 ARK_API_KEY，无法发起图片生成。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成图片。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generateImage()}><WandSparkles size={15}/>{job && ['queued', 'running'].includes(job.status) ? '图片生成中…' : '生成当前主视觉'}</button><button className="secondary-button full" onClick={save}><Save size={15}/>保存新版本</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div></StateBoundary>
 }
@@ -134,10 +172,16 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const [brandGenerated, setBrandGenerated] = useState(false)
   const [brandStage, setBrandStage] = useState(0)
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
+  const activeTaskType = activeTask?.type
+  const handoffIntake = useTaskStrategyCreativeIntake(
+    currentProject.id,
+    activeTaskId,
+    Boolean(activeTaskId && !activeTask),
+  )
   const category = activeView === '品牌广告' ? 'brand' : activeView === '素材剪辑' ? 'editing' : 'performance'
   const activeMode = performanceModes.find(item => item.id === selected) ?? performanceModes[0]
   useEffect(() => {
-    if (!activeTask) return
+    if (!activeTaskType) return
     const modeByType: Partial<Record<BusinessTaskType, string>> = {
       short_drama_preroll: 'short-drama',
       game_preroll: 'game',
@@ -145,9 +189,17 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       viral_remake: 'viral-remake',
       video: 'short-drama',
     }
-    const nextMode = modeByType[activeTask.type]
+    const nextMode = modeByType[activeTaskType]
     if (nextMode) setSelected(nextMode)
-  }, [activeTask])
+  }, [activeTaskType])
+  useEffect(() => {
+    if (!handoffIntake) return
+    const nextMode = taskStrategyPerformanceMode(
+      handoffIntake.request.task_strategy_input.business_code,
+    )
+    if (nextMode) setSelected(nextMode)
+    setNotice('任务策略已冻结到 Creative；请补齐生产素材和人工确认后继续。')
+  }, [handoffIntake])
   const create = async () => {
     const name = category === 'performance' ? activeMode.label : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
     const type: BusinessTaskType = category === 'brand' ? 'brand_video'
@@ -171,10 +223,10 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 到剪辑交付形成完整叙事。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
   const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '沿着 Brief、剧本、资产、广告生成和剪辑的固定路径推进，所有产物均保留来源与确认记录。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
-    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
+    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
     <IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/>
     <ProjectMediaContext />
-    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace onNotice={setNotice}/> : selected === 'short-drama' || selected === 'game' ? <PreRollWorkspace key={selected} mode={selected} onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace onNotice={setNotice}/> : <div className="performance-workflow">
+    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selected === 'short-drama' ? <PreRollWorkspace handoffIntake={handoffIntake ?? undefined} key={selected} mode={selected} onNotice={setNotice}/> : selected === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <div className="performance-workflow">
       <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
       <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
       <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
@@ -258,7 +310,7 @@ function ProjectMediaContext() {
   </section>
 }
 
-function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
+function ViralRemixWorkspace({ onNotice, handoffIntake }: { onNotice: (message: string) => void; handoffIntake?: ApiTaskStrategyCreativeIntake }) {
   const { currentProject, reloadProjects } = useProject()
   const { providers } = useModelConfig()
   const [sourceAssetId, setSourceAssetId] = useState('source_video')
@@ -425,15 +477,16 @@ function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void
       let taskId = viralTaskId
       if (!taskId) {
         const workspace = await api.createManualViralRemakeWorkspace(currentProject.id, {
+          parentIntakeId: handoffIntake?.id,
           sourceVideo: makeAsset(sourceAssetId, sourceVersion),
           referenceImage: referenceImageAsset,
           productName,
           sellingPoints: [sellingPoint, secondSellingPoint],
           callToAction: cta,
           userInstruction,
-          objective: '复用高停留结构，生成当前产品的原创转化广告',
-          audience: '当前 Project 的目标受众（手工输入，待 Strategy 接管）',
-          coreMessage: [sellingPoint, secondSellingPoint].filter(Boolean).join('；'),
+          objective: handoffIntake?.request.objective || '复用高停留结构，生成当前产品的原创转化广告',
+          audience: handoffIntake?.request.audience || '当前 Project 的目标受众',
+          coreMessage: handoffIntake?.request.core_message || [sellingPoint, secondSellingPoint].filter(Boolean).join('；'),
           durationSeconds,
         })
         taskId = workspace.task.id
@@ -558,7 +611,64 @@ function ViralRemixWorkspace({ onNotice }: { onNotice: (message: string) => void
   </div>
 }
 
-function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; onNotice: (message: string) => void }) {
+const defaultShortDramaGenerationConfig: ApiShortDramaGenerationConfig = {
+  subtitle_style: 'high_contrast_dynamic',
+  hook_strength: 4,
+  pace_profile: 'auto',
+}
+
+function mapShortDramaWorkspacePlan(workspace: ApiShortDramaPrerollWorkspace): ApiShortDramaPrerollPlan {
+  const activeConfig = workspace.video_draft.short_drama_preroll.active_candidate_batch?.generation_config
+    ?? defaultShortDramaGenerationConfig
+  const candidates = workspace.video_draft.short_drama_preroll.candidates.map(candidate => ({
+    id: candidate.id,
+    hookType: (candidate.hook_strategy === 'conflict_reversal' ? 'conflict'
+      : candidate.hook_strategy === 'suspense_reveal' ? 'suspense'
+        : candidate.hook_strategy === 'identity_contrast' ? 'reversal' : 'selling_point_bridge') as ApiShortDramaPrerollCandidate['hookType'],
+    executionAngle: candidate.execution_angle,
+    executionAngleLabel: candidate.execution_angle === 'dialogue_confrontation'
+      ? '台词对峙'
+      : candidate.execution_angle === 'action_reveal'
+        ? '关键动作'
+        : candidate.execution_angle === 'reaction_escalation' ? '群体反应' : '结果先行',
+    score: candidate.score,
+    scoreMeaning: candidate.score_meaning,
+    evidence: candidate.evidence,
+    primaryTestVariable: candidate.primary_test_variable ?? candidate.execution_angle,
+    pacingProfile: candidate.pacing_profile ?? activeConfig.pace_profile,
+    visualGrammar: candidate.visual_grammar ?? candidate.visual_intent,
+    variantHypothesis: candidate.variant_hypothesis ?? '以不同钩子机制验证前 1 秒的注意力。',
+    hookLine: candidate.hook_line,
+    voiceover: candidate.voiceover,
+    storyboard: candidate.storyboard.map(beat => ({
+      startSeconds: beat.start_seconds,
+      endSeconds: beat.end_seconds,
+      visual: beat.visual,
+      copy: beat.copy,
+    })),
+    visualIntent: candidate.visual_intent,
+    transitionLine: candidate.transition_line,
+    promptPackage: {
+      compiledPrompt: candidate.prompt_package.compiled_prompt,
+      contentHash: candidate.prompt_package.content_hash,
+      directorSpec: candidate.prompt_package.director_spec,
+      candidateBatchId: candidate.prompt_package.candidate_batch_id,
+      promptCompilerVersion: candidate.prompt_package.prompt_compiler_version,
+      generationConfig: candidate.prompt_package.generation_config ?? activeConfig,
+      subtitleSpec: candidate.prompt_package.subtitle_spec ?? {
+        mode: activeConfig.subtitle_style,
+        max_lines: activeConfig.subtitle_style === 'brand_minimal' ? 1 : 2,
+        safe_area: '9:16',
+        keyword_emphasis: activeConfig.subtitle_style === 'high_contrast_dynamic',
+        animation_density: activeConfig.subtitle_style === 'high_contrast_dynamic' ? 'high' : 'low',
+        contrast_policy: 'model_generated_readable',
+      },
+    },
+  }))
+  return { version: 'short_drama_preroll_v1', candidates }
+}
+
+function PreRollWorkspace({ mode, onNotice, handoffIntake }: { mode: 'short-drama' | 'game'; onNotice: (message: string) => void; handoffIntake?: ApiTaskStrategyCreativeIntake }) {
   const { currentProject, reloadProjects } = useProject()
   const { providers } = useModelConfig()
   const preset = preRollPresets[mode]
@@ -577,7 +687,6 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
     title: '',
     synopsis: '',
     reviewedSellingPoints: [...localShortDramaBriefs[0].reviewedSellingPoints],
-    openingLine: '',
   })
   const [plan, setPlan] = useState<ApiShortDramaPrerollPlan | null>(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState('')
@@ -585,6 +694,10 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
   const [shortDramaWorkspace, setShortDramaWorkspace] = useState<ApiShortDramaPrerollWorkspace | null>(null)
   const [selectedBriefId, setSelectedBriefId] = useState(localShortDramaBriefs[0].id)
   const [hookStrategy, setHookStrategy] = useState<ApiShortDramaHookStrategy>('conflict_reversal')
+  const [subtitleStyle, setSubtitleStyle] = useState<ApiShortDramaSubtitleStyle>('high_contrast_dynamic')
+  const [hookStrength, setHookStrength] = useState(4)
+  const [paceProfile, setPaceProfile] = useState<ApiShortDramaPaceProfile>('auto')
+  const [generationConfigDirty, setGenerationConfigDirty] = useState(false)
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState('')
   const selectedBrief = findLocalShortDramaBrief(selectedBriefId)
   const selectedCandidate = plan?.candidates.find(candidate => candidate.id === selectedCandidateId)
@@ -606,35 +719,83 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
   }
   useEffect(() => {
     let active = true
-    void Promise.all([
-      api.listArtifacts(currentProject.id),
-      api.listPrerollArtifacts(scope),
-      api.listPrerollJobs(scope),
-    ]).then(([artifacts, prerollArtifacts, jobs]) => {
+    void (async () => {
+      const artifacts = await api.listArtifacts(currentProject.id)
+      if (!active) return
+      setConfirmedBriefId(artifacts.filter(artifact => artifact.kind === 'brief' && artifact.status === 'ready').at(-1)?.id ?? '')
+
+      if (isShortDrama) {
+        const workspace = await api.getLatestShortDramaPrerollWorkspace(currentProject.id)
+        if (!active || !workspace) return
+        const draft = workspace.video_draft.short_drama_preroll
+        const snapshot = draft.input_snapshot
+        const restoredConfig = draft.active_candidate_batch?.generation_config ?? {
+          subtitle_style: snapshot.subtitle_style,
+          hook_strength: snapshot.hook_strength,
+          pace_profile: snapshot.pace_profile ?? 'auto',
+        }
+        setShortDramaWorkspace(workspace)
+        setPlan(mapShortDramaWorkspacePlan(workspace))
+        setSelectedCandidateId(draft.selected_candidate_id ?? '')
+        setStoryContext({
+          title: snapshot.story_title,
+          synopsis: snapshot.synopsis,
+          reviewedSellingPoints: [...snapshot.reviewed_selling_points],
+        })
+        setSelectedBriefId(findLocalShortDramaBrief(snapshot.brief_id).id)
+        setHookStrategy(snapshot.hook_strategy)
+        setSubtitleStyle(restoredConfig.subtitle_style)
+        setHookStrength(restoredConfig.hook_strength)
+        setPaceProfile(restoredConfig.pace_profile)
+        setGenerationConfigDirty(false)
+
+        const latestAttempt = workspace.short_drama_generation_attempts
+          ?.filter(attempt => attempt.draft_revision === workspace.video_draft.revision
+            && attempt.candidate_id === draft.selected_candidate_id)
+          .at(-1)
+        if (!latestAttempt) {
+          setJob(null)
+          setHasPersistedAsset(false)
+          setInteractionFeedback(draft.selected_candidate_id
+            ? '已恢复 Brief、候选批次和人工选择，可继续生成前贴视频。'
+            : '已恢复 Brief 与候选批次，请人工选择一个方案。')
+          return
+        }
+        const restoredJob = await api.getShortDramaPrerollVideoJob(currentProject.id, latestAttempt.provider_job_id)
+        if (!active) return
+        setJob(restoredJob)
+        if (restoredJob.status === 'succeeded' && restoredJob.artifactId) {
+          const media = await api.listProjectMediaAssets(currentProject.id)
+          if (!active) return
+          const video = media.find(asset => asset.id === restoredJob.artifactId)
+          setHasPersistedAsset(Boolean(video))
+          setGeneratedVideoUrl(video?.contentUrl ?? '')
+          setInteractionFeedback(video
+            ? '已恢复 Brief、已选候选、生成任务和视频结果。'
+            : '已恢复生成任务，但视频资产仍在入库。')
+        } else {
+          setHasPersistedAsset(false)
+          setInteractionFeedback(restoredJob.status === 'failed'
+            ? '已恢复上一次失败任务，可调整配置后重新生成。'
+            : '已恢复正在进行的视频任务。')
+        }
+        return
+      }
+
+      const [prerollArtifacts, jobs] = await Promise.all([
+        api.listPrerollArtifacts(scope),
+        api.listPrerollJobs(scope),
+      ])
+      if (!active) return
       const latest = jobs.at(-1) ?? null
       const persisted = latest?.status === 'succeeded'
         && prerollArtifacts.some(artifact => artifact.id === latest.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
-      if (active) {
-        setJob(latest)
-        setConfirmedBriefId(artifacts.filter(artifact => artifact.kind === 'brief' && artifact.status === 'ready').at(-1)?.id ?? '')
-        setHasPersistedAsset(persisted)
-        const persistedShortDrama = isShortDrama
-          ? prerollArtifacts.find(artifact => artifact.id === latest?.artifactId)?.shortDramaPreroll
-          : undefined
-        if (persistedShortDrama) {
-          setStoryContext(context => ({ ...persistedShortDrama.storyContext, openingLine: context.openingLine }))
-          setPlan({
-            version: persistedShortDrama.planVersion,
-            candidates: [persistedShortDrama.selectedCandidate],
-          })
-          setSelectedCandidateId(persistedShortDrama.selectedCandidate.id)
-          setInteractionFeedback('已从服务端持久化产物恢复已选短剧候选与预览。')
-        }
-        if (latest?.status === 'succeeded' && !persisted) {
-          setInteractionFeedback('任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
-        }
+      setJob(latest)
+      setHasPersistedAsset(persisted)
+      if (latest?.status === 'succeeded' && !persisted) {
+        setInteractionFeedback('任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
       }
-    }).catch(cause => {
+    })().catch(cause => {
       if (active) setInteractionFeedback(cause instanceof Error ? cause.message : '无法读取服务端任务状态。')
     })
     return () => { active = false }
@@ -646,8 +807,14 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
       void readJob.then(async next => {
         setJob(next)
         if (next.status === 'succeeded') {
-          const artifacts = await api.listPrerollArtifacts(scope)
-          const persisted = artifacts.some(artifact => artifact.id === next.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
+          const media = isShortDrama ? await api.listProjectMediaAssets(currentProject.id) : []
+          const artifacts = isShortDrama ? [] : await api.listPrerollArtifacts(scope)
+          const video = isShortDrama
+            ? media.find(asset => asset.id === next.artifactId)
+            : undefined
+          const persisted = isShortDrama
+            ? Boolean(video)
+            : artifacts.some(artifact => artifact.id === next.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
           setHasPersistedAsset(persisted)
           if (persisted) {
             void reloadProjects()
@@ -656,10 +823,7 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
           } else {
             setInteractionFeedback('任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
           }
-          if (isShortDrama && next.artifactId) {
-            const media = await api.listProjectMediaAssets(currentProject.id)
-            setGeneratedVideoUrl(media.find(asset => asset.id === next.artifactId)?.contentUrl ?? '')
-          }
+          if (isShortDrama) setGeneratedVideoUrl(video?.contentUrl ?? '')
         } else if (next.status === 'failed' || next.status === 'cancelled') {
           setHasPersistedAsset(false)
           setInteractionFeedback(next.status === 'cancelled' ? '前贴分镜任务已取消，可以修改配置后重试。' : `前贴分镜生成失败${next.diagnostic ? `：${next.diagnostic}` : '，请重试。'}`)
@@ -689,7 +853,12 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
       let next: ApiGenerationJob
       if (isShortDrama) {
         if (!plan || !selectedCandidate || !shortDramaWorkspace) return
-        next = await api.createShortDramaPrerollVideoJob(currentProject.id, shortDramaWorkspace.task.id)
+        next = await api.createShortDramaPrerollVideoJob(
+          currentProject.id,
+          shortDramaWorkspace.task.id,
+          shortDramaWorkspace.video_draft.revision,
+          selectedCandidate.id,
+        )
       } else {
         next = await api.createPrerollVideo(
           scope,
@@ -699,9 +868,16 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
       }
       setJob(next)
       if (next.status === 'succeeded') {
-        const artifacts = await api.listPrerollArtifacts(scope)
-        const persisted = artifacts.some(artifact => artifact.id === next.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
+        const media = isShortDrama ? await api.listProjectMediaAssets(currentProject.id) : []
+        const artifacts = isShortDrama ? [] : await api.listPrerollArtifacts(scope)
+        const video = isShortDrama
+          ? media.find(asset => asset.id === next.artifactId)
+          : undefined
+        const persisted = isShortDrama
+          ? Boolean(video)
+          : artifacts.some(artifact => artifact.id === next.artifactId && artifact.kind === 'video' && artifact.status === 'ready')
         setHasPersistedAsset(persisted)
+        if (isShortDrama) setGeneratedVideoUrl(video?.contentUrl ?? '')
         setInteractionFeedback(persisted
           ? '前贴分镜已生成且产物已持久化，可以加入混剪素材箱。'
           : '任务已成功，但服务端产物尚未就绪；暂不能加入素材箱。')
@@ -725,76 +901,74 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
       setInteractionFeedback(cause instanceof Error ? cause.message : '取消前贴分镜任务失败，请重试。')
     }
   }
+  const clearShortDramaWorkspace = () => {
+    setPlan(null)
+    setSelectedCandidateId('')
+    setShortDramaWorkspace(null)
+    setJob(null)
+    setHasPersistedAsset(false)
+    setGeneratedVideoUrl('')
+    setGenerationConfigDirty(false)
+  }
   const updateStoryContext = (field: keyof ApiShortDramaStoryContext, value: string) => {
     setStoryContext(context => ({ ...context, [field]: value }))
-  }
-  const normalizedStoryContext = (): ApiShortDramaStoryContext => {
-    const openingLine = storyContext.openingLine?.trim()
-    return {
-      ...storyContext,
-      reviewedSellingPoints: storyContext.reviewedSellingPoints.filter(value => value.trim()),
-      openingLine: openingLine || undefined,
-    }
+    clearShortDramaWorkspace()
   }
   const selectLocalBrief = (briefId: string) => {
     const brief = findLocalShortDramaBrief(briefId)
     setSelectedBriefId(brief.id)
     setHookStrategy(brief.recommendedHookStrategy)
     setStoryContext(context => ({ ...context, reviewedSellingPoints: [...brief.reviewedSellingPoints] }))
-    setPlan(null)
-    setSelectedCandidateId('')
-    setShortDramaWorkspace(null)
-    setGeneratedVideoUrl('')
+    clearShortDramaWorkspace()
     setInteractionFeedback(`已选择“${brief.name}”，卖点、CTA 和推荐钩子策略已自动带入。`)
   }
   const planShortDrama = async () => {
     setIsPlanning(true)
     try {
-      const workspace = await api.createManualShortDramaPrerollWorkspace(currentProject.id, {
-        briefId: selectedBrief.id,
-        briefVersion: selectedBrief.version,
-        briefName: selectedBrief.name,
-        title: storyContext.title,
-        synopsis: storyContext.synopsis,
-        reviewedSellingPoints: storyContext.reviewedSellingPoints.filter(Boolean),
-        openingLine: storyContext.openingLine || undefined,
-        hookStrategy,
-        subtitleStyle: 'high_contrast_dynamic',
-        transition: 'hard_cut',
-        hookStrength: 4,
-        objective: selectedBrief.objective,
-        audience: `偏好${selectedBrief.applicableGenres.join('、')}内容的竖屏短剧观众`,
-        prohibitedClaims: selectedBrief.prohibited,
-        callToAction: selectedBrief.callToAction,
-      })
-      const candidates = workspace.video_draft.short_drama_preroll.candidates.map(candidate => ({
-        id: candidate.id,
-        hookType: (candidate.hook_strategy === 'conflict_reversal' ? 'conflict'
-          : candidate.hook_strategy === 'suspense_reveal' ? 'suspense'
-            : candidate.hook_strategy === 'identity_contrast' ? 'reversal' : 'selling_point_bridge') as ApiShortDramaPrerollCandidate['hookType'],
-        executionAngle: candidate.execution_angle,
-        executionAngleLabel: candidate.execution_angle === 'dialogue_confrontation'
-          ? '台词对峙'
-          : candidate.execution_angle === 'action_reveal' ? '关键动作' : '群体反应',
-        score: candidate.score,
-        scoreMeaning: candidate.score_meaning,
-        evidence: candidate.evidence,
-        hookLine: candidate.hook_line,
-        voiceover: candidate.voiceover,
-        storyboard: candidate.storyboard.map(beat => ({ startSeconds: beat.start_seconds, endSeconds: beat.end_seconds, visual: beat.visual, copy: beat.copy })),
-        visualIntent: candidate.visual_intent,
-        transitionLine: candidate.transition_line,
-        promptPackage: {
-          compiledPrompt: candidate.prompt_package.compiled_prompt,
-          contentHash: candidate.prompt_package.content_hash,
-          directorSpec: candidate.prompt_package.director_spec,
-        },
-      }))
-      const next = { version: 'short_drama_preroll_v1' as const, candidates }
+      const generationConfig: ApiShortDramaGenerationConfig = {
+        subtitle_style: subtitleStyle,
+        hook_strength: hookStrength,
+        pace_profile: paceProfile,
+      }
+      const workspace = shortDramaWorkspace
+        ? await api.regenerateShortDramaPrerollCandidates(
+          currentProject.id,
+          shortDramaWorkspace.task.id,
+          shortDramaWorkspace.video_draft.revision,
+          generationConfig,
+        )
+        : await api.createManualShortDramaPrerollWorkspace(currentProject.id, {
+          parentIntakeId: handoffIntake?.id,
+          briefId: selectedBrief.id,
+          briefVersion: selectedBrief.version,
+          briefName: selectedBrief.name,
+          title: storyContext.title,
+          synopsis: storyContext.synopsis,
+          reviewedSellingPoints: Array.from(new Set([
+            ...storyContext.reviewedSellingPoints.filter(Boolean),
+            ...(handoffIntake?.request.core_message ? [handoffIntake.request.core_message] : []),
+          ])),
+          openingLine: storyContext.openingLine || undefined,
+          hookStrategy,
+          subtitleStyle,
+          transition: 'hard_cut',
+          hookStrength,
+          paceProfile,
+          objective: handoffIntake?.request.objective || selectedBrief.objective,
+          audience: handoffIntake?.request.audience || `偏好${selectedBrief.applicableGenres.join('、')}内容的竖屏短剧观众`,
+          prohibitedClaims: selectedBrief.prohibited,
+          callToAction: selectedBrief.callToAction,
+        })
       setShortDramaWorkspace(workspace)
-      setPlan(next)
+      setPlan(mapShortDramaWorkspacePlan(workspace))
       setSelectedCandidateId('')
-      setInteractionFeedback('候选已按本地 Brief 和钩子策略生成。请人工选择一个方案，再创建 Seedance 视频任务。')
+      setJob(null)
+      setHasPersistedAsset(false)
+      setGeneratedVideoUrl('')
+      setGenerationConfigDirty(false)
+      setInteractionFeedback(shortDramaWorkspace
+        ? '已重新生成 3 个机制不同的候选，旧批次仍保留在服务端版本历史中。'
+        : '候选已按本地 Brief、钩子策略和生成配置生成。请人工选择一个方案。')
     } catch (cause) {
       setInteractionFeedback(cause instanceof Error ? cause.message : '短剧前贴候选规划失败。请检查故事上下文后重试。')
     } finally {
@@ -812,6 +986,9 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
       )
       setShortDramaWorkspace(workspace)
       setSelectedCandidateId(candidate.id)
+      setJob(null)
+      setHasPersistedAsset(false)
+      setGeneratedVideoUrl('')
       setInteractionFeedback(`已人工选择“${candidate.executionAngleLabel}”候选；中央预览已更新，可创建视频任务。`)
     } catch (cause) {
       setInteractionFeedback(cause instanceof Error ? cause.message : '选择短剧候选失败。')
@@ -821,8 +998,8 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
     {isShortDrama ? <aside className="preroll-candidate-panel" aria-label="短剧前贴 AI 候选">
       <details open>
         <summary><span className="section-label">AI 候选</span><b>需人工选择</b><ChevronDown size={15}/></summary>
-        <p>评分仅表示钩子机制相关性，不代表转化效果预测。</p>
-        {!plan ? <div className="preroll-candidate-empty">选择本地 Brief、填写故事上下文并生成候选后，在此处完成人工选择。</div> : plan.candidates.map(candidate => <article className="preroll-candidate-card" key={candidate.id}><button type="button" className={selectedCandidateId === candidate.id ? 'active' : ''} aria-pressed={selectedCandidateId === candidate.id} onClick={() => void selectShortDramaCandidate(candidate)}><span><b>{candidate.executionAngleLabel}</b><small>相关性 {candidate.score}</small></span><strong>{candidate.voiceover}</strong><small>{candidate.evidence.join(' ')}</small></button><div className="preroll-candidate-detail"><b>文案</b><p>{candidate.hookLine}</p><b>分镜</b><ol>{candidate.storyboard.map(beat => <li key={`${candidate.id}-${beat.startSeconds}`}><small>{beat.startSeconds}–{beat.endSeconds} 秒</small><span>{beat.copy}</span></li>)}</ol><details><summary>PromptPackage</summary><small>{candidate.promptPackage.contentHash}</small><pre>{candidate.promptPackage.compiledPrompt}</pre></details></div></article>)}
+        <p>分数是结构、可执行性与合规性的启发式编导评分，不代表 CTR 或转化效果预测。</p>
+        {!plan ? <div className="preroll-candidate-empty">选择本地 Brief、填写故事上下文并生成候选后，在此处完成人工选择。</div> : plan.candidates.map(candidate => <article className="preroll-candidate-card" key={candidate.id}><button type="button" className={selectedCandidateId === candidate.id ? 'active' : ''} aria-pressed={selectedCandidateId === candidate.id} onClick={() => void selectShortDramaCandidate(candidate)}><span><b>{candidate.executionAngleLabel}</b><small>启发式编导分 {candidate.score}</small></span><strong>{candidate.voiceover}</strong><small>{candidate.evidence.join(' ')}</small></button><div className="preroll-candidate-detail"><b>主测试变量</b><p>{candidate.primaryTestVariable} · {candidate.pacingProfile}</p><b>差异假设</b><p>{candidate.variantHypothesis}</p><b>文案</b><p>{candidate.hookLine}</p><b>分镜</b><ol>{candidate.storyboard.map(beat => <li key={`${candidate.id}-${beat.startSeconds}`}><small>{beat.startSeconds}–{beat.endSeconds} 秒</small><span>{beat.copy}</span></li>)}</ol><details><summary>PromptPackage</summary><small>{candidate.promptPackage.promptCompilerVersion ?? 'legacy'} · {candidate.promptPackage.contentHash}</small><small>字幕 {candidate.promptPackage.generationConfig.subtitle_style} · 强度 {candidate.promptPackage.generationConfig.hook_strength} · 节奏 {candidate.promptPackage.generationConfig.pace_profile}</small><pre>{candidate.promptPackage.compiledPrompt}</pre></details></div></article>)}
       </details>
     </aside> : <aside className="preroll-storyboard" aria-label="6 秒前贴分镜">
       <div className="surface-toolbar"><h3>镜头</h3><span>{generated ? 'v1.1' : '草稿'}</span></div>
@@ -842,20 +1019,26 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
     </section>
     <aside className="preroll-config">
       <span className="section-label">生成配置</span><h3>{mode === 'short-drama' ? '短剧前贴策略' : '挑战反馈型'}</h3>
-      {isShortDrama ? <label>钩子策略<select value={hookStrategy} onChange={event => { setHookStrategy(event.target.value as ApiShortDramaHookStrategy); setPlan(null); setSelectedCandidateId(''); setShortDramaWorkspace(null) }}><option value="conflict_reversal">冲突反转型（推荐）</option><option value="suspense_reveal">悬念揭示型</option><option value="identity_contrast">身份反差型</option><option value="selling_point_bridge">卖点剧情桥接型</option></select></label> : null}
+      {isShortDrama ? <label>钩子策略<select value={hookStrategy} onChange={event => { setHookStrategy(event.target.value as ApiShortDramaHookStrategy); clearShortDramaWorkspace() }}><option value="conflict_reversal">冲突反转型（推荐）</option><option value="suspense_reveal">悬念揭示型</option><option value="identity_contrast">身份反差型</option><option value="selling_point_bridge">卖点剧情桥接型</option></select></label> : null}
       {isShortDrama ? <div className="short-drama-context">
         <label>短剧标题<input value={storyContext.title} onChange={event => updateStoryContext('title', event.target.value)} placeholder="已审核短剧标题"/></label>
         <label>故事梗概<textarea value={storyContext.synopsis} onChange={event => updateStoryContext('synopsis', event.target.value)} placeholder="至少 40 字，描述已审核的剧情上下文。"/></label>
-        <label>已审核卖点<input value={storyContext.reviewedSellingPoints[0] ?? ''} onChange={event => setStoryContext(context => ({ ...context, reviewedSellingPoints: [event.target.value] }))} placeholder="至少一条已审核卖点"/></label>
-        <label>正片首句（可选）<textarea value={storyContext.openingLine} onChange={event => updateStoryContext('openingLine', event.target.value)} placeholder="仅用于避免逐字复用，不会写入产物。"/></label>
-        <button className="secondary-button full" disabled={isPlanning} aria-busy={isPlanning} onClick={() => void planShortDrama()}><Sparkles size={15}/>{isPlanning ? '正在规划候选…' : '生成 AI 候选'}</button>
+        <label>已审核剧情卖点<input value={storyContext.reviewedSellingPoints[0] ?? ''} onChange={event => { setStoryContext(context => ({ ...context, reviewedSellingPoints: [event.target.value] })); clearShortDramaWorkspace() }} placeholder="至少一条已审核剧情卖点"/></label>
+        <button className="secondary-button full" disabled={isPlanning} aria-busy={isPlanning} onClick={() => void planShortDrama()}><Sparkles size={15}/>{isPlanning ? '正在规划候选…' : shortDramaWorkspace ? '重新生成 3 个候选' : '生成 3 个 AI 候选'}</button>
       </div> : null}
-      <label>字幕样式<select defaultValue="高对比动态字幕"><option>高对比动态字幕</option><option>品牌极简字幕</option></select></label>
-      <label>钩子强度<input aria-label="钩子强度" type="range" min="1" max="5" defaultValue="4"/></label>
+      {isShortDrama ? <>
+        <label>字幕样式<select value={subtitleStyle} onChange={event => { setSubtitleStyle(event.target.value as ApiShortDramaSubtitleStyle); setGenerationConfigDirty(Boolean(shortDramaWorkspace)) }}><option value="high_contrast_dynamic">高对比动态字幕</option><option value="brand_minimal">极简字幕</option></select></label>
+        <label>节奏<select value={paceProfile} onChange={event => { setPaceProfile(event.target.value as ApiShortDramaPaceProfile); setGenerationConfigDirty(Boolean(shortDramaWorkspace)) }}><option value="auto">跟随钩子自动匹配</option><option value="punchy">强节奏快切</option><option value="balanced">均衡推进</option><option value="suspense_hold">悬念停顿</option></select></label>
+        <label>钩子强度 <b>{hookStrength}</b><input aria-label="钩子强度" type="range" min="1" max="5" value={hookStrength} onInput={event => { setHookStrength(Number(event.currentTarget.value)); setGenerationConfigDirty(Boolean(shortDramaWorkspace)) }}/></label>
+        {generationConfigDirty ? <div className="model-required"><CircleAlert size={15}/><span>配置已修改，请重新生成候选；新配置会写入每条 PromptPackage。</span></div> : null}
+      </> : <>
+        <label>字幕样式<select defaultValue="高对比动态字幕"><option>高对比动态字幕</option><option>品牌极简字幕</option></select></label>
+        <label>钩子强度<input aria-label="钩子强度" type="range" min="1" max="5" defaultValue="4"/></label>
+      </>}
       {['静音可理解', '品牌事实已校验', '人物与画面连续', '结尾 CTA 清晰'].map(item => <span className="analysis-check" key={item}><Check size={14}/>{item}</span>)}
       {!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>服务端尚未配置 ARK_API_KEY，无法发起前贴分镜生成。</span></div> : null}
       {!isShortDrama && !confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成前贴分镜。</span></div> : null}
-      <button className="primary-button full" disabled={!configuredProvider || (!isShortDrama && !confirmedBriefId) || isGenerating || (isShortDrama && !shortDramaWorkspace?.video_draft.short_drama_preroll.readiness.generation_ready)} aria-busy={isGenerating} onClick={() => void generateStoryboard()}><WandSparkles size={15}/>{isGenerating ? '正在生成分镜…' : generated ? '重新生成前贴' : '生成前贴分镜'}</button>
+      <button className="primary-button full" disabled={!configuredProvider || (!isShortDrama && !confirmedBriefId) || isGenerating || (isShortDrama && (generationConfigDirty || !shortDramaWorkspace?.video_draft.short_drama_preroll.readiness.generation_ready))} aria-busy={isGenerating} onClick={() => void generateStoryboard()}><WandSparkles size={15}/>{isGenerating ? '正在生成前贴视频…' : generated ? '重新生成前贴视频' : '生成前贴视频'}</button>
       {isGenerating ? <button className="secondary-button full" onClick={() => void cancelStoryboard()}>取消生成</button> : null}
       <button className="secondary-button full" disabled={!generated} aria-describedby={!generated ? `preroll-export-hint-${mode}` : undefined} onClick={() => onNotice('前贴视频产物已持久化，可在素材剪辑中选择。')}>加入混剪素材箱</button>
       {!generated ? <small className="preroll-action-hint" id={`preroll-export-hint-${mode}`}>仅任务成功且服务端产物持久化后，才能加入混剪素材箱。</small> : null}
@@ -864,7 +1047,7 @@ function PreRollWorkspace({ mode, onNotice }: { mode: 'short-drama' | 'game'; on
   </div>
 }
 
-function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => void }) {
+function CommerceHookWorkspace({ onNotice, handoffIntake }: { onNotice: (message: string) => void; handoffIntake?: ApiTaskStrategyCreativeIntake }) {
   const { currentProject, reloadProjects, updateArtifact } = useProject()
   const { providers } = useModelConfig()
   const [selectedId, setSelectedId] = useState(commerceHookTemplates[0].id)
@@ -880,6 +1063,7 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
   const [sourceOptions, setSourceOptions] = useState<ApiCreativeSourceOption[]>([])
   const [selectedSourceKey, setSelectedSourceKey] = useState('fixture:guerlain')
   const [prepared, setPrepared] = useState<ApiPreparedCommercePreroll | null>(null)
+  const [commerceWorkspace, setCommerceWorkspace] = useState<ApiCommercePrerollWorkspace | null>(null)
   const [sourceNotice, setSourceNotice] = useState('')
   const [preparing, setPreparing] = useState(false)
   const selected = commerceHookTemplates.find(item => item.id === selectedId) ?? commerceHookTemplates[0]
@@ -888,32 +1072,61 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
     `${option.source_ref.kind}:${option.source_ref.id}:${option.source_ref.version}` === selectedSourceKey,
   )
   const usingFixture = !selectedSource
-  const selectedProductAsset = selectedSource?.product.product_asset_refs[0]
+  const fixtureProductAsset = commerceWorkspace?.video_draft.commerce_preroll.input_snapshot.product_asset_ref
+  const inheritedProductAsset = handoffIntake?.request.task_strategy_input.media.find(item =>
+    item.kind === 'image' && item.status === 'ready',
+  )?.asset_ref
+  const selectedProductAsset = inheritedProductAsset
+    ?? selectedSource?.product.product_asset_refs[0]
+    ?? (usingFixture ? fixtureProductAsset : undefined)
   const sourcePreview = selectedProductAsset
-    ? `/platform/v1/projects/${encodeURIComponent(currentProject.id)}/assets/${encodeURIComponent(selectedProductAsset.asset_id)}/versions/${selectedProductAsset.version}/preview`
+    ? `/platform/v1/projects/${encodeURIComponent(currentProject.id)}/assets/${encodeURIComponent(selectedProductAsset.asset_id)}/versions/${selectedProductAsset.version}/content`
     : selected.image
+  const effectivePreparedBlockers = prepared?.readiness.blockers.filter(blocker =>
+    !(handoffIntake && selectedProductAsset && blocker === 'PRODUCT_IMAGE_MISSING'),
+  ) ?? []
+  const effectivePreparedReady = Boolean(prepared && effectivePreparedBlockers.length === 0)
+  const effectiveSourceNotice = prepared && prepared.readiness.blockers.length > 0 && effectivePreparedReady
+    ? '已用冻结任务策略中的商品素材补齐 Brief 缺口；提示词已合并业务专属判断和约束。'
+    : sourceNotice
 
   useEffect(() => {
     let active = true
-    void Promise.all([
-      api.listArtifacts(currentProject.id),
-      api.listJobs(currentProject.id),
-      api.listCommercePrerollSources(currentProject.id).catch(() => []),
-    ]).then(([artifacts, jobs, sources]) => {
-      const latest = jobs.filter(candidate => candidate.artifactKind === 'video').at(-1)
-      const latestVideo = artifacts
-        .filter(artifact => artifact.kind === 'video' && artifact.status === 'ready' && Boolean(artifact.sourceJobId))
-        .at(-1)
-      if (active) {
-        setJob(latest ?? null)
-        setGeneratedAsset(latestVideo ?? null)
+    void (async () => {
+      try {
+        const [sources, existingWorkspace] = await Promise.all([
+          api.listCommercePrerollSources(currentProject.id).catch(() => []),
+          api.getLatestCommercePrerollWorkspace(currentProject.id),
+        ])
+        const workspace = existingWorkspace ?? await api.ensureCommercePrerollFixtureWorkspace(currentProject.id)
+        if (!active) return
         setSourceOptions(sources)
-        const preferred = sources.find(source => source.preferred) ?? sources[0]
-        setSelectedSourceKey(preferred
-          ? `${preferred.source_ref.kind}:${preferred.source_ref.id}:${preferred.source_ref.version}`
-          : 'fixture:guerlain')
+        setSelectedSourceKey('fixture:guerlain')
+        setCommerceWorkspace(workspace)
+        const templateId = workspace.video_draft.commerce_preroll.plan.template.template_id.replace('commerce.', '')
+        setSelectedId(templateId)
+        const latestAttempt = workspace.commerce_preroll_generation_attempts?.at(-1)
+        if (!latestAttempt) {
+          setJob(null)
+          setGeneratedAsset(null)
+          return
+        }
+        const restoredJob = await api.getViralVideoJob(currentProject.id, latestAttempt.provider_job_id)
+        if (!active) return
+        setJob(restoredJob)
+        if (restoredJob.status === 'succeeded') {
+          const artifacts = await api.listArtifacts(currentProject.id)
+          if (!active) return
+          setGeneratedAsset(artifacts.find(candidate =>
+            candidate.kind === 'video'
+            && candidate.status === 'ready'
+            && candidate.sourceJobId === latestAttempt.provider_job_id,
+          ) ?? null)
+        }
+      } catch (cause) {
+        if (active) setSourceNotice(cause instanceof Error ? cause.message : '电商前贴工作区恢复失败。')
       }
-    }).catch(() => undefined)
+    })()
     return () => { active = false }
   }, [currentProject.id])
 
@@ -922,14 +1135,25 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
     setPreviewing(false)
     setPrepared(null)
     if (!selectedSource) {
-      const copy = guerlainPromptCopy(selected.id)
-      setFidelity(copy.fidelity)
-      setCamera(copy.camera)
-      setMotion(copy.motion)
-      setEnvironment(copy.environment)
-      setResult(copy.result)
-      setGuardrails(copy.guardrails)
-      setSourceNotice('正在使用娇兰固定样例；接入已确认 Brief 后会由服务端动态编译。')
+      const savedPrompt = commerceWorkspace?.video_draft.commerce_preroll.plan.prompt
+      if (savedPrompt && commerceWorkspace.video_draft.commerce_preroll.plan.template.template_id === commerceTemplateApiId(selected.id)) {
+        setFidelity(savedPrompt.fidelity)
+        setCamera(savedPrompt.camera)
+        setMotion(savedPrompt.timeline.find(item => item.purpose === 'single_transformation')?.instruction ?? '')
+        setEnvironment(savedPrompt.environment)
+        setResult(savedPrompt.timeline.find(item => item.purpose === 'product_hold')?.instruction ?? '')
+        setGuardrails(savedPrompt.guardrails.join('；'))
+        setSourceNotice(`娇兰固定样例已由服务端恢复 · Prompt revision ${savedPrompt.prompt_version}`)
+      } else {
+        const copy = guerlainPromptCopy(selected.id)
+        setFidelity(copy.fidelity)
+        setCamera(copy.camera)
+        setMotion(copy.motion)
+        setEnvironment(copy.environment)
+        setResult(copy.result)
+        setGuardrails(copy.guardrails)
+        setSourceNotice('正在使用娇兰固定样例；保存后会形成新的服务端 Prompt revision。')
+      }
       return () => { active = false }
     }
     setPreparing(true)
@@ -958,9 +1182,17 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
       if (active) setPreparing(false)
     })
     return () => { active = false }
-  }, [currentProject.id, selected.id, selectedSource])
+  }, [commerceWorkspace, currentProject.id, selected.id, selectedSource])
 
-  const prompt = `${fidelity}\n${camera}\n${motion}\n${environment}\n${result}\n${guardrails}`
+  const inheritedStrategyPrompt = handoffIntake
+    ? [
+        `冻结任务策略目标：${handoffIntake.request.objective}`,
+        `核心信息：${handoffIntake.request.core_message}`,
+        `业务专属判断：${JSON.stringify(handoffIntake.request.task_strategy_input.business_strategy)}`,
+        `任务策略约束：${handoffIntake.request.task_strategy_input.guardrails.join('；')}`,
+      ].join('\n')
+    : ''
+  const prompt = `${fidelity}\n${camera}\n${motion}\n${environment}\n${result}\n${guardrails}${inheritedStrategyPrompt ? `\n${inheritedStrategyPrompt}` : ''}`
   const storyboard = prepared
     ? prepared.plan.prompt.timeline.map((segment, index) => ({
         time: `00:${segment.start_seconds.toFixed(1).padStart(4, '0')}–00:${segment.end_seconds.toFixed(1).padStart(4, '0')}`,
@@ -988,8 +1220,61 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
     }, 1500)
     return () => window.clearInterval(timer)
   }, [currentProject.id, job, onNotice, reloadProjects, selected.name])
+  const persistFixtureDraft = async (
+    templateId = selected.id,
+    includeEdits = true,
+  ) => {
+    const workspace = commerceWorkspace ?? await api.ensureCommercePrerollFixtureWorkspace(currentProject.id)
+    const next = await api.updateCommercePrerollDraft(
+      currentProject.id,
+      workspace.task.id,
+      {
+        expected_revision: workspace.video_draft.revision,
+        template_ref: {
+          template_id: commerceTemplateApiId(templateId),
+          template_version: 1,
+        },
+        ...(includeEdits ? {
+          fidelity,
+          camera,
+          motion,
+          environment,
+          result,
+          guardrails: guardrails.split('；').map(item => item.trim()).filter(Boolean),
+        } : {}),
+      },
+    )
+    setCommerceWorkspace(next)
+    return next
+  }
+  const selectTemplate = async (templateId: string) => {
+    if (!usingFixture || !commerceWorkspace) {
+      setSelectedId(templateId)
+      return
+    }
+    if (commerceWorkspace.video_draft.commerce_preroll.plan.template.template_id === commerceTemplateApiId(templateId)) {
+      setSelectedId(templateId)
+      return
+    }
+    try {
+      setPreparing(true)
+      const next = await persistFixtureDraft(templateId, false)
+      setSelectedId(templateId)
+      onNotice(`「${commerceHookTemplates.find(item => item.id === templateId)?.name ?? templateId}」提示词已由服务端生成并保存。`)
+      return next
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : '切换电商前贴模板失败。')
+    } finally {
+      setPreparing(false)
+    }
+  }
   const save = async () => {
     try {
+      if (usingFixture) {
+        const next = await persistFixtureDraft()
+        onNotice(`「${selected.name}」已保存为 Prompt revision ${next.video_draft.revision}。`)
+        return
+      }
       await updateArtifact('creative', { status: '制作中', sourceVersion: `策略 ${currentProject.artifacts.strategy.version}`, summary: `广告前贴 · ${selected.name} · ${selected.frameStrategy}` })
       onNotice(`「${selected.name}」已保存为广告前贴策略草稿，并保留来源版本。`)
     } catch (cause) {
@@ -1005,21 +1290,35 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
       onNotice('当前 Brief 的提示词还没有准备完成，请稍后再试。')
       return
     }
-    if (selectedSource && !prepared?.readiness.generation_ready) {
-      onNotice(`当前 Brief 还不能正式生成：${prepared?.readiness.blockers.join('、') || '缺少商品素材'}`)
+    if (selectedSource && !effectivePreparedReady) {
+      onNotice(`当前输入还不能正式生成：${effectivePreparedBlockers.join('、') || '缺少商品素材'}`)
       return
     }
     try {
       setPreparing(true)
       setGeneratedAsset(null)
-      const sourceId = selectedSource?.source_ref.id ?? 'creative-video-intake-commerce-preroll-guerlain-v1'
-      const productAsset = selectedSource?.product.product_asset_refs[0]
-      const next = usingFixture && selected.id === 'window-reveal'
-        ? await api.createCommercePrerollVideo(currentProject.id, prompt, sourceId)
+      const sourceId = handoffIntake?.id ?? selectedSource?.source_ref.id ?? 'creative-video-intake-commerce-preroll-guerlain-v1'
+      const productAsset = selectedProductAsset
+      let confirmedWorkspace = commerceWorkspace
+      if (usingFixture && !handoffIntake) {
+        const saved = await persistFixtureDraft()
+        confirmedWorkspace = await api.confirmCommercePrerollGeneration(
+          currentProject.id,
+          saved.task.id,
+          saved.video_draft.revision,
+        )
+        setCommerceWorkspace(confirmedWorkspace)
+      }
+      const next = usingFixture && !handoffIntake && confirmedWorkspace
+        ? await api.createCommercePrerollWorkspaceVideoJob(currentProject.id, confirmedWorkspace)
         : productAsset
           ? await api.createPreparedCommercePrerollVideo(currentProject.id, prompt, sourceId, productAsset)
           : await api.createMedia(currentProject.id, 'video', prompt, sourceId)
       setJob(next)
+      if (usingFixture) {
+        const refreshed = await api.getLatestCommercePrerollWorkspace(currentProject.id)
+        if (refreshed) setCommerceWorkspace(refreshed)
+      }
       if (next.status === 'succeeded') {
         const artifacts = await api.listArtifacts(currentProject.id)
         setGeneratedAsset(artifacts.find(candidate =>
@@ -1038,7 +1337,7 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
   return <div className="commerce-hook-workspace">
     <aside className="hook-template-rail">
       <div className="hook-rail-heading"><span className="section-label">场景策略库</span><b>电商前贴 / 钩子</b><small>学习资料 revision 399</small></div>
-      {commerceHookTemplates.map((template, index) => <button key={template.id} className={selectedId === template.id ? 'active' : ''} onClick={() => setSelectedId(template.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{template.name}</b><small>{template.category} · {template.duration}</small></div></button>)}
+      {commerceHookTemplates.map((template, index) => <button key={template.id} disabled={preparing} className={selectedId === template.id ? 'active' : ''} onClick={() => void selectTemplate(template.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{template.name}</b><small>{template.category} · {template.duration}</small></div></button>)}
       <a href="https://bytedance.larkoffice.com/wiki/H5uQwNji9iYH0TkNXaxcvFhUn2c" target="_blank" rel="noreferrer"><ExternalLink size={13}/>查看学习来源</a>
     </aside>
     <section className="hook-canvas">
@@ -1069,8 +1368,8 @@ function CommerceHookWorkspace({ onNotice }: { onNotice: (message: string) => vo
       <label>结果与停留<textarea value={result} onChange={event => setResult(event.target.value)}/></label>
       <div className="hook-guardrail"><ShieldCheck size={15}/><span><b>自动附加生成护栏</b><small>{guardrails}</small></span></div>
       {configuredProvider ? <div className="hook-model"><CircleCheck size={15}/><span><b>{configuredProvider.name}</b><small>服务端媒体模型目录</small></span></div> : <div className="hook-model missing"><CircleAlert size={15}/><span><b>尚未配置模型</b><small>请在服务端配置 ARK_API_KEY 后重新检查能力。</small></span></div>}
-      {sourceNotice ? <div className={prepared && !prepared.readiness.generation_ready ? 'hook-model missing' : 'hook-model'}><CircleAlert size={15}/><span><b>来源与准备状态</b><small>{sourceNotice}</small></span></div> : null}
-      <div className="hook-actions"><button className="secondary-button" onClick={() => void save()}><Save size={14}/>保存策略</button><button className="primary-button" disabled={!configuredProvider || preparing || Boolean(selectedSource && !prepared?.readiness.generation_ready) || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}><WandSparkles size={14}/>{preparing ? '准备素材…' : job && ['queued', 'running'].includes(job.status) ? '生成中…' : '生成视频'}</button></div>
+      {effectiveSourceNotice ? <div className={prepared && !effectivePreparedReady ? 'hook-model missing' : 'hook-model'}><CircleAlert size={15}/><span><b>来源与准备状态</b><small>{effectiveSourceNotice}</small></span></div> : null}
+      <div className="hook-actions"><button className="secondary-button" disabled={preparing} onClick={() => void save()}><Save size={14}/>保存策略</button><button className="primary-button" disabled={!configuredProvider || preparing || Boolean(selectedSource && !effectivePreparedReady) || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}><WandSparkles size={14}/>{preparing ? '准备素材…' : job && ['queued', 'running'].includes(job.status) ? '生成中…' : generatedAsset ? '重新生成视频' : '生成视频'}</button></div>
       {job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}</div> : null}
     </aside>
   </div>

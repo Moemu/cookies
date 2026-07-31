@@ -3,3 +3,9 @@
 a514c0945e6758394a975a2b2a7a7f6de80f6b1e:server/provider.test.ts:generic-api-key:224
 a514c0945e6758394a975a2b2a7a7f6de80f6b1e:server/provider.test.ts:generic-api-key:240
 a514c0945e6758394a975a2b2a7a7f6de80f6b1e:server/provider.test.ts:generic-api-key:258
+ee5650e8ea7096c1d53fac097dba4d9d89538b13:server/provider.test.ts:generic-api-key:224
+ee5650e8ea7096c1d53fac097dba4d9d89538b13:server/provider.test.ts:generic-api-key:240
+ee5650e8ea7096c1d53fac097dba4d9d89538b13:server/provider.test.ts:generic-api-key:258
+
+# Versioned short-drama API test uses a deterministic idempotency token.
+4eaed0bba0ea0aa6400d2f3d14fb065284a865f9:internal/platform/httpserver/server_test.go:generic-api-key:1514

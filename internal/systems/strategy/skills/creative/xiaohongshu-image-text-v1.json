@@ -1,0 +1,15 @@
+{
+  "name": "creative_task.xiaohongshu_image_text",
+  "version": "v1.0.0",
+  "kind": "creative_task",
+  "match": ["xiaohongshu_image_text"],
+  "instructions": [
+    "围绕原生种草、生活场景、可信证据和搜索承接制定任务策略。",
+    "明确单一核心主张、信息优先级、搜索关键词意图和互动目标。",
+    "只描述内容角度与素材要求，不生成具体标题、正文或图组构图。"
+  ],
+  "quality_checks": [
+    "策略必须说明用户场景、证据边界和商业内容披露要求。",
+    "不得输出具体标题、正文、封面构图或模型提示词。"
+  ]
+}

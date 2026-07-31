@@ -493,7 +493,7 @@ paths:
   /platform/v1/projects/{project_id}/knowledge/research-runs:
     post:
       operationId: createExternalResearchRun
-      summary: Execute one explicitly confirmed web or MCP research call.
+      summary: Queue one explicitly confirmed Seed web-search research run.
       parameters:
       - $ref: '#/components/parameters/ProjectID'
       requestBody:
@@ -503,7 +503,6 @@ paths:
             schema:
               type: object
               required:
-              - mode
               - query
               - document_ids
               - disclosed_fields
@@ -512,7 +511,15 @@ paths:
                 mode:
                   enum:
                   - web
-                  - mcp
+                  default: web
+                category:
+                  type: string
+                  enum:
+                  - general
+                  - audience
+                  - competitor
+                  - industry
+                  default: general
                 query:
                   type: string
                   minLength: 1
@@ -524,8 +531,13 @@ paths:
                     type: string
                 disclosed_fields:
                   type: array
+                  description: Must contain query and, when document_ids are present, document_content.
+                  uniqueItems: true
                   items:
                     type: string
+                    enum:
+                    - query
+                    - document_content
                 confirmed:
                   const: true
               additionalProperties: false
@@ -5618,7 +5630,12 @@ components:
       - source_uri
       - source_type
       - chunk_count
-      - imported_by
+      - filename
+      - mime_type
+      - size_bytes
+      - content_sha256
+      - text_sha256
+      - status
       - created_at
       - updated_at
       properties:
@@ -5639,6 +5656,35 @@ components:
           minimum: 0
         imported_by:
           $ref: '#/components/schemas/Principal'
+        filename:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        content_sha256:
+          type: string
+        text_sha256:
+          type: string
+        status:
+          type: string
+          enum:
+          - parse_queued
+          - parsing
+          - ready
+          - parse_failed
+        parser_code:
+          type: string
+        parser_version:
+          type: string
+        parse_error_code:
+          type: string
+        parse_error_message:
+          type: string
+        parsed_at:
+          type: string
+          format: date-time
         created_at:
           type: string
           format: date-time

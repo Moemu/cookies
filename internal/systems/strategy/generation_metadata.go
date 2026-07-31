@@ -54,6 +54,7 @@ type GenerationMetadata struct {
 	LatencyMS             int64                     `json:"latency_ms,omitempty"`
 	ValidationAttempts    int                       `json:"validation_attempts"`
 	QualityReport         *QualityReport            `json:"quality_report,omitempty"`
+	Attempts              []SkillRunAttempt         `json:"attempts"`
 }
 
 func (s Service) GetGenerationReadiness(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (GenerationReadiness, error) {
@@ -63,10 +64,7 @@ func (s Service) GetGenerationReadiness(ctx context.Context, actor contract.Acto
 	if _, err := s.project(ctx, actor, projectID); err != nil {
 		return GenerationReadiness{}, err
 	}
-	promptVersion := strings.TrimSpace(s.PromptVersion)
-	if promptVersion == "" {
-		promptVersion = "strategy.generate.v2"
-	}
+	promptVersion := s.generatePromptVersion()
 	if s.Text == nil {
 		return GenerationReadiness{
 			Ready: true, GenerationMode: "deterministic", PromptVersion: promptVersion,
@@ -201,12 +199,13 @@ func (s Service) GetGenerationMetadata(ctx context.Context, actor contract.Actor
 		return GenerationMetadata{}, err
 	}
 	var value GenerationMetadata
+	var skillRunID string
 	var providerCode, modelVersion, generationMode, modelAlias, routeRevisionID, responseMode, promptVersion sql.NullString
 	var generationContextHash, outputHash sql.NullString
 	var inputTokens, outputTokens, totalTokens, latencyMS sql.NullInt64
 	var skillsJSON, skillHashesJSON, qualityJSON []byte
 	err = s.DB.QueryRowContext(ctx, `SELECT
-			sr.provider_code, sr.model_version, sr.generation_mode, sr.model_alias,
+			sr.id, sr.provider_code, sr.model_version, sr.generation_mode, sr.model_alias,
 			sr.route_revision_id, sr.response_mode, sr.prompt_version,
 			COALESCE(sr.skill_versions, JSON_OBJECT()),
 			COALESCE(sr.skill_snapshot_hashes, JSON_OBJECT()),
@@ -224,7 +223,7 @@ func (s Service) GetGenerationMetadata(ctx context.Context, actor contract.Actor
 		ORDER BY sr.completed_at DESC, sr.id DESC LIMIT 1`,
 		actor.OrganizationID, draft.ProjectID, strategyID,
 	).Scan(
-		&providerCode, &modelVersion, &generationMode, &modelAlias,
+		&skillRunID, &providerCode, &modelVersion, &generationMode, &modelAlias,
 		&routeRevisionID, &responseMode, &promptVersion, &skillsJSON, &skillHashesJSON,
 		&generationContextHash, &outputHash,
 		&inputTokens, &outputTokens, &totalTokens, &latencyMS,
@@ -269,6 +268,10 @@ func (s Service) GetGenerationMetadata(ctx context.Context, actor contract.Actor
 			return GenerationMetadata{}, err
 		}
 		value.QualityReport = &report
+	}
+	value.Attempts, err = s.listAttemptsForSkillRun(ctx, actor.OrganizationID, draft.ProjectID, skillRunID)
+	if err != nil {
+		return GenerationMetadata{}, err
 	}
 	return value, nil
 }

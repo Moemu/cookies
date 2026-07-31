@@ -1,8 +1,10 @@
 package knowledge_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 )
@@ -78,7 +81,9 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		DocumentIDs: []string{document.ID}, DisclosedFields: []string{"query", "document_content"},
 		Confirmed: true,
 	})
-	if err != nil || run.Status != "succeeded" || run.Category != "audience" || len(run.Artifacts) != 1 {
+	if err != nil || run.Status != "succeeded" || run.Category != "audience" ||
+		len(run.Artifacts) != 1 || len(run.DisclosedChunkIDs) != 1 ||
+		run.DisclosedChunkIDs[0] == document.ID {
 		t.Fatalf("research run=%#v err=%v", run, err)
 	}
 	artifacts, err := service.ListResearchArtifacts(ctx, actor, projectID, "audience", 10)
@@ -88,9 +93,51 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 	if _, err := service.ListResearchArtifacts(ctx, actor, projectID, "creative", 10); !errors.Is(err, knowledge.ErrInvalidResearchRequest) {
 		t.Fatalf("invalid category error=%v", err)
 	}
+
+	service.DocumentParser = parserStub{}
+	service.DocumentScheduler = parseSchedulerStub{}
+	pdfBytes := []byte("%PDF-1.7 fake integration payload")
+	pdf, err := service.CreateDocument(
+		ctx, actor, projectID, "market-report.pdf", "application/pdf",
+		bytes.NewReader(pdfBytes), int64(len(pdfBytes)),
+	)
+	if err != nil || pdf.Status != "parse_queued" {
+		t.Fatalf("queued PDF=%#v err=%v", pdf, err)
+	}
+	payload, _ := json.Marshal(map[string]string{"document_id": pdf.ID})
+	if _, err := service.HandleDocumentParseJob(ctx, jobruntime.Claim{
+		Job: contract.Job{
+			Kind:           knowledge.DocumentParseJobKind,
+			OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		},
+		Payload: payload,
+	}); err != nil {
+		t.Fatalf("HandleDocumentParseJob() error=%v", err)
+	}
+	parsedPDF, err := service.GetDocument(ctx, actor, projectID, pdf.ID)
+	if err != nil || parsedPDF.Status != "ready" || parsedPDF.ParserCode != "tika" ||
+		parsedPDF.ChunkCount < 1 {
+		t.Fatalf("parsed PDF=%#v err=%v", parsedPDF, err)
+	}
 }
 
 type researchRunner struct{}
+
+type parserStub struct{}
+
+func (parserStub) Parse(context.Context, knowledge.DocumentParseRequest) (knowledge.ParsedDocument, error) {
+	return knowledge.ParsedDocument{
+		Text:     "市场规模持续增长。\n\n品牌事实需要逐项验证。",
+		MIMEType: "application/pdf", ParserCode: "tika", ParserVersion: "test",
+		Metadata: json.RawMessage(`{"Content-Type":"application/pdf"}`),
+	}, nil
+}
+
+type parseSchedulerStub struct{}
+
+func (parseSchedulerStub) ScheduleDocumentParse(context.Context, knowledge.Document) error {
+	return nil
+}
 
 func (researchRunner) Run(context.Context, knowledge.ExternalResearchInput) ([]knowledge.ExternalResearchResult, error) {
 	return []knowledge.ExternalResearchResult{{
@@ -105,8 +152,11 @@ func cleanupKnowledgeIntegration(t *testing.T, db *sql.DB, organizationID contra
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	statements := []string{
+		"DELETE FROM platform_research_citations WHERE organization_id=?",
+		"DELETE FROM platform_research_sources WHERE organization_id=?",
 		"DELETE FROM platform_research_artifacts WHERE organization_id=?",
 		"DELETE FROM platform_research_runs WHERE organization_id=?",
+		"DELETE FROM platform_knowledge_chunks WHERE organization_id=?",
 		"DELETE FROM platform_knowledge_documents WHERE organization_id=?",
 		"DELETE FROM project_context_versions WHERE organization_id=?",
 		"DELETE FROM project_products WHERE organization_id=?",

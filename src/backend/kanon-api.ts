@@ -953,6 +953,20 @@ async function ensureGuerlainWindowRevealFrames(projectId: string) {
   }))
 }
 
+export async function ensureKanonGuerlainCommerceFixtureAssets(projectId: string) {
+  const frames = await ensureGuerlainWindowRevealFrames(projectId)
+  const firstFrame = frames.find(frame => frame.role === 'first_frame')
+  const lastFrame = frames.find(frame => frame.role === 'last_frame')
+  if (!firstFrame || !lastFrame) {
+    throw new Error('娇兰固定样例缺少可用的首帧或尾帧 AssetVersion。')
+  }
+  return {
+    productAsset: lastFrame.assetVersion,
+    firstFrame: firstFrame.assetVersion,
+    lastFrame: lastFrame.assetVersion,
+  }
+}
+
 async function putSignedAsset(request: SignedRequest, blob: Blob) {
   const headers = new Headers()
   for (const [name, value] of Object.entries(request.headers)) {

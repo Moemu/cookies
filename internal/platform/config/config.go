@@ -42,6 +42,7 @@ type Config struct {
 	Scanner       Scanner
 	Media         Media
 	Provider      Provider
+	Creative      Creative
 	Strategy      Strategy
 	Research      Research
 	LocalIdentity *LocalIdentity
@@ -84,21 +85,43 @@ type Media struct {
 // Package-to-Creative permits only the explicit package-to-Intake handoff;
 // approval never creates a Creative task implicitly.
 type Strategy struct {
-	Enabled                  bool
-	V2Enabled                bool
-	RealProviderEnabled      bool
-	ApproveEnabled           bool
-	PackageToCreativeEnabled bool
-	TextModelAlias           string
-	DeepReviewModelAlias     string
-	PromptVersion            string
-	CriticEnabled            bool
-	OrganizationAllowlist    []string
+	Enabled                     bool
+	V2Enabled                   bool
+	RealProviderEnabled         bool
+	ApproveEnabled              bool
+	PackageToCreativeEnabled    bool
+	CreativeTaskPlanningEnabled bool
+	TextModelAlias              string
+	DeepReviewModelAlias        string
+	PromptVersion               string
+	ConversationPromptVersion   string
+	RevisePromptVersion         string
+	ReviewPromptVersion         string
+	RepairPromptVersion         string
+	CreativeTaskPromptVersion   string
+	CriticEnabled               bool
+	ContextSelectionEnabled     bool
+	OrganizationAllowlist       []string
 }
 
-// Research configures an optional backend-owned MCP stdio client. The browser
-// never receives the command or environment and cannot launch subprocesses.
+type Creative struct {
+	ShortDramaModelPlannerEnabled  bool
+	ShortDramaPlannerModelAlias    string
+	GamePrerollModelPlannerEnabled bool
+	GamePrerollPlannerModelAlias   string
+}
+
+// Research configures backend-owned web research. MCP fields are retained only
+// for decoding older local configuration and are not used by the API process.
 type Research struct {
+	SeedEnabled        bool
+	SeedModelAlias     string
+	MaxConcurrent      int
+	TikaEnabled        bool
+	TikaBaseURL        string
+	TikaVersion        string
+	TikaTimeoutSeconds int
+	TikaMaxOutputBytes int
 	MCPStdioCommand    string
 	MCPStdioArgs       []string
 	MCPToolName        string
@@ -262,7 +285,23 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	strategyCreativeTaskPlanningEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_STRATEGY_CREATIVE_TASK_PLANNING_ENABLED",
+		environment == EnvironmentLocal || environment == EnvironmentTest,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	strategyCriticEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_CRITIC_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	strategyContextSelectionEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED",
+		environment == EnvironmentLocal || environment == EnvironmentTest,
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -277,6 +316,42 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	strategyV2Enabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_V2_ENABLED", true)
 	if err != nil {
 		return Config{}, err
+	}
+	gamePrerollModelPlannerEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_CREATIVE_GAME_PREROLL_MODEL_PLANNER_ENABLED",
+		true,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	shortDramaModelPlannerEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_CREATIVE_SHORT_DRAMA_MODEL_PLANNER_ENABLED",
+		true,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	researchSeedEnabled, err := strictBoolValueOr(lookup, "COOKIES_RESEARCH_SEED_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	researchTikaEnabled, err := strictBoolValueOr(lookup, "COOKIES_RESEARCH_TIKA_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	generatePromptDefault := "strategy.generate.v2"
+	conversationPromptDefault := "strategy.conversation.v3"
+	revisePromptDefault := "strategy.revise.v2"
+	reviewPromptDefault := "strategy.review.deep.v1"
+	repairPromptDefault := "strategy.repair.v1"
+	if environment == EnvironmentLocal || environment == EnvironmentTest {
+		generatePromptDefault = "strategy.generate.v3"
+		conversationPromptDefault = "strategy.conversation.v4"
+		revisePromptDefault = "strategy.revise.v3"
+		reviewPromptDefault = "strategy.review.deep.v2"
+		repairPromptDefault = "strategy.repair.v2"
 	}
 	config := Config{
 		Environment: environment,
@@ -309,19 +384,40 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			FFprobePath:   valueOr(lookup, "COOKIES_FFPROBE_PATH", ""),
 			VideoWorkRoot: valueOr(lookup, "COOKIES_VIDEO_WORK_ROOT", ".data/video-work"),
 		},
+		Creative: Creative{
+			ShortDramaModelPlannerEnabled:  shortDramaModelPlannerEnabled,
+			ShortDramaPlannerModelAlias:    valueOr(lookup, "COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+			GamePrerollModelPlannerEnabled: gamePrerollModelPlannerEnabled,
+			GamePrerollPlannerModelAlias:   valueOr(lookup, "COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+		},
 		Strategy: Strategy{
-			Enabled:                  strategyEnabled,
-			V2Enabled:                strategyV2Enabled,
-			RealProviderEnabled:      strategyRealProviderEnabled,
-			ApproveEnabled:           strategyApproveEnabled,
-			PackageToCreativeEnabled: strategyPackageToCreativeEnabled,
-			TextModelAlias:           valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
-			DeepReviewModelAlias:     valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
-			PromptVersion:            valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", "strategy.generate.v2"),
-			CriticEnabled:            strategyCriticEnabled,
-			OrganizationAllowlist:    splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
+			Enabled:                     strategyEnabled,
+			V2Enabled:                   strategyV2Enabled,
+			RealProviderEnabled:         strategyRealProviderEnabled,
+			ApproveEnabled:              strategyApproveEnabled,
+			PackageToCreativeEnabled:    strategyPackageToCreativeEnabled,
+			CreativeTaskPlanningEnabled: strategyCreativeTaskPlanningEnabled,
+			TextModelAlias:              valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
+			DeepReviewModelAlias:        valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
+			PromptVersion:               valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", generatePromptDefault),
+			ConversationPromptVersion:   valueOr(lookup, "COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION", conversationPromptDefault),
+			RevisePromptVersion:         valueOr(lookup, "COOKIES_STRATEGY_REVISE_PROMPT_VERSION", revisePromptDefault),
+			ReviewPromptVersion:         valueOr(lookup, "COOKIES_STRATEGY_REVIEW_PROMPT_VERSION", reviewPromptDefault),
+			RepairPromptVersion:         valueOr(lookup, "COOKIES_STRATEGY_REPAIR_PROMPT_VERSION", repairPromptDefault),
+			CreativeTaskPromptVersion:   valueOr(lookup, "COOKIES_STRATEGY_CREATIVE_TASK_PROMPT_VERSION", "strategy.creative_task.generate.v2"),
+			CriticEnabled:               strategyCriticEnabled,
+			ContextSelectionEnabled:     strategyContextSelectionEnabled,
+			OrganizationAllowlist:       splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
 		},
 		Research: Research{
+			SeedEnabled:        researchSeedEnabled,
+			SeedModelAlias:     valueOr(lookup, "COOKIES_RESEARCH_SEED_MODEL_ALIAS", "cookies.research.web.standard"),
+			MaxConcurrent:      intValueOr(lookup, "COOKIES_RESEARCH_MAX_CONCURRENT", 3),
+			TikaEnabled:        researchTikaEnabled,
+			TikaBaseURL:        valueOr(lookup, "COOKIES_RESEARCH_TIKA_BASE_URL", "http://127.0.0.1:9998"),
+			TikaVersion:        valueOr(lookup, "COOKIES_RESEARCH_TIKA_VERSION", "3.2.3.0"),
+			TikaTimeoutSeconds: intValueOr(lookup, "COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS", 120),
+			TikaMaxOutputBytes: intValueOr(lookup, "COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES", 20*1024*1024),
 			MCPStdioCommand:    strings.TrimSpace(valueOr(lookup, "COOKIES_RESEARCH_MCP_STDIO_COMMAND", "")),
 			MCPToolName:        valueOr(lookup, "COOKIES_RESEARCH_MCP_TOOL_NAME", "research"),
 			MCPProtocolVersion: valueOr(lookup, "COOKIES_RESEARCH_MCP_PROTOCOL_VERSION", "2025-11-25"),
@@ -442,11 +538,38 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Media.VideoWorkRoot) == "" {
 		return fmt.Errorf("COOKIES_VIDEO_WORK_ROOT must not be empty")
 	}
+	if strings.TrimSpace(c.Creative.ShortDramaPlannerModelAlias) == "" {
+		return fmt.Errorf("COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Creative.GamePrerollPlannerModelAlias) == "" {
+		return fmt.Errorf("COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS must not be empty")
+	}
 	if c.Research.TimeoutSeconds < 1 || c.Research.TimeoutSeconds > 600 {
 		return fmt.Errorf("COOKIES_RESEARCH_TIMEOUT_SECONDS must be between 1 and 600")
 	}
 	if c.Research.MaxOutputBytes < 1024 || c.Research.MaxOutputBytes > 16*1024*1024 {
 		return fmt.Errorf("COOKIES_RESEARCH_MAX_OUTPUT_BYTES must be between 1024 and 16777216")
+	}
+	if strings.TrimSpace(c.Research.SeedModelAlias) == "" {
+		return fmt.Errorf("COOKIES_RESEARCH_SEED_MODEL_ALIAS must not be empty")
+	}
+	if c.Research.MaxConcurrent < 1 || c.Research.MaxConcurrent > 4 {
+		return fmt.Errorf("COOKIES_RESEARCH_MAX_CONCURRENT must be between 1 and 4")
+	}
+	if c.Research.TikaTimeoutSeconds < 1 || c.Research.TikaTimeoutSeconds > 600 {
+		return fmt.Errorf("COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS must be between 1 and 600")
+	}
+	if c.Research.TikaMaxOutputBytes < 1024 || c.Research.TikaMaxOutputBytes > 32*1024*1024 {
+		return fmt.Errorf("COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES must be between 1024 and 33554432")
+	}
+	if c.Research.TikaEnabled {
+		tikaURL, err := url.Parse(strings.TrimSpace(c.Research.TikaBaseURL))
+		if err != nil || (tikaURL.Scheme != "http" && tikaURL.Scheme != "https") || tikaURL.Host == "" {
+			return fmt.Errorf("COOKIES_RESEARCH_TIKA_BASE_URL must be an absolute HTTP(S) URL")
+		}
+		if strings.TrimSpace(c.Research.TikaVersion) == "" {
+			return fmt.Errorf("COOKIES_RESEARCH_TIKA_VERSION must not be empty")
+		}
 	}
 	if c.Research.MCPStdioCommand != "" &&
 		(strings.TrimSpace(c.Research.MCPToolName) == "" || strings.TrimSpace(c.Research.MCPProtocolVersion) == "") {
@@ -475,6 +598,36 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Strategy.PromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.PromptVersion, "strategy.generate.v2", "strategy.generate.v3") {
+		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.ConversationPromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.ConversationPromptVersion, "strategy.conversation.v3", "strategy.conversation.v4") {
+		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.RevisePromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_REVISE_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.RevisePromptVersion, "strategy.revise.v2", "strategy.revise.v3") {
+		return fmt.Errorf("COOKIES_STRATEGY_REVISE_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.ReviewPromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_REVIEW_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.ReviewPromptVersion, "strategy.review.deep.v1", "strategy.review.deep.v2") {
+		return fmt.Errorf("COOKIES_STRATEGY_REVIEW_PROMPT_VERSION is unsupported")
+	}
+	if strings.TrimSpace(c.Strategy.RepairPromptVersion) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_REPAIR_PROMPT_VERSION must not be empty")
+	}
+	if !oneOf(c.Strategy.RepairPromptVersion, "strategy.repair.v1", "strategy.repair.v2") {
+		return fmt.Errorf("COOKIES_STRATEGY_REPAIR_PROMPT_VERSION is unsupported")
+	}
+	if c.Strategy.CreativeTaskPromptVersion != "strategy.creative_task.generate.v2" {
+		return fmt.Errorf("COOKIES_STRATEGY_CREATIVE_TASK_PROMPT_VERSION is unsupported")
 	}
 	if c.Strategy.CriticEnabled && !c.Strategy.RealProviderEnabled {
 		return fmt.Errorf("COOKIES_STRATEGY_CRITIC_ENABLED requires COOKIES_STRATEGY_REAL_PROVIDER_ENABLED=true")
@@ -515,7 +668,10 @@ func (c Config) Validate() error {
 			return fmt.Errorf("COOKIES_VOLCENGINE_ASR_AUTH_MODE must be legacy or api_key")
 		}
 	}
-	usesCredentialBroker := c.Provider.ImageAdapter == "adapter_gateway" || c.Provider.TextAdapter == "adapter_gateway" || c.Provider.VideoAdapter == "ark_video"
+	usesGenerationBroker := c.Provider.ImageAdapter == "adapter_gateway" ||
+		c.Provider.TextAdapter == "adapter_gateway" ||
+		c.Provider.VideoAdapter == "ark_video"
+	usesCredentialBroker := usesGenerationBroker || c.Research.SeedEnabled
 	if usesCredentialBroker && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
 		return fmt.Errorf("configured Provider adapter requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")
 	}
@@ -524,7 +680,10 @@ func (c Config) Validate() error {
 		if err != nil || len(key) != 32 {
 			return fmt.Errorf("COOKIES_PROVIDER_MASTER_KEY must be base64-encoded 32 bytes")
 		}
-		if strings.TrimSpace(c.Provider.OutputBucket) == "" || c.Provider.OutputBucket == c.ObjectStorage.AssetsBucket || c.Provider.OutputBucket == c.ObjectStorage.QuarantineBucket {
+		if usesGenerationBroker &&
+			(strings.TrimSpace(c.Provider.OutputBucket) == "" ||
+				c.Provider.OutputBucket == c.ObjectStorage.AssetsBucket ||
+				c.Provider.OutputBucket == c.ObjectStorage.QuarantineBucket) {
 			return fmt.Errorf("adapter_gateway requires a distinct COOKIES_PROVIDER_OUTPUT_BUCKET")
 		}
 		if c.Provider.AllowInsecureHTTP && c.Environment != EnvironmentLocal {
@@ -551,6 +710,15 @@ func (c Config) Validate() error {
 		return fmt.Errorf("local identity requires organization, principal kind, principal ID, and project ID")
 	}
 	return nil
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if strings.TrimSpace(value) == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func valueOr(lookup func(string) (string, bool), key, fallback string) string {

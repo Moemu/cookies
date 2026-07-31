@@ -14,9 +14,16 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	}
 	if !value.Strategy.Enabled || value.Strategy.RealProviderEnabled || !value.Strategy.ApproveEnabled ||
 		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
+		!value.Strategy.ContextSelectionEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
 		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
-		value.Strategy.PromptVersion != "strategy.generate.v2" ||
+		value.Strategy.PromptVersion != "strategy.generate.v3" ||
+		value.Strategy.ConversationPromptVersion != "strategy.conversation.v4" ||
+		value.Strategy.RevisePromptVersion != "strategy.revise.v3" ||
+		value.Strategy.ReviewPromptVersion != "strategy.review.deep.v2" ||
+		value.Strategy.RepairPromptVersion != "strategy.repair.v2" ||
+		!value.Strategy.CreativeTaskPlanningEnabled ||
+		value.Strategy.CreativeTaskPromptVersion != "strategy.creative_task.generate.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
 	}
@@ -28,6 +35,49 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	}
 	if value.Provider.AudioAdapter != "fake" {
 		t.Fatalf("unexpected audio adapter default: %q", value.Provider.AudioAdapter)
+	}
+	if !value.Creative.ShortDramaModelPlannerEnabled ||
+		value.Creative.ShortDramaPlannerModelAlias != "cookies.text.standard" ||
+		!value.Creative.GamePrerollModelPlannerEnabled ||
+		value.Creative.GamePrerollPlannerModelAlias != "cookies.text.standard" {
+		t.Fatalf("unexpected Creative game preroll defaults: %#v", value.Creative)
+	}
+}
+
+func TestStrategyRejectsUnknownPromptVersion(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_STRATEGY_REVIEW_PROMPT_VERSION": "strategy.review.deep.unknown",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_REVIEW_PROMPT_VERSION") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestProductionKeepsPreviousStrategyPromptDefaults(t *testing.T) {
+	t.Parallel()
+	values := secureProductionValues()
+	config, err := FromLookup(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Strategy.PromptVersion != "strategy.generate.v2" ||
+		config.Strategy.ConversationPromptVersion != "strategy.conversation.v3" ||
+		config.Strategy.RevisePromptVersion != "strategy.revise.v2" ||
+		config.Strategy.ReviewPromptVersion != "strategy.review.deep.v1" ||
+		config.Strategy.RepairPromptVersion != "strategy.repair.v1" ||
+		config.Strategy.ContextSelectionEnabled || config.Strategy.CreativeTaskPlanningEnabled {
+		t.Fatalf("production prompt defaults = %#v", config.Strategy)
+	}
+}
+
+func TestStrategyContextSelectionRejectsInvalidBoolean(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED": "sometimes",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -486,6 +536,47 @@ func TestFromLookupRejectsInvalidMCPArgumentsAndResearchBounds(t *testing.T) {
 		"COOKIES_RESEARCH_TIMEOUT_SECONDS": "0",
 	})); err == nil {
 		t.Fatal("expected invalid research timeout to be rejected")
+	}
+}
+
+func TestFromLookupParsesAndValidatesTikaConfiguration(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_TIKA_ENABLED":          "true",
+		"COOKIES_RESEARCH_TIKA_BASE_URL":         "http://127.0.0.1:9998",
+		"COOKIES_RESEARCH_TIKA_VERSION":          "3.2.3.0",
+		"COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS":  "90",
+		"COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES": "1048576",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if !config.Research.TikaEnabled || config.Research.TikaVersion != "3.2.3.0" ||
+		config.Research.TikaTimeoutSeconds != 90 || config.Research.TikaMaxOutputBytes != 1048576 {
+		t.Fatalf("unexpected Tika config: %#v", config.Research)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_TIKA_ENABLED":  "true",
+		"COOKIES_RESEARCH_TIKA_BASE_URL": "127.0.0.1:9998",
+	})); err == nil {
+		t.Fatal("expected relative Tika URL to be rejected")
+	}
+}
+
+func TestSeedResearchRequiresCredentialEncryptionKey(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_SEED_ENABLED": "true",
+	})); err == nil {
+		t.Fatal("expected Seed research without a credential encryption key to be rejected")
+	}
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_RESEARCH_SEED_ENABLED":       "true",
+		"COOKIES_PROVIDER_MASTER_KEY":         base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"COOKIES_PROVIDER_MASTER_KEY_VERSION": "v1",
+	}))
+	if err != nil || !config.Research.SeedEnabled {
+		t.Fatalf("valid Seed research configuration rejected: config=%#v err=%v", config.Research, err)
 	}
 }
 
