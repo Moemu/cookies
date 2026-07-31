@@ -192,3 +192,49 @@ func TestConversationTurnMergesExplicitLabeledBriefFields(t *testing.T) {
 		}
 	}
 }
+
+func TestConversationTurnMergesExplicitNarrativeCNCBriefFields(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{
+		ID: "msg_cnc", CreatedBy: "user_1",
+		Content: `白域精工希望面向研发负责人和采购负责人推广高精密 CNC 加工服务，在小红书建立专业认知并获取销售咨询。
+
+核心能力包括：
+1. 最高可实现 ±0.01mm 加工精度；
+2. 历史订单准时交付率达到 98% 以上；
+3. 可承接铝合金、不锈钢等材料的打样和小批量加工。
+
+目前我们还不确定目标人群最关注哪些决策证据。`,
+	}
+	patch := mergeExplicitLabeledBriefOperations(draft, message, BriefPatch{Operations: []BriefPatchOperation{
+		{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"白域精工"`), Confidence: "high"},
+		{Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`["研发负责人","采购负责人"]`), Confidence: "high"},
+		{Op: "set", FieldPath: "channels", Value: json.RawMessage(`["xiaohongshu"]`), Confidence: "high"},
+	}})
+	if err := normalizeModelBriefPatch(&patch); err != nil {
+		t.Fatal(err)
+	}
+	for index := range patch.Operations {
+		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: message.ID}
+		patch.Operations[index].Confirmation = "unconfirmed"
+	}
+	updated, err := ApplyBriefPatch(draft, patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Document.Product.Name != "高精密 CNC 加工服务" ||
+		updated.Document.Product.Category != "CNC 加工" ||
+		updated.Document.Industry != "CNC 加工" {
+		t.Fatalf("narrative product fields were not retained: %#v", updated.Document.Product)
+	}
+	if len(updated.Document.Product.SellingPoints) != 3 {
+		t.Fatalf("selling points = %#v", updated.Document.Product.SellingPoints)
+	}
+	if len(updated.Document.Product.Evidence) != 2 {
+		t.Fatalf("evidence = %#v", updated.Document.Product.Evidence)
+	}
+}
