@@ -14,8 +14,6 @@ import (
 const (
 	ScopeRead  contract.Scope = "creative.read"
 	ScopeWrite contract.Scope = "creative.write"
-
-	CreativeIntakeCreateV3ContractVersion = "creative-intake-create/v3"
 )
 
 type IntakeSource string
@@ -125,16 +123,36 @@ type CreativeRouteSnapshot struct {
 }
 
 func (r CreativeRouteSnapshot) Validate() error {
-	if r.RouteType != "image_text" && r.RouteType != "brand_video" && r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
+	if r.RouteType != CreativeRouteImageText && r.RouteType != CreativeRouteBrandVideo && r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
 		r.RouteType != PerformanceModeShortDramaPreroll && r.RouteType != PerformanceModeGamePreroll &&
 		r.RouteType != PerformanceModeCommercePreroll {
 		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
 	}
-	if r.RouteType == "image_text" {
+	if r.RouteType == CreativeRouteImageText {
 		if len(r.Channels) != 1 || r.Channels[0] != string(ChannelXiaohongshu) ||
 			r.AspectRatio != "3:4" || strings.TrimSpace(r.RouteID) == "" ||
 			strings.TrimSpace(r.Reason) == "" {
 			return fmt.Errorf("creative image-text route is incomplete")
+		}
+		return nil
+	}
+	if r.RouteType == CreativeRouteBrandVideo {
+		if r.VideoPurpose != "brand" || len(r.Channels) == 0 ||
+			r.TargetDurationSeconds < 1 || strings.TrimSpace(r.AspectRatio) == "" ||
+			strings.TrimSpace(r.RouteID) == "" || strings.TrimSpace(r.Reason) == "" ||
+			!r.RequiresHumanConfirmation {
+			return fmt.Errorf("creative brand-video route is incomplete")
+		}
+		for _, channel := range r.Channels {
+			if channel != "xiaohongshu" && channel != "wechat_official_account" &&
+				channel != "douyin" && channel != "kuaishou" {
+				return fmt.Errorf("creative brand-video route channel %q is unsupported", channel)
+			}
+		}
+		for _, ref := range r.SourceAssetRefs {
+			if err := ref.Validate(); err != nil {
+				return fmt.Errorf("creative brand-video route source asset: %w", err)
+			}
 		}
 		return nil
 	}
@@ -805,7 +823,7 @@ func (v CreativeVersion) Validate() error {
 		v.OrganizationID == "" || v.ProjectID == "" || v.ContentHash.Validate() != nil || v.CreatedAt.IsZero() {
 		return fmt.Errorf("creative version is incomplete")
 	}
-	if v.Status != CreativeVersionCreated && v.Status != CreativeVersionChecked && v.Status != CreativeVersionApproved && v.Status != CreativeVersionSuperseded {
+	if !validCreativeVersionStatus(v.Status) {
 		return fmt.Errorf("creative version status is invalid")
 	}
 	switch v.Format {

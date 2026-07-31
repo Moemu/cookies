@@ -10,12 +10,6 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-const (
-	CreativePlanningContextV1  = "creative-planning-context/v1"
-	CreativeDirectionBatchV1   = "creative-direction-candidate-batch/v1"
-	CreativeDirectionVersionV1 = "creative-direction/v1"
-)
-
 type CreativePlanningContext struct {
 	ContractVersion   string                   `json:"contract_version"`
 	InputIdentityHash string                   `json:"input_identity_hash"`
@@ -82,7 +76,7 @@ type CreativeDirectionVersion struct {
 	MessagePlan       []string                `json:"message_plan"`
 	ExecutionOutline  []string                `json:"execution_outline"`
 	GuardrailTrace    []string                `json:"guardrail_trace"`
-	Status            string                  `json:"status"`
+	Status            CreativeDirectionStatus `json:"status"`
 	Version           int64                   `json:"version"`
 	ContentHash       string                  `json:"content_hash"`
 	ConfirmedBy       string                  `json:"confirmed_by,omitempty"`
@@ -91,19 +85,19 @@ type CreativeDirectionVersion struct {
 }
 
 type CreativeDirectionBatch struct {
-	ContractVersion   string                     `json:"contract_version"`
-	ID                string                     `json:"batch_id"`
-	OrganizationID    contract.OrganizationID    `json:"organization_id"`
-	ProjectID         contract.ProjectID         `json:"project_id"`
-	IntakeID          string                     `json:"intake_id"`
-	InputIdentityHash string                     `json:"input_identity_hash"`
-	Status            string                     `json:"status"`
-	Candidates        []CreativeDirectionVersion `json:"candidates"`
-	Model             string                     `json:"model"`
-	PromptVersion     string                     `json:"prompt_version"`
-	FailureCode       string                     `json:"failure_code,omitempty"`
-	CreatedBy         string                     `json:"created_by"`
-	CreatedAt         time.Time                  `json:"created_at"`
+	ContractVersion   string                       `json:"contract_version"`
+	ID                string                       `json:"batch_id"`
+	OrganizationID    contract.OrganizationID      `json:"organization_id"`
+	ProjectID         contract.ProjectID           `json:"project_id"`
+	IntakeID          string                       `json:"intake_id"`
+	InputIdentityHash string                       `json:"input_identity_hash"`
+	Status            CreativeDirectionBatchStatus `json:"status"`
+	Candidates        []CreativeDirectionVersion   `json:"candidates"`
+	Model             string                       `json:"model"`
+	PromptVersion     string                       `json:"prompt_version"`
+	FailureCode       string                       `json:"failure_code,omitempty"`
+	CreatedBy         string                       `json:"created_by"`
+	CreatedAt         time.Time                    `json:"created_at"`
 }
 
 type GenerateDirectionRequest struct {
@@ -158,7 +152,7 @@ func (s Service) GenerateDirectionCandidates(
 	if err != nil {
 		return CreativeDirectionBatch{}, err
 	}
-	if route.RouteType != "image_text" {
+	if route.RouteType != CreativeRouteImageText && route.RouteType != CreativeRouteBrandVideo {
 		return CreativeDirectionBatch{}, fmt.Errorf("creative direction planning is not enabled for route %q", route.RouteType)
 	}
 	if request.CandidateCount == 0 {
@@ -217,7 +211,7 @@ func (s Service) GenerateDirectionCandidates(
 			MessagePlan:      append([]string{}, candidate.MessagePlan...),
 			ExecutionOutline: append([]string{}, candidate.ExecutionOutline...),
 			GuardrailTrace:   append([]string{}, candidate.GuardrailTrace...),
-			Status:           "candidate", Version: 1, CreatedAt: now,
+			Status:           DirectionStatusCandidate, Version: 1, CreatedAt: now,
 		}
 		contentHash, hashErr := contract.NewContentHash(value)
 		if hashErr != nil {
@@ -229,7 +223,7 @@ func (s Service) GenerateDirectionCandidates(
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1, ID: batchID,
 		OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intakeID,
-		InputIdentityHash: intake.InputIdentityHash, Status: "ready", Candidates: directions,
+		InputIdentityHash: intake.InputIdentityHash, Status: DirectionBatchReady, Candidates: directions,
 		Model: result.Model, PromptVersion: result.PromptVersion,
 		CreatedBy: actor.Principal.ID, CreatedAt: now,
 	}

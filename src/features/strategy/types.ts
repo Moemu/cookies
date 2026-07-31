@@ -1,3 +1,5 @@
+import type { CreativeIntakeStatus } from '../../contracts/creative'
+
 export type Workspace = {
   id: string
   project_id: string
@@ -387,7 +389,7 @@ export type StrategyCreativeHandoff = {
 export type CreativeIntakeV3 = {
   contract_version: 'creative-intake/v3'
   id: string
-  status: 'needs_clarification' | 'ready' | 'superseded'
+  status: CreativeIntakeStatus
   selected_route_id: string
   input_identity_hash: string
 }

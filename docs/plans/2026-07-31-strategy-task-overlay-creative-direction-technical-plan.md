@@ -1,5 +1,9 @@
 # Strategy 任务策略增强层与 CreativeDirection 技术实现方案
 
+> 共享契约与状态机已于 2026-07-31 冻结，后续图文与品牌广告闭环以
+> `docs/26-creative-shared-contract-state-machine-v1.md` 和
+> `api/fixtures/creative-shared-workflow-v1-frozen.json` 为准。
+
 | 属性 | 内容 |
 | --- | --- |
 | 日期 | 2026-07-31 |

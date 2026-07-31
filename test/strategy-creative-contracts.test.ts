@@ -4,6 +4,13 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import {
+  CREATIVE_CONTRACT_VERSIONS,
+  CREATIVE_ROUTE_PROFILES,
+  CREATIVE_SHARED_WORKFLOW_VERSION,
+  CREATIVE_STATE_MACHINE,
+  canTransitionCreativeState,
+} from "../src/contracts/creative.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const contractsDirectory = join(repositoryRoot, "api", "contracts");
@@ -26,6 +33,7 @@ const fixtureContracts = [
   ["creative-direction-v1-candidate.json", "creative-direction-v1.schema.json"],
   ["creative-direction-candidate-batch-v1-ready.json", "creative-direction-candidate-batch-v1.schema.json"],
   ["creative-direction-candidate-batch-v1-failed.json", "creative-direction-candidate-batch-v1.schema.json"],
+  ["creative-shared-workflow-v1-frozen.json", "creative-shared-workflow-v1.schema.json"],
 ] as const;
 
 const ajv = new Ajv2020({
@@ -111,6 +119,20 @@ test("the mismatch fixture is structurally valid but carries a deliberate route-
 
   assert.equal(validate(mismatch), true, ajv.errorsText(validate.errors));
   assert.notEqual(mismatch.selected_route_id, overlay.selected_route_id);
+});
+
+test("the frontend consumes the frozen Creative contract versions and state graph", () => {
+  const frozen = readJSON(join(fixturesDirectory, "creative-shared-workflow-v1-frozen.json"));
+
+  assert.equal(frozen.contract_version, CREATIVE_SHARED_WORKFLOW_VERSION);
+  assert.deepEqual(frozen.contracts, CREATIVE_CONTRACT_VERSIONS);
+  assert.deepEqual(frozen.route_profiles, CREATIVE_ROUTE_PROFILES);
+  assert.deepEqual(frozen.states, CREATIVE_STATE_MACHINE);
+
+  assert.equal(canTransitionCreativeState("intake", "ready", "superseded"), true);
+  assert.equal(canTransitionCreativeState("direction", "confirmed", "candidate"), false);
+  assert.equal(canTransitionCreativeState("task", "archived", "draft"), false);
+  assert.equal(canTransitionCreativeState("creative_version", "checked", "approved"), true);
 });
 
 test("every OpenAPI contract reference resolves to a checked-in schema", () => {

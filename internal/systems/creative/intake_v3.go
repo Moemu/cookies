@@ -34,7 +34,7 @@ type CreativeIntakeV3 struct {
 }
 
 func (value CreativeIntake) V3View() (CreativeIntakeV3, error) {
-	if value.ContractVersion != "creative-intake/v3" ||
+	if value.ContractVersion != CreativeIntakeV3ContractVersion ||
 		value.Request.StrategyPackage == nil ||
 		len(value.Request.StrategyHandoffInput) == 0 ||
 		value.Request.SelectedRouteID == "" {
@@ -68,7 +68,7 @@ func (value CreativeIntake) V3View() (CreativeIntakeV3, error) {
 	}
 	reference := value.Request.StrategyPackage
 	return CreativeIntakeV3{
-		ContractVersion: "creative-intake/v3", ID: value.ID,
+		ContractVersion: CreativeIntakeV3ContractVersion, ID: value.ID,
 		OrganizationID: string(value.OrganizationID), ProjectID: string(value.ProjectID),
 		Source: value.Source, Status: value.Status,
 		StrategyPackageRef: StrategyPackageContractReference{

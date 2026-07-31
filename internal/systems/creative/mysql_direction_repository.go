@@ -78,10 +78,10 @@ func (r MySQLRepository) GetDirection(
 	if err := json.Unmarshal(snapshot, &value); err != nil {
 		return CreativeDirectionVersion{}, fmt.Errorf("decode creative direction: %w", err)
 	}
-	if status == "superseded" {
+	if status == string(DirectionStatusSuperseded) {
 		return CreativeDirectionVersion{}, ErrInvalidState
 	}
-	if value.Status != status {
+	if value.Status != CreativeDirectionStatus(status) {
 		return CreativeDirectionVersion{}, fmt.Errorf("creative direction snapshot status is inconsistent")
 	}
 	return value, nil
@@ -118,10 +118,11 @@ func (r MySQLRepository) ConfirmDirection(
 	if err := json.Unmarshal(snapshot, &value); err != nil {
 		return CreativeDirectionVersion{}, fmt.Errorf("decode creative direction: %w", err)
 	}
-	if status == "confirmed" {
+	if status == string(DirectionStatusConfirmed) {
 		return value, nil
 	}
-	if status != "candidate" || value.Status != "candidate" {
+	if !CanTransitionDirectionStatus(CreativeDirectionStatus(status), DirectionStatusConfirmed) ||
+		!CanTransitionDirectionStatus(value.Status, DirectionStatusConfirmed) {
 		return CreativeDirectionVersion{}, ErrInvalidState
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE creative_directions
@@ -132,7 +133,7 @@ func (r MySQLRepository) ConfirmDirection(
 	); err != nil {
 		return CreativeDirectionVersion{}, err
 	}
-	value.Status = "confirmed"
+	value.Status = DirectionStatusConfirmed
 	value.ConfirmedBy = confirmedBy
 	value.ConfirmedAt = &confirmedAt
 	value.Version++

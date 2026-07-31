@@ -519,7 +519,7 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 		}
 		inputIdentityHash = string(identityHash)
 		if request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
-			intakeContractVersion = "creative-intake/v3"
+			intakeContractVersion = CreativeIntakeV3ContractVersion
 		}
 	}
 	intakeID, err := s.idGenerator()("creativeintake")
@@ -649,7 +649,7 @@ func (s Service) CreateTask(ctx context.Context, actor contract.ActorContext, pr
 		Concept:      strings.TrimSpace(request.Focus), Tone: append([]string{}, intake.Request.Tone...),
 		VisualKeywords: append([]string{}, intake.Request.VisualKeywords...),
 	}
-	if intake.ContractVersion == "creative-intake/v3" {
+	if intake.ContractVersion == CreativeIntakeV3ContractVersion {
 		if s.Directions == nil || strings.TrimSpace(request.DirectionID) == "" {
 			return CreativeTask{}, fmt.Errorf("a confirmed CreativeDirection is required for a v3 intake")
 		}
@@ -732,7 +732,7 @@ func (s Service) ArchiveTask(ctx context.Context, actor contract.ActorContext, p
 	if err != nil {
 		return err
 	}
-	if detail.Task.Status == TaskArchived {
+	if !CanTransitionCreativeTaskStatus(detail.Task.Status, TaskArchived) {
 		return ErrInvalidState
 	}
 	return s.Repository.ArchiveTask(ctx, actor.OrganizationID, projectID, taskID, s.now())
@@ -962,7 +962,7 @@ func (s Service) CheckVersion(ctx context.Context, actor contract.ActorContext, 
 	if err != nil {
 		return CreativeVersion{}, err
 	}
-	if version.Status != CreativeVersionCreated && version.Status != CreativeVersionChecked {
+	if !CanTransitionCreativeVersionStatus(version.Status, CreativeVersionChecked) {
 		return CreativeVersion{}, ErrInvalidState
 	}
 	detail, err := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, version.TaskID)
@@ -1023,7 +1023,8 @@ func (s Service) ApproveVersion(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return CreativeVersion{}, err
 	}
-	if version.Status != CreativeVersionChecked || version.Check == nil || !version.Check.Passed {
+	if !CanTransitionCreativeVersionStatus(version.Status, CreativeVersionApproved) ||
+		version.Check == nil || !version.Check.Passed {
 		return CreativeVersion{}, ErrInvalidState
 	}
 	return s.Repository.ApproveVersion(ctx, actor.OrganizationID, projectID, versionID, CreativeApproval{ApprovedBy: actor.Principal.ID, ApprovedAt: s.now()})
