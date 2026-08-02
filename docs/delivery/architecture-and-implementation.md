@@ -2,24 +2,37 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 模块 1+2 已实现；模块 3+ 为草案 |
+| 状态 | 模块 1+2 与 A03 审批完整性已实现；模块 4+ 为草案 |
 | 记录日期 | 2026-07-29 |
-| 实现快照日期 | 2026-07-30 |
+| 实现快照日期 | 2026-07-31 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
 
-本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）与模块 2（服务端权威预检）。除“当前实现快照”明确列出的内容外，ChangeSet、审批、执行、监控和建议仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
+本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）与 A03（内容哈希绑定的 mock 审批完整性）。除“当前实现快照”明确列出的内容外，持久执行步骤、异常执行场景、监控和建议仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
 
-## 当前实现快照（模块 1+2）
+## 当前实现快照（模块 1+2+A03）
 
-当前交付严格限制在 mock 投放计划草稿与投前检查：
+当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批与已有即时本地模拟执行接缝：
 
-- API：`/api/delivery/v1/plans`、计划详情与乐观并发更新、不可变版本列表/详情、`/api/delivery/v1/plans/{plan_id}/preflight`。
-- 数据：`delivery_plans` 与 `delivery_plan_versions`；更新以 `expected_version` 做乐观并发，旧版本返回 `409 VERSION_CONFLICT`。
-- 分层：`domain.go`、`repository.go`、`memory_store.go`、`mysql_store.go`、`service.go`、`http.go` 与 `preflight.go`。
+- API：Project-in-path 的 `/api/delivery/v1/projects/{project_id}/plans`、计划详情与乐观并发更新、不可变版本列表/详情、计划预检、ChangeSet 创建/详情/列表/预检/审批/模拟执行。
+- 数据：`delivery_plans`、`delivery_plan_versions`、`delivery_change_sets` 与不可变 `delivery_approvals`；更新以 `expected_version` 做乐观并发，旧版本返回 `409 VERSION_CONFLICT` 或 `412 VERSION_CONFLICT`。
+- 分层：`domain.go`、`approval.go`、`preflight.go`、`service.go`、`mysql_repository.go`、`backfill.go` 与 `httpapi/server.go`。
 - 隔离：所有读写同时受 Organization 和 Project 约束；跨 Project 读取即使主体拥有两个 Project 的权限也会被拒绝。
-- 权限：读取与写入分别要求 `delivery.plan.read`、`delivery.plan.write`；目标 E2E 会显式注入这两个 scope，本 PR 暂不修改可能与上游身份方案冲突的全局 `.env.example`。
+- 权限：读取、写入、审批、执行分别要求 `delivery.read`、`delivery.write`、`delivery.approve`、`delivery.execute`；身份只来自 `ActorContext`。
 - mock 透明度：计划、版本、预检和页面均显式显示 `source=mock` 与场景代码。
 - 页面顺序：目标与账户 → 预算与排期 → 追踪 → 素材引用 → 投前检查；服务端预检结果是唯一事实源。
+
+A03 审批快照具有以下已实现语义：
+
+- `DeliveryPlanVersion.canonical_hash` 使用共享 `contract.CanonicalJSONHash`，即 RFC 8785 JCS + SHA-256；内容范围只含投放业务字段和 source/platform 边界，不含创建人、创建时间等审计元数据。
+- `DeliveryApproval.action_hash` 绑定 Organization、Project、Plan/PlanVersion、ChangeSet/ChangeSetVersion、Plan canonical hash、`action=execute`、`scope=execute_mock`、预算上限与币种。
+- mock 审批固定在批准后 24 小时过期；审批人来自 `ActorContext`，审批请求体只接受 `expected_version`。
+- `delivery_change_sets.approved_by/approved_at` 仅作为权威 Approval 的兼容投影；迁移会把历史投影一次性转为不可变 Approval，之后不允许覆盖。
+- ChangeSet 列表与详情从绑定的不可变 PlanVersion 派生 `plan_name`，审批队列和详情显示真实计划标题而不是通用的 `Plan V*`。
+- ChangeSet 详情动态返回 Approval 的 `valid`、`invalid_reason`、版本、hash、审批人、批准/过期时间、范围和预算快照。
+- 任何模拟执行前重新校验 Approval 存在、未过期、PlanVersion 仍为 current、ChangeSetVersion/action hash 匹配、scope 与预算未超限。
+- 成功执行和回滚只推进 ChangeSet 生命周期版本，不改变获批内容版本；回读时 `executed` 映射到当前版本减一、`rolled_back` 映射到当前版本减二，因此合法状态推进不会被误报为 `APPROVAL_CONTENT_MISMATCH`。
+- 投放计划与审批中心当前只展示已接入真实数据源的主工作区；尚未实现服务端筛选的 L2 标签保持隐藏，待过滤契约完成后再开放。
+- 稳定错误包括 `APPROVAL_REQUIRED`、`APPROVAL_EXPIRED`、`APPROVAL_CONTENT_MISMATCH`、`APPROVAL_SCOPE_EXCEEDED` 与既有 `STALE_PLAN_VERSION`；响应继续明确 `source=mock` 和场景。
 
 当前预检分级如下：
 
@@ -28,7 +41,7 @@
 | error | 广告主缺失、预算为 0、排期无效、素材引用缺失、追踪配置缺失 | 阻断，并返回可定位的 repair target |
 | warning | 素材版本尚未人工确认 | 不阻断，但要求投手明确处理 |
 
-当前交付不包含 OAuth、真实平台请求、ChangeSet、审批、执行、回滚/补偿、监控告警或建议生成。下文章节涉及这些能力时，均表示后续路线图，而非已经实现的能力。
+当前交付不包含 OAuth、真实平台请求、A04 持久 Execution Step/幂等/partial/failed/result_unknown、补偿语义、监控告警或建议生成。下文章节涉及这些能力时，除上述已有即时模拟接缝外，均表示后续路线图。
 
 ---
 
@@ -184,12 +197,15 @@ type PlatformAdapter interface {
 
 ### 5.2 审批绑定内容哈希（P0-D06）
 
-审批请求体不再直接传 `actor`/`role`，改为：
-- 生成 `DeliveryPlanVersion.canonical_hash`（JSON canonical 哈希）
-- `DeliveryApproval.action_hash = hash(canonical_hash + action + scope)`
-- 审批仅在 `action_hash` 与最新 `canonical_hash` 匹配且未过期时有效
-- 计划 Versions 更新后旧审批自动失效
-- Actor 身份从 Go 的 ActorContext 注入，不由请求体提供
+已实现语义：
+
+- `DeliveryPlanVersion.canonical_hash` 复用 `internal/platform/contract.CanonicalJSONHash`，不建立第二套 JSON canonicalizer。
+- Plan canonical payload 覆盖 `name`、`objective`、`advertiser`、`budget`、`schedule`、`tracking`、`creative_references`、`source_strategy_version` 与 source/platform 边界；排除 `created_at`、`created_by` 等审计元数据。
+- `DeliveryApproval.action_hash` 的 canonical payload 绑定 `organization_id`、`project_id`、`plan_id`、`plan_version`、`change_set_id`、`change_set_version`、`plan_canonical_hash`、`action`、`scope`、`budget_limit` 与 `currency`。
+- mock `action=execute`、`scope=execute_mock`，预算上限等于批准 PlanVersion 的预算，固定 24 小时有效。
+- 审批仅在 action hash、Plan/ChangeSet 版本、内容 hash、有效期、scope 与预算全部匹配时有效；计划产生任何新版本后旧审批永久失效，即使内容后来改回相同值。
+- ChangeSet 从 `approved` 推进到 `executed` 或 `rolled_back` 时只增加生命周期版本；审批仍绑定原始批准版本并保持完整性有效，但状态机会阻止重复执行。
+- Actor 身份从 Go `ActorContext` 注入，审批请求体不得接受 `actor`、`role`、`approver` 或任意 `scope`。
 
 ### 5.3 幂等键
 
@@ -230,16 +246,16 @@ type PlatformAdapter interface {
 - 前端 preflight 结果展示 + repair 提示（点击预算超限 → 跳转计划编辑页）
 - 以服务端为唯一预检事实源；前端 helper 检查仅供参考
 
-### 模块 3：版本绑定审批
+### 模块 3：版本绑定审批（A03 已实现）
 
 **做什么**：审批人只能批准当前看到的那一版计划。
 
-- `DeliveryPlanVersion.canonical_hash` 计算（stable JSON canonical form）
-- `delivery_change_sets` + `delivery_approvals` 表与迁移
-- `POST /api/delivery/v1/change-sets`（从两版本 diff 生成）
-- `POST /api/delivery/v1/change-sets/{id}/approve`（校验 ActorContext + content_hash + 有效期）
+- `DeliveryPlanVersion.canonical_hash` 计算与现有版本确定性 Go backfill
+- `delivery_change_sets` + 不可变 `delivery_approvals` 表与迁移
+- `POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}:create-change-set`（冻结当前 PlanVersion；完整 base/target diff 编辑器仍不在 A03）
+- `POST /api/delivery/v1/projects/{project_id}/change-sets/{id}:approve`（校验 ActorContext + content/action hash + 24 小时有效期）
 - 计划 V2 更新后 V1 的旧审批自动失效
-- 审批页 + 审计定位（审批人 + 审批时间 + 版本）
+- 审批页 + 审计定位（审批人、审批时间、过期时间、Plan/ChangeSet 版本、hash、scope、预算）
 
 ### 模块 4：场景化模拟执行
 

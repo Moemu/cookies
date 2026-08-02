@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,13 @@ func TestChangeSetFreezesVersionAndRejectsStalePlan(t *testing.T) {
 	if _, err := service.UpdatePlan(context.Background(), actor, "project_a", plan.ID, UpdatePlanRequest{ExpectedVersion: 1, PlanDraft: draft}); err != nil {
 		t.Fatal(err)
 	}
+	frozen, err := service.GetChangeSet(context.Background(), actor, "project_a", changeSet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frozen.PlanName != plan.CurrentVersion.Name {
+		t.Fatalf("ChangeSet plan name = %q, want immutable V1 name %q", frozen.PlanName, plan.CurrentVersion.Name)
+	}
 	if _, err := service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrStalePlanVersion) {
 		t.Fatalf("expected stale frozen version rejection, got %v", err)
 	}
@@ -122,6 +130,9 @@ func TestChangeSetGoldenFlowAndMetricProvenance(t *testing.T) {
 	changeSet, err := service.CreateChangeSet(context.Background(), actor, "project_a", plan.ID, plan.Version)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if changeSet.PlanName != plan.CurrentVersion.Name {
+		t.Fatalf("ChangeSet plan name = %q, want %q", changeSet.PlanName, plan.CurrentVersion.Name)
 	}
 	changeSet, err = service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
 	if err != nil || changeSet.Status != ChangeSetPreflightPassed {
@@ -147,6 +158,266 @@ func TestChangeSetGoldenFlowAndMetricProvenance(t *testing.T) {
 	}
 }
 
+func TestApprovalRemainsValidAfterExecutionAndRollbackLifecycleTransitions(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	approved := approveGoldenChangeSet(t, &service, actor)
+	approvalID := approved.Approval.ApprovalID
+	approvalVersion := approved.Approval.ChangeSetVersion
+
+	executed, err := service.Execute(context.Background(), actor, "project_a", approved.ID, approved.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed.ChangeSet.Status != ChangeSetExecuted || executed.ChangeSet.Version != approvalVersion+1 {
+		t.Fatalf("unexpected executed lifecycle state: %#v", executed.ChangeSet)
+	}
+	refreshed, err := service.GetChangeSet(context.Background(), actor, "project_a", approved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Approval == nil || !refreshed.Approval.Valid ||
+		refreshed.Approval.ApprovalID != approvalID ||
+		refreshed.Approval.ChangeSetVersion != approvalVersion {
+		t.Fatalf("execution invalidated the immutable approval: %#v", refreshed.Approval)
+	}
+
+	rolledBack, err := service.Rollback(context.Background(), actor, "project_a", approved.ID, refreshed.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolledBack.Status != ChangeSetRolledBack || rolledBack.Version != approvalVersion+2 {
+		t.Fatalf("unexpected rolled-back lifecycle state: %#v", rolledBack)
+	}
+	if rolledBack.Approval == nil || !rolledBack.Approval.Valid ||
+		rolledBack.Approval.ApprovalID != approvalID ||
+		rolledBack.Approval.ChangeSetVersion != approvalVersion {
+		t.Fatalf("rollback invalidated the immutable approval: %#v", rolledBack.Approval)
+	}
+}
+
+func TestApprovalIsValidFor24HoursThenExpires(t *testing.T) {
+	service, actor, setNow := newTestServiceClock()
+	changeSet := approveGoldenChangeSet(t, &service, actor)
+	if changeSet.Approval == nil || !changeSet.Approval.Valid {
+		t.Fatalf("approval should initially be valid: %#v", changeSet.Approval)
+	}
+	if got := changeSet.Approval.ExpiresAt.Sub(changeSet.Approval.ApprovedAt); got != ApprovalTTL {
+		t.Fatalf("approval TTL = %s, want %s", got, ApprovalTTL)
+	}
+
+	setNow(changeSet.Approval.ExpiresAt.Add(-time.Nanosecond))
+	beforeExpiry, err := service.GetChangeSet(context.Background(), actor, "project_a", changeSet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beforeExpiry.Approval == nil || !beforeExpiry.Approval.Valid {
+		t.Fatalf("approval should remain valid immediately before expiry: %#v", beforeExpiry.Approval)
+	}
+
+	setNow(changeSet.Approval.ExpiresAt)
+	expired, err := service.GetChangeSet(context.Background(), actor, "project_a", changeSet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Approval == nil || expired.Approval.Valid || expired.Approval.InvalidReason != ApprovalInvalidExpired {
+		t.Fatalf("unexpected expired approval view: %#v", expired.Approval)
+	}
+	if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalExpired) {
+		t.Fatalf("execute after expiry error = %v, want APPROVAL_EXPIRED", err)
+	}
+}
+
+func TestPlanVersionChangePermanentlyInvalidatesApprovalEvenAfterContentReverts(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	changeSet := approveGoldenChangeSet(t, &service, actor)
+	plan, err := service.GetPlan(context.Background(), actor, "project_a", changeSet.PlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := goldenDraft()
+	changed.Budget.TotalMinor++
+	if _, err := service.UpdatePlan(context.Background(), actor, "project_a", plan.ID, UpdatePlanRequest{
+		ExpectedVersion: 1, PlanDraft: changed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdatePlan(context.Background(), actor, "project_a", plan.ID, UpdatePlanRequest{
+		ExpectedVersion: 2, PlanDraft: goldenDraft(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := service.GetChangeSet(context.Background(), actor, "project_a", changeSet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Approval == nil || stale.Approval.Valid || stale.Approval.InvalidReason != ApprovalInvalidStalePlan {
+		t.Fatalf("reverted content reactivated an old approval: %#v", stale.Approval)
+	}
+	if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrStalePlanVersion) {
+		t.Fatalf("execute stale approval error = %v", err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	if got := len(repository.approvals[repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)]); got != 1 {
+		t.Fatalf("old approval audit count = %d, want 1", got)
+	}
+}
+
+func TestExecuteRejectsApprovalContentAndChangeSetVersionMismatch(t *testing.T) {
+	t.Run("action hash", func(t *testing.T) {
+		service, actor, _ := newTestServiceClock()
+		changeSet := approveGoldenChangeSet(t, &service, actor)
+		repository := service.Repository.(*memoryRepository)
+		key := repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)
+		repository.approvals[key][0].ActionHash = "tampered"
+		if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalContentMismatch) {
+			t.Fatalf("execute tampered action hash error = %v", err)
+		}
+	})
+
+	t.Run("change set version", func(t *testing.T) {
+		service, actor, _ := newTestServiceClock()
+		changeSet := approveGoldenChangeSet(t, &service, actor)
+		repository := service.Repository.(*memoryRepository)
+		key := repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)
+		stored := repository.changeSets[key]
+		stored.Version++
+		repository.changeSets[key] = stored
+		if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, stored.Version); !errors.Is(err, ErrApprovalContentMismatch) {
+			t.Fatalf("execute mismatched ChangeSetVersion error = %v", err)
+		}
+	})
+}
+
+func TestExecuteRejectsApprovalScopeAndBudgetExceeded(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*DeliveryApproval)
+	}{
+		{name: "scope", mutate: func(value *DeliveryApproval) { value.Scope = "execute_real" }},
+		{name: "budget", mutate: func(value *DeliveryApproval) { value.BudgetLimitMinor-- }},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			service, actor, _ := newTestServiceClock()
+			changeSet := approveGoldenChangeSet(t, &service, actor)
+			repository := service.Repository.(*memoryRepository)
+			key := repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)
+			approval := repository.approvals[key][0]
+			testCase.mutate(&approval)
+			var err error
+			approval.ActionHash, err = ApprovalActionHash(approval)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repository.approvals[key][0] = approval
+			if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalScopeExceeded) {
+				t.Fatalf("execute exceeded approval error = %v", err)
+			}
+		})
+	}
+}
+
+func TestApprovalRequiresTrustedScopeAndProjectAndCannotBeOverwritten(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{PlanDraft: goldenDraft()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err := service.CreateChangeSet(context.Background(), actor, "project_a", plan.ID, plan.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err = service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	withoutApprove := actor
+	withoutApprove.Scopes = contract.ScopesFromStrings([]string{
+		string(ScopeRead), string(ScopeWrite), string(ScopeExecute),
+	})
+	if _, err := service.Approve(context.Background(), withoutApprove, "project_a", changeSet.ID, changeSet.Version); err == nil || !strings.Contains(err.Error(), string(ScopeApprove)) {
+		t.Fatalf("approve without trusted scope error = %v", err)
+	}
+	if _, err := service.Approve(context.Background(), actor, "project_b", changeSet.ID, changeSet.Version); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-project approve error = %v, want hidden not found", err)
+	}
+	otherOrganization := actor
+	otherOrganization.OrganizationID = "org_b"
+	if _, err := service.GetChangeSet(context.Background(), otherOrganization, "project_a", changeSet.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-organization read error = %v, want hidden not found", err)
+	}
+	if _, err := service.Approve(context.Background(), otherOrganization, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-organization approve error = %v, want hidden not found", err)
+	}
+	if _, err := service.Approve(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version-1); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale approve expected_version error = %v", err)
+	}
+
+	approved, err := service.Approve(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Approval == nil ||
+		approved.Approval.Source != SourceMock ||
+		approved.Approval.Scenario != ScenarioGoldenPath ||
+		approved.Approval.ApprovedBy != actor.Principal.ID ||
+		approved.Approval.Scope != ApprovalScopeExecuteMock {
+		t.Fatalf("unexpected approval projection: %#v", approved.Approval)
+	}
+	if _, err := service.Approve(context.Background(), actor, "project_a", changeSet.ID, approved.Version); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("second approval error = %v", err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	if got := len(repository.approvals[repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)]); got != 1 {
+		t.Fatalf("approval count = %d, want immutable singleton", got)
+	}
+}
+
+func TestExecuteRequiresAuthoritativeApprovalRecord(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{PlanDraft: goldenDraft()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err := service.CreateChangeSet(context.Background(), actor, "project_a", plan.ID, plan.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err = service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	key := repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)
+	changeSet.Status, changeSet.Version = ChangeSetApproved, changeSet.Version+1
+	repository.changeSets[key] = changeSet
+	if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("execute without authoritative approval error = %v", err)
+	}
+}
+
+func approveGoldenChangeSet(t *testing.T, service *Service, actor contract.ActorContext) ChangeSet {
+	t.Helper()
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{PlanDraft: goldenDraft()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err := service.CreateChangeSet(context.Background(), actor, "project_a", plan.ID, plan.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err = service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err = service.Approve(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return changeSet
+}
+
 func goldenDraft() PlanDraft {
 	return PlanDraft{
 		Name: "Mock 投放计划", Objective: "获取销售线索",
@@ -163,6 +434,11 @@ func goldenDraft() PlanDraft {
 }
 
 func newTestService() (Service, contract.ActorContext) {
+	service, actor, _ := newTestServiceClock()
+	return service, actor
+}
+
+func newTestServiceClock() (Service, contract.ActorContext, func(time.Time)) {
 	repository := newMemoryRepository()
 	actor := contract.ActorContext{
 		OrganizationID: "org_a",
@@ -172,7 +448,8 @@ func newTestService() (Service, contract.ActorContext) {
 		}),
 	}
 	counter := 0
-	return Service{
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	service := Service{
 		Repository: repository,
 		Projects:   testProjects{},
 		Packages:   testPackages{},
@@ -180,8 +457,9 @@ func newTestService() (Service, contract.ActorContext) {
 			counter++
 			return fmt.Sprintf("%s_%d", prefix, counter), nil
 		},
-		Now: func() time.Time { return time.Date(2026, 7, 30, 10, 0, counter, 0, time.UTC) },
-	}, actor
+		Now: func() time.Time { return now },
+	}
+	return service, actor, func(value time.Time) { now = value }
 }
 
 type testProjects struct{}
@@ -202,12 +480,16 @@ func (testPackages) ReadCreativePackage(_ context.Context, _ contract.ActorConte
 type memoryRepository struct {
 	plans      map[string]DeliveryPlan
 	changeSets map[string]ChangeSet
+	approvals  map[string][]DeliveryApproval
 	executions []ExecutionResult
 	metrics    []DeliveryMetricSnapshot
 }
 
 func newMemoryRepository() *memoryRepository {
-	return &memoryRepository{plans: map[string]DeliveryPlan{}, changeSets: map[string]ChangeSet{}}
+	return &memoryRepository{
+		plans: map[string]DeliveryPlan{}, changeSets: map[string]ChangeSet{},
+		approvals: map[string][]DeliveryApproval{},
+	}
 }
 
 func repositoryKey(organizationID contract.OrganizationID, projectID contract.ProjectID, id string) string {
@@ -317,7 +599,66 @@ func (r *memoryRepository) TransitionChangeSet(ctx context.Context, organization
 	return value, nil
 }
 
-func (r *memoryRepository) RecordExecution(_ context.Context, changeSet ChangeSet, execution Execution, evidence Evidence) (ExecutionResult, error) {
+func (r *memoryRepository) ApproveChangeSet(ctx context.Context, changeSet ChangeSet, approval DeliveryApproval) (ChangeSet, error) {
+	plan, err := r.GetPlan(ctx, changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if plan.Version != changeSet.PlanVersion {
+		return ChangeSet{}, ErrStalePlanVersion
+	}
+	stored, err := r.GetChangeSet(ctx, changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if stored.Status != ChangeSetPreflightPassed {
+		return ChangeSet{}, ErrInvalidState
+	}
+	if stored.Version != changeSet.Version || approval.ChangeSetVersion != stored.Version+1 {
+		return ChangeSet{}, ErrVersionConflict
+	}
+	key := repositoryKey(changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID)
+	if len(r.approvals[key]) != 0 {
+		return ChangeSet{}, ErrInvalidState
+	}
+	r.approvals[key] = append(r.approvals[key], approval)
+	stored.Status, stored.Version, stored.UpdatedAt = ChangeSetApproved, approval.ChangeSetVersion, approval.ApprovedAt
+	stored.ApprovedBy = approval.ApprovedBy
+	approvedAt := approval.ApprovedAt
+	stored.ApprovedAt = &approvedAt
+	r.changeSets[key] = stored
+	return stored, nil
+}
+
+func (r *memoryRepository) GetApproval(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, changeSetID string) (DeliveryApproval, error) {
+	values := r.approvals[repositoryKey(organizationID, projectID, changeSetID)]
+	if len(values) == 0 {
+		return DeliveryApproval{}, ErrNotFound
+	}
+	return values[len(values)-1], nil
+}
+
+func (r *memoryRepository) RecordExecution(ctx context.Context, changeSet ChangeSet, approval DeliveryApproval, execution Execution, evidence Evidence) (ExecutionResult, error) {
+	plan, err := r.GetPlan(ctx, changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if plan.Version != changeSet.PlanVersion {
+		return ExecutionResult{}, ErrStalePlanVersion
+	}
+	storedApproval, err := r.GetApproval(ctx, changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID)
+	if errors.Is(err, ErrNotFound) {
+		return ExecutionResult{}, ErrApprovalRequired
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if !execution.StartedAt.Before(storedApproval.ExpiresAt) {
+		return ExecutionResult{}, ErrApprovalExpired
+	}
+	if !sameApproval(storedApproval, approval) {
+		return ExecutionResult{}, ErrApprovalContentMismatch
+	}
 	changeSet.Status, changeSet.Version = ChangeSetExecuted, changeSet.Version+1
 	r.changeSets[repositoryKey(changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID)] = changeSet
 	value := ExecutionResult{ChangeSet: changeSet, Execution: execution, Evidence: evidence}

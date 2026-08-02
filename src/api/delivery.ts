@@ -33,7 +33,7 @@ export const deliveryApi = {
 }
 
 export type DeliverySource = 'mock'
-export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list'
+export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue'
 
 export type DeliveryPlanDraft = {
   name: string
@@ -70,6 +70,8 @@ export type DeliveryPlanVersion = DeliveryPlanDraft & {
   organizationId: string
   projectId: string
   versionNumber: number
+  canonicalHash: string
+  platform: 'ocean_engine_mock'
   advertiser: DeliveryPlanDraft['advertiser'] & {
     source: DeliverySource
     scenario: DeliveryScenario
@@ -119,6 +121,50 @@ export type DeliveryPreflightResult = {
   checkedAt: string
 }
 
+export type DeliveryApproval = {
+  approvalId: string
+  valid: boolean
+  invalidReason?: 'APPROVAL_EXPIRED' | 'APPROVAL_CONTENT_MISMATCH' | 'APPROVAL_SCOPE_EXCEEDED' | 'STALE_PLAN_VERSION'
+  planId: string
+  planVersion: number
+  changeSetId: string
+  changeSetVersion: number
+  planCanonicalHash: string
+  actionHash: string
+  hashSummary: string
+  action: 'execute'
+  scope: 'execute_mock'
+  budgetLimit: { totalMinor: number; currency: 'CNY' }
+  approvedBy: string
+  approvedAt: string
+  expiresAt: string
+  source: DeliverySource
+  scenario: DeliveryScenario
+}
+
+export type DeliveryControlChangeSet = {
+  id: string
+  organizationId: string
+  projectId: string
+  planId: string
+  planName: string
+  planVersion: number
+  planCanonicalHash: string
+  budgetLimit: { totalMinor: number; currency: 'CNY' }
+  status: 'draft' | 'preflight_passed' | 'preflight_failed' | 'approved' | 'rejected' | 'executed' | 'rolled_back'
+  riskLevel: string
+  preflightNotes: string[]
+  approvedBy?: string
+  approvedAt?: string
+  approval?: DeliveryApproval
+  source: DeliverySource
+  scenario: DeliveryScenario
+  version: number
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
 type WireDeliveryPlanDraft = {
   name: string
   objective: string
@@ -135,6 +181,8 @@ type WireDeliveryPlanVersion = WireDeliveryPlanDraft & {
   organization_id: string
   project_id: string
   version_number: number
+  canonical_hash: string
+  platform: 'ocean_engine_mock'
   advertiser: WireDeliveryPlanDraft['advertiser'] & { source: DeliverySource; scenario: DeliveryScenario }
   source: DeliverySource
   scenario: DeliveryScenario
@@ -175,6 +223,50 @@ type WirePreflightResult = {
   checked_at: string
 }
 
+type WireDeliveryApproval = {
+  approval_id: string
+  valid: boolean
+  invalid_reason?: DeliveryApproval['invalidReason']
+  plan_id: string
+  plan_version: number
+  change_set_id: string
+  change_set_version: number
+  plan_canonical_hash: string
+  action_hash: string
+  hash_summary: string
+  action: 'execute'
+  scope: 'execute_mock'
+  budget_limit: { total_minor: number; currency: 'CNY' }
+  approved_by: string
+  approved_at: string
+  expires_at: string
+  source: DeliverySource
+  scenario: DeliveryScenario
+}
+
+type WireDeliveryControlChangeSet = {
+  id: string
+  organization_id: string
+  project_id: string
+  plan_id: string
+  plan_name: string
+  plan_version: number
+  plan_canonical_hash: string
+  budget_limit: { total_minor: number; currency: 'CNY' }
+  status: DeliveryControlChangeSet['status']
+  risk_level: string
+  preflight_notes: string[]
+  approved_by?: string
+  approved_at?: string
+  approval?: WireDeliveryApproval
+  source: DeliverySource
+  scenario: DeliveryScenario
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
 export const deliveryPlanApi = {
   async list(projectId: string): Promise<DeliveryPlan[]> {
     const response = await deliveryPlanRequest<{ items: WireDeliveryPlan[]; source: DeliverySource; scenario: DeliveryScenario }>(
@@ -210,6 +302,51 @@ export const deliveryPlanApi = {
       checkedAt: response.checked_at,
     }
   },
+  async listChangeSets(projectId: string): Promise<DeliveryControlChangeSet[]> {
+    const response = await deliveryPlanRequest<{ items: WireDeliveryControlChangeSet[] }>(projectId, '/change-sets')
+    return (response.items ?? []).map(toDeliveryControlChangeSet)
+  },
+  async getChangeSet(projectId: string, changeSetId: string): Promise<DeliveryControlChangeSet> {
+    return toDeliveryControlChangeSet(await deliveryPlanRequest<WireDeliveryControlChangeSet>(
+      projectId,
+      `/change-sets/${encodeURIComponent(changeSetId)}`,
+    ))
+  },
+  async createChangeSet(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
+    return toDeliveryControlChangeSet(await deliveryPlanRequest<WireDeliveryControlChangeSet>(
+      projectId,
+      `/plans/${encodeURIComponent(planId)}:create-change-set`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+    ))
+  },
+  async preflightChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
+    return deliveryChangeSetAction(projectId, changeSetId, 'preflight', expectedVersion)
+  },
+  async approveChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
+    return deliveryChangeSetAction(projectId, changeSetId, 'approve', expectedVersion)
+  },
+  async executeChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
+    const response = await deliveryPlanRequest<{ change_set: WireDeliveryControlChangeSet }>(
+      projectId,
+      `/change-sets/${encodeURIComponent(changeSetId)}:execute`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+    )
+    return toDeliveryControlChangeSet(response.change_set)
+  },
+}
+
+async function deliveryChangeSetAction(
+  projectId: string,
+  changeSetId: string,
+  action: 'preflight' | 'approve',
+  expectedVersion: number,
+) {
+  const response = await deliveryPlanRequest<WireDeliveryControlChangeSet>(
+    projectId,
+    `/change-sets/${encodeURIComponent(changeSetId)}:${action}`,
+    { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+  )
+  return toDeliveryControlChangeSet(response)
 }
 
 async function deliveryPlanRequest<T>(projectId: string, path: string, init: RequestInit = {}): Promise<T> {
@@ -271,6 +408,8 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     organizationId: version.organization_id,
     projectId: version.project_id,
     versionNumber: version.version_number,
+    canonicalHash: version.canonical_hash,
+    platform: version.platform,
     name: version.name,
     objective: version.objective,
     advertiser: {
@@ -297,5 +436,55 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     scenario: version.scenario,
     createdBy: version.created_by,
     createdAt: version.created_at,
+  }
+}
+
+function toDeliveryControlChangeSet(value: WireDeliveryControlChangeSet): DeliveryControlChangeSet {
+  return {
+    id: value.id,
+    organizationId: value.organization_id,
+    projectId: value.project_id,
+    planId: value.plan_id,
+    planName: value.plan_name,
+    planVersion: value.plan_version,
+    planCanonicalHash: value.plan_canonical_hash,
+    budgetLimit: {
+      totalMinor: value.budget_limit.total_minor,
+      currency: value.budget_limit.currency,
+    },
+    status: value.status,
+    riskLevel: value.risk_level,
+    preflightNotes: value.preflight_notes ?? [],
+    approvedBy: value.approved_by,
+    approvedAt: value.approved_at,
+    approval: value.approval ? {
+      approvalId: value.approval.approval_id,
+      valid: value.approval.valid,
+      invalidReason: value.approval.invalid_reason,
+      planId: value.approval.plan_id,
+      planVersion: value.approval.plan_version,
+      changeSetId: value.approval.change_set_id,
+      changeSetVersion: value.approval.change_set_version,
+      planCanonicalHash: value.approval.plan_canonical_hash,
+      actionHash: value.approval.action_hash,
+      hashSummary: value.approval.hash_summary,
+      action: value.approval.action,
+      scope: value.approval.scope,
+      budgetLimit: {
+        totalMinor: value.approval.budget_limit.total_minor,
+        currency: value.approval.budget_limit.currency,
+      },
+      approvedBy: value.approval.approved_by,
+      approvedAt: value.approval.approved_at,
+      expiresAt: value.approval.expires_at,
+      source: value.approval.source,
+      scenario: value.approval.scenario,
+    } : undefined,
+    source: value.source,
+    scenario: value.scenario,
+    version: value.version,
+    createdBy: value.created_by,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
   }
 }

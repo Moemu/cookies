@@ -22,6 +22,7 @@ const scenarioLabels: Record<DeliveryScenario | 'unsaved_draft', string> = {
   tracking_missing: '追踪缺失',
   incomplete_draft: '草稿不完整',
   project_plan_list: '计划列表',
+  approval_queue: '审批队列',
   unsaved_draft: '未保存草稿',
 }
 
@@ -165,6 +166,24 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     }
   }
 
+  const createChangeSet = async () => {
+    if (!selectedPlan || dirty || !preflight?.passed) return
+    setBusy(true)
+    try {
+      const created = await deliveryPlanApi.createChangeSet(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
+      const checked = await deliveryPlanApi.preflightChangeSet(projectId, created.id, created.version)
+      setNotice(
+        checked.status === 'preflight_passed'
+          ? `${checked.id} 已冻结 Plan V${checked.planVersion} 并通过服务端预检，可前往审批中心。`
+          : `${checked.id} 的服务端预检未通过，请修复计划后创建新 ChangeSet。`,
+      )
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '创建 ChangeSet 失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const repair = (target: { field: string; section: string }) => {
     if (isPlanSection(target.section)) setSection(target.section)
     setRepairField(target.field)
@@ -232,6 +251,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           ><FilePlus size={15}/>新建空白草稿</button>
           <button className="secondary-button" onClick={() => void save()} disabled={busy || (!dirty && !isNew)}><Save size={15}/>{isNew ? '保存草稿' : '保存新版本'}</button>
           <button className="primary-button" onClick={() => void runPreflight()} disabled={busy || !selectedPlan || dirty}><Send size={15}/>运行服务端预检</button>
+          <button className="primary-button" onClick={() => void createChangeSet()} disabled={busy || !selectedPlan || dirty || !preflight?.passed}><FilePlus size={15}/>创建并预检 ChangeSet</button>
         </footer>
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </main>
@@ -348,6 +368,7 @@ function VersionSnapshot({ version }: { version: DeliveryPlanVersion }) {
       <div><dt>预算</dt><dd>¥{formatMinor(version.budget.totalMinor)}</dd></div>
       <div><dt>排期</dt><dd>{new Date(version.schedule.startAt).toLocaleDateString('zh-CN')} → {new Date(version.schedule.endAt).toLocaleDateString('zh-CN')}</dd></div>
       <div><dt>素材</dt><dd>{version.creativeReferences.map(reference => `${reference.assetId}@V${reference.version}`).join('、')}</dd></div>
+      <div><dt>内容 Hash</dt><dd title={version.canonicalHash}>{version.canonicalHash.slice(0, 12)}</dd></div>
     </dl>
     <small>source={version.source} · scenario={version.scenario}</small>
   </div>

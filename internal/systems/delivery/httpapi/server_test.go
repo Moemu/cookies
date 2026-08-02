@@ -49,6 +49,60 @@ func TestDeliveryHTTPMapsProjectIsolationDenial(t *testing.T) {
 	}
 }
 
+func TestApprovalRequestRejectsInjectedIdentityAndScopeFields(t *testing.T) {
+	t.Parallel()
+	server := New(&applicationStub{
+		changeSet: delivery.ChangeSet{ID: "deliverychangeset_1", Version: 2},
+	})
+	fields := []string{"actor", "role", "approver", "scope"}
+	for _, field := range fields {
+		t.Run(field, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := authenticatedRequest(
+				http.MethodPost,
+				"/api/delivery/v1/projects/project_1/change-sets/deliverychangeset_1:approve",
+				`{"expected_version":2,"`+field+`":"forged"}`,
+			)
+			server.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("injected %s status=%d body=%s", field, response.Code, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), `"source":"mock"`) ||
+				!strings.Contains(response.Body.String(), `"scenario":"invalid_request"`) {
+				t.Fatalf("injected %s response lacks mock provenance: %s", field, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestDeliveryHTTPMapsStableApprovalErrorsWithMockProvenance(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "required", err: delivery.ErrApprovalRequired, status: http.StatusConflict, code: "APPROVAL_REQUIRED"},
+		{name: "expired", err: delivery.ErrApprovalExpired, status: http.StatusConflict, code: "APPROVAL_EXPIRED"},
+		{name: "content mismatch", err: delivery.ErrApprovalContentMismatch, status: http.StatusConflict, code: "APPROVAL_CONTENT_MISMATCH"},
+		{name: "scope exceeded", err: delivery.ErrApprovalScopeExceeded, status: http.StatusForbidden, code: "APPROVAL_SCOPE_EXCEEDED"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/change-sets/change_1:execute", `{"expected_version":3}`)
+			writeError(response, request, testCase.err)
+			if response.Code != testCase.status ||
+				!strings.Contains(response.Body.String(), `"`+testCase.code+`"`) ||
+				!strings.Contains(response.Body.String(), `"source":"mock"`) ||
+				!strings.Contains(response.Body.String(), `"scenario":"`+strings.ToLower(testCase.code)+`"`) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -91,6 +145,12 @@ func (s *applicationStub) RunPlanPreflight(context.Context, contract.ActorContex
 }
 func (s *applicationStub) GetPlanDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlanDetail, error) {
 	return delivery.PlanDetail{Plan: s.plan}, nil
+}
+func (s *applicationStub) ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.ChangeSet, error) {
+	return []delivery.ChangeSet{s.changeSet}, nil
+}
+func (s *applicationStub) GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ChangeSet, error) {
+	return s.changeSet, nil
 }
 func (s *applicationStub) CreateChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, planID string, _ int64) (delivery.ChangeSet, error) {
 	s.createdPlanID = planID
