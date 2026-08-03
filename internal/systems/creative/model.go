@@ -3,6 +3,7 @@
 package creative
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -66,14 +67,24 @@ const (
 )
 
 type CreateIntakeRequest struct {
-	Source IntakeSource `json:"source"`
+	ContractVersion string       `json:"contract_version,omitempty"`
+	Source          IntakeSource `json:"source"`
 	// ParentIntakeID links a production-specific manual intake back to a
 	// task-strategy handoff without allowing the manual flow to rewrite it.
 	ParentIntakeID string `json:"parent_intake_id,omitempty"`
 	// StrategyPackage is supplied only for the explicit, user-triggered handoff
 	// from an immutable Strategy package. The server reads and validates that
 	// package; callers never submit its content as trusted Creative input.
-	StrategyPackage *StrategyPackageReference `json:"strategy_package,omitempty"`
+	StrategyPackage    *StrategyPackageReference         `json:"strategy_package,omitempty"`
+	StrategyPackageRef *StrategyPackageContractReference `json:"strategy_package_ref,omitempty"`
+	// SelectedRouteID is required by the strict v3 Strategy handoff. Creative
+	// resolves it from the immutable Handoff snapshot; callers cannot submit a
+	// route body or override the route after confirmation.
+	SelectedRouteID      string                        `json:"selected_route_id,omitempty"`
+	TaskOverlay          *TaskOverlayReference         `json:"task_overlay,omitempty"`
+	TaskOverlayRef       *TaskOverlayContractReference `json:"task_overlay_ref,omitempty"`
+	TaskOverlayInput     *TaskOverlayInput             `json:"task_overlay_input,omitempty"`
+	StrategyHandoffInput json.RawMessage               `json:"strategy_handoff_input,omitempty"`
 	// TaskStrategy is the immutable Strategy-side version selected by the
 	// user. TaskStrategyInput is populated only by the server-side adapter.
 	TaskStrategy            *TaskStrategyReference        `json:"task_strategy,omitempty"`
@@ -108,13 +119,43 @@ type CreativeRouteSnapshot struct {
 	SourceAssetRefs           []contract.AssetVersionRef `json:"source_asset_refs"`
 	EvidenceRefs              []string                   `json:"evidence_refs"`
 	RequiresHumanConfirmation bool                       `json:"requires_human_confirmation"`
+	ReadinessStatus           string                     `json:"readiness_status,omitempty"`
 }
 
 func (r CreativeRouteSnapshot) Validate() error {
-	if r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
+	if r.RouteType != CreativeRouteImageText && r.RouteType != CreativeRouteBrandVideo && r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
 		r.RouteType != PerformanceModeShortDramaPreroll && r.RouteType != PerformanceModeGamePreroll &&
 		r.RouteType != PerformanceModeCommercePreroll {
 		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
+	}
+	if r.RouteType == CreativeRouteImageText {
+		if len(r.Channels) != 1 || r.Channels[0] != string(ChannelXiaohongshu) ||
+			r.AspectRatio != "3:4" || strings.TrimSpace(r.RouteID) == "" ||
+			strings.TrimSpace(r.Reason) == "" || r.VideoPurpose != "" ||
+			r.TargetDurationSeconds != 0 {
+			return fmt.Errorf("creative image-text route is incomplete")
+		}
+		return nil
+	}
+	if r.RouteType == CreativeRouteBrandVideo {
+		if r.VideoPurpose != "brand" || len(r.Channels) == 0 ||
+			r.TargetDurationSeconds < 1 || strings.TrimSpace(r.AspectRatio) == "" ||
+			strings.TrimSpace(r.RouteID) == "" || strings.TrimSpace(r.Reason) == "" ||
+			!r.RequiresHumanConfirmation {
+			return fmt.Errorf("creative brand-video route is incomplete")
+		}
+		for _, channel := range r.Channels {
+			if channel != "xiaohongshu" && channel != "wechat_official_account" &&
+				channel != "douyin" && channel != "kuaishou" {
+				return fmt.Errorf("creative brand-video route channel %q is unsupported", channel)
+			}
+		}
+		for _, ref := range r.SourceAssetRefs {
+			if err := ref.Validate(); err != nil {
+				return fmt.Errorf("creative brand-video route source asset: %w", err)
+			}
+		}
+		return nil
 	}
 	if r.RouteType == PerformanceModeViralRemake && r.RouteID != ManualViralRemakeRouteID {
 		return fmt.Errorf("viral remake route_id must be %q", ManualViralRemakeRouteID)
@@ -159,9 +200,19 @@ func (r CreativeRouteSnapshot) Validate() error {
 }
 
 type StrategyPackageReference struct {
-	PackageID           string `json:"package_id"`
-	PackageVersion      int64  `json:"package_version"`
-	ExpectedContentHash string `json:"expected_content_hash"`
+	PackageID              string `json:"package_id"`
+	PackageVersion         int64  `json:"package_version"`
+	ExpectedContentHash    string `json:"expected_content_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version,omitempty"`
+	ExpectedHandoffHash    string `json:"expected_handoff_hash,omitempty"`
+}
+
+type StrategyPackageContractReference struct {
+	PackageID              string `json:"package_id"`
+	PackageVersion         int64  `json:"package_version"`
+	PackageContentHash     string `json:"package_content_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version"`
+	HandoffContentHash     string `json:"handoff_content_hash"`
 }
 
 func (r StrategyPackageReference) Validate() error {
@@ -177,7 +228,8 @@ func (r CreateIntakeRequest) Validate() error {
 	}
 	switch r.Source {
 	case IntakeSourceManual:
-		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil {
+		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil ||
+			r.TaskOverlay != nil || r.TaskOverlayInput != nil {
 			return fmt.Errorf("manual intake must not include a Strategy reference")
 		}
 		if r.ManualViralRemake != nil {
@@ -199,15 +251,37 @@ func (r CreateIntakeRequest) Validate() error {
 		if r.StrategyPackage == nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" {
 			return fmt.Errorf("strategy_package is required for a strategy intake")
 		}
+		if r.TaskOverlayInput != nil {
+			return fmt.Errorf("task overlay content is resolved by Creative and must not be submitted by a caller")
+		}
+		if r.TaskOverlay != nil && r.ContractVersion != CreativeIntakeCreateV3ContractVersion {
+			return fmt.Errorf("task_overlay requires creative-intake-create/v3")
+		}
 		if len(r.CreativeRoutes) != 0 {
 			return fmt.Errorf("creative_routes are resolved from Strategy and must not be submitted by a caller")
 		}
-		return r.StrategyPackage.Validate()
+		if err := r.StrategyPackage.Validate(); err != nil {
+			return err
+		}
+		if r.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+			if r.StrategyPackage.HandoffContractVersion != "strategy-creative-handoff/v1" ||
+				strings.TrimSpace(r.StrategyPackage.ExpectedHandoffHash) == "" ||
+				strings.TrimSpace(r.SelectedRouteID) == "" {
+				return fmt.Errorf("v3 strategy intake requires the frozen handoff version/hash and selected_route_id")
+			}
+			if r.TaskOverlay != nil {
+				if err := r.TaskOverlay.Validate(); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	case IntakeSourceTaskStrategy:
 		if r.TaskStrategy == nil {
 			return fmt.Errorf("task_strategy is required for a task strategy intake")
 		}
-		if r.StrategyPackage != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" {
+		if r.StrategyPackage != nil || r.TaskStrategyInput != nil || r.ParentIntakeID != "" ||
+			r.TaskOverlay != nil || r.TaskOverlayInput != nil {
 			return fmt.Errorf("task strategy content is resolved by Creative and must not be submitted by a caller")
 		}
 		if len(r.CreativeRoutes) != 0 || r.Format != "" || r.PerformanceMode != "" ||
@@ -355,21 +429,23 @@ func (r CreateIntakeRequest) missingFields() []string {
 }
 
 type CreativeIntake struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	Source         IntakeSource            `json:"source"`
-	Status         IntakeStatus            `json:"status"`
-	Request        CreateIntakeRequest     `json:"request"`
-	MissingFields  []string                `json:"missing_fields"`
-	Warnings       []string                `json:"warnings"`
-	ConfirmedBy    string                  `json:"confirmed_by,omitempty"`
-	Principal      contract.Principal      `json:"-"`
-	IdempotencyKey contract.IdempotencyKey `json:"-"`
-	RequestHash    string                  `json:"-"`
-	Version        int64                   `json:"version"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	ContractVersion   string                  `json:"contract_version,omitempty"`
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	Source            IntakeSource            `json:"source"`
+	Status            IntakeStatus            `json:"status"`
+	Request           CreateIntakeRequest     `json:"request"`
+	MissingFields     []string                `json:"missing_fields"`
+	Warnings          []string                `json:"warnings"`
+	ConfirmedBy       string                  `json:"confirmed_by,omitempty"`
+	Principal         contract.Principal      `json:"-"`
+	IdempotencyKey    contract.IdempotencyKey `json:"-"`
+	RequestHash       string                  `json:"-"`
+	InputIdentityHash string                  `json:"input_identity_hash,omitempty"`
+	Version           int64                   `json:"version"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
 }
 
 type CreativeTask struct {
@@ -478,6 +554,7 @@ const (
 // CreateTaskRequest is the explicit second-stage brief that differentiates
 // several Creative tasks produced from one approved Strategy package.
 type CreateTaskRequest struct {
+	DirectionID  string              `json:"direction_id,omitempty"`
 	ContentType  CreativeContentType `json:"content_type"`
 	Focus        string              `json:"focus"`
 	Audience     string              `json:"audience,omitempty"`
@@ -491,33 +568,42 @@ func (r CreateTaskRequest) Validate() error {
 	default:
 		return fmt.Errorf("unsupported Creative content_type %q", r.ContentType)
 	}
-	if len(strings.TrimSpace(r.Focus)) == 0 || len(r.Focus) > 300 || len(r.Audience) > 500 || len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 {
+	if (len(strings.TrimSpace(r.Focus)) == 0 && len(strings.TrimSpace(r.DirectionID)) == 0) ||
+		len(r.Focus) > 300 || len(r.DirectionID) > 96 || len(r.Audience) > 500 ||
+		len(r.CoreMessage) > 1000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("creative task focus is required or task input exceeds its maximum length")
 	}
 	return nil
 }
 
 type CreativeDirection struct {
-	ContentType    CreativeContentType `json:"content_type"`
-	Focus          string              `json:"focus"`
-	Audience       string              `json:"audience"`
-	CoreMessage    string              `json:"core_message"`
-	CallToAction   string              `json:"call_to_action"`
-	Concept        string              `json:"concept"`
-	Tone           []string            `json:"tone"`
-	VisualKeywords []string            `json:"visual_keywords"`
+	DirectionVersionID string              `json:"direction_version_id,omitempty"`
+	InputIdentityHash  string              `json:"input_identity_hash,omitempty"`
+	ContentType        CreativeContentType `json:"content_type"`
+	Focus              string              `json:"focus"`
+	Audience           string              `json:"audience"`
+	CoreMessage        string              `json:"core_message"`
+	CallToAction       string              `json:"call_to_action"`
+	Concept            string              `json:"concept"`
+	Tone               []string            `json:"tone"`
+	VisualKeywords     []string            `json:"visual_keywords"`
 }
 
 type ImageTextDraft struct {
-	TaskID          string          `json:"task_id"`
-	Version         int64           `json:"version"`
-	Status          string          `json:"status"`
-	TitleCandidates []string        `json:"title_candidates"`
-	Body            string          `json:"body"`
-	Topics          []string        `json:"topics"`
-	CoverCopy       string          `json:"cover_copy"`
-	ImagePlan       []ImagePlanItem `json:"image_plan"`
-	CreatedAt       time.Time       `json:"created_at"`
+	ContractVersion         string                 `json:"contract_version,omitempty"`
+	TaskID                  string                 `json:"task_id"`
+	Version                 int64                  `json:"version"`
+	GenerationSourceVersion *int64                 `json:"generation_source_version,omitempty"`
+	DirectionRef            *ImageTextDirectionRef `json:"direction_ref,omitempty"`
+	InputIdentityHash       string                 `json:"input_identity_hash,omitempty"`
+	Status                  string                 `json:"status"`
+	TitleCandidates         []string               `json:"title_candidates"`
+	SelectedTitle           string                 `json:"selected_title,omitempty"`
+	Body                    string                 `json:"body"`
+	Topics                  []string               `json:"topics"`
+	CoverCopy               string                 `json:"cover_copy"`
+	ImagePlan               []ImagePlanItem        `json:"image_plan"`
+	CreatedAt               time.Time              `json:"created_at"`
 }
 
 // ReviseDraftRequest replaces the editable content of the current draft. The
@@ -743,7 +829,7 @@ func (v CreativeVersion) Validate() error {
 		v.OrganizationID == "" || v.ProjectID == "" || v.ContentHash.Validate() != nil || v.CreatedAt.IsZero() {
 		return fmt.Errorf("creative version is incomplete")
 	}
-	if v.Status != CreativeVersionCreated && v.Status != CreativeVersionChecked && v.Status != CreativeVersionApproved && v.Status != CreativeVersionSuperseded {
+	if !validCreativeVersionStatus(v.Status) {
 		return fmt.Errorf("creative version status is invalid")
 	}
 	switch v.Format {
@@ -762,11 +848,19 @@ func (v CreativeVersion) Validate() error {
 }
 
 type ImagePlanItem struct {
-	Order       int                       `json:"order"`
-	Purpose     string                    `json:"purpose"`
-	VisualBrief string                    `json:"visual_brief"`
-	Caption     string                    `json:"caption"`
-	AssetRef    *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+	Order        int                       `json:"order"`
+	Role         string                    `json:"role,omitempty"`
+	Purpose      string                    `json:"purpose"`
+	VisualBrief  string                    `json:"visual_brief"`
+	Caption      string                    `json:"caption"`
+	OverlayCopy  string                    `json:"overlay_copy,omitempty"`
+	LayoutPreset string                    `json:"layout_preset,omitempty"`
+	AssetRef     *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+}
+
+type ImageTextDirectionRef struct {
+	DirectionID string `json:"direction_id"`
+	ContentHash string `json:"content_hash"`
 }
 
 type ProductionJob struct {

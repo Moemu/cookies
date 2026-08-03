@@ -658,7 +658,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 		updated, err = ApplyBriefPatch(draft, decision.Patch, PatchFromModel, agentTask.ID, now)
 		if err != nil {
 			return nil, jobruntime.ExecutionError{JobError: contract.JobError{
-				Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch could not be applied",
+				Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch could not be applied: " + err.Error(),
 			}}
 		}
 		changed = true
@@ -1162,7 +1162,9 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 		patch.ContractVersion = "strategy-brief-patch/v2"
 	}
 	if err := normalizeModelBriefPatch(patch); err != nil {
-		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch contains unsupported values"}}
+		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_OUTPUT_INVALID", Message: "Conversation patch contains unsupported values: " + err.Error(),
+		}}
 	}
 	if patch.ContractVersion == "" {
 		patch.ContractVersion = "strategy-brief-patch/v1"
@@ -1605,7 +1607,8 @@ func mergeExplicitLabeledBriefOperations(draft BriefDraft, message Message, patc
 	for _, operation := range patch.Operations {
 		existing[operation.FieldPath] = struct{}{}
 	}
-	for _, operation := range explicitLabeledBriefOperations(message) {
+	explicitOperations := append(explicitLabeledBriefOperations(message), explicitNarrativeBriefOperations(message)...)
+	for _, operation := range explicitOperations {
 		if _, found := existing[operation.FieldPath]; found || len(patch.Operations) >= 32 {
 			continue
 		}
@@ -1678,6 +1681,92 @@ func explicitLabeledBriefOperations(message Message) []BriefPatchOperation {
 		add("channels", channels)
 	}
 	return operations
+}
+
+func explicitNarrativeBriefOperations(message Message) []BriefPatchOperation {
+	content := strings.TrimSpace(message.Content)
+	source := FieldSource{Type: "conversation_message", ID: message.ID}
+	operations := make([]BriefPatchOperation, 0, 4)
+	add := func(path string, value any) {
+		operations = append(operations, BriefPatchOperation{
+			Op: "set", FieldPath: path, Value: mustJSON(value), Source: source,
+			Confidence: "high", Confirmation: "unconfirmed",
+		})
+	}
+
+	if match := regexp.MustCompile(`推广\s*([^，。；;\n]{2,80})`).FindStringSubmatch(content); len(match) == 2 {
+		if product := strings.TrimSpace(match[1]); product != "" {
+			add("product.name", product)
+		}
+	}
+	if strings.Contains(content, "CNC 加工") {
+		add("product.category", "CNC 加工")
+		add("industry", "CNC 加工")
+	}
+
+	capabilities := explicitCapabilityItems(content)
+	if len(capabilities) > 0 {
+		add("product.selling_points", capabilities)
+		evidence := make([]string, 0, len(capabilities))
+		for _, capability := range capabilities {
+			if strings.ContainsAny(capability, "±%％") ||
+				strings.Contains(capability, "精度") ||
+				strings.Contains(capability, "交付率") ||
+				strings.Contains(capability, "检测") {
+				evidence = append(evidence, capability)
+			}
+		}
+		if len(evidence) > 0 {
+			add("product.evidence", evidence)
+		}
+	}
+	return operations
+}
+
+func explicitCapabilityItems(content string) []string {
+	start := -1
+	markerLength := 0
+	for _, marker := range []string{"核心能力包括", "核心能力", "产品优势包括", "产品优势"} {
+		if index := strings.Index(content, marker); index >= 0 && (start == -1 || index < start) {
+			start = index
+			markerLength = len(marker)
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	section := content[start+markerLength:]
+	section = strings.TrimLeft(section, "：: \t\r\n")
+	for _, marker := range []string{"我们还不确定", "目前我们", "目前还", "但我们", "但是"} {
+		if index := strings.Index(section, marker); index >= 0 {
+			section = section[:index]
+		}
+	}
+	section = strings.TrimSpace(section)
+	if section == "" {
+		return nil
+	}
+
+	numberedPattern := regexp.MustCompile(`(?m)^\s*\d+[.、]\s*([^\r\n]+)`)
+	matches := numberedPattern.FindAllStringSubmatch(section, -1)
+	items := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) == 2 {
+			if item := strings.Trim(strings.TrimSpace(match[1]), "。；;，, "); item != "" {
+				items = appendUnique(items, item)
+			}
+		}
+	}
+	if len(items) > 0 {
+		return items
+	}
+
+	for _, item := range regexp.MustCompile(`(?:以及|和|、|；|;)`).Split(section, -1) {
+		if item = strings.Trim(strings.TrimSpace(item), "。；;，, "); item != "" {
+			items = appendUnique(items, item)
+		}
+	}
+	return items
 }
 
 func explicitLabeledValue(content string, labels ...string) (string, bool) {

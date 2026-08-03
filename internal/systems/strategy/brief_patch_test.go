@@ -121,6 +121,53 @@ func TestNormalizeModelBriefPatchRejectsUnsupportedChannels(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelBriefPatchCoercesScalarAndArrayShapes(t *testing.T) {
+	t.Parallel()
+	patch := BriefPatch{
+		ContractVersion: "strategy-brief-patch/v2",
+		BaseVersion:     1,
+		Operations: []BriefPatchOperation{
+			{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`["白域精工"]`), Confidence: "high"},
+			{Op: "set", FieldPath: "product.evidence", Value: json.RawMessage(`"±0.01mm 加工精度"`), Confidence: "high"},
+			{Op: "set", FieldPath: "channels", Value: json.RawMessage(`"小红书"`), Confidence: "high"},
+		},
+	}
+	if err := normalizeModelBriefPatch(&patch); err != nil {
+		t.Fatal(err)
+	}
+	for index := range patch.Operations {
+		patch.Operations[index].Source = FieldSource{Type: "conversation_message", ID: "msg_1"}
+		patch.Operations[index].Confirmation = "unconfirmed"
+	}
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	updated, err := ApplyBriefPatch(draft, patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Document.Brand.Name != "白域精工" ||
+		len(updated.Document.Product.Evidence) != 1 ||
+		updated.Document.Product.Evidence[0] != "±0.01mm 加工精度" ||
+		len(updated.Document.Channels) != 1 || updated.Document.Channels[0] != "xiaohongshu" {
+		t.Fatalf("normalized document = %#v", updated.Document)
+	}
+}
+
+func TestNormalizeModelBriefPatchMergesMultiValueScalar(t *testing.T) {
+	t.Parallel()
+	patch := BriefPatch{Operations: []BriefPatchOperation{{
+		Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`["研发负责人","采购负责人"]`), Confidence: "high",
+	}}}
+	if err := normalizeModelBriefPatch(&patch); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(patch.Operations[0].Value); got != `"研发负责人；采购负责人"` {
+		t.Fatalf("normalized audience = %s", got)
+	}
+}
+
 func TestBriefPlatformScopeStaysVersioned(t *testing.T) {
 	t.Parallel()
 	operation := BriefPatchOperation{

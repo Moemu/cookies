@@ -1,0 +1,13 @@
+{
+  "contract_version": "creative-image-render-spec/v1",
+  "layout_preset": "cover_center_v1",
+  "overlay_copy": "看得见的精度",
+  "source_width": 1024,
+  "source_height": 1536,
+  "final_width": 1080,
+  "final_height": 1440,
+  "output_format": "png",
+  "font_ref": "fonts/brand-cjk-v1.ttf@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "renderer_version": "creative.image_text.renderer.v1",
+  "content_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}

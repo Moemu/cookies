@@ -13,11 +13,10 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { BackendApiError } from '../../backend/platform'
 import type { ApiProjectMediaAsset } from '../../data/api'
 import { platformClient } from '../../data/platformClient'
-import { projectPath } from '../../lib/router'
+import type { SystemKey } from '../../types'
 import { createMutationKey, strategyApi } from './api'
 import type {
   BriefVersion,
@@ -27,23 +26,28 @@ import type {
   CreativeBusinessRecommendationSnapshot,
   CreativeMediaAssessment,
   CreativeTaskPlan,
+  PackageVersion,
+  StrategyCreativeHandoff,
   StrategyDraft,
 } from './types'
 
 type Props = {
   briefVersion: BriefVersion | null
   draft: StrategyDraft | null
+  onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
   projectId: string
 }
 
-export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
-  const navigate = useNavigate()
+export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: Props) {
   const [catalogHash, setCatalogHash] = useState('')
   const [profiles, setProfiles] = useState<CreativeBusinessProfile[]>([])
   const [capabilities, setCapabilities] = useState<CreativeBusinessCapability[]>([])
   const [mediaAssets, setMediaAssets] = useState<ApiProjectMediaAsset[]>([])
   const [recommendation, setRecommendation] = useState<CreativeBusinessRecommendationSnapshot | null>(null)
   const [plans, setPlans] = useState<CreativeTaskPlan[]>([])
+  const [strategyPackage, setStrategyPackage] = useState<PackageVersion | null>(null)
+  const [creativeHandoff, setCreativeHandoff] = useState<StrategyCreativeHandoff | null>(null)
+  const [selectedRouteId, setSelectedRouteId] = useState('')
   const [selectedCode, setSelectedCode] = useState('')
   const [activePlanId, setActivePlanId] = useState('')
   const [answers, setAnswers] = useState<Record<string, unknown>>({})
@@ -87,13 +91,24 @@ export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
 
   const load = async (signal?: AbortSignal) => {
     if (!briefVersion) return
-    const [catalog, nextRecommendation, planResult, nextMediaAssets, capabilityResult] = await Promise.all([
+    const [catalog, nextRecommendation, planResult, nextMediaAssets, capabilityResult, packageResult] = await Promise.all([
       strategyApi.listCreativeBusinesses(projectId, signal),
       strategyApi.recommendCreativeBusinesses(projectId, briefVersion, signal),
       strategyApi.listCreativeTaskPlans(projectId, briefVersion.brief_id, signal),
       platformClient.listProjectMediaAssets(projectId),
       strategyApi.listCreativeBusinessCapabilities(projectId, signal),
+      strategyApi.listStrategyPackages(projectId, signal),
     ])
+    const nextPackage = packageResult.items.find(item =>
+      item.status === 'published' &&
+      item.snapshot.brief?.brief_id === briefVersion.brief_id &&
+      item.snapshot.brief?.version === briefVersion.version,
+    ) ?? null
+    const nextHandoff = nextPackage
+      ? await strategyApi.getStrategyCreativeHandoff(
+        projectId, nextPackage.package_id, nextPackage.version, signal,
+      )
+      : null
     const matchingPlans = planResult.items.filter(plan => plan.brief_version === briefVersion.version)
     const nextPlan = matchingPlans.find(plan => plan.id === activePlanId) ?? matchingPlans[0] ?? null
     setCatalogHash(catalog.catalog_hash)
@@ -102,6 +117,12 @@ export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
     setMediaAssets(nextMediaAssets)
     setRecommendation(nextRecommendation)
     setPlans(matchingPlans)
+    setStrategyPackage(nextPackage)
+    setCreativeHandoff(nextHandoff)
+    setSelectedRouteId(current => {
+      if (nextHandoff?.routes.some(route => route.route_id === current)) return current
+      return nextHandoff?.routes.find(route => route.route_readiness.status === 'ready')?.route_id ?? ''
+    })
     setActivePlanId(nextPlan?.id ?? '')
     setSelectedCode(nextPlan?.business_code ?? nextRecommendation.recommended[0]?.business_code ?? catalog.items[0]?.business_code ?? '')
     setAnswers(nextPlan?.answers ?? {})
@@ -132,17 +153,20 @@ export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
   }
 
   const createPlan = async () => {
-    if (!briefVersion || !selectedCode) return
+    if (!briefVersion || !selectedCode || !strategyPackage || !creativeHandoff || !selectedRouteId) return
     setBusy('create')
     setError('')
     try {
-      const sourceStrategy = draft?.current_revision && draft.brief_id === briefVersion.brief_id
-        ? { strategy_id: draft.id, revision: draft.current_revision }
-        : undefined
       const plan = await strategyApi.createCreativeTaskPlan(projectId, {
-        brief_id: briefVersion.brief_id,
-        brief_version: briefVersion.version,
-        source_strategy: sourceStrategy,
+        contract_version: 'strategy-creative-task-plan/v2',
+        strategy_package_ref: {
+          package_id: strategyPackage.package_id,
+          package_version: strategyPackage.version,
+          package_content_hash: strategyPackage.content_hash,
+          handoff_contract_version: creativeHandoff.contract_version,
+          handoff_content_hash: creativeHandoff.handoff_content_hash,
+        },
+        selected_route_id: selectedRouteId,
         business_code: selectedCode,
         selection_source: recommendedCodes.has(selectedCode) ? 'recommended' : 'manual',
         catalog_hash: catalogHash,
@@ -250,26 +274,15 @@ export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
         plan,
         `task-strategy-handoff-${plan.id}-${plan.current_strategy.version}`,
       )
-      let destinationId = intake.id
-      if (capability.can_create_task_immediately && capability.format === 'image_text') {
-        const angle = plan.current_strategy.document.business_strategy.content_angle
-        const task = await strategyApi.createImageTextTaskFromHandoff(
-          projectId,
-          intake.id,
-          typeof angle === 'string' && angle.trim()
-            ? angle
-            : plan.current_strategy.document.core_message,
-        )
-        destinationId = task.id
-      }
-      navigate(projectPath(
+      const destinationId = intake.id
+      onOpenProject(
         projectId,
         'creative',
         capability.destination_area,
         undefined,
         capability.destination_view,
         destinationId,
-      ))
+      )
     } catch (cause) {
       setError(messageOf(cause))
     } finally {
@@ -347,7 +360,17 @@ export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
           profile={selectedProfile}
           recommendation={selectedRecommendation}
         /> : null}
-        {!activePlan ? <button className="primary-button creative-plan-create" disabled={!selectedCode || Boolean(busy)} onClick={() => void createPlan()}>
+        {!activePlan ? <div className="creative-question">
+          <span><label htmlFor="creative-route-select">策略交接 Route</label><em>任务计划强绑定</em></span>
+          {creativeHandoff
+            ? <select id="creative-route-select" value={selectedRouteId} onChange={event => setSelectedRouteId(event.target.value)}>
+              {creativeHandoff.routes.map(route => <option disabled={route.route_readiness.status !== 'ready'} key={route.route_id} value={route.route_id}>
+                {route.channels.join('/')} · {route.deliverable_type} · {route.reason}
+              </option>)}
+            </select>
+            : <output>当前 Brief 尚无已批准 StrategyPackage/Handoff，请先完成策略审批。</output>}
+        </div> : null}
+        {!activePlan ? <button className="primary-button creative-plan-create" disabled={!selectedCode || !strategyPackage || !selectedRouteId || Boolean(busy)} onClick={() => void createPlan()}>
           {busy === 'create' ? <LoaderCircle className="spin" size={15}/> : <Check size={15}/>}
           确认此业务并创建任务计划
         </button> : null}

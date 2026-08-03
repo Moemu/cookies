@@ -507,6 +507,57 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 
 /* Image and text creation */
 .image-editor-specialized { display: grid; grid-template-columns: 210px minmax(520px, 1fr) 270px; min-height: 610px; background: var(--surface); border: 1px solid var(--line); }.creative-structure { border-right: 1px solid var(--line); }.creative-page { display: grid; grid-template-columns: 25px 1fr; gap: 6px; width: 100%; min-height: 62px; padding: 12px 14px; background: transparent; border-bottom: 1px solid var(--line); text-align: left; }.creative-page > span { grid-row: 1 / 3; color: var(--muted); font-size: 10px; }.creative-page b { font-size: 12px; }.creative-page small { color: var(--muted); font-size: 10px; }.creative-page.active { color: var(--cobalt-dark); background: var(--cobalt-soft); }.version-block { display: flex; flex-direction: column; gap: 6px; margin: 18px 14px; padding-top: 16px; border-top: 1px solid var(--line); }.version-block span, .version-block small { color: var(--muted); font-size: 10px; }.version-block b { font-size: 12px; }.version-block small { line-height: 1.5; }
+.image-text-empty { display: grid; place-items: center; gap: 10px; min-height: 520px; padding: 48px; color: var(--muted); text-align: center; }
+.image-text-empty h2, .image-text-empty p { margin: 0; }
+.image-text-v2-workspace { display: grid; gap: 14px; }
+.image-text-direction-gate { display: grid; gap: 16px; }
+.image-text-direction-gate > header { padding: 22px; background: var(--surface); border: 1px solid var(--line); }
+.image-text-direction-gate > header h2 { margin: 7px 0; }
+.image-text-direction-gate > header p { margin: 0; color: var(--muted); }
+.image-text-direction-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.image-text-direction-cards article { display: flex; flex-direction: column; gap: 11px; padding: 18px; background: var(--surface); border: 1px solid var(--line); }
+.image-text-direction-cards article > span, .image-text-direction-cards article > small { color: var(--muted); font-size: 11px; }
+.image-text-direction-cards h3, .image-text-direction-cards p { margin: 0; }
+.image-text-direction-cards p, .image-text-direction-cards li { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.image-text-direction-cards ul { flex: 1; margin: 0; padding-left: 18px; }
+.image-text-v2-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px; background: var(--surface); border: 1px solid var(--line); }
+.image-text-v2-header h2 { margin: 6px 0; font-size: 24px; }
+.image-text-v2-header p { margin: 0; color: var(--muted); }
+.image-text-v2-readiness { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.image-text-v2-readiness small { color: var(--muted); }
+.image-text-v2-start { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 18px 20px; background: var(--cobalt-soft); border: 1px solid var(--line); }
+.image-text-v2-start h3, .image-text-v2-start p { margin: 0; }
+.image-text-v2-start p { margin-top: 5px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.image-text-v2-blockers { display: flex; align-items: center; gap: 8px; padding: 10px 14px; color: #8a5a00; background: #fff7df; border: 1px solid #efd89a; font-size: 13px; }
+.image-text-v2-grid { display: grid; grid-template-columns: 210px minmax(360px, 1fr) 300px; min-height: 610px; background: var(--surface); border: 1px solid var(--line); }
+.image-text-v2-slots { border-right: 1px solid var(--line); }
+.image-text-v2-slots > button { display: grid; grid-template-columns: 28px 1fr; gap: 8px; width: 100%; padding: 16px 14px; background: transparent; border: 0; border-bottom: 1px solid var(--line); text-align: left; }
+.image-text-v2-slots > button > span { color: var(--muted); font-size: 11px; }
+.image-text-v2-slots > button div { display: grid; gap: 5px; }
+.image-text-v2-slots b { font-size: 13px; }
+.image-text-v2-slots small { color: var(--muted); line-height: 1.35; }
+.image-text-v2-slots em { color: var(--cobalt-dark); font-size: 11px; font-style: normal; }
+.image-text-v2-slots > button.active { background: var(--cobalt-soft); }
+.image-text-v2-preview { display: grid; place-items: center; padding: 26px; background: #eef0f3; }
+.image-text-v2-preview > img { width: min(100%, 420px); aspect-ratio: 3 / 4; object-fit: cover; box-shadow: 0 18px 45px rgb(20 30 50 / 18%); }
+.image-text-v2-preview > div { display: grid; place-items: center; gap: 12px; width: min(100%, 420px); aspect-ratio: 3 / 4; padding: 36px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); text-align: center; }
+.image-text-v2-preview > div b { color: var(--ink); line-height: 1.55; }
+.image-text-v2-inspector { display: flex; flex-direction: column; gap: 12px; padding: 18px; border-left: 1px solid var(--line); }
+.image-text-v2-inspector h3, .image-text-v2-inspector p { margin: 0; }
+.image-text-v2-inspector > p { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.image-text-v2-copy { display: grid; gap: 7px; padding: 12px; background: var(--panel, #f7f8fa); border: 1px solid var(--line); }
+.image-text-v2-copy label, .image-text-v2-inspector > label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.image-text-v2-copy input, .image-text-v2-copy textarea, .image-text-v2-inspector > label textarea { width: 100%; padding: 9px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); font: inherit; resize: vertical; }
+.image-text-v2-copy textarea { min-height: 130px; }
+.image-text-v2-copy p { max-height: 150px; overflow: auto; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.image-text-v2-copy small { color: var(--cobalt-dark); }
+.image-text-v2-attempts { display: grid; gap: 8px; }
+.image-text-v2-attempts > div { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; padding: 9px 10px; border: 1px solid var(--line); font-size: 12px; }
+.image-text-v2-attempts small { grid-column: 1 / -1; color: #a13b2a; }
+.image-text-v2-attempts em { color: #23824d; font-style: normal; }
+.image-text-v2-delivery { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--line); }
+.image-text-v2-delivery h3, .image-text-v2-delivery p { margin: 5px 0 0; }
+.image-text-v2-delivery p { color: var(--muted); font-size: 12px; }
 .image-canvas-workspace { display: grid; grid-template-rows: 42px minmax(430px, 1fr) 72px; background: var(--subtle); }.canvas-toolbar.light { color: var(--text); background: var(--surface); border-color: var(--line); }.canvas-toolbar.light button { color: var(--text); background: var(--subtle); }.portrait-stage { display: grid; place-items: center; padding: 20px; overflow: hidden; }.social-poster { position: relative; height: min(47vh, 430px); aspect-ratio: 4 / 5; overflow: hidden; background: var(--surface); box-shadow: 0 12px 32px oklch(0.205 0.028 250 / .15); }.social-poster img { width: 100%; height: 58%; object-fit: cover; }.poster-copy { padding: 22px 24px; }.poster-copy small { color: var(--cobalt); font-size: 10px; font-weight: 700; letter-spacing: .13em; }.poster-copy h2 { margin-top: 10px; font-size: 21px; line-height: 1.35; }.poster-copy p { margin-top: 10px; color: var(--muted); font-size: 11px; }.poster-index { position: absolute; right: 16px; bottom: 14px; color: var(--muted); font-size: 10px; }
 .page-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; padding: 10px; background: var(--surface); border-top: 1px solid var(--line); }.page-strip button { display: flex; align-items: center; gap: 7px; padding: 0 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; font-size: 10px; }.page-strip button.active { color: var(--cobalt-dark); border-color: var(--cobalt); background: var(--cobalt-soft); }.page-strip span { color: var(--muted); }.creative-inspector { border-left: 1px solid var(--line); }.creative-inspector label { display: flex; flex-direction: column; gap: 7px; padding: 13px 14px 0; color: var(--muted); font-size: 11px; }.creative-inspector select, .creative-inspector textarea { width: 100%; padding: 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; color: var(--text); font-size: 12px; }.creative-inspector textarea { min-height: 82px; resize: vertical; }.creative-inspector label small { align-self: flex-end; font-size: 10px; }.check-list { display: grid; gap: 9px; margin: 18px 14px; padding-top: 16px; border-top: 1px solid var(--line); }.check-list span { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 11px; }.check-list svg { color: var(--success); }.creative-inspector > .primary-button { width: calc(100% - 28px); margin: 4px 14px; }
 
@@ -1365,6 +1416,98 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .prelaunch-boundary > svg { color: oklch(.55 .13 78); }
 .prelaunch-boundary span, .prelaunch-boundary small { display: block; }
 .prelaunch-actions { display: grid; gap: 8px; }
+/* 工具栏里的一组按钮横着排。默认那条是竖排（详情面板用），放在标题右边会顶成两行。 */
+.prelaunch-actions.inline { display: flex; gap: 8px; }
+
+/* 字段映射表单：一个指标一格。指标的英文名压在输入框下面当脚注——
+   人填的时候不需要它，但导入报错时报的是这个名字，得能对得上。 */
+.mapping-form { margin: 12px 0 4px; }
+.mapping-field { display: block; margin-bottom: 10px; }
+.mapping-field small { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.mapping-field input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 10px;
+}
+.mapping-field input:focus { border-color: var(--cobalt); outline: none; }
+.mapping-field em {
+  display: block; margin-top: 3px; color: var(--muted); font-style: normal; font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.mapping-field.required small { color: var(--text); font-weight: 600; }
+.mapping-field.required input { border-left: 2px solid var(--cobalt); }
+.sample-banner { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; margin-bottom: 14px; padding: 11px 13px; border: 1px solid oklch(.82 .12 55); background: oklch(.955 .05 62); color: var(--text); }
+.sample-banner > svg { color: oklch(.55 .17 42); margin-top: 1px; }
+.sample-banner span, .sample-banner b, .sample-banner small { display: block; }
+.sample-banner b { font-size: 10px; letter-spacing: .04em; }
+.sample-banner small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.sample-tag { display: inline-block; margin-right: 6px; padding: 1px 5px; border: 1px solid oklch(.82 .12 55); background: oklch(.955 .05 62); color: oklch(.48 .16 42); font-size: 8px; font-weight: 600; letter-spacing: .06em; vertical-align: 1px; }
+.experience-reason { display: block; margin: 14px 0 10px; }
+.experience-reason small { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; }
+.experience-reason textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 10px; line-height: 1.55; resize: vertical; }
+.experience-reason textarea:focus { border-color: var(--cobalt); outline: none; }
+/* 报告里的四块发现。每块一个标题，块内一条一行，删除按钮贴在行尾。 */
+.report-section { margin-top: 14px; }
+.report-section .section-label { display: block; margin-bottom: 7px; }
+.report-finding { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid var(--line); font-size: 10px; line-height: 1.6; }
+.report-finding > span { min-width: 0; }
+.report-finding em { display: inline-block; margin-left: 6px; padding: 1px 5px; border: 1px solid var(--line); font-size: 8px; font-style: normal; letter-spacing: .04em; }
+.report-finding em.ok { border-color: var(--success); color: var(--success); }
+.report-finding em.warning { border-color: var(--warning); color: var(--warning); }
+.report-finding em.danger { border-color: var(--danger); color: var(--danger); }
+.report-finding em.muted { color: var(--muted); }
+.report-finding > button { padding: 2px 4px; color: var(--muted); }
+.report-finding > button:hover:not(:disabled) { color: var(--danger); }
+.report-finding.muted > span { color: var(--muted); text-decoration: line-through; }
+/* 删掉的条目默认收起。摊开放着会和留下的混在一起，读的人分不清哪些还算数。 */
+.report-dropped { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.report-dropped > .text-button { color: var(--muted); font-size: 9px; }
+
+/* 定格报告时挑投放执行。只有下拉，没有输入框：ID 打错了两边都不会报错。 */
+.freeze-pick { display: block; margin-top: 10px; }
+.freeze-pick small { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+.freeze-pick select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 10px; }
+.freeze-pick select:focus { border-color: var(--cobalt); outline: none; }
+/* 经验修订表单。字段多，两列排；输入框沿用 .experience-reason 的口径，
+   免得同一屏里出现两种粗细的框。 */
+.experience-revise { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.experience-revise > p { margin: 6px 0 4px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.experience-revise > .section-label { display: block; margin-top: 14px; }
+.experience-revise .revise-hint { margin: -4px 0 6px; color: var(--muted); font-size: 9px; }
+.experience-revise .experience-reason input,
+.experience-revise .experience-reason select,
+.revise-grid input, .revise-grid select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 10px;
+}
+.experience-revise .experience-reason input:focus,
+.experience-revise .experience-reason select:focus,
+.revise-grid input:focus, .revise-grid select:focus { border-color: var(--cobalt); outline: none; }
+.revise-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 10px; }
+.revise-grid label { display: block; min-width: 0; }
+.revise-grid small { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+/* 样例素材从素材库里勾，不给输入框：这一格存的是素材 ID，手打的串没人能验证，
+   显示时也换不回名字。列表限高滚动，素材多的项目不能把整个表单顶下去。 */
+.asset-picker { margin: 8px 0 10px; }
+.asset-picker > small { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+.asset-picker > input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 10px;
+}
+.asset-picker > input:focus { border-color: var(--cobalt); outline: none; }
+.asset-picker-list { max-height: 168px; margin-top: 6px; overflow-y: auto; border: 1px solid var(--line); }
+.asset-picker-list .revise-hint { margin: 0; padding: 10px; }
+.asset-picker-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.asset-picker-item:last-child { border-bottom: none; }
+.asset-picker-item:hover { background: var(--surface-2, rgba(0, 0, 0, 0.03)); }
+.asset-picker-item input { width: 12px; height: 12px; flex: none; accent-color: var(--cobalt); }
+.asset-picker-item span { min-width: 0; }
+.asset-picker-item b { display: block; font-size: 10px; }
+.asset-picker-item small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+.asset-picker .text-button { height: auto; margin-left: 4px; font-size: 9px; }
+/* 跨渠道比较的开关长在提示里，不在工具栏里：打开它是接受一个前提，不是换个筛选。 */
+.prelaunch-crosschannel { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 9px; cursor: pointer; }
+.prelaunch-crosschannel input { width: 12px; height: 12px; accent-color: var(--cobalt); }
+.prelaunch-disclosure { margin-top: 12px; color: var(--muted); font-size: 8px; line-height: 1.6; }
 .prelaunch-deeplink { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 12px 0; padding: 8px 0; color: var(--cobalt-dark); font-size: 10px; }
 .reference-count { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding-top: 13px; border-top: 1px solid var(--line); }
 .reference-count > svg { color: var(--cobalt); }
@@ -3705,4 +3848,220 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   .kanon-evidence-toolbar label {
     min-width: 0;
   }
+}
+
+/* 内容分析（03 §5）：多素材看矩阵，单素材看逐项拆解，两处都要能同时显示 AI 与人工两层。 */
+.content-matrix { overflow-x: auto; }
+.content-matrix-row { display: grid; grid-template-columns: minmax(170px, 240px) repeat(var(--matrix-columns, 1), minmax(150px, 1fr)); gap: 14px; align-items: start; padding: 11px 18px; border-bottom: 1px solid var(--line); }
+.content-matrix-row.header { background: var(--canvas); color: var(--muted); font-size: 9px; font-weight: 650; }
+.content-matrix-row > span { min-width: 0; font-size: 10px; line-height: 1.5; }
+.content-matrix-row > span > b { display: block; font-size: 10px; }
+.content-matrix-row > span > small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.content-matrix-group { padding: 9px 18px; background: var(--subtle); color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .07em; }
+.content-layer { margin-top: 4px; font-size: 9px; font-weight: 500; line-height: 1.5; }
+.content-layer.ai { color: var(--cobalt-dark); }
+.content-layer.human { color: var(--success); font-weight: 650; }
+.content-breakdown-row { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) 190px; gap: 14px; align-items: start; padding: 11px 18px; border-bottom: 1px solid var(--line); }
+.content-breakdown-row > span { min-width: 0; font-size: 10px; line-height: 1.5; }
+.content-breakdown-row > span > b { display: block; }
+.content-breakdown-row > span > small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.content-breakdown-row input { width: 100%; height: 30px; margin-top: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.content-breakdown-row .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.content-breakdown-row .actions .secondary-button { height: 28px; padding: 0 10px; font-size: 9px; }
+.content-asset-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--subtle); }
+.content-asset-strip button { padding: 6px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 9px; }
+.content-asset-strip button:hover { border-color: var(--cobalt); }
+.content-asset-strip button.active { border-color: var(--cobalt); background: var(--cobalt-soft); color: var(--cobalt-dark); font-weight: 650; }
+
+/* AI 提特征（03 §9 AM-005）：只有人点按钮才会调模型，所以这一块必须显式摆在页面上，
+   而不是藏在某个后台队列里。正文框是必填的——素材库里没有正文。 */
+.content-extract { padding: 14px 18px 16px; border-bottom: 1px solid var(--line); background: oklch(.99 .002 255); }
+.content-extract > p { margin: 9px 0 11px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.content-extract textarea { width: 100%; min-height: 108px; padding: 10px; resize: vertical; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 11px; line-height: 1.65; }
+.content-extract input { width: 100%; height: 32px; margin-top: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.content-extract .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 11px; }
+.content-extract .actions > span { flex: 1 1 220px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.content-extract .primary-button { height: 32px; padding: 0 14px; font-size: 11px; }
+
+/* 分析历史（03 §82「数据与方法」、§310）：失败的任务也要在列，
+   只列成功的，成功率看上去永远是 100%。 */
+.analysis-run-list { display: grid; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.analysis-run-list > .section-label { display: block; }
+.analysis-run { display: grid; gap: 3px; padding: 8px 10px; border-left: 2px solid var(--line); background: var(--subtle); }
+.analysis-run.succeeded { border-left-color: var(--success); }
+.analysis-run.failed { border-left-color: var(--danger); }
+.analysis-run b { font-size: 10px; }
+.analysis-run small { color: var(--muted); font-size: 9px; line-height: 1.55; }
+
+/* 系统设置（20 §121「单列分组表单，重要阈值显示影响说明和默认推荐；不使用仪表盘布局」）。
+   单列、限宽、每条设置占一整行：这一页要被读，不是被扫一眼。整页只读，所以没有
+   任何输入框样式——画一个改不动的框比直接说「这里改不了」更让人恼火。 */
+.settings-page { max-width: 760px; padding: 24px 28px 32px; }
+.settings-status { color: var(--muted); font-size: 12px; }
+.settings-status.error { color: var(--danger); }
+.settings-lock { display: flex; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-left: 2px solid var(--cobalt); background: var(--cobalt-soft); }
+.settings-lock svg { flex: none; margin-top: 1px; color: var(--cobalt-dark); }
+.settings-lock b { display: block; margin-bottom: 3px; font-size: 11px; }
+.settings-lock span { color: var(--text); font-size: 10px; line-height: 1.65; }
+.settings-group { margin-top: 22px; }
+.settings-summary { margin: 2px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.setting-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.setting-row { padding: 14px 16px; background: var(--surface); }
+.setting-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; }
+.setting-head b { font-size: 12px; }
+/* 当前生效值是这一行里唯一需要被一眼找到的东西，用等宽字避免数字对不齐。 */
+.setting-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 650; color: var(--cobalt-dark); }
+.setting-effect { margin-top: 7px; color: var(--text); font-size: 10px; line-height: 1.7; }
+.setting-recommended { margin-top: 6px; color: var(--muted); font-size: 10px; }
+.setting-recommended em { color: var(--warning); font-style: normal; }
+.setting-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 9px; }
+.setting-meta svg { flex: none; }
+.setting-meta code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+/* 「还没做」必须和「做了但为空」长得不一样：通知这一组最容易被读成在后台默默生效。 */
+.settings-missing { padding: 14px 16px; border: 1px solid var(--line); border-left: 2px solid var(--warning); background: var(--subtle); }
+.settings-missing-head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.settings-missing-head svg { flex: none; color: var(--warning); }
+.settings-missing-head b { font-size: 11px; }
+.settings-missing p { margin-top: 6px; color: var(--text); font-size: 10px; line-height: 1.7; }
+
+/* 投后分析 · 指标总览（10 §6，展示要求见 20 §4.1）：数字要大到一眼看见，
+   但窗口、样本量、口径、置信必须和数字待在同一屏，不能靠说明文档补。 */
+.insight-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 20px 0 4px; background: var(--line); border: 1px solid var(--line); }
+.insight-metric-card { padding: 15px 16px; background: var(--surface); }
+.insight-metric-card small { display: block; color: var(--muted); font-size: 9px; }
+.insight-metric-card b { display: block; margin: 7px 0 5px; font-size: 21px; letter-spacing: -.02em; }
+.insight-metric-card span { display: block; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.insight-series { margin: 18px 0; padding: 14px 16px; border: 1px solid var(--line); }
+.insight-series > .section-label { display: block; margin-bottom: 10px; }
+.insight-series-row { display: grid; grid-template-columns: 84px minmax(70px, 1fr) 96px 108px 108px; gap: 12px; align-items: center; padding: 6px 0; font-size: 10px; }
+.insight-series-track { display: block; height: 7px; background: var(--subtle); }
+.insight-series-track > i { display: block; height: 100%; background: var(--cobalt); }
+.insight-asset-row { grid-template-columns: minmax(220px, 1.3fr) 110px 96px 108px 88px; }
+.insight-asset-row > span:last-child { color: var(--text); font-weight: 500; }
+
+/* 数据质量的问题队列（20 §4.1 错误与延迟置顶）：颜色跟着严重度走，
+   而不是跟着「有没有处置」——已经有人认领的阻断问题依然是阻断问题。
+   .prelaunch-row 默认把末列涂成绿色，这里按严重度覆盖掉。 */
+.insight-issue-row { grid-template-columns: minmax(240px, 1.3fr) 72px minmax(150px, 1fr) 104px; }
+.insight-issue-row > span:nth-child(2) { font-weight: 650; }
+.insight-issue-row.blocking > span:nth-child(2), .insight-issue-row.blocking > span:last-child { color: var(--danger); }
+.insight-issue-row.warning > span:nth-child(2), .insight-issue-row.warning > span:last-child { color: var(--warning); }
+.insight-issue-row.info > span:nth-child(2), .insight-issue-row.info > span:last-child { color: var(--muted); }
+
+/* 投后分析的后五个视图（03 §一级导航）。每条结论都是「判定 + 一句为什么 + 两侧数字」，
+   所以用卡片而不是表格行：判定单独占一格，读者先看到能不能用，再看差多少。 */
+.insight-analysis-list { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.insight-analysis-card { padding: 15px 16px; border: 1px solid var(--line); background: var(--surface); }
+.insight-analysis-card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.insight-analysis-card > header > b { font-size: 12px; }
+.insight-analysis-card > header > em { flex: none; font-style: normal; font-size: 10px; font-weight: 650; }
+.insight-analysis-card > header > em.ok { color: var(--cobalt-dark); }
+.insight-analysis-card > header > em.warning { color: var(--warning); }
+.insight-analysis-card > header > em.danger { color: var(--danger); }
+.insight-analysis-card > header > em.muted { color: var(--muted); }
+.insight-analysis-card > p { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.insight-analysis-card > footer { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.6; }
+.insight-analysis-card .insight-series { margin: 12px 0 0; }
+.insight-analysis-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 12px; background: var(--line); border: 1px solid var(--line); }
+.insight-analysis-metrics > div { padding: 12px 13px; background: var(--surface); }
+.insight-analysis-metrics small { display: block; color: var(--muted); font-size: 9px; }
+.insight-analysis-metrics b { display: block; margin: 6px 0 5px; font-size: 17px; letter-spacing: -.02em; }
+.insight-analysis-metrics span { display: block; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.insight-analysis-diff { margin-top: 12px; padding: 11px 13px; border: 1px dashed var(--line); background: var(--subtle); }
+.insight-analysis-diff > span { display: block; color: var(--muted); font-size: 9px; }
+.insight-analysis-diff > b { display: block; margin-top: 6px; font-size: 10px; font-weight: 500; line-height: 1.6; }
+/* 异常用表格：五列都是可比的数字，卡片反而让人难以横向扫。说明文字换行占满整行。 */
+.insight-anomaly-row { grid-template-columns: minmax(180px, 1.1fr) 110px 104px 140px 104px; }
+.insight-anomaly-note { grid-column: 1 / -1; margin-top: 6px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+
+/* 实验中心（03 §7.3、19 §284）。和投后分析用同一套卡片与表格，是有意的：两页算的
+   是同一件事，长得不一样会让人以为是两套口径。差别只在这里多了「事先登记」的痕迹
+   ——状态、锁、门槛差多少。 */
+.insight-experiment-row { grid-template-columns: minmax(240px, 1.4fr) 76px 130px 150px 118px; }
+/* .prelaunch-row 默认把末列涂成绿色，但这里末列是判定，绿色会暗示「支持假设 = 好」。
+   假设被推翻同样是有用的结论，所以末列回到普通文字色，颜色只留给状态那一格。 */
+.insight-experiment-row > span:last-child { display: block; color: var(--text); font-weight: 500; }
+.insight-experiment-status { font-weight: 650; }
+.insight-experiment-status.ok { color: var(--cobalt-dark); }
+.insight-experiment-status.warning { color: var(--warning); }
+.insight-experiment-status.danger { color: var(--danger); }
+.insight-experiment-status.muted { color: var(--muted); }
+.insight-sample-row { grid-template-columns: minmax(200px, 1.3fr) 110px 104px 92px 118px; }
+.insight-sample-row > span:last-child { display: block; color: var(--text); }
+
+/* 入组黄牌。用警告色但不用红：素材已经加进去了，这是「记下来了」而不是「被拒绝」。 */
+.experiment-warnings { display: flex; gap: 9px; margin-top: 18px; padding: 12px 14px; border: 1px solid var(--line); border-left: 2px solid var(--warning); background: var(--subtle); }
+.experiment-warnings svg { flex: none; margin-top: 1px; color: var(--warning); }
+.experiment-warnings b { display: block; margin-bottom: 5px; font-size: 11px; }
+.experiment-warnings em { display: block; margin-top: 4px; color: var(--text); font-style: normal; font-size: 10px; line-height: 1.65; }
+
+.experiment-asset-list { display: grid; gap: 1px; margin-top: 11px; background: var(--line); border: 1px solid var(--line); }
+.experiment-asset-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; background: var(--surface); }
+.experiment-asset-list > div > span { min-width: 0; font-size: 10px; line-height: 1.5; }
+.experiment-asset-list .text-button { flex: none; height: auto; font-size: 10px; }
+
+/* 变量矩阵。一行一个特征，一列一个分组；标黄的格子是「这一项在组内就不止一个取值」。
+   标黄不是错误提示——真实素材下几乎必然出现几处，藏起来才是问题。 */
+.experiment-matrix { margin-top: 18px; border: 1px solid var(--line); }
+.experiment-matrix-row { display: grid; grid-template-columns: minmax(160px, 1fr) repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--line); }
+.experiment-matrix-row + .experiment-matrix-row { border-top: 1px solid var(--line); }
+.experiment-matrix-row.header { background: var(--canvas); }
+.experiment-matrix-row.header > span { padding: 9px 12px; background: var(--canvas); color: var(--muted); font-size: 9px; font-weight: 650; }
+.experiment-matrix-row > span { padding: 11px 12px; background: var(--surface); font-size: 10px; line-height: 1.55; }
+.experiment-matrix-row > span > b { display: block; font-size: 11px; }
+.experiment-matrix-row > span > small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+.experiment-matrix-row > span.mixed { color: var(--warning); background: oklch(0.975 0.035 85); font-weight: 600; }
+.experiment-matrix-row > span.mixed > small { color: var(--warning); }
+.experiment-matrix-foot { margin: 0; padding: 11px 13px; border-top: 1px solid var(--line); background: var(--subtle); color: var(--muted); font-size: 9px; line-height: 1.7; }
+
+/* 登记结论。判定是只读的一行，解读是一个大输入框——版面上的比例就是权责的比例。 */
+.experiment-conclude { margin-top: 18px; padding: 15px 16px; border: 1px solid var(--line); background: var(--surface); }
+.experiment-conclude > .section-label { display: block; margin-bottom: 10px; }
+.experiment-verdict { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
+.experiment-verdict b { font-size: 13px; }
+.experiment-verdict b.ok { color: var(--cobalt-dark); }
+.experiment-verdict b.danger { color: var(--danger); }
+.experiment-verdict b.muted { color: var(--muted); }
+
+/* 新建实验表单。单列、限宽：这张表的每一项都要被读一遍，不是被扫过去。 */
+.experiment-form { max-width: 720px; margin-top: 18px; padding: 18px 20px 20px; border: 1px solid var(--line); background: var(--surface); }
+.experiment-form-head { margin-bottom: 16px; }
+.experiment-form-head > .section-label { display: block; }
+.experiment-form-head h3 { margin: 7px 0 0; font-size: 14px; }
+.experiment-form-head p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.experiment-field { display: block; margin-top: 14px; }
+.experiment-field > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.experiment-field input, .experiment-field select, .experiment-field textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; font-size: 11px; font-family: inherit; }
+.experiment-field textarea { min-height: 68px; line-height: 1.6; resize: vertical; }
+.experiment-field-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.experiment-field-row .experiment-field { margin-top: 14px; }
+.experiment-hint { display: flex; gap: 7px; margin-top: 8px; padding: 9px 11px; background: var(--subtle); color: var(--muted); font-size: 10px; line-height: 1.6; }
+.experiment-hint svg { flex: none; margin-top: 2px; color: var(--warning); }
+.experiment-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.experiment-checks label { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; }
+.experiment-variant-drafts { display: grid; gap: 8px; }
+.experiment-variant-draft { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 62px 48px; gap: 8px; align-items: center; }
+.experiment-variant-draft input[type="text"], .experiment-variant-draft input:not([type]), .experiment-variant-draft select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; font-size: 11px; font-family: inherit; }
+.experiment-variant-terms { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+.experiment-variant-terms label { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); }
+.experiment-variant-terms label.on { color: var(--ink); font-weight: 500; }
+.experiment-field-note { margin: 0 0 8px; color: var(--muted); font-size: 9px; line-height: 1.7; }
+.experiment-baseline-pick { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; }
+.experiment-variant-draft .text-button { height: auto; font-size: 10px; }
+.experiment-form-actions { display: flex; gap: 10px; margin-top: 18px; }
+.experiment-form-foot { margin: 10px 0 0; color: var(--muted); font-size: 9px; line-height: 1.7; }
+.prelaunch-detail .primary-button.full { width: 100%; margin-top: 10px; }
+
+@media (max-width: 1180px) {
+  .insight-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insight-experiment-row { grid-template-columns: minmax(200px, 1.3fr) 66px 112px 128px 100px; }
+  .insight-sample-row { grid-template-columns: minmax(170px, 1.2fr) 96px 88px 78px 100px; }
+  .experiment-field-row { grid-template-columns: minmax(0, 1fr); }
+  .experiment-variant-draft { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .insight-analysis-metrics { grid-template-columns: minmax(0, 1fr); }
+  .insight-anomaly-row { grid-template-columns: minmax(150px, 1fr) 92px 88px 118px 88px; }
+  .insight-series-row { grid-template-columns: 78px minmax(50px, 1fr) 88px 96px; }
+  .insight-series-row > span:last-child { display: none; }
+  .insight-asset-row { grid-template-columns: minmax(190px, 1.2fr) 96px 84px 96px 78px; }
+  .insight-issue-row { grid-template-columns: minmax(210px, 1.2fr) 64px minmax(130px, 1fr) 92px; }
 }

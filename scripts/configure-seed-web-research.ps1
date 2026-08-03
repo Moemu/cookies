@@ -80,8 +80,11 @@ try {
 
     $secureKey = Read-Host "Paste the Ark API key for Seed web research (input stays hidden)" -AsSecureString
     $plainKey = Convert-SecureStringToPlainText $secureKey
-    if ($plainKey -notmatch '^ark-[A-Za-z0-9-]{20,}$') {
-        throw "Ark API key must be the complete value beginning with 'ark-'."
+    if ([string]::IsNullOrWhiteSpace($plainKey) -or
+        $plainKey.Length -lt 20 -or
+        $plainKey.Length -gt 512 -or
+        $plainKey -match '\s') {
+        throw "Ark API key appears incomplete or contains whitespace."
     }
     try {
         $encryptedJSON = $plainKey | & go run ./cmd/cookies-provider-credential

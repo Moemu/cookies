@@ -78,29 +78,51 @@ func normalizeModelBriefPatch(patch *BriefPatch) error {
 	}
 	for index := range patch.Operations {
 		operation := &patch.Operations[index]
+		switch operation.FieldPath {
+		case "product.selling_points", "product.evidence", "channels", "constraints",
+			"reference_ids", "creative.tone", "creative.mandatory_elements", "creative.prohibited_claims":
+			values, err := normalizeModelStringArray(operation.Value, operation.FieldPath)
+			if err != nil {
+				return err
+			}
+			operation.Value = mustJSON(values)
+		case "brand.name", "product.name", "product.category", "industry", "region", "language",
+			"campaign.objective", "audience.primary", "proposition", "budget.total",
+			"schedule.window", "measurement.primary_kpi":
+			value, err := normalizeModelString(operation.Value, operation.FieldPath)
+			if err != nil {
+				return err
+			}
+			operation.Value = mustJSON(value)
+		}
 		if operation.FieldPath != "channels" {
 			continue
 		}
 		var values []string
-		if err := json.Unmarshal(operation.Value, &values); err != nil || len(values) == 0 {
-			return fmt.Errorf("%w: channels must be a non-empty string array", ErrInvalidRequest)
-		}
+		_ = json.Unmarshal(operation.Value, &values)
 		normalized := make([]string, 0, len(values))
 		for _, value := range values {
-			switch strings.ToLower(strings.TrimSpace(value)) {
-			case "xiaohongshu", "小红书", "小红书图文", "rednote", "red note", "redbook", "red book":
+			channel := strings.ToLower(strings.TrimSpace(value))
+			switch {
+			case channel == "xiaohongshu" || strings.Contains(channel, "小红书") ||
+				strings.Contains(channel, "rednote") || strings.Contains(channel, "red note") ||
+				strings.Contains(channel, "redbook") || strings.Contains(channel, "red book"):
 				normalized = appendUnique(normalized, "xiaohongshu")
-			case "douyin", "抖音", "抖音短视频":
+			case channel == "douyin" || strings.Contains(channel, "抖音"):
 				if patch.ContractVersion != "strategy-brief-patch/v2" {
 					return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
 				}
 				normalized = appendUnique(normalized, "douyin")
-			case "taobao_tmall", "taobao", "tmall", "淘宝", "天猫", "淘宝天猫", "淘宝/天猫":
+			case channel == "taobao_tmall" || strings.Contains(channel, "taobao") ||
+				strings.Contains(channel, "tmall") || strings.Contains(channel, "淘宝") ||
+				strings.Contains(channel, "天猫"):
 				if patch.ContractVersion != "strategy-brief-patch/v2" {
 					return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
 				}
 				normalized = appendUnique(normalized, "taobao_tmall")
-			case "wechat_ecosystem", "wechat", "微信", "公众号", "视频号", "微信生态", "私域":
+			case channel == "wechat_ecosystem" || strings.Contains(channel, "wechat") ||
+				strings.Contains(channel, "微信") || strings.Contains(channel, "公众号") ||
+				strings.Contains(channel, "视频号") || strings.Contains(channel, "私域"):
 				if patch.ContractVersion != "strategy-brief-patch/v2" {
 					return fmt.Errorf("%w: unsupported strategy platform %q", ErrInvalidRequest, value)
 				}
@@ -112,6 +134,52 @@ func normalizeModelBriefPatch(patch *BriefPatch) error {
 		operation.Value = mustJSON(normalized)
 	}
 	return nil
+}
+
+func normalizeModelString(raw json.RawMessage, path string) (string, error) {
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value, nil
+		}
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 {
+		return "", fmt.Errorf("%w: %s must be a non-empty string", ErrInvalidRequest, path)
+	}
+	normalized := make([]string, 0, len(values))
+	for _, item := range values {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return "", fmt.Errorf("%w: %s entries must not be empty", ErrInvalidRequest, path)
+		}
+		normalized = append(normalized, item)
+	}
+	return strings.Join(normalized, "；"), nil
+}
+
+func normalizeModelStringArray(raw json.RawMessage, path string) ([]string, error) {
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		var value string
+		if stringErr := json.Unmarshal(raw, &value); stringErr != nil || strings.TrimSpace(value) == "" {
+			return nil, fmt.Errorf("%w: %s must be a non-empty string array", ErrInvalidRequest, path)
+		}
+		values = []string{strings.TrimSpace(value)}
+	}
+	if len(values) == 0 {
+		return nil, fmt.Errorf("%w: %s must be a non-empty string array", ErrInvalidRequest, path)
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, fmt.Errorf("%w: %s entries must not be empty", ErrInvalidRequest, path)
+		}
+		normalized = append(normalized, value)
+	}
+	return normalized, nil
 }
 
 func setBriefField(document *BriefDocument, path string, raw json.RawMessage) error {

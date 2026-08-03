@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-intake-v3.schema.json",
+  "title": "creative-intake/v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "id", "organization_id", "project_id", "source", "status", "strategy_package_ref", "selected_route_id", "base_handoff", "input_identity_hash", "readiness", "blockers", "warnings", "assumptions", "version", "created_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "creative-intake/v3"},
+    "id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "source": {"const": "strategy_package"},
+    "status": {"enum": ["needs_clarification", "ready", "superseded"]},
+    "strategy_package_ref": {"$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef"},
+    "selected_route_id": {"type": "string", "minLength": 1},
+    "base_handoff": {"$ref": "./strategy-creative-handoff-v1.schema.json"},
+    "task_overlay": {"$ref": "./strategy-creative-task-overlay-v1.schema.json"},
+    "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "readiness": {"type": "object"},
+    "blockers": {"type": "array"},
+    "warnings": {"type": "array"},
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "confirmed_by": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

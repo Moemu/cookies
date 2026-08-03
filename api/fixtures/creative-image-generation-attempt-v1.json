@@ -1,0 +1,24 @@
+{
+  "contract_version": "creative-image-generation-attempt/v1",
+  "id": "image_attempt_01",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "task_id": "creative_task_image_01",
+  "draft_revision": 2,
+  "image_plan_order": 1,
+  "attempt_no": 1,
+  "prompt_package_id": "image_prompt_01",
+  "generation_spec": {
+    "model_alias": "cookies.image.standard",
+    "width": 1024,
+    "height": 1536,
+    "quality": "medium",
+    "output_format": "png"
+  },
+  "generation_spec_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "provider_job_id": "provider_job_01",
+  "status": "running",
+  "created_by": "user_01",
+  "created_at": "2026-07-31T08:02:00Z",
+  "updated_at": "2026-07-31T08:02:05Z"
+}

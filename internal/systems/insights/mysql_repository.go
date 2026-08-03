@@ -20,19 +20,64 @@ func (r MySQLRepository) CreateReport(ctx context.Context, value InsightReport) 
 	if err != nil {
 		return InsightReport{}, err
 	}
+	digest, err := marshalReportDigest(value.Digest)
+	if err != nil {
+		return InsightReport{}, err
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_reports (
 		id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary,
 		metric_snapshot_id, creative_package_id, is_simulated, dataset_version,
-		status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+		status, summary, findings, digest, window_start, window_end,
+		version, created_by, confirmed_by, confirmed_at, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, value.DeliveryMode,
 		value.EvidenceID, value.EvidenceSummary, value.MetricSnapshotID, value.CreativePackageID,
 		value.IsSimulated, value.DatasetVersion, value.Status, value.Summary, findings,
+		digest, value.WindowStart, value.WindowEnd,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	if isDuplicateKey(err) {
+		return InsightReport{}, fmt.Errorf("%w: 这次投放的这个数据窗口已经定格过一份报告了，去报告中心看那一份", ErrInvalidState)
+	}
 	if err != nil {
 		return InsightReport{}, err
 	}
 	return value, nil
+}
+
+// UpdateReportDigest 覆盖整份汇总。人工删减改的是 dropped 标记，条目本身不删——
+// 报告要能说清「系统给了什么、人拿掉了哪几条」，物理删掉就查不回来了。
+func (r MySQLRepository) UpdateReportDigest(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, digest []ReportFinding, now time.Time) (InsightReport, error) {
+	encoded, err := marshalReportDigest(digest)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_reports SET digest = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
+		encoded, now, organizationID, projectID, id, expectedVersion, ReportDraft)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if affected == 0 {
+		value, getErr := r.GetReport(ctx, organizationID, projectID, id)
+		if getErr != nil {
+			return InsightReport{}, getErr
+		}
+		if value.Version != expectedVersion {
+			return InsightReport{}, ErrVersionConflict
+		}
+		return InsightReport{}, ErrInvalidState
+	}
+	return r.GetReport(ctx, organizationID, projectID, id)
+}
+
+func marshalReportDigest(digest []ReportFinding) ([]byte, error) {
+	if digest == nil {
+		digest = make([]ReportFinding, 0)
+	}
+	return json.Marshal(digest)
 }
 
 func (r MySQLRepository) ListReports(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]InsightReport, error) {
@@ -83,30 +128,249 @@ func (r MySQLRepository) ConfirmReport(ctx context.Context, organizationID contr
 	return r.GetReport(ctx, organizationID, projectID, id)
 }
 
-func (r MySQLRepository) CreateExperience(ctx context.Context, value Experience) (Experience, error) {
-	conditions, err := json.Marshal(value.Conditions)
-	if err != nil {
-		return Experience{}, err
-	}
-	counterexamples, err := json.Marshal(value.Counterexamples)
-	if err != nil {
-		return Experience{}, err
-	}
-	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_experiences (
-		id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id,
-		conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.ReportID, value.SourceExecutionID,
-		value.SourceEvidenceID, value.SourceMetricSnapshotID, value.Conclusion, conditions, counterexamples, value.Status,
-		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+// CreateExperience writes the conclusion and its opening audit row together so
+// a 待确认 experience can never exist without a trail (PRD §11.2).
+func (r MySQLRepository) CreateExperience(ctx context.Context, value Experience, audit ExperienceAudit) (Experience, error) {
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		if txErr := insertExperienceTx(ctx, tx, value); txErr != nil {
+			return txErr
+		}
+		return insertExperienceAudit(ctx, tx, audit)
+	})
 	if err != nil {
 		return Experience{}, err
 	}
 	return value, nil
 }
 
-func (r MySQLRepository) ListExperiences(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]Experience, error) {
-	rows, err := r.DB.QueryContext(ctx, experienceSelect+` WHERE organization_id = ? AND project_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
+// ReviseExperience appends a revision and, when the predecessor was never
+// confirmed, retires it in the same transaction. Two 待确认 rows of one lineage
+// must never sit in the candidate queue together: they read as two independent
+// conclusions, and confirming the older one silently discards the revision.
+func (r MySQLRepository) ReviseExperience(ctx context.Context, input ReviseExperienceInput) (Experience, error) {
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		if txErr := insertExperienceTx(ctx, tx, input.Value); txErr != nil {
+			return txErr
+		}
+		if txErr := insertExperienceAudit(ctx, tx, input.Audit); txErr != nil {
+			return txErr
+		}
+		if input.RetireSource == nil {
+			return nil
+		}
+		if _, txErr := transitionExperienceTx(ctx, tx, *input.RetireSource); txErr != nil {
+			return txErr
+		}
+		_, txErr := tx.ExecContext(ctx, `UPDATE insight_experiences SET superseded_by_id = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			input.Value.ID, input.RetireSource.OrganizationID, input.RetireSource.ProjectID, input.RetireSource.ID)
+		return txErr
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	return input.Value, nil
+}
+
+func insertExperienceTx(ctx context.Context, tx *sql.Tx, value Experience) error {
+	conditions, err := json.Marshal(value.Conditions)
+	if err != nil {
+		return err
+	}
+	counterexamples, err := json.Marshal(value.Counterexamples)
+	if err != nil {
+		return err
+	}
+	applicability, err := json.Marshal(value.Applicability)
+	if err != nil {
+		return err
+	}
+	dataBasis, err := json.Marshal(value.DataBasis)
+	if err != nil {
+		return err
+	}
+	contentBasis, err := json.Marshal(value.ContentBasis)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO insight_experiences (
+		id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id,
+		report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id,
+		conclusion, card_type, confidence, recommended_action,
+		conditions, counterexamples, applicability, data_basis, content_basis,
+		status, status_reason, status_changed_by, status_changed_at,
+		confirmed_by, confirmed_at, version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.LineageID, value.Revision,
+		nullableString(value.SupersedesID),
+		value.ReportID, value.SourceExecutionID, value.SourceEvidenceID, value.SourceMetricSnapshotID,
+		value.Conclusion, value.CardType, value.Confidence, value.RecommendedAction,
+		conditions, counterexamples, applicability, dataBasis, contentBasis,
+		value.Status, value.StatusReason,
+		value.StatusChangedBy, value.StatusChangedAt,
+		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	return err
+}
+
+// ListExperiences filters by lifecycle status when one is given; an empty
+// status returns every revision, including retired ones, so the library stays
+// auditable.
+func (r MySQLRepository) ListExperiences(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, status ExperienceStatus, limit int) ([]Experience, error) {
+	query := experienceSelect + ` WHERE organization_id = ? AND project_id = ?`
+	args := []any{organizationID, projectID}
+	if status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY updated_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	return r.queryExperiences(ctx, query, args...)
+}
+
+func (r MySQLRepository) GetExperience(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (Experience, error) {
+	value, err := scanExperience(r.DB.QueryRowContext(ctx, experienceSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`, organizationID, projectID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Experience{}, ErrNotFound
+	}
+	return value, err
+}
+
+// ListExperienceLineage returns every revision of one conclusion oldest first,
+// so the UI can show how a conclusion evolved instead of only its latest form.
+func (r MySQLRepository) ListExperienceLineage(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, lineageID string) ([]Experience, error) {
+	return r.queryExperiences(ctx, experienceSelect+` WHERE organization_id = ? AND project_id = ? AND lineage_id = ? ORDER BY revision ASC`,
+		organizationID, projectID, lineageID)
+}
+
+func (r MySQLRepository) TransitionExperience(ctx context.Context, input TransitionExperienceInput) (Experience, error) {
+	var value Experience
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		var txErr error
+		value, txErr = transitionExperienceTx(ctx, tx, input)
+		return txErr
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	return value, nil
+}
+
+// ConfirmExperience makes a revision quotable and retires the one it supersedes
+// in the same transaction, so a lineage never has two reusable conclusions.
+func (r MySQLRepository) ConfirmExperience(ctx context.Context, input ConfirmExperienceInput) (Experience, error) {
+	var value Experience
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		confirmed, txErr := transitionExperienceTx(ctx, tx, TransitionExperienceInput{
+			OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: input.ID,
+			ExpectedVersion: input.ExpectedVersion,
+			From:            []ExperienceStatus{ExperiencePending, ExperienceNeedsReview},
+			To:              ExperienceConfirmed, ActorID: input.ActorID, Now: input.Now, AuditID: input.AuditID,
+		})
+		if txErr != nil {
+			return txErr
+		}
+		if _, txErr = tx.ExecContext(ctx, `UPDATE insight_experiences SET confirmed_by = ?, confirmed_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			input.ActorID, input.Now, input.OrganizationID, input.ProjectID, input.ID); txErr != nil {
+			return txErr
+		}
+		confirmed.ConfirmedBy = input.ActorID
+		confirmed.ConfirmedAt = &input.Now
+		value = confirmed
+		if confirmed.SupersedesID == "" {
+			return nil
+		}
+		previous, txErr := getExperienceForUpdate(ctx, tx, input.OrganizationID, input.ProjectID, confirmed.SupersedesID)
+		if txErr != nil {
+			return txErr
+		}
+		if previous.Status == ExperienceRetired {
+			return nil
+		}
+		if _, txErr = transitionExperienceTx(ctx, tx, TransitionExperienceInput{
+			OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: previous.ID,
+			ExpectedVersion: previous.Version,
+			From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview},
+			To:              ExperienceRetired,
+			Reason:          fmt.Sprintf("已被第 %d 版取代。", confirmed.Revision),
+			ActorID:         input.ActorID, Now: input.Now, AuditID: input.SupersedeAuditID,
+		}); txErr != nil {
+			return txErr
+		}
+		_, txErr = tx.ExecContext(ctx, `UPDATE insight_experiences SET superseded_by_id = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			confirmed.ID, input.OrganizationID, input.ProjectID, previous.ID)
+		return txErr
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	return value, nil
+}
+
+func (r MySQLRepository) CreateExperienceReference(ctx context.Context, value ExperienceReference) (ExperienceReference, error) {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_experience_references (
+		id, organization_id, project_id, experience_id, consumer_kind, consumer_id, outcome, note,
+		version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON DUPLICATE KEY UPDATE outcome = VALUES(outcome), note = VALUES(note), version = version + 1, updated_at = VALUES(updated_at)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ExperienceID, value.ConsumerKind,
+		value.ConsumerID, value.Outcome, value.Note, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	if err != nil {
+		return ExperienceReference{}, err
+	}
+	stored, err := scanExperienceReference(r.DB.QueryRowContext(ctx, experienceReferenceSelect+` WHERE organization_id = ? AND experience_id = ? AND consumer_kind = ? AND consumer_id = ?`,
+		value.OrganizationID, value.ExperienceID, value.ConsumerKind, value.ConsumerID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExperienceReference{}, ErrNotFound
+	}
+	return stored, err
+}
+
+// An empty experienceID lists every reference in the project, which is what the
+// 引用记录 view needs to answer "who used our experiences and how did it go".
+func (r MySQLRepository) ListExperienceReferences(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, experienceID string, limit int) ([]ExperienceReference, error) {
+	query := experienceReferenceSelect + ` WHERE organization_id = ? AND project_id = ?`
+	arguments := []any{organizationID, projectID}
+	if experienceID != "" {
+		query += ` AND experience_id = ?`
+		arguments = append(arguments, experienceID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	rows, err := r.DB.QueryContext(ctx, query, append(arguments, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]ExperienceReference, 0)
+	for rows.Next() {
+		value, scanErr := scanExperienceReference(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (r MySQLRepository) ListExperienceAudits(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, experienceID string, limit int) ([]ExperienceAudit, error) {
+	rows, err := r.DB.QueryContext(ctx, experienceAuditSelect+` WHERE organization_id = ? AND project_id = ? AND experience_id = ? ORDER BY sequence ASC LIMIT ?`,
+		organizationID, projectID, experienceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]ExperienceAudit, 0)
+	for rows.Next() {
+		var value ExperienceAudit
+		if scanErr := rows.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExperienceID,
+			&value.FromStatus, &value.ToStatus, &value.Reason, &value.ActorID, &value.CreatedAt); scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (r MySQLRepository) queryExperiences(ctx context.Context, query string, args ...any) ([]Experience, error) {
+	rows, err := r.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -122,16 +386,98 @@ func (r MySQLRepository) ListExperiences(ctx context.Context, organizationID con
 	return values, rows.Err()
 }
 
-func (r MySQLRepository) GetExperience(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (Experience, error) {
-	value, err := scanExperience(r.DB.QueryRowContext(ctx, experienceSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`, organizationID, projectID, id))
+func (r MySQLRepository) inTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// transitionExperienceTx locks the row, enforces the optimistic version and the
+// allowed source states, then records the move.
+func transitionExperienceTx(ctx context.Context, tx *sql.Tx, input TransitionExperienceInput) (Experience, error) {
+	current, err := getExperienceForUpdate(ctx, tx, input.OrganizationID, input.ProjectID, input.ID)
+	if err != nil {
+		return Experience{}, err
+	}
+	if current.Version != input.ExpectedVersion {
+		return Experience{}, ErrVersionConflict
+	}
+	if !allowsStatus(input.From, current.Status) {
+		return Experience{}, ErrInvalidState
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE insight_experiences SET status = ?, status_reason = ?, status_changed_by = ?, status_changed_at = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ?`,
+		input.To, input.Reason, input.ActorID, input.Now, input.Now,
+		input.OrganizationID, input.ProjectID, input.ID, input.ExpectedVersion); err != nil {
+		return Experience{}, err
+	}
+	if err := insertExperienceAudit(ctx, tx, ExperienceAudit{
+		ID: input.AuditID, OrganizationID: input.OrganizationID, ProjectID: input.ProjectID,
+		ExperienceID: input.ID, FromStatus: current.Status, ToStatus: input.To,
+		Reason: input.Reason, ActorID: input.ActorID, CreatedAt: input.Now,
+	}); err != nil {
+		return Experience{}, err
+	}
+	current.Status = input.To
+	current.StatusReason = input.Reason
+	current.StatusChangedBy = input.ActorID
+	current.StatusChangedAt = &input.Now
+	current.Version++
+	current.UpdatedAt = input.Now
+	return current, nil
+}
+
+func getExperienceForUpdate(ctx context.Context, tx *sql.Tx, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (Experience, error) {
+	value, err := scanExperience(tx.QueryRowContext(ctx, experienceSelect+` WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`, organizationID, projectID, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Experience{}, ErrNotFound
 	}
 	return value, err
 }
 
-const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
-const experienceSelect = `SELECT id, organization_id, project_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, conditions, counterexamples, status, version, created_by, created_at, updated_at FROM insight_experiences`
+func insertExperienceAudit(ctx context.Context, tx *sql.Tx, value ExperienceAudit) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO insight_experience_audits (
+		id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ExperienceID,
+		value.FromStatus, value.ToStatus, value.Reason, value.ActorID, value.CreatedAt)
+	return err
+}
+
+func allowsStatus(values []ExperienceStatus, value ExperienceStatus) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+// unmarshalNullableJSON 把 NULL 或空列当成零值。用在后加的 JSON 列上——
+// 历史行没有这些字段不是数据损坏，报错会让整张经验库读不出来。
+func unmarshalNullableJSON(raw []byte, target any) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return json.Unmarshal(raw, target)
+}
+
+const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, digest, window_start, window_end, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
+const experienceSelect = `SELECT id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, status_reason, status_changed_by, status_changed_at, confirmed_by, confirmed_at, version, created_by, created_at, updated_at FROM insight_experiences`
+const experienceAuditSelect = `SELECT id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at FROM insight_experience_audits`
+const experienceReferenceSelect = `SELECT id, organization_id, project_id, experience_id, consumer_kind, consumer_id, outcome, note, version, created_by, created_at, updated_at FROM insight_experience_references`
 
 type rowScanner interface {
 	Scan(...any) error
@@ -139,12 +485,13 @@ type rowScanner interface {
 
 func scanInsightReport(row rowScanner) (InsightReport, error) {
 	var value InsightReport
-	var findings []byte
-	var confirmedBy sql.NullString
+	var findings, digest []byte
+	var confirmedBy, windowStart, windowEnd sql.NullString
 	var confirmedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &value.DeliveryMode,
 		&value.EvidenceID, &value.EvidenceSummary, &value.MetricSnapshotID, &value.CreativePackageID,
-		&value.IsSimulated, &value.DatasetVersion, &value.Status, &value.Summary, &findings, &value.Version,
+		&value.IsSimulated, &value.DatasetVersion, &value.Status, &value.Summary, &findings,
+		&digest, &windowStart, &windowEnd, &value.Version,
 		&value.CreatedBy, &confirmedBy, &confirmedAt, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return InsightReport{}, err
@@ -152,6 +499,16 @@ func scanInsightReport(row rowScanner) (InsightReport, error) {
 	if err := json.Unmarshal(findings, &value.Findings); err != nil {
 		return InsightReport{}, fmt.Errorf("decode insight findings: %w", err)
 	}
+	// 老报告这一列是空的。空切片而不是 nil：nil 序列化成 null，前端拿到会白屏。
+	value.Digest = make([]ReportFinding, 0)
+	if err := unmarshalNullableJSON(digest, &value.Digest); err != nil {
+		return InsightReport{}, fmt.Errorf("decode insight digest: %w", err)
+	}
+	if value.Digest == nil {
+		value.Digest = make([]ReportFinding, 0)
+	}
+	value.WindowStart = windowStart.String
+	value.WindowEnd = windowEnd.String
 	if confirmedBy.Valid {
 		value.ConfirmedBy = confirmedBy.String
 	}
@@ -164,9 +521,16 @@ func scanInsightReport(row rowScanner) (InsightReport, error) {
 func scanExperience(row rowScanner) (Experience, error) {
 	var value Experience
 	var conditions, counterexamples []byte
-	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ReportID,
-		&value.SourceExecutionID, &value.SourceEvidenceID, &value.SourceMetricSnapshotID, &value.Conclusion, &conditions,
-		&counterexamples, &value.Status, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
+	var applicability, dataBasis, contentBasis []byte
+	var supersedesID, supersededByID, confirmedBy sql.NullString
+	var statusChangedAt, confirmedAt sql.NullTime
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID,
+		&value.LineageID, &value.Revision, &supersedesID, &supersededByID, &value.ReportID,
+		&value.SourceExecutionID, &value.SourceEvidenceID, &value.SourceMetricSnapshotID, &value.Conclusion,
+		&value.CardType, &value.Confidence, &value.RecommendedAction, &conditions,
+		&counterexamples, &applicability, &dataBasis, &contentBasis,
+		&value.Status, &value.StatusReason, &value.StatusChangedBy, &statusChangedAt,
+		&confirmedBy, &confirmedAt, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return Experience{}, err
 	}
@@ -175,6 +539,37 @@ func scanExperience(row rowScanner) (Experience, error) {
 	}
 	if err := json.Unmarshal(counterexamples, &value.Counterexamples); err != nil {
 		return Experience{}, fmt.Errorf("decode experience counterexamples: %w", err)
+	}
+	// 三个卡片字段是这次扩展加的，历史行是 NULL。NULL 解成零值而不是报错——
+	// 老经验没写适用范围是事实，投影时会把它标进 MissingFields。
+	if err := unmarshalNullableJSON(applicability, &value.Applicability); err != nil {
+		return Experience{}, fmt.Errorf("decode experience applicability: %w", err)
+	}
+	if err := unmarshalNullableJSON(dataBasis, &value.DataBasis); err != nil {
+		return Experience{}, fmt.Errorf("decode experience data basis: %w", err)
+	}
+	if err := unmarshalNullableJSON(contentBasis, &value.ContentBasis); err != nil {
+		return Experience{}, fmt.Errorf("decode experience content basis: %w", err)
+	}
+	value.SupersedesID = supersedesID.String
+	value.SupersededByID = supersededByID.String
+	value.ConfirmedBy = confirmedBy.String
+	if statusChangedAt.Valid {
+		value.StatusChangedAt = &statusChangedAt.Time
+	}
+	if confirmedAt.Valid {
+		value.ConfirmedAt = &confirmedAt.Time
+	}
+	return value, nil
+}
+
+func scanExperienceReference(row rowScanner) (ExperienceReference, error) {
+	var value ExperienceReference
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExperienceID,
+		&value.ConsumerKind, &value.ConsumerID, &value.Outcome, &value.Note,
+		&value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
+	if err != nil {
+		return ExperienceReference{}, err
 	}
 	return value, nil
 }

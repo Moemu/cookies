@@ -148,7 +148,7 @@ paths:
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createCreativeIntake
-      summary: Create a normalized manual CreativeIntake or explicitly hand off an immutable Strategy package or CreativeTaskStrategyVersion.
+      summary: Create a normalized manual CreativeIntake or a v3 Strategy package intake with an optional task overlay.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
         required: true
@@ -168,6 +168,55 @@ paths:
         '200': {description: Frozen CreativeIntake snapshot.}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches:
+    post:
+      operationId: generateCreativeDirectionCandidates
+      summary: Generate schema-constrained CreativeDirection candidates from one frozen v3 Strategy intake.
+      description: >-
+        This is the first LLM-authored creative step. Strategy facts and
+        guardrails are immutable inputs; provider failures are returned and
+        never replaced with a fabricated fallback concept.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: intake_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                candidate_count: {type: integer, minimum: 2, maximum: 4, default: 3}
+      responses:
+        '201':
+          description: Immutable candidate batch.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-directions/{direction_id}/confirm:
+    post:
+      operationId: confirmCreativeDirection
+      summary: Confirm one CreativeDirection and supersede competing candidates for the same intake.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: direction_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Confirmed immutable CreativeDirection version.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/business-capabilities:
     get:
       operationId: listCreativeBusinessCapabilities
@@ -235,6 +284,137 @@ paths:
       responses:
         '204': {description: CreativeTask archived.}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/image-text-workspace:
+    get:
+      operationId: getCreativeImageTextWorkspace
+      summary: Read the Strategy-to-Creative image-text workspace without advancing generation state.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200':
+          description: Image-text draft, three independently generated slots, selections and readiness.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-image-text-workspace-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/image-text-draft:generate:
+    post:
+      operationId: generateCreativeImageTextDraft
+      summary: Generate the v2 copy and three-slot plan from the confirmed Creative Direction.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_task_version, expected_direction_id]
+              properties:
+                expected_task_version: {type: integer, minimum: 1}
+                expected_direction_id: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Newly persisted v2 image-text draft.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-image-text-draft-v2.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/image-text-draft:
+    patch:
+      operationId: updateCreativeImageTextDraft
+      summary: Save copy and slot edits as the next immutable v2 draft revision before generation starts.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_task_version, expected_draft_revision, title_candidates, selected_title, body, topics, image_plan]
+              properties:
+                expected_task_version: {type: integer, minimum: 1}
+                expected_draft_revision: {type: integer, minimum: 1}
+                title_candidates: {type: array, minItems: 3, maxItems: 3, items: {type: string, minLength: 1, maxLength: 80}}
+                selected_title: {type: string, minLength: 1, maxLength: 80}
+                body: {type: string, minLength: 1, maxLength: 5000}
+                topics: {type: array, maxItems: 12, items: {type: string, minLength: 1, maxLength: 80}}
+                image_plan:
+                  type: array
+                  minItems: 3
+                  maxItems: 3
+                  items: {$ref: '#/components/schemas/ImagePlanItemV2'}
+      responses:
+        '200':
+          description: Newly persisted authoring revision.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-image-text-draft-v2.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/image-slots/{order}:generate:
+    post:
+      operationId: generateCreativeImageTextSlot
+      summary: Compile an immutable prompt package and start one portrait base-image attempt.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/ImageSlotOrder'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PrepareImageSlotRequest'}
+      responses:
+        '202': {description: Image attempt and Provider job accepted.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/image-slots/{order}:retry:
+    post:
+      operationId: retryCreativeImageTextSlot
+      summary: Start a new attempt for one slot without recreating the other slots.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/ImageSlotOrder'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PrepareImageSlotRequest'}
+      responses:
+        '202': {description: Retry attempt and Provider job accepted.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/image-slots/{order}/attempts/{attempt_id}:adopt:
+    post:
+      operationId: adoptCreativeImageTextAttempt
+      summary: Adopt one succeeded attempt for a slot using optimistic concurrency.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/ImageSlotOrder'}
+        - name: attempt_id
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_task_version, expected_selection_version]
+              properties:
+                expected_task_version: {type: integer, minimum: 1}
+                expected_selection_version: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Updated slot selection.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-image-slot-selection-v1.schema.json'}
         '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake:
     get:
@@ -425,6 +605,11 @@ components:
   securitySchemes:
     cookiesAuth: {type: http, scheme: bearer}
   parameters:
+    ImageSlotOrder:
+      name: order
+      in: path
+      required: true
+      schema: {type: integer, minimum: 1, maximum: 3}
     ProjectID: {name: project_id, in: path, required: true, schema: {type: string, minLength: 1}}
     IntakeID: {name: intake_id, in: path, required: true, schema: {type: string, minLength: 1}}
     TaskID: {name: task_id, in: path, required: true, schema: {type: string, minLength: 1}}
@@ -432,6 +617,26 @@ components:
     RenderJobID: {name: render_job_id, in: path, required: true, schema: {type: string, minLength: 1}}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 255}}
   schemas:
+    PrepareImageSlotRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_task_version, draft_revision]
+      properties:
+        expected_task_version: {type: integer, minimum: 1}
+        draft_revision: {type: integer, minimum: 1}
+        model_alias: {type: string, minLength: 1, maxLength: 128}
+    ImagePlanItemV2:
+      type: object
+      additionalProperties: false
+      required: [order, role, purpose, visual_brief, caption, overlay_copy, layout_preset]
+      properties:
+        order: {type: integer, minimum: 1, maximum: 3}
+        role: {enum: [cover, proof, cta]}
+        purpose: {type: string, minLength: 1, maxLength: 300}
+        visual_brief: {type: string, minLength: 1, maxLength: 2000}
+        caption: {type: string, minLength: 1, maxLength: 120}
+        overlay_copy: {type: string, minLength: 1, maxLength: 120}
+        layout_preset: {enum: [cover_center_v1, proof_lower_left_v1, cta_bottom_v1]}
     CreateCreativeIntakeRequest:
       type: object
       additionalProperties: false
@@ -441,10 +646,13 @@ components:
           required: [channel, objective, audience, core_message, call_to_action, concept, tone, visual_keywords, mandatory_elements, prohibited_claims]
         - properties: {source: {const: strategy_package}}
           required: [strategy_package]
-        - properties: {source: {const: task_strategy}}
-          required: [task_strategy]
+        - properties:
+            contract_version: {const: creative-intake-create/v3}
+            source: {const: strategy_package}
+          required: [contract_version, strategy_package_ref, selected_route_id]
       properties:
-        source: {enum: [manual, strategy_package, task_strategy]}
+        contract_version: {const: creative-intake-create/v3}
+        source: {enum: [manual, strategy_package]}
         strategy_package:
           type: object
           additionalProperties: false
@@ -453,14 +661,16 @@ components:
             package_id: {type: string, minLength: 1}
             package_version: {type: integer, minimum: 1}
             expected_content_hash: {type: string, minLength: 1}
-        task_strategy:
+        strategy_package_ref:
+          $ref: '../contracts/strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef'
+        selected_route_id: {type: string, minLength: 1}
+        task_overlay_ref:
           type: object
           additionalProperties: false
-          required: [plan_id, strategy_version, expected_content_hash]
+          required: [overlay_id, content_hash]
           properties:
-            plan_id: {type: string, minLength: 1}
-            strategy_version: {type: integer, minimum: 1}
-            expected_content_hash: {type: string, minLength: 1}
+            overlay_id: {type: string, minLength: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
         format: {enum: [image_text, video]}
         performance_mode: {enum: [viral_remake]}
         creative_routes:
@@ -497,8 +707,12 @@ components:
     CreateCreativeTaskRequest:
       type: object
       additionalProperties: false
-      required: [content_type, focus]
+      required: [content_type]
+      anyOf:
+        - required: [focus]
+        - required: [direction_id]
       properties:
+        direction_id: {type: string, minLength: 1, maxLength: 96}
         content_type: {enum: [lifestyle, ingredient_explanation, usage_scenario, list_guide, comparison, custom]}
         focus: {type: string, minLength: 1, maxLength: 300}
         audience: {type: string, maxLength: 500}

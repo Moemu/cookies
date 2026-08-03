@@ -1,3 +1,5 @@
+import type { CreativeIntakeStatus } from '../../contracts/creative'
+
 export type Workspace = {
   id: string
   project_id: string
@@ -262,10 +264,11 @@ export type CreativeTaskStrategyVersion = {
   plan_id: string
   version: number
   plan_revision: number
-  contract_version: 'creative-task-strategy/v1'
+  contract_version: 'creative-task-strategy/v1' | 'creative-task-strategy/v2'
   document: CreativeTaskStrategyDocument
   content_hash: string
   created_at: string
+  task_overlay_ref?: { overlay_id: string; content_hash: string }
 }
 
 export type CreativeBusinessCapability = {
@@ -330,10 +333,14 @@ export type TaskStrategyCreativeIntake = {
 }
 
 export type CreativeTaskPlan = {
+  contract_version?: 'strategy-creative-task-plan/v1' | 'strategy-creative-task-plan/v2'
   id: string
   project_id: string
   brief_id: string
   brief_version: number
+  package_ref?: StrategyCreativePackageRef
+  handoff_ref?: { contract_version: 'strategy-creative-handoff/v1'; content_hash: string }
+  selected_route_id?: string
   status: 'collecting' | 'ready' | 'generating' | 'generated' | 'failed' | 'superseded'
   business_code: string
   selection_source: 'recommended' | 'manual'
@@ -349,6 +356,42 @@ export type CreativeTaskPlan = {
   version: number
   profile?: CreativeBusinessProfile
   current_strategy?: CreativeTaskStrategyVersion
+}
+
+export type StrategyCreativePackageRef = {
+  package_id: string
+  package_version: number
+  package_content_hash: string
+  handoff_contract_version: 'strategy-creative-handoff/v1'
+  handoff_content_hash: string
+}
+
+export type StrategyCreativeHandoff = {
+  contract_version: 'strategy-creative-handoff/v1'
+  package_ref: {
+    package_id: string
+    package_version: number
+    package_content_hash: string
+  }
+  handoff_content_hash: string
+  routes: Array<{
+    route_id: string
+    deliverable_type: 'image_text' | 'video'
+    purpose: 'brand' | 'performance'
+    performance_mode?: string
+    channels: string[]
+    reason: string
+    route_readiness: { status: 'ready' | 'blocked' }
+  }>
+  upstream_readiness: { status: 'ready' | 'blocked' }
+}
+
+export type CreativeIntakeV3 = {
+  contract_version: 'creative-intake/v3'
+  id: string
+  status: CreativeIntakeStatus
+  selected_route_id: string
+  input_identity_hash: string
 }
 
 export type BriefCenterSummary = {

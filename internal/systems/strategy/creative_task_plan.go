@@ -18,36 +18,45 @@ type CreativeTaskPlanCompleteness struct {
 }
 
 type CreativeTaskPlan struct {
-	ID                     string                       `json:"id"`
-	OrganizationID         contract.OrganizationID      `json:"organization_id"`
-	ProjectID              contract.ProjectID           `json:"project_id"`
-	BriefID                string                       `json:"brief_id"`
-	BriefVersion           int64                        `json:"brief_version"`
-	BriefContentHash       string                       `json:"brief_content_hash"`
-	SourceStrategyID       string                       `json:"source_strategy_id,omitempty"`
-	SourceStrategyRevision int64                        `json:"source_strategy_revision,omitempty"`
-	SourceStrategyHash     string                       `json:"source_strategy_content_hash,omitempty"`
-	Status                 string                       `json:"status"`
-	BusinessCode           string                       `json:"business_code"`
-	BusinessGeneration     int64                        `json:"business_generation"`
-	BusinessVersion        string                       `json:"business_version"`
-	BusinessContentHash    string                       `json:"business_content_hash"`
-	SkillName              string                       `json:"skill_name"`
-	SkillVersion           string                       `json:"skill_version"`
-	SkillContentHash       string                       `json:"skill_content_hash"`
-	SelectionSource        string                       `json:"selection_source"`
-	RecommendationSnapshot RecommendationSnapshot       `json:"recommendation_snapshot"`
-	Answers                map[string]json.RawMessage   `json:"answers"`
-	Completeness           CreativeTaskPlanCompleteness `json:"completeness"`
-	CurrentRevision        int64                        `json:"current_revision"`
-	CurrentStrategyVersion int64                        `json:"current_strategy_version"`
-	CurrentAgentTaskID     string                       `json:"current_agent_task_id,omitempty"`
-	Version                int64                        `json:"version"`
-	CreatedBy              string                       `json:"created_by"`
-	CreatedAt              time.Time                    `json:"created_at"`
-	UpdatedAt              time.Time                    `json:"updated_at"`
-	Profile                *creativecatalog.Profile     `json:"profile,omitempty"`
-	CurrentStrategy        *CreativeTaskStrategyVersion `json:"current_strategy,omitempty"`
+	ContractVersion        string                            `json:"contract_version,omitempty"`
+	ID                     string                            `json:"id"`
+	OrganizationID         contract.OrganizationID           `json:"organization_id"`
+	ProjectID              contract.ProjectID                `json:"project_id"`
+	PackageID              string                            `json:"-"`
+	PackageVersion         int64                             `json:"-"`
+	PackageContentHash     string                            `json:"-"`
+	HandoffContractVersion string                            `json:"-"`
+	HandoffContentHash     string                            `json:"-"`
+	PackageRef             *CreativeTaskPlanPackageReference `json:"package_ref,omitempty"`
+	HandoffRef             *CreativeTaskStrategyHandoffRef   `json:"handoff_ref,omitempty"`
+	SelectedRouteID        string                            `json:"selected_route_id,omitempty"`
+	BriefID                string                            `json:"brief_id"`
+	BriefVersion           int64                             `json:"brief_version"`
+	BriefContentHash       string                            `json:"brief_content_hash"`
+	SourceStrategyID       string                            `json:"source_strategy_id,omitempty"`
+	SourceStrategyRevision int64                             `json:"source_strategy_revision,omitempty"`
+	SourceStrategyHash     string                            `json:"source_strategy_content_hash,omitempty"`
+	Status                 string                            `json:"status"`
+	BusinessCode           string                            `json:"business_code"`
+	BusinessGeneration     int64                             `json:"business_generation"`
+	BusinessVersion        string                            `json:"business_version"`
+	BusinessContentHash    string                            `json:"business_content_hash"`
+	SkillName              string                            `json:"skill_name"`
+	SkillVersion           string                            `json:"skill_version"`
+	SkillContentHash       string                            `json:"skill_content_hash"`
+	SelectionSource        string                            `json:"selection_source"`
+	RecommendationSnapshot RecommendationSnapshot            `json:"recommendation_snapshot"`
+	Answers                map[string]json.RawMessage        `json:"answers"`
+	Completeness           CreativeTaskPlanCompleteness      `json:"completeness"`
+	CurrentRevision        int64                             `json:"current_revision"`
+	CurrentStrategyVersion int64                             `json:"current_strategy_version"`
+	CurrentAgentTaskID     string                            `json:"current_agent_task_id,omitempty"`
+	Version                int64                             `json:"version"`
+	CreatedBy              string                            `json:"created_by"`
+	CreatedAt              time.Time                         `json:"created_at"`
+	UpdatedAt              time.Time                         `json:"updated_at"`
+	Profile                *creativecatalog.Profile          `json:"profile,omitempty"`
+	CurrentStrategy        *CreativeTaskStrategyVersion      `json:"current_strategy,omitempty"`
 }
 
 type CreativeTaskPlanRevision struct {
@@ -62,23 +71,27 @@ type CreativeTaskPlanRevision struct {
 }
 
 type CreativeTaskPlanSnapshot struct {
-	BriefID                string                       `json:"brief_id"`
-	BriefVersion           int64                        `json:"brief_version"`
-	BriefContentHash       string                       `json:"brief_content_hash"`
-	SourceStrategyID       string                       `json:"source_strategy_id,omitempty"`
-	SourceStrategyRevision int64                        `json:"source_strategy_revision,omitempty"`
-	SourceStrategyHash     string                       `json:"source_strategy_content_hash,omitempty"`
-	BusinessCode           string                       `json:"business_code"`
-	BusinessGeneration     int64                        `json:"business_generation"`
-	BusinessVersion        string                       `json:"business_version"`
-	BusinessContentHash    string                       `json:"business_content_hash"`
-	SkillName              string                       `json:"skill_name"`
-	SkillVersion           string                       `json:"skill_version"`
-	SkillContentHash       string                       `json:"skill_content_hash"`
-	SelectionSource        string                       `json:"selection_source"`
-	RecommendationSnapshot RecommendationSnapshot       `json:"recommendation_snapshot"`
-	Answers                map[string]json.RawMessage   `json:"answers"`
-	Completeness           CreativeTaskPlanCompleteness `json:"completeness"`
+	ContractVersion        string                            `json:"contract_version,omitempty"`
+	PackageRef             *CreativeTaskPlanPackageReference `json:"package_ref,omitempty"`
+	HandoffRef             *CreativeTaskStrategyHandoffRef   `json:"handoff_ref,omitempty"`
+	SelectedRouteID        string                            `json:"selected_route_id,omitempty"`
+	BriefID                string                            `json:"brief_id"`
+	BriefVersion           int64                             `json:"brief_version"`
+	BriefContentHash       string                            `json:"brief_content_hash"`
+	SourceStrategyID       string                            `json:"source_strategy_id,omitempty"`
+	SourceStrategyRevision int64                             `json:"source_strategy_revision,omitempty"`
+	SourceStrategyHash     string                            `json:"source_strategy_content_hash,omitempty"`
+	BusinessCode           string                            `json:"business_code"`
+	BusinessGeneration     int64                             `json:"business_generation"`
+	BusinessVersion        string                            `json:"business_version"`
+	BusinessContentHash    string                            `json:"business_content_hash"`
+	SkillName              string                            `json:"skill_name"`
+	SkillVersion           string                            `json:"skill_version"`
+	SkillContentHash       string                            `json:"skill_content_hash"`
+	SelectionSource        string                            `json:"selection_source"`
+	RecommendationSnapshot RecommendationSnapshot            `json:"recommendation_snapshot"`
+	Answers                map[string]json.RawMessage        `json:"answers"`
+	Completeness           CreativeTaskPlanCompleteness      `json:"completeness"`
 }
 
 type SourceStrategyRequest struct {
@@ -87,12 +100,23 @@ type SourceStrategyRequest struct {
 }
 
 type CreateCreativeTaskPlanRequest struct {
-	BriefID         string                 `json:"brief_id"`
-	BriefVersion    int64                  `json:"brief_version"`
-	SourceStrategy  *SourceStrategyRequest `json:"source_strategy,omitempty"`
-	BusinessCode    string                 `json:"business_code"`
-	SelectionSource string                 `json:"selection_source"`
-	CatalogHash     string                 `json:"catalog_hash"`
+	ContractVersion string                            `json:"contract_version,omitempty"`
+	StrategyPackage *CreativeTaskPlanPackageReference `json:"strategy_package_ref,omitempty"`
+	SelectedRouteID string                            `json:"selected_route_id,omitempty"`
+	BriefID         string                            `json:"brief_id"`
+	BriefVersion    int64                             `json:"brief_version"`
+	SourceStrategy  *SourceStrategyRequest            `json:"source_strategy,omitempty"`
+	BusinessCode    string                            `json:"business_code"`
+	SelectionSource string                            `json:"selection_source"`
+	CatalogHash     string                            `json:"catalog_hash"`
+}
+
+type CreativeTaskPlanPackageReference struct {
+	PackageID              string `json:"package_id"`
+	PackageVersion         int64  `json:"package_version"`
+	PackageContentHash     string `json:"package_content_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version"`
+	HandoffContentHash     string `json:"handoff_content_hash"`
 }
 
 type CreativeTaskAnswerOperation struct {
@@ -106,7 +130,10 @@ type CreativeTaskAnswerPatch struct {
 	Operations      []CreativeTaskAnswerOperation `json:"operations"`
 }
 
-const creativeTaskPlanSelect = `SELECT id, organization_id, project_id, brief_id,
+const creativeTaskPlanSelect = `SELECT id, organization_id, project_id,
+	contract_version, COALESCE(package_id, ''), COALESCE(package_version, 0),
+	COALESCE(package_content_hash, ''), COALESCE(handoff_contract_version, ''),
+	COALESCE(handoff_content_hash, ''), COALESCE(selected_route_id, ''), brief_id,
 	brief_version, brief_content_hash, COALESCE(source_strategy_id, ''),
 	COALESCE(source_strategy_revision, 0), COALESCE(source_strategy_content_hash, ''),
 	status, business_code, business_generation, business_version, business_content_hash,
@@ -129,16 +156,64 @@ func (s Service) CreateCreativeTaskPlan(
 		return CreativeTaskPlan{}, false, err
 	}
 	request.BriefID = strings.TrimSpace(request.BriefID)
+	request.ContractVersion = strings.TrimSpace(request.ContractVersion)
+	request.SelectedRouteID = strings.TrimSpace(request.SelectedRouteID)
 	request.BusinessCode = strings.TrimSpace(request.BusinessCode)
 	request.SelectionSource = strings.TrimSpace(request.SelectionSource)
 	request.CatalogHash = strings.TrimSpace(request.CatalogHash)
-	if err := key.Validate(); err != nil || request.BriefID == "" || request.BriefVersion < 1 ||
-		request.BusinessCode == "" || request.CatalogHash == "" ||
+	if err := key.Validate(); err != nil || request.BusinessCode == "" || request.CatalogHash == "" ||
 		(request.SelectionSource != "recommended" && request.SelectionSource != "manual") {
 		return CreativeTaskPlan{}, false, ErrInvalidRequest
 	}
 	if _, err := s.project(ctx, actor, projectID); err != nil {
 		return CreativeTaskPlan{}, false, err
+	}
+	planContractVersion := "strategy-creative-task-plan/v1"
+	var packageRef CreativeTaskPlanPackageReference
+	if request.ContractVersion == "strategy-creative-task-plan/v2" {
+		if request.StrategyPackage == nil || request.SourceStrategy != nil ||
+			request.SelectedRouteID == "" {
+			return CreativeTaskPlan{}, false, ErrInvalidRequest
+		}
+		packageRef = *request.StrategyPackage
+		if strings.TrimSpace(packageRef.PackageID) == "" || packageRef.PackageVersion < 1 ||
+			strings.TrimSpace(packageRef.PackageContentHash) == "" ||
+			packageRef.HandoffContractVersion != CreativeHandoffContractVersion ||
+			strings.TrimSpace(packageRef.HandoffContentHash) == "" {
+			return CreativeTaskPlan{}, false, ErrInvalidRequest
+		}
+		pkg, err := s.GetPackage(ctx, actor, projectID, packageRef.PackageID, packageRef.PackageVersion)
+		if err != nil {
+			return CreativeTaskPlan{}, false, err
+		}
+		if !strings.EqualFold(string(pkg.ContentHash), packageRef.PackageContentHash) {
+			return CreativeTaskPlan{}, false, ErrVersionConflict
+		}
+		handoff, err := s.GetCreativeHandoff(ctx, actor, projectID, packageRef.PackageID, packageRef.PackageVersion)
+		if err != nil {
+			return CreativeTaskPlan{}, false, err
+		}
+		if !strings.EqualFold(string(handoff.HandoffContentHash), packageRef.HandoffContentHash) {
+			return CreativeTaskPlan{}, false, ErrVersionConflict
+		}
+		routeFound := false
+		for _, route := range handoff.Routes {
+			if route.RouteID == request.SelectedRouteID {
+				routeFound = true
+				break
+			}
+		}
+		if !routeFound {
+			return CreativeTaskPlan{}, false, ErrInvalidRequest
+		}
+		request.BriefID = pkg.Snapshot.Brief.BriefID
+		request.BriefVersion = pkg.Snapshot.Brief.Version
+		planContractVersion = request.ContractVersion
+	} else if request.ContractVersion != "" && request.ContractVersion != "strategy-creative-task-plan/v1" {
+		return CreativeTaskPlan{}, false, ErrInvalidRequest
+	}
+	if request.BriefID == "" || request.BriefVersion < 1 {
+		return CreativeTaskPlan{}, false, ErrInvalidRequest
 	}
 	brief, err := s.GetBriefVersion(ctx, actor, request.BriefID, request.BriefVersion)
 	if err != nil {
@@ -222,8 +297,14 @@ func (s Service) CreateCreativeTaskPlan(
 		status = "ready"
 	}
 	plan := CreativeTaskPlan{
-		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		BriefID: brief.BriefID, BriefVersion: brief.Version,
+		ContractVersion: planContractVersion,
+		ID:              id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		PackageID: packageRef.PackageID, PackageVersion: packageRef.PackageVersion,
+		PackageContentHash:     packageRef.PackageContentHash,
+		HandoffContractVersion: packageRef.HandoffContractVersion,
+		HandoffContentHash:     packageRef.HandoffContentHash,
+		SelectedRouteID:        request.SelectedRouteID,
+		BriefID:                brief.BriefID, BriefVersion: brief.Version,
 		BriefContentHash: string(brief.ContentHash),
 		SourceStrategyID: sourceStrategyID, SourceStrategyRevision: sourceStrategyRevision,
 		SourceStrategyHash: sourceStrategyHash, Status: status,
@@ -234,6 +315,14 @@ func (s Service) CreateCreativeTaskPlan(
 		RecommendationSnapshot: recommendation, Answers: answers, Completeness: completeness,
 		CurrentRevision: 1, Version: 1, CreatedBy: actor.Principal.ID,
 		CreatedAt: now, UpdatedAt: now,
+	}
+	if planContractVersion == "strategy-creative-task-plan/v2" {
+		ref := packageRef
+		plan.PackageRef = &ref
+		plan.HandoffRef = &CreativeTaskStrategyHandoffRef{
+			ContractVersion: packageRef.HandoffContractVersion,
+			ContentHash:     packageRef.HandoffContentHash,
+		}
 	}
 	plan.Profile = &profile
 	snapshot := plan.snapshot()
@@ -247,15 +336,23 @@ func (s Service) CreateCreativeTaskPlan(
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_creative_task_plans
-		(id, organization_id, project_id, brief_id, brief_version, brief_content_hash,
+		(id, organization_id, project_id, contract_version,
+		 package_id, package_version, package_content_hash,
+		 handoff_contract_version, handoff_content_hash, selected_route_id,
+		 brief_id, brief_version, brief_content_hash,
 		 source_strategy_id, source_strategy_revision, source_strategy_content_hash,
 		 status, business_code, business_generation, business_version, business_content_hash,
 		 skill_name, skill_version, skill_content_hash, selection_source,
 		 recommendation_snapshot, answers, completeness, current_revision,
 		 current_strategy_version, current_agent_task_id, version, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?, ?, ?,
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
+		 NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?,
+		 NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?, ?, ?,
 		 ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, 1, ?, ?, ?)`,
-		plan.ID, plan.OrganizationID, plan.ProjectID, plan.BriefID, plan.BriefVersion,
+		plan.ID, plan.OrganizationID, plan.ProjectID, plan.ContractVersion,
+		plan.PackageID, plan.PackageVersion, plan.PackageContentHash,
+		plan.HandoffContractVersion, plan.HandoffContentHash, plan.SelectedRouteID,
+		plan.BriefID, plan.BriefVersion,
 		plan.BriefContentHash, plan.SourceStrategyID, plan.SourceStrategyRevision,
 		plan.SourceStrategyHash, plan.Status, plan.BusinessCode, plan.BusinessGeneration,
 		plan.BusinessVersion, plan.BusinessContentHash, plan.SkillName, plan.SkillVersion,
@@ -520,7 +617,10 @@ func (s Service) PatchCreativeTaskPlanAnswers(
 
 func (p CreativeTaskPlan) snapshot() CreativeTaskPlanSnapshot {
 	return CreativeTaskPlanSnapshot{
-		BriefID: p.BriefID, BriefVersion: p.BriefVersion,
+		ContractVersion: p.ContractVersion,
+		PackageRef:      p.PackageRef, HandoffRef: p.HandoffRef,
+		SelectedRouteID: p.SelectedRouteID,
+		BriefID:         p.BriefID, BriefVersion: p.BriefVersion,
 		BriefContentHash: p.BriefContentHash, SourceStrategyID: p.SourceStrategyID,
 		SourceStrategyRevision: p.SourceStrategyRevision, SourceStrategyHash: p.SourceStrategyHash,
 		BusinessCode: p.BusinessCode, BusinessGeneration: p.BusinessGeneration,
@@ -743,7 +843,10 @@ func scanCreativeTaskPlan(row interface{ Scan(...any) error }) (CreativeTaskPlan
 	var plan CreativeTaskPlan
 	var recommendation, answers, completeness json.RawMessage
 	if err := row.Scan(
-		&plan.ID, &plan.OrganizationID, &plan.ProjectID, &plan.BriefID,
+		&plan.ID, &plan.OrganizationID, &plan.ProjectID, &plan.ContractVersion,
+		&plan.PackageID, &plan.PackageVersion, &plan.PackageContentHash,
+		&plan.HandoffContractVersion, &plan.HandoffContentHash, &plan.SelectedRouteID,
+		&plan.BriefID,
 		&plan.BriefVersion, &plan.BriefContentHash, &plan.SourceStrategyID,
 		&plan.SourceStrategyRevision, &plan.SourceStrategyHash, &plan.Status,
 		&plan.BusinessCode, &plan.BusinessGeneration, &plan.BusinessVersion,
@@ -769,6 +872,18 @@ func scanCreativeTaskPlan(row interface{ Scan(...any) error }) (CreativeTaskPlan
 	}
 	if plan.Answers == nil {
 		plan.Answers = map[string]json.RawMessage{}
+	}
+	if plan.ContractVersion == "strategy-creative-task-plan/v2" {
+		plan.PackageRef = &CreativeTaskPlanPackageReference{
+			PackageID: plan.PackageID, PackageVersion: plan.PackageVersion,
+			PackageContentHash:     plan.PackageContentHash,
+			HandoffContractVersion: plan.HandoffContractVersion,
+			HandoffContentHash:     plan.HandoffContentHash,
+		}
+		plan.HandoffRef = &CreativeTaskStrategyHandoffRef{
+			ContractVersion: plan.HandoffContractVersion,
+			ContentHash:     plan.HandoffContentHash,
+		}
 	}
 	return plan, nil
 }

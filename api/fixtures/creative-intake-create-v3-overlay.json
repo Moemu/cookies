@@ -1,0 +1,16 @@
+{
+  "contract_version": "creative-intake-create/v3",
+  "source": "strategy_package",
+  "strategy_package_ref": {
+    "package_id": "strategy_package_03",
+    "package_version": 3,
+    "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handoff_contract_version": "strategy-creative-handoff/v1",
+    "handoff_content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "selected_route_id": "route_xhs_image_text",
+  "task_overlay_ref": {
+    "overlay_id": "overlay_xhs_launch_01",
+    "content_hash": "sha256:16c8efaae785146616c2c7650d91253cce8eb6f5ad7eea2e93571e7ccae476b6"
+  }
+}

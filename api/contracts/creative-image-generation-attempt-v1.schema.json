@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-image-generation-attempt-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "id", "organization_id", "project_id", "task_id", "draft_revision", "image_plan_order", "attempt_no", "prompt_package_id", "generation_spec", "generation_spec_hash", "status", "created_by", "created_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "creative-image-generation-attempt/v1"},
+    "id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "draft_revision": {"type": "integer", "minimum": 1},
+    "image_plan_order": {"type": "integer", "minimum": 1, "maximum": 3},
+    "attempt_no": {"type": "integer", "minimum": 1},
+    "prompt_package_id": {"type": "string", "minLength": 1},
+    "generation_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_alias", "width", "height", "quality", "output_format"],
+      "properties": {
+        "model_alias": {"type": "string", "minLength": 1},
+        "width": {"const": 1024},
+        "height": {"const": 1536},
+        "quality": {"const": "medium"},
+        "output_format": {"const": "png"}
+      }
+    },
+    "generation_spec_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "provider_job_id": {"type": "string"},
+    "render_job_id": {"type": "string"},
+    "status": {"enum": ["queued", "running", "base_asset_ready", "rendering", "succeeded", "failed", "cancelled", "stale"]},
+    "base_asset_ref": {"oneOf": [{"$ref": "#/$defs/assetRef"}, {"type": "null"}]},
+    "final_asset_ref": {"oneOf": [{"$ref": "#/$defs/assetRef"}, {"type": "null"}]},
+    "reused_from_attempt_id": {"type": "string"},
+    "error_code": {"type": "string"},
+    "error_message": {"type": "string"},
+    "stale_reason": {"type": "string"},
+    "created_by": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "assetRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "version"],
+      "properties": {
+        "asset_id": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

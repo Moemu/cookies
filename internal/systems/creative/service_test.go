@@ -623,8 +623,9 @@ func testService() Service {
 			intakes: map[string]CreativeIntake{}, tasks: map[string]TaskDetail{}, renders: map[string]RenderJob{},
 			versions: map[string]CreativeVersion{}, packages: map[string]CreativePackage{},
 		},
-		Projects: testProjects{},
-		Now:      func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) },
+		Projects:                            testProjects{},
+		AllowLegacyTaskStrategyIntakeWrites: true,
+		Now:                                 func() time.Time { return time.Date(2026, time.July, 23, 1, 0, 0, 0, time.UTC) },
 		NewID: func(prefix string) (string, error) {
 			sequence++
 			return fmt.Sprintf("%s_%d", prefix, sequence), nil
@@ -733,7 +734,10 @@ func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake
 			}
 			return existing, true, nil
 		}
-		if intake.Source == IntakeSourceStrategyPackage && existing.Source == IntakeSourceStrategyPackage && sameStrategyPackage(existing.Request.StrategyPackage, intake.Request.StrategyPackage) {
+		if intake.Source == IntakeSourceStrategyPackage && existing.Source == IntakeSourceStrategyPackage &&
+			sameStrategyPackage(existing.Request.StrategyPackage, intake.Request.StrategyPackage) &&
+			existing.Request.SelectedRouteID == intake.Request.SelectedRouteID &&
+			sameTaskOverlay(existing.Request.TaskOverlay, intake.Request.TaskOverlay) {
 			return existing, true, nil
 		}
 		if intake.Source == IntakeSourceTaskStrategy && existing.Source == IntakeSourceTaskStrategy &&
@@ -743,6 +747,14 @@ func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake
 	}
 	r.intakes[intake.ID] = intake
 	return intake, false, nil
+}
+
+func sameTaskOverlay(left, right *TaskOverlayReference) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.OverlayID == right.OverlayID &&
+		left.ExpectedContentHash == right.ExpectedContentHash
 }
 
 func sameTaskStrategy(left, right *TaskStrategyReference) bool {

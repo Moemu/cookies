@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -124,7 +125,43 @@ func main() {
 	creativeService := &creative.Service{
 		Repository: creativeRepository, ViralRemakes: creativeRepository,
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
-		CommerceWorkspaces: creativeRepository,
+		CommerceWorkspaces: creativeRepository, Directions: creativeRepository,
+	}
+	if cfg.Creative.DirectionPlanningEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure CreativeDirection planner: %v", textAdapterErr)
+		}
+		creativeService.DirectionPlanner = creative.ModelCreativeDirectionPlanner{
+			Text:       &provider.Service{TextAdapter: textAdapter},
+			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
+		}
+		creativeService.ImageTextDraftPlanner = creative.ModelImageTextDraftPlanner{
+			Text:       &provider.Service{TextAdapter: textAdapter},
+			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
+		}
+		log.Printf(
+			"CreativeDirection planning configured: model_alias=%s routes=xiaohongshu_image_text",
+			cfg.Creative.DirectionPlannerModelAlias,
+		)
+	}
+	if fontPath := os.Getenv("COOKIES_CREATIVE_IMAGE_FONT_PATH"); fontPath != "" {
+		fontBytes, fontErr := os.ReadFile(fontPath)
+		if fontErr != nil {
+			log.Fatalf("read Creative image renderer font: %v", fontErr)
+		}
+		fontChecksum := strings.ToLower(strings.TrimSpace(os.Getenv("COOKIES_CREATIVE_IMAGE_FONT_SHA256")))
+		renderer := &creative.ImageTextRenderer{
+			FontBytes: fontBytes, FontRef: fontPath + "@sha256:" + fontChecksum,
+			ExpectedSHA256: fontChecksum,
+		}
+		if readyErr := renderer.Ready(); readyErr != nil {
+			log.Fatalf("configure Creative image renderer: %v", readyErr)
+		}
+		creativeService.ImageRenderer = renderer
+		creativeService.ImageBaseAssets = creativeImageAssetIO{uploads: uploadService}
+		creativeService.RenderedImages = creativeRenderedImageWriter{uploads: uploadService}
+		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV1)
 	}
 	if cfg.Creative.ShortDramaModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -255,10 +292,32 @@ func main() {
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
+	// 文本模型出口。Strategy 和 Insights 共用同一个网关适配器和同一个能力别名——
+	// 它们要的是同一件事：调一次文本模型。**目前也共用同一个开关**
+	// （COOKIES_STRATEGY_REAL_PROVIDER_ENABLED），这是个遗留：
+	// 想单独关掉素材洞察的提取而留着策略生成，现在做不到。
+	var textProvider *provider.Service
+	if cfg.Strategy.RealProviderEnabled {
+		textAdapter, err := buildTextAdapter(cfg, db)
+		if err != nil {
+			log.Fatalf("configure Provider text adapter: %v", err)
+		}
+		textProvider = &provider.Service{TextAdapter: textAdapter}
+	}
 	insightsService := &insights.Service{
-		Repository: insights.MySQLRepository{DB: db},
-		Projects:   projectService,
-		Delivery:   deliveryinsights.Reader{Service: deliveryService},
+		Repository:  insights.MySQLRepository{DB: db},
+		Assets:      insights.MySQLRepository{DB: db},
+		Connectors:  insights.MySQLRepository{DB: db},
+		Runs:        insights.MySQLRepository{DB: db},
+		Experiments: insights.MySQLRepository{DB: db},
+		Projects:    projectService,
+		Delivery:    deliveryinsights.Reader{Service: deliveryService},
+	}
+	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
+	// 库里一条编造的特征，代价远大于一次失败的提取。
+	if textProvider != nil {
+		insightsService.Text = textProvider
+		insightsService.TextModelAlias = cfg.Strategy.TextModelAlias
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
@@ -287,14 +346,6 @@ func main() {
 		}
 	}
 	if cfg.Strategy.Enabled {
-		var textProvider *provider.Service
-		if cfg.Strategy.RealProviderEnabled {
-			textAdapter, err := buildTextAdapter(cfg, db)
-			if err != nil {
-				log.Fatalf("configure Provider text adapter: %v", err)
-			}
-			textProvider = &provider.Service{TextAdapter: textAdapter}
-		}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService,
 			CreativeAssets: uploadService, Agents: agentStore, Text: textProvider,
@@ -332,6 +383,7 @@ func main() {
 		creativeService.Sources = strategyCreativeReader
 		if cfg.Strategy.CreativeTaskPlanningEnabled {
 			creativeService.TaskStrategies = strategyCreativeReader
+			creativeService.TaskOverlays = strategyCreativeReader
 		}
 		if cfg.Strategy.PackageToCreativeEnabled {
 			creativeService.StrategyPackages = strategyCreativeReader
@@ -384,6 +436,11 @@ func main() {
 			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher}
 		}
 		dependencies.ProviderJobs = providerService
+		imageTextReconciler := creative.ImageTextReconciler{
+			Service: creativeService, Repository: creativeRepository,
+			Provider: providerService, Limit: 100,
+		}
+		startWorker(workerContext, "creative-image-text-reconcile", imageTextReconciler.ProcessOnce)
 		for kind, handler := range provider.NewRuntimeWorker(runtimeStore, providerService).Handlers {
 			runtimeHandlers[kind] = handler
 		}
@@ -559,11 +616,49 @@ func (s creativeMediaSource) OpenVideo(ctx context.Context, organizationID contr
 
 type creativeRenderedAssetWriter struct{ uploads *assets.UploadService }
 
+type creativeImageAssetIO struct{ uploads *assets.UploadService }
+
+type creativeRenderedImageWriter struct{ uploads *assets.UploadService }
+
 func (w creativeRenderedAssetWriter) IngestRenderedVideo(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, renderJobID string, content io.Reader, sizeBytes int64) (contract.ProjectAssetRef, error) {
 	if w.uploads == nil {
 		return contract.ProjectAssetRef{}, fmt.Errorf("rendered asset intake is unavailable")
 	}
 	return w.uploads.IngestRenderedVideo(ctx, requestContext, projectID, renderJobID, content, sizeBytes)
+}
+
+func (r creativeImageAssetIO) OpenImage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {
+	if r.uploads == nil {
+		return nil, fmt.Errorf("image asset reader is unavailable")
+	}
+	reader, info, err := r.uploads.OpenPreview(ctx, actor, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	if info.MIMEType != "image/png" && info.MIMEType != "image/jpeg" {
+		reader.Close()
+		return nil, fmt.Errorf("image asset is not a supported image")
+	}
+	return reader, nil
+}
+
+func (w creativeRenderedImageWriter) IngestRenderedImage(
+	ctx context.Context,
+	requestContext contract.RequestContext,
+	projectID contract.ProjectID,
+	renderJobID string,
+	content io.Reader,
+	sizeBytes int64,
+	sourceAssets []contract.AssetVersionRef,
+	sourceResources []contract.ResourceRef,
+) (contract.ProjectAssetRef, error) {
+	if w.uploads == nil {
+		return contract.ProjectAssetRef{}, fmt.Errorf("rendered image intake is unavailable")
+	}
+	return w.uploads.IngestRenderedImage(
+		ctx, requestContext, projectID, renderJobID, content, sizeBytes,
+		sourceAssets, sourceResources,
+	)
 }
 
 func (r creativeAssetReader) ReadForCreative(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (creative.CreativeAssetSnapshot, error) {

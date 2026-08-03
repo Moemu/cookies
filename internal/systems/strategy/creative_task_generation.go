@@ -19,6 +19,7 @@ import (
 const AgentKindCreativeTaskGenerate = "strategy.creative_task.generate"
 
 var reservedCreativeOutputFields = map[string]bool{
+	"concept": true, "hook": true, "creative_direction": true,
 	"script": true, "dialogue": true, "storyboard": true, "shot": true,
 	"camera": true, "model_prompt": true, "seedance_prompt": true,
 	"timeline": true, "creative_version": true, "prompt": true,
@@ -72,40 +73,62 @@ type CreativeTaskStrategyLineage struct {
 }
 
 type CreativeTaskStrategyDocument struct {
-	ContractVersion   string                         `json:"contract_version"`
-	PlanRef           CreativeTaskPlanRef            `json:"plan_ref"`
-	BusinessRef       CreativeBusinessRef            `json:"business_ref"`
-	Objective         string                         `json:"objective"`
-	Audience          StrategyAudience               `json:"audience"`
-	CoreMessage       string                         `json:"core_message"`
-	MessageHierarchy  []string                       `json:"message_hierarchy"`
-	Hypotheses        []CreativeTaskHypothesis       `json:"hypotheses"`
-	BusinessStrategy  map[string]any                 `json:"business_strategy"`
-	ClaimsAndEvidence []string                       `json:"claims_and_evidence"`
-	Media             CreativeMediaAssessment        `json:"media"`
-	AssetRequirements []CreativeTaskAssetRequirement `json:"asset_requirements"`
-	Guardrails        []string                       `json:"guardrails"`
-	ReferenceUse      CreativeTaskReferenceUse       `json:"reference_use"`
-	OpenQuestions     []string                       `json:"open_questions"`
-	Lineage           CreativeTaskStrategyLineage    `json:"lineage"`
+	ContractVersion   string                          `json:"contract_version"`
+	PlanRef           CreativeTaskPlanRef             `json:"plan_ref"`
+	PackageRef        *CreativeTaskStrategyPackageRef `json:"package_ref,omitempty"`
+	HandoffRef        *CreativeTaskStrategyHandoffRef `json:"handoff_ref,omitempty"`
+	SelectedRouteID   string                          `json:"selected_route_id,omitempty"`
+	BusinessRef       CreativeBusinessRef             `json:"business_ref"`
+	Objective         string                          `json:"objective"`
+	Audience          StrategyAudience                `json:"audience"`
+	CoreMessage       string                          `json:"core_message"`
+	MessageHierarchy  []string                        `json:"message_hierarchy"`
+	Hypotheses        []CreativeTaskHypothesis        `json:"hypotheses"`
+	BusinessStrategy  map[string]any                  `json:"business_strategy"`
+	ClaimsAndEvidence []string                        `json:"claims_and_evidence"`
+	Media             CreativeMediaAssessment         `json:"media"`
+	AssetRequirements []CreativeTaskAssetRequirement  `json:"asset_requirements"`
+	Guardrails        []string                        `json:"guardrails"`
+	ReferenceUse      CreativeTaskReferenceUse        `json:"reference_use"`
+	OpenQuestions     []string                        `json:"open_questions"`
+	Lineage           CreativeTaskStrategyLineage     `json:"lineage"`
+}
+
+type CreativeTaskStrategyPackageRef struct {
+	PackageID              string `json:"package_id"`
+	PackageVersion         int64  `json:"package_version"`
+	PackageContentHash     string `json:"package_content_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version"`
+	HandoffContentHash     string `json:"handoff_content_hash"`
+}
+
+type CreativeTaskStrategyHandoffRef struct {
+	ContractVersion string `json:"contract_version"`
+	ContentHash     string `json:"content_hash"`
 }
 
 type CreativeTaskStrategyVersion struct {
-	PlanID                string                       `json:"plan_id"`
-	Version               int64                        `json:"version"`
-	OrganizationID        contract.OrganizationID      `json:"organization_id"`
-	ProjectID             contract.ProjectID           `json:"project_id"`
-	PlanRevision          int64                        `json:"plan_revision"`
-	ContractVersion       string                       `json:"contract_version"`
-	Document              CreativeTaskStrategyDocument `json:"document"`
-	ContentHash           string                       `json:"content_hash"`
-	GenerationContextHash string                       `json:"generation_context_hash"`
-	AgentTaskID           string                       `json:"agent_task_id"`
-	SkillName             string                       `json:"skill_name"`
-	SkillVersion          string                       `json:"skill_version"`
-	SkillContentHash      string                       `json:"skill_content_hash"`
-	CreatedBy             string                       `json:"created_by"`
-	CreatedAt             time.Time                    `json:"created_at"`
+	PlanID                string                        `json:"plan_id"`
+	Version               int64                         `json:"version"`
+	OrganizationID        contract.OrganizationID       `json:"organization_id"`
+	ProjectID             contract.ProjectID            `json:"project_id"`
+	PlanRevision          int64                         `json:"plan_revision"`
+	ContractVersion       string                        `json:"contract_version"`
+	Document              CreativeTaskStrategyDocument  `json:"document"`
+	ContentHash           string                        `json:"content_hash"`
+	GenerationContextHash string                        `json:"generation_context_hash"`
+	AgentTaskID           string                        `json:"agent_task_id"`
+	SkillName             string                        `json:"skill_name"`
+	SkillVersion          string                        `json:"skill_version"`
+	SkillContentHash      string                        `json:"skill_content_hash"`
+	CreatedBy             string                        `json:"created_by"`
+	CreatedAt             time.Time                     `json:"created_at"`
+	TaskOverlayRef        *CreativeTaskOverlayReference `json:"task_overlay_ref,omitempty"`
+}
+
+type CreativeTaskOverlayReference struct {
+	OverlayID   string `json:"overlay_id"`
+	ContentHash string `json:"content_hash"`
 }
 
 type CreativeTaskGenerationResult struct {
@@ -344,6 +367,31 @@ func (s Service) handleCreativeTaskGenerate(
 		version.SkillName, version.SkillVersion, version.SkillContentHash,
 		version.CreatedBy, version.CreatedAt); err != nil {
 		return nil, err
+	}
+	if version.ContractVersion == "creative-task-strategy/v2" {
+		overlayID, err := s.newID("strategycreativeoverlay")
+		if err != nil {
+			return nil, err
+		}
+		overlay, err := materializeCreativeTaskOverlay(overlayID, version)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_creative_task_overlays (
+			organization_id, project_id, overlay_id, plan_id, task_strategy_version,
+			package_id, package_version, package_content_hash,
+			handoff_contract_version, handoff_content_hash, selected_route_id,
+			contract_version, snapshot, content_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			overlay.OrganizationID, overlay.ProjectID, overlay.OverlayID,
+			overlay.TaskStrategyRef.PlanID, overlay.TaskStrategyRef.Version,
+			overlay.PackageRef.PackageID, overlay.PackageRef.PackageVersion,
+			overlay.PackageRef.PackageContentHash, overlay.HandoffRef.ContractVersion,
+			overlay.HandoffRef.ContentHash, overlay.SelectedRouteID,
+			overlay.ContractVersion, mustJSON(overlay), overlay.ContentHash, overlay.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := s.insertSkillRun(
 		ctx, tx, agentTask, "strategy.creative_task.generate", "v1.0.0",
@@ -631,6 +679,24 @@ func normalizeCreativeTaskStrategy(
 ) {
 	brief := generation.Brief.Snapshot
 	document.ContractVersion = "creative-task-strategy/v1"
+	document.PackageRef = nil
+	document.HandoffRef = nil
+	document.SelectedRouteID = ""
+	if generation.Plan.ContractVersion == "strategy-creative-task-plan/v2" {
+		document.ContractVersion = "creative-task-strategy/v2"
+		document.PackageRef = &CreativeTaskStrategyPackageRef{
+			PackageID:              generation.Plan.PackageRef.PackageID,
+			PackageVersion:         generation.Plan.PackageRef.PackageVersion,
+			PackageContentHash:     generation.Plan.PackageRef.PackageContentHash,
+			HandoffContractVersion: generation.Plan.PackageRef.HandoffContractVersion,
+			HandoffContentHash:     generation.Plan.PackageRef.HandoffContentHash,
+		}
+		document.HandoffRef = &CreativeTaskStrategyHandoffRef{
+			ContractVersion: generation.Plan.HandoffRef.ContractVersion,
+			ContentHash:     generation.Plan.HandoffRef.ContentHash,
+		}
+		document.SelectedRouteID = generation.Plan.SelectedRouteID
+	}
 	document.Objective = brief.Campaign.Objective
 	document.Audience.Primary = brief.Audience.Primary
 	document.CoreMessage = brief.Proposition
@@ -739,12 +805,23 @@ func validateCreativeTaskStrategy(
 	profile creativecatalog.Profile,
 ) QualityReport {
 	report := QualityReport{Passed: true, Score: 100, Errors: []string{}, Warnings: []string{}}
-	if document.ContractVersion != "creative-task-strategy/v1" ||
+	if (document.ContractVersion != "creative-task-strategy/v1" &&
+		document.ContractVersion != "creative-task-strategy/v2") ||
 		strings.TrimSpace(document.Objective) == "" ||
 		strings.TrimSpace(document.Audience.Primary) == "" ||
 		strings.TrimSpace(document.CoreMessage) == "" ||
 		len(document.MessageHierarchy) == 0 || len(document.Hypotheses) == 0 {
 		report.Errors = append(report.Errors, "creative task strategy is incomplete")
+	}
+	if document.ContractVersion == "creative-task-strategy/v2" &&
+		(document.PackageRef == nil || document.HandoffRef == nil ||
+			strings.TrimSpace(document.SelectedRouteID) == "" ||
+			document.PackageRef.PackageID == "" || document.PackageRef.PackageVersion < 1 ||
+			document.PackageRef.PackageContentHash == "" ||
+			document.PackageRef.HandoffContentHash == "" ||
+			document.HandoffRef.ContractVersion != CreativeHandoffContractVersion ||
+			document.HandoffRef.ContentHash != document.PackageRef.HandoffContentHash) {
+		report.Errors = append(report.Errors, "creative task strategy package/handoff/route lineage is incomplete")
 	}
 	if containsReservedOutput(document.BusinessStrategy) {
 		report.Errors = append(report.Errors, ErrReservedOutputField.Error())
@@ -1007,11 +1084,15 @@ func (s Service) getCreativeTaskStrategyVersion(
 	if err := requireScope(actor, ScopeRead); err != nil {
 		return CreativeTaskStrategyVersion{}, err
 	}
-	return scanCreativeTaskStrategyVersion(s.DB.QueryRowContext(
+	value, err := scanCreativeTaskStrategyVersion(s.DB.QueryRowContext(
 		ctx, creativeTaskStrategySelect+`
 		WHERE organization_id = ? AND project_id = ? AND plan_id = ? AND version = ?`,
 		actor.OrganizationID, plan.ProjectID, plan.ID, versionNumber,
 	))
+	if err != nil {
+		return CreativeTaskStrategyVersion{}, err
+	}
+	return s.attachCreativeTaskOverlayRef(ctx, value)
 }
 
 func (s Service) ListCreativeTaskStrategyVersions(
@@ -1033,6 +1114,10 @@ func (s Service) ListCreativeTaskStrategyVersions(
 	result := []CreativeTaskStrategyVersion{}
 	for rows.Next() {
 		value, err := scanCreativeTaskStrategyVersion(rows)
+		if err != nil {
+			return nil, err
+		}
+		value, err = s.attachCreativeTaskOverlayRef(ctx, value)
 		if err != nil {
 			return nil, err
 		}

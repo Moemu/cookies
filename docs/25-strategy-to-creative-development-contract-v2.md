@@ -27,6 +27,11 @@
 11. 业务信息不完整时可以创建 `needs_clarification` Intake；结构非法、越权、跨 Project 或 Hash 不匹配时不得创建 Intake。
 12. 五个视频模式继续属于 Creative：短剧前贴、游戏前贴、电商前贴、爆款复刻和品牌视频。Strategy Route 只表达允许的业务方向与约束，不控制前端模板实现。
 13. 方舟 API Key、模型真实 ID、Base URL 和供应商临时 URL 不得出现在任何 Handoff、Intake、Fixture、日志或前端响应中。
+14. Creative 必须支持两种 Strategy 来源模式：只使用 `StrategyPackage + CreativeHandoff` 的基础模式，以及在同一 Package、Handoff 和 Route 上叠加任务级策略的增强模式。
+15. 任务级策略只是可选增强层，不得成为独立 Intake 根；新建增强 Intake 时 `source` 仍为 `strategy_package`。
+16. 任务级策略必须引用已批准 Package、冻结 Handoff 和稳定 Route；任一版本或 Hash 不一致时不得创建 Intake，也不得静默降级为基础模式。
+17. `creative-intake-create/v2` 与 `creative-intake/v2` 保持冻结不变；任务增强模式使用 v3 契约。
+18. LLM 不参与 Handoff、Overlay 和 Intake 的跨系统映射；LLM 从 Creative 拥有的 CreativeDirection 候选生成开始工作。
 
 ## 2. 共享词汇与 interface 分层
 
@@ -35,7 +40,11 @@
 | `StrategyPackage` | Strategy | 已批准、不可变的完整策略交付版本 |
 | `CreativeHandoff` | Strategy | 指定 StrategyPackage Version 面向 Creative 的不可变读模型 |
 | `CreativeRoute` | Strategy 提供、Creative 验证 | Strategy 允许 Creative 开始的一条业务路线 |
+| `CreativeTaskStrategyVersion` | Strategy | 从已批准 Package 和选定 Route 派生的不可变任务级策略 |
+| `CreativeTaskOverlay` | Strategy | 指定 TaskStrategyVersion 面向 Creative 的不可变增强投影；必须引用同一 Package、Handoff 和 Route |
 | `CreativeIntake` | Creative | Creative 保存的上游快照、Route 选择和本地 readiness 结果 |
+| `CreativePlanningContext` | Creative | 从 Intake 快照确定性构造的模型规划输入 |
+| `CreativeDirectionVersion` | Creative | 经结构化候选、语义校验和人工确认后冻结的创作方向 |
 | `CreativeVideoIntake` | Creative | 视频规划、生成和生产门禁使用的归一化内部输入 |
 | `CreativeTask` | Creative | 从 planning-ready Intake 创建的正式制作任务 |
 | `ExecutionBrief` | Creative | Creative 补充的创作者、脚本、镜头、交付规格、排期和修改轮次 |
@@ -47,10 +56,14 @@
 ```text
 StrategyPackage（已批准、不可变）
   → strategy-creative-handoff/v1
-  → creative-intake-create/v2
-  → CreativeIntake v2（保存 input_snapshot）
+  → 可选 CreativeTaskStrategyVersion / CreativeTaskOverlay
+  → creative-intake-create/v2（基础模式）
+    或 creative-intake-create/v3（基础 + 可选增强层）
+  → CreativeIntake v2 / v3（保存 input_snapshot）
+  → CreativePlanningContext
+  → CreativeDirection 候选与人工确认版本
   → creative-video-intake/v1（Creative 内部归一化）
-  → CreativeTask / CreativeDirection / ExecutionBrief
+  → CreativeTask / ExecutionBrief
   → ProviderJob
   → CreativeVersion / CreativePackage
 ```
@@ -67,6 +80,14 @@ StrategyPackage（已批准、不可变）
 | `api/contracts/creative-intake-create-v2.schema.json` | Creative | 创建 Strategy 来源 Intake 的命令 |
 | `api/contracts/creative-intake-v2.schema.json` | Creative | Creative 持久化并返回的 Intake |
 | `api/contracts/creative-video-intake-v1.schema.json` | Creative | 视频规划、生成、生产三级门禁输入 |
+| `api/contracts/strategy-creative-task-plan-v2.schema.json` | Strategy | Package/Route-bound 任务计划 |
+| `api/contracts/strategy-creative-task-strategy-v2.schema.json` | Strategy | 带 Package、Handoff、Route 血缘的任务策略 |
+| `api/contracts/strategy-creative-task-overlay-v1.schema.json` | Strategy | 面向 Creative 的不可变任务增强投影 |
+| `api/contracts/creative-intake-create-v3.schema.json` | Creative | 创建基础 + 可选任务增强 Intake 的命令 |
+| `api/contracts/creative-intake-v3.schema.json` | Creative | Creative 持久化的增强 Intake |
+| `api/contracts/creative-planning-context-v1.schema.json` | Creative | Creative 内部统一规划输入 |
+| `api/contracts/creative-direction-candidate-batch-v1.schema.json` | Creative | 结构化方向候选批次 |
+| `api/contracts/creative-direction-v1.schema.json` | Creative | 人工确认后的不可变方向版本 |
 | `api/fixtures/strategy-creative-handoff-v1-ready.json` | 联合 | 多 Route、可规划的 Handoff |
 | `api/fixtures/strategy-creative-handoff-v1-blocked.json` | 联合 | 信息不足、需要澄清的 Handoff |
 | `api/fixtures/creative-intake-create-v2.json` | Creative | 创建命令示例 |

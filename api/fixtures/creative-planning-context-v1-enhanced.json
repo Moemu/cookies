@@ -1,0 +1,56 @@
+{
+  "contract_version": "creative-planning-context/v1",
+  "input_identity_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "selected_route": {
+    "route_id": "route_xhs_image_text",
+    "deliverable_type": "image_text",
+    "purpose": "brand",
+    "channels": [
+      "xiaohongshu"
+    ]
+  },
+  "objective": {
+    "statement": "建立新品高端修护认知，并验证功效证据对咨询意愿的提升。"
+  },
+  "audience": [
+    {
+      "segment_id": "audience_urban_25_35",
+      "label": "25—35 岁高线城市功效护肤人群"
+    }
+  ],
+  "proposition": "以可验证的蜂皇修护体验回应可信修护需求。",
+  "message_hierarchy": [
+    "真实使用场景",
+    "已批准的功效证据"
+  ],
+  "guardrails": [
+    "不得使用无法验证的绝对化功效承诺"
+  ],
+  "claims": [
+    {
+      "claim_id": "claim_guerlain_repair_01",
+      "approved_text": "帮助改善肌肤干燥与粗糙感。"
+    }
+  ],
+  "assets": [
+    {
+      "asset_id": "asset_product_packshot",
+      "version": 1,
+      "role": "product_image"
+    }
+  ],
+  "hypotheses": [
+    {
+      "hypothesis_id": "hypothesis_scene_first_01",
+      "statement": "场景先行比产品先行更容易建立代入感。"
+    }
+  ],
+  "task_refinements": {
+    "objective": "优先验证真实使用场景能否提升有效咨询意愿。",
+    "audience": "首次接触新品且需要可信证据的人群。",
+    "message_priorities": [
+      "先呈现真实使用场景",
+      "再使用已批准证据"
+    ]
+  }
+}

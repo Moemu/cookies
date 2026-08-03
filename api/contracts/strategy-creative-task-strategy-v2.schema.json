@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-creative-task-strategy-v2.schema.json",
+  "title": "creative-task-strategy/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "plan_ref", "package_ref", "handoff_ref", "selected_route_id", "business_ref", "objective", "audience", "core_message", "message_hierarchy", "hypotheses", "business_strategy", "claims_and_evidence", "asset_requirements", "guardrails", "reference_use", "open_questions", "lineage"],
+  "properties": {
+    "contract_version": {"const": "creative-task-strategy/v2"},
+    "plan_ref": {"$ref": "#/$defs/versionRef"},
+    "package_ref": {"$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef"},
+    "handoff_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "content_hash"],
+      "properties": {
+        "contract_version": {"const": "strategy-creative-handoff/v1"},
+        "content_hash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "selected_route_id": {"$ref": "#/$defs/text"},
+    "business_ref": {"type": "object"},
+    "objective": {"$ref": "#/$defs/text"},
+    "audience": {"type": "object"},
+    "core_message": {"$ref": "#/$defs/text"},
+    "message_hierarchy": {"$ref": "#/$defs/stringList"},
+    "hypotheses": {"type": "array", "minItems": 1},
+    "business_strategy": {
+      "type": "object",
+      "not": {
+        "anyOf": [
+          {"required": ["concept"]},
+          {"required": ["hook"]},
+          {"required": ["script"]},
+          {"required": ["storyboard"]},
+          {"required": ["shot"]},
+          {"required": ["prompt"]}
+        ]
+      }
+    },
+    "claims_and_evidence": {"$ref": "#/$defs/stringList"},
+    "media": {"type": "object"},
+    "asset_requirements": {"type": "array"},
+    "guardrails": {"$ref": "#/$defs/stringList"},
+    "reference_use": {"type": "object"},
+    "open_questions": {"$ref": "#/$defs/stringList"},
+    "lineage": {"type": "object"}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stringList": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+    "versionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_id", "revision", "content_hash"],
+      "properties": {
+        "plan_id": {"$ref": "#/$defs/text"},
+        "revision": {"type": "integer", "minimum": 1},
+        "content_hash": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

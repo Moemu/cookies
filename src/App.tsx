@@ -39,10 +39,10 @@ export default function App() {
   const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
   const activeProjectId = route.projectId ?? currentProject.id
   const changeSystem = (next: SystemKey) => navigate(projectPath(activeProjectId, next, systemLanding[next]))
-  const openProject = (projectId: string, next?: SystemKey, navId?: string, objectId?: string, view?: string) => {
+  const openProject = (projectId: string, next?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => {
     selectProject(projectId)
     const rememberedPath = next && !navId ? getRememberedProjectSystemPath(projectId, next) : undefined
-    navigate(next ? rememberedPath ?? projectPath(projectId, next, navId ?? systemLanding[next], objectId, view) : projectHomePath(projectId))
+    navigate(next ? rememberedPath ?? projectPath(projectId, next, navId ?? systemLanding[next], objectId, view, contextId) : projectHomePath(projectId))
   }
 
   const manageProject = (projectId: string) => {

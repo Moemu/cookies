@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-planning-context-v1.schema.json",
+  "title": "creative-planning-context/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "input_identity_hash", "selected_route", "objective", "audience", "proposition", "message_hierarchy", "guardrails", "claims", "assets", "hypotheses"],
+  "properties": {
+    "contract_version": {"const": "creative-planning-context/v1"},
+    "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "selected_route": {"type": "object"},
+    "objective": {"type": "object"},
+    "audience": {"type": "array"},
+    "proposition": {"type": "string", "minLength": 1},
+    "message_hierarchy": {"type": "array"},
+    "guardrails": {"type": "array"},
+    "claims": {"type": "array"},
+    "assets": {"type": "array"},
+    "hypotheses": {"type": "array"},
+    "task_refinements": {"type": ["object", "null"]}
+  }
+}
