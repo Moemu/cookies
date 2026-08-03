@@ -28,31 +28,63 @@ export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, onExe
   const [scenario, setScenario] = useState<DeliveryExecutionScenario>('success')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [detailRevision, setDetailRevision] = useState(0)
   const idempotencyKeys = useRef(new Map<string, string>())
+  const listRequest = useRef(0)
+  const detailRequest = useRef(0)
+  const executionRequest = useRef(0)
+  const activeProjectId = useRef(projectId)
+  const activeChangeSetId = useRef(changeSet.id)
+  activeProjectId.current = projectId
+  activeChangeSetId.current = changeSet.id
 
   const refresh = useCallback(async () => {
     if (!projectId) return
+    const request = ++listRequest.current
+    const requestedProjectId = projectId
     setBusy(true)
     try {
       const values = await deliveryExecutionApi.list(projectId)
+      if (request !== listRequest.current || activeProjectId.current !== requestedProjectId) return
       setRecords(values)
       setSelectedId(current => {
         if (values.some(value => value.execution.id === current)) return current
         return values.find(value => value.execution.changeSetId === changeSet.id)?.execution.id ?? values[0]?.execution.id ?? ''
       })
+      setSelectedRecord(undefined)
+      setDetailRevision(current => current + 1)
       setNotice(values.length ? `已从 Go 权威 API 加载 ${values.length} 条 Execution 记录。` : '当前 Project 暂无 Execution 记录。')
     } catch (error) {
+      if (request !== listRequest.current || activeProjectId.current !== requestedProjectId) return
       setNotice(error instanceof Error ? error.message : '读取 Execution 记录失败。')
     } finally {
-      setBusy(false)
+      if (request === listRequest.current && activeProjectId.current === requestedProjectId) setBusy(false)
     }
   }, [changeSet.id, projectId])
+
+  useEffect(() => {
+    listRequest.current += 1
+    detailRequest.current += 1
+    executionRequest.current += 1
+    idempotencyKeys.current.clear()
+    setRecords([])
+    setSelectedId('')
+    setSelectedRecord(undefined)
+    setNotice('')
+    setBusy(false)
+  }, [projectId])
+
+  useEffect(() => {
+    executionRequest.current += 1
+    setBusy(false)
+  }, [changeSet.id])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
   useEffect(() => {
+    const request = ++detailRequest.current
     if (!projectId || !selectedId) {
       setSelectedRecord(undefined)
       return
@@ -60,13 +92,16 @@ export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, onExe
     let cancelled = false
     void deliveryExecutionApi.get(projectId, selectedId)
       .then(value => {
-        if (!cancelled) setSelectedRecord(value)
+        if (!cancelled && request === detailRequest.current && activeProjectId.current === projectId) setSelectedRecord(value)
       })
       .catch(error => {
-        if (!cancelled) setNotice(error instanceof Error ? error.message : '读取 Execution 明细失败。')
+        if (!cancelled && request === detailRequest.current && activeProjectId.current === projectId) {
+          setSelectedRecord(undefined)
+          setNotice(error instanceof Error ? error.message : '读取 Execution 明细失败。')
+        }
       })
     return () => { cancelled = true }
-  }, [projectId, selectedId])
+  }, [detailRevision, projectId, selectedId])
 
   const selectedSummary = useMemo(
     () => records.find(value => value.execution.id === selectedId),
@@ -80,21 +115,26 @@ export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, onExe
 
   const startExecution = async () => {
     if (!canStart) return
+    const requestedProjectId = projectId
+    const requestedChangeSetId = changeSet.id
+    const request = ++executionRequest.current
     const keyScope = `${changeSet.id}:${scenario}`
     const idempotencyKey = idempotencyKeys.current.get(keyScope) ?? createIdempotencyKey()
     idempotencyKeys.current.set(keyScope, idempotencyKey)
     setBusy(true)
     try {
       const value = await deliveryExecutionApi.execute(projectId, changeSet.id, changeSet.version, scenario, idempotencyKey)
+      if (request !== executionRequest.current || activeProjectId.current !== requestedProjectId || activeChangeSetId.current !== requestedChangeSetId) return
       setRecords(current => [value, ...current.filter(item => item.execution.id !== value.execution.id)])
       setSelectedId(value.execution.id)
       setSelectedRecord(value)
       onExecutionCreated(value.changeSet)
       setNotice(`已创建或复用 Execution ${value.execution.id.slice(-12)}。所有结果来自 source=mock。`)
     } catch (error) {
+      if (request !== executionRequest.current || activeProjectId.current !== requestedProjectId || activeChangeSetId.current !== requestedChangeSetId) return
       setNotice(error instanceof Error ? error.message : '启动模拟执行失败。')
     } finally {
-      setBusy(false)
+      if (request === executionRequest.current && activeProjectId.current === requestedProjectId && activeChangeSetId.current === requestedChangeSetId) setBusy(false)
     }
   }
 

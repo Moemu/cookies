@@ -264,6 +264,12 @@ paths:
       - $ref: '#/components/parameters/ChangeSetID'
     post:
       operationId: rollbackDeliveryChangeSet
+      summary: Record the legacy mock rollback lifecycle transition for a succeeded execution
+      description: >-
+        This compatibility transition is accepted only when the ChangeSet's durable
+        Execution is completed and succeeded. Failed has no target effect to roll back;
+        partial requires a new controlled compensation ChangeSet; result_unknown and
+        non-terminal executions must be queried and reconciled first.
       requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
         '200': { $ref: '#/components/responses/ChangeSet' }

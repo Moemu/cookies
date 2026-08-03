@@ -322,6 +322,7 @@ type Repository interface {
 	AdvanceStep(context.Context, Execution, ExecutionStep, ExecutionStep) (ExecutionStep, error)
 	ListExecutions(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ExecutionResult, error)
 	GetExecution(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, error)
+	GetExecutionByChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, error)
 	CreateMetricSnapshot(context.Context, DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error)
 	ListMetricSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]DeliveryMetricSnapshot, error)
 }
@@ -987,6 +988,13 @@ func (s Service) Rollback(ctx context.Context, actor contract.ActorContext, proj
 		return ChangeSet{}, err
 	}
 	if value.Status != ChangeSetExecuted {
+		return ChangeSet{}, ErrInvalidState
+	}
+	execution, err := s.Repository.GetExecutionByChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if execution.Execution.Status != ExecutionSucceeded || execution.Execution.CompletedAt == nil {
 		return ChangeSet{}, ErrInvalidState
 	}
 	transitioned, err := s.Repository.TransitionChangeSet(

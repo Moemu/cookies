@@ -48,10 +48,27 @@ test('Delivery execution scenarios persist steps, enforce idempotency, and prese
 
   // The A04 panel must recover durable server state after a full browser refresh.
   const executionIdSuffix = createdBody.execution.id.slice(-12)
+  let detailReads = 0
+  await page.route(`**${executionURL(projectId, createdBody.execution.id)}`, async route => {
+    const response = await route.fetch()
+    const body = await response.json() as ExecutionResult
+    detailReads += 1
+    if (detailReads > 1) {
+      body.execution.status = 'result_unknown'
+      body.execution.retry_allowed = false
+      body.execution.recovery_action = 'query_and_reconcile'
+      body.execution.recovery_reason = 'refreshed authoritative recovery decision'
+    }
+    await route.fulfill({ response, json: body })
+  })
   await page.goto(`/projects/${projectId}/delivery/approvals`)
   const executionPanel = page.getByRole('region', { name: '模拟执行记录' })
   await expect(executionPanel).toBeVisible()
   await expect(executionPanel.getByText(executionIdSuffix, { exact: true }).first()).toBeVisible()
+  await expect(executionPanel.locator('.execution-detail-heading h4')).toHaveText('succeeded')
+  await executionPanel.getByRole('button', { name: '从 Go API 刷新' }).click()
+  await expect(executionPanel.locator('.execution-detail-heading h4')).toHaveText('result_unknown')
+  await expect(executionPanel.getByText('refreshed authoritative recovery decision').first()).toBeVisible()
   await page.reload()
   await expect(executionPanel).toBeVisible()
   await expect(executionPanel.getByText(executionIdSuffix, { exact: true }).first()).toBeVisible()
@@ -101,6 +118,11 @@ test('Delivery execution scenarios persist steps, enforce idempotency, and prese
         expect.objectContaining({ status: 'failed' }),
       ]))
     }
+    const rollback = await request.post(`/api/delivery/v1/projects/${projectId}/change-sets/${changeSet.id}:rollback`, {
+      data: { expected_version: body.change_set.version },
+    })
+    expect(rollback.status()).toBe(409)
+    expect(await rollback.json()).toMatchObject({ error: { code: 'INVALID_STATE' }, source: 'mock' })
   }
 })
 
@@ -155,13 +177,16 @@ type ExecutionScenario = 'success' | 'failed' | 'partial' | 'result_unknown'
 type ChangeSet = { id: string; version: number }
 
 type ExecutionResult = {
+  change_set: ChangeSet
   execution: {
     id: string
+    status: string
     request_hash: string
     steps: Array<{ status: string; evidence_ref: string }>
     compensation_candidates: string[]
     retry_allowed: boolean
     recovery_action: string
+    recovery_reason: string
   }
   evidence: {
     source: string

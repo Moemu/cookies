@@ -195,6 +195,51 @@ func TestApprovalRemainsValidAfterExecutionAndRollbackLifecycleTransitions(t *te
 	}
 }
 
+func TestRollbackRejectsNonSuccessfulExecutionOutcomes(t *testing.T) {
+	for _, scenario := range []ExecutionScenario{
+		ExecutionScenarioFailed,
+		ExecutionScenarioPartial,
+		ExecutionScenarioResultUnknown,
+	} {
+		t.Run(string(scenario), func(t *testing.T) {
+			service, actor, _ := newTestServiceClock()
+			approved := approveGoldenChangeSet(t, &service, actor)
+			executed, _, err := service.Execute(context.Background(), actor, "project_a", approved.ID, "rollback-"+string(scenario), ExecuteRequest{
+				ExpectedVersion: approved.Version,
+				Scenario:        scenario,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Rollback(context.Background(), actor, "project_a", approved.ID, executed.ChangeSet.Version); !errors.Is(err, ErrInvalidState) {
+				t.Fatalf("rollback %s error=%v, want invalid state", scenario, err)
+			}
+		})
+	}
+}
+
+func TestRollbackRejectsInFlightExecution(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	approved := approveGoldenChangeSet(t, &service, actor)
+	executed, _, err := service.Execute(context.Background(), actor, "project_a", approved.ID, "rollback-in-flight", ExecuteRequest{
+		ExpectedVersion: approved.Version,
+		Scenario:        ExecutionScenarioSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	for index := range repository.executions {
+		if repository.executions[index].Execution.ID == executed.Execution.ID {
+			repository.executions[index].Execution.Status = ExecutionExecuting
+			repository.executions[index].Execution.CompletedAt = nil
+		}
+	}
+	if _, err := service.Rollback(context.Background(), actor, "project_a", approved.ID, executed.ChangeSet.Version); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("rollback in-flight error=%v, want invalid state", err)
+	}
+}
+
 func TestApprovalIsValidFor24HoursThenExpires(t *testing.T) {
 	service, actor, setNow := newTestServiceClock()
 	changeSet := approveGoldenChangeSet(t, &service, actor)
@@ -999,6 +1044,15 @@ func (r *memoryRepository) ListExecutions(_ context.Context, organizationID cont
 func (r *memoryRepository) GetExecution(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (ExecutionResult, error) {
 	for _, value := range r.executions {
 		if value.Execution.OrganizationID == organizationID && value.Execution.ProjectID == projectID && value.Execution.ID == id {
+			return value, nil
+		}
+	}
+	return ExecutionResult{}, ErrNotFound
+}
+
+func (r *memoryRepository) GetExecutionByChangeSet(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, changeSetID string) (ExecutionResult, error) {
+	for _, value := range r.executions {
+		if value.Execution.OrganizationID == organizationID && value.Execution.ProjectID == projectID && value.Execution.ChangeSetID == changeSetID {
 			return value, nil
 		}
 	}

@@ -72,6 +72,8 @@ A04 将已有的即时本地模拟接缝替换为受控、可刷新读取的 `Ex
 
 `failed` 只表示已确认目标效果**未**产生；中断或无法验证的情况不能被写成 failed，而应为 `result_unknown`。所有 terminal fixture 都返回 `retry_allowed=false`：同一 key 的操作只能回放同一条 Execution，不能创建第二次尝试。`partial` 明确保留已完成和未完成的 Step，以及可选的补偿候选项；补偿是新的受控动作，绝不自动回滚。`result_unknown` 必须先查询/重新识别目标并形成恢复决策（`query_and_reconcile`），不能盲目重试。允许的恢复动作仅为 `none`、`create_new_change_set`、`review_and_compensate` 和 `query_and_reconcile`。
 
+为兼容 A03 保留的 `:rollback` 生命周期接口只接受已经完成且 `succeeded` 的 mock Execution。非终态、`failed`、`partial` 和 `result_unknown` 均返回 `INVALID_STATE`：它不能被用来宣称未知效果已经回滚，也不能绕过新的受控补偿或查询复核流程。
+
 每个 Step 保存 sequence、action、attempt、effect、outcome summary、evidence reference、时间戳和 version；Execution 保存 recovery action/reason、compensation candidates 和全部 Step。Evidence 也携带 `source=mock`、fixture scenario 和非敏感 references。
 
 ---

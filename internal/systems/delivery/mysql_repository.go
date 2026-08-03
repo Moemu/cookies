@@ -624,6 +624,18 @@ func (r MySQLRepository) GetExecution(ctx context.Context, organizationID contra
 	return value, nil
 }
 
+func (r MySQLRepository) GetExecutionByChangeSet(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, changeSetID string) (ExecutionResult, error) {
+	var id string
+	err := r.DB.QueryRowContext(ctx, `SELECT id FROM delivery_executions WHERE organization_id=? AND project_id=? AND change_set_id=?`, organizationID, projectID, changeSetID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return r.GetExecution(ctx, organizationID, projectID, id)
+}
+
 func sameApproval(left, right DeliveryApproval) bool {
 	return left.ApprovalID == right.ApprovalID &&
 		left.OrganizationID == right.OrganizationID &&
