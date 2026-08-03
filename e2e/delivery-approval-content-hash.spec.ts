@@ -119,7 +119,10 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
 
   const staleExecute = await request.post(
     `/api/delivery/v1/projects/${primaryProjectId}/change-sets/${v1ChangeSet.id}:execute`,
-    { data: { expected_version: approvedV1.version } },
+    {
+      headers: { 'Idempotency-Key': `a03-stale-${suffix}` },
+      data: { expected_version: approvedV1.version, scenario: 'success' },
+    },
   )
   expect(staleExecute.status()).toBe(409)
   expect(await staleExecute.json()).toMatchObject({
@@ -173,7 +176,7 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
   )
   await page.getByRole('button', { name: '模拟执行' }).click()
   const executeV2Response = await executeV2Promise
-  expect(executeV2Response.status()).toBe(200)
+  expect(executeV2Response.status()).toBe(201)
   expect(await executeV2Response.json()).toMatchObject({
     change_set: {
       id: v2ChangeSet.id,

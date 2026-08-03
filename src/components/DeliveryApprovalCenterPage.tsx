@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleAlert, CircleCheck, FileCheck2, Play, RotateCcw, ShieldCheck, ThumbsUp } from 'lucide-react'
+import { CircleAlert, CircleCheck, FileCheck2, RotateCcw, ShieldCheck, ThumbsUp } from 'lucide-react'
 import {
   deliveryPlanApi,
   type DeliveryApproval,
@@ -8,6 +8,7 @@ import {
 import { useProject } from '../context/ProjectContext'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
+import { DeliveryExecutionPanel } from './DeliveryExecutionPanel'
 
 const invalidReasonLabels: Record<NonNullable<DeliveryApproval['invalidReason']>, string> = {
   APPROVAL_EXPIRED: '审批已超过 24 小时有效期，需要重新预检并审批。',
@@ -55,19 +56,15 @@ export function DeliveryApprovalCenterPage({ state }: { state: DataState }) {
     void refresh()
   }, [refresh])
 
-  const apply = async (action: 'approve' | 'execute') => {
+  const apply = async (action: 'approve') => {
     if (!selected) return
     setBusy(true)
     try {
-      const updated = action === 'approve'
-        ? await deliveryPlanApi.approveChangeSet(projectId, selected.id, selected.version)
-        : await deliveryPlanApi.executeChangeSet(projectId, selected.id, selected.version)
+      const updated = await deliveryPlanApi.approveChangeSet(projectId, selected.id, selected.version)
       setChangeSets(current => current.map(item => item.id === updated.id ? updated : item))
-      setNotice(action === 'approve'
-        ? `已批准 Plan V${updated.planVersion}；审批将在 24 小时后过期。`
-        : '模拟执行完成，未写入真实广告平台。')
+      setNotice(`已批准 Plan V${updated.planVersion}；审批将在 24 小时后过期。`)
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : `${action === 'approve' ? '审批' : '执行'}失败`)
+      setNotice(error instanceof Error ? error.message : '审批失败')
     } finally {
       setBusy(false)
     }
@@ -146,16 +143,19 @@ export function DeliveryApprovalCenterPage({ state }: { state: DataState }) {
 
           <div className="approval-actions">
             <button
-              className="secondary-button"
-              onClick={() => void apply('execute')}
-              disabled={busy || !approvalValid}
-            ><Play size={15}/>模拟执行</button>
-            <button
               className="primary-button"
               onClick={() => void apply('approve')}
               disabled={busy || selected.status !== 'preflight_passed'}
             ><ThumbsUp size={15}/>批准当前内容快照</button>
           </div>
+          <DeliveryExecutionPanel
+            projectId={projectId}
+            changeSet={selected}
+            canExecute={approvalValid}
+            onExecutionCreated={updated => {
+              setChangeSets(current => current.map(item => item.id === updated.id ? updated : item))
+            }}
+          />
         </> : <div className="panel-empty"><FileCheck2 size={24}/>没有可显示的 Delivery ChangeSet。</div>}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </section>
