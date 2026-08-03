@@ -777,6 +777,17 @@ func oneOf(value string, allowed ...string) bool {
 }
 
 func creativeObjectiveType(snapshot PackageSnapshot) (string, bool) {
+	objectiveText := strings.ToLower(strings.Join(append(
+		[]string{snapshot.Strategy.Objective, snapshot.Brief.Snapshot.Campaign.Objective},
+		snapshot.Strategy.Measurement...,
+	), " "))
+	if containsAny(objectiveText,
+		"performance", "conversion", "转化", "获客", "留资", "线索", "成交", "销售", "购买", "安装", "注册") {
+		return "performance", true
+	}
+	if containsAny(objectiveText, "brand awareness", "品牌认知", "品牌心智", "品牌资产") {
+		return "brand", true
+	}
 	brand := false
 	performance := false
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
@@ -844,6 +855,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 		}
 		seen[platform] = true
 		routeBlockers := make([]HandoffIssue, 0)
+		routeWarnings := make([]HandoffIssue, 0)
 		ctaPolicy := CreativeCTAPolicy{
 			RequiredForGeneration: false, RequiredForDelivery: false, CTAIntent: "",
 		}
@@ -855,11 +867,12 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 					Message: "效果 Route 需要明确产品引用。", Source: "strategy", SourceRefIDs: []string{},
 				})
 			}
-			routeBlockers = append(routeBlockers, HandoffIssue{
-				Code: "cta_missing", Stage: "planning",
+			routeWarnings = append(routeWarnings, HandoffIssue{
+				Code: "cta_missing", Stage: "generation",
 				Path:    "routes.route_xiaohongshu_image_text.cta_policy.cta_intent",
-				Message: "效果 Route 需要显式确认 CTA intent。", Source: "strategy", SourceRefIDs: []string{},
+				Message: "效果 Route 需要在任务计划中显式确认 CTA intent。", Source: "strategy", SourceRefIDs: []string{},
 			})
+			ctaPolicy.RequiredForGeneration = true
 			ctaPolicy.RequiredForDelivery = true
 		}
 		routeStatus := "ready"
@@ -867,6 +880,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			routeStatus = "blocked"
 			blockers = append(blockers, routeBlockers...)
 		}
+		warnings = append(warnings, routeWarnings...)
 		routes = append(routes, CreativeHandoffRoute{
 			RouteID: "route_xiaohongshu_image_text", DeliverableType: "image_text",
 			Purpose: purpose, Channels: []string{"xiaohongshu"},
@@ -877,7 +891,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			CTAPolicy: ctaPolicy,
 			ClaimRefs: []string{}, AssetRequirements: []CreativeAssetRequirement{},
 			AssetRefs: []string{}, RouteReadiness: HandoffReadiness{
-				Status: routeStatus, Blockers: routeBlockers, Warnings: []HandoffIssue{},
+				Status: routeStatus, Blockers: routeBlockers, Warnings: routeWarnings,
 			},
 		})
 	}
@@ -932,7 +946,13 @@ func containsImageTextFormat(formats []string) bool {
 	for _, format := range formats {
 		normalized := strings.ToLower(strings.TrimSpace(format))
 		if strings.Contains(normalized, "图文") || strings.Contains(normalized, "image_text") ||
-			strings.Contains(normalized, "image-text") || strings.Contains(normalized, "image text") {
+			strings.Contains(normalized, "image-text") || strings.Contains(normalized, "image text") ||
+			strings.Contains(normalized, "图片") || strings.Contains(normalized, "配图") ||
+			strings.Contains(normalized, "长图") || strings.Contains(normalized, "海报") ||
+			strings.Contains(normalized, "三联图") || strings.Contains(normalized, "对比图") ||
+			strings.Contains(normalized, "步骤图") || strings.Contains(normalized, "实拍图") ||
+			strings.Contains(normalized, "carousel") || strings.Contains(normalized, "poster") ||
+			strings.Contains(normalized, "static image") || strings.Contains(normalized, "photo post") {
 			return true
 		}
 	}

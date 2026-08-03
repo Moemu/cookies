@@ -1237,6 +1237,12 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .creative-question small { color: var(--muted); font-size: 8px; line-height: 1.4; }
 .creative-question-grid input:not([type="checkbox"]), .creative-question-grid select, .creative-question-grid textarea { width: 100%; min-width: 0; padding: 8px; background: var(--white); border: 1px solid var(--line); border-radius: 5px; font-size: 10px; }
 .creative-question-grid output { padding: 8px; color: var(--muted); background: var(--white); border: 1px dashed var(--line); border-radius: 5px; font-size: 10px; line-height: 1.45; }
+.creative-route-state { display: flex; align-items: flex-start; gap: 9px; padding: 11px; color: #7a381f; border: 1px solid #efc7b5; border-radius: 6px; background: #fff8f4; }
+.creative-route-state > svg { flex: none; margin-top: 1px; }
+.creative-route-state > span { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.creative-route-state b { color: #6e2f18; font-size: 10px; }
+.creative-route-state small { color: #8c5842; font-size: 9px; line-height: 1.55; }
+.creative-route-state .text-button { flex: none; color: #9c4c16; font-size: 9px; white-space: nowrap; }
 .creative-question.readonly { opacity: .82; }
 .creative-question-options { display: flex; flex-wrap: wrap; gap: 6px; }
 .creative-question-options label { display: flex; align-items: center; gap: 4px; padding: 5px 7px; background: var(--white); border: 1px solid var(--line); border-radius: 5px; font-size: 9px; }
@@ -2679,6 +2685,20 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
+.kanon-review-full > .kanon-review-value-object { padding: 12px; }
+.kanon-review-value-text,
+.kanon-review-empty-value { margin: 7px 0 0; color: #344055; font-size: 11px; line-height: 1.65; white-space: pre-wrap; }
+.kanon-review-empty-value { color: var(--muted); }
+.kanon-review-value-list { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.kanon-review-value-list > li { position: relative; padding-left: 13px; }
+.kanon-review-value-list > li::before { content: ""; position: absolute; top: 8px; left: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--cobalt); }
+.kanon-review-value-list .kanon-review-value-text { margin: 0; }
+.kanon-review-value-object { display: grid; gap: 8px; margin: 8px 0 0; }
+.kanon-review-value-object > div { display: grid; grid-template-columns: minmax(88px, 116px) minmax(0, 1fr); gap: 10px; padding: 8px 9px; border: 1px solid #e5eaf1; border-radius: 5px; background: rgb(255 255 255 / 72%); }
+.kanon-review-value-object dt { color: #64748b; font-size: 9px; font-weight: 700; line-height: 1.6; }
+.kanon-review-value-object dd { min-width: 0; margin: 0; }
+.kanon-review-value-object dd > :first-child { margin-top: 0; }
+
 .kanon-review-comments {
   padding: 13px;
   border: 1px solid var(--line);
@@ -3167,6 +3187,7 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .kanon-deep-review .surface-toolbar > div { display: grid; gap: 4px; }.kanon-deep-review .surface-toolbar h3 { font-size: 12px; }.kanon-deep-review .surface-toolbar small { color: var(--text-3); font-size: 9px; }
 .kanon-deep-review-empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.kanon-deep-review-empty p { max-width: 560px; color: var(--text-2); font-size: 10px; line-height: 1.65; }
 .kanon-deep-review-pending { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--cobalt-50); }.kanon-deep-review-pending span { display: grid; gap: 4px; }.kanon-deep-review-pending b { font-size: 10px; }.kanon-deep-review-pending small { color: var(--text-3); font-size: 9px; }
+.kanon-deep-review-failed { display: flex; align-items: flex-start; gap: 10px; padding: 12px; color: #7a381f; border: 1px solid #efc7b5; border-radius: 6px; background: #fff8f4; }.kanon-deep-review-failed > svg { flex: none; margin-top: 1px; }.kanon-deep-review-failed > span { min-width: 0; flex: 1; display: grid; gap: 4px; }.kanon-deep-review-failed b { font-size: 10px; }.kanon-deep-review-failed small { color: #8c5842; font-size: 9px; line-height: 1.55; }.kanon-deep-review-failed em { color: var(--text-3); font-size: 8px; font-style: normal; }.kanon-deep-review-failed button { flex: none; }
 .kanon-deep-review-summary { color: var(--text-2); font-size: 11px; line-height: 1.7; }.kanon-deep-findings { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }.kanon-deep-findings article { padding: 11px; border: 1px solid var(--line); border-left: 3px solid var(--cobalt); border-radius: 5px; background: var(--surface); }.kanon-deep-findings article.blocker { border-left-color: var(--danger); }.kanon-deep-findings article.warning { border-left-color: var(--warning); }
 .kanon-deep-findings header { display: flex; justify-content: space-between; gap: 8px; color: var(--text-3); font-size: 8px; }.kanon-deep-findings h4 { margin: 7px 0 5px; font-size: 10px; }.kanon-deep-findings p, .kanon-deep-findings article > div { color: var(--text-2); font-size: 9px; line-height: 1.6; }.kanon-deep-findings article > div { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }.kanon-deep-findings article > div b { margin-right: 5px; }.kanon-deep-review-meta { color: var(--text-3); font-size: 8px; }
 

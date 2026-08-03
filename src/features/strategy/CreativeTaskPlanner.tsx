@@ -18,6 +18,7 @@ import type { ApiProjectMediaAsset } from '../../data/api'
 import { platformClient } from '../../data/platformClient'
 import type { SystemKey } from '../../types'
 import { createMutationKey, strategyApi } from './api'
+import { createRouteRevisionChannelStrategy, findPublishedPackageForDraft } from './creativeTaskPlanning'
 import type {
   BriefVersion,
   CreativeBusinessCapability,
@@ -34,11 +35,13 @@ import type {
 type Props = {
   briefVersion: BriefVersion | null
   draft: StrategyDraft | null
+  onCreateRouteRevision: (channelStrategy: unknown) => Promise<boolean>
+  onOpenStrategy: () => void
   onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
   projectId: string
 }
 
-export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: Props) {
+export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision, onOpenProject, onOpenStrategy, projectId }: Props) {
   const [catalogHash, setCatalogHash] = useState('')
   const [profiles, setProfiles] = useState<CreativeBusinessProfile[]>([])
   const [capabilities, setCapabilities] = useState<CreativeBusinessCapability[]>([])
@@ -80,6 +83,37 @@ export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: 
   const selectedRecommendation = recommendation?.recommended.find(item =>
     item.business_code === selectedCode,
   ) ?? recommendation?.alternatives.find(item => item.business_code === selectedCode)
+  const readyRoutes = creativeHandoff?.routes.filter(route => route.route_readiness.status === 'ready') ?? []
+  const routeBlockers = Array.from(new Set([
+    ...(creativeHandoff?.upstream_readiness.blockers ?? []),
+    ...(creativeHandoff?.routes.flatMap(route => route.route_readiness.blockers ?? []) ?? []),
+  ].map(routeIssueMessage)))
+  const routeState = !strategyPackage
+    ? {
+        title: '当前策略尚未发布交接包',
+        detail: draft?.status === 'approved'
+          ? '未找到与当前 Strategy Revision 精确匹配的已发布策略包，请刷新后重试。'
+          : '请先在“评审”中确认当前 Revision，发布后才能创建强绑定任务计划。',
+      }
+    : !creativeHandoff?.routes.length
+      ? {
+          title: '已发布策略包没有生成 Route',
+          detail: routeBlockers[0] || '渠道策略需要明确图文内容形式、品牌或效果目的，保存新 Revision 后重新评审发布。',
+        }
+      : !readyRoutes.length
+        ? {
+            title: '当前 Route 尚未就绪',
+            detail: routeBlockers[0] || '请先补齐 Route 的规划阻断项，再重新发布策略包。',
+          }
+        : null
+  const createPlanLabel = !strategyPackage
+    ? '等待策略评审发布'
+    : !readyRoutes.length
+      ? '等待可用 Route'
+      : '确认此业务并创建任务计划'
+  const routeRevision = draft?.revision
+    ? createRouteRevisionChannelStrategy(draft.revision.document.channel_strategy)
+    : null
   const hasUnsavedAnswers = Boolean(activePlan && selectedProfile && selectedProfile.questions.some(question => {
     if (question.brief_source_path &&
       hasDisplayValue(readPath(briefVersion?.snapshot, question.brief_source_path))) return false
@@ -99,11 +133,7 @@ export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: 
       strategyApi.listCreativeBusinessCapabilities(projectId, signal),
       strategyApi.listStrategyPackages(projectId, signal),
     ])
-    const nextPackage = packageResult.items.find(item =>
-      item.status === 'published' &&
-      item.snapshot.brief?.brief_id === briefVersion.brief_id &&
-      item.snapshot.brief?.version === briefVersion.version,
-    ) ?? null
+    const nextPackage = findPublishedPackageForDraft(packageResult.items, briefVersion, draft)
     const nextHandoff = nextPackage
       ? await strategyApi.getStrategyCreativeHandoff(
         projectId, nextPackage.package_id, nextPackage.version, signal,
@@ -120,7 +150,7 @@ export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: 
     setStrategyPackage(nextPackage)
     setCreativeHandoff(nextHandoff)
     setSelectedRouteId(current => {
-      if (nextHandoff?.routes.some(route => route.route_id === current)) return current
+      if (nextHandoff?.routes.some(route => route.route_id === current && route.route_readiness.status === 'ready')) return current
       return nextHandoff?.routes.find(route => route.route_readiness.status === 'ready')?.route_id ?? ''
     })
     setActivePlanId(nextPlan?.id ?? '')
@@ -143,7 +173,7 @@ export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: 
     return () => controller.abort()
     // A new immutable Brief version is a new planning context.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [briefVersion?.brief_id, briefVersion?.version, projectId])
+  }, [briefVersion?.brief_id, briefVersion?.version, draft?.current_revision, draft?.id, projectId])
 
   const selectPlan = (plan: CreativeTaskPlan) => {
     setActivePlanId(plan.id)
@@ -178,6 +208,20 @@ export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: 
       if (cause instanceof BackendApiError && cause.code === 'CATALOG_CHANGED') {
         await load().catch(() => undefined)
       }
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const createRouteRevision = async () => {
+    if (!routeRevision?.changed) {
+      onOpenStrategy()
+      return
+    }
+    setBusy('route-repair')
+    setError('')
+    try {
+      if (await onCreateRouteRevision(routeRevision.value)) onOpenStrategy()
     } finally {
       setBusy('')
     }
@@ -362,17 +406,17 @@ export function CreativeTaskPlanner({ briefVersion, onOpenProject, projectId }: 
         /> : null}
         {!activePlan ? <div className="creative-question">
           <span><label htmlFor="creative-route-select">策略交接 Route</label><em>任务计划强绑定</em></span>
-          {creativeHandoff
+          {readyRoutes.length
             ? <select id="creative-route-select" value={selectedRouteId} onChange={event => setSelectedRouteId(event.target.value)}>
-              {creativeHandoff.routes.map(route => <option disabled={route.route_readiness.status !== 'ready'} key={route.route_id} value={route.route_id}>
+              {readyRoutes.map(route => <option key={route.route_id} value={route.route_id}>
                 {route.channels.join('/')} · {route.deliverable_type} · {route.reason}
               </option>)}
             </select>
-            : <output>当前 Brief 尚无已批准 StrategyPackage/Handoff，请先完成策略审批。</output>}
+            : routeState ? <div className="creative-route-state" role="status"><AlertCircle size={16}/><span><b>{routeState.title}</b><small>{routeState.detail}</small>{routeBlockers.length > 1 ? <small>另有 {routeBlockers.length - 1} 项需补齐</small> : null}</span><button className="text-button" disabled={Boolean(busy)} onClick={() => void createRouteRevision()} type="button">{busy === 'route-repair' ? '正在创建…' : routeRevision?.changed ? '创建 Route 修订' : '去策略创建修订'}</button></div> : null}
         </div> : null}
         {!activePlan ? <button className="primary-button creative-plan-create" disabled={!selectedCode || !strategyPackage || !selectedRouteId || Boolean(busy)} onClick={() => void createPlan()}>
           {busy === 'create' ? <LoaderCircle className="spin" size={15}/> : <Check size={15}/>}
-          确认此业务并创建任务计划
+          {createPlanLabel}
         </button> : null}
       </div>
 
@@ -798,4 +842,14 @@ function messageOf(cause: unknown) {
     return '还有生成前必填信息未完成。'
   }
   return cause instanceof Error ? cause.message : '创意任务策略操作失败。'
+}
+
+function routeIssueMessage(issue: { code: string; message: string }) {
+  if (issue.code === 'creative_route_missing' || issue.code === 'creative_route_mode_missing') {
+    return '请在渠道策略中明确“小红书图文笔记”等内容形式和品牌/效果目的，保存新 Revision 后重新评审发布。'
+  }
+  if (issue.code === 'route_purpose_missing' || issue.code === 'objective_type_missing') {
+    return '请在策略目标或渠道角色中明确这是品牌认知还是效果获客，保存新 Revision 后重新评审发布。'
+  }
+  return issue.message
 }

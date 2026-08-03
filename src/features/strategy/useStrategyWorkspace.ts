@@ -35,6 +35,7 @@ export type StrategyWorkspaceState = {
   review: Review | null
   comments: ReviewComment[]
   deepReview: DeepReviewAnalysis | null
+  deepReviewError: string
   published: PackageVersion | null
   packages: PackageVersion[]
   readiness: GenerationReadiness | null
@@ -47,6 +48,7 @@ export type StrategyWorkspaceState = {
   busy: string
   error: string
   pendingAgentTaskId: string
+  pendingAgentPurpose: 'deep_review' | 'general' | ''
 }
 
 function messageOf(error: unknown) {
@@ -107,6 +109,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     review: null,
     comments: [],
     deepReview: null,
+    deepReviewError: '',
     published: null,
     packages: [],
     readiness: null,
@@ -119,6 +122,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     busy: '',
     error: '',
     pendingAgentTaskId: '',
+    pendingAgentPurpose: '',
   })
   const currentWorkspaceId = useRef('')
   const approvalMutationKey = useRef('')
@@ -192,6 +196,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let review: Review | null = null
     let comments: ReviewComment[] = []
     let deepReview: DeepReviewAnalysis | null = null
+    let deepReviewFailure = ''
     let published: PackageVersion | null = null
     let agentFailure = ''
     if (task?.current_strategy_id) {
@@ -220,6 +225,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ])
         comments = commentResult.items
         deepReview = analysis
+        if (analysis?.status === 'failed' && analysis.agent_task_id) {
+          const inspection = await strategyApi.getAgentTask(analysis.agent_task_id, signal).catch(() => null)
+          const problem = inspection?.task.error ?? inspection?.job?.error
+          deepReviewFailure = agentFailureMessage(problem?.code, problem?.message)
+        }
       }
     }
 
@@ -236,6 +246,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       review,
       comments,
       deepReview,
+      deepReviewError: deepReviewFailure,
       packages,
       published,
       readiness,
@@ -274,6 +285,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
 
   useEffect(() => {
     const agentTaskId = state.pendingAgentTaskId
+    const agentPurpose = state.pendingAgentPurpose
     if (!agentTaskId) return
     const controller = new AbortController()
     let timer = 0
@@ -288,12 +300,19 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           setState(current => ({
             ...current,
             pendingAgentTaskId: '',
-            error: failureMessage,
+            pendingAgentPurpose: '',
+            error: agentPurpose === 'deep_review' ? '' : failureMessage,
+            deepReviewError: agentPurpose === 'deep_review' ? failureMessage : current.deepReviewError,
           }))
           return
         }
         if (task.status === 'succeeded') {
-          setState(current => ({ ...current, pendingAgentTaskId: '' }))
+          setState(current => ({
+            ...current,
+            pendingAgentTaskId: '',
+            pendingAgentPurpose: '',
+            deepReviewError: agentPurpose === 'deep_review' ? '' : current.deepReviewError,
+          }))
           await reload()
           return
         }
@@ -307,7 +326,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [reload, state.pendingAgentTaskId])
+  }, [reload, state.pendingAgentPurpose, state.pendingAgentTaskId])
 
   useEffect(() => {
     const researchRun = state.researchRun
@@ -358,8 +377,18 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     }
   }, [projectId, state.documents])
 
-  const perform = useCallback(async (name: string, action: () => Promise<void>, reloadAfter = true) => {
-    setState(current => ({ ...current, busy: name, error: '' }))
+  const perform = useCallback(async (
+    name: string,
+    action: () => Promise<void>,
+    reloadAfter = true,
+    errorTarget: 'global' | 'deep_review' = 'global',
+  ) => {
+    setState(current => ({
+      ...current,
+      busy: name,
+      error: '',
+      deepReviewError: errorTarget === 'deep_review' ? '' : current.deepReviewError,
+    }))
     try {
       await action()
       if (reloadAfter) await load()
@@ -368,7 +397,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       if (error instanceof BackendApiError && error.code === 'VERSION_CONFLICT') {
         await load().catch(() => undefined)
       }
-      setState(current => ({ ...current, error: messageOf(error) }))
+      setState(current => ({
+        ...current,
+        error: errorTarget === 'global' ? messageOf(error) : '',
+        deepReviewError: errorTarget === 'deep_review' ? messageOf(error) : current.deepReviewError,
+      }))
       return false
     } finally {
       setState(current => ({ ...current, busy: '' }))
@@ -423,6 +456,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           ? current.messages
           : [...current.messages, result.message],
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     patchBriefField: (fieldPath: string, value: unknown) => perform(`brief:${fieldPath}`, async () => {
@@ -470,6 +504,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ...current,
         draft: result.strategy_draft,
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     retryStrategy: () => perform('retry-strategy', async () => {
@@ -482,6 +517,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ...current,
         draft: result.strategy_draft,
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     patchStrategySection: (section: string, value: unknown) => perform(`strategy:${section}`, async () => {
@@ -505,6 +541,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ...current,
         draft: current.draft ? { ...current.draft, status: 'generating' } : current.draft,
         pendingAgentTaskId: agentTask.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     submitStrategy: () => perform('submit-review', async () => {
@@ -528,9 +565,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       setState(current => ({
         ...current,
         deepReview: result.analysis,
+        deepReviewError: '',
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'deep_review',
       }))
-    }, false),
+    }, false, 'deep_review'),
     returnReview: (reason: string) => perform('return-review', async () => {
       if (!state.review) throw new Error('当前没有可退回的评审。')
       await strategyApi.returnReview(state.review.id, reason)

@@ -146,6 +146,14 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
         {activeView === '创意任务策略' ? <CreativeTaskPlanner
           briefVersion={state.briefVersion}
           draft={state.draft}
+          onCreateRouteRevision={value => actions.patchStrategySection('channel_strategy', value)}
+          onOpenStrategy={() => onOpenProject(
+            currentProject.id,
+            'strategy',
+            'workspaces',
+            state.detail?.workspace.id,
+            '策略',
+          )}
           onOpenProject={onOpenProject}
           projectId={currentProject.id}
         /> : null}
@@ -153,6 +161,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
           busy={state.busy}
           comments={state.comments}
           deepReview={state.deepReview}
+          deepReviewError={state.deepReviewError}
           draft={state.draft}
           review={state.review}
           revisions={state.revisions}
@@ -568,10 +577,11 @@ function strategyArrayTemplate(section: string): unknown {
   return ''
 }
 
-function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove, onDeepReview, onReturn, review, revisions }: {
+function ReviewPane({ busy, comments, deepReview, deepReviewError, draft, onAddComment, onApprove, onDeepReview, onReturn, review, revisions }: {
   busy: string
   comments: WorkspaceState['comments']
   deepReview: WorkspaceState['deepReview']
+  deepReviewError: string
   draft: StrategyDraft | null
   onAddComment: (body: string) => Promise<boolean>
   onApprove: () => Promise<boolean>
@@ -596,13 +606,13 @@ function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove
     <div className="kanon-review-proof"><span>候选哈希</span><code>{review.candidate_content_hash}</code></div>
     <section className="kanon-deep-review">
       <div className="surface-toolbar"><div><h3>GPT‑5.5 Pro 深度评审</h3><small>Responses · 后台运行 · 仅提供决策辅助</small></div>{deepReview?.status === 'succeeded' ? <span className="source-chip">{deepReview.model_version}</span> : null}</div>
-      {!deepReview ? <div className="kanon-deep-review-empty"><p>从证据、渠道协同、可衡量性与执行风险对候选 Revision 做第二视角检查。</p><button className="secondary-button" disabled={Boolean(busy) || review.status !== 'open'} onClick={() => void onDeepReview()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '启动深度评审'}</button></div> : deepReview.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>深度评审正在后台运行</b><small>可以离开页面，AgentTask 完成后会自动恢复结果。</small></span></div> : deepReview.status === 'failed' ? <div className="kanon-deep-review-empty"><p>本次深度评审未完成，人工评审不受影响。</p><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onDeepReview()}><RefreshCw size={14}/>重新运行</button></div> : <><p className="kanon-deep-review-summary">{deepReview.summary}</p><div className="kanon-deep-findings">{deepReview.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><small className="kanon-deep-review-meta">{deepReview.api_mode} · background={String(deepReview.background)} · {deepReview.latency_ms ?? 0} ms{deepReview.usage ? ` · ${deepReview.usage.total_tokens} tokens` : ''}</small></>}
+      {deepReviewError && !deepReview ? <DeepReviewFailure busy={busy} message={deepReviewError} onRetry={onDeepReview} reviewOpen={review.status === 'open'}/> : !deepReview ? <div className="kanon-deep-review-empty"><p>从证据、渠道协同、可衡量性与执行风险对候选 Revision 做第二视角检查。</p><button className="secondary-button" disabled={Boolean(busy) || review.status !== 'open'} onClick={() => void onDeepReview()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '启动深度评审'}</button></div> : deepReview.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>深度评审正在后台运行</b><small>可以离开页面，AgentTask 完成后会自动恢复结果。</small></span></div> : deepReview.status === 'failed' ? <DeepReviewFailure busy={busy} message={deepReviewError || '本次模型任务未完成，请稍后重试。'} onRetry={onDeepReview} reviewOpen={review.status === 'open'}/> : <><p className="kanon-deep-review-summary">{deepReview.summary}</p><div className="kanon-deep-findings">{deepReview.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><small className="kanon-deep-review-meta">{deepReview.api_mode} · background={String(deepReview.background)} · {deepReview.latency_ms ?? 0} ms{deepReview.usage ? ` · ${deepReview.usage.total_tokens} tokens` : ''}</small></>}
     </section>
     <div className="kanon-review-content">
       <div className="kanon-review-diffs">
-        {!diffs.length && candidate ? <pre>{JSON.stringify(candidate.document, null, 2)}</pre> : diffs.map(diff => <article key={diff.section}>
+        {!diffs.length && candidate ? <article className="kanon-review-full"><h3>候选策略</h3><ReviewValue value={candidate.document}/></article> : diffs.map(diff => <article key={diff.section}>
           <h3>{strategySectionLabel(diff.section)}</h3>
-          <div><section><small>之前</small><pre>{diff.before}</pre></section><section><small>候选</small><pre>{diff.after}</pre></section></div>
+          <div><section><small>之前</small><ReviewValue emptyLabel="暂无上一版本" value={diff.before}/></section><section><small>候选</small><ReviewValue value={diff.after}/></section></div>
         </article>)}
       </div>
       <aside className="kanon-review-comments">
@@ -620,6 +630,15 @@ function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove
       </aside>
     </div>
   </section>
+}
+
+function DeepReviewFailure({ busy, message, onRetry, reviewOpen }: {
+  busy: string
+  message: string
+  onRetry: () => Promise<boolean>
+  reviewOpen: boolean
+}) {
+  return <div className="kanon-deep-review-failed" role="status"><AlertCircle size={17}/><span><b>深度评审暂不可用</b><small>{message}</small><em>人工评审仍可继续，不会阻断策略包发布。</em></span><button className="secondary-button" disabled={Boolean(busy) || !reviewOpen} onClick={() => void onRetry()}><RefreshCw size={14}/>重新运行</button></div>
 }
 
 function ResearchPane({ brief, busy, documents, onAdoption, onResearch, onUpload, researchRun }: {
@@ -795,18 +814,36 @@ function strategyDiff(base?: DraftRevision, candidate?: DraftRevision) {
     : candidate.changed_sections
   return sections.map(section => ({
     section,
-    before: pretty((before as unknown as Record<string, unknown>)[section]),
-    after: pretty((candidate.document as unknown as Record<string, unknown>)[section]),
-  })).filter(item => item.before !== item.after)
+    before: (before as unknown as Record<string, unknown>)[section],
+    after: (candidate.document as unknown as Record<string, unknown>)[section],
+  })).filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after))
 }
 
 function splitValues(value: string) {
   return value.split(/[\n,，、]/).map(item => item.trim()).filter(Boolean)
 }
 
-function pretty(value: unknown) {
-  if (value === undefined) return '—'
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+function ReviewValue({ emptyLabel = '—', value }: { emptyLabel?: string; value: unknown }) {
+  if (value === undefined || value === null || value === '') {
+    return <p className="kanon-review-empty-value">{emptyLabel}</p>
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return <p className="kanon-review-empty-value">{emptyLabel}</p>
+    return <ul className="kanon-review-value-list">{value.map((item, index) => <li key={reviewValueKey(item, index)}><ReviewValue value={item}/></li>)}</ul>
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== 'contract_version')
+    if (!entries.length) return <p className="kanon-review-empty-value">{emptyLabel}</p>
+    return <dl className="kanon-review-value-object">{entries.map(([key, fieldValue]) => <div key={key}><dt>{strategyFieldLabel(key)}</dt><dd><ReviewValue value={fieldValue}/></dd></div>)}</dl>
+  }
+  if (typeof value === 'boolean') return <p className="kanon-review-value-text">{value ? '是' : '否'}</p>
+  return <p className="kanon-review-value-text">{String(value)}</p>
+}
+
+function reviewValueKey(value: unknown, index: number) {
+  if (typeof value === 'string' || typeof value === 'number') return `${index}-${String(value).slice(0, 32)}`
+  return String(index)
 }
 
 function strategySectionLabel(value: string) {
@@ -826,6 +863,7 @@ function strategySectionLabel(value: string) {
     platform_plans: '分平台方案',
     evidence_refs: '证据引用',
     compliance: '合规报告',
+    lineage: '生成追溯',
   }
   return labels[value] ?? value
 }
@@ -837,6 +875,9 @@ function strategyFieldLabel(value: string) {
     conversion_path: '转化路径', cadence: '内容节奏', primary_kpi: '核心 KPI',
     creative_ideas: '创意方向', hypothesis: '实验假设', variable: '实验变量',
     metric: '衡量指标', budget: '预算',
+    brief_id: 'Brief ID', brief_version: 'Brief 版本', project_context_version: 'Project 上下文版本',
+    skill_versions: '技能版本', passed: '是否通过', issues: '检查项', rule_id: '规则',
+    severity: '级别', message: '说明', checked_at: '检查时间',
   }
   return labels[value] ?? strategySectionLabel(value)
 }

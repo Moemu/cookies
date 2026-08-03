@@ -381,9 +381,26 @@ export type StrategyCreativeHandoff = {
     performance_mode?: string
     channels: string[]
     reason: string
-    route_readiness: { status: 'ready' | 'blocked' }
+    route_readiness: {
+      status: 'ready' | 'blocked'
+      blockers?: StrategyCreativeHandoffIssue[]
+      warnings?: StrategyCreativeHandoffIssue[]
+    }
   }>
-  upstream_readiness: { status: 'ready' | 'blocked' }
+  upstream_readiness: {
+    status: 'ready' | 'blocked'
+    blockers?: StrategyCreativeHandoffIssue[]
+    warnings?: StrategyCreativeHandoffIssue[]
+  }
+}
+
+export type StrategyCreativeHandoffIssue = {
+  code: string
+  stage: string
+  path: string
+  message: string
+  source: string
+  source_ref_ids?: string[]
 }
 
 export type CreativeIntakeV3 = {
