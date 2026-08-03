@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Cookies Delivery API
-  version: 1.1.0
-  description: Versioned mock delivery plans, authoritative preflight, controlled local simulation, and execution evidence.
+  version: 1.2.0
+  description: Versioned mock delivery plans, authoritative preflight, content-bound approvals, controlled local simulation, and execution evidence.
 servers:
   - url: /
 security:
@@ -150,6 +150,33 @@ paths:
         '201': { $ref: '#/components/responses/ChangeSet' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/change-sets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listDeliveryChangeSets
+      summary: List project-scoped Delivery ChangeSets with current approval validity
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: ChangeSet approval queue with explicit mock provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeSetList' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    get:
+      operationId: getDeliveryChangeSet
+      summary: Get one ChangeSet and its immutable approval audit projection
+      responses:
+        '200': { $ref: '#/components/responses/ChangeSet' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:preflight:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -173,10 +200,20 @@ paths:
       - $ref: '#/components/parameters/ChangeSetID'
     post:
       operationId: approveDeliveryChangeSet
+      summary: Approve the current immutable content snapshot for execute_mock
       requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
         '200': { $ref: '#/components/responses/ChangeSet' }
-        '409': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: SCOPE_REQUIRED when ActorContext lacks delivery.approve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: INVALID_STATE, STALE_PLAN_VERSION, or content mismatch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:execute:
@@ -193,7 +230,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExecutionResult' }
-        '409': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: SCOPE_REQUIRED or APPROVAL_SCOPE_EXCEEDED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, INVALID_STATE, or STALE_PLAN_VERSION.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:rollback:
@@ -413,12 +459,14 @@ components:
       allOf:
         - $ref: '#/components/schemas/PlanDraft'
         - type: object
-          required: [plan_id, organization_id, project_id, version_number, source, scenario, created_by, created_at]
+          required: [plan_id, organization_id, project_id, version_number, canonical_hash, platform, source, scenario, created_by, created_at]
           properties:
             plan_id: { type: string }
             organization_id: { type: string }
             project_id: { type: string }
             version_number: { type: integer, minimum: 1 }
+            canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+            platform: { type: string, const: ocean_engine_mock }
             source: { type: string, const: mock }
             scenario: { $ref: '#/components/schemas/Scenario' }
             created_by: { $ref: '#/components/schemas/Principal' }
@@ -453,7 +501,7 @@ components:
         updated_at: { type: string, format: date-time }
     Scenario:
       type: string
-      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list]
+      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list, approval_queue]
     PlanList:
       type: object
       required: [items, source, scenario]
@@ -509,13 +557,16 @@ components:
         checked_at: { type: string, format: date-time }
     ChangeSet:
       type: object
-      required: [id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, plan_id, plan_name, plan_version, plan_canonical_hash, budget_limit, status, risk_level, preflight_notes, source, scenario, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
         plan_id: { type: string }
+        plan_name: { type: string, minLength: 1 }
         plan_version: { type: integer, minimum: 1 }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        budget_limit: { $ref: '#/components/schemas/Budget' }
         status: { type: string, enum: [draft, preflight_passed, preflight_failed, approved, rejected, executed, rolled_back] }
         risk_level: { type: string }
         preflight_notes:
@@ -523,10 +574,54 @@ components:
           items: { type: string }
         approved_by: { type: string }
         approved_at: { type: string, format: date-time }
+        approval: { $ref: '#/components/schemas/ApprovalView' }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
         version: { type: integer, minimum: 1 }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ChangeSetList:
+      type: object
+      required: [items, source, scenario]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ChangeSet' }
+        source: { type: string, const: mock }
+        scenario: { type: string, const: approval_queue }
+    ApprovalView:
+      type: object
+      additionalProperties: false
+      required: [approval_id, organization_id, project_id, plan_id, plan_version, change_set_id, change_set_version, plan_canonical_hash, action_hash, action, scope, budget_limit_minor, currency, approved_by, approved_at, expires_at, source, scenario, valid, hash_summary, budget_limit]
+      properties:
+        approval_id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        change_set_id: { type: string }
+        change_set_version: { type: integer, minimum: 1 }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        action_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        action: { type: string, const: execute }
+        scope: { type: string, const: execute_mock }
+        budget_limit_minor: { type: integer, minimum: 0 }
+        currency: { type: string, const: CNY }
+        approved_by: { type: string }
+        approved_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
+        valid: { type: boolean }
+        invalid_reason:
+          type: string
+          enum: [APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, STALE_PLAN_VERSION]
+        hash_summary: { type: string, minLength: 1, maxLength: 12 }
+        budget_limit: { $ref: '#/components/schemas/Budget' }
+    CanonicalHash:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
     ExecutionResult:
       type: object
       required: [change_set, execution, evidence]
@@ -592,16 +687,20 @@ components:
           items: { $ref: '#/components/schemas/ExecutionResult' }
     Problem:
       type: object
-      required: [error]
+      required: [error, source, scenario]
       properties:
         error:
           type: object
           required: [code, message, request_id, retryable, details]
           properties:
-            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, STALE_PLAN_VERSION, SCOPE_REQUIRED, INTERNAL] }
+            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, PROJECT_ACCESS_DENIED, INVALID_STATE, VERSION_CONFLICT, STALE_PLAN_VERSION, APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, SCOPE_REQUIRED, INTERNAL] }
             message: { type: string }
             request_id: { type: string }
             retryable: { type: boolean }
             details:
               type: array
               items: { type: object }
+        source: { type: string, const: mock }
+        scenario:
+          type: string
+          description: Stable lowercase error scenario, for example approval_expired.

@@ -19,6 +19,7 @@ import { useProject } from '../context/ProjectContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, SystemKey } from '../types'
 import type { ApiAgencyWorkbench, ApiAssetVersionPointer, ApiMaterialConfirmation, ApiQualityCheckRun } from '../data/api'
 import { StateBoundary } from './StateBoundary'
+import { shortId } from '../data/shortId'
 
 export const taskTypeMeta: Record<BusinessTaskType, { label: string; domain: 'strategy' | 'creative'; detail: string }> = {
   strategy: { label: '策略任务', domain: 'strategy', detail: '从 Brief、研究证据与业务目标形成可评审策略。' },
@@ -340,7 +341,7 @@ export function TaskCenterPage({
       </aside>
       <section className="task-work-area">
         {selected ? <>
-          <header><div><span>{selected.id.slice(0, 8)} · {taskTypeMeta[selected.type].label}</span><h2>{selected.name}</h2><p>{selected.objective}</p></div><span className={`task-state ${selected.status}`}>{statusLabels[selected.status]}</span></header>
+          <header><div><span>{shortId(selected.id)} · {taskTypeMeta[selected.type].label}</span><h2>{selected.name}</h2><p>{selected.objective}</p></div><span className={`task-state ${selected.status}`}>{statusLabels[selected.status]}</span></header>
           <div className="task-context-grid">
             <article><Link2 size={17}/><small>所属 Project</small><b>{currentProject.name}</b><p>{currentProject.brand} · {currentProject.goal}</p></article>
             <article><FileInput size={17}/><small>上游输入</small><b>{selected.sourceTaskIds.length} 个任务 · {selected.sourceArtifactIds.length} 个产物</b><p>Brief、策略任务、版本和证据均保持项目内关联。</p></article>
