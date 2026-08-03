@@ -105,6 +105,32 @@ func TestAdapterGatewayImageAdapterAllowsHTTPOnlyWithExplicitPolicy(t *testing.T
 	}
 }
 
+func TestAdapterGatewayImageAdapterAcceptsFrozenImageTextPortraitProfile(t *testing.T) {
+	t.Parallel()
+	adapter, err := NewAdapterGatewayImageAdapter(
+		staticGatewayCredential("service-token"), &memoryOutputHandles{},
+	)
+	if err != nil {
+		t.Fatalf("NewAdapterGatewayImageAdapter() error = %v", err)
+	}
+	request := ImageGenerationRequest{
+		OrganizationID: "org_1", ProjectID: "project_1",
+		ProviderJobID: "provider_job_portrait_1", ModelAlias: "cookies.image.standard",
+		IdempotencyKey: "gateway-image-portrait-1",
+		Input: ImageGenerationInput{
+			Prompt: "portrait editorial product image", Width: 1024, Height: 1536,
+		},
+		Route: testGatewayRoute(),
+	}
+	if err := adapter.Prepare(context.Background(), request); err != nil {
+		t.Fatalf("portrait Prepare() error = %v", err)
+	}
+	request.Input.Width = 1000
+	if err := adapter.Prepare(context.Background(), request); err == nil {
+		t.Fatal("Prepare() accepted a non-supported image size")
+	}
+}
+
 func testGatewayRoute() *ImageRouteSnapshot {
 	return &ImageRouteSnapshot{
 		RouteID: "route_1", RouteRevisionID: "route_revision_1",

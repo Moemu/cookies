@@ -58,8 +58,8 @@ func (a *AdapterGatewayImageAdapter) Prepare(ctx context.Context, request ImageG
 	if err := request.Route.ValidateWithPolicy(a.allowInsecureHTTP); err != nil {
 		return err
 	}
-	if request.Input.Width != 1024 || request.Input.Height != 1024 {
-		return gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", "Adapter gateway M1 supports only 1024x1024 images")
+	if !adapterGatewayImageSizeSupported(request.Input.Width, request.Input.Height) {
+		return gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", "Adapter gateway image dimensions are unsupported")
 	}
 	if _, err := a.credentials.ResolveGatewayCredential(ctx, request.Route.CredentialID, request.Route.CredentialVersion); err != nil {
 		return gatewayExecutionError("MODEL_AUTH_UNAVAILABLE", "Adapter gateway credential could not be resolved")
@@ -79,7 +79,7 @@ func (a *AdapterGatewayImageAdapter) Submit(ctx context.Context, request ImageGe
 		"model":           request.Route.UpstreamModel,
 		"prompt":          request.Input.Prompt,
 		"n":               1,
-		"size":            "1024x1024",
+		"size":            fmt.Sprintf("%dx%d", request.Input.Width, request.Input.Height),
 		"response_format": "b64_json",
 		"output_format":   "png",
 	})
@@ -155,6 +155,12 @@ func (a *AdapterGatewayImageAdapter) Submit(ctx context.Context, request ImageGe
 		ActualProvider:   strings.TrimSpace(response.Header.Get("X-Actual-Provider")),
 		ActualModel:      actualModel,
 	}, nil
+}
+
+func adapterGatewayImageSizeSupported(width, height int) bool {
+	return (width == 1024 && height == 1024) ||
+		(width == 1024 && height == 1536) ||
+		(width == 1536 && height == 1024)
 }
 
 func (a *AdapterGatewayImageAdapter) Poll(context.Context, ImageTaskReference) (ImageTaskResult, error) {

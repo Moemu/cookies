@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useProject } from '../../context/ProjectContext'
+import type { SystemKey } from '../../types'
 import { CreativeTaskPlanner } from './CreativeTaskPlanner'
 import { useStrategyWorkspace } from './useStrategyWorkspace'
 import type {

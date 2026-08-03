@@ -1,0 +1,19 @@
+{
+  "contract_version": "creative-image-prompt-package/v1",
+  "id": "image_prompt_01",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "task_id": "creative_task_image_01",
+  "draft_revision": 2,
+  "image_plan_order": 1,
+  "direction_id": "creative_direction_01",
+  "direction_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "input_identity_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "compiled_prompt": "Create a portrait editorial product image with negative space and no text.",
+  "negative_constraints": ["text", "watermark", "fabricated logo"],
+  "source_asset_refs": [{"asset_id": "asset_product_01", "version": 1}],
+  "compiler_version": "creative.image_text.prompt.v1",
+  "content_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "created_by": "user_01",
+  "created_at": "2026-07-31T08:01:00Z"
+}

@@ -105,6 +105,8 @@ type Strategy struct {
 }
 
 type Creative struct {
+	DirectionPlanningEnabled       bool
+	DirectionPlannerModelAlias     string
 	ShortDramaModelPlannerEnabled  bool
 	ShortDramaPlannerModelAlias    string
 	GamePrerollModelPlannerEnabled bool
@@ -343,6 +345,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	directionPlanningEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_CREATIVE_DIRECTION_PLANNING_ENABLED",
+		false,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	researchSeedEnabled, err := strictBoolValueOr(lookup, "COOKIES_RESEARCH_SEED_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -395,6 +405,8 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			VideoWorkRoot: valueOr(lookup, "COOKIES_VIDEO_WORK_ROOT", ".data/video-work"),
 		},
 		Creative: Creative{
+			DirectionPlanningEnabled:       directionPlanningEnabled,
+			DirectionPlannerModelAlias:     valueOr(lookup, "COOKIES_CREATIVE_DIRECTION_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 			ShortDramaModelPlannerEnabled:  shortDramaModelPlannerEnabled,
 			ShortDramaPlannerModelAlias:    valueOr(lookup, "COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 			GamePrerollModelPlannerEnabled: gamePrerollModelPlannerEnabled,

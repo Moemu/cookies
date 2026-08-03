@@ -405,6 +405,107 @@ func (s UploadService) IngestDerivedImage(ctx context.Context, requestContext co
 	return ref, nil
 }
 
+// IngestRenderedImage is the Assets-owned boundary for deterministic Creative
+// image composition. The caller supplies only stable lineage references;
+// Assets validates the bytes and persists the immutable rendered version.
+func (s UploadService) IngestRenderedImage(
+	ctx context.Context,
+	requestContext contract.RequestContext,
+	projectID contract.ProjectID,
+	renderJobID string,
+	content io.Reader,
+	sizeBytes int64,
+	sourceAssets []contract.AssetVersionRef,
+	sourceResources []contract.ResourceRef,
+) (contract.ProjectAssetRef, error) {
+	if err := s.validateDependencies(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if err := requestContext.Validate(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if !requestContext.Actor.HasScope("assets.write") {
+		return contract.ProjectAssetRef{}, fmt.Errorf("assets.write scope is required")
+	}
+	if strings.TrimSpace(renderJobID) == "" || len(renderJobID) > 96 ||
+		content == nil || sizeBytes < 1 || sizeBytes > MaxImageBytes {
+		return contract.ProjectAssetRef{}, fmt.Errorf("render_job_id and supported image content are required")
+	}
+	for _, ref := range sourceAssets {
+		if err := ref.Validate(); err != nil {
+			return contract.ProjectAssetRef{}, fmt.Errorf("rendered image source asset: %w", err)
+		}
+	}
+	for _, ref := range sourceResources {
+		if err := ref.Validate(); err != nil {
+			return contract.ProjectAssetRef{}, fmt.Errorf("rendered image source resource: %w", err)
+		}
+	}
+	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	newID := s.idGenerator()
+	assetIDValue, err := newID("asset")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	blobID, err := newID("blob")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	stagingID, err := newID("renderstage")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	staged, err := s.Blobs.Put(
+		ctx, s.QuarantineBucket,
+		quarantineKey(requestContext.Actor.OrganizationID, stagingID),
+		io.LimitReader(content, MaxImageBytes+1), sizeBytes, "image/png",
+	)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	defer s.Blobs.Delete(ctx, staged.ObjectLocation)
+	commit, err := s.ingestStoredObject(
+		ctx, requestContext.Actor.OrganizationID, projectID, contract.AssetID(assetIDValue), blobID,
+		project.ProjectContextVersion, contract.AssetSourceRendered, staged.ObjectLocation,
+		"", "", renderJobID, requestContext.TraceID,
+	)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if commit.Kind != contract.AssetImage || commit.MIMEType != "image/png" ||
+		commit.WidthPixels != 1080 || commit.HeightPixels != 1440 {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, fmt.Errorf("%w: rendered image must be a 1080x1440 PNG", ErrOutputMetadataMismatch)
+	}
+	outputRef := contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version}
+	for _, ref := range sourceAssets {
+		version := ref.Version
+		commit.Relations = append(commit.Relations, AssetRelation{
+			OrganizationID: commit.OrganizationID, ProjectID: projectID, OutputAsset: outputRef,
+			RelationType: AssetRelationGeneratedFrom,
+			Source:       contract.ResourceRef{Type: "asset_version", ID: string(ref.AssetID), Version: &version},
+		})
+	}
+	for _, ref := range sourceResources {
+		commit.Relations = append(commit.Relations, AssetRelation{
+			OrganizationID: commit.OrganizationID, ProjectID: projectID, OutputAsset: outputRef,
+			RelationType: AssetRelationGeneratedFrom, Source: ref,
+		})
+	}
+	ref, err := s.Repository.CompleteRender(ctx, renderJobID, commit, s.now())
+	if err != nil {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, err
+	}
+	if ref.AssetVersion != outputRef {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+	}
+	return ref, nil
+}
+
 func (s UploadService) UpsertFeature(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, feature AssetFeature) (AssetFeature, error) {
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return AssetFeature{}, err

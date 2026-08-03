@@ -1,14 +1,25 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Film, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
-import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiProjectMediaAsset, type ApiPublicInsightFilters, type ApiPublicInsightOverview, type ApiPublicInsightVideoDetail, type ApiPublicInsightVideoListItem, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
+import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
-import { calculateProjectProgress, progressBarWidth, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
+import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
-import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, ReportCenterPage, VideoCreationPage } from './SpecializedPages'
-import { AssetExperiencePage, PostLaunchAnalysisPage, PreLaunchInsightPage } from './CoreFlowPages'
+import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
+import { PreLaunchInsightPage } from './PreLaunchInsightPage'
+import { ReportCenterPage } from './ReportCenterPage'
+import { shortId } from '../data/shortId'
+import { AssetLibraryPage } from './AssetLibraryPage'
+import { ContentAnalysisPage } from './ContentAnalysisPage'
+import { DataConnectionsPage } from './DataConnectionsPage'
+import { CapabilityOperationsPage } from './CapabilityOperationsPage'
+import { ExperimentCenterPage } from './ExperimentCenterPage'
+import { InsightSettingsPage } from './InsightSettingsPage'
+import { DataQualityPage } from './DataQualityPage'
+import { PostLaunchAnalysisPage } from './PostLaunchAnalysisPage'
+import { ExperienceLibraryPage } from './ExperienceLibraryPage'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
 import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
@@ -1022,129 +1033,6 @@ function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: stri
   </div>
 }
 
-function MaterialInsightSurface() {
-  const { advanceArtifact, currentProject } = useProject()
-  const industry = industryProfile(currentProject.industry)
-  const [notice, setNotice] = useState('')
-  const [overview, setOverview] = useState<ApiPublicInsightOverview | null>(null)
-  const [filters, setFilters] = useState<ApiPublicInsightFilters | null>(null)
-  const [videos, setVideos] = useState<ApiPublicInsightVideoListItem[]>([])
-  const [detail, setDetail] = useState<ApiPublicInsightVideoDetail | null>(null)
-  const [publicInsightState, setPublicInsightState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [publicQuery, setPublicQuery] = useState('')
-  const [publicIndustry, setPublicIndustry] = useState('')
-  const [projectMedia, setProjectMedia] = useState<ApiProjectMediaAsset[]>([])
-  const manhuaMix = operationRecords(currentProject.operations, 'audience_mix')
-  const manhuaMethods = operationRecords(currentProject.operations, 'method')
-  useEffect(() => {
-    let active = true
-    setPublicInsightState('loading')
-    void Promise.all([
-      api.getPublicInsightOverview(),
-      api.getPublicInsightFilters(),
-    ]).then(([nextOverview, nextFilters]) => {
-      if (!active) return
-      setOverview(nextOverview)
-      setFilters(nextFilters)
-      setPublicIndustry(nextFilters.industries[0]?.value ?? '')
-    }).catch(cause => {
-      if (!active) return
-      setPublicInsightState('error')
-      setNotice(cause instanceof Error ? cause.message : '读取示例洞察数据失败。')
-    })
-    return () => { active = false }
-  }, [])
-  useEffect(() => {
-    let active = true
-    void api.listProjectMediaAssets(currentProject.id).then(items => {
-      if (active) setProjectMedia(items)
-    }).catch(() => {
-      if (active) setProjectMedia([])
-    })
-    return () => { active = false }
-  }, [currentProject.id])
-  const projectVideos = projectMedia.filter(asset => asset.kind === 'video')
-  const projectBrief = projectMedia.find(asset => asset.mimeType === 'application/pdf')
-  useEffect(() => {
-    let active = true
-    setPublicInsightState('loading')
-    void api.listPublicInsightVideos({
-      page: 1,
-      pageSize: 6,
-      keyword: publicQuery,
-      industry: publicIndustry,
-      sortBy: 'vv_all',
-    }).then(async page => {
-      if (!active) return
-      setVideos(page.items)
-      const first = page.items[0]
-      setDetail(first ? await api.getPublicInsightVideo(first.item_id) : null)
-      if (active) setPublicInsightState('ready')
-    }).catch(cause => {
-      if (!active) return
-      setPublicInsightState('error')
-      setNotice(cause instanceof Error ? cause.message : '筛选示例洞察数据失败。')
-    })
-    return () => { active = false }
-  }, [publicIndustry, publicQuery])
-  const selectPublicVideo = async (itemId: string) => {
-    try {
-      setDetail(await api.getPublicInsightVideo(itemId))
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '读取视频洞察详情失败。')
-    }
-  }
-  const createMaterials = async () => {
-    try {
-      await advanceArtifact('creative', '制作中')
-      setNotice('4 组测试素材已保存到创意制作队列')
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '创建测试素材失败，请重试。')
-    }
-  }
-  return <div className="strategy-analysis-layout">
-    <section className="strategy-analysis-main">
-      <IndustrySchema module="素材洞察" profile={industry.insight} industry={industry.label}/>
-      <div className="analysis-heading"><div><span className="section-label">公开短视频洞察样本</span><h2>部署后自动导入 data 目录作为示例展示。</h2><p>服务端默认读取 data/insights/public_data_insight_source_export/*.csv，保留公开样本的行业、播放、留存、口播和分镜字段。</p></div><span className="source-chip">{overview ? `${overview.total_videos} 条样本 · ${overview.files.length} 个文件` : '加载示例数据'}</span></div>
-      <section className="project-media-analysis" aria-label="当前 Project 视频分析输入"><div><span className="section-label">PROJECT MEDIA INPUT</span><h3>{projectVideos.length} 个视频已纳入内容分析输入</h3><p>{projectBrief ? '已关联 Guerlain KOL Brief PDF；可将其与视频元数据、时长和尺寸共同作为创作及内容分析依据。' : '尚未检测到项目 PDF Brief。'}</p></div><div>{projectVideos.slice(0, 4).map(asset => <span key={asset.id}><Film size={13}/>{asset.durationSeconds?.toFixed(0) ?? '—'}s · {asset.width}×{asset.height}</span>)}</div></section>
-      <div className="public-insight-overview">
-        <span><b>{overview?.total_views.toLocaleString('zh-CN') ?? '—'}</b><small>总播放</small></span>
-        <span><b>{overview ? `${(overview.average_finish_rate * 100).toFixed(1)}%` : '—'}</b><small>平均完播率</small></span>
-        <span><b>{overview ? `${(overview.ai_ratio * 100).toFixed(1)}%` : '—'}</b><small>AI 标记占比</small></span>
-      </div>
-      <div className="prelaunch-filterbar public-insight-filterbar">
-        <div className="search-field"><Search size={15}/><input aria-label="搜索公开短视频洞察" value={publicQuery} onChange={event => setPublicQuery(event.target.value)} placeholder="搜索标题、口播、品牌或亮点"/></div>
-        <label>行业<select aria-label="公开短视频洞察行业" value={publicIndustry} onChange={event => setPublicIndustry(event.target.value)}><option value="">全部行业</option>{filters?.industries.map(item => <option key={item.value} value={item.value}>{item.value}（{item.count}）</option>)}</select></label>
-      </div>
-      {publicInsightState === 'error' ? <div className="panel-empty">示例洞察数据暂时无法读取，请确认 data/insights/public_data_insight_source_export 下存在 CSV。</div> : null}
-      <div className="public-insight-table">
-        <div className="public-insight-row header"><span>视频</span><span>行业</span><span>播放</span><span>完播率</span></div>
-        {videos.map(item => <button key={item.item_id} className={detail?.item_id === item.item_id ? 'public-insight-row active' : 'public-insight-row'} onClick={() => void selectPublicVideo(item.item_id)}>
-          <span><b>{item.item_title}</b><small>{item.item_id} · {item.has_ai_generated === '是' ? 'AI 生成' : '真实素材'} · {item.date}</small></span>
-          <span>{item.industry}</span>
-          <span>{item.vv_all.toLocaleString('zh-CN')}</span>
-          <span>{(item.finish_rate * 100).toFixed(1)}%</span>
-        </button>)}
-        {publicInsightState === 'loading' ? <div className="panel-empty">正在读取 data 目录示例数据…</div> : null}
-        {publicInsightState === 'ready' && !videos.length ? <div className="panel-empty">当前筛选没有匹配的公开短视频样本。</div> : null}
-      </div>
-      {detail ? <div className="public-insight-detail-card"><span className="section-label">当前样本拆解</span><h3>{detail.item_title}</h3><p>{detail.creative_highlight || detail.item_asr}</p><div className="public-insight-tags"><span>{detail.first3s_visual_creative_type}</span><span>{detail.visual_style}</span><span>{detail.bgm_style}</span></div><div className="insight-note"><span>口播脚本</span><p>{detail.oral_script || detail.item_asr || '该样本未提供口播脚本。'}</p></div></div> : null}
-      <div className="analysis-heading secondary"><div><span className="section-label">当前 Project 运营记录</span><h2>供给多，不等于消耗贡献高。</h2><p>下方继续展示当前 Project 服务端运营记录，用于和公开示例样本交叉验证。</p></div><span className="source-chip">项目数据 · 待账户验证</span></div>
-      <div className="mix-legend"><span><i className="supply"/>供给占比</span><span><i className="spend"/>消耗占比</span></div>
-      <div className="mix-table">
-        {manhuaMix.map(row => <div className="mix-row" key={row.id}>
-          <div><b>{row.title}</b><small>{row.status}</small></div>
-          <div className="mix-bars"><span className="mix-bar supply" style={{width: `${Number(row.fields.supply ?? 0) * 1.55}%`}}/><span className="mix-bar spend" style={{width: `${Number(row.fields.spend ?? 0) * 1.55}%`}}/></div>
-          <div className="mix-values"><span>{operationField(row, 'supply')}%</span><strong>{operationField(row, 'spend')}%</strong></div>
-        </div>)}
-        {!manhuaMix.length ? <div className="panel-empty">暂无服务端供需记录。</div> : null}
-      </div>
-      <div className="insight-note"><span>策略建议</span><p>先用同商品、同人群、同预算的小样本测试验证结构机会。首轮只改变制作方法或钩子，避免同时改变多个变量。</p></div>
-    </section>
-    <aside className="strategy-method-rail"><span className="section-label">推荐首轮素材池</span><h3>从低成本验证开始</h3>{manhuaMethods.map(item => <div className="method-card" key={item.id}><span>{item.id}</span><div><b>{item.title}</b><small>{operationField(item, 'detail')}</small></div></div>)}{!manhuaMethods.length ? <div className="panel-empty">暂无服务端推荐方法。</div> : null}<button className="primary-button full" onClick={() => void createMaterials()}>创建 4 组测试素材</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">数据来自当前 Project 的服务端运营记录。</p></aside>
-  </div>
-}
-
 function DeliveryStrategySurface() {
   const { addChangeSet, currentProject } = useProject()
   const industry = industryProfile(currentProject.industry)
@@ -1242,7 +1130,7 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
   return <div className="editor-layout">
     <aside className="asset-rail"><div className="surface-toolbar"><h3>结构与素材</h3><button aria-label="新增镜头"><Plus size={15}/></button></div>{['开场：精度的瞬间', '产品与制造过程', '真实应用场景', '品牌主张与 CTA'].map((label, i) => <button className={i === selected ? 'asset-row active' : 'asset-row'} onClick={() => setSelected(i)} key={label}><span>{String(i + 1).padStart(2, '0')}</span><b>{label}</b><small>{i === 1 ? '00:06–00:18' : `${i * 8 + 1} 秒`}</small></button>)}</aside>
     <section className="canvas-area"><div className="canvas-toolbar"><span>{item.label} · v1.2</span><div><button>50%</button><button><Download size={15}/>导出预览</button></div></div><div className="media-canvas"><div className="precision-art"><img src="/assets/white-precision-cnc.png" alt="高精度 CNC 设备加工金属零件"/><div className="art-copy"><small>WHITE PRECISION</small><h2>看得见的精度，<br/>兑现你的创新。</h2><p>±0.01mm · 98%+ 准时交付</p></div></div></div><div className="timeline"><div className="time-ruler">00:00 <span>00:06</span><span>00:12</span><span>00:18</span><span>00:24</span><span>00:30</span></div>{['画面', '字幕', '音乐'].map((track, index) => <div className="track" key={track}><b>{track}</b><span className={`clip clip-${index + 1}`}>{index === 0 ? '精密加工 · 06–18s' : index === 1 ? '品牌主张' : 'Precision Theme.wav'}</span></div>)}</div></section>
-    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · 服务端模型目录` : '服务端未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请在服务端设置 ARK_API_KEY 后重新检查能力。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成媒体。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}>{job && ['queued', 'running'].includes(job.status) ? '正在生成…' : `生成选中${mediaKind === 'image' ? '图片' : '视频'}`}</button>{job ? <div className="inline-notice" role="status">任务 {job.id.slice(0, 8)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}{['queued', 'running'].includes(job.status) ? <button onClick={() => void cancel()}>取消</button> : job.status === 'failed' || job.status === 'cancelled' ? <button onClick={() => void generate()}>重试</button> : null}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
+    <aside className="inspector"><div className="surface-toolbar"><h3>{activeView}属性</h3><button aria-label="属性更多操作"><MoreHorizontal size={16}/></button></div>{['内容', '画面', '声音', '品牌检查'].map((tab, i) => <button className={i === 0 ? 'inspector-tab active' : 'inspector-tab'} key={tab}>{tab}<ChevronDown size={14}/></button>)}<div className="field"><label>镜头描述</label><textarea value={description} onChange={event => setDescription(event.target.value)}/></div><div className="field"><label>生成模型</label><button className="select-field">{configuredProvider ? `${configuredProvider.name} · 服务端模型目录` : '服务端未配置模型'}<ChevronDown size={14}/></button></div>{!configuredProvider ? <div className="model-required"><CircleAlert size={15}/><span>请在服务端设置 ARK_API_KEY 后重新检查能力。</span></div> : null}{!confirmedBriefId ? <div className="model-required"><CircleAlert size={15}/><span>请先在需求中心确认 Brief，系统才会允许生成媒体。</span></div> : null}<button className="primary-button full" disabled={!configuredProvider || !confirmedBriefId || ['queued', 'running'].includes(job?.status ?? '')} onClick={() => void generate()}>{job && ['queued', 'running'].includes(job.status) ? '正在生成…' : `生成选中${mediaKind === 'image' ? '图片' : '视频'}`}</button>{job ? <div className="inline-notice" role="status">任务 {shortId(job.id)} · {job.status} · {job.model ?? '模型待分配'}{job.diagnostic ? ` · ${job.diagnostic}` : ''}{['queued', 'running'].includes(job.status) ? <button onClick={() => void cancel()}>取消</button> : job.status === 'failed' || job.status === 'cancelled' ? <button onClick={() => void generate()}>重试</button> : null}</div> : null}{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
   </div>
 }
 
@@ -1364,7 +1252,7 @@ function AuditEvidenceSurface() {
   return <div className="audit-evidence-surface">
     <section>
       <div className="audit-evidence-heading"><div><span className="section-label">SERVER AUDIT</span><h2>服务端审计轨迹</h2><p>记录预置项目的创建、产物确认、预检、审批、模拟执行与回滚；不会连接真实广告平台。</p></div><span className="source-chip">不可变事件</span></div>
-      <div className="audit-event-list">{events.length ? events.map(event => <article key={event.id}><span>{new Date(event.createdAt).toLocaleString('zh-CN', { hour12: false })}</span><div><b>{auditActionLabel(event.action)}</b><small>{event.actor} · {event.entityType} · {event.entityId.slice(0, 8)}</small></div><CircleCheck size={16}/></article>) : <div className="panel-empty">正在读取服务端审计记录…</div>}</div>
+      <div className="audit-event-list">{events.length ? events.map(event => <article key={event.id}><span>{new Date(event.createdAt).toLocaleString('zh-CN', { hour12: false })}</span><div><b>{auditActionLabel(event.action)}</b><small>{event.actor} · {event.entityType} · {shortId(event.entityId)}</small></div><CircleCheck size={16}/></article>) : <div className="panel-empty">正在读取服务端审计记录…</div>}</div>
     </section>
     <aside className="audit-boundary"><ShieldCheck size={18}/><h3>模拟边界</h3><p>这些事件只记录本地 MVP 的受控投放模拟。审批、执行和回滚不会对广告账户或外部平台写入。</p></aside>
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
@@ -1465,7 +1353,7 @@ function AgentRunTracePanel() {
       const run = await api.createAgentRun(currentProject.id, renderJobId.trim())
       setRuns(current => [run, ...current.filter(item => item.id !== run.id)])
       setSelectedRunId(run.id)
-      setNotice(run.status === 'failed' ? `诊断失败：${run.error_message ?? '未知错误'}` : `Agent Run ${run.id.slice(0, 8)} 已完成。`)
+      setNotice(run.status === 'failed' ? `诊断失败：${run.error_message ?? '未知错误'}` : `Agent Run ${shortId(run.id)} 已完成。`)
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '启动 Agent Run 失败')
     } finally {
@@ -1498,7 +1386,7 @@ function AgentRunTracePanel() {
     <div className="agent-trace-grid">
       <aside className="agent-run-list">
         {runs.map(run => <button key={run.id} className={run.id === selectedRun?.id ? 'active' : ''} onClick={() => setSelectedRunId(run.id)}>
-          <span>{run.id.slice(0, 12)}</span><b>{run.workflow}</b><small>{run.status} · {run.target.render_job_id}</small>
+          <span>{run.id.slice(-12)}</span><b>{run.workflow}</b><small>{run.status} · {run.target.render_job_id}</small>
         </button>)}
         {!runs.length ? <div className="panel-empty">暂无 Agent Run，输入 RenderJob ID 后可创建诊断。</div> : null}
       </aside>
@@ -1508,7 +1396,7 @@ function AgentRunTracePanel() {
           <div className="agent-trace-columns">
             <TraceColumn title="步骤" items={selectedRun.steps.map(step => ({ id: step.id, title: step.label, meta: step.status, body: step.summary }))}/>
             <TraceColumn title="工具调用" items={selectedRun.tool_calls.map(call => ({ id: call.id, title: call.name, meta: call.status, body: call.error_message ?? String(call.output?.recommendation ?? call.output?.diagnosis ?? '无输出') }))}/>
-            <TraceColumn title="模型 Span" items={selectedRun.trace_spans.map(span => ({ id: span.id, title: span.name, meta: span.parent_id ? `${span.kind} · parent ${span.parent_id.slice(0, 8)}` : span.kind, body: span.error_message ?? `${span.status}${span.model ? ` · ${span.model}` : ''}` }))}/>
+            <TraceColumn title="模型 Span" items={selectedRun.trace_spans.map(span => ({ id: span.id, title: span.name, meta: span.parent_id ? `${span.kind} · parent ${shortId(span.parent_id)}` : span.kind, body: span.error_message ?? `${span.status}${span.model ? ` · ${span.model}` : ''}` }))}/>
           </div>
           <div className="agent-run-actions"><button className="secondary-button" disabled={busy || !['queued', 'running'].includes(selectedRun.status)} onClick={() => void cancelRun()}>取消</button><button className="primary-button" disabled={busy} onClick={retryDiagnosis}>重试诊断</button></div>
         </> : <div className="panel-empty">选择 Agent Run 后查看 trace 详情。</div>}
@@ -1606,21 +1494,27 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'strategy' && item.id === 'research' ? <KanonResearchEvidenceCenter activeView={activeView}/>
     : system.key === 'strategy' && item.id === 'operations' ? <KanonSkillsOperations activeView={activeView}/>
     : system.key === 'strategy' && item.id === 'reviews' ? <KanonReviewCenter activeView={activeView} onOpenReview={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', undefined, '评审')}/>
-    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={contextId ?? objectId}/>
+    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={contextId ?? objectId} onTaskCreated={id => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView, id)}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'assets' ? <AssetExperiencePage state={dataState} mode="assets"/>
-    : system.key === 'insight' && item.id === 'knowledge' ? <AssetExperiencePage state={dataState} mode="knowledge"/>
-    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState}/>
+    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
     : null
   if (specialized) surface = specialized
   else {
-    const analysisSurface = system.key === 'insight' && item.id === 'content' ? <MaterialInsightSurface/> : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
+    const analysisSurface = system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
     const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : <OperationsSurface item={item}/>
     surface = <StateBoundary
       state={dataState}
@@ -1638,6 +1532,8 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'
     : system.key === 'creative' && item.id === 'tasks' ? '新建创意任务'
     : system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet'
+    // 素材洞察的系统设置整页只读，没有一处可保存，所以这里不给「保存配置」按钮——
+    // 留一个点下去什么都不发生的按钮，会被读成「保存失败」而不是「不需要保存」。
     : undefined
   const taskCreated = (task: BusinessTaskRecord) => {
     setTaskDialog(null)
@@ -1653,11 +1549,12 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   const projectProgress = calculateProjectProgress(currentProject)
   const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces'))
   const isStrategyWorkspace = system.key === 'strategy' && item.id === 'workspaces'
+  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'plans' || item.id === 'approvals'))
   const changeView = (view: string) => {
     setActiveView(view)
     onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view)
   }
   const pageSurface = <div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div>
 
-  return <div className={`module-page page-frame layout-${item.layout}${isStrategyWorkspace ? ' strategy-workspace-page' : ''}`}><PageHeader item={item} activeView={activeView} onViewChange={changeView} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel} showTabs={!isStrategyWorkspace}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}{isStrategyWorkspace ? <div className="strategy-workspace-shell"><ViewTabs item={item} activeView={activeView} onViewChange={changeView}/>{pageSurface}</div> : pageSurface}{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
+  return <div className={`module-page page-frame layout-${item.layout}${isStrategyWorkspace ? ' strategy-workspace-page' : ''}`}><PageHeader item={item} activeView={activeView} onViewChange={changeView} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel} showTabs={!isStrategyWorkspace && hasImplementedHeaderViews}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}{isStrategyWorkspace ? <div className="strategy-workspace-shell"><ViewTabs item={item} activeView={activeView} onViewChange={changeView}/>{pageSurface}</div> : pageSurface}{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }

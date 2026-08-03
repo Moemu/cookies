@@ -14,8 +14,10 @@ test('Go product API requests are proxied before the compatibility API', () => {
   const strategyIndex = entries.findIndex(([path]) => path === '/api/strategy/v1')
   const compatibilityIndex = entries.findIndex(([path]) => path === '/api')
 
-  assert.equal(entries.find(([path]) => path === '/api/creative/v1')?.[1], process.env.VITE_PLATFORM_PROXY_TARGET ?? 'http://127.0.0.1:8080')
-  assert.equal(entries[strategyIndex]?.[1], process.env.VITE_PLATFORM_PROXY_TARGET ?? 'http://127.0.0.1:8080')
+  assert.equal(entries[0]?.[0], '/api/strategy/v1')
+  for (const path of ['/api/creative/v1', '/api/delivery/v1', '/api/insights/v1', '/api/strategy/v1']) {
+    assert.equal(entries.find(([entryPath]) => entryPath === path)?.[1], process.env.VITE_PLATFORM_PROXY_TARGET ?? 'http://127.0.0.1:8080')
+  }
   assert.ok(strategyIndex >= 0 && strategyIndex < compatibilityIndex, 'Strategy API must be matched before the compatibility API')
   assert.equal(entries[compatibilityIndex]?.[1], process.env.VITE_COMPAT_API_PROXY_TARGET ?? 'http://127.0.0.1:8787')
 })

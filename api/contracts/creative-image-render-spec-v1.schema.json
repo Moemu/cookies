@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-image-render-spec-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "layout_preset", "overlay_copy", "source_width", "source_height", "final_width", "final_height", "output_format", "font_ref", "renderer_version", "content_hash"],
+  "properties": {
+    "contract_version": {"const": "creative-image-render-spec/v1"},
+    "layout_preset": {"enum": ["cover_center_v1", "proof_lower_left_v1", "cta_bottom_v1"]},
+    "overlay_copy": {"type": "string", "minLength": 1, "maxLength": 120},
+    "source_width": {"const": 1024},
+    "source_height": {"const": 1536},
+    "final_width": {"const": 1080},
+    "final_height": {"const": 1440},
+    "output_format": {"const": "png"},
+    "font_ref": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+    "renderer_version": {"type": "string", "minLength": 1},
+    "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

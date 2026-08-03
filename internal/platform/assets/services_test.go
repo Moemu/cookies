@@ -556,6 +556,57 @@ func TestDerivedImageIntakeIsIdempotentAndPreservesSourceLineage(t *testing.T) {
 	}
 }
 
+func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC)
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository,
+		Projects:   fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs:      NewMemoryBlobStore(), Scanner: NoopScanner{},
+		QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1080, 1440))); err != nil {
+		t.Fatalf("encode rendered image: %v", err)
+	}
+	sourceAsset := contract.AssetVersionRef{AssetID: "asset_base", Version: 2}
+	draftVersion := int64(4)
+	sourceResource := contract.ResourceRef{
+		Type: "creative_image_text_draft", ID: "task_1", Version: &draftVersion,
+	}
+	requestContext := testRequestContext("org_1", "project_1")
+	first, err := service.IngestRenderedImage(
+		context.Background(), requestContext, "project_1", "image_render_1",
+		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()),
+		[]contract.AssetVersionRef{sourceAsset}, []contract.ResourceRef{sourceResource},
+	)
+	if err != nil {
+		t.Fatalf("IngestRenderedImage() error = %v", err)
+	}
+	second, err := service.IngestRenderedImage(
+		context.Background(), requestContext, "project_1", "image_render_1",
+		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()),
+		[]contract.AssetVersionRef{sourceAsset}, []contract.ResourceRef{sourceResource},
+	)
+	if err != nil {
+		t.Fatalf("idempotent IngestRenderedImage() error = %v", err)
+	}
+	if first != second {
+		t.Fatalf("render retry created a second asset: first=%+v second=%+v", first, second)
+	}
+	relations, err := repository.ListAssetRelations(
+		context.Background(), "org_1", "project_1", first.AssetVersion,
+	)
+	if err != nil {
+		t.Fatalf("ListAssetRelations() error = %v", err)
+	}
+	if len(relations) != 2 {
+		t.Fatalf("relations = %+v, want base asset and Creative draft lineage", relations)
+	}
+}
+
 type fakeVideoProbe struct {
 	metadata VideoMetadata
 	err      error

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Cookies Delivery API
-  version: 1.0.0
-  description: Versioned plans, controlled local simulation, and execution evidence.
+  version: 1.2.0
+  description: Versioned mock delivery plans, authoritative preflight, content-bound approvals, controlled local simulation, and execution evidence.
 servers:
   - url: /
 security:
@@ -12,132 +12,252 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
     get:
-      summary: List delivery plans
       operationId: listDeliveryPlans
+      summary: List project-scoped delivery plans
       parameters:
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Project plans.
+          description: Mock plan list with explicit provenance.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PlanList'
-        default:
-          $ref: '#/components/responses/Problem'
+              schema: { $ref: '#/components/schemas/PlanList' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
-      summary: Create a delivery plan
       operationId: createDeliveryPlan
+      summary: Create and persist a mock delivery plan draft
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/CreatePlan'
+            schema: { $ref: '#/components/schemas/PlanDraft' }
       responses:
         '201':
-          description: Plan created.
+          description: Plan and immutable V1 created.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/DeliveryPlan'
-        default:
-          $ref: '#/components/responses/Problem'
+              schema: { $ref: '#/components/schemas/DeliveryPlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/plans/{plan_id}:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/PlanID'
     get:
-      summary: Get a delivery plan
       operationId: getDeliveryPlan
+      summary: Get a project-scoped delivery plan and all immutable versions
       responses:
         '200':
-          description: Plan, change sets, and execution history.
+          description: Current plan projection and immutable history.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PlanDetail'
-        default:
-          $ref: '#/components/responses/Problem'
+              schema: { $ref: '#/components/schemas/DeliveryPlan' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateDeliveryPlan
+      summary: Create a new immutable plan version using optimistic concurrency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdatePlan' }
+      responses:
+        '200':
+          description: Updated current projection with retained history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryPlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: VERSION_CONFLICT; expected_version is stale.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+    get:
+      operationId: listDeliveryPlanVersions
+      summary: List immutable plan versions
+      responses:
+        '200':
+          description: Immutable history with mock provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanVersionList' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+      - $ref: '#/components/parameters/PlanVersion'
+    get:
+      operationId: getDeliveryPlanVersion
+      summary: Read one immutable plan version
+      responses:
+        '200':
+          description: Exact immutable version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryPlanVersion' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/preflight:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+    post:
+      operationId: preflightDeliveryPlan
+      summary: Run the server-authoritative preflight rules on the current version
+      responses:
+        '200':
+          description: Structured error and warning checks with repair targets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreflightResult' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/detail:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+    get:
+      operationId: getDeliveryPlanDetail
+      summary: Get a plan with its ChangeSets and execution history
+      responses:
+        '200':
+          description: Plan control-loop detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanDetail' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/plans/{plan_id}:create-change-set:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/PlanID'
     post:
-      summary: Create a plan change set
       operationId: createDeliveryChangeSet
-      requestBody:
-        $ref: '#/components/requestBodies/ExpectedVersion'
+      summary: Freeze the exact current PlanVersion in a new ChangeSet
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
-        '201':
-          $ref: '#/components/responses/ChangeSet'
-        default:
-          $ref: '#/components/responses/Problem'
+        '201': { $ref: '#/components/responses/ChangeSet' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/change-sets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listDeliveryChangeSets
+      summary: List project-scoped Delivery ChangeSets with current approval validity
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: ChangeSet approval queue with explicit mock provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeSetList' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    get:
+      operationId: getDeliveryChangeSet
+      summary: Get one ChangeSet and its immutable approval audit projection
+      responses:
+        '200': { $ref: '#/components/responses/ChangeSet' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:preflight:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/ChangeSetID'
     post:
-      summary: Preflight a delivery change set
       operationId: preflightDeliveryChangeSet
-      requestBody:
-        $ref: '#/components/requestBodies/ExpectedVersion'
+      summary: Reuse the Plan rule engine and reject stale frozen PlanVersions
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
-        '200':
-          $ref: '#/components/responses/ChangeSet'
-        default:
-          $ref: '#/components/responses/Problem'
+        '200': { $ref: '#/components/responses/ChangeSet' }
+        '409':
+          description: INVALID_STATE or STALE_PLAN_VERSION.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:approve:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/ChangeSetID'
     post:
-      summary: Approve a delivery change set
       operationId: approveDeliveryChangeSet
-      requestBody:
-        $ref: '#/components/requestBodies/ExpectedVersion'
+      summary: Approve the current immutable content snapshot for execute_mock
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
-        '200':
-          $ref: '#/components/responses/ChangeSet'
-        default:
-          $ref: '#/components/responses/Problem'
+        '200': { $ref: '#/components/responses/ChangeSet' }
+        '403':
+          description: SCOPE_REQUIRED when ActorContext lacks delivery.approve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: INVALID_STATE, STALE_PLAN_VERSION, or content mismatch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:execute:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/ChangeSetID'
     post:
-      summary: Execute a local simulation
       operationId: executeDeliveryChangeSet
-      requestBody:
-        $ref: '#/components/requestBodies/ExpectedVersion'
+      summary: Execute only as local_simulation
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
         '200':
-          description: Local simulation result and evidence.
+          description: Simulated execution and durable evidence.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ExecutionResult'
-        default:
-          $ref: '#/components/responses/Problem'
+              schema: { $ref: '#/components/schemas/ExecutionResult' }
+        '403':
+          description: SCOPE_REQUIRED or APPROVAL_SCOPE_EXCEEDED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, INVALID_STATE, or STALE_PLAN_VERSION.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:rollback:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/ChangeSetID'
     post:
-      summary: Roll back a simulated change set
       operationId: rollbackDeliveryChangeSet
-      requestBody:
-        $ref: '#/components/requestBodies/ExpectedVersion'
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
-        '200':
-          $ref: '#/components/responses/ChangeSet'
-        default:
-          $ref: '#/components/responses/Problem'
+        '200': { $ref: '#/components/responses/ChangeSet' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/executions:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
     get:
-      summary: List delivery execution evidence
       operationId: listDeliveryExecutions
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -152,16 +272,13 @@ paths:
                 properties:
                   items:
                     type: array
-                    items:
-                      $ref: '#/components/schemas/ExecutionResult'
-        default:
-          $ref: '#/components/responses/Problem'
+                    items: { $ref: '#/components/schemas/ExecutionResult' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/ExecutionID'
     post:
-      summary: Materialize the fixed Phase-1 simulated metric fixture
       operationId: createDemoDeliveryMetricSnapshot
       requestBody:
         required: true
@@ -179,10 +296,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryMetricSnapshot' }
-        '400': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
     get:
-      summary: List immutable metric snapshots for one execution
       operationId: listDeliveryMetricSnapshots
       responses:
         '200':
@@ -196,7 +311,6 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/DeliveryMetricSnapshot' }
-        '400': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
@@ -215,6 +329,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    PlanVersion:
+      name: version
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
     ChangeSetID:
       name: change_set_id
       in: path
@@ -242,32 +361,119 @@ components:
               expected_version: { type: integer, minimum: 1 }
   responses:
     ChangeSet:
-      description: Updated change set.
+      description: Updated ChangeSet.
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/ChangeSet'
+          schema: { $ref: '#/components/schemas/ChangeSet' }
     Problem:
-      description: Problem details.
+      description: Cookies problem response.
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/Problem'
+          schema: { $ref: '#/components/schemas/Problem' }
   schemas:
-    CreatePlan:
+    Principal:
       type: object
       additionalProperties: false
-      required: [creative_package_id, name, objective, budget_cents, start_at, end_at]
+      required: [kind, id]
       properties:
-        creative_package_id: { type: string }
-        name: { type: string, maxLength: 160 }
-        objective: { type: string, maxLength: 1000 }
-        budget_cents: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [user, service] }
+        id: { type: string }
+    Advertiser:
+      type: object
+      additionalProperties: false
+      required: [id, name, platform]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        platform: { type: string, const: ocean_engine }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
+    Budget:
+      type: object
+      additionalProperties: false
+      required: [total_minor, currency]
+      properties:
+        total_minor:
+          type: integer
+          minimum: 0
+          description: Draft persistence allows zero; authoritative preflight requires a positive value.
+        currency: { type: string, const: CNY }
+    Schedule:
+      type: object
+      additionalProperties: false
+      required: [start_at, end_at, timezone]
+      properties:
         start_at: { type: string, format: date-time }
         end_at: { type: string, format: date-time }
+        timezone: { type: string }
+    Tracking:
+      type: object
+      additionalProperties: false
+      required: [landing_page, pixel_id, conversion_event]
+      properties:
+        landing_page: { type: string }
+        pixel_id: { type: string }
+        conversion_event: { type: string }
+    CreativeReference:
+      type: object
+      additionalProperties: false
+      required: [asset_id, version, confirmed]
+      properties:
+        asset_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        confirmed: { type: boolean }
+    PlanDraft:
+      type: object
+      additionalProperties: false
+      required: [name, objective, advertiser, budget, schedule, tracking, creative_references, source_strategy_version]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        objective: { type: string, minLength: 1, maxLength: 2000 }
+        advertiser: { $ref: '#/components/schemas/Advertiser' }
+        budget: { $ref: '#/components/schemas/Budget' }
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        tracking: { $ref: '#/components/schemas/Tracking' }
+        creative_references:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/CreativeReference' }
+        source_strategy_version: { type: string }
+    UpdatePlan:
+      type: object
+      additionalProperties: false
+      required: [expected_version, name, objective, advertiser, budget, schedule, tracking, creative_references, source_strategy_version]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        objective: { type: string, minLength: 1, maxLength: 2000 }
+        advertiser: { $ref: '#/components/schemas/Advertiser' }
+        budget: { $ref: '#/components/schemas/Budget' }
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        tracking: { $ref: '#/components/schemas/Tracking' }
+        creative_references:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/CreativeReference' }
+        source_strategy_version: { type: string }
+    DeliveryPlanVersion:
+      allOf:
+        - $ref: '#/components/schemas/PlanDraft'
+        - type: object
+          required: [plan_id, organization_id, project_id, version_number, canonical_hash, platform, source, scenario, created_by, created_at]
+          properties:
+            plan_id: { type: string }
+            organization_id: { type: string }
+            project_id: { type: string }
+            version_number: { type: integer, minimum: 1 }
+            canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+            platform: { type: string, const: ocean_engine_mock }
+            source: { type: string, const: mock }
+            scenario: { $ref: '#/components/schemas/Scenario' }
+            created_by: { $ref: '#/components/schemas/Principal' }
+            created_at: { type: string, format: date-time }
     DeliveryPlan:
       type: object
-      required: [id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario, current_version_number, current_version, versions, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -277,50 +483,158 @@ components:
         creative_version_id: { type: string }
         name: { type: string }
         objective: { type: string }
-        budget_cents: { type: integer }
+        budget_cents: { type: integer, minimum: 0 }
         start_at: { type: string, format: date-time }
         end_at: { type: string, format: date-time }
-        status: { type: string, enum: [draft] }
+        status: { type: string, const: draft }
         version: { type: integer, minimum: 1 }
+        platform: { type: string, const: ocean_engine_mock }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
+        current_version_number: { type: integer, minimum: 1 }
+        current_version: { $ref: '#/components/schemas/DeliveryPlanVersion' }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryPlanVersion' }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    Scenario:
+      type: string
+      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list, approval_queue]
+    PlanList:
+      type: object
+      required: [items, source, scenario]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryPlan' }
+        source: { type: string, const: mock }
+        scenario: { type: string, const: project_plan_list }
+    PlanVersionList:
+      type: object
+      required: [items, source, scenario]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryPlanVersion' }
+        source: { type: string, const: mock }
+        scenario: { type: string, const: project_plan_list }
+    RepairTarget:
+      type: object
+      required: [field, section, label]
+      properties:
+        field: { type: string }
+        section: { type: string, enum: [目标与账户, 预算与排期, 追踪, 素材引用] }
+        label: { type: string }
+    PreflightCheck:
+      type: object
+      required: [code, severity, passed, message]
+      properties:
+        code:
+          type: string
+          enum: [advertiser_available, budget_positive, schedule_valid, creative_present, creative_confirmed, tracking_complete]
+        severity: { type: string, enum: [error, warning] }
+        passed: { type: boolean }
+        message: { type: string }
+        repair:
+          oneOf:
+            - { $ref: '#/components/schemas/RepairTarget' }
+            - { type: 'null' }
+    PreflightResult:
+      type: object
+      required: [plan_id, plan_version, passed, blocked, checks, source, scenario, checked_at]
+      properties:
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        passed: { type: boolean }
+        blocked: { type: boolean }
+        checks:
+          type: array
+          items: { $ref: '#/components/schemas/PreflightCheck' }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
+        checked_at: { type: string, format: date-time }
     ChangeSet:
       type: object
-      required: [id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, plan_id, plan_name, plan_version, plan_canonical_hash, budget_limit, status, risk_level, preflight_notes, source, scenario, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
         plan_id: { type: string }
-        plan_version: { type: integer }
-        status:
-          type: string
-          enum: [draft, preflight_passed, preflight_failed, approved, rejected, executed, rolled_back]
+        plan_name: { type: string, minLength: 1 }
+        plan_version: { type: integer, minimum: 1 }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        budget_limit: { $ref: '#/components/schemas/Budget' }
+        status: { type: string, enum: [draft, preflight_passed, preflight_failed, approved, rejected, executed, rolled_back] }
         risk_level: { type: string }
         preflight_notes:
           type: array
           items: { type: string }
         approved_by: { type: string }
         approved_at: { type: string, format: date-time }
+        approval: { $ref: '#/components/schemas/ApprovalView' }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
         version: { type: integer, minimum: 1 }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ChangeSetList:
+      type: object
+      required: [items, source, scenario]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ChangeSet' }
+        source: { type: string, const: mock }
+        scenario: { type: string, const: approval_queue }
+    ApprovalView:
+      type: object
+      additionalProperties: false
+      required: [approval_id, organization_id, project_id, plan_id, plan_version, change_set_id, change_set_version, plan_canonical_hash, action_hash, action, scope, budget_limit_minor, currency, approved_by, approved_at, expires_at, source, scenario, valid, hash_summary, budget_limit]
+      properties:
+        approval_id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        change_set_id: { type: string }
+        change_set_version: { type: integer, minimum: 1 }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        action_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        action: { type: string, const: execute }
+        scope: { type: string, const: execute_mock }
+        budget_limit_minor: { type: integer, minimum: 0 }
+        currency: { type: string, const: CNY }
+        approved_by: { type: string }
+        approved_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/Scenario' }
+        valid: { type: boolean }
+        invalid_reason:
+          type: string
+          enum: [APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, STALE_PLAN_VERSION]
+        hash_summary: { type: string, minLength: 1, maxLength: 12 }
+        budget_limit: { $ref: '#/components/schemas/Budget' }
+    CanonicalHash:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
     ExecutionResult:
       type: object
       required: [change_set, execution, evidence]
       properties:
-        change_set:
-          $ref: '#/components/schemas/ChangeSet'
+        change_set: { $ref: '#/components/schemas/ChangeSet' }
         execution:
           type: object
           required: [id, change_set_id, status, mode, executed_by, started_at, completed_at]
           properties:
             id: { type: string }
             change_set_id: { type: string }
-            status: { type: string, enum: [succeeded] }
-            mode: { type: string, enum: [local_simulation] }
+            status: { type: string, const: succeeded }
+            mode: { type: string, const: local_simulation }
             executed_by: { type: string }
             started_at: { type: string, format: date-time }
             completed_at: { type: string, format: date-time }
@@ -331,7 +645,7 @@ components:
             id: { type: string }
             execution_id: { type: string }
             summary: { type: string }
-            mode: { type: string, enum: [local_simulation] }
+            mode: { type: string, const: local_simulation }
             reversible: { type: boolean }
             created_at: { type: string, format: date-time }
     DeliveryMetricSnapshot:
@@ -360,40 +674,33 @@ components:
             spend_cents: { type: integer, minimum: 0 }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
-    PlanList:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/DeliveryPlan'
     PlanDetail:
       type: object
       required: [plan, change_sets, executions]
       properties:
-        plan:
-          $ref: '#/components/schemas/DeliveryPlan'
+        plan: { $ref: '#/components/schemas/DeliveryPlan' }
         change_sets:
           type: array
-          items:
-            $ref: '#/components/schemas/ChangeSet'
+          items: { $ref: '#/components/schemas/ChangeSet' }
         executions:
           type: array
-          items:
-            $ref: '#/components/schemas/ExecutionResult'
+          items: { $ref: '#/components/schemas/ExecutionResult' }
     Problem:
       type: object
-      required: [error]
+      required: [error, source, scenario]
       properties:
         error:
           type: object
           required: [code, message, request_id, retryable, details]
           properties:
-            code: { type: string }
+            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, PROJECT_ACCESS_DENIED, INVALID_STATE, VERSION_CONFLICT, STALE_PLAN_VERSION, APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, SCOPE_REQUIRED, INTERNAL] }
             message: { type: string }
             request_id: { type: string }
             retryable: { type: boolean }
             details:
               type: array
               items: { type: object }
+        source: { type: string, const: mock }
+        scenario:
+          type: string
+          description: Stable lowercase error scenario, for example approval_expired.

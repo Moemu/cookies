@@ -15,15 +15,33 @@ type MySQLRepository struct {
 	DB *sql.DB
 }
 
-func (r MySQLRepository) CreatePlan(ctx context.Context, value DeliveryPlan) (DeliveryPlan, error) {
-	_, err := r.DB.ExecContext(ctx, `INSERT INTO delivery_plans (
+func (r MySQLRepository) CreatePlan(ctx context.Context, value DeliveryPlan, version DeliveryPlanVersion) (DeliveryPlan, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_plans (
 		id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id,
-		name, objective, budget_cents, start_at, end_at, status, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario,
+		current_version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.CreativePackageID, value.CreativePackageHash,
 		value.CreativeVersionID, value.Name, value.Objective, value.BudgetCents, value.StartAt, value.EndAt,
-		value.Status, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
-	return value, err
+		value.Status, value.Version, value.Platform, value.Source, value.Scenario, value.CurrentVersionNumber,
+		value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	if err := insertPlanVersion(ctx, tx, version); err != nil {
+		return DeliveryPlan{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return DeliveryPlan{}, err
+	}
+	value.CurrentVersion = cloneVersion(version)
+	value.Versions = []DeliveryPlanVersion{cloneVersion(version)}
+	return value, nil
 }
 
 func (r MySQLRepository) ListPlans(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]DeliveryPlan, error) {
@@ -38,6 +56,9 @@ func (r MySQLRepository) ListPlans(ctx context.Context, organizationID contract.
 		if scanErr != nil {
 			return nil, scanErr
 		}
+		if hydrateErr := r.hydratePlan(ctx, &value); hydrateErr != nil {
+			return nil, hydrateErr
+		}
 		values = append(values, value)
 	}
 	return values, rows.Err()
@@ -48,7 +69,162 @@ func (r MySQLRepository) GetPlan(ctx context.Context, organizationID contract.Or
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeliveryPlan{}, ErrNotFound
 	}
+	if err == nil {
+		err = r.hydratePlan(ctx, &value)
+	}
 	return value, err
+}
+
+func (r MySQLRepository) UpdatePlan(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int, version DeliveryPlanVersion) (DeliveryPlan, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	defer tx.Rollback()
+	var current int
+	err = tx.QueryRowContext(ctx, `SELECT current_version FROM delivery_plans
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		organizationID, projectID, id).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryPlan{}, ErrNotFound
+	}
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	if current != expectedVersion {
+		return DeliveryPlan{}, ErrPlanVersionConflict
+	}
+	if err := insertPlanVersion(ctx, tx, version); err != nil {
+		return DeliveryPlan{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_plans SET
+		creative_package_id = ?, creative_package_hash = ?, creative_version_id = ?,
+		name = ?, objective = ?, budget_cents = ?, start_at = ?, end_at = ?,
+		version = ?, source = ?, scenario = ?, current_version = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ? AND current_version = ?`,
+		firstCreativeID(version), firstCreativeHash(version), firstCreativeVersion(version),
+		version.Name, version.Objective, version.Budget.TotalMinor, version.Schedule.StartAt, version.Schedule.EndAt,
+		version.VersionNumber, version.Source, version.Scenario, version.VersionNumber, version.CreatedAt,
+		organizationID, projectID, id, expectedVersion)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	if affected != 1 {
+		return DeliveryPlan{}, ErrPlanVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return DeliveryPlan{}, err
+	}
+	return r.GetPlan(ctx, organizationID, projectID, id)
+}
+
+func (r MySQLRepository) ListPlanVersions(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, planID string) ([]DeliveryPlanVersion, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT config_json, canonical_hash FROM delivery_plan_versions
+		WHERE organization_id = ? AND project_id = ? AND plan_id = ?
+		ORDER BY version_number ASC`, organizationID, projectID, planID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]DeliveryPlanVersion, 0)
+	for rows.Next() {
+		var payload []byte
+		var canonicalHash string
+		if err := rows.Scan(&payload, &canonicalHash); err != nil {
+			return nil, err
+		}
+		value, err := decodePlanVersion(payload, canonicalHash)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (r MySQLRepository) GetPlanVersion(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, planID string, version int) (DeliveryPlanVersion, error) {
+	var payload []byte
+	var canonicalHash string
+	err := r.DB.QueryRowContext(ctx, `SELECT config_json, canonical_hash FROM delivery_plan_versions
+		WHERE organization_id = ? AND project_id = ? AND plan_id = ? AND version_number = ?`,
+		organizationID, projectID, planID, version).Scan(&payload, &canonicalHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryPlanVersion{}, ErrNotFound
+	}
+	if err != nil {
+		return DeliveryPlanVersion{}, err
+	}
+	return decodePlanVersion(payload, canonicalHash)
+}
+
+func (r MySQLRepository) hydratePlan(ctx context.Context, value *DeliveryPlan) error {
+	versions, err := r.ListPlanVersions(ctx, value.OrganizationID, value.ProjectID, value.ID)
+	if err != nil {
+		return err
+	}
+	if len(versions) == 0 {
+		return fmt.Errorf("delivery plan %s has no immutable version", value.ID)
+	}
+	value.Versions = versions
+	value.CurrentVersion = cloneVersion(versions[len(versions)-1])
+	value.CurrentVersionNumber = value.CurrentVersion.VersionNumber
+	return nil
+}
+
+type execContexter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertPlanVersion(ctx context.Context, executor execContexter, version DeliveryPlanVersion) error {
+	payload, err := json.Marshal(version)
+	if err != nil {
+		return err
+	}
+	_, err = executor.ExecContext(ctx, `INSERT INTO delivery_plan_versions (
+		organization_id, project_id, plan_id, version_number, config_json, canonical_hash, source, scenario,
+		created_by_kind, created_by_id, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		version.OrganizationID, version.ProjectID, version.PlanID, version.VersionNumber, payload,
+		version.CanonicalHash, version.Source, version.Scenario, version.CreatedBy.Kind, version.CreatedBy.ID, version.CreatedAt)
+	return err
+}
+
+func decodePlanVersion(payload []byte, canonicalHash string) (DeliveryPlanVersion, error) {
+	var value DeliveryPlanVersion
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return DeliveryPlanVersion{}, fmt.Errorf("decode delivery plan version: %w", err)
+	}
+	value.CanonicalHash = canonicalHash
+	calculated, err := PlanCanonicalHash(value)
+	if err != nil {
+		return DeliveryPlanVersion{}, err
+	}
+	if calculated != canonicalHash {
+		return DeliveryPlanVersion{}, fmt.Errorf("delivery plan version canonical hash mismatch")
+	}
+	return value, nil
+}
+
+func firstCreativeID(version DeliveryPlanVersion) string {
+	if len(version.CreativeReferences) == 0 {
+		return "mock-unset"
+	}
+	return version.CreativeReferences[0].AssetID
+}
+
+func firstCreativeVersion(version DeliveryPlanVersion) string {
+	if len(version.CreativeReferences) == 0 {
+		return "0"
+	}
+	return fmt.Sprint(version.CreativeReferences[0].Version)
+}
+
+func firstCreativeHash(version DeliveryPlanVersion) string {
+	return fmt.Sprintf("mock:%s@%s", firstCreativeID(version), firstCreativeVersion(version))
 }
 
 func (r MySQLRepository) CreateChangeSet(ctx context.Context, value ChangeSet) (ChangeSet, error) {
@@ -116,12 +292,159 @@ func (r MySQLRepository) TransitionChangeSet(ctx context.Context, organizationID
 	return r.GetChangeSet(ctx, organizationID, projectID, id)
 }
 
-func (r MySQLRepository) RecordExecution(ctx context.Context, changeSet ChangeSet, execution Execution, evidence Evidence) (ExecutionResult, error) {
+func (r MySQLRepository) ApproveChangeSet(ctx context.Context, changeSet ChangeSet, approval DeliveryApproval) (ChangeSet, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	defer tx.Rollback()
+	var currentPlanVersion int64
+	err = tx.QueryRowContext(ctx, `SELECT current_version FROM delivery_plans
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID).Scan(&currentPlanVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChangeSet{}, ErrNotFound
+	}
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if currentPlanVersion != changeSet.PlanVersion {
+		return ChangeSet{}, ErrStalePlanVersion
+	}
+	var status ChangeSetStatus
+	var version int64
+	err = tx.QueryRowContext(ctx, `SELECT status, version FROM delivery_change_sets
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID).Scan(&status, &version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChangeSet{}, ErrNotFound
+	}
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if status != ChangeSetPreflightPassed {
+		return ChangeSet{}, ErrInvalidState
+	}
+	if version != changeSet.Version || approval.ChangeSetVersion != version+1 {
+		return ChangeSet{}, ErrVersionConflict
+	}
+	if approval.OrganizationID != changeSet.OrganizationID ||
+		approval.ProjectID != changeSet.ProjectID ||
+		approval.PlanID != changeSet.PlanID ||
+		approval.PlanVersion != changeSet.PlanVersion ||
+		approval.ChangeSetID != changeSet.ID {
+		return ChangeSet{}, ErrApprovalContentMismatch
+	}
+	actionHash, err := ApprovalActionHash(approval)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if actionHash != approval.ActionHash {
+		return ChangeSet{}, ErrApprovalContentMismatch
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_approvals (
+		approval_id, organization_id, project_id, plan_id, plan_version,
+		change_set_id, change_set_version, plan_canonical_hash, action_hash,
+		action, scope, budget_limit_minor, currency, approved_by, approved_at,
+		expires_at, source, scenario
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		approval.ApprovalID, approval.OrganizationID, approval.ProjectID, approval.PlanID,
+		approval.PlanVersion, approval.ChangeSetID, approval.ChangeSetVersion,
+		approval.PlanCanonicalHash, approval.ActionHash, approval.Action, approval.Scope,
+		approval.BudgetLimitMinor, approval.Currency, approval.ApprovedBy, approval.ApprovedAt,
+		approval.ExpiresAt, approval.Source, approval.Scenario)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_change_sets SET
+		status = ?, approved_by = ?, approved_at = ?, version = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
+		ChangeSetApproved, approval.ApprovedBy, approval.ApprovedAt, approval.ChangeSetVersion,
+		approval.ApprovedAt, changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID,
+		changeSet.Version, ChangeSetPreflightPassed)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if affected != 1 {
+		return ChangeSet{}, ErrVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return ChangeSet{}, err
+	}
+	changeSet.Status = ChangeSetApproved
+	changeSet.ApprovedBy = approval.ApprovedBy
+	approvedAt := approval.ApprovedAt
+	changeSet.ApprovedAt = &approvedAt
+	changeSet.Version = approval.ChangeSetVersion
+	changeSet.UpdatedAt = approval.ApprovedAt
+	return changeSet, nil
+}
+
+func (r MySQLRepository) GetApproval(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, changeSetID string) (DeliveryApproval, error) {
+	value, err := scanApproval(r.DB.QueryRowContext(ctx, approvalSelect+`
+		WHERE organization_id = ? AND project_id = ? AND change_set_id = ?`,
+		organizationID, projectID, changeSetID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryApproval{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) RecordExecution(ctx context.Context, changeSet ChangeSet, approval DeliveryApproval, execution Execution, evidence Evidence) (ExecutionResult, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return ExecutionResult{}, err
 	}
 	defer tx.Rollback()
+	var currentPlanVersion int64
+	err = tx.QueryRowContext(ctx, `SELECT current_version FROM delivery_plans
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID).Scan(&currentPlanVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if currentPlanVersion != changeSet.PlanVersion {
+		return ExecutionResult{}, ErrStalePlanVersion
+	}
+	var storedStatus ChangeSetStatus
+	var storedVersion int64
+	err = tx.QueryRowContext(ctx, `SELECT status, version FROM delivery_change_sets
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID).Scan(&storedStatus, &storedVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if storedStatus != ChangeSetApproved {
+		return ExecutionResult{}, ErrInvalidState
+	}
+	if storedVersion != changeSet.Version {
+		return ExecutionResult{}, ErrVersionConflict
+	}
+	storedApproval, err := scanApproval(tx.QueryRowContext(ctx, approvalSelect+`
+		WHERE organization_id = ? AND project_id = ? AND change_set_id = ? FOR UPDATE`,
+		changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, ErrApprovalRequired
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if !execution.StartedAt.Before(storedApproval.ExpiresAt) {
+		return ExecutionResult{}, ErrApprovalExpired
+	}
+	if !sameApproval(storedApproval, approval) {
+		return ExecutionResult{}, ErrApprovalContentMismatch
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE delivery_change_sets SET status = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
 		ChangeSetExecuted, execution.CompletedAt, changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID, changeSet.Version, ChangeSetApproved)
 	if err != nil {
@@ -151,6 +474,27 @@ func (r MySQLRepository) RecordExecution(ctx context.Context, changeSet ChangeSe
 	changeSet.Version++
 	changeSet.UpdatedAt = execution.CompletedAt
 	return ExecutionResult{ChangeSet: changeSet, Execution: execution, Evidence: evidence}, nil
+}
+
+func sameApproval(left, right DeliveryApproval) bool {
+	return left.ApprovalID == right.ApprovalID &&
+		left.OrganizationID == right.OrganizationID &&
+		left.ProjectID == right.ProjectID &&
+		left.PlanID == right.PlanID &&
+		left.PlanVersion == right.PlanVersion &&
+		left.ChangeSetID == right.ChangeSetID &&
+		left.ChangeSetVersion == right.ChangeSetVersion &&
+		left.PlanCanonicalHash == right.PlanCanonicalHash &&
+		left.ActionHash == right.ActionHash &&
+		left.Action == right.Action &&
+		left.Scope == right.Scope &&
+		left.BudgetLimitMinor == right.BudgetLimitMinor &&
+		left.Currency == right.Currency &&
+		left.ApprovedBy == right.ApprovedBy &&
+		left.ApprovedAt.Equal(right.ApprovedAt) &&
+		left.ExpiresAt.Equal(right.ExpiresAt) &&
+		left.Source == right.Source &&
+		left.Scenario == right.Scenario
 }
 
 func (r MySQLRepository) ListExecutions(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]ExecutionResult, error) {
@@ -253,8 +597,9 @@ func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID
 	return values, rows.Err()
 }
 
-const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, created_by, created_at, updated_at FROM delivery_plans`
+const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario, current_version, created_by, created_at, updated_at FROM delivery_plans`
 const changeSetSelect = `SELECT id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, approved_by, approved_at, version, created_by, created_at, updated_at FROM delivery_change_sets`
+const approvalSelect = `SELECT approval_id, organization_id, project_id, plan_id, plan_version, change_set_id, change_set_version, plan_canonical_hash, action_hash, action, scope, budget_limit_minor, currency, approved_by, approved_at, expires_at, source, scenario FROM delivery_approvals`
 
 type rowScanner interface {
 	Scan(...any) error
@@ -265,6 +610,7 @@ func scanDeliveryPlan(row rowScanner) (DeliveryPlan, error) {
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativePackageID,
 		&value.CreativePackageHash, &value.CreativeVersionID, &value.Name, &value.Objective,
 		&value.BudgetCents, &value.StartAt, &value.EndAt, &value.Status, &value.Version,
+		&value.Platform, &value.Source, &value.Scenario, &value.CurrentVersionNumber,
 		&value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	return value, err
 }
@@ -297,4 +643,16 @@ func decodeChangeSetOptional(value *ChangeSet, notes []byte, approvedBy sql.Null
 		value.ApprovedAt = &approvedAt.Time
 	}
 	return nil
+}
+
+func scanApproval(row rowScanner) (DeliveryApproval, error) {
+	var value DeliveryApproval
+	err := row.Scan(
+		&value.ApprovalID, &value.OrganizationID, &value.ProjectID, &value.PlanID,
+		&value.PlanVersion, &value.ChangeSetID, &value.ChangeSetVersion,
+		&value.PlanCanonicalHash, &value.ActionHash, &value.Action, &value.Scope,
+		&value.BudgetLimitMinor, &value.Currency, &value.ApprovedBy, &value.ApprovedAt,
+		&value.ExpiresAt, &value.Source, &value.Scenario,
+	)
+	return value, err
 }

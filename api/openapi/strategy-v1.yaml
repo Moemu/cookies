@@ -85,7 +85,7 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
     post:
       operationId: createStrategyCreativeTaskPlan
-      summary: Freeze one user-selected business, its recommendation snapshot, Brief, optional Strategy revision, profile, and Skill.
+      summary: Freeze one user-selected business against an approved StrategyPackage, formal Handoff, and selected Route.
       parameters:
         - {$ref: '#/components/parameters/ProjectID'}
         - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -95,17 +95,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [brief_id, brief_version, business_code, selection_source, catalog_hash]
+              required: [contract_version, strategy_package_ref, selected_route_id, business_code, selection_source, catalog_hash]
               properties:
-                brief_id: {type: string, minLength: 1}
-                brief_version: {type: integer, minimum: 1}
-                source_strategy:
-                  type: object
-                  required: [strategy_id, revision]
-                  properties:
-                    strategy_id: {type: string, minLength: 1}
-                    revision: {type: integer, minimum: 1}
-                  additionalProperties: false
+                contract_version: {const: strategy-creative-task-plan/v2}
+                strategy_package_ref:
+                  $ref: '../contracts/strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef'
+                selected_route_id: {type: string, minLength: 1}
                 business_code: {type: string, minLength: 1}
                 selection_source: {enum: [recommended, manual]}
                 catalog_hash: {$ref: '#/components/schemas/SHA256'}
@@ -115,7 +110,7 @@ paths:
           description: Newly created plan.
           content:
             application/json:
-              schema: {$ref: '../contracts/strategy-creative-task-plan-v1.schema.json'}
+              schema: {$ref: '../contracts/strategy-creative-task-plan-v2.schema.json'}
         '409': {$ref: '#/components/responses/Problem'}
         '400': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/creative-task-plans/{plan_id}:
@@ -128,7 +123,10 @@ paths:
           description: Current mutable plan aggregate.
           content:
             application/json:
-              schema: {$ref: '../contracts/strategy-creative-task-plan-v1.schema.json'}
+              schema:
+                oneOf:
+                  - {$ref: '../contracts/strategy-creative-task-plan-v1.schema.json'}
+                  - {$ref: '../contracts/strategy-creative-task-plan-v2.schema.json'}
         '404': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/creative-task-plans/{plan_id}/answers:
     patch:

@@ -12,6 +12,7 @@ import type {
   CreativeBusinessCapability,
   CreativeBusinessRecommendationSnapshot,
   CreativeTaskPlan,
+  CreativeIntakeV3,
   DeepReviewAnalysis,
   DraftRevision,
   EvidenceReference,
@@ -21,6 +22,7 @@ import type {
   KnowledgeDocument,
   Message,
   PackageVersion,
+  StrategyCreativeHandoff,
   ResearchRun,
   ResearchArtifact,
   Review,
@@ -33,7 +35,6 @@ import type {
   StrategyTask,
   StrategyTaskBundle,
   StrategyTaskListItem,
-  TaskStrategyCreativeIntake,
   Workspace,
   WorkspaceDetail,
 } from './types'
@@ -113,9 +114,15 @@ export const strategyApi = {
   createCreativeTaskPlan: (
     projectId: string,
     input: {
-      brief_id: string
-      brief_version: number
-      source_strategy?: { strategy_id: string; revision: number }
+      contract_version: 'strategy-creative-task-plan/v2'
+      strategy_package_ref: {
+        package_id: string
+        package_version: number
+        package_content_hash: string
+        handoff_contract_version: 'strategy-creative-handoff/v1'
+        handoff_content_hash: string
+      }
+      selected_route_id: string
       business_code: string
       selection_source: 'recommended' | 'manual'
       catalog_hash: string
@@ -129,6 +136,17 @@ export const strategyApi = {
         headers: mutationHeaders(mutationKey),
         body: JSON.stringify(input),
       },
+    ),
+
+  getStrategyCreativeHandoff: (
+    projectId: string,
+    packageId: string,
+    packageVersion: number,
+    signal?: AbortSignal,
+  ) =>
+    apiRequest<StrategyCreativeHandoff>(
+      `${root}/projects/${encodeURIComponent(projectId)}/strategy-packages/${encodeURIComponent(packageId)}/versions/${packageVersion}/creative-handoff`,
+      { signal },
     ),
 
   patchCreativeTaskPlanAnswers: (
@@ -183,18 +201,20 @@ export const strategyApi = {
     mutationKey?: string,
   ) => {
     if (!plan.current_strategy) throw new Error('请先生成创意任务策略')
-    return apiRequest<TaskStrategyCreativeIntake>(
+    if (!plan.package_ref || !plan.selected_route_id || !plan.current_strategy.task_overlay_ref) {
+      throw new Error('任务策略缺少策略包、Handoff、Route 或 Overlay 血缘')
+    }
+    return apiRequest<CreativeIntakeV3>(
       `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes`,
       {
         method: 'POST',
         headers: mutationHeaders(mutationKey),
         body: JSON.stringify({
-          source: 'task_strategy',
-          task_strategy: {
-            plan_id: plan.id,
-            strategy_version: plan.current_strategy.version,
-            expected_content_hash: plan.current_strategy.content_hash,
-          },
+          contract_version: 'creative-intake-create/v3',
+          source: 'strategy_package',
+          strategy_package_ref: plan.package_ref,
+          selected_route_id: plan.selected_route_id,
+          task_overlay_ref: plan.current_strategy.task_overlay_ref,
         }),
       },
     )

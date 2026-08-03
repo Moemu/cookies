@@ -29,10 +29,12 @@ var ErrVersionConflict = errors.New("provider job version conflict")
 // Prompt contents may be persisted in protected Provider storage, but callers
 // must never place them in events or ordinary logs.
 type ImageGenerationInput struct {
-	Prompt       string                     `json:"prompt"`
-	Width        int                        `json:"width"`
-	Height       int                        `json:"height"`
-	SourceAssets []contract.ProjectAssetRef `json:"source_assets,omitempty"`
+	Prompt             string                     `json:"prompt"`
+	Width              int                        `json:"width"`
+	Height             int                        `json:"height"`
+	SourceAssets       []contract.ProjectAssetRef `json:"source_assets,omitempty"`
+	PromptRef          *contract.ResourceRef      `json:"prompt_ref,omitempty"`
+	SourceResourceRefs []contract.ResourceRef     `json:"source_resource_refs,omitempty"`
 }
 
 func (i ImageGenerationInput) Validate() error {
@@ -52,6 +54,16 @@ func (i ImageGenerationInput) Validate() error {
 			return fmt.Errorf("image source asset at index %d is duplicated", index)
 		}
 		seen[key] = struct{}{}
+	}
+	if i.PromptRef != nil {
+		if err := i.PromptRef.Validate(); err != nil {
+			return fmt.Errorf("invalid image prompt_ref: %w", err)
+		}
+	}
+	for index, ref := range i.SourceResourceRefs {
+		if err := ref.Validate(); err != nil {
+			return fmt.Errorf("invalid image source resource at index %d: %w", index, err)
+		}
 	}
 	return nil
 }
@@ -242,8 +254,8 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		if resolveErr != nil {
 			return contract.ProviderJob{}, false, fmt.Errorf("resolve provider image route: %w", resolveErr)
 		}
-		if request.Input.Width != 1024 || request.Input.Height != 1024 {
-			return contract.ProviderJob{}, false, fmt.Errorf("adapter gateway M1 supports only 1024x1024 images")
+		if !adapterGatewayImageSizeSupported(request.Input.Width, request.Input.Height) {
+			return contract.ProviderJob{}, false, fmt.Errorf("adapter gateway image dimensions are unsupported")
 		}
 		route = &resolved
 	}
@@ -343,8 +355,9 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 					ProviderCode:          record.ProviderCode,
 					ModelAlias:            record.ModelAlias,
 					ModelVersion:          record.ModelVersion,
-					PromptRef:             nil,
+					PromptRef:             record.Input.PromptRef,
 					SourceAssetRefs:       generationSourceAssetVersionRefs(record),
+					SourceResourceRefs:    append([]contract.ResourceRef{}, record.Input.SourceResourceRefs...),
 					ProjectContextVersion: record.ProjectContextVersion,
 					GeneratedAt:           now,
 				},
