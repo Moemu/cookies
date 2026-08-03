@@ -393,6 +393,16 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	if request.Source == IntakeSourceTaskStrategy && !s.AllowLegacyTaskStrategyIntakeWrites {
 		return CreativeIntake{}, fmt.Errorf("legacy task_strategy intake creation is read-only; use a v3 strategy_package intake with an optional task_overlay_ref")
 	}
+	if request.Source == IntakeSourceManual && request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+		request.Format = FormatImageText
+		request.SelectedRouteID = ManualImageTextRouteID
+		request.CreativeRoutes = []CreativeRouteSnapshot{{
+			RouteID: ManualImageTextRouteID, RouteType: CreativeRouteImageText,
+			Channels:    []string{string(ChannelXiaohongshu)},
+			Reason:      "用户在图文创作工作区直接提交创作需求",
+			AspectRatio: "3:4", RequiresHumanConfirmation: true, ReadinessStatus: "ready",
+		}}
+	}
 	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
 	if err != nil {
 		return CreativeIntake{}, err
@@ -525,6 +535,14 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 		if request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
 			intakeContractVersion = CreativeIntakeV3ContractVersion
 		}
+	}
+	if request.Source == IntakeSourceManual && request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+		identityHash, identityErr := contract.NewContentHash(request)
+		if identityErr != nil {
+			return CreativeIntake{}, fmt.Errorf("hash manual creative planning input identity: %w", identityErr)
+		}
+		inputIdentityHash = string(identityHash)
+		intakeContractVersion = CreativeIntakeV3ContractVersion
 	}
 	intakeID, err := s.idGenerator()("creativeintake")
 	if err != nil {

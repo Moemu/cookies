@@ -145,9 +145,9 @@ func (s Service) GenerateDirectionCandidates(
 	if err != nil {
 		return CreativeDirectionBatch{}, err
 	}
-	if intake.Source != IntakeSourceStrategyPackage || intake.Status != IntakeReady ||
+	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.Status != IntakeReady ||
 		intake.InputIdentityHash == "" || intake.Request.SelectedRouteID == "" {
-		return CreativeDirectionBatch{}, fmt.Errorf("a ready v3 strategy intake is required")
+		return CreativeDirectionBatch{}, fmt.Errorf("a ready v3 creative intake is required")
 	}
 	route, err := selectedPlanningRoute(intake.Request.CreativeRoutes, intake.Request.SelectedRouteID)
 	if err != nil {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Check,
   CircleAlert,
@@ -10,6 +10,7 @@ import {
 import { useProject } from '../context/ProjectContext'
 import {
   api,
+  type ApiCreateManualImageTextInput,
   type ApiCreativeDirection,
   type ApiCreativeIntakeBootstrap,
   type ApiImageTextAttempt,
@@ -52,6 +53,32 @@ const blockerLabels: Record<string, string> = {
   task_not_authoring: '素材已经进入审核或交付阶段，不能继续生成',
 }
 
+type ManualImageTextForm = {
+  objective: string
+  audience: string
+  coreMessage: string
+  callToAction: string
+  tone: string
+  visualKeywords: string
+  mandatoryElements: string
+  prohibitedClaims: string
+}
+
+const emptyManualForm: ManualImageTextForm = {
+  objective: '',
+  audience: '',
+  coreMessage: '',
+  callToAction: '',
+  tone: '',
+  visualKeywords: '',
+  mandatoryElements: '',
+  prohibitedClaims: '',
+}
+
+function parseList(value: string) {
+  return value.split(/[，,；;\n]/).map(item => item.trim()).filter(Boolean)
+}
+
 export function ImageTextWorkspacePage({
   state,
   activeTaskId,
@@ -75,6 +102,7 @@ export function ImageTextWorkspacePage({
   const [editedVisualBriefs, setEditedVisualBriefs] = useState<Record<number, string>>({})
   const [editedCaptions, setEditedCaptions] = useState<Record<number, string>>({})
   const [creativeVersion, setCreativeVersion] = useState<ApiCreativeVersion | null>(null)
+  const [manualForm, setManualForm] = useState<ManualImageTextForm>(emptyManualForm)
 
   const loadWorkspace = useCallback(async () => {
     if (!activeTaskId) {
@@ -306,13 +334,136 @@ export function ImageTextWorkspacePage({
     }
   }
 
+  const updateManualField = (field: keyof ManualImageTextForm, value: string) => {
+    setManualForm(current => ({ ...current, [field]: value }))
+  }
+
+  const createManualIntake = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setBusyAction('manual-intake')
+    setNotice('')
+    const input: ApiCreateManualImageTextInput = {
+      objective: manualForm.objective,
+      audience: manualForm.audience,
+      coreMessage: manualForm.coreMessage,
+      callToAction: manualForm.callToAction,
+      tone: parseList(manualForm.tone),
+      visualKeywords: parseList(manualForm.visualKeywords),
+      mandatoryElements: parseList(manualForm.mandatoryElements),
+      prohibitedClaims: parseList(manualForm.prohibitedClaims),
+    }
+    try {
+      const created = await api.createManualImageTextIntake(currentProject.id, input)
+      setNotice('创作需求已保存，请继续确认 Creative Direction')
+      onTaskCreated?.(created.id)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '创作需求提交失败')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   if (!activeTaskId) {
     return <StateBoundary state={state}>
-      <div className="image-text-empty">
-        <ImageIcon size={28}/>
-        <h2>请先从策略任务进入图文创作</h2>
-        <p>确认 Creative Direction 后，系统会在这里生成文案、底图和最终排版成品。</p>
-      </div>
+      <form className="image-text-direct-entry" onSubmit={createManualIntake}>
+        <header>
+          <span className="section-label">图文创作 · 直接输入</span>
+          <div className="image-text-direct-title">
+            <ImageIcon size={28}/>
+            <div>
+              <h2>告诉我们这次要创作什么</h2>
+              <p>可以直接填写创作需求，也可以继续从策略任务携带已确认的上下文进入。</p>
+            </div>
+          </div>
+        </header>
+        <div className="image-text-direct-grid">
+          <label className="wide">
+            <span>创作目标 <em>必填</em></span>
+            <textarea
+              value={manualForm.objective}
+              onChange={event => updateManualField('objective', event.target.value)}
+              placeholder="例如：为新品上市建立第一轮认知"
+              maxLength={500}
+              required
+            />
+          </label>
+          <label>
+            <span>目标受众 <em>必填</em></span>
+            <input
+              value={manualForm.audience}
+              onChange={event => updateManualField('audience', event.target.value)}
+              placeholder="例如：关注通勤饮品的年轻用户"
+              maxLength={500}
+              required
+            />
+          </label>
+          <label>
+            <span>行动引导</span>
+            <input
+              value={manualForm.callToAction}
+              onChange={event => updateManualField('callToAction', event.target.value)}
+              placeholder="例如：搜索品牌了解更多"
+              maxLength={300}
+            />
+          </label>
+          <label className="wide">
+            <span>核心信息 <em>必填</em></span>
+            <textarea
+              value={manualForm.coreMessage}
+              onChange={event => updateManualField('coreMessage', event.target.value)}
+              placeholder="这篇内容最需要让用户记住什么？"
+              maxLength={1000}
+              required
+            />
+          </label>
+          <label>
+            <span>语气风格</span>
+            <input
+              value={manualForm.tone}
+              onChange={event => updateManualField('tone', event.target.value)}
+              placeholder="清爽，克制，可信"
+            />
+          </label>
+          <label>
+            <span>视觉关键词</span>
+            <input
+              value={manualForm.visualKeywords}
+              onChange={event => updateManualField('visualKeywords', event.target.value)}
+              placeholder="青柠绿，生活方式，留白"
+            />
+          </label>
+          <label>
+            <span>必须出现</span>
+            <textarea
+              value={manualForm.mandatoryElements}
+              onChange={event => updateManualField('mandatoryElements', event.target.value)}
+              placeholder="品牌名、产品卖点；用逗号或换行分隔"
+            />
+          </label>
+          <label>
+            <span>禁止表达</span>
+            <textarea
+              value={manualForm.prohibitedClaims}
+              onChange={event => updateManualField('prohibitedClaims', event.target.value)}
+              placeholder="不得虚构功效；用逗号或换行分隔"
+            />
+          </label>
+        </div>
+        <footer className="image-text-direct-actions">
+          <p>提交后先生成 3 个创意方向，由你确认后再创建图文任务。</p>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={busyAction === 'manual-intake'
+              || !manualForm.objective.trim()
+              || !manualForm.audience.trim()
+              || !manualForm.coreMessage.trim()}
+          >
+            <Sparkles size={15}/>{busyAction === 'manual-intake' ? '正在创建…' : '创建并规划创意方向'}
+          </button>
+        </footer>
+        {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+      </form>
     </StateBoundary>
   }
 
@@ -320,19 +471,25 @@ export function ImageTextWorkspacePage({
     return <StateBoundary state={state}>
       <div className="image-text-direction-gate">
         <header>
-          <span className="section-label">Strategy → Creative 交接</span>
+          <span className="section-label">
+            {intake.source === 'manual' ? '直接创作 · Creative Intake' : 'Strategy → Creative 交接'}
+          </span>
           <h2>先确认创意方向，再开始图文制作</h2>
           <p>{intake.request?.objective
             || intake.request?.core_message
             || intake.base_handoff?.creative_view?.objective?.statement
             || intake.base_handoff?.creative_view?.communication?.single_minded_proposition
-            || '策略上下文已经冻结，Creative 将据此提出可执行的创意方向。'}</p>
+            || (intake.source === 'manual'
+              ? '创作需求已经保存，Creative 将据此提出可执行的创意方向。'
+              : '策略上下文已经冻结，Creative 将据此提出可执行的创意方向。')}</p>
         </header>
         {directions.length === 0 ? <section className="image-text-v2-start">
           <Sparkles size={24}/>
           <div>
             <h3>由 LLM 生成 Creative Direction 候选</h3>
-            <p>输入同时包含通用策略、任务级策略、受众、信息优先级、证据和边界；输出只负责创意概念与执行方向。</p>
+            <p>{intake.source === 'manual'
+              ? '系统会基于目标、受众、核心信息与表达边界提出候选；输出只负责创意概念与执行方向。'
+              : '输入同时包含通用策略、任务级策略、受众、信息优先级、证据和边界；输出只负责创意概念与执行方向。'}</p>
           </div>
           <button className="primary-button" disabled={busyAction === 'directions'} onClick={() => void generateDirections()}>
             <WandSparkles size={15}/>{busyAction === 'directions' ? '正在生成…' : '生成 3 个候选方向'}

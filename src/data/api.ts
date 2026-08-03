@@ -569,6 +569,17 @@ export type ApiCreativeIntakeBootstrap = {
   }
 }
 
+export type ApiCreateManualImageTextInput = {
+  objective: string
+  audience: string
+  coreMessage: string
+  callToAction: string
+  tone: string[]
+  visualKeywords: string[]
+  mandatoryElements: string[]
+  prohibitedClaims: string[]
+}
+
 export type ApiCreativeVersion = {
   id: string
   task_id: string
@@ -3079,6 +3090,31 @@ function getCreativeIntake(projectId: string, intakeId: string) {
   )
 }
 
+function createManualImageTextIntake(
+  projectId: string,
+  input: ApiCreateManualImageTextInput,
+) {
+  return creativeRequest<ApiCreativeIntakeBootstrap>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      contract_version: 'creative-intake-create/v3',
+      source: 'manual',
+      channel: 'xiaohongshu',
+      objective: input.objective.trim(),
+      audience: input.audience.trim(),
+      core_message: input.coreMessage.trim(),
+      call_to_action: input.callToAction.trim(),
+      concept: '',
+      tone: input.tone,
+      visual_keywords: input.visualKeywords,
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+    },
+    { 'Idempotency-Key': `manual-image-text-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+}
+
 function generateCreativeDirections(projectId: string, intakeId: string) {
   return creativeRequest<ApiCreativeDirectionBatch>(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/direction-candidate-batches`,
@@ -4334,6 +4370,7 @@ export const api = {
   getCreativeTaskHandoffDetail,
   getImageTextWorkspace,
   getCreativeIntake,
+  createManualImageTextIntake,
   generateCreativeDirections,
   confirmCreativeDirection,
   createImageTextTaskFromDirection,

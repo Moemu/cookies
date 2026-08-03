@@ -2,6 +2,54 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { api } from "../src/data/api.ts";
 
+test("manual image-text intake freezes a v3 direct-input request", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    return jsonResponse({ id: "intake_manual_1", source: "manual", status: "ready" }, 201);
+  };
+  try {
+    const created = await api.createManualImageTextIntake("project_demo", {
+      objective: " 建立新品认知 ",
+      audience: "年轻通勤用户",
+      coreMessage: " 0 糖青柠气泡水适合通勤场景 ",
+      callToAction: " 搜索品牌 ",
+      tone: ["清爽", "克制"],
+      visualKeywords: ["青柠绿"],
+      mandatoryElements: ["品牌名"],
+      prohibitedClaims: ["不得虚构功效"],
+    });
+    assert.equal(created.id, "intake_manual_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(
+    calls[0].url,
+    "/api/creative/v1/projects/project_demo/creative-intakes",
+  );
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+    contract_version: "creative-intake-create/v3",
+    source: "manual",
+    channel: "xiaohongshu",
+    objective: "建立新品认知",
+    audience: "年轻通勤用户",
+    core_message: "0 糖青柠气泡水适合通勤场景",
+    call_to_action: "搜索品牌",
+    concept: "",
+    tone: ["清爽", "克制"],
+    visual_keywords: ["青柠绿"],
+    mandatory_elements: ["品牌名"],
+    prohibited_claims: ["不得虚构功效"],
+  });
+  assert.match(
+    new Headers(calls[0].init.headers).get("Idempotency-Key") ?? "",
+    /^manual-image-text-\d+-[a-z0-9]+$/,
+  );
+});
+
 test("image-text slot generation binds task and draft revisions and uses a fresh operation key", async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; init: RequestInit }> = [];

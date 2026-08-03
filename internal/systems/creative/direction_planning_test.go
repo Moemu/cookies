@@ -72,6 +72,56 @@ func TestGenerateDirectionCandidatesStartsCreativeAuthorship(t *testing.T) {
 	}
 }
 
+func TestManualV3ImageTextIntakeStartsDirectionPlanning(t *testing.T) {
+	service := testService()
+	planner := &directionPlannerStub{result: DirectionPlannerResult{
+		Model: "test-model", PromptVersion: "creative-direction/xhs-v1",
+		Candidates: []DirectionCandidate{
+			{Concept: "通勤场景记录", CreativeRationale: "从用户输入的通勤场景展开", MessagePlan: []string{"先场景后信息"}, ExecutionOutline: []string{"通勤插画"}, GuardrailTrace: []string{"不补造产品功效"}},
+			{Concept: "三类场景清单", CreativeRationale: "把用户输入整理成场景清单", MessagePlan: []string{"场景分组"}, ExecutionOutline: []string{"三栏信息图"}, GuardrailTrace: []string{"不虚构用户体验"}},
+		},
+	}}
+	service.DirectionPlanner = planner
+	service.Directions = &directionRepositoryStub{}
+
+	intake, err := service.CreateIntake(
+		context.Background(), testRequestContext(), "project_1", "manual-v3-image-text",
+		CreateIntakeRequest{
+			ContractVersion: CreativeIntakeCreateV3ContractVersion,
+			Source:          IntakeSourceManual, Channel: ChannelXiaohongshu,
+			Objective: "建立新品认知", Audience: "关注通勤饮品的年轻用户",
+			CoreMessage:  "0糖青柠气泡水适合用场景化内容介绍",
+			CallToAction: "搜索品牌了解更多", Tone: []string{"清爽", "克制"},
+			VisualKeywords: []string{"青柠绿", "生活方式"},
+			Mandatory:      []string{},
+			Prohibited:     []string{"不得虚构产品功效"},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.InputIdentityHash == "" ||
+		intake.Request.SelectedRouteID != ManualImageTextRouteID || len(intake.Request.CreativeRoutes) != 1 {
+		t.Fatalf("manual intake did not freeze v3 planning lineage: %+v", intake)
+	}
+	view, err := intake.V3View()
+	if err != nil || !view.Readiness.PlanningReady || !view.Readiness.GenerationReady {
+		t.Fatalf("manual intake did not expose a ready v3 view: view=%+v err=%v", view, err)
+	}
+
+	batch, err := service.GenerateDirectionCandidates(
+		context.Background(), testRequestContext().Actor, "project_1", intake.ID,
+		GenerateDirectionRequest{CandidateCount: 2},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Candidates) != 2 || planner.context.SelectedRoute.RouteID != ManualImageTextRouteID ||
+		planner.context.Proposition != intake.Request.CoreMessage {
+		t.Fatalf("manual planning context was not preserved: batch=%+v context=%+v", batch, planner.context)
+	}
+}
+
 func TestGenerateDirectionCandidatesHasNoProviderFallback(t *testing.T) {
 	service := testService()
 	intake := CreativeIntake{

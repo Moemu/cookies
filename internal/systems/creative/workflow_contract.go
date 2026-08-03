@@ -13,6 +13,7 @@ const (
 
 	CreativeRouteImageText  = "image_text"
 	CreativeRouteBrandVideo = "brand_video"
+	ManualImageTextRouteID  = "route_manual_xiaohongshu_image_text_v1"
 )
 
 type CreativeDirectionBatchStatus string

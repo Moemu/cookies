@@ -244,7 +244,7 @@ func (r CreateIntakeRequest) Validate() error {
 		if r.ManualCommercePreroll != nil {
 			return r.validateManualCommercePreroll()
 		}
-		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
+		if len(r.CreativeRoutes) != 0 || r.SelectedRouteID != "" || r.Format == FormatVideo || r.PerformanceMode != "" {
 			return fmt.Errorf("manual image intake must not include video routing")
 		}
 	case IntakeSourceStrategyPackage:
