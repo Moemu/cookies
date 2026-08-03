@@ -54,6 +54,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
   const [selectedCode, setSelectedCode] = useState('')
   const [activePlanId, setActivePlanId] = useState('')
   const [answers, setAnswers] = useState<Record<string, unknown>>({})
+  const [showSetup, setShowSetup] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -362,6 +363,27 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
 
     {error ? <div className="kanon-strategy-alert" role="alert"><AlertCircle size={15}/><span>{error}</span></div> : null}
 
+    {activePlan?.current_strategy && selectedProfile
+      ? <StrategyResult
+        busy={busy === 'handoff'}
+        capability={capabilities.find(item => item.business_code === activePlan.business_code)}
+        onHandoff={handoff}
+        plan={activePlan}
+        profile={selectedProfile}
+      />
+      : null}
+
+    {activePlan?.current_strategy ? <button
+      aria-expanded={showSetup}
+      className="creative-setup-toggle"
+      onClick={() => setShowSetup(value => !value)}
+      type="button"
+    >
+      <span><b>{showSetup ? '收起任务策略设置' : '需要调整业务或任务输入？'}</b><small>当前结果已冻结；修改会创建新的计划或版本。</small></span>
+      <ChevronRight className={showSetup ? 'expanded' : ''} size={15}/>
+    </button> : null}
+
+    {!activePlan?.current_strategy || showSetup ? <>
     <div className="creative-planner-layout">
       <div className="creative-business-picker">
         <div className="creative-planner-section-title">
@@ -487,16 +509,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
         </button>
       </div>
     </div> : null}
-
-    {activePlan?.current_strategy && selectedProfile
-      ? <StrategyResult
-        busy={busy === 'handoff'}
-        capability={capabilities.find(item => item.business_code === activePlan.business_code)}
-        onHandoff={handoff}
-        plan={activePlan}
-        profile={selectedProfile}
-      />
-      : null}
+    </> : null}
   </section>
 }
 
@@ -630,9 +643,9 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
   return <div className="creative-strategy-result">
     <div className="creative-result-heading">
       <div>
-        <span className="section-label">GENERATED TASK STRATEGY</span>
-        <b>03 任务策略 v{strategy.version}</b>
-        <small title={strategy.content_hash}>{strategy.content_hash.slice(0, 24)}…</small>
+        <span className="section-label">READY FOR CREATIVE</span>
+        <b>{document.core_message}</b>
+        <small>{profile.display_name} · 任务策略 v{strategy.version}</small>
       </div>
       <div>
         <span className="creative-result-status"><ShieldCheck size={13}/>已冻结并可追溯</span>
@@ -684,6 +697,10 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
       projectId={plan.project_id}
       title="素材如何参与了这份策略"
     />
+    <details className="kanon-technical-details creative-result-lineage">
+      <summary>查看版本血缘</summary>
+      <code>{strategy.content_hash}</code>
+    </details>
   </div>
 }
 

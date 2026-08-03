@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
+  ArrowLeft,
   Check,
   CircleAlert,
+  Clock3,
   Image as ImageIcon,
+  Images,
+  Plus,
   RefreshCw,
   Sparkles,
   WandSparkles,
@@ -13,6 +17,7 @@ import {
   type ApiCreateManualImageTextInput,
   type ApiCreativeDirection,
   type ApiCreativeIntakeBootstrap,
+  type ApiCreativeTaskSummary,
   type ApiImageTextAttempt,
   type ApiImageTextWorkspace,
   type ApiCreativeVersion,
@@ -75,18 +80,34 @@ const emptyManualForm: ManualImageTextForm = {
   prohibitedClaims: '',
 }
 
+type RecentImageTextTask = {
+  summary: ApiCreativeTaskSummary
+  workspace: ApiImageTextWorkspace | null
+  previews: Record<number, string>
+}
+
 function parseList(value: string) {
   return value.split(/[，,；;\n]/).map(item => item.trim()).filter(Boolean)
+}
+
+function formatTaskTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '最近更新'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(date)
 }
 
 export function ImageTextWorkspacePage({
   state,
   activeTaskId,
   onTaskCreated,
+  onBack,
 }: {
   state: DataState
   activeTaskId?: string
   onTaskCreated?: (taskId: string) => void
+  onBack?: () => void
 }) {
   const { currentProject } = useProject()
   const [workspace, setWorkspace] = useState<ApiImageTextWorkspace | null>(null)
@@ -103,6 +124,49 @@ export function ImageTextWorkspacePage({
   const [editedCaptions, setEditedCaptions] = useState<Record<number, string>>({})
   const [creativeVersion, setCreativeVersion] = useState<ApiCreativeVersion | null>(null)
   const [manualForm, setManualForm] = useState<ManualImageTextForm>(emptyManualForm)
+  const [recentTasks, setRecentTasks] = useState<RecentImageTextTask[]>([])
+  const [recentTasksLoading, setRecentTasksLoading] = useState(false)
+  const [recentTasksError, setRecentTasksError] = useState('')
+
+  const loadRecentTasks = useCallback(async () => {
+    if (activeTaskId) return
+    setRecentTasksLoading(true)
+    setRecentTasksError('')
+    try {
+      const result = await api.listCreativeTasks(currentProject.id, 30)
+      const summaries = result.items
+        .filter(task => task.format === 'image_text' && task.status !== 'archived')
+        .slice(0, 6)
+      const values = await Promise.all(summaries.map(async summary => {
+        try {
+          const taskWorkspace = await api.getImageTextWorkspace(currentProject.id, summary.id)
+          const previewEntries = await Promise.all(taskWorkspace.slots.map(async slot => {
+            const adopted = slot.attempts.find(attempt => attempt.id === slot.adopted_attempt_id)
+            const visible = adopted ?? [...slot.attempts].reverse().find(attempt => attempt.status === 'succeeded')
+            if (!visible?.final_asset_ref) return [slot.order, ''] as const
+            try {
+              return [slot.order, await api.getProjectAssetPreview(currentProject.id, visible.final_asset_ref)] as const
+            } catch {
+              return [slot.order, ''] as const
+            }
+          }))
+          return { summary, workspace: taskWorkspace, previews: Object.fromEntries(previewEntries) }
+        } catch {
+          return { summary, workspace: null, previews: {} }
+        }
+      }))
+      setRecentTasks(values)
+    } catch (cause) {
+      setRecentTasks([])
+      setRecentTasksError(cause instanceof Error ? cause.message : '最近图文任务加载失败')
+    } finally {
+      setRecentTasksLoading(false)
+    }
+  }, [activeTaskId, currentProject.id])
+
+  useEffect(() => {
+    void loadRecentTasks()
+  }, [loadRecentTasks])
 
   const loadWorkspace = useCallback(async () => {
     if (!activeTaskId) {
@@ -116,8 +180,17 @@ export function ImageTextWorkspacePage({
       setNotice('')
       if (value.readiness.review_ready) {
         try {
-          const versions = await api.listImageTextVersions(currentProject.id, activeTaskId)
-          setCreativeVersion(versions.items[0] ?? null)
+          const [versions, packages] = await Promise.all([
+            api.listImageTextVersions(currentProject.id, activeTaskId),
+            api.listCreativePackages(currentProject.id),
+          ])
+          const latestVersion = versions.items[0] ?? null
+          const delivered = latestVersion
+            ? packages.items.some(item => item.creative_version_id === latestVersion.id)
+            : false
+          setCreativeVersion(latestVersion && delivered
+            ? { ...latestVersion, status: 'delivered' }
+            : latestVersion)
         } catch (cause) {
           setCreativeVersion(null)
           setNotice(cause instanceof Error ? cause.message : '交付版本加载失败')
@@ -365,7 +438,47 @@ export function ImageTextWorkspacePage({
 
   if (!activeTaskId) {
     return <StateBoundary state={state}>
-      <form className="image-text-direct-entry" onSubmit={createManualIntake}>
+      <div className="image-text-home">
+      <section className="image-text-library" aria-label="最近图文创作">
+        <header>
+          <div>
+            <span className="section-label">真实任务 · 自动保存</span>
+            <h2>最近图文创作</h2>
+            <p>你生成的图片都在这里。打开任务即可继续生成、查看成品或进入审核。</p>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => document.getElementById('new-image-text')?.scrollIntoView({ behavior: 'smooth' })}>
+            <Plus size={15}/>新建图文
+          </button>
+        </header>
+        {recentTasksLoading ? <div className="image-text-library-loading">正在读取最近创作…</div> : null}
+        {recentTasksError ? <div className="inline-notice" role="alert">{recentTasksError}<button className="text-button" onClick={() => void loadRecentTasks()}>重试</button></div> : null}
+        {!recentTasksLoading && !recentTasksError && recentTasks.length === 0 ? <div className="image-text-library-empty">
+          <Images size={26}/><div><b>还没有图文任务</b><p>从下方直接输入，或从策略确认 Creative Direction 后创建。</p></div>
+        </div> : null}
+        <div className="image-text-library-grid">
+          {recentTasks.map(item => {
+            const generated = item.workspace?.slots.filter(slot => slot.attempts.some(attempt => attempt.status === 'succeeded')).length ?? 0
+            const total = item.workspace?.slots.length ?? 3
+            const title = item.workspace?.draft.selected_title || item.summary.direction.focus || '未命名图文任务'
+            return <article key={item.summary.id} className="image-text-library-card">
+              <button className="image-text-library-open" type="button" onClick={() => onTaskCreated?.(item.summary.id)} aria-label={`继续创作：${title}`}>
+                <div className="image-text-library-previews" aria-hidden="true">
+                  {[1, 2, 3].map(order => item.previews[order]
+                    ? <img key={order} src={item.previews[order]} alt=""/>
+                    : <span key={order}><ImageIcon size={18}/><small>0{order}</small></span>)}
+                </div>
+                <div className="image-text-library-copy">
+                  <span className="image-text-library-status"><i data-ready={generated === total}/>{generated}/{total} 张成品</span>
+                  <h3>{title}</h3>
+                  <p>{item.summary.direction.concept || item.summary.direction.core_message}</p>
+                  <footer><span><Clock3 size={13}/>{formatTaskTime(item.summary.updated_at)}</span><b>继续创作</b></footer>
+                </div>
+              </button>
+            </article>
+          })}
+        </div>
+      </section>
+      <form id="new-image-text" className="image-text-direct-entry" onSubmit={createManualIntake}>
         <header>
           <span className="section-label">图文创作 · 直接输入</span>
           <div className="image-text-direct-title">
@@ -464,6 +577,7 @@ export function ImageTextWorkspacePage({
         </footer>
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </form>
+      </div>
     </StateBoundary>
   }
 
@@ -532,21 +646,27 @@ export function ImageTextWorkspacePage({
   }
 
   const draftReady = workspace.draft.contract_version === 'creative-image-text-draft/v2'
+  const generatedSlotCount = workspace.slots.filter(slot => slot.attempts.some(attempt => attempt.status === 'succeeded')).length
+  const allImagesReady = workspace.slots.length > 0 && generatedSlotCount === workspace.slots.length
+  const isReadyRework = workspace.task.status === 'ready_for_review' && workspace.draft.generation_source_version != null
+  const isGenerationActive = workspace.slots.some(slot => slot.attempts.some(attempt => activeStatuses.has(attempt.status)))
 
   return <StateBoundary state={state}>
     <div className="image-text-v2-workspace">
       <header className="image-text-v2-header">
         <div>
+          {onBack ? <button className="image-text-back" type="button" onClick={onBack}><ArrowLeft size={15}/>全部图文</button> : null}
           <span className="section-label">图文创作 · 小红书 3:4</span>
           <h2>{workspace.draft.selected_title || workspace.task.direction.focus || '从策略生成图文成品'}</h2>
           <p>{workspace.direction.concept} · {workspace.task.direction.audience}</p>
         </div>
         <div className="image-text-v2-readiness">
-          <span className={workspace.readiness.image_generation_ready ? 'status success' : 'status warning'}>
-            {workspace.readiness.image_generation_ready ? <Check size={14}/> : <CircleAlert size={14}/>}
-            {workspace.readiness.image_generation_ready ? '可生成素材' : '尚未满足生成条件'}
+          <span className={allImagesReady || workspace.readiness.image_generation_ready ? 'status success' : 'status warning'}>
+            {allImagesReady || workspace.readiness.image_generation_ready ? <Check size={14}/> : <CircleAlert size={14}/>}
+            {allImagesReady ? '成品已生成' : isGenerationActive ? '图片生成中' : workspace.readiness.image_generation_ready ? '可生成素材' : '尚未满足生成条件'}
           </span>
-          <small>任务 v{workspace.task.version} · 草稿 v{workspace.draft.version}</small>
+          <small>{generatedSlotCount}/{workspace.slots.length} 张成品 · 任务 v{workspace.task.version} · 草稿 v{workspace.draft.version}</small>
+          <code>{workspace.task.id}</code>
         </div>
       </header>
 
@@ -565,7 +685,21 @@ export function ImageTextWorkspacePage({
         </button>
       </section> : null}
 
-      {draftReady ? <button
+      {isReadyRework ? <section className="image-text-rework">
+        <div>
+          <span className="section-label">效果不满意？</span>
+          <h3>保留当前成品，创建一个可重新生成的返工版本</h3>
+          <p>推荐先保留文案和画面说明，只重新生成图片；旧版本不会被覆盖。</p>
+        </div>
+        <div>
+          <button className="primary-button" disabled={busyAction === 'save-draft'} onClick={() => void saveDraft()}>
+            <RefreshCw size={15}/>{busyAction === 'save-draft' ? '正在创建返工版本…' : '保留文案，返工图片'}
+          </button>
+          <button className="secondary-button" disabled={!workspace.readiness.draft_generation_ready || busyAction === 'draft'} onClick={() => void generateDraft()}>
+            <WandSparkles size={15}/>{busyAction === 'draft' ? '正在重新规划…' : '重新规划全部方案'}
+          </button>
+        </div>
+      </section> : draftReady ? <button
         className="secondary-button"
         disabled={!workspace.readiness.draft_generation_ready || busyAction === 'draft'}
         onClick={() => void generateDraft()}
@@ -575,7 +709,9 @@ export function ImageTextWorkspacePage({
 
       {workspace.readiness.blocking_reasons.length > 0 ? <div className="image-text-v2-blockers">
         <CircleAlert size={16}/>
-        <span>{workspace.readiness.blocking_reasons.map(reason => blockerLabels[reason] ?? reason).join('；')}</span>
+        <span>{workspace.readiness.blocking_reasons.map(reason => reason === 'task_not_authoring' && isGenerationActive
+          ? '当前图片正在生成，完成后可继续操作'
+          : blockerLabels[reason] ?? reason).join('；')}</span>
       </div> : null}
 
       <div className="image-text-v2-grid">
@@ -650,9 +786,9 @@ export function ImageTextWorkspacePage({
           </div>
           <button
             className="secondary-button full"
-            disabled={!draftReady || workspace.slots.some(slot => slot.attempts.length > 0) || busyAction === 'save-draft'}
+            disabled={!draftReady || (!isReadyRework && workspace.slots.some(slot => slot.attempts.length > 0)) || busyAction === 'save-draft'}
             onClick={() => void saveDraft()}
-          >{busyAction === 'save-draft' ? '保存中…' : '保存文案修改'}</button>
+          >{busyAction === 'save-draft' ? '保存中…' : isReadyRework ? '保留修改并创建返工版本' : '保存文案修改'}</button>
           <button
             className="primary-button full"
             disabled={!draftReady || !workspace.readiness.image_generation_ready || Boolean(selectedSlot?.attempts.some(attempt => activeStatuses.has(attempt.status))) || busyAction === `slot-${selectedOrder}`}

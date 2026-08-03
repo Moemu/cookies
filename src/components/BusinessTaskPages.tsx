@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, SystemKey } from '../types'
-import type { ApiAgencyWorkbench, ApiAssetVersionPointer, ApiMaterialConfirmation, ApiQualityCheckRun } from '../data/api'
+import { api, type ApiAgencyWorkbench, type ApiAssetVersionPointer, type ApiCreativeTaskSummary, type ApiMaterialConfirmation, type ApiQualityCheckRun } from '../data/api'
 import { StateBoundary } from './StateBoundary'
 import { shortId } from '../data/shortId'
 
@@ -50,6 +50,20 @@ const statusLabels: Record<BusinessTaskRecord['status'], string> = {
   ready: '待评审',
   completed: '已完成',
   failed: '失败',
+}
+
+function creativeServiceStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: '待补充',
+    in_progress: '创作中',
+    generated: '已有生成结果',
+    ready_for_review: '待审核',
+    frozen: '已冻结',
+    approved: '已批准',
+    delivered: '已交付',
+    failed: '生成失败',
+  }
+  return labels[status] ?? status
 }
 
 type CreativeQuickView = '全部' | '我的任务' | '今日到期' | '质检未通过' | '待人工确认' | '需要修改' | '生成失败'
@@ -196,13 +210,15 @@ export function TaskCenterPage({
   onOpenTask: (id: string) => void
   onRequestCreate: () => void
   onContinueTask?: (task: BusinessTaskRecord) => void
-  onOpenProject?: (projectId: string, system?: SystemKey, navId?: string, objectId?: string, view?: string) => void
+  onOpenProject?: (projectId: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
 }) {
   const { agencyWorkbench, currentProject, projects, updateTask } = useProject()
   const [search, setSearch] = useState('')
   const [quickView, setQuickView] = useState<CreativeQuickView>(() => creativeQuickViews.includes(activeView as CreativeQuickView) ? activeView as CreativeQuickView : '全部')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [notice, setNotice] = useState('')
+  const [persistedCreativeTasks, setPersistedCreativeTasks] = useState<ApiCreativeTaskSummary[]>([])
+  const [persistedCreativeError, setPersistedCreativeError] = useState('')
   const allTasks = useMemo(
     () => currentProject.tasks
       .filter(task => taskTypeMeta[task.type].domain === domain)
@@ -226,6 +242,20 @@ export function TaskCenterPage({
   }, [creativeRows, currentProject.owner, quickView, search])
   const selectedCreativeRows = visibleCreativeRows.filter(row => selectedIds.includes(row.task.id))
   const commonActions = commonBatchActions(selectedCreativeRows)
+
+  useEffect(() => {
+    if (domain !== 'creative') return
+    let active = true
+    setPersistedCreativeError('')
+    void api.listCreativeTasks(currentProject.id, 20)
+      .then(result => {
+        if (active) setPersistedCreativeTasks(result.items.filter(task => task.status !== 'archived'))
+      })
+      .catch(cause => {
+        if (active) setPersistedCreativeError(cause instanceof Error ? cause.message : '真实创意任务加载失败')
+      })
+    return () => { active = false }
+  }, [currentProject.id, domain])
 
   useEffect(() => {
     if (domain !== 'creative') return
@@ -274,6 +304,28 @@ export function TaskCenterPage({
   if (domain === 'creative') {
     const selectedRow = visibleCreativeRows.find(row => row.task.id === selectedCreative?.id)
     return <StateBoundary state={state} onCreate={onRequestCreate}><div className="business-task-center creative-ops-center">
+      <section className="persisted-creative-rail" aria-label="最近真实创作">
+        <header>
+          <div><span className="section-label">已保存到服务端</span><h3>最近真实创作</h3><p>从策略或直接输入创建的任务都从这里继续，不再依赖临时页面状态。</p></div>
+          <button className="secondary-button" onClick={() => onOpenProject?.(currentProject.id, 'creative', 'image-text', undefined, '小红书')}><Plus size={15}/>进入图文创作</button>
+        </header>
+        {persistedCreativeError ? <div className="inline-notice" role="alert">{persistedCreativeError}</div> : null}
+        <div className="persisted-creative-list">
+          {persistedCreativeTasks.slice(0, 5).map(task => <button key={task.id} onClick={() => onOpenProject?.(
+            task.project_id,
+            'creative',
+            task.format === 'image_text' ? 'image-text' : 'video',
+            undefined,
+            task.format === 'image_text' ? '小红书' : task.video_purpose === 'brand' ? '品牌广告' : '效果广告',
+            task.id,
+          )}>
+            <span className="persisted-creative-format">{task.format === 'image_text' ? '图文' : '视频'}</span>
+            <span><b>{task.direction.focus || task.direction.concept || '未命名创意任务'}</b><small>{task.channel} · {task.id}</small></span>
+            <span className="persisted-creative-state">{creativeServiceStatusLabel(task.status)}<ArrowRight size={14}/></span>
+          </button>)}
+          {!persistedCreativeError && persistedCreativeTasks.length === 0 ? <div className="task-list-empty compact"><ListChecks size={20}/><b>还没有真实创作任务</b><p>从策略交接或图文直接输入开始。</p></div> : null}
+        </div>
+      </section>
       <section className="creative-ops-toolbar" aria-label="创意任务批量运营筛选">
         <div><span className="section-label">CREATIVE OPS</span><h3>创意任务批量运营</h3><p>按客户、Project、渠道规格、质检与人工确认状态筛选，批量动作只显示选中对象共同支持的操作。</p></div>
         <label className="creative-task-search"><Search size={15}/><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索任务名称、ID 或素材名称"/></label>

@@ -448,6 +448,53 @@ func TestCreateVideoTaskConsumesApprovedRouteAndReadyProjectVideo(t *testing.T) 
 	}
 }
 
+func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	intake := CreativeIntake{
+		ContractVersion: CreativeIntakeV3ContractVersion,
+		ID:              "intake_brand", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: IntakeSourceStrategyPackage, Status: IntakeReady,
+		InputIdentityHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Request: CreateIntakeRequest{
+			Source: IntakeSourceStrategyPackage, SelectedRouteID: "route_brand_video",
+			Audience: "研发与采购负责人", CoreMessage: "把不可见的风险变成可验证的工程判断",
+			CreativeRoutes: []CreativeRouteSnapshot{{
+				RouteID: "route_brand_video", RouteType: CreativeRouteBrandVideo, VideoPurpose: "brand",
+				Channels: []string{"douyin"}, Reason: "建立品牌认知", TargetDurationSeconds: 30,
+				AspectRatio: "9:16", Resolution: "1080x1920", RequiresHumanConfirmation: true, ReadinessStatus: "ready",
+			}},
+		},
+	}
+	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	direction := CreativeDirectionVersion{
+		ContractVersion: CreativeDirectionVersionV1, ID: "direction_brand", OrganizationID: "org_1", ProjectID: "project_1",
+		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, RouteID: "route_brand_video",
+		Concept: "毫米之间，有人回答", CreativeRationale: "用人物接力建立工程伙伴认知",
+		MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构结论"},
+		DirectionMode: "cinematic", EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "工业微距",
+		BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认", Status: DirectionStatusConfirmed,
+	}
+	service.Directions = &directionRepositoryStub{batch: CreativeDirectionBatch{Candidates: []CreativeDirectionVersion{direction}}}
+
+	task, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		SelectedRouteID: "route_brand_video", DirectionID: direction.ID, Channel: ChannelDouyin,
+		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), testRequestContext().Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Direction.DirectionVersionID != direction.ID || task.Direction.InputIdentityHash != intake.InputIdentityHash ||
+		task.Direction.CallToAction != "" || detail.VideoDraft == nil || detail.VideoDraft.Resolution != "1080x1920" ||
+		!strings.Contains(detail.VideoDraft.Prompt, direction.BrandMemoryDevice) {
+		t.Fatalf("brand task did not preserve confirmed direction lineage and route spec: task=%+v detail=%+v", task, detail)
+	}
+}
+
 func TestCreateManualViralRemakeTaskUsesStableRouteAndRestorableSnapshot(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -614,6 +661,36 @@ func defaultTaskRequest() CreateTaskRequest {
 
 func testRequestContext() contract.RequestContext {
 	return contract.RequestContext{RequestID: "req_1", TraceID: "trace_1", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{ScopeRead, ScopeWrite}}}
+}
+
+func TestMandatoryElementSatisfiedUsesSemanticSignalsForStrategyRequirements(t *testing.T) {
+	t.Parallel()
+	copyText := strings.ToLower("新产品准备打样时，先确认判断依据与资质文件是否可核验；如需讨论具体需求，可私信沟通。")
+
+	for _, requirement := range []string{
+		"明确触发场景",
+		"可核验或待核验的证据位",
+		"低摩擦咨询动作",
+		"必须包含明确触发场景、可核验/待核验证据位、低摩擦咨询动作三个强制元素",
+		"不得虚构客户案例、设备数量或交付承诺",
+		"仅使用已绑定研究证据描述行业决策逻辑",
+	} {
+		if !mandatoryElementSatisfied(requirement, copyText) {
+			t.Fatalf("expected requirement %q to be satisfied", requirement)
+		}
+	}
+}
+
+func TestMandatoryElementSatisfiedStillWarnsForMissingVisibleRequirement(t *testing.T) {
+	t.Parallel()
+	copyText := strings.ToLower("新产品准备打样时，先核验判断依据。")
+
+	if mandatoryElementSatisfied("低摩擦咨询动作", copyText) {
+		t.Fatal("consultation requirement should be missing")
+	}
+	if mandatoryElementSatisfied("必须展示品牌授权标识", copyText) {
+		t.Fatal("unknown visible requirement should still require a literal match")
+	}
 }
 
 func testService() Service {

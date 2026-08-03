@@ -101,6 +101,54 @@ test("image-text adoption forwards the server selection version", async () => {
   });
 });
 
+test("creative task library reads persisted tasks for the selected project", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    return jsonResponse({ items: [{ id: "task_saved_1", format: "image_text" }] });
+  };
+  try {
+    const result = await api.listCreativeTasks("project with space", 30);
+    assert.equal(result.items[0].id, "task_saved_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(
+    calls[0].url,
+    "/api/creative/v1/projects/project%20with%20space/creative-tasks?limit=30",
+  );
+  assert.equal(calls[0].init.method, "GET");
+});
+
+test("image-text delivery recovery reads persisted creative packages", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    return jsonResponse({
+      items: [{
+        id: "creativepackage_1",
+        creative_version_id: "creativeversion_1",
+        format: "image_text",
+      }],
+    });
+  };
+  try {
+    const result = await api.listCreativePackages("project demo", 25);
+    assert.equal(result.items[0].creative_version_id, "creativeversion_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(
+    calls[0].url,
+    "/api/creative/v1/projects/project%20demo/creative-packages?limit=25",
+  );
+  assert.equal(calls[0].init.method, "GET");
+});
+
 test("image-text authoring save advances from the exact task and draft revisions", async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; init: RequestInit }> = [];

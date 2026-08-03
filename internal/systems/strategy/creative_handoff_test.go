@@ -191,8 +191,9 @@ func TestBuildCreativeHandoffKeepsStableImageTextRouteWhenLegacyVideoRouteExists
 	if err != nil {
 		t.Fatal(err)
 	}
-	if handoff.UpstreamReadiness.Status != "ready" || len(handoff.Routes) != 1 ||
+	if handoff.UpstreamReadiness.Status != "ready" || len(handoff.Routes) != 2 ||
 		handoff.Routes[0].RouteID != "route_xiaohongshu_image_text" ||
+		handoff.Routes[1].RouteID != "route_brand_video" ||
 		!hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "creative_route_legacy_ignored") {
 		t.Fatalf("stable image-text route was blocked by unrelated legacy video route: %#v", handoff)
 	}
@@ -215,6 +216,34 @@ func TestBuildCreativeHandoffRecognizesConcreteImageFormats(t *testing.T) {
 	}
 	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteID != "route_xiaohongshu_image_text" {
 		t.Fatalf("concrete image formats did not produce an image-text route: %#v", handoff.Routes)
+	}
+}
+
+func TestBuildCreativeHandoffFreezesBrandVideoRouteFromApprovedVideoPlan(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{
+		{Platform: "xiaohongshu", Role: "品牌种草", Formats: []string{"图文笔记"}},
+		{Platform: "douyin", Role: "品牌认知", Formats: []string{"竖屏短视频"}},
+	}
+	snapshot.Strategy.PlatformPlans = []PlatformPlan{{Platform: "douyin", Role: "工程品牌认知"}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(handoff.Routes) != 2 {
+		t.Fatalf("routes = %#v", handoff.Routes)
+	}
+	brandRoute := handoff.Routes[1]
+	if brandRoute.RouteID != "route_brand_video" || brandRoute.DeliverableType != "video" ||
+		brandRoute.Purpose != "brand" || brandRoute.PerformanceMode != "brand_video" ||
+		brandRoute.Spec.TargetDurationSeconds != 30 || brandRoute.Spec.AspectRatio != "9:16" ||
+		len(brandRoute.AssetRequirements) != 3 || brandRoute.RouteReadiness.Status != "ready" {
+		t.Fatalf("brand route = %#v", brandRoute)
 	}
 }
 

@@ -132,7 +132,31 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if !channelAllowed {
 		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
 	}
-	if route.RouteType != PerformanceModeShortDramaPreroll {
+	var confirmedDirection *CreativeDirectionVersion
+	if route.RouteType == CreativeRouteBrandVideo {
+		if s.Directions == nil || strings.TrimSpace(request.DirectionID) == "" {
+			return CreativeTask{}, fmt.Errorf("confirmed direction_id is required for a brand-video task")
+		}
+		direction, directionErr := s.Directions.GetDirection(ctx, actor.OrganizationID, projectID, request.DirectionID)
+		if directionErr != nil {
+			return CreativeTask{}, directionErr
+		}
+		if direction.Status != DirectionStatusConfirmed || direction.IntakeID != intake.ID ||
+			direction.InputIdentityHash != intake.InputIdentityHash || direction.RouteID != route.RouteID {
+			return CreativeTask{}, fmt.Errorf("brand-video direction does not match the confirmed intake lineage")
+		}
+		if strings.TrimSpace(request.CallToAction) != "" {
+			return CreativeTask{}, fmt.Errorf("brand-video task cannot introduce a performance CTA")
+		}
+		confirmedDirection = &direction
+		request.Concept = direction.Concept
+		request.Prompt = brandVideoOutlineFromDirection(direction)
+	}
+	hasSourceVideo := strings.TrimSpace(string(request.SourceVideo.AssetID)) != "" || request.SourceVideo.Version != 0
+	if route.RouteType != PerformanceModeShortDramaPreroll && (route.RouteType != CreativeRouteBrandVideo || hasSourceVideo) {
+		if err := request.SourceVideo.Validate(); err != nil {
+			return CreativeTask{}, fmt.Errorf("source_video: %w", err)
+		}
 		if s.Assets == nil {
 			return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
 		}
@@ -182,10 +206,18 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		},
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	if confirmedDirection != nil {
+		task.Direction.DirectionVersionID = confirmedDirection.ID
+		task.Direction.InputIdentityHash = confirmedDirection.InputIdentityHash
+	}
+	resolution := route.Resolution
+	if strings.TrimSpace(resolution) == "" {
+		resolution = "720p"
+	}
 	draft := VideoDraft{
 		ContractVersion: "creative-video-draft/v1", TaskID: task.ID, Revision: 1,
 		Concept: request.Concept, Prompt: request.Prompt, DurationSeconds: route.TargetDurationSeconds,
-		AspectRatio: route.AspectRatio, Resolution: "720p", SourceVideo: request.SourceVideo,
+		AspectRatio: route.AspectRatio, Resolution: resolution, VideoPurpose: route.VideoPurpose, SourceVideo: request.SourceVideo,
 		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
 		CallToAction: request.CallToAction, CreatedAt: now,
 	}
@@ -332,6 +364,20 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		return CreativeTask{}, err
 	}
 	return s.Repository.CreateVideoTask(ctx, task, draft)
+}
+
+func brandVideoOutlineFromDirection(direction CreativeDirectionVersion) string {
+	parts := []string{
+		"品牌概念：" + direction.Concept,
+		"创意依据：" + direction.CreativeRationale,
+		"情绪转变：" + direction.EmotionalArc,
+		"影像语法：" + direction.VisualGrammar,
+		"品牌记忆装置：" + direction.BrandMemoryDevice,
+		"人物瞬间：" + direction.HumanMoment,
+		"信息顺序：" + strings.Join(direction.MessagePlan, "；"),
+		"执行轮廓：" + strings.Join(direction.ExecutionOutline, "；"),
+	}
+	return strings.Join(parts, "\n")
 }
 
 func selectedVideoRoute(intake CreativeIntake, request CreateVideoTaskRequest) (CreativeRouteSnapshot, error) {
@@ -1105,11 +1151,56 @@ func evaluateVersion(version CreativeVersion, intake CreativeIntake, actorID str
 		}
 	}
 	for _, mandatory := range intake.Request.Mandatory {
-		if needle := strings.ToLower(strings.TrimSpace(mandatory)); needle != "" && !strings.Contains(copyText, needle) {
+		if !mandatoryElementSatisfied(mandatory, copyText) {
 			warnings = append(warnings, fmt.Sprintf("mandatory element is not found in text: %s", mandatory))
 		}
 	}
 	return CreativeCheck{Passed: len(blockers) == 0, Blockers: blockers, Warnings: warnings, CheckedBy: actorID, CheckedAt: now}
+}
+
+func mandatoryElementSatisfied(requirement string, copyText string) bool {
+	requirement = strings.ToLower(strings.TrimSpace(requirement))
+	if requirement == "" || strings.Contains(copyText, requirement) {
+		return true
+	}
+
+	hasScene := containsAny(copyText, "新产品", "打样", "替换供应商", "供应商", "项目")
+	hasEvidence := containsAny(copyText, "可核验", "核验", "判断依据", "工程评估", "资质", "文件")
+	hasConsultation := containsAny(copyText, "私信", "咨询", "评论", "联系", "沟通")
+
+	// Strategy hand-offs describe semantic requirements, not copy that must be
+	// repeated verbatim. Recognize the three cross-route requirement classes so
+	// a valid draft does not receive a warning simply for using natural wording.
+	if strings.Contains(requirement, "触发场景") && strings.Contains(requirement, "证据") && strings.Contains(requirement, "咨询") {
+		return hasScene && hasEvidence && hasConsultation
+	}
+	if strings.Contains(requirement, "触发场景") {
+		return hasScene
+	}
+	if strings.Contains(requirement, "证据位") || strings.Contains(requirement, "可核验") || strings.Contains(requirement, "待核验") {
+		return hasEvidence
+	}
+	if strings.Contains(requirement, "低摩擦") || strings.Contains(requirement, "咨询动作") {
+		return hasConsultation
+	}
+
+	// Policy directives constrain how copy is written; they are not visible-copy
+	// requirements. Prohibited claims are checked separately above, while these
+	// directives remain part of the immutable intake for audit and human review.
+	return strings.HasPrefix(requirement, "不得") ||
+		strings.HasPrefix(requirement, "禁止") ||
+		strings.HasPrefix(requirement, "避免") ||
+		strings.HasPrefix(requirement, "仅使用") ||
+		strings.HasPrefix(requirement, "所有内容需")
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Service) now() time.Time {

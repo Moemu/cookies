@@ -107,6 +107,8 @@ type Strategy struct {
 type Creative struct {
 	DirectionPlanningEnabled       bool
 	DirectionPlannerModelAlias     string
+	ImageFontPath                  string
+	ImageFontSHA256                string
 	ShortDramaModelPlannerEnabled  bool
 	ShortDramaPlannerModelAlias    string
 	GamePrerollModelPlannerEnabled bool
@@ -357,7 +359,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	reviewPromptDefault := "strategy.review.deep.v1"
 	repairPromptDefault := "strategy.repair.v1"
 	if environment == EnvironmentLocal || environment == EnvironmentTest {
-		generatePromptDefault = "strategy.generate.v3"
+		generatePromptDefault = "strategy.generate.v4"
 		conversationPromptDefault = "strategy.conversation.v5"
 		revisePromptDefault = "strategy.revise.v3"
 		reviewPromptDefault = "strategy.review.deep.v2"
@@ -397,6 +399,8 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		Creative: Creative{
 			DirectionPlanningEnabled:       directionPlanningEnabled,
 			DirectionPlannerModelAlias:     valueOr(lookup, "COOKIES_CREATIVE_DIRECTION_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+			ImageFontPath:                  valueOr(lookup, "COOKIES_CREATIVE_IMAGE_FONT_PATH", ""),
+			ImageFontSHA256:                strings.ToLower(strings.TrimSpace(valueOr(lookup, "COOKIES_CREATIVE_IMAGE_FONT_SHA256", ""))),
 			ShortDramaModelPlannerEnabled:  shortDramaModelPlannerEnabled,
 			ShortDramaPlannerModelAlias:    valueOr(lookup, "COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 			GamePrerollModelPlannerEnabled: gamePrerollModelPlannerEnabled,
@@ -611,7 +615,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Strategy.PromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION must not be empty")
 	}
-	if !oneOf(c.Strategy.PromptVersion, "strategy.generate.v2", "strategy.generate.v3") {
+	if !oneOf(c.Strategy.PromptVersion, "strategy.generate.v2", "strategy.generate.v3", "strategy.generate.v4") {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION is unsupported")
 	}
 	if strings.TrimSpace(c.Strategy.ConversationPromptVersion) == "" {

@@ -501,6 +501,7 @@ export type ApiImageTextWorkspace = {
   draft: {
     contract_version?: string
     version: number
+    generation_source_version?: number
     selected_title?: string
     title_candidates: string[]
     body: string
@@ -540,6 +541,11 @@ export type ApiCreativeDirection = {
   message_plan: string[]
   execution_outline: string[]
   guardrail_trace: string[]
+  direction_mode?: 'emotional' | 'cinematic' | 'utility'
+  emotional_arc?: string
+  visual_grammar?: string
+  brand_memory_device?: string
+  human_moment?: string
   status: 'candidate' | 'confirmed' | 'superseded'
 }
 
@@ -569,6 +575,33 @@ export type ApiCreativeIntakeBootstrap = {
   }
 }
 
+export type ApiCreativeTaskSummary = {
+  id: string
+  organization_id: string
+  project_id: string
+  intake_id: string
+  format: 'image_text' | 'video'
+  channel: string
+  video_purpose?: string
+  performance_mode?: string
+  status: string
+  direction: {
+    direction_version_id?: string
+    input_identity_hash?: string
+    content_type?: string
+    focus: string
+    audience: string
+    core_message: string
+    call_to_action: string
+    concept: string
+    tone: string[]
+    visual_keywords: string[]
+  }
+  version: number
+  created_at: string
+  updated_at: string
+}
+
 export type ApiCreateManualImageTextInput = {
   objective: string
   audience: string
@@ -582,10 +615,18 @@ export type ApiCreateManualImageTextInput = {
 
 export type ApiCreativeVersion = {
   id: string
-  task_id: string
+  creative_task_id: string
   draft_version: number
   status: 'created' | 'checked' | 'approved' | 'delivered'
-  check?: { passed: boolean; issues?: string[] }
+  check?: { passed: boolean; blockers: string[]; warnings: string[] }
+}
+
+export type ApiCreativePackage = {
+  id: string
+  creative_version_id: string
+  format: 'image_text' | 'video'
+  content_hash: string
+  created_at: string
 }
 
 export type ApiPreparedCommercePreroll = {
@@ -3090,6 +3131,12 @@ function getCreativeIntake(projectId: string, intakeId: string) {
   )
 }
 
+function listCreativeTasks(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativeTaskSummary[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=${limit}`,
+  )
+}
+
 function createManualImageTextIntake(
   projectId: string,
   input: ApiCreateManualImageTextInput,
@@ -3139,6 +3186,25 @@ function createImageTextTaskFromDirection(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-task`,
     'POST',
     { content_type: 'custom', direction_id: directionId },
+  )
+}
+
+function createBrandVideoTaskFromDirection(
+  projectId: string,
+  intakeId: string,
+  directionId: string,
+) {
+  return creativeRequest<ApiCreativeTaskSummary>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_brand_video',
+      direction_id: directionId,
+      channel: 'douyin',
+      mandatory_elements: [],
+      prohibited_claims: [],
+      confirm_route: true,
+    },
   )
 }
 
@@ -3231,6 +3297,12 @@ function listImageTextVersions(projectId: string, taskId: string) {
   )
 }
 
+function listCreativePackages(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativePackage[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-packages?limit=${limit}`,
+  )
+}
+
 function freezeImageTextVersion(projectId: string, taskId: string, draftVersion: number) {
   return creativeRequest<ApiCreativeVersion>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:freeze-version`,
@@ -3255,7 +3327,7 @@ function approveImageTextVersion(projectId: string, versionId: string) {
 }
 
 function deliverImageTextVersion(projectId: string, versionId: string) {
-  return creativeRequest(
+  return creativeRequest<ApiCreativePackage>(
     `/projects/${encodeURIComponent(projectId)}/creative-versions/${encodeURIComponent(versionId)}:deliver`,
     'POST',
   )
@@ -4368,18 +4440,21 @@ export const api = {
   createManualShortDramaPrerollWorkspace,
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
+  listCreativeTasks,
   getImageTextWorkspace,
   getCreativeIntake,
   createManualImageTextIntake,
   generateCreativeDirections,
   confirmCreativeDirection,
   createImageTextTaskFromDirection,
+  createBrandVideoTaskFromDirection,
   generateImageTextDraft,
   updateImageTextDraft,
   generateImageTextSlot,
   adoptImageTextAttempt,
   getProjectAssetPreview,
   listImageTextVersions,
+  listCreativePackages,
   freezeImageTextVersion,
   checkImageTextVersion,
   approveImageTextVersion,

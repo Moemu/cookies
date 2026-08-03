@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -145,12 +144,12 @@ func main() {
 			cfg.Creative.DirectionPlannerModelAlias,
 		)
 	}
-	if fontPath := os.Getenv("COOKIES_CREATIVE_IMAGE_FONT_PATH"); fontPath != "" {
+	if fontPath := cfg.Creative.ImageFontPath; fontPath != "" {
 		fontBytes, fontErr := os.ReadFile(fontPath)
 		if fontErr != nil {
 			log.Fatalf("read Creative image renderer font: %v", fontErr)
 		}
-		fontChecksum := strings.ToLower(strings.TrimSpace(os.Getenv("COOKIES_CREATIVE_IMAGE_FONT_SHA256")))
+		fontChecksum := cfg.Creative.ImageFontSHA256
 		renderer := &creative.ImageTextRenderer{
 			FontBytes: fontBytes, FontRef: fontPath + "@sha256:" + fontChecksum,
 			ExpectedSHA256: fontChecksum,
@@ -161,7 +160,7 @@ func main() {
 		creativeService.ImageRenderer = renderer
 		creativeService.ImageBaseAssets = creativeImageAssetIO{uploads: uploadService}
 		creativeService.RenderedImages = creativeRenderedImageWriter{uploads: uploadService}
-		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV1)
+		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV2)
 	}
 	if cfg.Creative.ShortDramaModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)

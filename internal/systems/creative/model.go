@@ -116,6 +116,7 @@ type CreativeRouteSnapshot struct {
 	Reason                    string                     `json:"reason"`
 	TargetDurationSeconds     int                        `json:"target_duration_seconds"`
 	AspectRatio               string                     `json:"aspect_ratio"`
+	Resolution                string                     `json:"resolution,omitempty"`
 	SourceAssetRefs           []contract.AssetVersionRef `json:"source_asset_refs"`
 	EvidenceRefs              []string                   `json:"evidence_refs"`
 	RequiresHumanConfirmation bool                       `json:"requires_human_confirmation"`
@@ -466,6 +467,7 @@ type CreativeTask struct {
 
 type CreateVideoTaskRequest struct {
 	SelectedRouteID string                   `json:"selected_route_id,omitempty"`
+	DirectionID     string                   `json:"direction_id,omitempty"`
 	RouteIndex      int                      `json:"route_index"`
 	Channel         CreativeChannel          `json:"channel"`
 	SourceVideo     contract.AssetVersionRef `json:"source_video,omitempty"`
@@ -482,12 +484,8 @@ func (r CreateVideoTaskRequest) Validate() error {
 		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if r.SelectedRouteID != ManualShortDramaPrerollRouteID {
-		if err := r.SourceVideo.Validate(); err != nil {
-			return fmt.Errorf("source_video: %w", err)
-		}
-	}
-	if strings.TrimSpace(r.Concept) == "" || len(r.Concept) > 500 || strings.TrimSpace(r.Prompt) == "" || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
+	if (strings.TrimSpace(r.DirectionID) == "" && (strings.TrimSpace(r.Concept) == "" || strings.TrimSpace(r.Prompt) == "")) ||
+		len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
 	}
 	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
@@ -505,6 +503,7 @@ type VideoDraft struct {
 	DurationSeconds   int                      `json:"duration_seconds"`
 	AspectRatio       string                   `json:"aspect_ratio"`
 	Resolution        string                   `json:"resolution"`
+	VideoPurpose      string                   `json:"video_purpose,omitempty"`
 	SourceVideo       contract.AssetVersionRef `json:"source_video,omitempty"`
 	Mandatory         []string                 `json:"mandatory_elements"`
 	Prohibited        []string                 `json:"prohibited_claims"`
@@ -519,10 +518,10 @@ type VideoDraft struct {
 func (d VideoDraft) Validate() error {
 	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
 		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds < 4 || d.DurationSeconds > 60 ||
-		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.CreatedAt.IsZero() {
+		strings.TrimSpace(d.AspectRatio) == "" || strings.TrimSpace(d.Resolution) == "" || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
-	if d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
+	if d.VideoPurpose != "brand" && d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
 	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {

@@ -204,6 +204,7 @@ func creativeRouteSnapshotFromHandoff(route strategy.CreativeHandoffRoute) creat
 		RouteID: route.RouteID, RouteType: routeType, VideoPurpose: videoPurpose,
 		Channels: append([]string{}, route.Channels...), Reason: route.Reason,
 		TargetDurationSeconds: route.Spec.TargetDurationSeconds, AspectRatio: route.Spec.AspectRatio,
+		Resolution:                route.Spec.Resolution,
 		EvidenceRefs:              append([]string{}, route.ClaimRefs...),
 		RequiresHumanConfirmation: route.DeliverableType == "video",
 		ReadinessStatus:           route.RouteReadiness.Status,

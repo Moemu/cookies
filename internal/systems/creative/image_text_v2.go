@@ -20,8 +20,10 @@ const (
 	ImageTextWorkspaceV1Contract  = "creative-image-text-workspace/v1"
 	ImageRenderSpecV1Contract     = "creative-image-render-spec/v1"
 	ImagePromptCompilerV1         = "creative.image_text.prompt.v1"
+	ImagePromptCompilerV2         = "creative.image_text.prompt.v2"
 	ImageTextDraftPromptVersionV3 = "creative.image_text.draft.v3"
 	ImageRendererV1               = "creative.image_text.renderer.v1"
+	ImageRendererV2               = "creative.image_text.renderer.v2"
 	ImageTextDefaultModelAlias    = "cookies.image.standard"
 	ImageTextSourceWidth          = 1024
 	ImageTextSourceHeight         = 1536
@@ -118,7 +120,7 @@ func (p ImagePromptPackage) Validate() error {
 		p.DraftRevision < 1 || p.ImagePlanOrder < 1 || p.ImagePlanOrder > 3 ||
 		strings.TrimSpace(p.DirectionID) == "" || strings.TrimSpace(p.DirectionContentHash) == "" ||
 		strings.TrimSpace(p.InputIdentityHash) == "" || strings.TrimSpace(p.CompiledPrompt) == "" ||
-		p.CompilerVersion != ImagePromptCompilerV1 || strings.TrimSpace(p.ContentHash) == "" ||
+		(p.CompilerVersion != ImagePromptCompilerV1 && p.CompilerVersion != ImagePromptCompilerV2) || strings.TrimSpace(p.ContentHash) == "" ||
 		strings.TrimSpace(p.CreatedBy) == "" || p.CreatedAt.IsZero() {
 		return fmt.Errorf("image prompt package is incomplete")
 	}
@@ -436,9 +438,10 @@ func (s Service) UpdateImageTextDraft(
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return ImageTextDraft{}, err
 	}
+	authoringImagePlan := imagePlanWithoutAssets(request.ImagePlan)
 	plan := ImageTextDraftPlan{
 		TitleCandidates: request.TitleCandidates, SelectedTitle: request.SelectedTitle,
-		Body: request.Body, Topics: request.Topics, ImagePlan: request.ImagePlan,
+		Body: request.Body, Topics: request.Topics, ImagePlan: authoringImagePlan,
 	}
 	if err := plan.Validate(); err != nil {
 		return ImageTextDraft{}, err
@@ -451,9 +454,9 @@ func (s Service) UpdateImageTextDraft(
 		detail.Draft.Version != request.ExpectedDraftRevision {
 		return ImageTextDraft{}, ErrVersionConflict
 	}
+	isReadyRework := detail.Task.Status == TaskReady && detail.Draft.GenerationSourceVersion != nil
 	if detail.Draft.ContractVersion != ImageTextDraftV2Contract ||
-		detail.Draft.GenerationSourceVersion != nil ||
-		!oneOfTaskStatus(detail.Task.Status, TaskDraft, TaskInProgress, TaskGenerated) {
+		(!isReadyRework && !oneOfTaskStatus(detail.Task.Status, TaskDraft, TaskInProgress, TaskGenerated)) {
 		return ImageTextDraft{}, ErrInvalidState
 	}
 	repository, err := s.imageTextV2Repository()
@@ -466,7 +469,7 @@ func (s Service) UpdateImageTextDraft(
 	if err != nil {
 		return ImageTextDraft{}, err
 	}
-	if len(attempts) != 0 {
+	if !isReadyRework && len(attempts) != 0 {
 		return ImageTextDraft{}, fmt.Errorf("draft_with_generation_attempts_is_immutable: %w", ErrInvalidState)
 	}
 	now := s.now()
@@ -477,13 +480,23 @@ func (s Service) UpdateImageTextDraft(
 	updated.Body = request.Body
 	updated.Topics = append([]string{}, request.Topics...)
 	updated.CoverCopy = request.ImagePlan[0].OverlayCopy
-	updated.ImagePlan = append([]ImagePlanItem{}, request.ImagePlan...)
+	updated.ImagePlan = authoringImagePlan
+	updated.GenerationSourceVersion = nil
+	updated.Status = "draft"
 	updated.CreatedAt = now
 	_, stored, err := repository.SaveImageTextDraft(
 		ctx, actor.OrganizationID, projectID, taskID, detail.Task.Version,
 		detail.Draft.Version, updated, TaskInProgress, now,
 	)
 	return stored, err
+}
+
+func imagePlanWithoutAssets(items []ImagePlanItem) []ImagePlanItem {
+	result := append([]ImagePlanItem{}, items...)
+	for index := range result {
+		result[index].AssetRef = nil
+	}
+	return result
 }
 
 func CompileImagePromptPackage(
@@ -502,23 +515,30 @@ func CompileImagePromptPackage(
 		draft.InputIdentityHash != task.Direction.InputIdentityHash || slot.Order < 1 || slot.Order > 3 {
 		return ImagePromptPackage{}, fmt.Errorf("image prompt inputs do not share the same lineage")
 	}
-	prompt := strings.Join([]string{
-		"Create a portrait editorial image for a Xiaohongshu brand post.",
-		"Creative concept: " + direction.Concept,
-		"Visual plan: " + slot.VisualBrief,
-		"Execution: " + strings.Join(direction.ExecutionOutline, "; "),
-		"Keep the primary subject centered with generous top and bottom crop safety.",
-		"Leave intentional negative space for deterministic text overlay.",
-		"Do not render any text, letters, watermark, or fabricated logo.",
-	}, "\n")
+	promptLines := []string{
+		"Generate one single full-bleed photorealistic commercial photograph as a clean base layer.",
+		"This is a photograph only, not a finished social-media post, poster, slide, infographic, or layout.",
+		"Scene brief: " + slot.VisualBrief,
+	}
+	promptLines = append(promptLines, imageTextRoleComposition(slot.Role)...)
+	promptLines = append(promptLines,
+		"Use one coherent camera viewpoint, one continuous background, realistic materials, natural perspective, and restrained commercial lighting.",
+		"Keep the important subject inside the central 70% safe area and preserve a calm uncluttered area for later deterministic typography.",
+		"Do not create a collage, triptych, split screen, multiple panels, cards, frames, borders, UI, charts, diagrams, line art, presentation templates, blank boxes, or text placeholders.",
+		"Do not render any text, letters, numbers, symbols resembling writing, watermark, signature, label, caption, or fabricated logo in any language.",
+	)
+	prompt := strings.Join(promptLines, "\n")
 	value := ImagePromptPackage{
 		ContractVersion: ImagePromptPackageV1Contract, ID: id,
 		OrganizationID: actor.OrganizationID, ProjectID: projectID, TaskID: task.ID,
 		DraftRevision: draft.Version, ImagePlanOrder: slot.Order,
 		DirectionID: direction.ID, DirectionContentHash: direction.ContentHash,
 		InputIdentityHash: draft.InputIdentityHash, CompiledPrompt: prompt,
-		NegativeConstraints: []string{"text", "letters", "watermark", "fabricated logo"},
-		SourceAssetRefs:     append([]contract.AssetVersionRef{}, sourceAssetRefs...), CompilerVersion: ImagePromptCompilerV1,
+		NegativeConstraints: []string{
+			"text", "letters", "numbers", "watermark", "fabricated logo", "collage", "triptych",
+			"split screen", "panels", "cards", "UI", "infographic", "presentation template", "text placeholder",
+		},
+		SourceAssetRefs: append([]contract.AssetVersionRef{}, sourceAssetRefs...), CompilerVersion: ImagePromptCompilerV2,
 		CreatedBy: actor.Principal.ID, CreatedAt: now,
 	}
 	hash, err := contract.NewContentHash(struct {
@@ -540,6 +560,28 @@ func CompileImagePromptPackage(
 	}
 	value.ContentHash = string(hash)
 	return value, value.Validate()
+}
+
+func imageTextRoleComposition(role string) []string {
+	switch ImageTextSlotRole(role) {
+	case ImageTextRoleCover:
+		return []string{
+			"Cover role: create one decisive hero scene with one primary subject; avoid comparison layouts and repeated subjects.",
+			"Place visual interest in the upper and middle areas, leaving the lower third simple enough for a short headline.",
+		}
+	case ImageTextRoleProof:
+		return []string{
+			"Proof role: show one close, credible piece of physical evidence, inspection, measurement, process, or material detail.",
+			"Do not repeat the cover portrait or stage a confused person; prioritize the evidence itself and leave the lower-left area calm.",
+		}
+	case ImageTextRoleCTA:
+		return []string{
+			"Action role: show one confident finished result, capable workshop, or clear next-step scene with a positive resolved mood.",
+			"Do not repeat the cover portrait or use problem/confusion imagery; leave the bottom area calm for a concise call to action.",
+		}
+	default:
+		return nil
+	}
 }
 
 func (s Service) PrepareImageSlotGeneration(

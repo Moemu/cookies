@@ -37,9 +37,43 @@ func TestModelCreativeDirectionPlannerRepairsUnsafeProviderOutput(t *testing.T) 
 	if len(generator.requests) != 2 || generator.requests[0].InvocationKey == generator.requests[1].InvocationKey {
 		t.Fatalf("repair must use a distinct provider invocation: %+v", generator.requests)
 	}
-	if !strings.Contains(string(generator.requests[0].InvocationKey), "_v2_0") ||
-		!strings.Contains(generator.requests[1].Messages[len(generator.requests[1].Messages)-1].Content, "未通过广告主张校验") {
-		t.Fatalf("repair request did not carry the v2 identity and remediation instruction: %+v", generator.requests)
+	if !strings.Contains(string(generator.requests[0].InvocationKey), "_v3_0") ||
+		!strings.Contains(generator.requests[1].Messages[len(generator.requests[1].Messages)-1].Content, "未通过质量校验") {
+		t.Fatalf("repair request did not carry the v3 identity and remediation instruction: %+v", generator.requests)
+	}
+}
+
+func TestModelCreativeDirectionPlannerRepairsUtilityHeavyBrandBatch(t *testing.T) {
+	utility := func(concept string) DirectionCandidate {
+		return DirectionCandidate{
+			Concept: concept, CreativeRationale: "用知识步骤解释工程判断", DirectionMode: "utility",
+			MessagePlan: []string{"先问题后方法"}, ExecutionOutline: []string{"清单式讲解"}, GuardrailTrace: []string{"不虚构结论"},
+			EmotionalArc: "从疑惑到理解", VisualGrammar: "信息卡片", BrandMemoryDevice: "海军蓝标尺", HumanMoment: "工程师核对图纸",
+		}
+	}
+	generator := &directionModelTextStub{responses: []provider.SynchronousResponse{
+		creativeDirectionModelResponse(t, []DirectionCandidate{utility("打样避坑指南"), utility("供应商核验清单"), utility("三步判断工具")}),
+		creativeDirectionModelResponse(t, []DirectionCandidate{
+			{Concept: "图纸沉默之后", CreativeRationale: "把不确定转成被看见的工程判断", DirectionMode: "emotional", MessagePlan: []string{"先焦虑后笃定"}, ExecutionOutline: []string{"空旷办公室切到机床微光"}, GuardrailTrace: []string{"只展示可核验过程"}, EmotionalArc: "从独自承担到有人共同判断", VisualGrammar: "低照度长镜头与微距金属反光", BrandMemoryDevice: "海军蓝校准线与一次清脆归零声", HumanMoment: "研发负责人按下发送前停顿，工程师回传标注"},
+			{Concept: "毫米之间，有人回答", CreativeRationale: "用人物接力建立工程伙伴认知", DirectionMode: "cinematic", MessagePlan: []string{"问题跨越空间被接住"}, ExecutionOutline: []string{"图纸线条匹配两地人物动作"}, GuardrailTrace: []string{"不承诺具体精度"}, EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "动作匹配剪辑与克制工业声场", BrandMemoryDevice: "银色测量光带贯穿转场", HumanMoment: "采购与工程师隔屏同时指向同一处标注"},
+			{Concept: "一次判断的来路", CreativeRationale: "展示判断如何形成", DirectionMode: "utility", MessagePlan: []string{"展示依据而非教学步骤"}, ExecutionOutline: []string{"证据在桌面逐层聚合"}, GuardrailTrace: []string{"不虚构数据"}, EmotionalArc: "从模糊到清晰", VisualGrammar: "俯拍证据与留白字幕", BrandMemoryDevice: "蓝色验证印记", HumanMoment: "工程师签下注释后抬头确认"},
+		}),
+	}}
+	planner := ModelCreativeDirectionPlanner{Text: generator, ModelAlias: "cookies.text.standard"}
+
+	result, err := planner.Generate(context.Background(), contract.ActorContext{}, contract.ProjectContext{}, CreativePlanningContext{
+		InputIdentityHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		SelectedRoute:     CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo},
+	}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 3 || result.PromptVersion != creativeDirectionPromptVersion {
+		t.Fatalf("unexpected repaired brand batch: %+v", result)
+	}
+	if !strings.Contains(generator.requests[0].Messages[0].Content, "品牌视频") ||
+		!strings.Contains(generator.requests[1].Messages[len(generator.requests[1].Messages)-1].Content, "utility-led") {
+		t.Fatalf("brand quality contract was not carried into prompt and repair: %+v", generator.requests)
 	}
 }
 

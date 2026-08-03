@@ -200,6 +200,9 @@ func (s Service) CreateCreativeTaskPlan(
 		for _, route := range handoff.Routes {
 			if route.RouteID == request.SelectedRouteID {
 				routeFound = true
+				if !creativeBusinessMatchesRoute(request.BusinessCode, route) {
+					return CreativeTaskPlan{}, false, ErrProfileSkillMismatch
+				}
 				break
 			}
 		}
@@ -647,6 +650,19 @@ func findRecommendation(
 		}
 	}
 	return nil, false
+}
+
+func creativeBusinessMatchesRoute(businessCode string, route CreativeHandoffRoute) bool {
+	switch strings.TrimSpace(businessCode) {
+	case "xiaohongshu_image_text":
+		return route.DeliverableType == "image_text" && route.RouteID == "route_xiaohongshu_image_text"
+	case "brand_video":
+		return route.DeliverableType == "video" && route.Purpose == "brand" && route.PerformanceMode == "brand_video"
+	case "short_drama_preroll", "game_preroll", "commerce_preroll", "viral_remake":
+		return route.DeliverableType == "video" && route.Purpose == "performance" && route.PerformanceMode == businessCode
+	default:
+		return false
+	}
 }
 
 func evaluateCreativeTaskPlanCompleteness(

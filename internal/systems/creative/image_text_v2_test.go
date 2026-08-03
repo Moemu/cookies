@@ -48,6 +48,15 @@ func TestCompileImagePromptPackageFreezesLineageAndSourceAssets(t *testing.T) {
 	if len(prompt.SourceAssetRefs) != 1 || prompt.SourceAssetRefs[0] != source {
 		t.Fatalf("source assets = %+v, want %+v", prompt.SourceAssetRefs, source)
 	}
+	if prompt.CompilerVersion != ImagePromptCompilerV2 ||
+		!strings.Contains(prompt.CompiledPrompt, "one single full-bleed photorealistic commercial photograph") ||
+		!strings.Contains(prompt.CompiledPrompt, "Do not create a collage, triptych, split screen") ||
+		!strings.Contains(prompt.CompiledPrompt, "Cover role") {
+		t.Fatalf("compiled prompt does not enforce the clean photographic base layer: %q", prompt.CompiledPrompt)
+	}
+	if strings.Contains(prompt.CompiledPrompt, "show evidence") || strings.Contains(prompt.CompiledPrompt, "close with CTA") {
+		t.Fatalf("compiled prompt leaked cross-slot execution instructions: %q", prompt.CompiledPrompt)
+	}
 	withoutSource, err := CompileImagePromptPackage(
 		"prompt_2", actor, "project_1", task, draft, slot, direction,
 		nil, prompt.CreatedAt,
@@ -76,6 +85,21 @@ func TestImageTextDraftPlanRequiresFrozenThreeSlotRoles(t *testing.T) {
 	plan.ImagePlan[1].Role = "cover"
 	if err := plan.Validate(); err == nil {
 		t.Fatal("plan with duplicated role was accepted")
+	}
+}
+
+func TestImagePlanWithoutAssetsPreservesAuthoringFields(t *testing.T) {
+	asset := contract.AssetVersionRef{AssetID: "asset_old", Version: 2}
+	input := []ImagePlanItem{{
+		Order: 1, Role: "cover", Purpose: "cover", VisualBrief: "single hero photograph",
+		Caption: "caption", OverlayCopy: "headline", LayoutPreset: "cover_center_v1", AssetRef: &asset,
+	}}
+	result := imagePlanWithoutAssets(input)
+	if result[0].AssetRef != nil || result[0].VisualBrief != input[0].VisualBrief || result[0].OverlayCopy != input[0].OverlayCopy {
+		t.Fatalf("rework plan = %+v, want authoring fields without the old asset", result[0])
+	}
+	if input[0].AssetRef == nil {
+		t.Fatal("imagePlanWithoutAssets mutated the materialized source draft")
 	}
 }
 

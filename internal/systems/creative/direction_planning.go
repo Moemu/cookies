@@ -45,6 +45,11 @@ type DirectionCandidate struct {
 	MessagePlan       []string `json:"message_plan"`
 	ExecutionOutline  []string `json:"execution_outline"`
 	GuardrailTrace    []string `json:"guardrail_trace"`
+	DirectionMode     string   `json:"direction_mode,omitempty"`
+	EmotionalArc      string   `json:"emotional_arc,omitempty"`
+	VisualGrammar     string   `json:"visual_grammar,omitempty"`
+	BrandMemoryDevice string   `json:"brand_memory_device,omitempty"`
+	HumanMoment       string   `json:"human_moment,omitempty"`
 }
 
 func (value DirectionCandidate) Validate() error {
@@ -77,6 +82,11 @@ type CreativeDirectionVersion struct {
 	MessagePlan       []string                `json:"message_plan"`
 	ExecutionOutline  []string                `json:"execution_outline"`
 	GuardrailTrace    []string                `json:"guardrail_trace"`
+	DirectionMode     string                  `json:"direction_mode,omitempty"`
+	EmotionalArc      string                  `json:"emotional_arc,omitempty"`
+	VisualGrammar     string                  `json:"visual_grammar,omitempty"`
+	BrandMemoryDevice string                  `json:"brand_memory_device,omitempty"`
+	HumanMoment       string                  `json:"human_moment,omitempty"`
 	Status            CreativeDirectionStatus `json:"status"`
 	Version           int64                   `json:"version"`
 	ContentHash       string                  `json:"content_hash"`
@@ -215,7 +225,10 @@ func (s Service) GenerateDirectionCandidates(
 			MessagePlan:      append([]string{}, candidate.MessagePlan...),
 			ExecutionOutline: append([]string{}, candidate.ExecutionOutline...),
 			GuardrailTrace:   append([]string{}, candidate.GuardrailTrace...),
-			Status:           DirectionStatusCandidate, Version: 1, CreatedAt: now,
+			DirectionMode:    candidate.DirectionMode, EmotionalArc: candidate.EmotionalArc,
+			VisualGrammar: candidate.VisualGrammar, BrandMemoryDevice: candidate.BrandMemoryDevice,
+			HumanMoment: candidate.HumanMoment,
+			Status:      DirectionStatusCandidate, Version: 1, CreatedAt: now,
 		}
 		contentHash, hashErr := contract.NewContentHash(value)
 		if hashErr != nil {
@@ -223,6 +236,9 @@ func (s Service) GenerateDirectionCandidates(
 		}
 		value.ContentHash = string(contentHash)
 		directions = append(directions, value)
+	}
+	if err := validateDirectionBatchQuality(planningContext, result.Candidates); err != nil {
+		return CreativeDirectionBatch{}, err
 	}
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1, ID: batchID,
@@ -232,6 +248,109 @@ func (s Service) GenerateDirectionCandidates(
 		CreatedBy: actor.Principal.ID, CreatedAt: now,
 	}
 	return s.Directions.CreateDirectionBatch(ctx, batch)
+}
+
+func validateDirectionBatchQuality(planningContext CreativePlanningContext, candidates []DirectionCandidate) error {
+	for left := 0; left < len(candidates); left++ {
+		for right := left + 1; right < len(candidates); right++ {
+			if directionConceptSimilarity(candidates[left].Concept, candidates[right].Concept) >= 0.72 {
+				return fmt.Errorf("creative direction candidates are too similar")
+			}
+		}
+	}
+	if planningContext.SelectedRoute.RouteType != CreativeRouteBrandVideo {
+		return nil
+	}
+	utilityCount := 0
+	brandLedCount := 0
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.EmotionalArc) == "" || strings.TrimSpace(candidate.VisualGrammar) == "" ||
+			strings.TrimSpace(candidate.BrandMemoryDevice) == "" || strings.TrimSpace(candidate.HumanMoment) == "" {
+			return fmt.Errorf("brand-video direction must define emotional_arc, visual_grammar, brand_memory_device, and human_moment")
+		}
+		mode := strings.ToLower(strings.TrimSpace(candidate.DirectionMode))
+		if mode != "emotional" && mode != "cinematic" && mode != "utility" {
+			return fmt.Errorf("brand-video direction_mode must be emotional, cinematic, or utility")
+		}
+		utilityLed := isUtilityLedDirection(candidate)
+		if mode != "utility" && utilityLed {
+			return fmt.Errorf("brand-video emotional or cinematic direction cannot be led by a guide, checklist, steps, or tool")
+		}
+		if phrase := firstBrandPerformanceCue(candidate); phrase != "" {
+			return fmt.Errorf("brand-video direction contains performance CTA or unsupported production spec: %s", phrase)
+		}
+		if mode == "utility" || utilityLed {
+			utilityCount++
+		} else {
+			brandLedCount++
+		}
+	}
+	if utilityCount > 1 || brandLedCount < 2 {
+		return fmt.Errorf("brand-video batch must contain at least two emotional or cinematic directions and at most one utility-led direction")
+	}
+	return nil
+}
+
+func firstBrandPerformanceCue(candidate DirectionCandidate) string {
+	text := strings.ToLower(strings.Join(append(
+		[]string{candidate.Concept, candidate.CreativeRationale, candidate.VisualGrammar, candidate.HumanMoment},
+		candidate.ExecutionOutline...,
+	), "\n"))
+	for _, phrase := range []string{"点击", "评论区", "私信", "扣1", "扣 1", "领取", "领完整", "立即咨询", "获取专属", "4k", "8k"} {
+		if strings.Contains(text, phrase) {
+			return phrase
+		}
+	}
+	return ""
+}
+
+func isUtilityLedDirection(candidate DirectionCandidate) bool {
+	text := strings.ToLower(strings.Join(append(
+		[]string{candidate.Concept, candidate.CreativeRationale},
+		candidate.MessagePlan...,
+	), "\n"))
+	for _, phrase := range []string{"指南", "清单", "三步", "步骤", "避坑", "工具", "教程", "科普", "方法论", "checklist", "how-to", "how to"} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func directionConceptSimilarity(left string, right string) float64 {
+	leftTokens := directionBigrams(left)
+	rightTokens := directionBigrams(right)
+	if len(leftTokens) == 0 || len(rightTokens) == 0 {
+		return 0
+	}
+	intersection := 0
+	union := make(map[string]struct{}, len(leftTokens)+len(rightTokens))
+	for token := range leftTokens {
+		union[token] = struct{}{}
+		if _, ok := rightTokens[token]; ok {
+			intersection++
+		}
+	}
+	for token := range rightTokens {
+		union[token] = struct{}{}
+	}
+	return float64(intersection) / float64(len(union))
+}
+
+func directionBigrams(value string) map[string]struct{} {
+	runes := []rune(strings.ToLower(strings.TrimSpace(value)))
+	filtered := make([]rune, 0, len(runes))
+	for _, current := range runes {
+		if current == ' ' || current == '-' || current == '—' || current == '：' || current == ':' || current == '·' {
+			continue
+		}
+		filtered = append(filtered, current)
+	}
+	tokens := map[string]struct{}{}
+	for index := 0; index+1 < len(filtered); index++ {
+		tokens[string(filtered[index:index+2])] = struct{}{}
+	}
+	return tokens
 }
 
 func validateDirectionCandidateClaims(candidate DirectionCandidate) error {

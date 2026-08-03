@@ -169,6 +169,33 @@ func TestValidateDirectionCandidateClaimsRejectsUnsafeCopyButAllowsPerspective(t
 	}
 }
 
+func TestValidateDirectionBatchQualityRejectsUtilityDisguisedAsEmotionalBrandDirection(t *testing.T) {
+	t.Parallel()
+	candidates := []DirectionCandidate{
+		{Concept: "焦虑消解后的风险核验清单", CreativeRationale: "以人物故事承载清单", DirectionMode: "emotional", MessagePlan: []string{"先人物后清单"}, ExecutionOutline: []string{"人物打开清单"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从焦虑到安心", VisualGrammar: "克制近景", BrandMemoryDevice: "蓝色校准线", HumanMoment: "工程师回传标注"},
+		{Concept: "毫米之间，有人回答", CreativeRationale: "以人物接力建立工程伙伴认知", DirectionMode: "cinematic", MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "工业微距", BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认"},
+		{Concept: "供应商判断工具", CreativeRationale: "提供参考框架", DirectionMode: "utility", MessagePlan: []string{"三个步骤"}, ExecutionOutline: []string{"信息卡片"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从迷茫到清晰", VisualGrammar: "卡片排版", BrandMemoryDevice: "蓝色印记", HumanMoment: "采购做出标注"},
+	}
+	err := validateDirectionBatchQuality(CreativePlanningContext{
+		SelectedRoute: CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo},
+	}, candidates)
+	if err == nil {
+		t.Fatal("utility-led emotional disguise must make the brand batch fail")
+	}
+}
+
+func TestValidateDirectionBatchQualityRejectsPerformanceCTAInBrandVideo(t *testing.T) {
+	t.Parallel()
+	candidates := []DirectionCandidate{
+		{Concept: "图纸沉默之后", CreativeRationale: "让焦虑被工程回应", DirectionMode: "emotional", MessagePlan: []string{"焦虑到笃定"}, ExecutionOutline: []string{"结尾评论区领取核验表"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从焦虑到笃定", VisualGrammar: "低照度长镜头", BrandMemoryDevice: "蓝色校准线", HumanMoment: "工程师回传标注"},
+		{Concept: "毫米之间，有人回答", CreativeRationale: "以人物接力建立伙伴认知", DirectionMode: "cinematic", MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从未知到确认", VisualGrammar: "工业微距", BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认"},
+	}
+	err := validateDirectionBatchQuality(CreativePlanningContext{SelectedRoute: CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo}}, candidates)
+	if err == nil {
+		t.Fatal("performance CTA must make the brand batch fail")
+	}
+}
+
 func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) {
 	service := testService()
 	intake := CreativeIntake{
@@ -191,8 +218,8 @@ func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) 
 	service.DirectionPlanner = &directionPlannerStub{result: DirectionPlannerResult{
 		Model: "test-model", PromptVersion: "creative-direction/brand-video-v1",
 		Candidates: []DirectionCandidate{
-			{Concept: "让精度被看见", CreativeRationale: "用工序证据建立信任", MessagePlan: []string{"承诺到证据"}, ExecutionOutline: []string{"工序与检测"}, GuardrailTrace: []string{"不虚构检测结论"}},
-			{Concept: "每一微米都有来路", CreativeRationale: "把过程透明转为品牌记忆", MessagePlan: []string{"细节到全局"}, ExecutionOutline: []string{"微距到交付"}, GuardrailTrace: []string{"保护客户图纸"}},
+			{Concept: "让精度被看见", CreativeRationale: "用工序证据建立信任", MessagePlan: []string{"承诺到证据"}, ExecutionOutline: []string{"工序与检测"}, GuardrailTrace: []string{"不虚构检测结论"}, DirectionMode: "emotional", EmotionalArc: "从忐忑到笃定", VisualGrammar: "微距与长镜头", BrandMemoryDevice: "蓝色校准线", HumanMoment: "工程师确认图纸"},
+			{Concept: "每一微米都有来路", CreativeRationale: "把过程透明转为品牌记忆", MessagePlan: []string{"细节到全局"}, ExecutionOutline: []string{"微距到交付"}, GuardrailTrace: []string{"保护客户图纸"}, DirectionMode: "cinematic", EmotionalArc: "从未知到可见", VisualGrammar: "银色光带转场", BrandMemoryDevice: "清脆归零声", HumanMoment: "采购收到确认"},
 		},
 	}}
 	service.Directions = &directionRepositoryStub{}

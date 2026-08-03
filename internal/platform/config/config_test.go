@@ -17,7 +17,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		!value.Strategy.ContextSelectionEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
 		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
-		value.Strategy.PromptVersion != "strategy.generate.v3" ||
+		value.Strategy.PromptVersion != "strategy.generate.v4" ||
 		value.Strategy.ConversationPromptVersion != "strategy.conversation.v5" ||
 		value.Strategy.RevisePromptVersion != "strategy.revise.v3" ||
 		value.Strategy.ReviewPromptVersion != "strategy.review.deep.v2" ||
@@ -103,6 +103,20 @@ func TestStrategyRolloutAllowsExplicitCreativeIntegration(t *testing.T) {
 	value, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED": "true"}))
 	if err != nil || !value.Strategy.PackageToCreativeEnabled {
 		t.Fatalf("expected explicit Strategy-to-Creative integration to be enabled: %#v, %v", value.Strategy, err)
+	}
+}
+
+func TestCreativeImageFontUsesUnifiedConfigurationLookup(t *testing.T) {
+	t.Parallel()
+	value, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_CREATIVE_IMAGE_FONT_PATH":   "C:/fonts/chinese.ttf",
+		"COOKIES_CREATIVE_IMAGE_FONT_SHA256": "ABCDEF",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Creative.ImageFontPath != "C:/fonts/chinese.ttf" || value.Creative.ImageFontSHA256 != "abcdef" {
+		t.Fatalf("unexpected Creative image font config: %#v", value.Creative)
 	}
 }
 

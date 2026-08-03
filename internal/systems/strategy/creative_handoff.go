@@ -834,8 +834,18 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 	blockers := make([]HandoffIssue, 0)
 	warnings := make([]HandoffIssue, 0)
 	seen := map[string]bool{}
+	brandVideoChannels := make([]string, 0)
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
 		platform := strings.ToLower(strings.TrimSpace(channel.Platform))
+		if supportsBrandVideoPlatform(platform) && containsVideoFormat(channel.Formats) {
+			purpose, known := creativeRoutePurpose(channel.Role)
+			if !known && objectiveTypeKnown && objectiveType != "mixed" {
+				purpose, known = objectiveType, true
+			}
+			if (known && purpose == "brand") || creativeHandoffHasBrandGoal(snapshot) {
+				brandVideoChannels = appendUnique(brandVideoChannels, platform)
+			}
+		}
 		if platform != "xiaohongshu" || seen[platform] || !containsImageTextFormat(channel.Formats) {
 			continue
 		}
@@ -892,6 +902,26 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			ClaimRefs: []string{}, AssetRequirements: []CreativeAssetRequirement{},
 			AssetRefs: []string{}, RouteReadiness: HandoffReadiness{
 				Status: routeStatus, Blockers: routeBlockers, Warnings: routeWarnings,
+			},
+		})
+	}
+	if len(brandVideoChannels) > 0 {
+		routes = append(routes, CreativeHandoffRoute{
+			RouteID: "route_brand_video", DeliverableType: "video", Purpose: "brand",
+			PerformanceMode: "brand_video", Channels: brandVideoChannels,
+			Reason: creativeBrandVideoReason(snapshot.Strategy, brandVideoChannels),
+			Spec: CreativeRouteSpec{
+				TargetDurationSeconds: 30, AspectRatio: "9:16", Resolution: "1080x1920",
+				HookDeadlineSeconds: 3, CompositionRequired: true,
+			},
+			CTAPolicy: CreativeCTAPolicy{}, ClaimRefs: []string{},
+			AssetRequirements: []CreativeAssetRequirement{
+				{Role: "brand_identity", RequiredStage: "production"},
+				{Role: "product_visuals", RequiredStage: "production"},
+				{Role: "music_and_voice_rights", RequiredStage: "production"},
+			},
+			AssetRefs: []string{}, RouteReadiness: HandoffReadiness{
+				Status: "ready", Blockers: []HandoffIssue{}, Warnings: []HandoffIssue{},
 			},
 		})
 	}
@@ -957,6 +987,43 @@ func containsImageTextFormat(formats []string) bool {
 		}
 	}
 	return false
+}
+
+func containsVideoFormat(formats []string) bool {
+	for _, format := range formats {
+		normalized := strings.ToLower(strings.TrimSpace(format))
+		if strings.Contains(normalized, "视频") || strings.Contains(normalized, "video") ||
+			strings.Contains(normalized, "短片") || strings.Contains(normalized, "tvc") {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsBrandVideoPlatform(platform string) bool {
+	return oneOf(platform, "xiaohongshu", "wechat_official_account", "douyin", "kuaishou")
+}
+
+func creativeHandoffHasBrandGoal(snapshot PackageSnapshot) bool {
+	objective := strings.Join([]string{
+		snapshot.Brief.Snapshot.Campaign.Objective,
+		snapshot.Strategy.Objective,
+		snapshot.Strategy.CrossPlatformRole,
+	}, " ")
+	return containsAny(strings.ToLower(objective), "品牌广告", "品牌认知", "品牌心智", "品牌资产", "brand", "awareness")
+}
+
+func creativeBrandVideoReason(document StrategyDocument, channels []string) string {
+	reasons := make([]string, 0, len(channels))
+	for _, channel := range channels {
+		if reason := creativeRouteReason(document, channel); reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}
+	if len(reasons) == 0 {
+		return strings.TrimSpace(document.Proposition)
+	}
+	return strings.Join(reasons, "；")
 }
 
 func productIDStrings(values []contract.ProductID) []string {
