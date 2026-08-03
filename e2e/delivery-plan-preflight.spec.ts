@@ -8,6 +8,7 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   const goldenName = `E2E 黄金计划 ${suffix}`
 
   await page.goto(`/projects/${primaryProjectId}/delivery/plans`)
+  await expect(page.getByRole('tablist', { name: '投放计划视图' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '计划草稿' })).toBeVisible()
   const workspace = page.locator('.delivery-lifecycle-workspace')
   const workspaceBox = await workspace.boundingBox()

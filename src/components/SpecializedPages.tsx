@@ -44,6 +44,7 @@ import {
 } from '../features/creative/TaskStrategyHandoff'
 
 export { DeliveryPlanLifecyclePage as DeliveryPlanPage } from './DeliveryPlanLifecyclePage'
+export { DeliveryApprovalCenterPage as ApprovalCenterPage } from './DeliveryApprovalCenterPage'
 
 function IndustrySchema({ module, profile, industry }: { module: string; industry: string; profile: { fields: string[]; format: string } }) {
   return <section className="industry-schema" aria-label={`${industry}${module}配置`}>
@@ -1756,7 +1757,7 @@ function LegacyDeliveryPlanPage({ state }: { state: DataState }) {
   </div></StateBoundary>
 }
 
-export function ApprovalCenterPage({ state }: { state: DataState }) {
+export function LegacyApprovalCenterPage({ state }: { state: DataState }) {
   const { currentProject, approveChangeSet, executeChangeSet, rollbackChangeSet } = useProject()
   const [changeSets, setChangeSets] = useState<DeliveryChangeSet[]>([])
   const [selectedId, setSelectedId] = useState('')

@@ -21,6 +21,7 @@ const (
 	ScenarioTrackingMissing     Scenario = "tracking_missing"
 	ScenarioIncompleteDraft     Scenario = "incomplete_draft"
 	ScenarioPlanList            Scenario = "project_plan_list"
+	ScenarioApprovalQueue       Scenario = "approval_queue"
 
 	CheckSeverityError   CheckSeverity = "error"
 	CheckSeverityWarning CheckSeverity = "warning"
@@ -79,6 +80,7 @@ type DeliveryPlanVersion struct {
 	OrganizationID        contract.OrganizationID `json:"organization_id"`
 	ProjectID             contract.ProjectID      `json:"project_id"`
 	VersionNumber         int                     `json:"version_number"`
+	CanonicalHash         string                  `json:"canonical_hash"`
 	Name                  string                  `json:"name"`
 	Objective             string                  `json:"objective"`
 	Advertiser            MockAdvertiser          `json:"advertiser"`
@@ -87,6 +89,7 @@ type DeliveryPlanVersion struct {
 	Tracking              Tracking                `json:"tracking"`
 	CreativeReferences    []CreativeReference     `json:"creative_references"`
 	SourceStrategyVersion string                  `json:"source_strategy_version"`
+	Platform              string                  `json:"platform"`
 	Source                Source                  `json:"source"`
 	Scenario              Scenario                `json:"scenario"`
 	CreatedBy             contract.Principal      `json:"created_by"`
@@ -172,10 +175,10 @@ func (draft PlanDraft) Validate() error {
 	return nil
 }
 
-func versionFromDraft(plan DeliveryPlan, versionNumber int, draft PlanDraft, actor contract.Principal, now time.Time) DeliveryPlanVersion {
+func versionFromDraft(plan DeliveryPlan, versionNumber int, draft PlanDraft, actor contract.Principal, now time.Time) (DeliveryPlanVersion, error) {
 	scenario := scenarioFor(draft)
 	draft = normalizeDraft(draft, scenario)
-	return DeliveryPlanVersion{
+	version := DeliveryPlanVersion{
 		PlanID: plan.ID, OrganizationID: plan.OrganizationID, ProjectID: plan.ProjectID,
 		VersionNumber: versionNumber, Name: draft.Name, Objective: draft.Objective,
 		Advertiser: MockAdvertiser{
@@ -184,9 +187,16 @@ func versionFromDraft(plan DeliveryPlan, versionNumber int, draft PlanDraft, act
 		},
 		Budget: draft.Budget, Schedule: draft.Schedule,
 		Tracking: draft.Tracking, CreativeReferences: draft.CreativeReferences,
-		SourceStrategyVersion: draft.SourceStrategyVersion, Source: SourceMock, Scenario: scenario,
+		SourceStrategyVersion: draft.SourceStrategyVersion, Platform: plan.Platform,
+		Source: SourceMock, Scenario: scenario,
 		CreatedBy: actor, CreatedAt: now,
 	}
+	hash, err := PlanCanonicalHash(version)
+	if err != nil {
+		return DeliveryPlanVersion{}, err
+	}
+	version.CanonicalHash = hash
+	return version, nil
 }
 
 func normalizeDraft(draft PlanDraft, scenario Scenario) PlanDraft {
