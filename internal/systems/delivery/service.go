@@ -32,6 +32,7 @@ var (
 	ErrApprovalExpired         = errors.New("delivery approval has expired")
 	ErrApprovalContentMismatch = errors.New("delivery approval content does not match")
 	ErrApprovalScopeExceeded   = errors.New("delivery approval scope or budget was exceeded")
+	ErrIdempotencyConflict     = errors.New("delivery idempotency key was reused with a different request")
 )
 
 type DeliveryPlanStatus string
@@ -144,15 +145,92 @@ type ChangeSet struct {
 }
 
 type Execution struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	ChangeSetID    string                  `json:"change_set_id"`
-	Status         string                  `json:"status"`
-	Mode           string                  `json:"mode"`
-	ExecutedBy     string                  `json:"executed_by"`
-	StartedAt      time.Time               `json:"started_at"`
-	CompletedAt    time.Time               `json:"completed_at"`
+	ID                     string                  `json:"id"`
+	OrganizationID         contract.OrganizationID `json:"organization_id"`
+	ProjectID              contract.ProjectID      `json:"project_id"`
+	ChangeSetID            string                  `json:"change_set_id"`
+	ApprovalID             string                  `json:"approval_id"`
+	Status                 ExecutionStatus         `json:"status"`
+	Version                int64                   `json:"version"`
+	Mode                   string                  `json:"mode"`
+	Adapter                string                  `json:"adapter"`
+	Source                 Source                  `json:"source"`
+	Scenario               ExecutionScenario       `json:"scenario"`
+	IdempotencyKey         string                  `json:"idempotency_key"`
+	RequestHash            string                  `json:"request_hash"`
+	ExecutedBy             string                  `json:"executed_by"`
+	StartedAt              time.Time               `json:"started_at"`
+	CompletedAt            *time.Time              `json:"completed_at"`
+	RetryAllowed           bool                    `json:"retry_allowed"`
+	RecoveryAction         string                  `json:"recovery_action"`
+	RecoveryReason         string                  `json:"recovery_reason"`
+	CompensationCandidates []string                `json:"compensation_candidates"`
+	Steps                  []ExecutionStep         `json:"steps"`
+}
+
+type ExecutionStatus string
+
+const (
+	ExecutionQueued             ExecutionStatus = "queued"
+	ExecutionValidatingApproval ExecutionStatus = "validating_approval"
+	ExecutionExecuting          ExecutionStatus = "executing"
+	ExecutionVerifying          ExecutionStatus = "verifying"
+	ExecutionSucceeded          ExecutionStatus = "succeeded"
+	ExecutionFailed             ExecutionStatus = "failed"
+	ExecutionPartial            ExecutionStatus = "partial"
+	ExecutionResultUnknown      ExecutionStatus = "result_unknown"
+	ExecutionCancelled          ExecutionStatus = "cancelled"
+)
+
+type StepStatus string
+
+const (
+	StepPending       StepStatus = "pending"
+	StepRunning       StepStatus = "running"
+	StepSucceeded     StepStatus = "succeeded"
+	StepFailed        StepStatus = "failed"
+	StepResultUnknown StepStatus = "result_unknown"
+	StepSkipped       StepStatus = "skipped"
+)
+
+type ExecutionScenario string
+
+const (
+	ExecutionScenarioSuccess       ExecutionScenario = "success"
+	ExecutionScenarioFailed        ExecutionScenario = "failed"
+	ExecutionScenarioPartial       ExecutionScenario = "partial"
+	ExecutionScenarioResultUnknown ExecutionScenario = "result_unknown"
+)
+
+type ExecutionStep struct {
+	ID             string     `json:"id"`
+	Sequence       int        `json:"sequence"`
+	Action         string     `json:"action"`
+	Status         StepStatus `json:"status"`
+	Attempt        int        `json:"attempt"`
+	Effect         string     `json:"effect"`
+	OutcomeSummary string     `json:"outcome_summary"`
+	EvidenceRef    string     `json:"evidence_ref"`
+	StartedAt      *time.Time `json:"started_at"`
+	CompletedAt    *time.Time `json:"completed_at"`
+	Version        int64      `json:"version"`
+}
+
+type ExecuteRequest struct {
+	ExpectedVersion int64             `json:"expected_version"`
+	Scenario        ExecutionScenario `json:"scenario"`
+}
+
+func (r ExecuteRequest) Validate() error {
+	if r.ExpectedVersion < 1 {
+		return ErrInvalidRequest
+	}
+	switch r.Scenario {
+	case ExecutionScenarioSuccess, ExecutionScenarioFailed, ExecutionScenarioPartial, ExecutionScenarioResultUnknown:
+		return nil
+	default:
+		return ErrInvalidRequest
+	}
 }
 
 type Evidence struct {
@@ -163,6 +241,9 @@ type Evidence struct {
 	Summary        string                  `json:"summary"`
 	Mode           string                  `json:"mode"`
 	Reversible     bool                    `json:"reversible"`
+	Source         Source                  `json:"source"`
+	Scenario       ExecutionScenario       `json:"scenario"`
+	References     []string                `json:"references"`
 	CreatedAt      time.Time               `json:"created_at"`
 }
 
@@ -235,8 +316,13 @@ type Repository interface {
 	TransitionChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ChangeSetStatus, string, time.Time) (ChangeSet, error)
 	ApproveChangeSet(context.Context, ChangeSet, DeliveryApproval) (ChangeSet, error)
 	GetApproval(context.Context, contract.OrganizationID, contract.ProjectID, string) (DeliveryApproval, error)
-	RecordExecution(context.Context, ChangeSet, DeliveryApproval, Execution, Evidence) (ExecutionResult, error)
+	CreateOrReplayExecution(context.Context, ChangeSet, DeliveryApproval, Execution, Evidence) (ExecutionResult, bool, error)
+	FindExecutionByIdempotency(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, bool, error)
+	AdvanceExecution(context.Context, Execution, ExecutionStatus, *time.Time, string, string, []string) (ExecutionResult, error)
+	AdvanceStep(context.Context, Execution, ExecutionStep, ExecutionStep) (ExecutionStep, error)
 	ListExecutions(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ExecutionResult, error)
+	GetExecution(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, error)
+	GetExecutionByChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, error)
 	CreateMetricSnapshot(context.Context, DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error)
 	ListMetricSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]DeliveryMetricSnapshot, error)
 }
@@ -245,6 +331,7 @@ type Service struct {
 	Repository Repository
 	Projects   ActiveProjectResolver
 	Packages   CreativePackageReader
+	Adapter    PlatformAdapter
 	NewID      ids.Generator
 	Now        func() time.Time
 }
@@ -678,81 +765,215 @@ func (s Service) Approve(ctx context.Context, actor contract.ActorContext, proje
 	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, approved)
 }
 
-func (s Service) Execute(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ExecutionResult, error) {
+func (s Service) Execute(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID, idempotencyKey string, request ExecuteRequest) (ExecutionResult, bool, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
+	}
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if err := request.Validate(); err != nil || len(idempotencyKey) < 1 || len(idempotencyKey) > 255 {
+		return ExecutionResult{}, false, ErrInvalidRequest
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
-	if value.Version != expectedVersion {
-		return ExecutionResult{}, ErrVersionConflict
+	requestHash, err := contract.CanonicalJSONHash(struct {
+		OrganizationID  contract.OrganizationID `json:"organization_id"`
+		ProjectID       contract.ProjectID      `json:"project_id"`
+		ChangeSetID     string                  `json:"change_set_id"`
+		Operation       string                  `json:"operation"`
+		ExpectedVersion int64                   `json:"expected_version"`
+		Scenario        ExecutionScenario       `json:"scenario"`
+	}{actor.OrganizationID, projectID, value.ID, "execute_mock", request.ExpectedVersion, request.Scenario})
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	if existing, found, findErr := s.Repository.FindExecutionByIdempotency(ctx, actor.OrganizationID, projectID, idempotencyKey); findErr != nil {
+		return ExecutionResult{}, false, findErr
+	} else if found {
+		if existing.Execution.RequestHash != requestHash {
+			return ExecutionResult{}, false, ErrIdempotencyConflict
+		}
+		existing, err = s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, existing)
+		return existing, true, err
+	}
+	if value.Version != request.ExpectedVersion {
+		return ExecutionResult{}, false, ErrVersionConflict
 	}
 	if value.Status != ChangeSetApproved {
-		return ExecutionResult{}, ErrInvalidState
+		return ExecutionResult{}, false, ErrInvalidState
 	}
 	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, value.PlanID)
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	if plan.Version != value.PlanVersion {
-		return ExecutionResult{}, ErrStalePlanVersion
+		return ExecutionResult{}, false, ErrStalePlanVersion
 	}
 	version, err := s.Repository.GetPlanVersion(ctx, actor.OrganizationID, projectID, value.PlanID, int(value.PlanVersion))
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	value.PlanName = version.Name
 	value.Source, value.Scenario = version.Source, version.Scenario
 	value.PlanCanonicalHash, value.BudgetLimit = version.CanonicalHash, version.Budget
 	approval, err := s.Repository.GetApproval(ctx, actor.OrganizationID, projectID, value.ID)
 	if errors.Is(err, ErrNotFound) {
-		return ExecutionResult{}, ErrApprovalRequired
+		return ExecutionResult{}, false, ErrApprovalRequired
 	}
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	view, err := s.approvalView(value, plan, version, approval)
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	if !view.Valid {
 		switch view.InvalidReason {
 		case ApprovalInvalidExpired:
-			return ExecutionResult{}, ErrApprovalExpired
+			return ExecutionResult{}, false, ErrApprovalExpired
 		case ApprovalInvalidStalePlan:
-			return ExecutionResult{}, ErrStalePlanVersion
+			return ExecutionResult{}, false, ErrStalePlanVersion
 		case ApprovalInvalidScopeExceeded:
-			return ExecutionResult{}, ErrApprovalScopeExceeded
+			return ExecutionResult{}, false, ErrApprovalScopeExceeded
 		default:
-			return ExecutionResult{}, ErrApprovalContentMismatch
+			return ExecutionResult{}, false, ErrApprovalContentMismatch
 		}
 	}
 	executionID, err := s.idGenerator()("deliveryexecution")
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	evidenceID, err := s.idGenerator()("deliveryevidence")
 	if err != nil {
-		return ExecutionResult{}, err
+		return ExecutionResult{}, false, err
 	}
 	now := s.now()
+	actions := []string{"create_platform_project", "create_promotion", "verify_platform_state"}
+	steps := make([]ExecutionStep, len(actions))
+	for index, action := range actions {
+		steps[index].ID, err = s.idGenerator()("deliveryexecutionstep")
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+		steps[index].Sequence = index + 1
+		steps[index].Action = action
+		steps[index].Status = StepPending
+		steps[index].Effect = "none"
+		steps[index].OutcomeSummary = "queued; no adapter call has occurred"
+		steps[index].Version = 1
+	}
+	adapter := s.platformAdapter()
+	if adapter.Source() != SourceMock {
+		return ExecutionResult{}, false, fmt.Errorf("%w: A04 only permits the mock platform adapter", ErrInvalidRequest)
+	}
 	execution := Execution{
 		ID: executionID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		ChangeSetID: value.ID, Status: "succeeded", Mode: ExecutionModeLocalSimulation,
-		ExecutedBy: actor.Principal.ID, StartedAt: now, CompletedAt: now,
+		ChangeSetID: value.ID, ApprovalID: approval.ApprovalID, Status: ExecutionQueued, Version: 1,
+		Mode: ExecutionModeLocalSimulation, Adapter: MockOceanEngineAdapter, Source: SourceMock,
+		Scenario: request.Scenario, IdempotencyKey: idempotencyKey, RequestHash: requestHash,
+		ExecutedBy: actor.Principal.ID, StartedAt: now, RetryAllowed: false,
+		RecoveryAction: "none", RecoveryReason: "", CompensationCandidates: []string{}, Steps: steps,
 	}
 	evidence := Evidence{
 		ID: evidenceID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		ExecutionID: execution.ID, Summary: "本地模拟执行完成，无真实广告平台写入。",
-		Mode: ExecutionModeLocalSimulation, Reversible: true, CreatedAt: now,
+		ExecutionID: execution.ID, Summary: "本地模拟执行记录，无真实广告平台写入。",
+		Mode: ExecutionModeLocalSimulation, Reversible: false,
+		Source: SourceMock, Scenario: request.Scenario, References: []string{"mock://execution/" + string(request.Scenario)}, CreatedAt: now,
 	}
 	value.Approval = &view
-	return s.Repository.RecordExecution(ctx, value, approval, execution, evidence)
+	created, replay, err := s.Repository.CreateOrReplayExecution(ctx, value, approval, execution, evidence)
+	if err != nil {
+		return created, replay, err
+	}
+	if replay {
+		created, err = s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, created)
+		return created, true, err
+	}
+	for _, state := range []ExecutionStatus{ExecutionValidatingApproval, ExecutionExecuting} {
+		created, err = s.Repository.AdvanceExecution(ctx, created.Execution, state, nil, "none", "", []string{})
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+	}
+
+	adapterUnknown := false
+	for index := range created.Execution.Steps {
+		current := created.Execution.Steps[index]
+		if current.Action == "verify_platform_state" {
+			created, err = s.Repository.AdvanceExecution(ctx, created.Execution, ExecutionVerifying, nil, "none", "", []string{})
+			if err != nil {
+				return ExecutionResult{}, false, err
+			}
+			current = created.Execution.Steps[index]
+		}
+		if (request.Scenario == ExecutionScenarioFailed && current.Sequence > 1) || adapterUnknown {
+			skipped := current
+			skipped.Status = StepSkipped
+			skipped.Effect = "none"
+			skipped.OutcomeSummary = "not run after a prior terminal step outcome"
+			skipped.EvidenceRef = "mock://execution/skipped"
+			completedAt := s.now()
+			skipped.CompletedAt = &completedAt
+			created.Execution.Steps[index], err = s.Repository.AdvanceStep(ctx, created.Execution, current, skipped)
+			if err != nil {
+				return ExecutionResult{}, false, err
+			}
+			continue
+		}
+
+		running := current
+		running.Status = StepRunning
+		running.Attempt++
+		running.Effect = "none"
+		running.OutcomeSummary = "adapter call in progress"
+		startedAt := s.now()
+		running.StartedAt = &startedAt
+		running, err = s.Repository.AdvanceStep(ctx, created.Execution, current, running)
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+		created.Execution.Steps[index] = running
+
+		stepResult, adapterErr := adapter.ExecuteStep(ctx, PlatformStepRequest{
+			ExecutionID: executionID, Scenario: request.Scenario, Action: running.Action, Sequence: running.Sequence,
+		})
+		completedAt := s.now()
+		terminal := running
+		terminal.CompletedAt = &completedAt
+		if adapterErr != nil {
+			adapterUnknown = true
+			terminal.Status = StepResultUnknown
+			terminal.Effect = "unknown"
+			terminal.OutcomeSummary = "adapter returned an error after the step began; target effect is unknown"
+			terminal.EvidenceRef = "mock://execution/adapter-error"
+		} else {
+			terminal.Status = stepResult.Status
+			terminal.Effect = stepResult.Effect
+			terminal.OutcomeSummary = stepResult.Summary
+			terminal.EvidenceRef = stepResult.EvidenceRef
+		}
+		created.Execution.Steps[index], err = s.Repository.AdvanceStep(ctx, created.Execution, running, terminal)
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+	}
+
+	status, recoveryAction, recoveryReason, compensation := executionOutcome(request.Scenario)
+	if adapterUnknown {
+		status, recoveryAction = ExecutionResultUnknown, "query_and_reconcile"
+		recoveryReason, compensation = "adapter result is unknown; blind retry is prohibited", []string{}
+	}
+	completedAt := s.now()
+	created, err = s.Repository.AdvanceExecution(ctx, created.Execution, status, &completedAt, recoveryAction, recoveryReason, compensation)
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	created, err = s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, created)
+	return created, false, err
 }
 
 func (s Service) Rollback(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ChangeSet, error) {
@@ -767,6 +988,13 @@ func (s Service) Rollback(ctx context.Context, actor contract.ActorContext, proj
 		return ChangeSet{}, err
 	}
 	if value.Status != ChangeSetExecuted {
+		return ChangeSet{}, ErrInvalidState
+	}
+	execution, err := s.Repository.GetExecutionByChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if execution.Execution.Status != ExecutionSucceeded || execution.Execution.CompletedAt == nil {
 		return ChangeSet{}, ErrInvalidState
 	}
 	transitioned, err := s.Repository.TransitionChangeSet(
@@ -791,12 +1019,47 @@ func (s Service) ListExecutions(ctx context.Context, actor contract.ActorContext
 		return nil, err
 	}
 	for index := range values {
-		values[index].ChangeSet, err = s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, values[index].ChangeSet)
+		values[index], err = s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, values[index])
 		if err != nil {
 			return nil, err
 		}
 	}
 	return values, nil
+}
+
+func (s Service) GetExecution(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string) (ExecutionResult, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return ExecutionResult{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ExecutionResult{}, err
+	}
+	if strings.TrimSpace(executionID) == "" {
+		return ExecutionResult{}, ErrInvalidRequest
+	}
+	value, err := s.Repository.GetExecution(ctx, actor.OrganizationID, projectID, executionID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, value)
+}
+
+func (s Service) hydrateExecutionResult(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, value ExecutionResult) (ExecutionResult, error) {
+	changeSet, err := s.hydrateChangeSet(ctx, organizationID, projectID, value.ChangeSet)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	value.ChangeSet = changeSet
+	if value.Execution.CompensationCandidates == nil {
+		value.Execution.CompensationCandidates = []string{}
+	}
+	if value.Evidence.References == nil {
+		value.Evidence.References = []string{}
+	}
+	if value.Execution.Steps == nil {
+		value.Execution.Steps = []ExecutionStep{}
+	}
+	return value, nil
 }
 
 func (s Service) CreateDemoMetricSnapshot(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, request CreateMetricSnapshotRequest) (DeliveryMetricSnapshot, error) {

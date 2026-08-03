@@ -295,3 +295,70 @@ func approvalFromLegacyProjection(row legacyApprovalBackfillRow) (DeliveryApprov
 	}
 	return approval, nil
 }
+
+// BackfillLegacyExecutions makes pre-A04 succeeded rows readable through the
+// execution contract without inventing a second hash implementation.
+func BackfillLegacyExecutions(ctx context.Context, db *sql.DB) (int, error) {
+	rows, err := db.QueryContext(ctx, `SELECT x.id, x.organization_id, x.project_id, x.change_set_id, x.executed_by, x.started_at, x.completed_at, a.approval_id
+		FROM delivery_executions x JOIN delivery_approvals a ON a.organization_id=x.organization_id AND a.change_set_id=x.change_set_id
+		WHERE x.request_hash IS NULL OR x.request_hash=''`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	type row struct {
+		id                      string
+		org                     contract.OrganizationID
+		project                 contract.ProjectID
+		changeSet, by, approval string
+		started                 time.Time
+		completed               sql.NullTime
+	}
+	values := []row{}
+	for rows.Next() {
+		var v row
+		if err := rows.Scan(&v.id, &v.org, &v.project, &v.changeSet, &v.by, &v.started, &v.completed, &v.approval); err != nil {
+			return 0, err
+		}
+		values = append(values, v)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, v := range values {
+		hash, err := contract.CanonicalJSONHash(map[string]any{"organization_id": v.org, "project_id": v.project, "change_set_id": v.changeSet, "operation": "execute_mock", "expected_version": int64(0), "scenario": ExecutionScenarioSuccess})
+		if err != nil {
+			return 0, err
+		}
+		key := "legacy-" + v.id
+		completed := v.started
+		if v.completed.Valid {
+			completed = v.completed.Time
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE delivery_executions SET approval_id=?,version=1,adapter='mock_ocean_engine',source='mock',scenario='success',idempotency_key=?,request_hash=?,retry_allowed=FALSE,recovery_action='none',recovery_reason='',compensation_candidates=JSON_ARRAY(),completed_at=? WHERE organization_id=? AND project_id=? AND id=? AND (request_hash IS NULL OR request_hash='')`, v.approval, key, hash, completed, v.org, v.project, v.id)
+		if err != nil {
+			return 0, err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE delivery_evidence SET source='mock',scenario='success',references_json=JSON_ARRAY('mock://execution/legacy') WHERE organization_id=? AND project_id=? AND execution_id=?`, v.org, v.project, v.id)
+		if err != nil {
+			return 0, err
+		}
+		stepIDHash, err := contract.CanonicalJSONHash(map[string]any{"execution_id": v.id, "legacy_step": true})
+		if err != nil {
+			return 0, err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT IGNORE INTO delivery_execution_steps (id,organization_id,project_id,execution_id,sequence_number,action,status,attempt,effect,outcome_summary,evidence_ref,started_at,completed_at,version) VALUES (?,?,?,?,1,'verify_platform_state','succeeded',1,'confirmed_applied','legacy A03 simulated execution','mock://execution/legacy',?,?,1)`, "deliveryexecutionstep_legacy_"+stepIDHash, v.org, v.project, v.id, v.started, completed)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(values), nil
+}

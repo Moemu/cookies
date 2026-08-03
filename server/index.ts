@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   isArtifactKind,
@@ -927,7 +928,7 @@ function sendError(response: ServerResponse, error: unknown): void {
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const port = Number(process.env.PORT ?? 8787);
   const dataFile = process.env.DATA_FILE ?? resolve(process.cwd(), "data/mvp-store.json");
   if (process.env.RESET_DATA_FILE === "true") {
