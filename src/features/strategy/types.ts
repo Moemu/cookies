@@ -668,6 +668,7 @@ export type KnowledgeDocument = {
 
 export type AgentTask = {
   id: string
+  kind: string
   status: 'dispatch_pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   version: number
   error?: { code: string; message: string; retryable: boolean }

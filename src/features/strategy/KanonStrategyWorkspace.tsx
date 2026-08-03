@@ -22,7 +22,6 @@ import {
   Upload,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useProject } from '../../context/ProjectContext'
 import { CreativeTaskPlanner } from './CreativeTaskPlanner'
 import { useStrategyWorkspace } from './useStrategyWorkspace'
@@ -35,9 +34,20 @@ import type {
   StrategyDraft,
 } from './types'
 
-export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView: string; workspaceId?: string }) {
+type Props = {
+  activeView: string
+  workspaceId?: string
+  onOpenWorkspace: (workspaceId: string, view: string) => void
+  onOpenCreative: (navId: string, view: string, contextId: string) => void
+}
+
+export function KanonStrategyWorkspace({
+  activeView,
+  workspaceId,
+  onOpenWorkspace,
+  onOpenCreative,
+}: Props) {
   const { currentProject } = useProject()
-  const navigate = useNavigate()
   const { state, actions } = useStrategyWorkspace(currentProject.id, workspaceId)
   const mainRef = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -96,10 +106,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
       <label><span>切换工作区</span><select
         aria-label="切换策略工作区"
         value={state.detail.workspace.id}
-        onChange={event => navigate({
-          pathname: `/projects/${encodeURIComponent(currentProject.id)}/strategy/workspaces/${encodeURIComponent(event.target.value)}`,
-          search: `?view=${encodeURIComponent(activeView)}`,
-        })}
+        onChange={event => onOpenWorkspace(event.target.value, activeView)}
       >{state.workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}{workspace.is_primary ? ' · 主工作区' : ''}</option>)}</select></label>
       <button className="icon-button" aria-label="刷新当前策略工作区" disabled={Boolean(state.busy)} onClick={() => void actions.reload()}><RefreshCw size={15}/></button>
     </div>
@@ -138,6 +145,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId }: { activeView
         {activeView === '创意任务策略' ? <CreativeTaskPlanner
           briefVersion={state.briefVersion}
           draft={state.draft}
+          onOpenCreative={onOpenCreative}
           projectId={currentProject.id}
         /> : null}
         {activeView === '评审' ? <ReviewPane

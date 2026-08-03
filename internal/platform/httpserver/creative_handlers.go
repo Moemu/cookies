@@ -82,6 +82,157 @@ func (s *Server) ensureCommerceFixtureWorkspace(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) ensureBrandFilmFixtureWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.EnsureBrandFilmFixtureWorkspace(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), key)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getLatestBrandFilmWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetLatestBrandFilmWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getBrandFilmWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetBrandFilmWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) analyzeBrandFilmBrief(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.AnalyzeBrandFilmBrief(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) updateBrandFilmBrief(w http.ResponseWriter, r *http.Request) {
+	var body creative.UpdateBrandBriefAnalysisRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateBrandFilmBrief(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) confirmBrandFilmBrief(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmBrandFilmBrief(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) generateBrandFilmConcepts(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GenerateBrandFilmConcepts(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) selectBrandFilmConcept(w http.ResponseWriter, r *http.Request) {
+	var body creative.SelectBrandConceptRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.SelectBrandFilmConcept(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) generateBrandFilmPlan(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GenerateBrandFilmPlan(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) updateBrandFilmPlan(w http.ResponseWriter, r *http.Request) {
+	var body creative.UpdateBrandFilmPlanRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateBrandFilmPlan(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) confirmBrandFilmPlan(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmBrandFilmPlan(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) decodeBrandFilmCommand(w http.ResponseWriter, r *http.Request, target any) bool {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return false
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return false
+	}
+	if err := decodeJSON(w, r, target); err != nil {
+		s.badRequest(w, r, err)
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeBrandFilmResult(w http.ResponseWriter, r *http.Request, value creative.TaskDetail, err error) {
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) getLatestCommercePrerollWorkspace(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -433,6 +584,28 @@ func (s *Server) selectGamePrerollCandidate(w http.ResponseWriter, r *http.Reque
 		r.PathValue("task_id"),
 		body,
 	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) prepareGamePrerollEvidence(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.PrepareGamePrerollEvidenceRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.PrepareGamePrerollEvidence(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return

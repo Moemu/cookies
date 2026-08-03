@@ -109,6 +109,8 @@ type Creative struct {
 	ShortDramaPlannerModelAlias    string
 	GamePrerollModelPlannerEnabled bool
 	GamePrerollPlannerModelAlias   string
+	BrandFilmModelPlannerEnabled   bool
+	BrandFilmPlannerModelAlias     string
 }
 
 // Research configures backend-owned web research. MCP fields are retained only
@@ -333,6 +335,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	brandFilmModelPlannerEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_CREATIVE_BRAND_FILM_MODEL_PLANNER_ENABLED",
+		true,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	researchSeedEnabled, err := strictBoolValueOr(lookup, "COOKIES_RESEARCH_SEED_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -389,6 +399,8 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ShortDramaPlannerModelAlias:    valueOr(lookup, "COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 			GamePrerollModelPlannerEnabled: gamePrerollModelPlannerEnabled,
 			GamePrerollPlannerModelAlias:   valueOr(lookup, "COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+			BrandFilmModelPlannerEnabled:   brandFilmModelPlannerEnabled,
+			BrandFilmPlannerModelAlias:     valueOr(lookup, "COOKIES_CREATIVE_BRAND_FILM_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 		},
 		Strategy: Strategy{
 			Enabled:                     strategyEnabled,
@@ -543,6 +555,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Creative.GamePrerollPlannerModelAlias) == "" {
 		return fmt.Errorf("COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Creative.BrandFilmPlannerModelAlias) == "" {
+		return fmt.Errorf("Creative brand film planner model alias is required")
 	}
 	if c.Research.TimeoutSeconds < 1 || c.Research.TimeoutSeconds > 600 {
 		return fmt.Errorf("COOKIES_RESEARCH_TIMEOUT_SECONDS must be between 1 and 600")

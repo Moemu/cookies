@@ -14,6 +14,150 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/game-preroll:prepare-evidence:
+    post:
+      operationId: prepareGamePrerollEvidence
+      summary: Extract the three verified gameplay evidence frames and persist their source-video lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200': {description: Workspace upgraded to game-preroll draft v2 with stable evidence image assets.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/brand-film:ensure-fixture:
+    post:
+      operationId: ensureBrandFilmFixtureWorkspace
+      summary: Idempotently materialize the Guerlain brand-film development fixture as a durable Creative workspace.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      responses:
+        '200': {description: Existing or newly materialized Phase 0 brand-film workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/brand-film:
+    get:
+      operationId: getLatestBrandFilmWorkspace
+      summary: Restore the latest durable brand-film workspace in the Project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {description: Latest task, intake, and versioned brand-film draft.}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:
+    get:
+      operationId: getBrandFilmWorkspace
+      summary: Read one brand-film workspace by CreativeTask ID.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+      responses:
+        '200': {description: Versioned Phase 0-2 brand-film workspace.}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:analyze-brief:
+    post:
+      operationId: analyzeBrandFilmBrief
+      summary: Append an editable, evidence-aware Brief analysis revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at brief_analysis_draft.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/brief:
+    patch:
+      operationId: updateBrandFilmBrief
+      summary: Persist a user-edited Brief analysis as a new optimistic-concurrency revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, analysis]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                analysis: {type: object, description: BrandBriefAnalysisVersion; see creative-brand-film-draft-v1.schema.json.}
+      responses:
+        '200': {description: Workspace with a new editable Brief revision.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:confirm-brief:
+    post:
+      operationId: confirmBrandFilmBrief
+      summary: Confirm the current Brief and its product-front reference.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at brief_confirmed.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:generate-concepts:
+    post:
+      operationId: generateBrandFilmConcepts
+      summary: Generate two or three differentiated creative directions from the confirmed Brief.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at concept_selection; no direction is auto-selected.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:select-concept:
+    post:
+      operationId: selectBrandFilmConcept
+      summary: Human-select and freeze one creative direction.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, concept_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                concept_id: {type: string, minLength: 1}
+      responses:
+        '200': {description: Workspace at concept_confirmed.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:generate-plan:
+    post:
+      operationId: generateBrandFilmPlan
+      summary: Generate an editable 15-second script and shot table from the selected direction.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at production_plan_draft.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/plan:
+    patch:
+      operationId: updateBrandFilmPlan
+      summary: Persist a user-edited script and shot table revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, plan]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                plan: {type: object, description: BrandFilmPlanVersion; see creative-brand-film-draft-v1.schema.json.}
+      responses:
+        '200': {description: Workspace with a new editable film-plan revision.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:confirm-plan:
+    post:
+      operationId: confirmBrandFilmPlan
+      summary: Confirm the current script and shot table, completing Phase 0-2 without creating a video job.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at production_plan_confirmed with GenerationUnit/PromptPackage/Attempt seam reserved.}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/commerce-preroll/sources:
     get:
       operationId: listCommercePrerollSources
@@ -422,6 +566,17 @@ paths:
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/VersionID'}]
       responses: {'200': {description: Stable CreativePackage created or replayed.}, '409': {$ref: '#/components/responses/Conflict'}}
 components:
+  requestBodies:
+    BrandFilmRevision:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_revision]
+            properties:
+              expected_revision: {type: integer, minimum: 1}
   securitySchemes:
     cookiesAuth: {type: http, scheme: bearer}
   parameters:

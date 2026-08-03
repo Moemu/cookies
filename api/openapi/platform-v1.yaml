@@ -3886,6 +3886,7 @@ components:
           - archived
         source_type:
           type: string
+          enum: [upload, provider_generated, imported, captured, rendered, derived]
         mime_type:
           type: string
         size_bytes:
@@ -3905,6 +3906,10 @@ components:
         provider_job_id:
           type: string
         provider_output_id:
+          type: string
+        render_job_id:
+          type: string
+        derivation_id:
           type: string
         project_context_version:
           type: integer

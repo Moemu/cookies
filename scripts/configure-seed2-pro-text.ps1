@@ -71,8 +71,7 @@ INSERT INTO provider_model_route_revisions (
     'text_response_mode', 'prompt_json',
     'max_output_tokens', 8192,
     'output_token_parameter', 'max_tokens',
-    'temperature', 0.2,
-    'thinking_mode', 'auto'
+    'temperature', 0.2
   )
 );
 UPDATE provider_model_routes SET current_revision_id = '$routeRevisionID' WHERE id = '$routeID';

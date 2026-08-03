@@ -76,6 +76,38 @@ func TestAdapterGatewayTextMapsRateLimitAsRetryableTextError(t *testing.T) {
 	}
 }
 
+func TestAdapterGatewayTextDoesNotRetryInvalidParameterDisguisedAsRateLimit(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusTooManyRequests)
+		_, _ = writer.Write([]byte(`{"error":{"code":"rate_limited","message":"Unsupported thinking type for the current model: auto","provider":"xinyuan","provider_code":"InvalidParameter"}}`))
+	}))
+	defer server.Close()
+	adapter, err := NewAdapterGatewayTextAdapter(
+		textRouteStub{snapshot: textRouteSnapshot(server.URL)},
+		credentialStub("test-token"),
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter.client = server.Client()
+	_, err = adapter.GenerateText(context.Background(), TextAdapterRequest{
+		OrganizationID: "org_1",
+		ModelAlias:     "cookies.text.standard",
+		Messages:       []TextMessage{{Role: TextRoleUser, Content: "generate"}},
+	})
+	var execution ExecutionError
+	if !errors.As(err, &execution) {
+		t.Fatalf("error = %T %v, want ExecutionError", err, err)
+	}
+	if execution.JobError.Code != "MODEL_REQUEST_REJECTED" || execution.JobError.Retryable ||
+		execution.JobError.Message != "Text model rejected the configured request parameters" {
+		t.Fatalf("job error = %#v", execution.JobError)
+	}
+}
+
 func TestAdapterGatewayTextRejectsOversizedResponse(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

@@ -513,6 +513,49 @@ func TestRenderedVideoIntakeIsIdempotentByRenderJob(t *testing.T) {
 	}
 }
 
+func TestDerivedImageIntakeIsIdempotentAndPreservesSourceLineage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 31, 16, 0, 0, 0, time.UTC)
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	source := repository.commit(AssetCommit{
+		BlobID: "source_blob", OrganizationID: "org_1", ProjectID: "project_1", AssetID: "source_video", Version: 1,
+		Kind: contract.AssetVideo, SourceType: contract.AssetSourceUpload, OwnerSystem: "assets", MIMEType: "video/mp4",
+		SizeBytes: 128, SHA256: strings.Repeat("a", 64), Location: ObjectLocation{Provider: "memory", Bucket: "assets", Key: "source"},
+	}, now).AssetVersion
+	frame := testPNG(t)
+	rc := testRequestContext("org_1", "project_1")
+	first, err := service.IngestDerivedImage(context.Background(), rc, "project_1", "game-frame-source_video-v1-21271ms-v1", source, bytes.NewReader(frame), int64(len(frame)), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.IngestDerivedImage(context.Background(), rc, "project_1", "game-frame-source_video-v1-21271ms-v1", source, bytes.NewReader(frame), int64(len(frame)), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("derivation retry created a second asset: first=%+v second=%+v", first, second)
+	}
+	stored, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Asset.Kind != contract.AssetImage || stored.Version.SourceType != contract.AssetSourceDerived || stored.Version.DerivationID == "" {
+		t.Fatalf("derived asset metadata = %+v", stored.Version)
+	}
+	relations, err := repository.ListAssetRelations(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(relations) != 1 || relations[0].RelationType != AssetRelationDerivedFrom || relations[0].Source.ID != string(source.AssetID) || relations[0].Source.Version == nil || *relations[0].Source.Version != source.Version {
+		t.Fatalf("derived source lineage = %+v", relations)
+	}
+}
+
 type fakeVideoProbe struct {
 	metadata VideoMetadata
 	err      error
@@ -717,9 +760,19 @@ func (r *fakeRepository) CompleteRender(_ context.Context, renderJobID string, c
 	}
 	return r.commit(c, now), nil
 }
+func (r *fakeRepository) CompleteDerived(_ context.Context, derivationID string, c AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.assets {
+		if existing.Asset.OrganizationID == c.OrganizationID && existing.Version.DerivationID == derivationID {
+			return existing.Ref, nil
+		}
+	}
+	return r.commit(c, now), nil
+}
 func (r *fakeRepository) commit(c AssetCommit, now time.Time) contract.ProjectAssetRef {
 	ref := contract.ProjectAssetRef{ProjectID: c.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: c.AssetID, Version: c.Version}}
-	r.assets[string(c.OrganizationID)+"/"+string(c.ProjectID)+"/"+string(c.AssetID)] = ProjectAsset{Ref: ref, Asset: Asset{ID: c.AssetID, OrganizationID: c.OrganizationID, Kind: c.Kind, Status: AssetReady, OwnerSystem: c.OwnerSystem, LatestVersion: c.Version, CreatedAt: now, UpdatedAt: now}, Version: AssetVersion{OrganizationID: c.OrganizationID, AssetID: c.AssetID, Version: c.Version, Status: AssetReady, SourceType: c.SourceType, MIMEType: c.MIMEType, SizeBytes: c.SizeBytes, SHA256: c.SHA256, WidthPixels: c.WidthPixels, HeightPixels: c.HeightPixels, Media: c.Media, DurationMS: c.DurationMS, FrameRate: c.FrameRate, VideoCodec: c.VideoCodec, AudioCodec: c.AudioCodec, RenderJobID: c.RenderJobID, ProviderJobID: c.ProviderJobID, ProviderOutputID: c.ProviderOutputID, ProjectContextVersion: c.ProjectContextVersion, Blob: c.Location, CreatedAt: now}, CreatedAt: now}
+	r.assets[string(c.OrganizationID)+"/"+string(c.ProjectID)+"/"+string(c.AssetID)] = ProjectAsset{Ref: ref, Asset: Asset{ID: c.AssetID, OrganizationID: c.OrganizationID, Kind: c.Kind, Status: AssetReady, OwnerSystem: c.OwnerSystem, LatestVersion: c.Version, CreatedAt: now, UpdatedAt: now}, Version: AssetVersion{OrganizationID: c.OrganizationID, AssetID: c.AssetID, Version: c.Version, Status: AssetReady, SourceType: c.SourceType, MIMEType: c.MIMEType, SizeBytes: c.SizeBytes, SHA256: c.SHA256, WidthPixels: c.WidthPixels, HeightPixels: c.HeightPixels, Media: c.Media, DurationMS: c.DurationMS, FrameRate: c.FrameRate, VideoCodec: c.VideoCodec, AudioCodec: c.AudioCodec, RenderJobID: c.RenderJobID, DerivationID: c.DerivationID, ProviderJobID: c.ProviderJobID, ProviderOutputID: c.ProviderOutputID, ProjectContextVersion: c.ProjectContextVersion, Blob: c.Location, CreatedAt: now}, CreatedAt: now}
 	for _, relation := range c.Relations {
 		relation.CreatedAt = now
 		key := relationKey(c.OrganizationID, c.ProjectID, relation.OutputAsset)

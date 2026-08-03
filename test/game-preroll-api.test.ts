@@ -100,6 +100,24 @@ test("game-preroll candidate regeneration preserves the versioned generation con
   });
 });
 
+test("game-preroll evidence preparation is revision-bound and idempotency-keyed", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    return jsonResponse(sampleGameWorkspace());
+  };
+  try {
+    await api.prepareGamePrerollEvidence("project_demo", "task_game_1", 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(calls[0].url, "/api/creative/v1/projects/project_demo/creative-tasks/task_game_1/game-preroll:prepare-evidence");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { expected_revision: 3 });
+  assert.equal(new Headers(calls[0].init.headers).get("Idempotency-Key"), "game-preroll-evidence-task_game_1-3");
+});
+
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,

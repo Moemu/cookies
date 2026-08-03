@@ -126,6 +126,13 @@ func main() {
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
 		CommerceWorkspaces: creativeRepository,
 	}
+	if cfg.Media.FFmpegPath != "" {
+		creativeService.GameEvidenceFrames = media.FFmpegFrameExtractor{
+			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs},
+		}
+		creativeService.DerivedAssets = uploadService
+	}
 	if cfg.Creative.ShortDramaModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
 		if textAdapterErr != nil {
@@ -169,6 +176,28 @@ func main() {
 		)
 	} else {
 		creativeService.GamePrerollPlanner = creative.DeterministicGamePrerollPlanner{}
+	}
+	if cfg.Creative.BrandFilmModelPlannerEnabled {
+		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
+		if textAdapterErr != nil {
+			log.Fatalf("configure Creative brand-film planner: %v", textAdapterErr)
+		}
+		creativeService.BrandFilmPlanner = creative.FallbackBrandFilmPlanner{
+			Primary: creative.ModelBrandFilmPlanner{
+				Text:       &provider.Service{TextAdapter: textAdapter},
+				ModelAlias: cfg.Creative.BrandFilmPlannerModelAlias,
+			},
+			Fallback: creative.DeterministicBrandFilmPlanner{},
+			OnPrimaryFailure: func(err error) {
+				log.Printf("Creative brand-film model planning fell back to deterministic planning: %v", err)
+			},
+		}
+		log.Printf(
+			"Creative brand-film planning configured: model_alias=%s fallback=deterministic",
+			cfg.Creative.BrandFilmPlannerModelAlias,
+		)
+	} else {
+		creativeService.BrandFilmPlanner = creative.DeterministicBrandFilmPlanner{}
 	}
 	if cfg.Provider.AudioAdapter == "volcengine_asr" && cfg.Provider.TextAdapter == "adapter_gateway" {
 		cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)

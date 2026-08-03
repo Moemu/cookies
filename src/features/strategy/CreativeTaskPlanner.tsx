@@ -13,11 +13,9 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { BackendApiError } from '../../backend/platform'
 import type { ApiProjectMediaAsset } from '../../data/api'
 import { platformClient } from '../../data/platformClient'
-import { projectPath } from '../../lib/router'
 import { createMutationKey, strategyApi } from './api'
 import type {
   BriefVersion,
@@ -33,11 +31,11 @@ import type {
 type Props = {
   briefVersion: BriefVersion | null
   draft: StrategyDraft | null
+  onOpenCreative: (navId: string, view: string, contextId: string) => void
   projectId: string
 }
 
-export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
-  const navigate = useNavigate()
+export function CreativeTaskPlanner({ briefVersion, draft, onOpenCreative, projectId }: Props) {
   const [catalogHash, setCatalogHash] = useState('')
   const [profiles, setProfiles] = useState<CreativeBusinessProfile[]>([])
   const [capabilities, setCapabilities] = useState<CreativeBusinessCapability[]>([])
@@ -262,14 +260,11 @@ export function CreativeTaskPlanner({ briefVersion, draft, projectId }: Props) {
         )
         destinationId = task.id
       }
-      navigate(projectPath(
-        projectId,
-        'creative',
+      onOpenCreative(
         capability.destination_area,
-        undefined,
         capability.destination_view,
         destinationId,
-      ))
+      )
     } catch (cause) {
       setError(messageOf(cause))
     } finally {

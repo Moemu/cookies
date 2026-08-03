@@ -3,6 +3,7 @@ package creative
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -31,6 +32,10 @@ type TaskStrategyReader interface {
 
 type AssetReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
+}
+
+type DerivedImageWriter interface {
+	IngestDerivedImage(context.Context, contract.RequestContext, contract.ProjectID, string, contract.AssetVersionRef, io.Reader, int64, string) (contract.ProjectAssetRef, error)
 }
 
 type CreativeAssetSnapshot struct {
@@ -65,12 +70,15 @@ type Service struct {
 	TaskStrategies           TaskStrategyReader
 	Sources                  CreativeSourceReader
 	Assets                   AssetReader
+	GameEvidenceFrames       media.FrameExtractor
+	DerivedAssets            DerivedImageWriter
 	Composer                 media.VideoComposer
 	RenderedAssets           RenderedAssetWriter
 	RenderScheduler          RenderScheduler
 	ShortDramaPrerollPlanner ShortDramaPrerollPlanner
 	GamePrerollPlanner       GamePrerollPlanner
 	CommerceWorkspaces       CommerceWorkspaceRepository
+	BrandFilmPlanner         BrandFilmPlanner
 	NewID                    ids.Generator
 	Now                      func() time.Time
 }
@@ -113,7 +121,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if !channelAllowed {
 		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
 	}
-	if route.RouteType != PerformanceModeShortDramaPreroll {
+	if route.RouteType != PerformanceModeShortDramaPreroll && route.RouteType != PerformanceModeBrandFilm {
 		if s.Assets == nil {
 			return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
 		}
@@ -128,6 +136,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	var viralDraft *ViralRemakeDraft
 	var shortDramaDraft *ShortDramaPrerollDraft
 	var gamePrerollDraft *GamePrerollDraft
+	var brandFilmDraft *BrandFilmDraft
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
 		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
@@ -169,6 +178,34 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		AspectRatio: route.AspectRatio, Resolution: "720p", SourceVideo: request.SourceVideo,
 		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
 		CallToAction: request.CallToAction, CreatedAt: now,
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeBrandFilm {
+		manual := intake.Request.ManualBrandFilm
+		if manual == nil {
+			return CreativeTask{}, fmt.Errorf("manual brand film input is required")
+		}
+		snapshot := BrandFilmSourceSnapshot{
+			FixtureID: manual.FixtureID, FixtureVersion: manual.FixtureVersion, FixtureHash: manual.FixtureHash,
+			BriefName: manual.BriefName, BriefText: manual.BriefText, ProductName: manual.ProductName,
+			Channel: string(request.Channel), Duration: route.TargetDurationSeconds, AspectRatio: route.AspectRatio,
+			EvidenceRefs: append([]string{}, route.EvidenceRefs...),
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize brand film input: %w", hashErr)
+		}
+		brandFilmDraft = &BrandFilmDraft{
+			ContractVersion: "creative-brand-film-draft/v1", TaskID: task.ID, Revision: 1,
+			Stage: BrandFilmWaitingBrief, SourceSnapshot: snapshot, SourceHash: "sha256:" + inputHash,
+			BriefAnalyses: []BrandBriefAnalysisVersion{}, ConceptSets: []BrandCreativeConceptSet{}, FilmPlans: []BrandFilmPlanVersion{},
+			Readiness: CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}},
+			PromptSeam: BrandFilmReservedGenerationSeam{
+				ContractVersion: "creative-brand-generation-seam/v1", UnitPolicy: "4_to_15_seconds",
+				PromptContract: "brand-shot-prompt-package/v1", AttemptPolicy: "single_default_regenerate_on_feedback",
+			},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		draft.BrandFilm = brandFilmDraft
 	}
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
 		manual := intake.Request.ManualViralRemake
@@ -248,7 +285,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			SelectedRouteID: route.RouteID, InputSnapshot: snapshot, InputHash: "sha256:" + inputHash,
 			Readiness: CreativeReadiness{
 				PlanningReady: true, GenerationReady: false, ProductionReady: false,
-				MissingFields: []string{}, Blockers: []string{"selected_candidate"},
+				MissingFields: []string{}, Blockers: []string{"selected_candidate", "evidence_assets"},
 			},
 			ActiveCandidateBatch: &batch, Candidates: batch.Candidates, CreatedAt: now, UpdatedAt: now,
 		}

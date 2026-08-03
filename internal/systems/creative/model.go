@@ -85,6 +85,7 @@ type CreateIntakeRequest struct {
 	ManualShortDramaPreroll *ManualShortDramaPrerollInput `json:"manual_short_drama_preroll,omitempty"`
 	ManualGamePreroll       *ManualGamePrerollInput       `json:"manual_game_preroll,omitempty"`
 	ManualCommercePreroll   *ManualCommercePrerollInput   `json:"manual_commerce_preroll,omitempty"`
+	ManualBrandFilm         *ManualBrandFilmInput         `json:"manual_brand_film,omitempty"`
 	Channel                 CreativeChannel               `json:"channel"`
 	Objective               string                        `json:"objective"`
 	Audience                string                        `json:"audience"`
@@ -113,7 +114,7 @@ type CreativeRouteSnapshot struct {
 func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
 		r.RouteType != PerformanceModeShortDramaPreroll && r.RouteType != PerformanceModeGamePreroll &&
-		r.RouteType != PerformanceModeCommercePreroll {
+		r.RouteType != PerformanceModeCommercePreroll && r.RouteType != PerformanceModeBrandFilm {
 		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
 	}
 	if r.RouteType == PerformanceModeViralRemake && r.RouteID != ManualViralRemakeRouteID {
@@ -128,6 +129,9 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == PerformanceModeCommercePreroll && r.RouteID != ManualCommercePrerollRouteID {
 		return fmt.Errorf("commerce preroll route_id must be %q", ManualCommercePrerollRouteID)
 	}
+	if r.RouteType == PerformanceModeBrandFilm && r.RouteID != ManualBrandFilmRouteID {
+		return fmt.Errorf("brand film route_id must be %q", ManualBrandFilmRouteID)
+	}
 	if r.RouteType == "pre_roll" && r.TargetDurationSeconds != 5 {
 		return fmt.Errorf("creative pre-roll route duration must be 5 seconds")
 	}
@@ -140,7 +144,14 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == PerformanceModeCommercePreroll && r.TargetDurationSeconds != 6 {
 		return fmt.Errorf("commerce preroll route duration must be 6 seconds")
 	}
-	if r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
+	if r.RouteType == PerformanceModeBrandFilm && r.TargetDurationSeconds != 15 {
+		return fmt.Errorf("brand film route duration must be 15 seconds")
+	}
+	expectedPurpose := "performance"
+	if r.RouteType == PerformanceModeBrandFilm {
+		expectedPurpose = "brand"
+	}
+	if r.VideoPurpose != expectedPurpose || len(r.Channels) == 0 ||
 		r.TargetDurationSeconds < 4 || r.TargetDurationSeconds > 60 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
 		!r.RequiresHumanConfirmation {
 		return fmt.Errorf("creative video route is incomplete")
@@ -191,6 +202,9 @@ func (r CreateIntakeRequest) Validate() error {
 		}
 		if r.ManualCommercePreroll != nil {
 			return r.validateManualCommercePreroll()
+		}
+		if r.ManualBrandFilm != nil {
+			return r.validateManualBrandFilm()
 		}
 		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
 			return fmt.Errorf("manual image intake must not include video routing")
@@ -278,6 +292,25 @@ func (r CreateIntakeRequest) validateManualCommercePreroll() error {
 		return err
 	}
 	if err := r.ManualCommercePreroll.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateManualBrandFilm() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeBrandFilm {
+		return fmt.Errorf("manual brand film intake requires format=video and performance_mode=brand_video")
+	}
+	if r.Channel != ChannelDouyin {
+		return fmt.Errorf("manual brand film fixture requires channel=douyin")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualBrandFilmRouteID {
+		return fmt.Errorf("manual brand film requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualBrandFilm.Validate(); err != nil {
 		return err
 	}
 	return r.validateVideoContent()
@@ -406,7 +439,7 @@ func (r CreateVideoTaskRequest) Validate() error {
 		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if r.SelectedRouteID != ManualShortDramaPrerollRouteID {
+	if r.SelectedRouteID != ManualShortDramaPrerollRouteID && r.SelectedRouteID != ManualBrandFilmRouteID {
 		if err := r.SourceVideo.Validate(); err != nil {
 			return fmt.Errorf("source_video: %w", err)
 		}
@@ -437,6 +470,7 @@ type VideoDraft struct {
 	ShortDramaPreroll *ShortDramaPrerollDraft  `json:"short_drama_preroll,omitempty"`
 	GamePreroll       *GamePrerollDraft        `json:"game_preroll,omitempty"`
 	CommercePreroll   *CommercePrerollDraft    `json:"commerce_preroll,omitempty"`
+	BrandFilm         *BrandFilmDraft          `json:"brand_film,omitempty"`
 	CreatedAt         time.Time                `json:"created_at"`
 }
 
@@ -446,7 +480,7 @@ func (d VideoDraft) Validate() error {
 		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
-	if d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
+	if d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.BrandFilm == nil && d.SourceVideo.Validate() != nil {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
 	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {
@@ -460,6 +494,9 @@ func (d VideoDraft) Validate() error {
 	}
 	if d.CommercePreroll != nil && d.CommercePreroll.Validate() != nil {
 		return fmt.Errorf("creative commerce preroll draft is incomplete")
+	}
+	if d.BrandFilm != nil && d.BrandFilm.Validate() != nil {
+		return fmt.Errorf("creative brand film draft is incomplete")
 	}
 	return nil
 }

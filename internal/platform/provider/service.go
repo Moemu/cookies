@@ -344,7 +344,7 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 					ModelAlias:            record.ModelAlias,
 					ModelVersion:          record.ModelVersion,
 					PromptRef:             nil,
-					SourceAssetRefs:       imageSourceAssetVersionRefs(record.Input.SourceAssets),
+					SourceAssetRefs:       generationSourceAssetVersionRefs(record),
 					ProjectContextVersion: record.ProjectContextVersion,
 					GeneratedAt:           now,
 				},
@@ -483,6 +483,17 @@ func imageSourceAssetVersionRefs(refs []contract.ProjectAssetRef) []contract.Ass
 		versions = append(versions, ref.AssetVersion)
 	}
 	return versions
+}
+
+func generationSourceAssetVersionRefs(record JobRecord) []contract.AssetVersionRef {
+	if record.Operation != videoGenerateOperation {
+		return imageSourceAssetVersionRefs(record.Input.SourceAssets)
+	}
+	refs := make([]contract.AssetVersionRef, 0, len(record.VideoInput.ConditioningAssets))
+	for _, asset := range record.VideoInput.ConditioningAssets {
+		refs = append(refs, asset.Reference.AssetVersion)
+	}
+	return refs
 }
 
 func (s Service) nowUTC() time.Time {
