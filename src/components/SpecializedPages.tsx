@@ -37,6 +37,7 @@ import { shortId } from '../data/shortId'
 import { industryProfile } from '../data/industry-profiles'
 import { findLocalShortDramaBrief, localShortDramaBriefs, shortDramaVideoLabel } from '../data/shortDramaBriefs'
 import { GamePrerollWorkspace } from './GamePrerollWorkspace'
+import { BrandFilmWorkspace } from './BrandFilmWorkspace'
 import {
   TaskStrategyHandoffBanner,
   taskStrategyPerformanceMode,
@@ -160,21 +161,11 @@ const preRollPresets = {
   },
 }
 
-const brandSteps = [
-  ['01', '解析 Brief', '提取品牌主张、受众、边界与交付目标。'],
-  ['02', '编写剧本', '形成叙事主线、分镜、台词和声音设计。'],
-  ['03', '生成资产', '按镜头生成画面、角色、配音、音乐与图形资产。'],
-  ['04', '生成广告', '基于已确认资产和剧本生成可预览的广告草稿。'],
-  ['05', '剪辑与交付', '完成多轨剪辑、品牌检查、导出和版本归档。'],
-]
-
 export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask }: { state: DataState, activeView: string, activeTaskId?: string, onOpenTask: (id: string) => void }) {
   const { currentProject, createTask } = useProject()
   const industry = industryProfile(currentProject.industry)
   const [selected, setSelected] = useState('short-drama')
   const [notice, setNotice] = useState('')
-  const [brandGenerated, setBrandGenerated] = useState(false)
-  const [brandStage, setBrandStage] = useState(0)
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
   const activeTaskType = activeTask?.type
   const handoffIntake = useTaskStrategyCreativeIntake(
@@ -224,23 +215,17 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       setNotice(cause instanceof Error ? cause.message : '创建创作任务失败，请重试。')
     }
   }
-  const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 到剪辑交付形成完整叙事。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
-  const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '沿着 Brief、剧本、资产、广告生成和剪辑的固定路径推进，所有产物均保留来源与确认记录。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
+  const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 确认到剧本分镜形成可追溯闭环。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
+  const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '从 Brief、创意与分镜，到生成锁定、质量确认和版本交付，形成可追溯的品牌广告制作闭环。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
-    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
+    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activeMode.label}</button> : null}</header>
     <IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/>
     <ProjectMediaContext />
     {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selected === 'short-drama' ? <PreRollWorkspace handoffIntake={handoffIntake ?? undefined} key={selected} mode={selected} onNotice={setNotice}/> : selected === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <div className="performance-workflow">
       <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
       <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
       <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
-    </div>}</> : category === 'brand' ? <div className="brand-workflow">
-      <div className="brand-brief-card"><span className="section-label">BRIEF → BRAND FILM</span><h3>{currentProject.artifacts.brief.version} · {currentProject.artifacts.brief.status}</h3><p>{currentProject.artifacts.brief.summary}</p><div><Sparkles size={17}/><span>核心主张：看得见的精度，兑现你的创新。所有镜头保留 Brief、证据与版本来源。</span></div><button className="primary-button full" onClick={() => { setBrandGenerated(true); setBrandStage(1); setNotice('品牌广告方案已从已确认 Brief 解析完成') }}><WandSparkles size={15}/>解析 Brief 并生成方案</button></div>
-      <section className="brand-generation-panel">
-        <div className="brand-generation-heading"><div><span className="section-label">品牌广告生成方案</span><h3>{brandGenerated ? '《精度，先于承诺被看见》' : '等待解析 Brief'}</h3></div>{brandGenerated ? <span className="status success"><span/>方案就绪</span> : null}</div>
-        {brandGenerated ? <><ol>{brandSteps.map(([id, stepTitle, detail], index) => <li className={brandStage === index + 1 ? 'active' : ''} key={id}><button onClick={() => setBrandStage(index + 1)}><span>{id}</span><div><b>{stepTitle}</b><p>{detail}</p></div>{index < brandSteps.length - 1 ? <ArrowRight size={16}/> : <WandSparkles size={17}/>}</button></li>)}</ol><div className="brand-output-card"><div className="brand-film-frame"><Play size={19} fill="currentColor"/><span>00:30 · 16:9</span></div><div><small>当前阶段 0{brandStage} / 05</small><b>{brandSteps[Math.max(0, brandStage - 1)][1]}</b><p>冷白工业光影、微距切削镜头与真实应用场景，结尾用 ±0.01mm 和 98%+ 准时交付完成品牌证明。</p><button className="secondary-button" onClick={() => setNotice('品牌广告预览已打开，当前为路演样片')}>预览品牌广告</button><button className="primary-button" onClick={() => void create()}>保存为创意任务</button></div></div></> : <div className="panel-empty">点击“解析 Brief 并生成方案”后展示剧本、分镜与品牌广告样片。</div>}
-      </section>
-    </div> : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }}/>}
+    </div>}</> : category === 'brand' ? <BrandFilmWorkspace onNotice={setNotice}/> : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }}/>}
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </section></StateBoundary>
 }

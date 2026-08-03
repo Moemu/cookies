@@ -56,8 +56,13 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : '策略工作区操作失败。'
 }
 
-function agentFailureMessage(code?: string, message?: string) {
-  if (code === 'MODEL_RATE_LIMITED') return '文本模型请求频率受限，请稍后再点击“重新生成策略”。'
+export function agentFailureMessage(code?: string, message?: string, kind?: string) {
+  if (code === 'MODEL_RATE_LIMITED') {
+    return kind === 'strategy.brief.extract'
+      ? '文本模型请求暂时受限，请稍后重新发送需求消息。'
+      : '文本模型请求频率受限，请稍后再点击“重新生成策略”。'
+  }
+  if (code === 'MODEL_REQUEST_REJECTED') return '文本模型不支持当前路由参数，请联系管理员检查模型配置后重试。'
   if (code === 'MODEL_OUTPUT_INVALID') return '模型输出未通过策略结构校验，可以重新生成。'
   if (code === 'MODEL_UNAVAILABLE') return '文本模型当前不可用，请检查模型配置后重试。'
   return message || '本轮 Strategy Agent 任务未完成。'
@@ -199,7 +204,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       if (draft.status === 'failed' && task.current_agent_task_id) {
         const inspection = await strategyApi.getAgentTask(task.current_agent_task_id, signal).catch(() => null)
         const problem = inspection?.task.error ?? inspection?.job?.error
-        agentFailure = agentFailureMessage(problem?.code, problem?.message)
+        agentFailure = agentFailureMessage(problem?.code, problem?.message, inspection?.task.kind)
       }
       if (draft.current_revision > 0) {
         const [revisionResult, generationMetadata] = await Promise.all([
@@ -283,7 +288,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         const task = inspection.task
         if (task.status === 'failed' || task.status === 'cancelled') {
           const problem = task.error ?? inspection.job?.error
-          const failureMessage = agentFailureMessage(problem?.code, problem?.message)
+          const failureMessage = agentFailureMessage(problem?.code, problem?.message, task.kind)
           await reload()
           setState(current => ({
             ...current,

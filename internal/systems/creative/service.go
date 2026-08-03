@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -38,11 +39,21 @@ type AssetReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
 }
 
+type DerivedImageWriter interface {
+	IngestDerivedImage(context.Context, contract.RequestContext, contract.ProjectID, string, contract.AssetVersionRef, io.Reader, int64, string) (contract.ProjectAssetRef, error)
+}
+
 type CreativeAssetSnapshot struct {
-	Ref      contract.AssetVersionRef
-	Kind     contract.AssetKind
-	MIMEType string
-	Ready    bool
+	Ref          contract.AssetVersionRef
+	Kind         contract.AssetKind
+	MIMEType     string
+	Ready        bool
+	WidthPixels  int
+	HeightPixels int
+	DurationMS   int64
+	FrameRate    string
+	VideoCodec   string
+	AudioCodec   string
 }
 
 type StrategyPackageSnapshot struct {
@@ -77,12 +88,16 @@ type Service struct {
 	TaskOverlays                        TaskOverlayReader
 	Sources                             CreativeSourceReader
 	Assets                              AssetReader
+	GameEvidenceFrames                  media.FrameExtractor
+	DerivedAssets                       DerivedImageWriter
 	Composer                            media.VideoComposer
+	BrandFilmComposer                   media.SegmentComposer
 	RenderedAssets                      RenderedAssetWriter
 	RenderScheduler                     RenderScheduler
 	ShortDramaPrerollPlanner            ShortDramaPrerollPlanner
 	GamePrerollPlanner                  GamePrerollPlanner
 	CommerceWorkspaces                  CommerceWorkspaceRepository
+	BrandFilmPlanner                    BrandFilmPlanner
 	DirectionPlanner                    CreativeDirectionPlanner
 	Directions                          DirectionRepository
 	ImageTextDraftPlanner               ImageTextDraftPlanner
@@ -132,7 +147,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if !channelAllowed {
 		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
 	}
-	if route.RouteType != PerformanceModeShortDramaPreroll {
+	if route.RouteType != PerformanceModeShortDramaPreroll && route.RouteType != PerformanceModeBrandFilm {
 		if s.Assets == nil {
 			return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
 		}
@@ -147,6 +162,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	var viralDraft *ViralRemakeDraft
 	var shortDramaDraft *ShortDramaPrerollDraft
 	var gamePrerollDraft *GamePrerollDraft
+	var brandFilmDraft *BrandFilmDraft
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
 		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
@@ -188,6 +204,34 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		AspectRatio: route.AspectRatio, Resolution: "720p", SourceVideo: request.SourceVideo,
 		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
 		CallToAction: request.CallToAction, CreatedAt: now,
+	}
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeBrandFilm {
+		manual := intake.Request.ManualBrandFilm
+		if manual == nil {
+			return CreativeTask{}, fmt.Errorf("manual brand film input is required")
+		}
+		snapshot := BrandFilmSourceSnapshot{
+			FixtureID: manual.FixtureID, FixtureVersion: manual.FixtureVersion, FixtureHash: manual.FixtureHash,
+			BriefName: manual.BriefName, BriefText: manual.BriefText, ProductName: manual.ProductName,
+			Channel: string(request.Channel), Duration: route.TargetDurationSeconds, AspectRatio: route.AspectRatio,
+			EvidenceRefs: append([]string{}, route.EvidenceRefs...),
+		}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, fmt.Errorf("canonicalize brand film input: %w", hashErr)
+		}
+		brandFilmDraft = &BrandFilmDraft{
+			ContractVersion: "creative-brand-film-draft/v1", TaskID: task.ID, Revision: 1,
+			Stage: BrandFilmWaitingBrief, SourceSnapshot: snapshot, SourceHash: "sha256:" + inputHash,
+			BriefAnalyses: []BrandBriefAnalysisVersion{}, ConceptSets: []BrandCreativeConceptSet{}, FilmPlans: []BrandFilmPlanVersion{}, QualityRuns: []BrandFilmQualityRun{},
+			Readiness: CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}},
+			PromptSeam: BrandFilmReservedGenerationSeam{
+				ContractVersion: "creative-brand-generation-seam/v1", UnitPolicy: "4_to_15_seconds",
+				PromptContract: "brand-shot-prompt-package/v1", AttemptPolicy: "single_default_regenerate_on_feedback",
+			},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		draft.BrandFilm = brandFilmDraft
 	}
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
 		manual := intake.Request.ManualViralRemake
@@ -267,7 +311,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			SelectedRouteID: route.RouteID, InputSnapshot: snapshot, InputHash: "sha256:" + inputHash,
 			Readiness: CreativeReadiness{
 				PlanningReady: true, GenerationReady: false, ProductionReady: false,
-				MissingFields: []string{}, Blockers: []string{"selected_candidate"},
+				MissingFields: []string{}, Blockers: []string{"selected_candidate", "evidence_assets"},
 			},
 			ActiveCandidateBatch: &batch, Candidates: batch.Candidates, CreatedAt: now, UpdatedAt: now,
 		}
@@ -884,31 +928,57 @@ func (s Service) FreezeVersion(ctx context.Context, requestContext contract.Requ
 		if detail.VideoDraft == nil || detail.VideoDraft.Revision != request.DraftVersion {
 			return CreativeVersion{}, false, ErrVersionConflict
 		}
-		if strings.TrimSpace(request.RenderJobID) == "" {
-			return CreativeVersion{}, false, fmt.Errorf("render_job_id is required for a video version")
-		}
-		render, renderErr := s.Repository.GetRenderJob(ctx, requestContext.Actor.OrganizationID, projectID, request.RenderJobID)
-		if renderErr != nil {
-			return CreativeVersion{}, false, renderErr
-		}
-		if render.TaskID != taskID || render.Status != RenderSucceeded || render.OutputAsset == nil {
-			return CreativeVersion{}, false, ErrInvalidState
-		}
-		providerJobID := ""
-		for _, job := range detail.ProductionJobs {
-			if job.Kind == "video_generate" {
-				providerJobID = job.ProviderJobID
+		if detail.Task.PerformanceMode == PerformanceModeBrandFilm {
+			brand := detail.VideoDraft.BrandFilm
+			if brand == nil || brand.Generation == nil || brand.Generation.PreviewAsset == nil || !brandFilmQualityConfirmed(*brand) {
+				return CreativeVersion{}, false, ErrInvalidState
 			}
-		}
-		videoSnapshot = &VideoVersionSnapshot{
-			ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
-			VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
-			StrategyPackage: detail.Intake.Request.StrategyPackage, DraftRevision: detail.VideoDraft.Revision,
-			SourceVideo: detail.VideoDraft.SourceVideo, GeneratedPreRoll: render.PreRollVideo,
-			FinalVideo: render.OutputAsset.AssetVersion, ProviderJobID: providerJobID, RenderJobID: render.ID,
-		}
-		if err := videoSnapshot.Validate(); err != nil {
-			return CreativeVersion{}, false, err
+			run := brand.QualityRuns[len(brand.QualityRuns)-1]
+			plan := brand.CurrentPlan()
+			if plan == nil || run.HumanConfirmedAt == nil {
+				return CreativeVersion{}, false, ErrInvalidState
+			}
+			metrics := brandFilmRunMetrics(*brand.Generation)
+			brandSnapshot := &BrandFilmVersionSnapshot{
+				ContractVersion: "creative-brand-film-version/v1", PlanRevision: plan.Revision, QualityRunID: run.ID,
+				ReferenceAsset: brand.Generation.ReferenceAsset, FinalVideo: *brand.Generation.PreviewAsset,
+				UnitCount: len(brand.Generation.Units), AttemptCount: metrics.AttemptCount,
+				ConfirmedBy: run.HumanConfirmedBy, ConfirmedAt: *run.HumanConfirmedAt,
+			}
+			videoSnapshot = &VideoVersionSnapshot{
+				ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
+				VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
+				DraftRevision: detail.VideoDraft.Revision, FinalVideo: *brand.Generation.PreviewAsset, BrandFilm: brandSnapshot,
+			}
+			if err := videoSnapshot.Validate(); err != nil {
+				return CreativeVersion{}, false, err
+			}
+		} else if strings.TrimSpace(request.RenderJobID) == "" {
+			return CreativeVersion{}, false, fmt.Errorf("render_job_id is required for a video version")
+		} else {
+			render, renderErr := s.Repository.GetRenderJob(ctx, requestContext.Actor.OrganizationID, projectID, request.RenderJobID)
+			if renderErr != nil {
+				return CreativeVersion{}, false, renderErr
+			}
+			if render.TaskID != taskID || render.Status != RenderSucceeded || render.OutputAsset == nil {
+				return CreativeVersion{}, false, ErrInvalidState
+			}
+			providerJobID := ""
+			for _, job := range detail.ProductionJobs {
+				if job.Kind == "video_generate" {
+					providerJobID = job.ProviderJobID
+				}
+			}
+			videoSnapshot = &VideoVersionSnapshot{
+				ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
+				VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
+				StrategyPackage: detail.Intake.Request.StrategyPackage, DraftRevision: detail.VideoDraft.Revision,
+				SourceVideo: detail.VideoDraft.SourceVideo, GeneratedPreRoll: render.PreRollVideo,
+				FinalVideo: render.OutputAsset.AssetVersion, ProviderJobID: providerJobID, RenderJobID: render.ID,
+			}
+			if err := videoSnapshot.Validate(); err != nil {
+				return CreativeVersion{}, false, err
+			}
 		}
 	} else {
 		if detail.Draft.Version != request.DraftVersion {

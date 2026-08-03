@@ -278,6 +278,361 @@ func (s *Server) ensureCommerceFixtureWorkspace(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) ensureBrandFilmFixtureWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.EnsureBrandFilmFixtureWorkspace(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), key)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getLatestBrandFilmWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetLatestBrandFilmWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getBrandFilmWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetBrandFilmWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) analyzeBrandFilmBrief(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.AnalyzeBrandFilmBrief(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) updateBrandFilmBrief(w http.ResponseWriter, r *http.Request) {
+	var body creative.UpdateBrandBriefAnalysisRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateBrandFilmBrief(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) confirmBrandFilmBrief(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmBrandFilmBrief(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) generateBrandFilmConcepts(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GenerateBrandFilmConcepts(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) updateBrandFilmConcepts(w http.ResponseWriter, r *http.Request) {
+	var body creative.UpdateBrandConceptsRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateBrandFilmConcepts(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) selectBrandFilmConcept(w http.ResponseWriter, r *http.Request) {
+	var body creative.SelectBrandConceptRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.SelectBrandFilmConcept(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) generateBrandFilmPlan(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GenerateBrandFilmPlan(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) updateBrandFilmPlan(w http.ResponseWriter, r *http.Request) {
+	var body creative.UpdateBrandFilmPlanRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateBrandFilmPlan(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) confirmBrandFilmPlan(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmBrandFilmPlan(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) prepareBrandFilmGeneration(w http.ResponseWriter, r *http.Request) {
+	var body creative.PrepareBrandFilmGenerationRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.PrepareBrandFilmGeneration(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+type generateBrandFilmUnitRequest struct {
+	ExpectedRevision int64  `json:"expected_revision"`
+	UnitID           string `json:"unit_id"`
+	Feedback         string `json:"feedback,omitempty"`
+	ModelAlias       string `json:"model_alias,omitempty"`
+}
+
+func (s *Server) generateBrandFilmUnit(w http.ResponseWriter, r *http.Request) {
+	if s.providerJobs == nil || s.projects == nil {
+		s.notFound(w, r)
+		return
+	}
+	var body generateBrandFilmUnitRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.UnitID) == "" {
+		s.badRequest(w, r, fmt.Errorf("unit_id is required"))
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID, taskID := contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id")
+	if strings.TrimSpace(body.Feedback) != "" {
+		value, err := s.creative.RegenerateBrandFilmUnit(r.Context(), rc.Actor, projectID, taskID, creative.RegenerateBrandFilmUnitRequest{ExpectedRevision: body.ExpectedRevision, UnitID: body.UnitID, Feedback: body.Feedback})
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+		body.ExpectedRevision = value.VideoDraft.Revision
+	}
+	input, promptHash, err := s.creative.BrandFilmProviderInput(r.Context(), rc.Actor, projectID, taskID, body.UnitID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	project, err := s.projects.GetContext(r.Context(), rc.Actor, projectID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	modelAlias := strings.TrimSpace(body.ModelAlias)
+	if modelAlias == "" {
+		modelAlias = "cookies.video.standard"
+	}
+	hash, err := contract.CanonicalJSONHash(struct {
+		TaskID                string `json:"task_id"`
+		UnitID                string `json:"unit_id"`
+		PromptHash            string `json:"prompt_hash"`
+		ModelAlias            string `json:"model_alias"`
+		ProjectContextVersion int64  `json:"project_context_version"`
+	}{taskID, body.UnitID, promptHash, modelAlias, project.ProjectContextVersion})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	job, _, err := s.providerJobs.CreateVideoJob(r.Context(), provider.CreateVideoJobRequest{Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: hash, ModelAlias: modelAlias, SourceSystem: "creative.brand-film", SourceTaskID: taskID + ":" + body.UnitID, Input: input})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	workspace, err := s.creative.RegisterBrandFilmGenerationAttempt(r.Context(), rc.Actor, projectID, taskID, body.UnitID, job.ID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, struct {
+		Workspace   creative.TaskDetail  `json:"workspace"`
+		ProviderJob contract.ProviderJob `json:"provider_job"`
+	}{workspace, job})
+}
+
+type reconcileBrandFilmUnitRequest struct {
+	UnitID        string `json:"unit_id"`
+	ProviderJobID string `json:"provider_job_id"`
+}
+
+func (s *Server) reconcileBrandFilmUnit(w http.ResponseWriter, r *http.Request) {
+	if s.providerJobs == nil {
+		s.notFound(w, r)
+		return
+	}
+	var body reconcileBrandFilmUnitRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	job, err := s.providerJobs.GetJob(r.Context(), rc.Actor.OrganizationID, projectID, body.ProviderJobID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	value, err := s.creative.ReconcileBrandFilmGenerationAttempt(r.Context(), rc.Actor, projectID, r.PathValue("task_id"), body.UnitID, job)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) lockBrandFilmUnit(w http.ResponseWriter, r *http.Request) {
+	var body creative.LockBrandFilmUnitRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.LockBrandFilmGenerationUnit(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) composeBrandFilmPreview(w http.ResponseWriter, r *http.Request) {
+	var body creative.ComposeBrandFilmPreviewRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ComposeBrandFilmPreview(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) runBrandFilmQuality(w http.ResponseWriter, r *http.Request) {
+	var body creative.RunBrandFilmQualityRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.RunBrandFilmQuality(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) confirmBrandFilmQuality(w http.ResponseWriter, r *http.Request) {
+	var body creative.ConfirmBrandFilmQualityRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ConfirmBrandFilmQuality(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) finalizeBrandFilmVersion(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmVersionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	key, _ := idempotencyKey(w, r)
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.FinalizeBrandFilmVersion(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body, key)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) approveBrandFilmVersion(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmVersionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ApproveBrandFilmVersion(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) deliverBrandFilmVersion(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmVersionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.DeliverBrandFilmVersion(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) decodeBrandFilmCommand(w http.ResponseWriter, r *http.Request, target any) bool {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return false
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return false
+	}
+	if err := decodeJSON(w, r, target); err != nil {
+		s.badRequest(w, r, err)
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeBrandFilmResult(w http.ResponseWriter, r *http.Request, value creative.TaskDetail, err error) {
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) getLatestCommercePrerollWorkspace(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -682,6 +1037,28 @@ func (s *Server) selectGamePrerollCandidate(w http.ResponseWriter, r *http.Reque
 		r.PathValue("task_id"),
 		body,
 	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) prepareGamePrerollEvidence(w http.ResponseWriter, r *http.Request) {
+	if s.creative == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body creative.PrepareGamePrerollEvidenceRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.PrepareGamePrerollEvidence(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return

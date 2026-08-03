@@ -28,4 +28,7 @@ func TestFFconcatPathUsesForwardSlashes(t *testing.T) {
 	if got, want := ffconcatPath(`C:\work\clip.mp4`), "C:/work/clip.mp4"; got != want {
 		t.Fatalf("ffconcatPath() = %q, want %q", got, want)
 	}
+	if got, want := ffconcatPath(`\\server\share\clip.mp4`), "//server/share/clip.mp4"; got != want {
+		t.Fatalf("ffconcatPath() UNC path = %q, want %q", got, want)
+	}
 }

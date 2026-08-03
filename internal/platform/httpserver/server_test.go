@@ -2284,6 +2284,78 @@ func (s *creativeManagerStub) ConfirmCommerceGeneration(context.Context, contrac
 func (s *creativeManagerStub) CommerceProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
 	return provider.VideoGenerationInput{}, "", nil
 }
+func (s *creativeManagerStub) EnsureBrandFilmFixtureWorkspace(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetLatestBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) AnalyzeBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandBriefAnalysisRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GenerateBrandFilmConcepts(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmConcepts(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandConceptsRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) SelectBrandFilmConcept(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectBrandConceptRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GenerateBrandFilmPlan(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmPlan(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandFilmPlanRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmBrandFilmPlan(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) PrepareBrandFilmGeneration(context.Context, contract.ActorContext, contract.ProjectID, string, creative.PrepareBrandFilmGenerationRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RegenerateBrandFilmUnit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RegenerateBrandFilmUnitRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) BrandFilmProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string, string) (provider.VideoGenerationInput, string, error) {
+	return provider.VideoGenerationInput{}, "", nil
+}
+func (s *creativeManagerStub) RegisterBrandFilmGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ReconcileBrandFilmGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, contract.ProviderJob) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) LockBrandFilmGenerationUnit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.LockBrandFilmUnitRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ComposeBrandFilmPreview(context.Context, contract.RequestContext, contract.ProjectID, string, creative.ComposeBrandFilmPreviewRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RunBrandFilmQuality(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RunBrandFilmQualityRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmBrandFilmQuality(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmBrandFilmQualityRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) FinalizeBrandFilmVersion(context.Context, contract.RequestContext, contract.ProjectID, string, creative.BrandFilmVersionRequest, contract.IdempotencyKey) (creative.BrandFilmVersionResult, error) {
+	return creative.BrandFilmVersionResult{Workspace: s.detail}, nil
+}
+func (s *creativeManagerStub) ApproveBrandFilmVersion(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmVersionRequest) (creative.BrandFilmVersionResult, error) {
+	return creative.BrandFilmVersionResult{Workspace: s.detail}, nil
+}
+func (s *creativeManagerStub) DeliverBrandFilmVersion(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmVersionRequest) (creative.BrandFilmDeliveryResult, error) {
+	return creative.BrandFilmDeliveryResult{Workspace: s.detail}, nil
+}
 func (s *creativeManagerStub) CreateIntake(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, _ contract.IdempotencyKey, request creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
 	s.createdIntakeRequest = request
 	return creative.CreativeIntake{}, nil
@@ -2320,6 +2392,9 @@ func (s *creativeManagerStub) ShortDramaProviderInput(context.Context, contract.
 }
 func (s *creativeManagerStub) GetLatestGamePrerollWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.TaskDetail, error) {
 	s.latestGamePrerollProjectID = projectID
+	return s.detail, nil
+}
+func (s *creativeManagerStub) PrepareGamePrerollEvidence(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, _ string, _ creative.PrepareGamePrerollEvidenceRequest) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
 func (s *creativeManagerStub) SelectGamePrerollCandidate(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.SelectGamePrerollCandidateRequest) (creative.TaskDetail, error) {
