@@ -698,6 +698,25 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		handoffV2.HandoffContentHash.Equal(handoffV1.HandoffContentHash) {
 		t.Fatalf("isolated handoff v2: %#v err=%v", handoffV2, err)
 	}
+	approvedV2Draft, err := service.GetDraft(ctx, actor, readyV2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels := append([]strategy.ChannelStrategy(nil), approvedV2Draft.Revision.Document.ChannelStrategy...)
+	channels[0].Formats = append(channels[0].Formats, "小红书图文笔记")
+	channelPayload, err := json.Marshal(channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeRevisionDraft, duplicate, err := service.PatchStrategy(ctx, actor, contract.IdempotencyKey("strategy_patch_route_revision_"+suffix), approvedV2Draft.ID, strategy.StrategySectionPatch{
+		ExpectedVersion: approvedV2Draft.Version, BaseRevision: approvedV2Draft.CurrentRevision,
+		Section: "channel_strategy", Value: channelPayload,
+	})
+	if err != nil || duplicate || routeRevisionDraft.Status != "draft" ||
+		routeRevisionDraft.CurrentRevision != approvedV2Draft.CurrentRevision+1 ||
+		!strings.Contains(strings.Join(routeRevisionDraft.Revision.Document.ChannelStrategy[0].Formats, " "), "小红书图文笔记") {
+		t.Fatalf("create route revision from approved strategy: draft=%#v duplicate=%v err=%v", routeRevisionDraft, duplicate, err)
+	}
 	var outboxCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_outbox WHERE organization_id = ?
 		AND event_type = 'strategy.approved.v1'`, organizationID).Scan(&outboxCount); err != nil || outboxCount != 2 {

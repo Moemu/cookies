@@ -1922,12 +1922,40 @@ func setStrategySection(document *StrategyDocument, section string, value json.R
 	switch section {
 	case "objective":
 		return decodeString(value, &document.Objective, section)
+	case "audience":
+		var audience StrategyAudience
+		if err := json.Unmarshal(value, &audience); err != nil {
+			return fmt.Errorf("%w: audience must be a valid audience object", ErrInvalidRequest)
+		}
+		document.Audience = audience
+		return nil
 	case "proposition":
 		return decodeString(value, &document.Proposition, section)
+	case "channel_strategy":
+		var channels []ChannelStrategy
+		if err := json.Unmarshal(value, &channels); err != nil {
+			return fmt.Errorf("%w: channel_strategy must be a valid channel strategy array", ErrInvalidRequest)
+		}
+		document.ChannelStrategy = channels
+		return nil
 	case "creative_recommendations":
 		return decodeStringSlice(value, &document.CreativeRecommendations, section)
 	case "constraints":
 		return decodeStringSlice(value, &document.Constraints, section)
+	case "budget_and_cadence":
+		var budgetAndCadence BudgetAndCadence
+		if err := json.Unmarshal(value, &budgetAndCadence); err != nil {
+			return fmt.Errorf("%w: budget_and_cadence must be a valid budget and cadence object", ErrInvalidRequest)
+		}
+		document.BudgetAndCadence = budgetAndCadence
+		return nil
+	case "experiment_matrix":
+		var experiments []Experiment
+		if err := json.Unmarshal(value, &experiments); err != nil {
+			return fmt.Errorf("%w: experiment_matrix must be a valid experiment array", ErrInvalidRequest)
+		}
+		document.ExperimentMatrix = experiments
+		return nil
 	case "measurement":
 		return decodeStringSlice(value, &document.Measurement, section)
 	case "assumptions_and_gaps":

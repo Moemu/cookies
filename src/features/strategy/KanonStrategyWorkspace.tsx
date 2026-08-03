@@ -487,7 +487,7 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
     return <UnavailablePane title="策略没有可用 Revision" detail={`当前状态：${statusLabel(draft.status)}。请重新加载或检查 AgentTask。`}/>
   }
 
-  const sections = Object.keys(document).filter(key => !['contract_version', 'compliance'].includes(key))
+  const sections = Object.keys(document).filter(key => !['contract_version', 'compliance', 'lineage'].includes(key))
   const original = (document as unknown as Record<string, unknown>)[section]
   const changed = JSON.stringify(sectionValue) !== JSON.stringify(original)
   // Editing an approved draft creates a new revision and leaves the published
