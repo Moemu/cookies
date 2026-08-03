@@ -332,12 +332,21 @@ func (c FFmpegComposer) normalizeDuration(ctx context.Context, runner CommandRun
 }
 
 func ffconcatPath(value string) string {
-	absolute, err := filepath.Abs(value)
-	if err == nil {
-		value = absolute
+	if !filepath.IsAbs(value) && !isWindowsAbsolutePath(value) {
+		absolute, err := filepath.Abs(value)
+		if err == nil {
+			value = absolute
+		}
 	}
 	normalized := strings.ReplaceAll(filepath.ToSlash(value), `\`, "/")
 	return strings.ReplaceAll(normalized, "'", "'\\''")
+}
+
+func isWindowsAbsolutePath(value string) bool {
+	if len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':' {
+		return value[2] == '\\' || value[2] == '/'
+	}
+	return strings.HasPrefix(value, `\\`)
 }
 
 type cleanupReadCloser struct {
