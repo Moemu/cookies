@@ -99,6 +99,26 @@ func TestGenerateDirectionCandidatesHasNoProviderFallback(t *testing.T) {
 	}
 }
 
+func TestValidateDirectionCandidateClaimsRejectsUnsafeCopyButAllowsPerspective(t *testing.T) {
+	t.Parallel()
+	unsafe := DirectionCandidate{
+		Concept: "夏季适配度第一", CreativeRationale: "大家都爱的神仙饮品",
+		MessagePlan: []string{"先场景后产品"}, ExecutionOutline: []string{"通勤实拍"},
+		GuardrailTrace: []string{"避免绝对化表达"},
+	}
+	if err := validateDirectionCandidateClaims(unsafe); err == nil {
+		t.Fatal("unsafe customer-facing claims must be rejected")
+	}
+	safe := DirectionCandidate{
+		Concept: "通勤清爽时刻", CreativeRationale: "用第一视角记录真实场景",
+		MessagePlan: []string{"先场景后证据"}, ExecutionOutline: []string{"通勤实拍"},
+		GuardrailTrace: []string{"避免绝对化表达"},
+	}
+	if err := validateDirectionCandidateClaims(safe); err != nil {
+		t.Fatalf("first-person perspective is not a ranking claim: %v", err)
+	}
+}
+
 func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) {
 	service := testService()
 	intake := CreativeIntake{

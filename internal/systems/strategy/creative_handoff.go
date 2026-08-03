@@ -882,11 +882,18 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 		})
 	}
 	if len(snapshot.CreativeRoutes) > 0 {
-		blockers = append(blockers, HandoffIssue{
+		issue := HandoffIssue{
 			Code: "creative_route_mode_missing", Stage: "planning", Path: "routes",
 			Message: "旧版 pre_roll Route 没有冻结契约要求的稳定 Route ID 和 performance mode。",
 			Source:  "strategy", SourceRefIDs: []string{},
-		})
+		}
+		if len(routes) == 0 {
+			blockers = append(blockers, issue)
+		} else {
+			issue.Code = "creative_route_legacy_ignored"
+			issue.Message = "旧版 pre_roll Route 未迁移；已冻结的新 Route 仍可独立交接。"
+			warnings = append(warnings, issue)
+		}
 	}
 	return routes, blockers, warnings
 }
@@ -923,8 +930,9 @@ func creativeRouteReason(document StrategyDocument, platform string) string {
 
 func containsImageTextFormat(formats []string) bool {
 	for _, format := range formats {
-		switch strings.ToLower(strings.TrimSpace(format)) {
-		case "图文", "图文笔记", "image_text", "image-text", "image text":
+		normalized := strings.ToLower(strings.TrimSpace(format))
+		if strings.Contains(normalized, "图文") || strings.Contains(normalized, "image_text") ||
+			strings.Contains(normalized, "image-text") || strings.Contains(normalized, "image text") {
 			return true
 		}
 	}

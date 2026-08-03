@@ -20,7 +20,7 @@ const (
 	ImageTextWorkspaceV1Contract  = "creative-image-text-workspace/v1"
 	ImageRenderSpecV1Contract     = "creative-image-render-spec/v1"
 	ImagePromptCompilerV1         = "creative.image_text.prompt.v1"
-	ImageTextDraftPromptVersionV1 = "creative.image_text.draft.v1"
+	ImageTextDraftPromptVersionV3 = "creative.image_text.draft.v3"
 	ImageRendererV1               = "creative.image_text.renderer.v1"
 	ImageTextDefaultModelAlias    = "cookies.image.standard"
 	ImageTextSourceWidth          = 1024
@@ -268,6 +268,15 @@ func (p ImageTextDraftPlan) Validate() error {
 			item.AssetRef != nil {
 			return fmt.Errorf("image-text slot %d is invalid", index+1)
 		}
+	}
+	claimFields := append([]string{}, p.TitleCandidates...)
+	claimFields = append(claimFields, p.SelectedTitle, p.Body)
+	claimFields = append(claimFields, p.Topics...)
+	for _, item := range p.ImagePlan {
+		claimFields = append(claimFields, item.Purpose, item.Caption, item.OverlayCopy)
+	}
+	if phrase := firstHighRiskOutboundClaim(claimFields...); phrase != "" {
+		return fmt.Errorf("image-text draft contains a high-risk claim: %s", phrase)
 	}
 	return nil
 }
@@ -732,6 +741,32 @@ func (s Service) AttachImageProviderJob(
 	)
 }
 
+func (s Service) FailImageGenerationAttempt(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	attemptID string,
+	code string,
+	message string,
+) (ImageGenerationAttempt, error) {
+	if s.Projects == nil || strings.TrimSpace(attemptID) == "" || strings.TrimSpace(code) == "" {
+		return ImageGenerationAttempt{}, fmt.Errorf("creative image generation is unavailable")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return ImageGenerationAttempt{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ImageGenerationAttempt{}, err
+	}
+	repository, err := s.imageTextV2Repository()
+	if err != nil {
+		return ImageGenerationAttempt{}, err
+	}
+	return repository.MarkImageAttemptFailed(
+		ctx, actor.OrganizationID, projectID, attemptID, code, message, s.now(),
+	)
+}
+
 func (s Service) ReconcileImageGenerationAttempt(
 	ctx context.Context,
 	requestContext contract.RequestContext,
@@ -1172,27 +1207,42 @@ func (p ModelImageTextDraftPlanner) Generate(
 	if identityKey == "" {
 		return ImageTextDraftPlan{}, fmt.Errorf("image-text planning identity hash is required")
 	}
-	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
-		Actor: plannerActor, Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey("image_text_draft_" + identityKey),
-		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "你是小红书品牌图文创作执行器。只能消费已确认 CreativeDirection，不得改写策略事实或补造功效。输出三图结构化 JSON。图片 visual_brief 不得包含需要模型渲染的文字；overlay_copy 由确定性渲染器添加。"},
+	systemPrompt := "你是小红书品牌图文创作执行器。只能消费已确认 CreativeDirection，不得改写策略事实、补造产品功效、包装尺寸、感官体验、用户体验或社会认同。所有标题、正文、话题、caption、overlay_copy 和 purpose 都按对外广告主张审核。禁止使用第一、最好、最优、首选、必买、必囤、神器、神仙、不踩雷、保证、都爱、大家都问、完全没负担、无额外负担、放心入、全适配、适合或适配多数人、适配度高、接受度超高、能力拉满、零负罪感等绝对化或无法证实的表达。不得虚构第一人称使用经历，例如“我喝了两周”；不得把目标受众洞察写成产品实际效果或群体偏好。没有输入证据时，不得声称瓶身尺寸、气泡强弱、具体口感反馈或解腻效果。0糖表述必须保留输入中提供的合规依据，优惠信息必须保留“以实际购买页面为准”。输出三图结构化 JSON。图片 visual_brief 不得包含需要模型渲染的文字；overlay_copy 由确定性渲染器添加。"
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		invocationKey := "image_text_draft_v3_" + identityKey
+		messages := []provider.TextMessage{
+			{Role: provider.TextRoleSystem, Content: systemPrompt},
 			{Role: provider.TextRoleUser, Content: string(input)},
-		},
-		OutputJSONSchema: imageTextDraftPlannerSchema,
-	})
-	if err != nil {
-		return ImageTextDraftPlan{}, err
+		}
+		if attempt == 2 {
+			invocationKey = "image_text_draft_v3_repair_" + identityKey
+			messages = append(messages, provider.TextMessage{Role: provider.TextRoleUser, Content: "上一版未通过确定性校验：" + lastErr.Error() + "。请重新生成完整 JSON，删除风险主张，不要只做解释。"})
+		}
+		response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
+			Actor: plannerActor, Project: project, ModelAlias: p.ModelAlias,
+			InvocationKey: contract.IdempotencyKey(invocationKey), Messages: messages,
+			OutputJSONSchema: imageTextDraftPlannerSchema,
+		})
+		if err != nil {
+			return ImageTextDraftPlan{}, err
+		}
+		raw := response.StructuredOutput
+		if len(raw) == 0 {
+			raw = json.RawMessage(response.Text)
+		}
+		var result ImageTextDraftPlan
+		if err := json.Unmarshal(raw, &result); err != nil {
+			lastErr = fmt.Errorf("decode image-text draft output: %w", err)
+			continue
+		}
+		if err := result.Validate(); err != nil {
+			lastErr = err
+			continue
+		}
+		return result, nil
 	}
-	raw := response.StructuredOutput
-	if len(raw) == 0 {
-		raw = json.RawMessage(response.Text)
-	}
-	var result ImageTextDraftPlan
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return ImageTextDraftPlan{}, fmt.Errorf("decode image-text draft output: %w", err)
-	}
-	return result, result.Validate()
+	return ImageTextDraftPlan{}, fmt.Errorf("image-text draft remained invalid after repair: %w", lastErr)
 }
 
 var imageTextDraftPlannerSchema = json.RawMessage(`{

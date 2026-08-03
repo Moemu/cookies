@@ -1298,6 +1298,12 @@ func writeError(writer http.ResponseWriter, err error) {
 		if errors.As(err, &blocked) {
 			details = blocked.Problems
 		}
+	case errors.Is(err, strategy.ErrStrategyPublishBlocked):
+		status, code, message, retryable = 409, "STRATEGY_PUBLISH_BLOCKED", "策略发布检查未通过", false
+		var blocked strategy.StrategyPublishBlockedError
+		if errors.As(err, &blocked) {
+			details = blocked.Problems
+		}
 	case errors.Is(err, strategy.ErrReviewStale):
 		status, code, message, retryable = 409, "REVIEW_STALE", "评审候选版本已经失效", false
 	case errors.Is(err, strategy.ErrReviewAssignment):

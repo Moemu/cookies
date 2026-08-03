@@ -1306,6 +1306,7 @@ func TestCreativeImageTextSlotGenerationUsesFrozenPromptAndPortraitProfile(t *te
 	}
 	if jobs.request.Input.Width != creative.ImageTextSourceWidth ||
 		jobs.request.Input.Height != creative.ImageTextSourceHeight ||
+		jobs.request.Operation != "image.edit" ||
 		jobs.request.Input.Prompt != "frozen portrait prompt" ||
 		len(jobs.request.Input.SourceAssets) != 1 ||
 		jobs.request.Input.PromptRef == nil ||
@@ -2258,6 +2259,7 @@ type creativeManagerStub struct {
 	imageAttempt                       creative.ImageGenerationAttempt
 	preparedImageOrder                 int
 	attachedImageProviderJobID         string
+	failedImageAttemptID               string
 }
 
 func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {
@@ -2460,6 +2462,19 @@ func (s *creativeManagerStub) AttachImageProviderJob(
 ) (creative.ImageGenerationAttempt, error) {
 	s.attachedImageProviderJobID = providerJobID
 	s.imageAttempt.ProviderJobID = providerJobID
+	return s.imageAttempt, nil
+}
+
+func (s *creativeManagerStub) FailImageGenerationAttempt(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	attemptID string,
+	_ string,
+	_ string,
+) (creative.ImageGenerationAttempt, error) {
+	s.failedImageAttemptID = attemptID
+	s.imageAttempt.Status = creative.ImageAttemptFailed
 	return s.imageAttempt, nil
 }
 

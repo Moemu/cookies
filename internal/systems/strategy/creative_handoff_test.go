@@ -169,6 +169,35 @@ func TestBuildCreativeHandoffDoesNotGuessLegacyPreRollMode(t *testing.T) {
 	}
 }
 
+func TestBuildCreativeHandoffKeepsStableImageTextRouteWhenLegacyVideoRouteExists(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.CreativeRoutes = []CreativeRoute{{
+		RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"},
+		Reason: "承接正片", TargetDurationSeconds: 5, AspectRatio: "9:16",
+		SourceAssetRefs: []contract.AssetVersionRef{}, EvidenceRefs: []string{},
+		RequiresHumanConfirmation: true,
+	}}
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "xiaohongshu", Role: "种草心智渗透", Formats: []string{"真实场景图文笔记"},
+	}, {
+		Platform: "douyin", Role: "泛兴趣触达", Formats: []string{"short_video"},
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handoff.UpstreamReadiness.Status != "ready" || len(handoff.Routes) != 1 ||
+		handoff.Routes[0].RouteID != "route_xiaohongshu_image_text" ||
+		!hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "creative_route_legacy_ignored") {
+		t.Fatalf("stable image-text route was blocked by unrelated legacy video route: %#v", handoff)
+	}
+}
+
 func TestBuildCreativeHandoffBlocksPerformanceRouteWithoutCTA(t *testing.T) {
 	t.Parallel()
 	snapshot := packageHashFixture()

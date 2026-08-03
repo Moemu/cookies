@@ -481,7 +481,9 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
   const sections = Object.keys(document).filter(key => !['contract_version', 'compliance'].includes(key))
   const original = (document as unknown as Record<string, unknown>)[section]
   const changed = JSON.stringify(sectionValue) !== JSON.stringify(original)
-  const canEdit = draft.status === 'draft' || draft.status === 'returned'
+  // Editing an approved draft creates a new revision and leaves the published
+  // StrategyPackage immutable. The backend already enforces that boundary.
+  const canEdit = draft.status === 'draft' || draft.status === 'returned' || draft.status === 'approved'
 
   return <section className="kanon-strategy-editor-pane">
     <div className="kanon-strategy-heading kanon-strategy-document-heading">

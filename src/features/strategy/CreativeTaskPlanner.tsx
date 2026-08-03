@@ -577,6 +577,12 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
   const strategy = plan.current_strategy
   if (!strategy) return null
   const document = strategy.document
+  const hasFrozenLineage = plan.contract_version === 'strategy-creative-task-plan/v2' &&
+    Boolean(plan.package_ref && plan.handoff_ref && plan.selected_route_id && strategy.task_overlay_ref)
+  const handoffAvailable = capability?.status === 'available' && hasFrozenLineage
+  const handoffLimitation = hasFrozenLineage
+    ? capability?.limitation
+    : '历史 v1 计划没有冻结交接血缘；请新建业务选择并创建 v2 任务计划。'
   return <div className="creative-strategy-result">
     <div className="creative-result-heading">
       <div>
@@ -588,24 +594,26 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
         <span className="creative-result-status"><ShieldCheck size={13}/>已冻结并可追溯</span>
         <button
           className="primary-button"
-          disabled={busy || capability?.status !== 'available'}
+          disabled={busy || !handoffAvailable}
           onClick={() => capability && void onHandoff(plan, capability)}
-          title={capability?.status === 'available'
+          title={handoffAvailable
             ? '创建冻结的 CreativeIntake 并进入对应工作台'
-            : capability?.limitation}
+            : handoffLimitation}
         >
           {busy ? <LoaderCircle className="spin" size={14}/> : <Rocket size={14}/>}
-          {capability?.status === 'available' ? '进入创意创作' : '创作侧未接通'}
+          {handoffAvailable ? '进入创意创作' : hasFrozenLineage ? '创作侧未接通' : '需新建 v2 计划'}
         </button>
         <a className="secondary-button" download href={`/api/strategy/v1/creative-task-plans/${encodeURIComponent(plan.id)}/strategy-versions/${strategy.version}/export.md`}>
           <Download size={14}/>导出 Markdown
         </a>
       </div>
     </div>
-    <div className={`creative-handoff-status ${capability?.status ?? 'unknown'}`}>
+    <div className={`creative-handoff-status ${handoffAvailable ? 'available' : 'unavailable'}`}>
       <div>
-        <b>{capability?.status === 'available' ? '已可交接到 Creative' : '任务策略可用，生产链路未开放'}</b>
-        <span>{capability?.limitation ?? '交接后会继承目标、受众、业务专属判断、约束、素材引用和版本血缘。'}</span>
+        <b>{handoffAvailable ? '已可交接到 Creative' : hasFrozenLineage ? '任务策略可用，生产链路未开放' : '历史计划仅供查看'}</b>
+        <span>{handoffAvailable
+          ? '交接后会继承目标、受众、业务专属判断、约束、素材引用和版本血缘。'
+          : handoffLimitation}</span>
       </div>
       {capability?.production_inputs.length
         ? <small>进入生产后还需确认：{capability.production_inputs.join('、')}</small>

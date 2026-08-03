@@ -331,13 +331,13 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		return PackageVersion{}, false, err
 	}
 	if !complianceHash.Equal(revision.ContentHash) || !compliancePassed {
-		return PackageVersion{}, false, BlockedError{Problems: []ValidationError{{
+		return PackageVersion{}, false, StrategyPublishBlockedError{Problems: []ValidationError{{
 			Field: "strategy.compliance", Reason: "策略合规检查存在阻断项或已过期",
 		}}}
 	}
 	readiness := calculateReadiness(brief, revision.Document)
 	if len(readiness.PublishBlockers) > 0 {
-		return PackageVersion{}, false, BlockedError{Problems: readiness.PublishBlockers}
+		return PackageVersion{}, false, StrategyPublishBlockedError{Problems: readiness.PublishBlockers}
 	}
 	packageID := ""
 	latestVersion := int64(0)

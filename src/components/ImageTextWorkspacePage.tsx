@@ -72,6 +72,8 @@ export function ImageTextWorkspacePage({
   const [editedTitle, setEditedTitle] = useState('')
   const [editedBody, setEditedBody] = useState('')
   const [editedOverlays, setEditedOverlays] = useState<Record<number, string>>({})
+  const [editedVisualBriefs, setEditedVisualBriefs] = useState<Record<number, string>>({})
+  const [editedCaptions, setEditedCaptions] = useState<Record<number, string>>({})
   const [creativeVersion, setCreativeVersion] = useState<ApiCreativeVersion | null>(null)
 
   const loadWorkspace = useCallback(async () => {
@@ -118,6 +120,12 @@ export function ImageTextWorkspacePage({
     setEditedBody(workspace.draft.body)
     setEditedOverlays(Object.fromEntries(
       workspace.draft.image_plan.map(item => [item.order, item.overlay_copy ?? '']),
+    ))
+    setEditedVisualBriefs(Object.fromEntries(
+      workspace.draft.image_plan.map(item => [item.order, item.visual_brief]),
+    ))
+    setEditedCaptions(Object.fromEntries(
+      workspace.draft.image_plan.map(item => [item.order, item.caption]),
     ))
   }, [workspace?.draft.version])
 
@@ -235,6 +243,8 @@ export function ImageTextWorkspacePage({
         selectedTitle: editedTitle,
         body: editedBody,
         overlayCopy: editedOverlays,
+        visualBrief: editedVisualBriefs,
+        caption: editedCaptions,
       })
       await loadWorkspace()
       setNotice('图文文案已保存为新的草稿版本')
@@ -327,7 +337,8 @@ export function ImageTextWorkspacePage({
           <button className="primary-button" disabled={busyAction === 'directions'} onClick={() => void generateDirections()}>
             <WandSparkles size={15}/>{busyAction === 'directions' ? '正在生成…' : '生成 3 个候选方向'}
           </button>
-        </section> : <div className="image-text-direction-cards">
+        </section> : <>
+          <div className="image-text-direction-cards">
           {directions.map((direction, index) => <article key={direction.direction_id}>
             <span>方向 0{index + 1}</span>
             <h3>{direction.concept}</h3>
@@ -340,7 +351,11 @@ export function ImageTextWorkspacePage({
               onClick={() => void confirmDirection(direction)}
             >确认并创建图文任务</button>
           </article>)}
-        </div>}
+          </div>
+          <button className="secondary-button" disabled={busyAction === 'directions'} onClick={() => void generateDirections()}>
+            <WandSparkles size={15}/>{busyAction === 'directions' ? '正在重新生成…' : '重新生成 3 个方向'}
+          </button>
+        </>}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </div>
     </StateBoundary>
@@ -393,6 +408,14 @@ export function ImageTextWorkspacePage({
         </button>
       </section> : null}
 
+      {draftReady ? <button
+        className="secondary-button"
+        disabled={!workspace.readiness.draft_generation_ready || busyAction === 'draft'}
+        onClick={() => void generateDraft()}
+      >
+        <WandSparkles size={15}/>{busyAction === 'draft' ? '正在重新生成…' : '重新生成图文方案'}
+      </button> : null}
+
       {workspace.readiness.blocking_reasons.length > 0 ? <div className="image-text-v2-blockers">
         <CircleAlert size={16}/>
         <span>{workspace.readiness.blocking_reasons.map(reason => blockerLabels[reason] ?? reason).join('；')}</span>
@@ -438,6 +461,26 @@ export function ImageTextWorkspacePage({
               }))}
             />
           </label> : <h3>等待创作方案</h3>}
+          {draftReady ? <label>画面说明
+            <textarea
+              value={editedVisualBriefs[selectedOrder] ?? ''}
+              maxLength={2000}
+              onChange={event => setEditedVisualBriefs(value => ({
+                ...value,
+                [selectedOrder]: event.target.value,
+              }))}
+            />
+          </label> : null}
+          {draftReady ? <label>配图说明
+            <textarea
+              value={editedCaptions[selectedOrder] ?? ''}
+              maxLength={120}
+              onChange={event => setEditedCaptions(value => ({
+                ...value,
+                [selectedOrder]: event.target.value,
+              }))}
+            />
+          </label> : null}
           <p>{selectedPlan?.visual_brief || workspace.direction.creative_rationale}</p>
           <div className="image-text-v2-copy">
             <label>主标题

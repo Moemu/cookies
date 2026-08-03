@@ -23,6 +23,7 @@ type creativeImageTextManager interface {
 	UpdateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateImageTextDraftRequest) (creative.ImageTextDraft, error)
 	PrepareImageSlotGeneration(context.Context, contract.RequestContext, contract.ProjectID, string, int, creative.PrepareImageSlotRequest, contract.IdempotencyKey) (creative.ImagePromptPackage, creative.ImageGenerationAttempt, bool, error)
 	AttachImageProviderJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.ImageGenerationAttempt, error)
+	FailImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, string) (creative.ImageGenerationAttempt, error)
 	AdoptImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, int, string, creative.AdoptImageAttemptRequest) (creative.ImageSlotSelection, error)
 }
 
@@ -141,10 +142,14 @@ func (s *Server) generateCreativeImageTextSlot(w http.ResponseWriter, r *http.Re
 	for _, ref := range prompt.SourceAssetRefs {
 		sourceAssets = append(sourceAssets, contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: ref})
 	}
+	operation := "image.generate"
+	if len(sourceAssets) > 0 {
+		operation = "image.edit"
+	}
 	job, _, err := s.providerJobs.CreateImageJob(r.Context(), provider.CreateImageJobRequest{
 		Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: attempt.RequestHash,
 		ModelAlias: attempt.GenerationSpec.ModelAlias, SourceSystem: "creative", SourceTaskID: taskID,
-		Operation: "creative.image_text.generate",
+		Operation: operation,
 		Input: provider.ImageGenerationInput{
 			Prompt: prompt.CompiledPrompt, Width: attempt.GenerationSpec.Width, Height: attempt.GenerationSpec.Height,
 			SourceAssets: sourceAssets,
@@ -159,6 +164,10 @@ func (s *Server) generateCreativeImageTextSlot(w http.ResponseWriter, r *http.Re
 		},
 	})
 	if err != nil {
+		_, _ = manager.FailImageGenerationAttempt(
+			r.Context(), rc.Actor, projectID, attempt.ID,
+			"PROVIDER_JOB_CREATE_FAILED", err.Error(),
+		)
 		s.writeServiceError(w, r, err)
 		return
 	}

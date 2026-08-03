@@ -3122,6 +3122,8 @@ function updateImageTextDraft(
     selectedTitle: string
     body: string
     overlayCopy: Record<number, string>
+    visualBrief?: Record<number, string>
+    caption?: Record<number, string>
   },
 ) {
   return creativeRequest<ApiImageTextWorkspace['draft']>(
@@ -3139,6 +3141,8 @@ function updateImageTextDraft(
       image_plan: workspace.draft.image_plan.map(item => ({
         ...item,
         overlay_copy: input.overlayCopy[item.order] ?? item.overlay_copy,
+        visual_brief: input.visualBrief?.[item.order] ?? item.visual_brief,
+        caption: input.caption?.[item.order] ?? item.caption,
       })),
     },
   )

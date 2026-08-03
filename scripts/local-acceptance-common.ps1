@@ -73,6 +73,8 @@ function Initialize-LocalAcceptanceEnvironment {
         "COOKIES_STRATEGY_APPROVE_ENABLED"             = "true"
         "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED" = "true"
         "COOKIES_STRATEGY_CREATIVE_TASK_PLANNING_ENABLED" = "true"
+        "COOKIES_CREATIVE_DIRECTION_PLANNING_ENABLED"    = "true"
+        "COOKIES_CREATIVE_DIRECTION_PLANNER_MODEL_ALIAS" = "cookies.text.standard"
         "COOKIES_PROVIDER_ALLOW_INSECURE_HTTP"          = "true"
         "COOKIES_PROVIDER_OUTPUT_BUCKET"                = "cookies-provider-output"
     }
@@ -98,6 +100,28 @@ function Initialize-LocalAcceptanceEnvironment {
         }
     }
 
+    $fontPath = Get-LocalAcceptanceSetting "COOKIES_CREATIVE_IMAGE_FONT_PATH"
+    if ([string]::IsNullOrWhiteSpace($fontPath)) {
+        $windowsRoot = [Environment]::GetEnvironmentVariable("WINDIR", "Process")
+        if (-not [string]::IsNullOrWhiteSpace($windowsRoot)) {
+            $fontCandidate = Join-Path $windowsRoot "Fonts\msyh.ttc"
+            if (Test-Path -LiteralPath $fontCandidate) {
+                $fontPath = $fontCandidate
+            }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($fontPath)) {
+        if (-not (Test-Path -LiteralPath $fontPath)) {
+            throw "COOKIES_CREATIVE_IMAGE_FONT_PATH does not exist: $fontPath"
+        }
+        $fontHash = Get-LocalAcceptanceSetting "COOKIES_CREATIVE_IMAGE_FONT_SHA256"
+        if ([string]::IsNullOrWhiteSpace($fontHash)) {
+            $fontHash = (Get-FileHash -LiteralPath $fontPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        Set-LocalAcceptanceProcessSetting "COOKIES_CREATIVE_IMAGE_FONT_PATH" $fontPath
+        Set-LocalAcceptanceProcessSetting "COOKIES_CREATIVE_IMAGE_FONT_SHA256" $fontHash
+    }
+
     $masterKey = Get-LocalAcceptanceSetting "COOKIES_PROVIDER_MASTER_KEY"
     if ([string]::IsNullOrWhiteSpace($masterKey)) {
         throw "COOKIES_PROVIDER_MASTER_KEY is missing. Run scripts\import-clawex-model-providers.ps1 once to import the encrypted Adapter credential."
@@ -113,6 +137,7 @@ function Initialize-LocalAcceptanceEnvironment {
     # Manual acceptance always exercises the real Seed route. These values are
     # deliberately set in the process so a stale fake value cannot win.
     Set-LocalAcceptanceProcessSetting "COOKIES_PROVIDER_TEXT_ADAPTER" "adapter_gateway"
+    Set-LocalAcceptanceProcessSetting "COOKIES_PROVIDER_IMAGE_ADAPTER" "adapter_gateway"
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" "true"
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" $script:SeedTextAlias
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $script:SeedTextAlias

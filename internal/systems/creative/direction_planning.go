@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -194,6 +195,9 @@ func (s Service) GenerateDirectionCandidates(
 		if err := candidate.Validate(); err != nil {
 			return CreativeDirectionBatch{}, err
 		}
+		if err := validateDirectionCandidateClaims(candidate); err != nil {
+			return CreativeDirectionBatch{}, err
+		}
 		conceptKey := strings.ToLower(strings.TrimSpace(candidate.Concept))
 		if seenConcepts[conceptKey] {
 			return CreativeDirectionBatch{}, fmt.Errorf("creative direction candidates must have distinct concepts")
@@ -228,6 +232,45 @@ func (s Service) GenerateDirectionCandidates(
 		CreatedBy: actor.Principal.ID, CreatedAt: now,
 	}
 	return s.Directions.CreateDirectionBatch(ctx, batch)
+}
+
+func validateDirectionCandidateClaims(candidate DirectionCandidate) error {
+	claimFields := append(
+		[]string{candidate.Concept, candidate.CreativeRationale},
+		append(append([]string{}, candidate.MessagePlan...), candidate.ExecutionOutline...)...,
+	)
+	if phrase := firstHighRiskOutboundClaim(claimFields...); phrase != "" {
+		return fmt.Errorf("creative direction contains a high-risk claim: %s", phrase)
+	}
+	return nil
+}
+
+func firstHighRiskOutboundClaim(fields ...string) string {
+	claimText := strings.ToLower(strings.Join(fields, "\n"))
+	for _, phrase := range []string{
+		"100%", "行业第一", "品类第一", "销量第一", "市场第一", "排名第一", "全网第一",
+		"全国第一", "世界第一", "适配度第一", "最好", "最优", "首选", "必囤", "必买",
+		"必看", "不踩雷", "神器", "神仙", "都爱", "大家都问", "保证", "绝对", "永久",
+		"顶级", "零风险", "治愈", "药到病除", "完全没负担", "毫无负担", "放心入",
+		"无额外负担", "放心喝", "全适配", "接受度超高", "能力拉满", "不会有负罪感",
+		"零负罪感", "适合多数人", "多数人的喜好", "口味适配度高",
+	} {
+		if strings.Contains(claimText, strings.ToLower(phrase)) {
+			return phrase
+		}
+	}
+	for _, pattern := range []struct {
+		label string
+		expr  string
+	}{
+		{label: "群体普适性表述", expr: `(适合|适配).{0,6}(多数|所有|全部).{0,10}(人|用户|偏好|喜好|场景)`},
+		{label: "无证据群体评价", expr: `大家.{0,6}(夸|喜欢|认可|爱)`},
+	} {
+		if regexp.MustCompile(pattern.expr).MatchString(claimText) {
+			return pattern.label
+		}
+	}
+	return ""
 }
 
 func (s Service) ConfirmDirection(

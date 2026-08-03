@@ -102,6 +102,19 @@ func TestRevisionScopeAmbiguousHasActionableError(t *testing.T) {
 	}
 }
 
+func TestStrategyPublishBlockedIsNotReportedAsBriefBlocked(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	writeError(response, strategy.StrategyPublishBlockedError{Problems: []strategy.ValidationError{{
+		Field: "strategy.compliance", Reason: "合规检查存在阻断项",
+	}}})
+	if response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "STRATEGY_PUBLISH_BLOCKED") ||
+		strings.Contains(response.Body.String(), "BRIEF_BLOCKED") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestMatchesIfNoneMatch(t *testing.T) {
 	t.Parallel()
 	etag := `"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`
