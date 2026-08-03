@@ -423,6 +423,10 @@ func TestDeterministicStrategyBuildsDistinctPlansForEveryV2Platform(t *testing.T
 		roles["douyin"] == roles["taobao_tmall"] || roles["taobao_tmall"] == roles["wechat_ecosystem"] {
 		t.Fatalf("platform roles are not distinct: %#v", roles)
 	}
+	quality := evaluateStrategyQuality(document, GenerationContext{Brief: brief, PromptVersion: promptkit.GenerateV4})
+	if !quality.Passed {
+		t.Fatalf("deterministic strategy does not satisfy GenerateV4 quality: %#v", quality)
+	}
 }
 
 func TestQualityRejectsDuplicatedPlatformPlansAndUnknownEvidence(t *testing.T) {
