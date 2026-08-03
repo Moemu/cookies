@@ -216,7 +216,7 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
     }
   }
   const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 确认到剧本分镜形成可追溯闭环。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
-  const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '第一轮开发止于剧本分镜确认；视频生成只预留接口，不会在此阶段产生模型费用。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
+  const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '从 Brief、创意与分镜，到生成锁定、质量确认和版本交付，形成可追溯的品牌广告制作闭环。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
     <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activeMode.label}</button> : null}</header>
     <IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/>

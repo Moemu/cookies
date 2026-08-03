@@ -365,10 +365,12 @@ func main() {
 	}
 	if cfg.Media.FFmpegPath != "" && cfg.Media.FFprobePath != "" {
 		probe := assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
-		creativeService.Composer = media.FFmpegComposer{
+		composer := media.FFmpegComposer{
 			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
+		creativeService.Composer = composer
+		creativeService.BrandFilmComposer = composer
 		creativeService.RenderedAssets = creativeRenderedAssetWriter{uploads: uploadService}
 		for kind, handler := range creative.NewRenderRuntimeWorker(runtimeStore, *creativeService).Handlers {
 			runtimeHandlers[kind] = handler
@@ -700,7 +702,10 @@ func (r creativeAssetReader) ReadForCreative(ctx context.Context, actor contract
 	}
 	return creative.CreativeAssetSnapshot{
 		Ref: value.Ref.AssetVersion, Kind: value.Asset.Kind, MIMEType: value.Version.MIMEType,
-		Ready: value.Asset.Status == assets.AssetReady && value.Version.Status == assets.AssetReady,
+		Ready:       value.Asset.Status == assets.AssetReady && value.Version.Status == assets.AssetReady,
+		WidthPixels: value.Version.WidthPixels, HeightPixels: value.Version.HeightPixels,
+		DurationMS: value.Version.DurationMS, FrameRate: value.Version.FrameRate,
+		VideoCodec: value.Version.VideoCodec, AudioCodec: value.Version.AudioCodec,
 	}, nil
 }
 

@@ -44,10 +44,16 @@ type DerivedImageWriter interface {
 }
 
 type CreativeAssetSnapshot struct {
-	Ref      contract.AssetVersionRef
-	Kind     contract.AssetKind
-	MIMEType string
-	Ready    bool
+	Ref          contract.AssetVersionRef
+	Kind         contract.AssetKind
+	MIMEType     string
+	Ready        bool
+	WidthPixels  int
+	HeightPixels int
+	DurationMS   int64
+	FrameRate    string
+	VideoCodec   string
+	AudioCodec   string
 }
 
 type StrategyPackageSnapshot struct {
@@ -85,6 +91,7 @@ type Service struct {
 	GameEvidenceFrames                  media.FrameExtractor
 	DerivedAssets                       DerivedImageWriter
 	Composer                            media.VideoComposer
+	BrandFilmComposer                   media.SegmentComposer
 	RenderedAssets                      RenderedAssetWriter
 	RenderScheduler                     RenderScheduler
 	ShortDramaPrerollPlanner            ShortDramaPrerollPlanner
@@ -216,7 +223,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		brandFilmDraft = &BrandFilmDraft{
 			ContractVersion: "creative-brand-film-draft/v1", TaskID: task.ID, Revision: 1,
 			Stage: BrandFilmWaitingBrief, SourceSnapshot: snapshot, SourceHash: "sha256:" + inputHash,
-			BriefAnalyses: []BrandBriefAnalysisVersion{}, ConceptSets: []BrandCreativeConceptSet{}, FilmPlans: []BrandFilmPlanVersion{},
+			BriefAnalyses: []BrandBriefAnalysisVersion{}, ConceptSets: []BrandCreativeConceptSet{}, FilmPlans: []BrandFilmPlanVersion{}, QualityRuns: []BrandFilmQualityRun{},
 			Readiness: CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}},
 			PromptSeam: BrandFilmReservedGenerationSeam{
 				ContractVersion: "creative-brand-generation-seam/v1", UnitPolicy: "4_to_15_seconds",
@@ -921,31 +928,57 @@ func (s Service) FreezeVersion(ctx context.Context, requestContext contract.Requ
 		if detail.VideoDraft == nil || detail.VideoDraft.Revision != request.DraftVersion {
 			return CreativeVersion{}, false, ErrVersionConflict
 		}
-		if strings.TrimSpace(request.RenderJobID) == "" {
-			return CreativeVersion{}, false, fmt.Errorf("render_job_id is required for a video version")
-		}
-		render, renderErr := s.Repository.GetRenderJob(ctx, requestContext.Actor.OrganizationID, projectID, request.RenderJobID)
-		if renderErr != nil {
-			return CreativeVersion{}, false, renderErr
-		}
-		if render.TaskID != taskID || render.Status != RenderSucceeded || render.OutputAsset == nil {
-			return CreativeVersion{}, false, ErrInvalidState
-		}
-		providerJobID := ""
-		for _, job := range detail.ProductionJobs {
-			if job.Kind == "video_generate" {
-				providerJobID = job.ProviderJobID
+		if detail.Task.PerformanceMode == PerformanceModeBrandFilm {
+			brand := detail.VideoDraft.BrandFilm
+			if brand == nil || brand.Generation == nil || brand.Generation.PreviewAsset == nil || !brandFilmQualityConfirmed(*brand) {
+				return CreativeVersion{}, false, ErrInvalidState
 			}
-		}
-		videoSnapshot = &VideoVersionSnapshot{
-			ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
-			VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
-			StrategyPackage: detail.Intake.Request.StrategyPackage, DraftRevision: detail.VideoDraft.Revision,
-			SourceVideo: detail.VideoDraft.SourceVideo, GeneratedPreRoll: render.PreRollVideo,
-			FinalVideo: render.OutputAsset.AssetVersion, ProviderJobID: providerJobID, RenderJobID: render.ID,
-		}
-		if err := videoSnapshot.Validate(); err != nil {
-			return CreativeVersion{}, false, err
+			run := brand.QualityRuns[len(brand.QualityRuns)-1]
+			plan := brand.CurrentPlan()
+			if plan == nil || run.HumanConfirmedAt == nil {
+				return CreativeVersion{}, false, ErrInvalidState
+			}
+			metrics := brandFilmRunMetrics(*brand.Generation)
+			brandSnapshot := &BrandFilmVersionSnapshot{
+				ContractVersion: "creative-brand-film-version/v1", PlanRevision: plan.Revision, QualityRunID: run.ID,
+				ReferenceAsset: brand.Generation.ReferenceAsset, FinalVideo: *brand.Generation.PreviewAsset,
+				UnitCount: len(brand.Generation.Units), AttemptCount: metrics.AttemptCount,
+				ConfirmedBy: run.HumanConfirmedBy, ConfirmedAt: *run.HumanConfirmedAt,
+			}
+			videoSnapshot = &VideoVersionSnapshot{
+				ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
+				VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
+				DraftRevision: detail.VideoDraft.Revision, FinalVideo: *brand.Generation.PreviewAsset, BrandFilm: brandSnapshot,
+			}
+			if err := videoSnapshot.Validate(); err != nil {
+				return CreativeVersion{}, false, err
+			}
+		} else if strings.TrimSpace(request.RenderJobID) == "" {
+			return CreativeVersion{}, false, fmt.Errorf("render_job_id is required for a video version")
+		} else {
+			render, renderErr := s.Repository.GetRenderJob(ctx, requestContext.Actor.OrganizationID, projectID, request.RenderJobID)
+			if renderErr != nil {
+				return CreativeVersion{}, false, renderErr
+			}
+			if render.TaskID != taskID || render.Status != RenderSucceeded || render.OutputAsset == nil {
+				return CreativeVersion{}, false, ErrInvalidState
+			}
+			providerJobID := ""
+			for _, job := range detail.ProductionJobs {
+				if job.Kind == "video_generate" {
+					providerJobID = job.ProviderJobID
+				}
+			}
+			videoSnapshot = &VideoVersionSnapshot{
+				ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,
+				VideoPurpose: detail.Task.VideoPurpose, PerformanceMode: detail.Task.PerformanceMode,
+				StrategyPackage: detail.Intake.Request.StrategyPackage, DraftRevision: detail.VideoDraft.Revision,
+				SourceVideo: detail.VideoDraft.SourceVideo, GeneratedPreRoll: render.PreRollVideo,
+				FinalVideo: render.OutputAsset.AssetVersion, ProviderJobID: providerJobID, RenderJobID: render.ID,
+			}
+			if err := videoSnapshot.Validate(); err != nil {
+				return CreativeVersion{}, false, err
+			}
 		}
 	} else {
 		if detail.Draft.Version != request.DraftVersion {

@@ -47,8 +47,8 @@ func (DeterministicBrandFilmPlanner) AnalyzeBrief(_ context.Context, _ contract.
 		VideoRequirements: []string{"抖音 9:16，15 秒", "使用水感微距、暖金蜂巢与克制运镜", "结尾至少保留 2 秒稳定商品定格"},
 		VoiceDirection:    "温柔、克制的年轻成熟女声，中低语速，品牌名与“二十五倍蜂皇水”咬字清晰。",
 		AssetCandidates: []BrandBriefAssetCandidate{
-			{ID: "asset_product_front", Role: "product_front", Label: "25X 蜂皇水正面图", SourceLocator: "fixture://briefs/guerlain-25x-bee-water-v1#product-front", FixtureURI: "/assets/guerlain-25x-bee-water.png", RightsStatus: "needs_confirmation"},
-			{ID: "asset_brand_logo", Role: "logo", Label: "娇兰 Logo", SourceLocator: "fixture://briefs/guerlain-25x-bee-water-v1#logo", RightsStatus: "needs_confirmation"},
+			{ID: "asset_product_front", Role: "product_front", Label: "25X 蜂皇水正面图", SourceLocator: "fixture://briefs/guerlain-25x-bee-water-v1#page=9&image=IM135", FixtureURI: "/assets/guerlain-25x-bee-water-product-front.png", RightsStatus: "needs_confirmation"},
+			{ID: "asset_brand_logo", Role: "logo", Label: "娇兰 Logo", SourceLocator: "fixture://briefs/guerlain-25x-bee-water-v1#page=1&image=IM17", FixtureURI: "/assets/guerlain-logo.png", RightsStatus: "needs_confirmation"},
 		},
 		Uncertainties: []string{"98% 天然来源成分的传播脚注与适用范围需要人工确认", "统一口播音色的 Voice ID 与授权尚未提供"},
 		ModelAlias:    "fixture.deterministic", ModelVersion: "guerlain-brand-v1", PromptVersion: brandBriefPromptVersion, CreatedAt: now,

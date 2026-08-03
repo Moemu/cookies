@@ -815,12 +815,44 @@ type VideoVersionSnapshot struct {
 	FinalVideo       contract.AssetVersionRef  `json:"final_video"`
 	ProviderJobID    string                    `json:"provider_job_id"`
 	RenderJobID      string                    `json:"render_job_id"`
+	BrandFilm        *BrandFilmVersionSnapshot `json:"brand_film,omitempty"`
+}
+
+type BrandFilmVersionSnapshot struct {
+	ContractVersion string                   `json:"contract_version"`
+	PlanRevision    int64                    `json:"plan_revision"`
+	QualityRunID    string                   `json:"quality_run_id"`
+	ReferenceAsset  contract.AssetVersionRef `json:"reference_asset"`
+	FinalVideo      contract.AssetVersionRef `json:"final_video"`
+	UnitCount       int                      `json:"unit_count"`
+	AttemptCount    int                      `json:"attempt_count"`
+	ConfirmedBy     string                   `json:"confirmed_by"`
+	ConfirmedAt     time.Time                `json:"confirmed_at"`
+}
+
+func (v BrandFilmVersionSnapshot) Validate() error {
+	if v.ContractVersion != "creative-brand-film-version/v1" || v.PlanRevision < 1 ||
+		strings.TrimSpace(v.QualityRunID) == "" || v.ReferenceAsset.Validate() != nil || v.FinalVideo.Validate() != nil ||
+		v.UnitCount < 1 || v.AttemptCount < v.UnitCount || strings.TrimSpace(v.ConfirmedBy) == "" || v.ConfirmedAt.IsZero() {
+		return fmt.Errorf("creative brand film version snapshot is incomplete")
+	}
+	return nil
 }
 
 func (v VideoVersionSnapshot) Validate() error {
 	if v.ContractVersion != "creative-video-version/v1" || v.Format != FormatVideo ||
 		(v.Channel != ChannelDouyin && v.Channel != ChannelKuaishou) ||
-		v.VideoPurpose != "performance" || v.PerformanceMode != "pre_roll" || v.DraftRevision < 1 ||
+		v.DraftRevision < 1 {
+		return fmt.Errorf("creative video version snapshot is incomplete")
+	}
+	if v.PerformanceMode == PerformanceModeBrandFilm {
+		if v.VideoPurpose != "brand" || v.BrandFilm == nil || v.BrandFilm.Validate() != nil || v.FinalVideo != v.BrandFilm.FinalVideo ||
+			v.StrategyPackage != nil || strings.TrimSpace(v.ProviderJobID) != "" || strings.TrimSpace(v.RenderJobID) != "" {
+			return fmt.Errorf("creative brand film version snapshot is incomplete")
+		}
+		return nil
+	}
+	if v.VideoPurpose != "performance" || v.PerformanceMode != "pre_roll" || v.BrandFilm != nil ||
 		v.SourceVideo.Validate() != nil || v.GeneratedPreRoll.Validate() != nil || v.FinalVideo.Validate() != nil ||
 		strings.TrimSpace(v.ProviderJobID) == "" || strings.TrimSpace(v.RenderJobID) == "" {
 		return fmt.Errorf("creative video version snapshot is incomplete")

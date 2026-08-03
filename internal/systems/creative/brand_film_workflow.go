@@ -26,6 +26,11 @@ type SelectBrandConceptRequest struct {
 	ConceptID        string `json:"concept_id"`
 }
 
+type UpdateBrandConceptsRequest struct {
+	ExpectedRevision int64                  `json:"expected_revision"`
+	Candidates       []BrandCreativeConcept `json:"candidates"`
+}
+
 type UpdateBrandFilmPlanRequest struct {
 	ExpectedRevision int64                `json:"expected_revision"`
 	Plan             BrandFilmPlanVersion `json:"plan"`
@@ -204,6 +209,7 @@ func (s Service) AnalyzeBrandFilmBrief(ctx context.Context, actor contract.Actor
 	next.BrandFilm.Stage = BrandFilmBriefDraft
 	next.BrandFilm.BriefAnalyses = append(next.BrandFilm.BriefAnalyses, analysis)
 	next.BrandFilm.ConceptSets, next.BrandFilm.FilmPlans, next.BrandFilm.SelectedConceptID = nil, nil, ""
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
 	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
@@ -215,7 +221,7 @@ func (s Service) UpdateBrandFilmBrief(ctx context.Context, actor contract.ActorC
 		return TaskDetail{}, err
 	}
 	current := detail.VideoDraft.BrandFilm.CurrentAnalysis()
-	if request.ExpectedRevision != detail.VideoDraft.Revision || current == nil || current.Confirmed {
+	if request.ExpectedRevision != detail.VideoDraft.Revision || current == nil {
 		return TaskDetail{}, ErrVersionConflict
 	}
 	value := request.Analysis
@@ -229,6 +235,9 @@ func (s Service) UpdateBrandFilmBrief(ctx context.Context, actor contract.ActorC
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmBriefDraft
 	next.BrandFilm.BriefAnalyses = append(next.BrandFilm.BriefAnalyses, value)
+	next.BrandFilm.ConceptSets, next.BrandFilm.FilmPlans, next.BrandFilm.SelectedConceptID = nil, nil, ""
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -242,14 +251,14 @@ func (s Service) ConfirmBrandFilmBrief(ctx context.Context, actor contract.Actor
 	if request.ExpectedRevision != detail.VideoDraft.Revision || current == nil {
 		return TaskDetail{}, ErrVersionConflict
 	}
-	hasProduct := false
+	requiredAssets := map[string]bool{"product_front": false, "logo": false}
 	for _, asset := range current.AssetCandidates {
-		if asset.Role == "product_front" && asset.UserConfirmed {
-			hasProduct = true
+		if _, required := requiredAssets[asset.Role]; required && asset.UserConfirmed {
+			requiredAssets[asset.Role] = true
 		}
 	}
-	if !hasProduct {
-		return TaskDetail{}, fmt.Errorf("confirm the product_front asset before confirming the Brief")
+	if !requiredAssets["product_front"] || !requiredAssets["logo"] {
+		return TaskDetail{}, fmt.Errorf("confirm the product_front and logo assets before confirming the Brief")
 	}
 	now := s.now()
 	next := cloneBrandVideoDraft(*detail.VideoDraft)
@@ -285,6 +294,38 @@ func (s Service) GenerateBrandFilmConcepts(ctx context.Context, actor contract.A
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmConceptSelection
 	next.BrandFilm.ConceptSets = append(next.BrandFilm.ConceptSets, concepts)
 	next.BrandFilm.SelectedConceptID, next.BrandFilm.FilmPlans = "", nil
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.UpdatedAt = s.now()
+	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
+}
+
+func (s Service) UpdateBrandFilmConcepts(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, request UpdateBrandConceptsRequest) (TaskDetail, error) {
+	detail, _, err := s.requireBrandFilmWorkspaceWithProject(ctx, actor, projectID, taskID, true)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	current := detail.VideoDraft.BrandFilm.CurrentConceptSet()
+	if request.ExpectedRevision != detail.VideoDraft.Revision || current == nil {
+		return TaskDetail{}, ErrVersionConflict
+	}
+	value := *current
+	value.Revision = current.Revision + 1
+	value.Candidates = append([]BrandCreativeConcept{}, request.Candidates...)
+	value.CreatedAt = s.now()
+	for index := range value.Candidates {
+		value.Candidates[index].Selected = false
+		value.Candidates[index].Confirmed = false
+	}
+	if err := value.Validate(); err != nil {
+		return TaskDetail{}, err
+	}
+	next := cloneBrandVideoDraft(*detail.VideoDraft)
+	next.Revision++
+	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmConceptSelection
+	next.BrandFilm.ConceptSets = append(next.BrandFilm.ConceptSets, value)
+	next.BrandFilm.SelectedConceptID, next.BrandFilm.FilmPlans = "", nil
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: true, GenerationReady: false, ProductionReady: false, Blockers: []string{"creative_concept_selection", "production_plan_confirmation", "prompt_package"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -312,6 +353,7 @@ func (s Service) SelectBrandFilmConcept(ctx context.Context, actor contract.Acto
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmConceptConfirmed
 	next.BrandFilm.SelectedConceptID, next.BrandFilm.FilmPlans = request.ConceptID, nil
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -347,6 +389,7 @@ func (s Service) GenerateBrandFilmPlan(ctx context.Context, actor contract.Actor
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmPlanDraft
 	next.BrandFilm.FilmPlans = append(next.BrandFilm.FilmPlans, plan)
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -357,7 +400,7 @@ func (s Service) UpdateBrandFilmPlan(ctx context.Context, actor contract.ActorCo
 		return TaskDetail{}, err
 	}
 	current := detail.VideoDraft.BrandFilm.CurrentPlan()
-	if request.ExpectedRevision != detail.VideoDraft.Revision || current == nil || current.Confirmed {
+	if request.ExpectedRevision != detail.VideoDraft.Revision || current == nil {
 		return TaskDetail{}, ErrVersionConflict
 	}
 	value := request.Plan
@@ -371,6 +414,8 @@ func (s Service) UpdateBrandFilmPlan(ctx context.Context, actor contract.ActorCo
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmPlanDraft
 	next.BrandFilm.FilmPlans = append(next.BrandFilm.FilmPlans, value)
+	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: true, GenerationReady: false, ProductionReady: false, Blockers: []string{"production_plan_confirmation", "prompt_package", "generation_confirmation"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }

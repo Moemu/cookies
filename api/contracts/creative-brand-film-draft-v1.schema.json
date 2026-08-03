@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shikanon/cookies/api/contracts/creative-brand-film-draft-v1.schema.json",
   "title": "creative-brand-film-draft/v1",
-  "description": "Durable Phase 0-2 brand-film workspace. GenerationUnit, PromptPackage and Attempt are deliberately represented only by a reserved seam.",
+  "description": "Durable Phase 0-4 brand-film workspace with immutable generation, quality, approval and delivery lineage.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_version", "task_id", "revision", "stage", "source_snapshot", "source_hash", "brief_analysis_versions", "concept_sets", "film_plan_versions", "readiness", "generation_seam", "created_at", "updated_at"],
+  "required": ["contract_version", "task_id", "revision", "stage", "source_snapshot", "source_hash", "brief_analysis_versions", "concept_sets", "film_plan_versions", "readiness", "generation_seam", "quality_runs", "created_at", "updated_at"],
   "properties": {
     "contract_version": {"const": "creative-brand-film-draft/v1"},
     "task_id": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 1},
-    "stage": {"enum": ["waiting_for_input", "brief_analysis_draft", "brief_confirmed", "concept_selection", "concept_confirmed", "production_plan_draft", "production_plan_confirmed"]},
+    "stage": {"enum": ["waiting_for_input", "brief_analysis_draft", "brief_confirmed", "concept_selection", "concept_confirmed", "production_plan_draft", "production_plan_confirmed", "generation_ready", "generating", "generation_review", "generation_locked", "quality_review", "ready_for_review", "approved", "delivered"]},
     "source_snapshot": {"$ref": "#/$defs/sourceSnapshot"},
     "source_hash": {"$ref": "#/$defs/sha256"},
     "brief_analysis_versions": {"type": ["array", "null"], "items": {"$ref": "#/$defs/briefAnalysis"}},
@@ -19,6 +19,9 @@
     "film_plan_versions": {"type": ["array", "null"], "items": {"$ref": "#/$defs/filmPlan"}},
     "readiness": {"$ref": "#/$defs/readiness"},
     "generation_seam": {"$ref": "#/$defs/generationSeam"},
+    "generation": {"$ref": "#/$defs/generation"},
+    "quality_runs": {"type": ["array", "null"], "items": {"$ref": "#/$defs/qualityRun"}},
+    "delivery": {"$ref": "#/$defs/deliveryLifecycle"},
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"}
   },
@@ -208,6 +211,148 @@
         "unit_policy": {"const": "4_to_15_seconds"},
         "prompt_contract": {"const": "brand-shot-prompt-package/v1"},
         "attempt_policy": {"const": "single_default_regenerate_on_feedback"}
+      }
+    },
+    "promptPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "revision", "unit_id", "plan_revision", "composite_prompt", "duration_seconds", "aspect_ratio", "resolution", "content_hash", "compiler_version", "created_at"],
+      "properties": {
+        "contract_version": {"const": "brand-shot-prompt-package/v1"},
+        "revision": {"type": "integer", "minimum": 1},
+        "unit_id": {"type": "string", "minLength": 1},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "composite_prompt": {"type": "string", "minLength": 1},
+        "feedback": {"type": "string"},
+        "duration_seconds": {"type": "integer", "minimum": 4, "maximum": 15},
+        "aspect_ratio": {"const": "9:16"},
+        "resolution": {"const": "720p"},
+        "content_hash": {"$ref": "#/$defs/sha256"},
+        "compiler_version": {"const": "brand-film-prompt-compiler/v1"},
+        "created_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ordinal", "prompt_hash", "provider_job_id", "status", "created_at", "updated_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "ordinal": {"type": "integer", "minimum": 1},
+        "prompt_hash": {"$ref": "#/$defs/sha256"},
+        "provider_job_id": {"type": "string", "minLength": 1},
+        "retry_of": {"type": "string"},
+        "feedback": {"type": "string"},
+        "status": {"type": "string", "minLength": 1},
+        "output_asset_ref": {"$ref": "#/$defs/assetRef"},
+        "error_code": {"type": "string"},
+        "error_message": {"type": "string"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "generationUnit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "order", "shot_ids", "start_second", "end_second", "prompt_packages", "attempts"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "order": {"type": "integer", "minimum": 1},
+        "shot_ids": {"$ref": "#/$defs/stringList"},
+        "start_second": {"type": "integer", "minimum": 0, "maximum": 14},
+        "end_second": {"type": "integer", "minimum": 4, "maximum": 15},
+        "prompt_packages": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/promptPackage"}},
+        "attempts": {"type": "array", "items": {"$ref": "#/$defs/attempt"}},
+        "locked_attempt_id": {"type": "string"}
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "plan_revision", "reference_asset", "units", "created_at", "updated_at"],
+      "properties": {
+        "contract_version": {"const": "creative-brand-film-generation/v1"},
+        "plan_revision": {"type": "integer", "minimum": 1},
+        "reference_asset": {"$ref": "#/$defs/assetRef"},
+        "units": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/generationUnit"}},
+        "preview_asset": {"$ref": "#/$defs/assetRef"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "qualityCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "category", "scope", "passed", "severity", "evidence"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "category": {"enum": ["shot", "technical", "copy", "audio", "brand"]},
+        "scope": {"type": "string", "minLength": 1},
+        "passed": {"type": "boolean"},
+        "severity": {"enum": ["info", "blocking"]},
+        "evidence": {"type": "string", "minLength": 1},
+        "repair_advice": {"type": "string"}
+      }
+    },
+    "manualCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "passed"],
+      "properties": {
+        "code": {"enum": ["product_fidelity", "brand_logo_packaging", "subtitle_voiceover", "sound_music"]},
+        "passed": {"type": "boolean"},
+        "note": {"type": "string"},
+        "unit_id": {"type": "string"}
+      }
+    },
+    "runMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_count", "attempt_count", "succeeded_attempts", "failed_attempts", "regeneration_count", "success_rate", "availability_rate", "regeneration_reasons"],
+      "properties": {
+        "unit_count": {"type": "integer", "minimum": 1},
+        "attempt_count": {"type": "integer", "minimum": 0},
+        "succeeded_attempts": {"type": "integer", "minimum": 0},
+        "failed_attempts": {"type": "integer", "minimum": 0},
+        "regeneration_count": {"type": "integer", "minimum": 0},
+        "success_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "availability_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "regeneration_reasons": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}}
+      }
+    },
+    "qualityRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "revision", "preview_asset", "status", "checks", "manual_checks", "metrics", "automatic_passed", "human_confirmed", "created_by", "created_at", "updated_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "revision": {"type": "integer", "minimum": 1},
+        "preview_asset": {"$ref": "#/$defs/assetRef"},
+        "status": {"enum": ["failed", "awaiting_human", "passed"]},
+        "checks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/qualityCheck"}},
+        "manual_checks": {"type": "array", "items": {"$ref": "#/$defs/manualCheck"}},
+        "metrics": {"$ref": "#/$defs/runMetrics"},
+        "automatic_passed": {"type": "boolean"},
+        "human_confirmed": {"type": "boolean"},
+        "human_confirmed_by": {"type": "string"},
+        "human_confirmed_at": {"type": "string", "format": "date-time"},
+        "created_by": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "deliveryLifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quality_run_id"],
+      "properties": {
+        "quality_run_id": {"type": "string", "minLength": 1},
+        "creative_version_id": {"type": "string"},
+        "creative_package_id": {"type": "string"},
+        "approved_by": {"type": "string"},
+        "approved_at": {"type": "string", "format": "date-time"},
+        "delivered_by": {"type": "string"},
+        "delivered_at": {"type": "string", "format": "date-time"}
       }
     }
   }
