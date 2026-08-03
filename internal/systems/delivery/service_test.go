@@ -142,7 +142,7 @@ func TestChangeSetGoldenFlowAndMetricProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	executed, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-golden", ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestApprovalRemainsValidAfterExecutionAndRollbackLifecycleTransitions(t *te
 	approvalID := approved.Approval.ApprovalID
 	approvalVersion := approved.Approval.ChangeSetVersion
 
-	executed, err := service.Execute(context.Background(), actor, "project_a", approved.ID, approved.Version)
+	executed, _, err := service.Execute(context.Background(), actor, "project_a", approved.ID, "key-approval", ExecuteRequest{ExpectedVersion: approved.Version, Scenario: ExecutionScenarioSuccess})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestApprovalIsValidFor24HoursThenExpires(t *testing.T) {
 	if expired.Approval == nil || expired.Approval.Valid || expired.Approval.InvalidReason != ApprovalInvalidExpired {
 		t.Fatalf("unexpected expired approval view: %#v", expired.Approval)
 	}
-	if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalExpired) {
+	if _, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-expired", ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess}); !errors.Is(err, ErrApprovalExpired) {
 		t.Fatalf("execute after expiry error = %v, want APPROVAL_EXPIRED", err)
 	}
 }
@@ -253,7 +253,7 @@ func TestPlanVersionChangePermanentlyInvalidatesApprovalEvenAfterContentReverts(
 	if stale.Approval == nil || stale.Approval.Valid || stale.Approval.InvalidReason != ApprovalInvalidStalePlan {
 		t.Fatalf("reverted content reactivated an old approval: %#v", stale.Approval)
 	}
-	if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrStalePlanVersion) {
+	if _, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-stale", ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess}); !errors.Is(err, ErrStalePlanVersion) {
 		t.Fatalf("execute stale approval error = %v", err)
 	}
 	repository := service.Repository.(*memoryRepository)
@@ -269,7 +269,7 @@ func TestExecuteRejectsApprovalContentAndChangeSetVersionMismatch(t *testing.T) 
 		repository := service.Repository.(*memoryRepository)
 		key := repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)
 		repository.approvals[key][0].ActionHash = "tampered"
-		if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalContentMismatch) {
+		if _, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-hash", ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess}); !errors.Is(err, ErrApprovalContentMismatch) {
 			t.Fatalf("execute tampered action hash error = %v", err)
 		}
 	})
@@ -282,7 +282,7 @@ func TestExecuteRejectsApprovalContentAndChangeSetVersionMismatch(t *testing.T) 
 		stored := repository.changeSets[key]
 		stored.Version++
 		repository.changeSets[key] = stored
-		if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, stored.Version); !errors.Is(err, ErrApprovalContentMismatch) {
+		if _, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-version", ExecuteRequest{ExpectedVersion: stored.Version, Scenario: ExecutionScenarioSuccess}); !errors.Is(err, ErrApprovalContentMismatch) {
 			t.Fatalf("execute mismatched ChangeSetVersion error = %v", err)
 		}
 	})
@@ -310,7 +310,7 @@ func TestExecuteRejectsApprovalScopeAndBudgetExceeded(t *testing.T) {
 				t.Fatal(err)
 			}
 			repository.approvals[key][0] = approval
-			if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalScopeExceeded) {
+			if _, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-scope", ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess}); !errors.Is(err, ErrApprovalScopeExceeded) {
 				t.Fatalf("execute exceeded approval error = %v", err)
 			}
 		})
@@ -392,26 +392,250 @@ func TestExecuteRequiresAuthoritativeApprovalRecord(t *testing.T) {
 	key := repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)
 	changeSet.Status, changeSet.Version = ChangeSetApproved, changeSet.Version+1
 	repository.changeSets[key] = changeSet
-	if _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version); !errors.Is(err, ErrApprovalRequired) {
+	if _, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "key-required", ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess}); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("execute without authoritative approval error = %v", err)
 	}
 }
 
+func TestExecutionFixturesPersistRecoveryAndIdempotency(t *testing.T) {
+	cases := []struct {
+		scenario ExecutionScenario
+		status   ExecutionStatus
+		retry    bool
+		recovery string
+	}{
+		{ExecutionScenarioSuccess, ExecutionSucceeded, false, "none"},
+		{ExecutionScenarioFailed, ExecutionFailed, false, "create_new_change_set"},
+		{ExecutionScenarioPartial, ExecutionPartial, false, "review_and_compensate"},
+		{ExecutionScenarioResultUnknown, ExecutionResultUnknown, false, "query_and_reconcile"},
+	}
+	for _, testCase := range cases {
+		t.Run(string(testCase.scenario), func(t *testing.T) {
+			service, actor, _ := newTestServiceClock()
+			changeSet := approveGoldenChangeSet(t, &service, actor)
+			request := ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: testCase.scenario}
+			created, replay, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "fixture-key", request)
+			if err != nil || replay {
+				t.Fatalf("create err=%v replay=%v", err, replay)
+			}
+			if created.Execution.Status != testCase.status || created.Execution.RetryAllowed != testCase.retry || created.Execution.RecoveryAction != testCase.recovery || len(created.Execution.Steps) != 3 {
+				t.Fatalf("unexpected execution: %#v", created.Execution)
+			}
+			expected := map[ExecutionScenario][]struct {
+				status StepStatus
+				effect string
+			}{
+				ExecutionScenarioSuccess:       {{StepSucceeded, "confirmed_applied"}, {StepSucceeded, "confirmed_applied"}, {StepSucceeded, "confirmed_applied"}},
+				ExecutionScenarioFailed:        {{StepFailed, "confirmed_not_applied"}, {StepSkipped, "none"}, {StepSkipped, "none"}},
+				ExecutionScenarioPartial:       {{StepSucceeded, "confirmed_applied"}, {StepFailed, "confirmed_not_applied"}, {StepSucceeded, "confirmed_applied"}},
+				ExecutionScenarioResultUnknown: {{StepSucceeded, "confirmed_applied"}, {StepResultUnknown, "unknown"}, {StepResultUnknown, "unknown"}},
+			}[testCase.scenario]
+			for index, step := range created.Execution.Steps {
+				if step.Status != expected[index].status || step.Effect != expected[index].effect {
+					t.Fatalf("scenario %s step %d=%#v want status=%s effect=%s", testCase.scenario, index+1, step, expected[index].status, expected[index].effect)
+				}
+			}
+			if testCase.scenario == ExecutionScenarioPartial && len(created.Execution.CompensationCandidates) == 0 {
+				t.Fatal("partial fixture lacks controlled compensation candidates")
+			}
+			loaded, err := service.GetExecution(context.Background(), actor, "project_a", created.Execution.ID)
+			if err != nil || loaded.Execution.RequestHash == "" || len(loaded.Execution.Steps) != 3 {
+				t.Fatalf("durable read err=%v value=%#v", err, loaded)
+			}
+			again, replay, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "fixture-key", request)
+			if err != nil || !replay || again.Execution.ID != created.Execution.ID {
+				t.Fatalf("replay err=%v replay=%v value=%#v", err, replay, again)
+			}
+			_, _, err = service.Execute(context.Background(), actor, "project_a", changeSet.ID, "fixture-key", ExecuteRequest{ExpectedVersion: changeSet.Version + 1, Scenario: testCase.scenario})
+			if !errors.Is(err, ErrIdempotencyConflict) {
+				t.Fatalf("conflict error=%v", err)
+			}
+			second := approveGoldenChangeSet(t, &service, actor)
+			_, _, err = service.Execute(context.Background(), actor, "project_a", second.ID, "fixture-key", ExecuteRequest{ExpectedVersion: second.Version, Scenario: testCase.scenario})
+			if !errors.Is(err, ErrIdempotencyConflict) {
+				t.Fatalf("cross-change-set conflict error=%v", err)
+			}
+			otherProject := approveGoldenChangeSetForProject(t, &service, actor, "project_b")
+			if _, replay, err := service.Execute(context.Background(), actor, "project_b", otherProject.ID, "fixture-key", ExecuteRequest{ExpectedVersion: otherProject.Version, Scenario: testCase.scenario}); err != nil || replay {
+				t.Fatalf("project-scoped key was not reusable in another Project: err=%v replay=%v", err, replay)
+			}
+			if _, err := service.GetExecution(context.Background(), actor, "project_b", created.Execution.ID); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross-project execution read=%v", err)
+			}
+		})
+	}
+}
+
+func TestExecutionInvokesAdapterOnlyAfterDurableRunningState(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	repository := service.Repository.(*memoryRepository)
+	adapter := &observingAdapter{repository: repository}
+	service.Adapter = adapter
+	changeSet := approveGoldenChangeSet(t, &service, actor)
+	request := ExecuteRequest{ExpectedVersion: changeSet.Version, Scenario: ExecutionScenarioSuccess}
+
+	created, replay, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "step-order-key", request)
+	if err != nil || replay {
+		t.Fatalf("execute err=%v replay=%v", err, replay)
+	}
+	if got, want := strings.Join(adapter.calls, ","), "create_platform_project,create_promotion,verify_platform_state"; got != want {
+		t.Fatalf("adapter calls=%q want=%q", got, want)
+	}
+	if got, want := strings.Join(adapter.executionStates, ","), "executing,executing,verifying"; got != want {
+		t.Fatalf("execution states at adapter boundary=%q want=%q", got, want)
+	}
+	for _, step := range created.Execution.Steps {
+		if step.Status != StepSucceeded || step.Version != 3 || step.Attempt != 1 || step.StartedAt == nil || step.CompletedAt == nil {
+			t.Fatalf("step was not advanced pending→running→succeeded: %#v", step)
+		}
+	}
+
+	if _, replay, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "step-order-key", request); err != nil || !replay {
+		t.Fatalf("replay err=%v replay=%v", err, replay)
+	}
+	if len(adapter.calls) != 3 {
+		t.Fatalf("successful terminal steps were re-executed: calls=%v", adapter.calls)
+	}
+}
+
+func TestExecutionAdapterErrorBecomesUnknownWithoutBlindContinuation(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	repository := service.Repository.(*memoryRepository)
+	adapter := &observingAdapter{repository: repository, failAction: "create_promotion"}
+	service.Adapter = adapter
+	changeSet := approveGoldenChangeSet(t, &service, actor)
+
+	created, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "adapter-error-key", ExecuteRequest{
+		ExpectedVersion: changeSet.Version,
+		Scenario:        ExecutionScenarioSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Execution.Status != ExecutionResultUnknown || created.Execution.RecoveryAction != "query_and_reconcile" || created.Execution.RetryAllowed {
+		t.Fatalf("adapter error did not produce a non-retryable unknown result: %#v", created.Execution)
+	}
+	if got, want := strings.Join(adapter.calls, ","), "create_platform_project,create_promotion"; got != want {
+		t.Fatalf("adapter continued after unknown result: calls=%q want=%q", got, want)
+	}
+	if created.Execution.Steps[0].Status != StepSucceeded || created.Execution.Steps[1].Status != StepResultUnknown || created.Execution.Steps[2].Status != StepSkipped {
+		t.Fatalf("unexpected interruption-safe steps: %#v", created.Execution.Steps)
+	}
+	if created.Execution.Steps[1].Effect != "unknown" || created.Execution.Steps[2].Attempt != 0 {
+		t.Fatalf("unknown/skip effects are not safe: %#v", created.Execution.Steps)
+	}
+}
+
+func TestFailedFixtureDoesNotInvokeSkippedSteps(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	repository := service.Repository.(*memoryRepository)
+	adapter := &observingAdapter{repository: repository}
+	service.Adapter = adapter
+	changeSet := approveGoldenChangeSet(t, &service, actor)
+	created, _, err := service.Execute(context.Background(), actor, "project_a", changeSet.ID, "failed-call-key", ExecuteRequest{
+		ExpectedVersion: changeSet.Version,
+		Scenario:        ExecutionScenarioFailed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(adapter.calls, ","), "create_platform_project"; got != want {
+		t.Fatalf("failed fixture adapter calls=%q want=%q", got, want)
+	}
+	if created.Execution.Steps[0].Effect != "confirmed_not_applied" || created.Execution.Steps[1].Status != StepSkipped || created.Execution.Steps[2].Status != StepSkipped {
+		t.Fatalf("failed fixture did not prove zero target effect: %#v", created.Execution.Steps)
+	}
+}
+
+func TestExecutionTransitionsUseCASAndRejectStaleWorkers(t *testing.T) {
+	if !validExecutionTransition(ExecutionQueued, ExecutionValidatingApproval) || validExecutionTransition(ExecutionSucceeded, ExecutionExecuting) {
+		t.Fatal("unexpected transition table")
+	}
+	repo := newMemoryRepository()
+	now := time.Now().UTC()
+	result := ExecutionResult{Execution: Execution{ID: "execution_1", OrganizationID: "org_a", ProjectID: "project_a", Status: ExecutionQueued, Version: 1, Steps: []ExecutionStep{{ID: "step_1", Status: StepPending, Version: 1}}}}
+	repo.executions = []ExecutionResult{result}
+	advanced, err := repo.AdvanceExecution(context.Background(), result.Execution, ExecutionValidatingApproval, nil, "none", "", nil)
+	if err != nil || advanced.Execution.Version != 2 {
+		t.Fatalf("advance=%#v err=%v", advanced, err)
+	}
+	if _, err := repo.AdvanceExecution(context.Background(), result.Execution, ExecutionExecuting, &now, "none", "", nil); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale worker error=%v", err)
+	}
+	if !validStepTransition(StepPending, StepRunning) || validStepTransition(StepSucceeded, StepRunning) {
+		t.Fatal("unexpected step transition table")
+	}
+	running := advanced.Execution.Steps[0]
+	running.Status = StepRunning
+	step, err := repo.AdvanceStep(context.Background(), advanced.Execution, advanced.Execution.Steps[0], running)
+	if err != nil || step.Version != 2 {
+		t.Fatalf("step advance=%#v err=%v", step, err)
+	}
+	staleStep := advanced.Execution.Steps[0]
+	staleStep.Status, staleStep.Version = StepPending, 1
+	if _, err := repo.AdvanceStep(context.Background(), advanced.Execution, staleStep, running); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale step error=%v", err)
+	}
+}
+
+func TestExactExecutionAndStepTransitionTables(t *testing.T) {
+	executionAllowed := map[[2]ExecutionStatus]bool{
+		{ExecutionQueued, ExecutionValidatingApproval}:    true,
+		{ExecutionQueued, ExecutionCancelled}:             true,
+		{ExecutionValidatingApproval, ExecutionExecuting}: true,
+		{ExecutionValidatingApproval, ExecutionCancelled}: true,
+		{ExecutionExecuting, ExecutionVerifying}:          true,
+		{ExecutionExecuting, ExecutionResultUnknown}:      true,
+		{ExecutionVerifying, ExecutionSucceeded}:          true,
+		{ExecutionVerifying, ExecutionFailed}:             true,
+		{ExecutionVerifying, ExecutionPartial}:            true,
+		{ExecutionVerifying, ExecutionResultUnknown}:      true,
+	}
+	executionStates := []ExecutionStatus{ExecutionQueued, ExecutionValidatingApproval, ExecutionExecuting, ExecutionVerifying, ExecutionSucceeded, ExecutionFailed, ExecutionPartial, ExecutionResultUnknown, ExecutionCancelled}
+	for _, from := range executionStates {
+		for _, to := range executionStates {
+			if got, want := validExecutionTransition(from, to), executionAllowed[[2]ExecutionStatus{from, to}]; got != want {
+				t.Fatalf("execution transition %s→%s=%v want=%v", from, to, got, want)
+			}
+		}
+	}
+
+	stepAllowed := map[[2]StepStatus]bool{
+		{StepPending, StepRunning}:       true,
+		{StepPending, StepSkipped}:       true,
+		{StepRunning, StepSucceeded}:     true,
+		{StepRunning, StepFailed}:        true,
+		{StepRunning, StepResultUnknown}: true,
+	}
+	stepStates := []StepStatus{StepPending, StepRunning, StepSucceeded, StepFailed, StepResultUnknown, StepSkipped}
+	for _, from := range stepStates {
+		for _, to := range stepStates {
+			if got, want := validStepTransition(from, to), stepAllowed[[2]StepStatus{from, to}]; got != want {
+				t.Fatalf("step transition %s→%s=%v want=%v", from, to, got, want)
+			}
+		}
+	}
+}
+
 func approveGoldenChangeSet(t *testing.T, service *Service, actor contract.ActorContext) ChangeSet {
+	return approveGoldenChangeSetForProject(t, service, actor, "project_a")
+}
+
+func approveGoldenChangeSetForProject(t *testing.T, service *Service, actor contract.ActorContext, projectID contract.ProjectID) ChangeSet {
 	t.Helper()
-	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{PlanDraft: goldenDraft()})
+	plan, err := service.CreatePlan(context.Background(), actor, projectID, CreatePlanRequest{PlanDraft: goldenDraft()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	changeSet, err := service.CreateChangeSet(context.Background(), actor, "project_a", plan.ID, plan.Version)
+	changeSet, err := service.CreateChangeSet(context.Background(), actor, projectID, plan.ID, plan.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	changeSet, err = service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	changeSet, err = service.Preflight(context.Background(), actor, projectID, changeSet.ID, changeSet.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	changeSet, err = service.Approve(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	changeSet, err = service.Approve(context.Background(), actor, projectID, changeSet.ID, changeSet.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,6 +699,38 @@ type testPackages struct{}
 
 func (testPackages) ReadCreativePackage(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (CreativePackageSnapshot, error) {
 	return CreativePackageSnapshot{ID: id, CreativeVersionID: "creative_v1", ContentHash: "sha256:mock"}, nil
+}
+
+type observingAdapter struct {
+	repository      *memoryRepository
+	calls           []string
+	executionStates []string
+	failAction      string
+}
+
+func (*observingAdapter) Source() Source { return SourceMock }
+
+func (a *observingAdapter) ExecuteStep(ctx context.Context, request PlatformStepRequest) (PlatformStepResult, error) {
+	value, err := a.repository.GetExecution(ctx, "org_a", "project_a", request.ExecutionID)
+	if err != nil {
+		return PlatformStepResult{}, fmt.Errorf("execution was not durable before adapter call: %w", err)
+	}
+	var durable *ExecutionStep
+	for index := range value.Execution.Steps {
+		if value.Execution.Steps[index].Action == request.Action {
+			durable = &value.Execution.Steps[index]
+			break
+		}
+	}
+	if durable == nil || durable.Status != StepRunning || durable.Attempt != 1 || durable.StartedAt == nil {
+		return PlatformStepResult{}, fmt.Errorf("step was not durably running before adapter call: %#v", durable)
+	}
+	a.calls = append(a.calls, request.Action)
+	a.executionStates = append(a.executionStates, string(value.Execution.Status))
+	if request.Action == a.failAction {
+		return PlatformStepResult{}, errors.New("controlled adapter interruption")
+	}
+	return (DeterministicMockAdapter{}).ExecuteStep(ctx, request)
 }
 
 type memoryRepository struct {
@@ -666,6 +922,70 @@ func (r *memoryRepository) RecordExecution(ctx context.Context, changeSet Change
 	return value, nil
 }
 
+func (r *memoryRepository) CreateOrReplayExecution(ctx context.Context, changeSet ChangeSet, approval DeliveryApproval, execution Execution, evidence Evidence) (ExecutionResult, bool, error) {
+	for _, existing := range r.executions {
+		if existing.Execution.OrganizationID == execution.OrganizationID && existing.Execution.ProjectID == execution.ProjectID && existing.Execution.IdempotencyKey == execution.IdempotencyKey {
+			if existing.Execution.RequestHash != execution.RequestHash {
+				return ExecutionResult{}, false, ErrIdempotencyConflict
+			}
+			return existing, true, nil
+		}
+	}
+	value, err := r.RecordExecution(ctx, changeSet, approval, execution, evidence)
+	return value, false, err
+}
+
+func (r *memoryRepository) FindExecutionByIdempotency(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, key string) (ExecutionResult, bool, error) {
+	for _, value := range r.executions {
+		if value.Execution.OrganizationID == organizationID && value.Execution.ProjectID == projectID && value.Execution.IdempotencyKey == key {
+			return value, true, nil
+		}
+	}
+	return ExecutionResult{}, false, nil
+}
+
+func (r *memoryRepository) AdvanceExecution(_ context.Context, execution Execution, next ExecutionStatus, completed *time.Time, action, reason string, compensation []string) (ExecutionResult, error) {
+	for index := range r.executions {
+		value := &r.executions[index]
+		if value.Execution.ID != execution.ID || value.Execution.OrganizationID != execution.OrganizationID || value.Execution.ProjectID != execution.ProjectID {
+			continue
+		}
+		if value.Execution.Version != execution.Version {
+			return ExecutionResult{}, ErrVersionConflict
+		}
+		if !validExecutionTransition(value.Execution.Status, next) {
+			return ExecutionResult{}, ErrInvalidState
+		}
+		value.Execution.Status, value.Execution.Version = next, value.Execution.Version+1
+		value.Execution.CompletedAt, value.Execution.RecoveryAction, value.Execution.RecoveryReason, value.Execution.CompensationCandidates = completed, action, reason, compensation
+		return *value, nil
+	}
+	return ExecutionResult{}, ErrNotFound
+}
+
+func (r *memoryRepository) AdvanceStep(_ context.Context, execution Execution, step ExecutionStep, next ExecutionStep) (ExecutionStep, error) {
+	if step.ID != next.ID || step.Sequence != next.Sequence || step.Action != next.Action || !validStepTransition(step.Status, next.Status) {
+		return ExecutionStep{}, ErrInvalidState
+	}
+	for i := range r.executions {
+		if r.executions[i].Execution.ID == execution.ID && r.executions[i].Execution.Version == execution.Version {
+			for j := range r.executions[i].Execution.Steps {
+				current := &r.executions[i].Execution.Steps[j]
+				if current.ID == step.ID {
+					if current.Version != step.Version {
+						return ExecutionStep{}, ErrVersionConflict
+					}
+					next.Version = current.Version + 1
+					*current = next
+					return *current, nil
+				}
+			}
+			return ExecutionStep{}, ErrNotFound
+		}
+	}
+	return ExecutionStep{}, ErrVersionConflict
+}
+
 func (r *memoryRepository) ListExecutions(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, _ int) ([]ExecutionResult, error) {
 	values := make([]ExecutionResult, 0)
 	for _, value := range r.executions {
@@ -674,6 +994,15 @@ func (r *memoryRepository) ListExecutions(_ context.Context, organizationID cont
 		}
 	}
 	return values, nil
+}
+
+func (r *memoryRepository) GetExecution(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (ExecutionResult, error) {
+	for _, value := range r.executions {
+		if value.Execution.OrganizationID == organizationID && value.Execution.ProjectID == projectID && value.Execution.ID == id {
+			return value, nil
+		}
+	}
+	return ExecutionResult{}, ErrNotFound
 }
 
 func (r *memoryRepository) CreateMetricSnapshot(_ context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {

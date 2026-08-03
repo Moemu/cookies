@@ -446,7 +446,7 @@ func (r MySQLRepository) RecordExecution(ctx context.Context, changeSet ChangeSe
 		return ExecutionResult{}, ErrApprovalContentMismatch
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE delivery_change_sets SET status = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
-		ChangeSetExecuted, execution.CompletedAt, changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID, changeSet.Version, ChangeSetApproved)
+		ChangeSetExecuted, execution.StartedAt, changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID, changeSet.Version, ChangeSetApproved)
 	if err != nil {
 		return ExecutionResult{}, err
 	}
@@ -457,23 +457,171 @@ func (r MySQLRepository) RecordExecution(ctx context.Context, changeSet ChangeSe
 	if affected == 0 {
 		return ExecutionResult{}, ErrVersionConflict
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_executions (id, organization_id, project_id, change_set_id, status, execution_mode, executed_by, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		execution.ID, execution.OrganizationID, execution.ProjectID, execution.ChangeSetID, execution.Status, execution.Mode, execution.ExecutedBy, execution.StartedAt, execution.CompletedAt)
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_executions (id, organization_id, project_id, change_set_id, approval_id, status, version, execution_mode, adapter, source, scenario, idempotency_key, request_hash, executed_by, started_at, completed_at, retry_allowed, recovery_action, recovery_reason, compensation_candidates) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		execution.ID, execution.OrganizationID, execution.ProjectID, execution.ChangeSetID, execution.ApprovalID, execution.Status, execution.Version, execution.Mode, execution.Adapter, execution.Source, execution.Scenario, execution.IdempotencyKey, execution.RequestHash, execution.ExecutedBy, execution.StartedAt, execution.CompletedAt, execution.RetryAllowed, execution.RecoveryAction, execution.RecoveryReason, mustJSON(execution.CompensationCandidates))
 	if err != nil {
 		return ExecutionResult{}, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_evidence (id, organization_id, project_id, execution_id, summary, evidence_mode, reversible, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		evidence.ID, evidence.OrganizationID, evidence.ProjectID, evidence.ExecutionID, evidence.Summary, evidence.Mode, evidence.Reversible, evidence.CreatedAt)
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_evidence (id, organization_id, project_id, execution_id, summary, evidence_mode, reversible, source, scenario, references_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		evidence.ID, evidence.OrganizationID, evidence.ProjectID, evidence.ExecutionID, evidence.Summary, evidence.Mode, evidence.Reversible, evidence.Source, evidence.Scenario, mustJSON(evidence.References), evidence.CreatedAt)
 	if err != nil {
 		return ExecutionResult{}, err
+	}
+	for _, step := range execution.Steps {
+		_, err = tx.ExecContext(ctx, `INSERT INTO delivery_execution_steps (id, organization_id, project_id, execution_id, sequence_number, action, status, attempt, effect, outcome_summary, evidence_ref, started_at, completed_at, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			step.ID, execution.OrganizationID, execution.ProjectID, execution.ID, step.Sequence, step.Action, step.Status, step.Attempt, step.Effect, step.OutcomeSummary, step.EvidenceRef, step.StartedAt, step.CompletedAt, step.Version)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return ExecutionResult{}, err
 	}
 	changeSet.Status = ChangeSetExecuted
 	changeSet.Version++
-	changeSet.UpdatedAt = execution.CompletedAt
+	changeSet.UpdatedAt = execution.StartedAt
 	return ExecutionResult{ChangeSet: changeSet, Execution: execution, Evidence: evidence}, nil
+}
+
+// CreateOrReplayExecution preserves the immutable approval and makes a retry
+// with the same idempotency key observationally identical to its first call.
+func (r MySQLRepository) CreateOrReplayExecution(ctx context.Context, changeSet ChangeSet, approval DeliveryApproval, execution Execution, evidence Evidence) (ExecutionResult, bool, error) {
+	var existingID, existingHash string
+	err := r.DB.QueryRowContext(ctx, `SELECT id, request_hash FROM delivery_executions
+		WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`,
+		execution.OrganizationID, execution.ProjectID, execution.IdempotencyKey).Scan(&existingID, &existingHash)
+	if err == nil {
+		if existingHash != execution.RequestHash {
+			return ExecutionResult{}, false, ErrIdempotencyConflict
+		}
+		value, getErr := r.GetExecution(ctx, execution.OrganizationID, execution.ProjectID, existingID)
+		return value, true, getErr
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, false, err
+	}
+	legacy, err := r.RecordExecution(ctx, changeSet, approval, execution, evidence)
+	if err != nil {
+		if replay, found, replayErr := r.FindExecutionByIdempotency(ctx, execution.OrganizationID, execution.ProjectID, execution.IdempotencyKey); replayErr == nil && found {
+			if replay.Execution.RequestHash == execution.RequestHash {
+				return replay, true, nil
+			}
+			return ExecutionResult{}, false, ErrIdempotencyConflict
+		}
+	}
+	return legacy, false, err
+}
+
+func (r MySQLRepository) FindExecutionByIdempotency(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, key string) (ExecutionResult, bool, error) {
+	var id string
+	err := r.DB.QueryRowContext(ctx, `SELECT id FROM delivery_executions WHERE organization_id=? AND project_id=? AND idempotency_key=?`, organizationID, projectID, key).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, false, nil
+	}
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	value, err := r.GetExecution(ctx, organizationID, projectID, id)
+	return value, err == nil, err
+}
+
+func (r MySQLRepository) AdvanceExecution(ctx context.Context, execution Execution, next ExecutionStatus, completed *time.Time, action, reason string, compensation []string) (ExecutionResult, error) {
+	if !validExecutionTransition(execution.Status, next) {
+		return ExecutionResult{}, ErrInvalidState
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_executions SET status=?, version=version+1, completed_at=?, recovery_action=?, recovery_reason=?, compensation_candidates=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND status=?`, next, completed, action, reason, mustJSON(compensation), execution.OrganizationID, execution.ProjectID, execution.ID, execution.Version, execution.Status)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if affected != 1 {
+		return ExecutionResult{}, ErrVersionConflict
+	}
+	if err = tx.Commit(); err != nil {
+		return ExecutionResult{}, err
+	}
+	return r.GetExecution(ctx, execution.OrganizationID, execution.ProjectID, execution.ID)
+}
+
+func (r MySQLRepository) AdvanceStep(ctx context.Context, execution Execution, step ExecutionStep, next ExecutionStep) (ExecutionStep, error) {
+	if step.ID != next.ID || step.Sequence != next.Sequence || step.Action != next.Action || !validStepTransition(step.Status, next.Status) {
+		return ExecutionStep{}, ErrInvalidState
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE delivery_execution_steps SET status=?, attempt=?, effect=?, outcome_summary=?, evidence_ref=?, started_at=?, completed_at=?, version=version+1 WHERE organization_id=? AND project_id=? AND execution_id=? AND id=? AND version=? AND status=?`, next.Status, next.Attempt, next.Effect, next.OutcomeSummary, next.EvidenceRef, next.StartedAt, next.CompletedAt, execution.OrganizationID, execution.ProjectID, execution.ID, step.ID, step.Version, step.Status)
+	if err != nil {
+		return ExecutionStep{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ExecutionStep{}, err
+	}
+	if affected != 1 {
+		return ExecutionStep{}, ErrVersionConflict
+	}
+	next.Version = step.Version + 1
+	return next, nil
+}
+
+func mustJSON(value any) []byte {
+	encoded, _ := json.Marshal(value)
+	return encoded
+}
+
+func (r MySQLRepository) GetExecution(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (ExecutionResult, error) {
+	var value ExecutionResult
+	var completedAt sql.NullTime
+	var compensation, references []byte
+	err := r.DB.QueryRowContext(ctx, `SELECT x.id, x.organization_id, x.project_id, x.change_set_id, x.approval_id, x.status, x.version, x.execution_mode, x.adapter, x.source, x.scenario, x.idempotency_key, x.request_hash, x.executed_by, x.started_at, x.completed_at, x.retry_allowed, x.recovery_action, x.recovery_reason, x.compensation_candidates, e.id, e.summary, e.evidence_mode, e.reversible, e.source, e.scenario, e.references_json, e.created_at FROM delivery_executions x JOIN delivery_evidence e ON e.organization_id=x.organization_id AND e.execution_id=x.id WHERE x.organization_id=? AND x.project_id=? AND x.id=?`, organizationID, projectID, id).Scan(
+		&value.Execution.ID, &value.Execution.OrganizationID, &value.Execution.ProjectID, &value.Execution.ChangeSetID, &value.Execution.ApprovalID, &value.Execution.Status, &value.Execution.Version, &value.Execution.Mode, &value.Execution.Adapter, &value.Execution.Source, &value.Execution.Scenario, &value.Execution.IdempotencyKey, &value.Execution.RequestHash, &value.Execution.ExecutedBy, &value.Execution.StartedAt, &completedAt, &value.Execution.RetryAllowed, &value.Execution.RecoveryAction, &value.Execution.RecoveryReason, &compensation,
+		&value.Evidence.ID, &value.Evidence.Summary, &value.Evidence.Mode, &value.Evidence.Reversible, &value.Evidence.Source, &value.Evidence.Scenario, &references, &value.Evidence.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if completedAt.Valid {
+		value.Execution.CompletedAt = &completedAt.Time
+	}
+	value.Evidence.OrganizationID, value.Evidence.ProjectID, value.Evidence.ExecutionID = organizationID, projectID, id
+	_ = json.Unmarshal(compensation, &value.Execution.CompensationCandidates)
+	_ = json.Unmarshal(references, &value.Evidence.References)
+	rows, err := r.DB.QueryContext(ctx, `SELECT id, sequence_number, action, status, attempt, effect, outcome_summary, evidence_ref, started_at, completed_at, version FROM delivery_execution_steps WHERE organization_id=? AND project_id=? AND execution_id=? ORDER BY sequence_number`, organizationID, projectID, id)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var step ExecutionStep
+		var started, completed sql.NullTime
+		if err := rows.Scan(&step.ID, &step.Sequence, &step.Action, &step.Status, &step.Attempt, &step.Effect, &step.OutcomeSummary, &step.EvidenceRef, &started, &completed, &step.Version); err != nil {
+			return ExecutionResult{}, err
+		}
+		if started.Valid {
+			step.StartedAt = &started.Time
+		}
+		if completed.Valid {
+			step.CompletedAt = &completed.Time
+		}
+		value.Execution.Steps = append(value.Execution.Steps, step)
+	}
+	if err := rows.Err(); err != nil {
+		return ExecutionResult{}, err
+	}
+	changeSet, err := r.GetChangeSet(ctx, organizationID, projectID, value.Execution.ChangeSetID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	value.ChangeSet = changeSet
+	return value, nil
 }
 
 func sameApproval(left, right DeliveryApproval) bool {
@@ -498,42 +646,27 @@ func sameApproval(left, right DeliveryApproval) bool {
 }
 
 func (r MySQLRepository) ListExecutions(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]ExecutionResult, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT
-		c.id, c.organization_id, c.project_id, c.plan_id, c.plan_version, c.status, c.risk_level, c.preflight_notes, c.approved_by, c.approved_at, c.version, c.created_by, c.created_at, c.updated_at,
-		x.id, x.organization_id, x.project_id, x.change_set_id, x.status, x.execution_mode, x.executed_by, x.started_at, x.completed_at,
-		e.id, e.organization_id, e.project_id, e.execution_id, e.summary, e.evidence_mode, e.reversible, e.created_at
-		FROM delivery_executions x
-		JOIN delivery_change_sets c ON c.organization_id = x.organization_id AND c.id = x.change_set_id
-		JOIN delivery_evidence e ON e.organization_id = x.organization_id AND e.execution_id = x.id
-		WHERE x.organization_id = ? AND x.project_id = ?
-		ORDER BY x.completed_at DESC, x.id DESC LIMIT ?`, organizationID, projectID, limit)
+	ids, err := r.DB.QueryContext(ctx, `SELECT id FROM delivery_executions WHERE organization_id=? AND project_id=? ORDER BY started_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	values := make([]ExecutionResult, 0)
-	for rows.Next() {
-		var value ExecutionResult
-		var notes []byte
-		var approvedBy sql.NullString
-		var approvedAt sql.NullTime
-		if err := rows.Scan(
-			&value.ChangeSet.ID, &value.ChangeSet.OrganizationID, &value.ChangeSet.ProjectID, &value.ChangeSet.PlanID,
-			&value.ChangeSet.PlanVersion, &value.ChangeSet.Status, &value.ChangeSet.RiskLevel, &notes,
-			&approvedBy, &approvedAt, &value.ChangeSet.Version, &value.ChangeSet.CreatedBy, &value.ChangeSet.CreatedAt, &value.ChangeSet.UpdatedAt,
-			&value.Execution.ID, &value.Execution.OrganizationID, &value.Execution.ProjectID, &value.Execution.ChangeSetID,
-			&value.Execution.Status, &value.Execution.Mode, &value.Execution.ExecutedBy, &value.Execution.StartedAt, &value.Execution.CompletedAt,
-			&value.Evidence.ID, &value.Evidence.OrganizationID, &value.Evidence.ProjectID, &value.Evidence.ExecutionID,
-			&value.Evidence.Summary, &value.Evidence.Mode, &value.Evidence.Reversible, &value.Evidence.CreatedAt,
-		); err != nil {
+	defer ids.Close()
+	legacyValues := make([]ExecutionResult, 0)
+	for ids.Next() {
+		var id string
+		if err := ids.Scan(&id); err != nil {
 			return nil, err
 		}
-		if err := decodeChangeSetOptional(&value.ChangeSet, notes, approvedBy, approvedAt); err != nil {
+		value, err := r.GetExecution(ctx, organizationID, projectID, id)
+		if err != nil {
 			return nil, err
 		}
-		values = append(values, value)
+		legacyValues = append(legacyValues, value)
 	}
-	return values, rows.Err()
+	if err := ids.Err(); err != nil {
+		return nil, err
+	}
+	return legacyValues, nil
 }
 
 func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {

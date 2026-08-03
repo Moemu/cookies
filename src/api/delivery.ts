@@ -165,6 +165,74 @@ export type DeliveryControlChangeSet = {
   updatedAt: string
 }
 
+export type DeliveryExecutionScenario = 'success' | 'failed' | 'partial' | 'result_unknown'
+
+export type DeliveryExecutionStatus =
+  | 'queued'
+  | 'validating_approval'
+  | 'executing'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'partial'
+  | 'result_unknown'
+  | 'cancelled'
+
+export type DeliveryExecutionStepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'result_unknown' | 'skipped'
+
+export type DeliveryExecutionStep = {
+  id: string
+  sequence: number
+  action: string
+  status: DeliveryExecutionStepStatus
+  attempt: number
+  effect: 'confirmed_applied' | 'confirmed_not_applied' | 'unknown' | 'none'
+  outcomeSummary: string
+  evidenceRef?: string
+  startedAt?: string
+  completedAt?: string
+  version: number
+}
+
+export type DeliveryExecution = {
+  id: string
+  organizationId: string
+  projectId: string
+  changeSetId: string
+  approvalId?: string
+  status: DeliveryExecutionStatus
+  version: number
+  mode: 'local_simulation'
+  adapter: 'mock_ocean_engine'
+  source: DeliverySource
+  scenario: DeliveryExecutionScenario
+  idempotencyKey: string
+  requestHash: string
+  executedBy: string
+  startedAt: string
+  completedAt?: string
+  retryAllowed: boolean
+  recoveryAction: 'none' | 'create_new_change_set' | 'review_and_compensate' | 'query_and_reconcile'
+  recoveryReason: string
+  compensationCandidates: string[]
+  steps: DeliveryExecutionStep[]
+}
+
+export type DeliveryExecutionEvidence = {
+  id: string
+  executionId: string
+  summary: string
+  source: DeliverySource
+  scenario: DeliveryExecutionScenario
+  references: string[]
+}
+
+export type DeliveryExecutionRecord = {
+  changeSet: DeliveryControlChangeSet
+  execution: DeliveryExecution
+  evidence: DeliveryExecutionEvidence
+}
+
 type WireDeliveryPlanDraft = {
   name: string
   objective: string
@@ -267,6 +335,59 @@ type WireDeliveryControlChangeSet = {
   updated_at: string
 }
 
+type WireDeliveryExecutionStep = {
+  id: string
+  sequence: number
+  action: string
+  status: DeliveryExecutionStepStatus
+  attempt: number
+  effect: DeliveryExecutionStep['effect']
+  outcome_summary: string
+  evidence_ref?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  version: number
+}
+
+type WireDeliveryExecution = {
+  id: string
+  organization_id: string
+  project_id: string
+  change_set_id: string
+  approval_id?: string | null
+  status: DeliveryExecutionStatus
+  version: number
+  mode: 'local_simulation'
+  adapter: 'mock_ocean_engine'
+  source: DeliverySource
+  scenario: DeliveryExecutionScenario
+  idempotency_key: string
+  request_hash: string
+  executed_by: string
+  started_at: string
+  completed_at?: string | null
+  retry_allowed: boolean
+  recovery_action: DeliveryExecution['recoveryAction']
+  recovery_reason: string
+  compensation_candidates?: string[] | null
+  steps?: WireDeliveryExecutionStep[] | null
+}
+
+type WireDeliveryExecutionEvidence = {
+  id: string
+  execution_id: string
+  summary: string
+  source?: DeliverySource
+  scenario?: DeliveryExecutionScenario
+  references?: string[] | null
+}
+
+type WireDeliveryExecutionRecord = {
+  change_set: WireDeliveryControlChangeSet
+  execution: WireDeliveryExecution
+  evidence: WireDeliveryExecutionEvidence
+}
+
 export const deliveryPlanApi = {
   async list(projectId: string): Promise<DeliveryPlan[]> {
     const response = await deliveryPlanRequest<{ items: WireDeliveryPlan[]; source: DeliverySource; scenario: DeliveryScenario }>(
@@ -325,13 +446,35 @@ export const deliveryPlanApi = {
   async approveChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
     return deliveryChangeSetAction(projectId, changeSetId, 'approve', expectedVersion)
   },
-  async executeChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
-    const response = await deliveryPlanRequest<{ change_set: WireDeliveryControlChangeSet }>(
+}
+
+export const deliveryExecutionApi = {
+  async execute(
+    projectId: string,
+    changeSetId: string,
+    expectedVersion: number,
+    scenario: DeliveryExecutionScenario,
+    idempotencyKey: string,
+  ): Promise<DeliveryExecutionRecord> {
+    return toDeliveryExecutionRecord(await deliveryPlanRequest<WireDeliveryExecutionRecord>(
       projectId,
       `/change-sets/${encodeURIComponent(changeSetId)}:execute`,
-      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
-    )
-    return toDeliveryControlChangeSet(response.change_set)
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expected_version: expectedVersion, scenario }),
+      },
+    ))
+  },
+  async list(projectId: string): Promise<DeliveryExecutionRecord[]> {
+    const response = await deliveryPlanRequest<{ items?: WireDeliveryExecutionRecord[] | null }>(projectId, '/executions')
+    return (response.items ?? []).map(toDeliveryExecutionRecord)
+  },
+  async get(projectId: string, executionId: string): Promise<DeliveryExecutionRecord> {
+    return toDeliveryExecutionRecord(await deliveryPlanRequest<WireDeliveryExecutionRecord>(
+      projectId,
+      `/executions/${encodeURIComponent(executionId)}`,
+    ))
   },
 }
 
@@ -486,5 +629,55 @@ function toDeliveryControlChangeSet(value: WireDeliveryControlChangeSet): Delive
     createdBy: value.created_by,
     createdAt: value.created_at,
     updatedAt: value.updated_at,
+  }
+}
+
+function toDeliveryExecutionRecord(value: WireDeliveryExecutionRecord): DeliveryExecutionRecord {
+  const execution = value.execution
+  return {
+    changeSet: toDeliveryControlChangeSet(value.change_set),
+    execution: {
+      id: execution.id,
+      organizationId: execution.organization_id,
+      projectId: execution.project_id,
+      changeSetId: execution.change_set_id,
+      approvalId: execution.approval_id ?? undefined,
+      status: execution.status,
+      version: execution.version,
+      mode: execution.mode,
+      adapter: execution.adapter,
+      source: execution.source,
+      scenario: execution.scenario,
+      idempotencyKey: execution.idempotency_key,
+      requestHash: execution.request_hash,
+      executedBy: execution.executed_by,
+      startedAt: execution.started_at,
+      completedAt: execution.completed_at ?? undefined,
+      retryAllowed: execution.retry_allowed,
+      recoveryAction: execution.recovery_action,
+      recoveryReason: execution.recovery_reason,
+      compensationCandidates: execution.compensation_candidates ?? [],
+      steps: (execution.steps ?? []).map(step => ({
+        id: step.id,
+        sequence: step.sequence,
+        action: step.action,
+        status: step.status,
+        attempt: step.attempt,
+        effect: step.effect,
+        outcomeSummary: step.outcome_summary,
+        evidenceRef: step.evidence_ref ?? undefined,
+        startedAt: step.started_at ?? undefined,
+        completedAt: step.completed_at ?? undefined,
+        version: step.version,
+      })),
+    },
+    evidence: {
+      id: value.evidence.id,
+      executionId: value.evidence.execution_id,
+      summary: value.evidence.summary,
+      source: value.evidence.source ?? execution.source,
+      scenario: value.evidence.scenario ?? execution.scenario,
+      references: value.evidence.references ?? [],
+    },
   }
 }

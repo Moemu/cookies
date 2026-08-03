@@ -2,19 +2,19 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 模块 1+2 与 A03 审批完整性已实现；模块 4+ 为草案 |
+| 状态 | 模块 1+2、A03 审批完整性和 A04 持久化模拟 Execution 场景已实现；模块 4+ 为草案 |
 | 记录日期 | 2026-07-29 |
-| 实现快照日期 | 2026-07-31 |
+| 实现快照日期 | 2026-08-03 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
 
-本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）与 A03（内容哈希绑定的 mock 审批完整性）。除“当前实现快照”明确列出的内容外，持久执行步骤、异常执行场景、监控和建议仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
+本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）、A03（内容哈希绑定的 mock 审批完整性）和 A04（持久化模拟 Execution/Step 场景）。除“当前实现快照”明确列出的内容外，监控和建议仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
 
-## 当前实现快照（模块 1+2+A03）
+## 当前实现快照（模块 1+2+A03+A04）
 
-当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批与已有即时本地模拟执行接缝：
+当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批与持久化本地模拟执行接缝：
 
-- API：Project-in-path 的 `/api/delivery/v1/projects/{project_id}/plans`、计划详情与乐观并发更新、不可变版本列表/详情、计划预检、ChangeSet 创建/详情/列表/预检/审批/模拟执行。
-- 数据：`delivery_plans`、`delivery_plan_versions`、`delivery_change_sets` 与不可变 `delivery_approvals`；更新以 `expected_version` 做乐观并发，旧版本返回 `409 VERSION_CONFLICT` 或 `412 VERSION_CONFLICT`。
+- API：Project-in-path 的 `/api/delivery/v1/projects/{project_id}/plans`、计划详情与乐观并发更新、不可变版本列表/详情、计划预检、ChangeSet 创建/详情/列表/预检/审批、带 Idempotency-Key 的模拟执行及 Execution 列表/详情。
+- 数据：`delivery_plans`、`delivery_plan_versions`、`delivery_change_sets`、不可变 `delivery_approvals` 与持久化 execution/step/evidence；更新以 `expected_version` 做乐观并发，旧版本返回 `409 VERSION_CONFLICT` 或 `412 VERSION_CONFLICT`。
 - 分层：`domain.go`、`approval.go`、`preflight.go`、`service.go`、`mysql_repository.go`、`backfill.go` 与 `httpapi/server.go`。
 - 隔离：所有读写同时受 Organization 和 Project 约束；跨 Project 读取即使主体拥有两个 Project 的权限也会被拒绝。
 - 权限：读取、写入、审批、执行分别要求 `delivery.read`、`delivery.write`、`delivery.approve`、`delivery.execute`；身份只来自 `ActorContext`。
@@ -41,7 +41,38 @@ A03 审批快照具有以下已实现语义：
 | error | 广告主缺失、预算为 0、排期无效、素材引用缺失、追踪配置缺失 | 阻断，并返回可定位的 repair target |
 | warning | 素材版本尚未人工确认 | 不阻断，但要求投手明确处理 |
 
-当前交付不包含 OAuth、真实平台请求、A04 持久 Execution Step/幂等/partial/failed/result_unknown、补偿语义、监控告警或建议生成。下文章节涉及这些能力时，除上述已有即时模拟接缝外，均表示后续路线图。
+当前交付不包含 OAuth、真实平台请求、自动补偿、监控告警或建议生成。下文章节涉及这些能力时，除上述 A04 受控 mock 接缝外，均表示后续路线图。
+
+---
+
+## A04：持久化模拟 Execution 场景
+
+A04 将已有的即时本地模拟接缝替换为受控、可刷新读取的 `Execution` / `Step` 记录。它仍然**只**调用 deterministic `mock_ocean_engine` adapter：`source=mock`、`mode=local_simulation` 和 fixture `scenario` 在执行、步骤和证据中均会显式返回；它不代表 Computer Use、真实广告账户或任何真实平台写入。
+
+### 对象边界与审批不变量
+
+- `ChangeSet` 是被批准的不可变动作内容与审批门禁；`Execution` 是对该 ChangeSet 的一次持久化执行尝试。Execution 的终态不会改写 Plan/ChangeSet 的内容哈希，也不会取代 A03 Approval 审计证据。
+- 创建执行前仍重新验证 A03 的 approval：不可变 approval、`execute_mock` scope、预算快照、24 小时有效期、Plan/ChangeSet version 与 canonical/action hash、Organization/Project 隔离均保持不变。
+- 成功 Step 不会被再次运行。状态推进以 `expected_version` 和持久化并发保护完成，避免多个 worker 或客户端重试创建重复效果。
+
+### HTTP、幂等与读取
+
+`POST /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:execute` 必须带 `Idempotency-Key`，请求体是 `{ "expected_version": number, "scenario": "success|failed|partial|result_unknown" }`。
+
+- 首次请求返回 `201`；同一 key 且同一 canonical request hash 返回原来的 `Execution` 和 `200`；同一 key 但 hash 不同返回稳定的 `409 IDEMPOTENCY_CONFLICT`，绝不新建执行。
+- canonical request hash 是 RFC 8785 JCS + SHA-256，输入为 `organization_id`、`project_id`、`change_set_id`、`expected_version`、`scenario` 和固定操作名 `execute_mock`；Idempotency-Key 不参与 hash。hash、key、scenario 和 provenance 都随 Execution 持久化。
+- `GET /api/delivery/v1/projects/{project_id}/executions` 返回 `{items, source:"mock", scenario:"execution_list"}`；`GET .../executions/{execution_id}` 返回单个 `{change_set, execution, evidence}`。两者均受 Organization 与 Project 边界约束，刷新后的页面必须从这些 Go API 恢复状态。
+
+### 状态、步骤与恢复决策
+
+| 层级 | 状态 |
+| --- | --- |
+| Execution | `queued` → `validating_approval` → `executing` → `verifying` → `succeeded` / `failed` / `partial` / `result_unknown` / `cancelled` |
+| Step | `pending` → `running` → `succeeded` / `failed` / `result_unknown`；或 `pending` → `skipped`（不调用 adapter） |
+
+`failed` 只表示已确认目标效果**未**产生；中断或无法验证的情况不能被写成 failed，而应为 `result_unknown`。所有 terminal fixture 都返回 `retry_allowed=false`：同一 key 的操作只能回放同一条 Execution，不能创建第二次尝试。`partial` 明确保留已完成和未完成的 Step，以及可选的补偿候选项；补偿是新的受控动作，绝不自动回滚。`result_unknown` 必须先查询/重新识别目标并形成恢复决策（`query_and_reconcile`），不能盲目重试。允许的恢复动作仅为 `none`、`create_new_change_set`、`review_and_compensate` 和 `query_and_reconcile`。
+
+每个 Step 保存 sequence、action、attempt、effect、outcome summary、evidence reference、时间戳和 version；Execution 保存 recovery action/reason、compensation candidates 和全部 Step。Evidence 也携带 `source=mock`、fixture scenario 和非敏感 references。
 
 ---
 
@@ -163,29 +194,24 @@ open → acknowledged → action_planned → resolved | dismissed
 ### 4.1 端口定义
 
 ```go
-// internal/systems/delivery/adapter.go
+// internal/systems/delivery/execution.go
 
 type PlatformAdapter interface {
-    // 创建平台对象（mock 阶段返回模拟 ID，真实阶段调用巨量 API）
-    CreateProject(ctx context.Context, plan DeliveryPlanVersion) (*CreateResult, error)
-    CreatePromotion(ctx context.Context, plan DeliveryPlanVersion, projectRef PlatformEntity) (*CreateResult, error)
-    // 暂停
-    PauseEntity(ctx context.Context, entity PlatformEntity) (*PauseResult, error)
-    // 读取（Phase B 之前返回模拟数据）
-    GetEntity(ctx context.Context, entity PlatformEntity) (*EntityStatus, error)
-    // 适配器元信息
-    Source() string // "mock" | "ocean_engine"
+    Source() Source
+    ExecuteStep(context.Context, PlatformStepRequest) (PlatformStepResult, error)
 }
 ```
+
+A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pending` 持久化为 `running`，随后才调用 `ExecuteStep`，并将返回结果推进为 `succeeded`、`failed` 或 `result_unknown`。`pending → skipped` 不调用 adapter。这样进程中断最多留下可查询的 `running`/`executing` 状态，不会在没有证据时写成 failed，也不会重新运行已成功的 Step。真实平台阶段可在同一端口后实现 action dispatch、查询复核和平台实体映射；暂停、读取与完整 `delivery_platform_entities` 仍是后续能力，不伪装成 A04 已实现行为。
 
 ### 4.2 两个实现
 
 | 实现 | 阶段 | 行为 |
 | --- | --- | --- |
-| `MockOceanEngineAdapter` | Phase A（当前） | 返回固定 mock 账号与场景的执行结果；所有响应显式标记 `source=mock`；可切换 success/partial/failed/result_unknown 场景 |
+| `DeterministicMockAdapter`（持久化标签 `mock_ocean_engine`） | Phase A（当前） | 返回固定 mock 账号与场景的逐 Step 结果；所有响应显式标记 `source=mock`；可切换 success/partial/failed/result_unknown 场景 |
 | `OceanEngineAdapter` | Phase C（写权限后） | 调用巨量 Marketing API；绑定 OAuth/SecretRef；实现限流、幂等、查询复核、错误分类和脱敏 |
 
-两个实现共享相同的 `PlatformAdapter` 端口，`delivery.Service` 只依赖端口。从 mock 切换到真实 Adapter 时，业务层代码不变，仅替换注入的适配器实例。Phase B 只读阶段通过独立的 `ReadOnlyOceanAdapter`（实现 `PlatformAdapter` 只读子集）进行契约校准，不经过执行链路。
+`delivery.Service` 只依赖上述逐 Step 端口。未来真实 Adapter 仍须遵守“先持久 running、再产生平台效果”的调用边界；Phase B 只读契约校准和真实写入依赖的 OAuth、SecretRef、限流与实体映射不属于 A04。
 
 ---
 
@@ -209,7 +235,7 @@ type PlatformAdapter interface {
 
 ### 5.3 幂等键
 
-每条 `delivery_executions` 在创建时校验 `idempotency_key` 的唯一性约束；首次创建成功生成执行记录后，相同键的重复请求返回已有记录的引用，不重复创建平台对象。
+每条 `delivery_executions` 在创建时校验 Project-scoped `idempotency_key` 的唯一性约束。canonical request hash 固定覆盖 Project、ChangeSet、`expected_version`、fixture scenario 与 `execute_mock` 操作名；同 key + 同 hash 返回原有 Execution， 同 key + 不同 hash 返回 `409 IDEMPOTENCY_CONFLICT`，不重复创建任何 mock 目标效果。
 
 ### 5.4 "回滚"改为补偿
 
@@ -257,16 +283,16 @@ type PlatformAdapter interface {
 - 计划 V2 更新后 V1 的旧审批自动失效
 - 审批页 + 审计定位（审批人、审批时间、过期时间、Plan/ChangeSet 版本、hash、scope、预算）
 
-### 模块 4：场景化模拟执行
+### 模块 4：场景化模拟执行（A04 已实现）
 
 **做什么**：投手能观察模拟执行的每一步及异常恢复。
 
 - `PlatformAdapter` 端口定义 + `MockOceanEngineAdapter` 实现
-- `delivery_executions` + `delivery_execution_steps` + `delivery_platform_entities` + `delivery_evidence` 表
-- `POST /api/delivery/v1/executions`（idempotency_key 去重）
-- `GET /api/delivery/v1/executions/{id}` → 步骤列表 + 状态 + source=mock
+- `delivery_executions` + `delivery_execution_steps` + `delivery_evidence` 表；完整 `delivery_platform_entities` 映射仍属后续真实平台阶段
+- `POST /api/delivery/v1/projects/{project_id}/change-sets/{id}:execute`（`Idempotency-Key` + canonical request hash 去重；201 创建/200 回放/409 冲突）
+- `GET /api/delivery/v1/projects/{project_id}/executions` 与 `GET /api/delivery/v1/projects/{project_id}/executions/{id}` → 步骤、状态、恢复决策和 `source=mock`
 - 四种 mock 场景：success / partial（部分成功）/ failed / result_unknown
-- 证据页（before/after snapshot + request_id + scenario tag）
+- 审批中心内的执行明细（持久 Step、脱敏 evidence reference、恢复决策与 scenario tag）；完整 before/after 平台快照仍属后续真实平台阶段
 
 ### 模块 5：Mock 监控告警
 
