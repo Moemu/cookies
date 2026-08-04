@@ -2,16 +2,16 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 模块 1+2、A03 审批完整性、A04 持久化模拟 Execution 场景已在当前基线实现；模块 5 已在上游 Draft PR #28 通过 required checks，待 #27 合并后更新基线复验；模块 6+ 为草案 |
+| 状态 | 模块 1+2、A03 审批完整性、A04 持久化模拟 Execution 场景、模块 5 mock 监控告警和三层配置/建议/人工操作包已在当前交付契约中；真实平台枚举、限额和 API 仍未接入 |
 | 记录日期 | 2026-07-29 |
 | 实现快照日期 | 2026-08-04 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
 
-本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）、A03（内容哈希绑定的 mock 审批完整性）、A04（持久化模拟 Execution/Step 场景）和已在 Draft PR #28 中完成的模块 5（mock 监控告警）。#28 必须在 #27 合并后更新到新的上游基线并复验；除“当前实现快照”明确列出的内容外，建议和真实平台能力仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
+本文记录智能投放系统的领域架构路线图，以及当前交付的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）、A03（内容哈希绑定的 mock 审批完整性）、A04（持久化模拟 Execution/Step 场景）、模块 5（mock 监控告警）和三层投放配置、确定性建议与人工操作包。除“当前实现快照”和以下冻结契约明确列出的内容外，真实平台能力仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
 
-## 当前实现快照（模块 1+2+A03+A04+模块 5）
+## 当前实现快照（模块 1+2+A03+A04+模块 5+三层配置编排）
 
-当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批、持久化本地模拟执行和项目级 mock 监控告警：
+当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批、持久化本地模拟执行、项目级 mock 监控告警，以及三层投放配置的受控编译/人工改写、确定性建议和人工操作包：
 
 - API：Project-in-path 的 `/api/delivery/v1/projects/{project_id}/plans`、计划详情与乐观并发更新、不可变版本列表/详情、计划预检、ChangeSet 创建/详情/列表/预检/审批、带 Idempotency-Key 的模拟执行及 Execution 列表/详情。
 - 数据：`delivery_plans`、`delivery_plan_versions`、`delivery_change_sets`、不可变 `delivery_approvals` 与持久化 execution/step/evidence；更新以 `expected_version` 做乐观并发，旧版本返回 `409 VERSION_CONFLICT` 或 `412 VERSION_CONFLICT`。
@@ -41,7 +41,24 @@ A03 审批快照具有以下已实现语义：
 | error | 广告主缺失、预算为 0、排期无效、素材引用缺失、追踪配置缺失 | 阻断，并返回可定位的 repair target |
 | warning | 素材版本尚未人工确认 | 不阻断，但要求投手明确处理 |
 
-当前交付不包含 OAuth、真实平台请求、自动补偿或建议生成。下文章节涉及这些能力时，除上述受控 mock 接缝外，均表示后续路线图。
+### 三层配置、建议与人工操作包冻结契约
+
+三层配置编排在既有 PlanVersion 上增加一个**可选**的 `delivery-three-tier/v1` 快照。它只描述受控 mock 配置，保留旧计划和旧 ChangeSet 的省略语义，因此既有计划的 canonical hash 不因该字段缺省而变化。三层配置快照出现时，canonical hash、ChangeSet 目标快照/hash 和 Approval action binding 一起覆盖整个快照，而不是只覆盖预算、素材或单一字段。
+
+- 快照固定携带 `source=mock`、fixture `scenario`、生成时间和 evidence references，且结构为 `1..N groups -> plans -> creatives`。每一层的每个配置字段携带值、provenance、dependency、risk、`platform_pending` 和 confirmation 元数据；它们是审计对象，不是前端推断结果。
+- `POST .../configuration:compile` 只接受 `{expected_version, fixture}`，由服务端从固定 fixture 编译新版本。支持的 fixture 是 `golden_path`、`missing_required_field`、`orphan_dependency`、`missing_confirmation` 和 `platform_fields_pending`。黄金 fixture 恰含 1 个组、2 个计划和 3 个创意；客户端不得提交自由结构来冒充编译结果。
+- `POST .../configuration:override` 只改写明确定位的一个 group/plan/creative field，并且要求 `expected_version`、typed value 和人工确认；成功总是创建新的不可变 PlanVersion。它不更新旧快照，也不允许跨 Project 定位对象。
+- 只有携带三层配置快照的版本才追加预检：结构完整性、required field、依赖是否孤立和 required confirmation。平台待补字段是显式风险/待办，不虚构真实平台枚举、预算上限、状态机或 API 限制。未携带该快照的版本继续运行既有规则，以保持原有结果与哈希。
+
+`DeliveryRecommendation` 完全由一个已冻结的 PlanVersion 确定性生成，绝不从 Alert 生成。记录必须保存 fingerprint、base/target snapshot 与 hash、evidence、action、impact、risks、observation window、cooldown 和 provenance，并只能 `proposed -> accepted|rejected`。接受建议时必须有 `Idempotency-Key`：同 key/请求返回原 decision，冲突 key 返回稳定冲突；接受响应只含 decision 和**一个新的 draft ChangeSet**。它不得修改 Plan、不得批准/执行 ChangeSet，也绝不写真实平台。
+
+由三层配置或建议创建的 ChangeSet 保存不可变 target snapshot/hash，并可选关联 `recommendation_id`；Approval 可选保存同一 target snapshot hash 作为 action binding。它们仍须分别预检和审批，接受建议本身不构成预检通过或审批。
+
+`ManualActionPackage` 仅可由已批准 ChangeSet 使用 `{expected_version}` 编译，并按幂等语义回放同一个不可变操作包。它提供按层排序的待填字段、字段来源、人工确认点、预期结果、禁止动作、evidence 和 provenance；读取或编译操作包不调用真实平台、不暗示已写入，也不取代执行审批。
+
+迁移 `20260804140000_delivery_a06_three_tier.up.sql` 是只前进、追加式迁移；文件名作为已执行迁移的历史标识保持不变。它为既有 `delivery_change_sets` 和 `delivery_approvals` 添加 nullable 的 target snapshot/hash 绑定，并创建 `delivery_recommendations` 与 `delivery_manual_action_packages`。历史行保持新增字段为 nullable，不回填或重算旧 canonical hash；所有新表和查询继续以 Organization + Project 为复合边界。
+
+当前交付不包含 OAuth、真实平台请求、自动补偿或自动化写入。后文涉及这些能力时，除上述受控 mock 接缝外，均表示后续路线图。
 
 ---
 

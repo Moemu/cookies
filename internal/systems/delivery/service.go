@@ -22,17 +22,18 @@ const (
 )
 
 var (
-	ErrNotFound                = errors.New("delivery resource not found")
-	ErrInvalidRequest          = errors.New("delivery request is invalid")
-	ErrInvalidState            = errors.New("delivery resource is not in a state that allows this action")
-	ErrVersionConflict         = errors.New("delivery resource version conflict")
-	ErrPlanVersionConflict     = errors.New("delivery plan version conflict")
-	ErrStalePlanVersion        = errors.New("delivery change set references a stale plan version")
-	ErrApprovalRequired        = errors.New("delivery approval is required")
-	ErrApprovalExpired         = errors.New("delivery approval has expired")
-	ErrApprovalContentMismatch = errors.New("delivery approval content does not match")
-	ErrApprovalScopeExceeded   = errors.New("delivery approval scope or budget was exceeded")
-	ErrIdempotencyConflict     = errors.New("delivery idempotency key was reused with a different request")
+	ErrNotFound                         = errors.New("delivery resource not found")
+	ErrInvalidRequest                   = errors.New("delivery request is invalid")
+	ErrInvalidState                     = errors.New("delivery resource is not in a state that allows this action")
+	ErrVersionConflict                  = errors.New("delivery resource version conflict")
+	ErrPlanVersionConflict              = errors.New("delivery plan version conflict")
+	ErrStalePlanVersion                 = errors.New("delivery change set references a stale plan version")
+	ErrApprovalRequired                 = errors.New("delivery approval is required")
+	ErrApprovalExpired                  = errors.New("delivery approval has expired")
+	ErrApprovalContentMismatch          = errors.New("delivery approval content does not match")
+	ErrApprovalScopeExceeded            = errors.New("delivery approval scope or budget was exceeded")
+	ErrIdempotencyConflict              = errors.New("delivery idempotency key was reused with a different request")
+	ErrUnsupportedConfigurationWorkflow = errors.New("delivery repository does not support the configuration workflow")
 )
 
 type DeliveryPlanStatus string
@@ -122,26 +123,29 @@ type DeliveryPlan struct {
 }
 
 type ChangeSet struct {
-	ID                string                  `json:"id"`
-	OrganizationID    contract.OrganizationID `json:"organization_id"`
-	ProjectID         contract.ProjectID      `json:"project_id"`
-	PlanID            string                  `json:"plan_id"`
-	PlanName          string                  `json:"plan_name"`
-	PlanVersion       int64                   `json:"plan_version"`
-	PlanCanonicalHash string                  `json:"plan_canonical_hash"`
-	BudgetLimit       Budget                  `json:"budget_limit"`
-	Status            ChangeSetStatus         `json:"status"`
-	RiskLevel         string                  `json:"risk_level"`
-	PreflightNotes    []string                `json:"preflight_notes"`
-	ApprovedBy        string                  `json:"approved_by,omitempty"`
-	ApprovedAt        *time.Time              `json:"approved_at,omitempty"`
-	Approval          *ApprovalView           `json:"approval,omitempty"`
-	Source            Source                  `json:"source"`
-	Scenario          Scenario                `json:"scenario"`
-	Version           int64                   `json:"version"`
-	CreatedBy         string                  `json:"created_by"`
-	CreatedAt         time.Time               `json:"created_at"`
-	UpdatedAt         time.Time               `json:"updated_at"`
+	ID                 string                  `json:"id"`
+	OrganizationID     contract.OrganizationID `json:"organization_id"`
+	ProjectID          contract.ProjectID      `json:"project_id"`
+	PlanID             string                  `json:"plan_id"`
+	PlanName           string                  `json:"plan_name"`
+	PlanVersion        int64                   `json:"plan_version"`
+	PlanCanonicalHash  string                  `json:"plan_canonical_hash"`
+	TargetSnapshot     *ThreeTierConfiguration `json:"target_snapshot,omitempty"`
+	TargetSnapshotHash string                  `json:"target_snapshot_hash,omitempty"`
+	RecommendationID   string                  `json:"recommendation_id,omitempty"`
+	BudgetLimit        Budget                  `json:"budget_limit"`
+	Status             ChangeSetStatus         `json:"status"`
+	RiskLevel          string                  `json:"risk_level"`
+	PreflightNotes     []string                `json:"preflight_notes"`
+	ApprovedBy         string                  `json:"approved_by,omitempty"`
+	ApprovedAt         *time.Time              `json:"approved_at,omitempty"`
+	Approval           *ApprovalView           `json:"approval,omitempty"`
+	Source             Source                  `json:"source"`
+	Scenario           Scenario                `json:"scenario"`
+	Version            int64                   `json:"version"`
+	CreatedBy          string                  `json:"created_by"`
+	CreatedAt          time.Time               `json:"created_at"`
+	UpdatedAt          time.Time               `json:"updated_at"`
 }
 
 type Execution struct {
@@ -430,6 +434,13 @@ func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, pr
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
+	// A legacy PATCH can never author three-tier configuration provenance. Preserve a compiled
+	// snapshot exactly and include it in the newly immutable canonical hash.
+	version.ThreeTierConfiguration = cloneThreeTierConfiguration(plan.CurrentVersion.ThreeTierConfiguration)
+	version.CanonicalHash, err = PlanCanonicalHash(version)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
 	return s.Repository.UpdatePlan(ctx, actor.OrganizationID, projectID, planID, request.ExpectedVersion, version)
 }
 
@@ -540,6 +551,9 @@ func (s Service) hydrateChangeSet(ctx context.Context, organizationID contract.O
 	}
 	value.PlanName = version.Name
 	value.Source, value.Scenario = version.Source, version.Scenario
+	if value.TargetSnapshot != nil {
+		value.Source, value.Scenario = value.TargetSnapshot.Source, Scenario(value.TargetSnapshot.Scenario)
+	}
 	value.PlanCanonicalHash = version.CanonicalHash
 	value.BudgetLimit = version.Budget
 	approval, err := s.Repository.GetApproval(ctx, organizationID, projectID, value.ID)
@@ -701,8 +715,12 @@ func (s Service) Preflight(ctx context.Context, actor contract.ActorContext, pro
 	if err != nil {
 		return ChangeSet{}, err
 	}
+	preflightVersion, err := changeSetPreflightVersion(version, value)
+	if err != nil {
+		return ChangeSet{}, err
+	}
 	next := ChangeSetPreflightPassed
-	for _, check := range RunPreflight(version) {
+	for _, check := range RunPreflight(preflightVersion) {
 		if !check.Passed && check.Severity == CheckSeverityError {
 			next = ChangeSetPreflightFailed
 			break
@@ -746,6 +764,15 @@ func (s Service) Approve(ctx context.Context, actor contract.ActorContext, proje
 	if err := validatePlanCanonicalHash(version); err != nil {
 		return ChangeSet{}, err
 	}
+	preflightVersion, err := changeSetPreflightVersion(version, value)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	for _, check := range RunPreflight(preflightVersion) {
+		if !check.Passed && check.Severity == CheckSeverityError {
+			return ChangeSet{}, ErrInvalidState
+		}
+	}
 	approvalID, err := s.idGenerator()("deliveryapproval")
 	if err != nil {
 		return ChangeSet{}, err
@@ -755,11 +782,12 @@ func (s Service) Approve(ctx context.Context, actor contract.ActorContext, proje
 		ApprovalID: approvalID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		PlanID: value.PlanID, PlanVersion: value.PlanVersion,
 		ChangeSetID: value.ID, ChangeSetVersion: value.Version + 1,
-		PlanCanonicalHash: version.CanonicalHash,
-		Action:            ApprovalActionExecute, Scope: ApprovalScopeExecuteMock,
+		PlanCanonicalHash:  version.CanonicalHash,
+		TargetSnapshotHash: value.TargetSnapshotHash,
+		Action:             ApprovalActionExecute, Scope: ApprovalScopeExecuteMock,
 		BudgetLimitMinor: version.Budget.TotalMinor, Currency: version.Budget.Currency,
 		ApprovedBy: actor.Principal.ID, ApprovedAt: now, ExpiresAt: now.Add(ApprovalTTL),
-		Source: SourceMock, Scenario: version.Scenario,
+		Source: SourceMock, Scenario: preflightVersion.Scenario,
 	}
 	approval.ActionHash, err = ApprovalActionHash(approval)
 	if err != nil {

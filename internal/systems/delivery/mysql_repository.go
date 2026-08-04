@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -13,6 +14,23 @@ import (
 
 type MySQLRepository struct {
 	DB *sql.DB
+}
+
+func nullableString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+func nullableJSON(v any) any {
+	if v == nil || (reflect.ValueOf(v).Kind() == reflect.Pointer && reflect.ValueOf(v).IsNil()) {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 func (r MySQLRepository) CreatePlan(ctx context.Context, value DeliveryPlan, version DeliveryPlanVersion) (DeliveryPlan, error) {
@@ -233,11 +251,11 @@ func (r MySQLRepository) CreateChangeSet(ctx context.Context, value ChangeSet) (
 		return ChangeSet{}, err
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_change_sets (
-		id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes,
+		id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, target_snapshot, target_snapshot_hash, recommendation_id,
 		approved_by, approved_at, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.PlanID, value.PlanVersion, value.Status,
-		value.RiskLevel, notes, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+		value.RiskLevel, notes, nullableJSON(value.TargetSnapshot), nullableString(value.TargetSnapshotHash), nullableString(value.RecommendationID), value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	return value, err
 }
 
@@ -344,13 +362,13 @@ func (r MySQLRepository) ApproveChangeSet(ctx context.Context, changeSet ChangeS
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_approvals (
 		approval_id, organization_id, project_id, plan_id, plan_version,
-		change_set_id, change_set_version, plan_canonical_hash, action_hash,
+		change_set_id, change_set_version, plan_canonical_hash, target_snapshot_hash, action_hash,
 		action, scope, budget_limit_minor, currency, approved_by, approved_at,
 		expires_at, source, scenario
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		approval.ApprovalID, approval.OrganizationID, approval.ProjectID, approval.PlanID,
 		approval.PlanVersion, approval.ChangeSetID, approval.ChangeSetVersion,
-		approval.PlanCanonicalHash, approval.ActionHash, approval.Action, approval.Scope,
+		approval.PlanCanonicalHash, nullableString(approval.TargetSnapshotHash), approval.ActionHash, approval.Action, approval.Scope,
 		approval.BudgetLimitMinor, approval.Currency, approval.ApprovedBy, approval.ApprovedAt,
 		approval.ExpiresAt, approval.Source, approval.Scenario)
 	if err != nil {
@@ -895,8 +913,8 @@ func scanAlert(row rowScanner) (DeliveryAlert, error) {
 }
 
 const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario, current_version, created_by, created_at, updated_at FROM delivery_plans`
-const changeSetSelect = `SELECT id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, approved_by, approved_at, version, created_by, created_at, updated_at FROM delivery_change_sets`
-const approvalSelect = `SELECT approval_id, organization_id, project_id, plan_id, plan_version, change_set_id, change_set_version, plan_canonical_hash, action_hash, action, scope, budget_limit_minor, currency, approved_by, approved_at, expires_at, source, scenario FROM delivery_approvals`
+const changeSetSelect = `SELECT id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, target_snapshot, target_snapshot_hash, recommendation_id, approved_by, approved_at, version, created_by, created_at, updated_at FROM delivery_change_sets`
+const approvalSelect = `SELECT approval_id, organization_id, project_id, plan_id, plan_version, change_set_id, change_set_version, plan_canonical_hash, target_snapshot_hash, action_hash, action, scope, budget_limit_minor, currency, approved_by, approved_at, expires_at, source, scenario FROM delivery_approvals`
 
 type rowScanner interface {
 	Scan(...any) error
@@ -915,23 +933,38 @@ func scanDeliveryPlan(row rowScanner) (DeliveryPlan, error) {
 func scanChangeSet(row rowScanner) (ChangeSet, error) {
 	var value ChangeSet
 	var notes []byte
+	var target []byte
+	var targetHash, recommendationID sql.NullString
 	var approvedBy sql.NullString
 	var approvedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.PlanID,
-		&value.PlanVersion, &value.Status, &value.RiskLevel, &notes, &approvedBy, &approvedAt,
+		&value.PlanVersion, &value.Status, &value.RiskLevel, &notes, &target, &targetHash, &recommendationID, &approvedBy, &approvedAt,
 		&value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return ChangeSet{}, err
 	}
-	if err := decodeChangeSetOptional(&value, notes, approvedBy, approvedAt); err != nil {
+	if err := decodeChangeSetOptional(&value, notes, target, targetHash, recommendationID, approvedBy, approvedAt); err != nil {
 		return ChangeSet{}, err
 	}
 	return value, nil
 }
 
-func decodeChangeSetOptional(value *ChangeSet, notes []byte, approvedBy sql.NullString, approvedAt sql.NullTime) error {
+func decodeChangeSetOptional(value *ChangeSet, notes, target []byte, targetHash, recommendationID, approvedBy sql.NullString, approvedAt sql.NullTime) error {
 	if err := json.Unmarshal(notes, &value.PreflightNotes); err != nil {
 		return fmt.Errorf("decode delivery preflight notes: %w", err)
+	}
+	if len(target) > 0 {
+		var snapshot *ThreeTierConfiguration
+		if err := json.Unmarshal(target, &snapshot); err != nil {
+			return fmt.Errorf("decode delivery target snapshot: %w", err)
+		}
+		value.TargetSnapshot = snapshot
+	}
+	if targetHash.Valid {
+		value.TargetSnapshotHash = targetHash.String
+	}
+	if recommendationID.Valid {
+		value.RecommendationID = recommendationID.String
 	}
 	if approvedBy.Valid {
 		value.ApprovedBy = approvedBy.String
@@ -944,12 +977,16 @@ func decodeChangeSetOptional(value *ChangeSet, notes []byte, approvedBy sql.Null
 
 func scanApproval(row rowScanner) (DeliveryApproval, error) {
 	var value DeliveryApproval
+	var targetSnapshotHash sql.NullString
 	err := row.Scan(
 		&value.ApprovalID, &value.OrganizationID, &value.ProjectID, &value.PlanID,
 		&value.PlanVersion, &value.ChangeSetID, &value.ChangeSetVersion,
-		&value.PlanCanonicalHash, &value.ActionHash, &value.Action, &value.Scope,
+		&value.PlanCanonicalHash, &targetSnapshotHash, &value.ActionHash, &value.Action, &value.Scope,
 		&value.BudgetLimitMinor, &value.Currency, &value.ApprovedBy, &value.ApprovedAt,
 		&value.ExpiresAt, &value.Source, &value.Scenario,
 	)
+	if targetSnapshotHash.Valid {
+		value.TargetSnapshotHash = targetSnapshotHash.String
+	}
 	return value, err
 }

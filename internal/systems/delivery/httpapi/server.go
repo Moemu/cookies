@@ -39,6 +39,15 @@ type Application interface {
 	EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error)
 	ListAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.AlertFilter) ([]delivery.DeliveryAlert, error)
 	UpdateAlert(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdateAlertRequest) (delivery.DeliveryAlert, error)
+	CompileThreeTierConfiguration(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileThreeTierRequest) (delivery.DeliveryPlan, error)
+	OverrideThreeTierField(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ThreeTierOverrideRequest) (delivery.DeliveryPlan, error)
+	GenerateRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryRecommendation, error)
+	ListRecommendations(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryRecommendation, error)
+	GetRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryRecommendation, error)
+	AcceptRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, string, int64) (delivery.RecommendationAcceptance, bool, error)
+	RejectRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.DeliveryRecommendation, error)
+	CompileManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ManualActionPackage, bool, error)
+	GetManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ManualActionPackage, error)
 }
 
 type Server struct {
@@ -56,10 +65,18 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}", server.getPlanVersion)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/preflight", server.planPreflight)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/detail", server.getPlanDetail)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/configuration:compile", server.compileConfiguration)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/configuration:override", server.overrideConfiguration)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/recommendations:generate", server.generateRecommendation)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_action}", server.createChangeSet)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/change-sets", server.listChangeSets)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}", server.getChangeSet)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/change-sets/{change_set_action}", server.changeSetAction)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}/manual-action-package", server.compileManualActionPackage)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}/manual-action-package", server.getManualActionPackage)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/recommendations", server.listRecommendations)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/recommendations/{recommendation_id}", server.getRecommendation)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/recommendations/{recommendation_action}", server.recommendationAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.createMetricSnapshot)
@@ -68,6 +85,124 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/alerts", server.listAlerts)
 	server.mux.HandleFunc("PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}", server.updateAlert)
 	return server
+}
+
+func (s *Server) compileConfiguration(w http.ResponseWriter, r *http.Request) {
+	var body delivery.CompileThreeTierRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	v, err := s.app.CompileThreeTierConfiguration(r.Context(), mustActor(r), projectID(r), r.PathValue("plan_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, v)
+}
+func (s *Server) overrideConfiguration(w http.ResponseWriter, r *http.Request) {
+	var body delivery.ThreeTierOverrideRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	v, err := s.app.OverrideThreeTierField(r.Context(), mustActor(r), projectID(r), r.PathValue("plan_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+func (s *Server) generateRecommendation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExpectedVersion int `json:"expected_version"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	v, err := s.app.GenerateRecommendation(r.Context(), mustActor(r), projectID(r), r.PathValue("plan_id"), body.ExpectedVersion)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, v)
+}
+func (s *Server) listRecommendations(w http.ResponseWriter, r *http.Request) {
+	v, err := s.app.ListRecommendations(r.Context(), mustActor(r), projectID(r), queryLimit(r))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": v, "source": delivery.SourceMock})
+}
+func (s *Server) getRecommendation(w http.ResponseWriter, r *http.Request) {
+	v, err := s.app.GetRecommendation(r.Context(), mustActor(r), projectID(r), r.PathValue("recommendation_id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+func (s *Server) recommendationAction(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("recommendation_action")
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if strings.HasSuffix(action, ":accept") {
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if key == "" {
+			writeError(w, r, delivery.ErrInvalidRequest)
+			return
+		}
+		v, replay, err := s.app.AcceptRecommendation(r.Context(), mustActor(r), projectID(r), strings.TrimSuffix(action, ":accept"), key, body.ExpectedVersion)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		if replay {
+			writeJSON(w, http.StatusOK, v)
+		} else {
+			writeJSON(w, http.StatusCreated, v)
+		}
+		return
+	}
+	if strings.HasSuffix(action, ":reject") {
+		v, err := s.app.RejectRecommendation(r.Context(), mustActor(r), projectID(r), strings.TrimSuffix(action, ":reject"), body.ExpectedVersion)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, v)
+		return
+	}
+	http.NotFound(w, r)
+}
+func (s *Server) compileManualActionPackage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	v, replay, err := s.app.CompileManualActionPackage(r.Context(), mustActor(r), projectID(r), r.PathValue("change_set_id"), body.ExpectedVersion)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if replay {
+		writeJSON(w, http.StatusOK, v)
+	} else {
+		writeJSON(w, http.StatusCreated, v)
+	}
+}
+func (s *Server) getManualActionPackage(w http.ResponseWriter, r *http.Request) {
+	v, err := s.app.GetManualActionPackage(r.Context(), mustActor(r), projectID(r), r.PathValue("change_set_id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) evaluateAlerts(w http.ResponseWriter, r *http.Request) {

@@ -9,6 +9,7 @@ import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, pr
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { DeliveryMonitoringPage } from './DeliveryMonitoringPage'
+import { DeliveryThreeTierPage } from './DeliveryThreeTierPage'
 import { PreLaunchInsightPage } from './PreLaunchInsightPage'
 import { ReportCenterPage } from './ReportCenterPage'
 import { shortId } from '../data/shortId'
@@ -1510,6 +1511,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
+    : system.key === 'delivery' && item.id === 'three-tier' ? <DeliveryThreeTierPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
