@@ -198,3 +198,12 @@ func (s *applicationStub) CreateDemoMetricSnapshot(context.Context, contract.Act
 func (s *applicationStub) ListMetricSnapshots(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryMetricSnapshot, error) {
 	return []delivery.DeliveryMetricSnapshot{{ID: "deliverymetric_1", IsSimulated: true}}, nil
 }
+func (s *applicationStub) EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error) {
+	return delivery.EvaluateAlertsResponse{Items: []delivery.DeliveryAlert{}}, nil
+}
+func (s *applicationStub) ListAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.AlertFilter) ([]delivery.DeliveryAlert, error) {
+	return []delivery.DeliveryAlert{}, nil
+}
+func (s *applicationStub) UpdateAlert(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdateAlertRequest) (delivery.DeliveryAlert, error) {
+	return delivery.DeliveryAlert{}, nil
+}

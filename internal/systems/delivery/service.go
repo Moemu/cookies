@@ -270,6 +270,9 @@ type DeliveryMetricSnapshot struct {
 	Source            string                  `json:"source"`
 	IsSimulated       bool                    `json:"is_simulated"`
 	DatasetVersion    string                  `json:"dataset_version"`
+	FixtureVersion    string                  `json:"fixture_version"`
+	WindowSequence    int                     `json:"window_sequence"`
+	DataThrough       time.Time               `json:"data_through"`
 	Currency          string                  `json:"currency"`
 	WindowStart       time.Time               `json:"window_start"`
 	WindowEnd         time.Time               `json:"window_end"`
@@ -325,6 +328,10 @@ type Repository interface {
 	GetExecutionByChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, error)
 	CreateMetricSnapshot(context.Context, DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error)
 	ListMetricSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]DeliveryMetricSnapshot, error)
+	ListProjectMetricSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]DeliveryMetricSnapshot, error)
+	UpsertAlert(context.Context, DeliveryAlert) (DeliveryAlert, error)
+	ListAlerts(context.Context, contract.OrganizationID, contract.ProjectID, AlertFilter) ([]DeliveryAlert, error)
+	UpdateAlert(context.Context, contract.OrganizationID, contract.ProjectID, string, AlertAction, int64, string, time.Time) (DeliveryAlert, error)
 }
 
 type Service struct {
@@ -1094,6 +1101,7 @@ func (s Service) CreateDemoMetricSnapshot(ctx context.Context, actor contract.Ac
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		ExecutionID: execution.Execution.ID, PlanID: plan.ID, CreativePackageID: plan.CreativePackageID,
 		Source: MetricSourceDemoFixture, IsSimulated: true, DatasetVersion: DemoMetricDatasetVersion,
+		FixtureVersion: "v1", WindowSequence: 1, DataThrough: plan.EndAt,
 		Currency: "CNY", WindowStart: plan.StartAt, WindowEnd: plan.EndAt,
 		RawMetrics: RawMetrics{Impressions: 10000, Clicks: 420, Conversions: 31, SpendCents: 50000},
 		CreatedBy:  actor.Principal.ID, CreatedAt: s.now(),

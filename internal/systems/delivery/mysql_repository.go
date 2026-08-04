@@ -684,11 +684,11 @@ func (r MySQLRepository) ListExecutions(ctx context.Context, organizationID cont
 func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {
 	result, err := r.DB.ExecContext(ctx, `INSERT IGNORE INTO delivery_metric_snapshots (
 		id, organization_id, project_id, execution_id, plan_id, creative_package_id,
-		source, is_simulated, dataset_version, currency, window_start, window_end,
+		source, is_simulated, dataset_version, fixture_version, window_sequence, currency, window_start, window_end, data_through,
 		impressions, clicks, conversions, spend_cents, created_by, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, value.PlanID, value.CreativePackageID,
-		value.Source, value.IsSimulated, value.DatasetVersion, value.Currency, value.WindowStart, value.WindowEnd,
+		value.Source, value.IsSimulated, value.DatasetVersion, value.FixtureVersion, value.WindowSequence, value.Currency, value.WindowStart, value.WindowEnd, value.DataThrough,
 		value.RawMetrics.Impressions, value.RawMetrics.Clicks, value.RawMetrics.Conversions, value.RawMetrics.SpendCents,
 		value.CreatedBy, value.CreatedAt)
 	if err != nil {
@@ -706,7 +706,7 @@ func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value Deliver
 		return DeliveryMetricSnapshot{}, false, err
 	}
 	for _, existing := range values {
-		if existing.DatasetVersion == value.DatasetVersion {
+		if existing.DatasetVersion == value.DatasetVersion && existing.FixtureVersion == value.FixtureVersion && existing.WindowSequence == value.WindowSequence {
 			return existing, false, nil
 		}
 	}
@@ -716,7 +716,7 @@ func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value Deliver
 func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string, limit int) ([]DeliveryMetricSnapshot, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT
 		id, organization_id, project_id, execution_id, plan_id, creative_package_id,
-		source, is_simulated, dataset_version, currency, window_start, window_end,
+		source, is_simulated, dataset_version, fixture_version, window_sequence, currency, window_start, window_end, data_through,
 		impressions, clicks, conversions, spend_cents, created_by, created_at
 		FROM delivery_metric_snapshots
 		WHERE organization_id = ? AND project_id = ? AND execution_id = ?
@@ -730,8 +730,8 @@ func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID
 		var value DeliveryMetricSnapshot
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &value.PlanID,
-			&value.CreativePackageID, &value.Source, &value.IsSimulated, &value.DatasetVersion,
-			&value.Currency, &value.WindowStart, &value.WindowEnd, &value.RawMetrics.Impressions,
+			&value.CreativePackageID, &value.Source, &value.IsSimulated, &value.DatasetVersion, &value.FixtureVersion, &value.WindowSequence,
+			&value.Currency, &value.WindowStart, &value.WindowEnd, &value.DataThrough, &value.RawMetrics.Impressions,
 			&value.RawMetrics.Clicks, &value.RawMetrics.Conversions, &value.RawMetrics.SpendCents,
 			&value.CreatedBy, &value.CreatedAt,
 		); err != nil {
@@ -740,6 +740,158 @@ func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+func (r MySQLRepository) ListProjectMetricSnapshots(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]DeliveryMetricSnapshot, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT id, organization_id, project_id, execution_id, plan_id, creative_package_id, source, is_simulated, dataset_version, fixture_version, window_sequence, currency, window_start, window_end, data_through, impressions, clicks, conversions, spend_cents, created_by, created_at FROM delivery_metric_snapshots WHERE organization_id=? AND project_id=? ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]DeliveryMetricSnapshot, 0)
+	for rows.Next() {
+		var v DeliveryMetricSnapshot
+		if err := rows.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.ExecutionID, &v.PlanID, &v.CreativePackageID, &v.Source, &v.IsSimulated, &v.DatasetVersion, &v.FixtureVersion, &v.WindowSequence, &v.Currency, &v.WindowStart, &v.WindowEnd, &v.DataThrough, &v.RawMetrics.Impressions, &v.RawMetrics.Clicks, &v.RawMetrics.Conversions, &v.RawMetrics.SpendCents, &v.CreatedBy, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, rows.Err()
+}
+
+func (r MySQLRepository) UpsertAlert(ctx context.Context, v DeliveryAlert) (DeliveryAlert, error) {
+	entity, err := json.Marshal(v.MonitoredEntity)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	window, err := json.Marshal(v.Window)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	metric, err := json.Marshal(v.MetricDefinition)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	owner, err := json.Marshal(v.Owner)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	evidence, err := json.Marshal(v.EvidenceRefs)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	freshness, err := json.Marshal(v.Freshness)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_alerts (id, organization_id, project_id, plan_id, execution_id, monitored_entity, alert_type, rule_id, rule_version, status, fingerprint, title, detail, severity, window_json, metric_definition, owner_json, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, version, created_by, created_at, updated_at, acknowledged_at, dismissed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)`, v.ID, v.OrganizationID, v.ProjectID, v.PlanID, v.ExecutionID, entity, v.Type, v.RuleID, v.RuleVersion, v.Status, v.Fingerprint, v.Title, v.Detail, v.Severity, window, metric, owner, evidence, v.Source, v.IsSimulated, v.Scenario, v.DatasetVersion, v.FixtureVersion, freshness, v.Version, v.CreatedBy, v.CreatedAt, v.UpdatedAt, v.AcknowledgedAt, v.DismissedAt)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	return r.alertByFingerprint(ctx, v.OrganizationID, v.ProjectID, v.Fingerprint)
+}
+func (r MySQLRepository) alertByFingerprint(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, fingerprint string) (DeliveryAlert, error) {
+	return scanAlert(r.DB.QueryRowContext(ctx, alertSelect+` WHERE organization_id=? AND project_id=? AND fingerprint=?`, org, project, fingerprint))
+}
+func (r MySQLRepository) ListAlerts(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, f AlertFilter) ([]DeliveryAlert, error) {
+	q := alertSelect + ` WHERE organization_id=? AND project_id=?`
+	args := []any{org, project}
+	if f.Status != "" {
+		q += ` AND status=?`
+		args = append(args, f.Status)
+	}
+	if f.Type != "" {
+		q += ` AND alert_type=?`
+		args = append(args, f.Type)
+	}
+	if f.Severity != "" {
+		q += ` AND severity=?`
+		args = append(args, f.Severity)
+	}
+	if f.Fixture != "" {
+		q += ` AND scenario=?`
+		args = append(args, f.Fixture)
+	}
+	if f.Cursor != "" {
+		q += ` AND id < ?`
+		args = append(args, f.Cursor)
+	}
+	q += ` ORDER BY id DESC LIMIT ?`
+	args = append(args, f.Limit)
+	rows, err := r.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]DeliveryAlert, 0)
+	for rows.Next() {
+		v, err := scanAlert(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, rows.Err()
+}
+func (r MySQLRepository) UpdateAlert(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, action AlertAction, expected int64, actor string, now time.Time) (DeliveryAlert, error) {
+	next, err := alertStatus(action)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	current, err := scanAlert(r.DB.QueryRowContext(ctx, alertSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryAlert{}, ErrNotFound
+	}
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	if current.Status == next {
+		return current, nil
+	}
+	if current.Version != expected {
+		return DeliveryAlert{}, ErrVersionConflict
+	}
+	if current.Status != AlertOpen {
+		return DeliveryAlert{}, ErrInvalidState
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE delivery_alerts SET status=?, version=version+1, resolved_by=?, acknowledged_at=IF(?='acknowledged', ?, acknowledged_at), dismissed_at=IF(?='dismissed', ?, dismissed_at), updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND status='open'`, next, actor, next, now, next, now, now, org, project, id, expected)
+	if err != nil {
+		return DeliveryAlert{}, err
+	}
+	n, _ := result.RowsAffected()
+	if n != 1 {
+		return DeliveryAlert{}, ErrVersionConflict
+	}
+	return scanAlert(r.DB.QueryRowContext(ctx, alertSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
+}
+
+const alertSelect = `SELECT id, organization_id, project_id, plan_id, execution_id, monitored_entity, alert_type, rule_id, rule_version, status, fingerprint, title, detail, severity, window_json, metric_definition, owner_json, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, version, created_by, created_at, updated_at, acknowledged_at, dismissed_at, resolved_by FROM delivery_alerts`
+
+func scanAlert(row rowScanner) (DeliveryAlert, error) {
+	var v DeliveryAlert
+	var entity, window, metric, owner, evidence, freshness []byte
+	err := row.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.PlanID, &v.ExecutionID, &entity, &v.Type, &v.RuleID, &v.RuleVersion, &v.Status, &v.Fingerprint, &v.Title, &v.Detail, &v.Severity, &window, &metric, &owner, &evidence, &v.Source, &v.IsSimulated, &v.Scenario, &v.DatasetVersion, &v.FixtureVersion, &freshness, &v.Version, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt, &v.AcknowledgedAt, &v.DismissedAt, &v.ResolvedBy)
+	if err != nil {
+		return v, err
+	}
+	if err = json.Unmarshal(entity, &v.MonitoredEntity); err != nil {
+		return v, err
+	}
+	if err = json.Unmarshal(window, &v.Window); err != nil {
+		return v, err
+	}
+	if err = json.Unmarshal(metric, &v.MetricDefinition); err != nil {
+		return v, err
+	}
+	if err = json.Unmarshal(owner, &v.Owner); err != nil {
+		return v, err
+	}
+	err = json.Unmarshal(evidence, &v.EvidenceRefs)
+	if err != nil {
+		return v, err
+	}
+	err = json.Unmarshal(freshness, &v.Freshness)
+	return v, err
 }
 
 const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario, current_version, created_by, created_at, updated_at FROM delivery_plans`

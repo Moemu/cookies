@@ -8,6 +8,7 @@ import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectR
 import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
+import { DeliveryMonitoringPage } from './DeliveryMonitoringPage'
 import { PreLaunchInsightPage } from './PreLaunchInsightPage'
 import { ReportCenterPage } from './ReportCenterPage'
 import { shortId } from '../data/shortId'
@@ -1510,6 +1511,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
+    : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
     : null
   if (specialized) surface = specialized
@@ -1549,7 +1551,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   const projectProgress = calculateProjectProgress(currentProject)
   const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces'))
   const isStrategyWorkspace = system.key === 'strategy' && item.id === 'workspaces'
-  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'plans' || item.id === 'approvals'))
+  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'plans' || item.id === 'approvals' || item.id === 'monitoring'))
   const changeView = (view: string) => {
     setActiveView(view)
     onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view)

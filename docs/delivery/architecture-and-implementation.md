@@ -2,16 +2,16 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 模块 1+2、A03 审批完整性和 A04 持久化模拟 Execution 场景已实现；模块 4+ 为草案 |
+| 状态 | 模块 1+2、A03 审批完整性、A04 持久化模拟 Execution 场景和模块 5 的 mock 监控告警已实现；模块 6+ 为草案 |
 | 记录日期 | 2026-07-29 |
 | 实现快照日期 | 2026-08-03 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
 
-本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）、A03（内容哈希绑定的 mock 审批完整性）和 A04（持久化模拟 Execution/Step 场景）。除“当前实现快照”明确列出的内容外，监控和建议仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
+本文记录智能投放系统的领域架构路线图，以及当前已落地的模块 1（DeliveryPlan 生命周期）、模块 2（服务端权威预检）、A03（内容哈希绑定的 mock 审批完整性）、A04（持久化模拟 Execution/Step 场景）和模块 5（mock 监控告警）。除“当前实现快照”明确列出的内容外，建议和真实平台能力仍是后续设计草案，不属于当前实现或当前 PR 的行为契约。
 
-## 当前实现快照（模块 1+2+A03+A04）
+## 当前实现快照（模块 1+2+A03+A04+模块 5）
 
-当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批与持久化本地模拟执行接缝：
+当前交付严格限制在 mock 投放计划草稿、投前检查、版本绑定审批、持久化本地模拟执行和项目级 mock 监控告警：
 
 - API：Project-in-path 的 `/api/delivery/v1/projects/{project_id}/plans`、计划详情与乐观并发更新、不可变版本列表/详情、计划预检、ChangeSet 创建/详情/列表/预检/审批、带 Idempotency-Key 的模拟执行及 Execution 列表/详情。
 - 数据：`delivery_plans`、`delivery_plan_versions`、`delivery_change_sets`、不可变 `delivery_approvals` 与持久化 execution/step/evidence；更新以 `expected_version` 做乐观并发，旧版本返回 `409 VERSION_CONFLICT` 或 `412 VERSION_CONFLICT`。
@@ -41,7 +41,7 @@ A03 审批快照具有以下已实现语义：
 | error | 广告主缺失、预算为 0、排期无效、素材引用缺失、追踪配置缺失 | 阻断，并返回可定位的 repair target |
 | warning | 素材版本尚未人工确认 | 不阻断，但要求投手明确处理 |
 
-当前交付不包含 OAuth、真实平台请求、自动补偿、监控告警或建议生成。下文章节涉及这些能力时，除上述 A04 受控 mock 接缝外，均表示后续路线图。
+当前交付不包含 OAuth、真实平台请求、自动补偿或建议生成。下文章节涉及这些能力时，除上述受控 mock 接缝外，均表示后续路线图。
 
 ---
 
@@ -130,7 +130,7 @@ React (Project Shell)
                           ├── delivery.Repository（MySQL）
                           ├── PlatformAdapter（端口）
                           │     └── MockOceanEngineAdapter（mock 阶段）
-                          │     └── OceanEngineAdapter（Phase C）
+                          │     └── OceanEngineAdapter（企业开放平台准入后的可选分支）
                           └── Project/Strategy/Creative 只读引用（通过主键 + 版本号，不持有外键）
 ```
 
@@ -156,7 +156,7 @@ React (Project Shell)
 | `delivery_execution_steps` | `execution_id`、`sequence`、`action`、`request_ref`、`result_ref`、`status`、`attempt`、`evidence_id` | 每一步独立记录；支持部分成功与恢复 |
 | `delivery_platform_entities` | `internal_type` / `internal_id`、`platform`、`advertiser_id`、`external_type` / `external_id`、`fingerprint`、`source` | 内部对象到外部 ID 的版本化映射 |
 | `delivery_evidence` | `before_snapshot`、`after_snapshot`、`request_id`、`platform_status`、`redacted_payload_ref`、`source` | 操作前后快照与平台状态证据 |
-| `delivery_alerts` | `rule_version`、`entity_ref`、`window`、`severity`、`status`、`owner`、`source` | mock 阶段用固定时间轴指标快照驱动 |
+| `delivery_alerts` | `organization_id`、`project_id`、`plan_id`、`execution_id`、`rule_id` / `rule_version`、`fingerprint`、`window`、`severity`、`status`、`owner`、`evidence_refs`、`fixture_version`、`freshness`、`source` | Project-scoped；由固定 demo fixture 指标快照驱动。fingerprint 绑定规则、实体、窗口、fixture/dataset 版本与证据引用，保证同一快照身份不会重复创建告警。 |
 | `delivery_recommendations` | `evidence_refs`、`action`、`risk`、`observation_window`、`decision`、`source` | 优化建议；采纳后生成 ChangeSet 重新走预检和审批 |
 
 #### 命名规范
@@ -184,7 +184,7 @@ queued → validating_approval → executing → verifying
 → succeeded | partial | failed | result_unknown | cancelled
 
 Alert:
-open → acknowledged → action_planned → resolved | dismissed
+open → acknowledged | dismissed
 ```
 
 三个状态机独立管理。平台审核状态、投放启停状态和 cookies Execution 状态分别保存各自的 `status` 列，不合并。
@@ -206,14 +206,15 @@ type PlatformAdapter interface {
 
 A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pending` 持久化为 `running`，随后才调用 `ExecuteStep`，并将返回结果推进为 `succeeded`、`failed` 或 `result_unknown`。`pending → skipped` 不调用 adapter。这样进程中断最多留下可查询的 `running`/`executing` 状态，不会在没有证据时写成 failed，也不会重新运行已成功的 Step。真实平台阶段可在同一端口后实现 action dispatch、查询复核和平台实体映射；暂停、读取与完整 `delivery_platform_entities` 仍是后续能力，不伪装成 A04 已实现行为。
 
-### 4.2 两个实现
+### 4.2 三个实现
 
 | 实现 | 阶段 | 行为 |
 | --- | --- | --- |
 | `DeterministicMockAdapter`（持久化标签 `mock_ocean_engine`） | Phase A（当前） | 返回固定 mock 账号与场景的逐 Step 结果；所有响应显式标记 `source=mock`；可切换 success/partial/failed/result_unknown 场景 |
-| `OceanEngineAdapter` | Phase C（写权限后） | 调用巨量 Marketing API；绑定 OAuth/SecretRef；实现限流、幂等、查询复核、错误分类和脱敏 |
+| `ComputerUseAdapter` | Phase B/D | 在已登录的受控会话中读取页面、核验对象并在写入范围获批后执行逐步 UI 操作；处理接管、页面证据和结果未知，不保存账号凭据 |
+| `OceanEngineAdapter` | 可选 API 分支 | 企业完成开发者、应用、scope、Secret 与授权准入后调用 Marketing API；实现限流、幂等、查询复核、错误分类和脱敏 |
 
-`delivery.Service` 只依赖上述逐 Step 端口。未来真实 Adapter 仍须遵守“先持久 running、再产生平台效果”的调用边界；Phase B 只读契约校准和真实写入依赖的 OAuth、SecretRef、限流与实体映射不属于 A04。
+`delivery.Service` 只依赖上述逐 Step 端口。未来真实 Adapter 仍须遵守“先持久 running、再产生平台效果”的调用边界；Phase B 的 Computer Use 只读校准不依赖 OAuth，Phase D 的受控写入和可选 API 分支则分别受各自的授权、限流、实体映射与安全条件约束。它们都不属于 A04。
 
 ---
 
@@ -300,34 +301,48 @@ A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pendi
 
 **做什么**：投手能完成开工巡检并把异常转成待办。
 
-- `delivery_alerts` 表：固定时间轴指标快照
-- `GET /api/delivery/v1/alerts`（按 Project/账户过滤）
-- `PATCH /api/delivery/v1/alerts/{id}`（acknowledge / dismiss）
-- 四类告警：审核拒绝 / 消耗突增 / 零转化 / 成本恶化
-- 每条告警显示：触发窗口、指标口径、证据引用、负责人
-- 场景切换：正常日 / 异常日的 mock 数据场景
-- 不做定时任务（mock 数据由 API 直接生成）
+- `delivery_alerts` 表：Project-scoped 固定时间轴指标快照；fingerprint 是规则版本、受监控实体、窗口、fixture/dataset 版本和证据引用的稳定组合身份，同一身份评估时复用已有告警而不是重复创建
+- `POST /api/delivery/v1/projects/{project_id}/alerts:evaluate`：只接受 `normal_day`、`anomaly_day`、`stale_data`、`insufficient_data` 四个确定性 fixture；返回 items、created/reused count、scenario、评估时间及 `source=demo_fixture` / `is_simulated=true`
+- `GET /api/delivery/v1/projects/{project_id}/alerts`：支持 `status`、`type`、`severity`、`fixture`、`limit` 与 opaque `cursor`；响应包含 `next_cursor`
+- `PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}`：请求为 `{action: acknowledge|dismiss, expected_version}`；仅允许 `open → acknowledged|dismissed`，过期版本返回 `409 VERSION_CONFLICT`
+- 四类告警：`review_rejected`（审核拒绝）、`spend_spike`（消耗突增）、`zero_conversion`（零转化）、`cost_worsening`（成本恶化）
+- 每条告警显示并持久化 Project/Plan/Execution/受监控实体、规则 fingerprint/version、主窗口及可选基线窗口、指标口径、证据引用、负责人、fixture/dataset 版本、结构化 freshness、创建及处置审计字段
+- 不做定时任务或真实平台轮询；mock 数据仅由受控 API fixture 评估生成
 
-### 模块 6：建议生成 ChangeSet
+#### API、状态和证据契约
 
-**做什么**：投手能采纳优化建议，经预检和审批后形成下一次模拟调整。
+`api/openapi/delivery-v1.yaml` 是监控接口的唯一事实源。它是受控、Project-scoped 的演示监控，不是广告平台集成：
 
-- `delivery_recommendations` 表
-- `GET /api/delivery/v1/recommendations`（两类建议：预算节奏 / 拒审修复）
-- `POST /api/delivery/v1/recommendations/{id}:accept` → 生成 ChangeSet
-- 采纳后走模块 2（预检）→ 模块 3（审批）→ 模块 4（执行）——复用已有链路
-- 冷却期（`observation_window`）：同一 Plan + 同一类型建议在冷却期内不重复推荐
-- 不做自动执行和 LLM 自动优化
+- `POST /api/delivery/v1/projects/{project_id}/alerts:evaluate` 只评估一个确定性 fixture：`normal_day`、`anomaly_day`、`stale_data` 或 `insufficient_data`
+- `GET /api/delivery/v1/projects/{project_id}/alerts` 可按状态、类型、严重度和 fixture 过滤，使用有界 `limit` 与 opaque `cursor` 分页
+- `PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}` 只接受 `{action: acknowledge|dismiss, expected_version}`；仅允许 `open → acknowledged|dismissed`，旧版本稳定返回 `409 VERSION_CONFLICT`
 
-### 模块 7：Demo 场景巡演
+支持的告警类型固定为审核拒绝、消耗突增、零转化和成本恶化。每条告警必须带有 organization、Project、Plan、Execution、被监控的 DeliveryPlan 实体、规则 fingerprint/version、指标及分析窗口（含可选基线）、负责人、证据、fixture/dataset 版本与 freshness。响应显式标记 `source=demo_fixture` 和 `is_simulated=true`；freshness 保存状态、数据覆盖时间、评估时间、观测 age、最大允许 age 与可选缺失指标。创建与处置均保留 actor 和时间的审计投影。
 
-**做什么**：评审者按固定脚本走完整闭环。
+告警 fingerprint 由 organization/Project、规则及版本、被监控实体、指标窗口、dataset/fixture 版本与证据引用的 canonical 内容确定。相同身份的重复评估必须复用既有告警；窗口或 provenance 变化才产生新的告警。客户端不得生成快照身份或告警结论。
 
-- 场景选择器（主路径 + 4 个异常路径：预检失败 / 执行部分成功 / 结果未知 / 审核拒绝）
-- 黄金数据一键复位
-- E2E 覆盖全部 5 个场景
-- 演示手册（每步说明 + 预期结果 + 记录栏："符合/不符合/缺信息"）
-- 所有 mock 数据带显式标签
+#### 运营界面语言
+
+运营主视图优先展示用户可读的告警结论、业务背景、已本地化的单位和可读的证据来源；规则 ID、枚举、schema 单位、fixture/actor 技术标识和原始证据 URI 只能作为次级技术披露，不能成为主要用户文案。后续模块 7 的完整 mock Tour 应审计既有投放界面是否满足同一规则，特别是既有 `AG-PREFLIGHT-002` 对“原始枚举不得作为主要用户文案”的要求。
+
+### 模块 6：三层投放配置 mock、建议与人工操作包
+
+**做什么**：把泛化的 DeliveryPlan 展开为广告组、广告计划、广告创意三层配置，使投手在没有真实写权限时也能完成完整配置、预检、审批和人工执行准备。
+
+- `DeliveryPlanVersion` 保存三层配置快照、对象依赖、来源策略/创意版本、推荐值、人工修改值、平台待补字段和风险。
+- 预检、内容哈希、ChangeSet 与 Approval 必须绑定完整三层配置，不能只绑定预算或素材等局部字段。
+- `delivery_recommendations` 保存 evidence refs、动作、影响范围、风险、观察窗口和冷却期；采纳只创建新的 ChangeSet，重新走预检和审批。
+- `ManualActionPackage` 按层输出待填写字段、字段来源、人工确认点、预期平台结果和禁止动作；它不操作真实平台，也不暗示已写入。
+- 不做自动执行和 LLM 自动优化；字段硬约束、预算与审批仍由确定性服务端规则裁决。
+
+### 模块 7：完整 mock Tour 与人工操作包验收
+
+**做什么**：评审者按固定脚本验证三层配置到监控建议的完整 mock 闭环，并确认投手能够理解和使用人工操作包。
+
+- 场景选择器（主路径 + 预检失败 / 执行部分成功 / 结果未知 / 审核拒绝等异常路径）
+- 黄金数据一键复位，且只处理明确属于 Tour run 的记录
+- E2E 覆盖行为证据；人工验收脚本记录字段来源、确认点、异常处理与操作包可理解性
+- 所有 mock 数据、操作包与 API 响应带显式来源标签，不声称真实平台写入
 
 ---
 
@@ -335,30 +350,32 @@ A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pendi
 
 ### 7.1 第一阶段边界
 
-**在当前阶段实现**：DeliveryPlan 生命周期 / 服务端预检 / 版本绑定审批 / 场景化模拟执行 / Mock 监控告警 / 建议→ChangeSet 闭环 / Demo 巡演
+**在当前阶段实现**：DeliveryPlan 生命周期 / 服务端预检 / 版本绑定审批 / 场景化模拟执行 / Mock 监控告警 / 广告组—计划—创意三层配置 mock / 建议→ChangeSet 闭环 / 人工操作包 / Demo 巡演
 
 **在当前阶段不做**：
-- 巨量引擎 OAuth、账户授权、Token 管理
-- 真实 API 读写（项目、广告、素材、报表）
-- Connector 数据同步（Raw/游标/回补/对账/指标快照）
-- Computer Use 控制面（环境/租约/会话/接管/证据/Kill Switch）
-- 定时任务、真实报表同步、LLM 自动优化
+- 巨量引擎 OAuth、账户授权、Token 管理和真实 API 调用
+- Computer Use 控制面（环境/租约/会话/接管/证据/Kill Switch）及任何真实平台写入
+- 真实数据采集、对象映射、对账和影子分析；当前监控仍是显式 fixture
+- 定时任务与 LLM 自动优化
 
 ### 7.2 后续阶段
 
 | 阶段 | 目标 | 启动前提 |
 | --- | --- | --- |
-| 第二阶段（只读校准） | 连接真实巨量只读账户，校准 mock 契约与数据口径 | 提供具体广告主账号 + 授权回调信息 |
-| 第三阶段（受控写入） | 在独立测试广告主上替换 mock Adapter 为真实写入 | 写 scope 获批 + 测试广告主 + 固定小额预算上限 + 人工负责人 |
-| 第四阶段（生产化） | 限流、事件重放、可靠性指标、凭证轮换、第二平台适配器 | 真实闭环证明瓶颈后启动 |
+| Phase B：只读校准与真实数据获取 | 在企业主投放账户下的单一测试项目中，以已登录 Computer Use 会话读取对象、页面和允许导出的报表 | 测试项目只读范围、指定管理员接管验证码/登录问题、受控设备边界 |
+| Phase C：行为流程编译与影子分析 | 将获批三层配置编译为 UI 行为、确认点、识别条件和恢复分支；以真实只读数据运行影子告警/建议 | Phase B 对象与字段校准、指标口径/新鲜度、对象映射和投手反馈 |
+| Phase D：受控写入 | 在测试项目内通过 Computer Use 填写草稿、读取回填值、人工确认提交并核验结果 | 明确写入范围、小额硬上限、人工负责人、Kill Switch、审批重验和防重演练 |
+| Phase E：生产化 | 限流、事件重放、可靠性指标、凭据轮换、第二平台适配器 | 真实闭环证明瓶颈后启动 |
 
 ---
 
-## 8. 后续接入的真实 API
+## 8. 可选的巨量引擎 Marketing API 适配分支
 
-### 8.1 巨量引擎 Marketing API 覆盖（Phase B/C 引入）
+### 8.1 准入后的能力覆盖
 
-以下为已知可用的官方 API，后续在 `OceanEngineAdapter` 中按需接入：
+公开文档可用于建立契约、mock/replay 和能力开关；但真实调用以企业获得开发者主体、应用、scope、Secret 管理和广告主授权为前提。它不是 Computer Use 只读校准或测试项目写入的前置条件。
+
+满足准入条件后，以下能力可在 `OceanEngineAdapter` 中按需接入：
 
 | 能力 | 接口 | cookies 用途 |
 | --- | --- | --- |
@@ -369,9 +386,9 @@ A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pendi
 | 素材与审核 | 素材管理、素材预审核、拒审原因接口 | 上线前检查和拒审处置 |
 | 报表 | `/open_api/v3.0/report/custom/get/` 及异步任务接口 | 指标同步、监控、分析 |
 
-### 8.2 字段映射策略
+### 8.2 双执行器字段映射策略
 
-`PlatformProject` / `PlatformPromotion` 的创建请求从 `DeliveryPlanVersion.config_json` 映射到巨量请求字段。映射表按官方 `ProjectCreateV30Request` / `PromotionCreateV30Request` 结构实现，在本文件中不展开，实现时写入对应 Adapter 的文档注释。
+三层配置快照是领域权威输入。行为流程编译器生成 Computer Use 的页面操作与读取核验步骤；API adapter 则生成结构化请求。两者都必须回写远端对象 ID、能力版本、证据与 `executor=computer_use|api`，并显式处理字段能力、授权、异步状态和错误语义的差异。不得使用全局“真/假”开关假设两者可以完全无差别互换。
 
 ---
 

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const apiBaseURL = 'http://127.0.0.1:18080'
-const mysqlBootstrap = `docker compose up -d --wait mysql && docker compose exec -T mysql mysql -uroot -proot_local_development_only -e 'CREATE DATABASE IF NOT EXISTS cookies_e2e CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci'`
+const mysqlBootstrap = `docker compose -f deployments/docker-compose.yml up -d --wait mysql && docker compose -f deployments/docker-compose.yml exec -T mysql mysql -uroot -proot_local_development_only -e 'CREATE DATABASE IF NOT EXISTS cookies_e2e CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci'`
 const mysqlCommand = process.env.COOKIES_E2E_SKIP_MYSQL_BOOTSTRAP === 'true'
   ? 'node -e ""'
   : process.platform === 'win32'
@@ -18,7 +18,7 @@ const localGoEnv = {
   COOKIES_ENV: 'local',
   COOKIES_PASSWORD_AUTH_ENABLED: 'false',
   COOKIES_HTTP_ADDR: ':18080',
-  COOKIES_MYSQL_DSN: 'root:root_local_development_only@tcp(127.0.0.1:3306)/cookies_e2e?parseTime=true&multiStatements=true',
+  COOKIES_MYSQL_DSN: 'root:root_local_development_only@tcp(127.0.0.1:3307)/cookies_e2e?parseTime=true&multiStatements=true',
   COOKIES_LOCAL_ORGANIZATION_ID: 'org_local',
   COOKIES_LOCAL_PRINCIPAL_KIND: 'user',
   COOKIES_LOCAL_PRINCIPAL_ID: 'user_local',
@@ -43,7 +43,7 @@ const localGoEnv = {
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /(platform-go-demo|delivery-plan-preflight|delivery-approval-content-hash|delivery-execution-scenarios)\.spec\.ts/,
+  testMatch: /(platform-go-demo|delivery-plan-preflight|delivery-approval-content-hash|delivery-execution-scenarios|delivery-monitoring-alerts)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   use: {

@@ -41,3 +41,10 @@ is nullable until terminal state and the idempotency uniqueness scope is
 exactly Organization + Project + key (not ChangeSet). It is intentionally a
 forward-only correction rather than an edit to a migration an environment may
 already have recorded.
+# A05 monitoring compatibility
+
+The A05 migration is additive: it preserves legacy metric rows with
+`fixture_version=legacy` and `window_sequence=1`, backfills `data_through` from
+the existing window end, and extends uniqueness for multi-window fixtures. It
+adds `delivery_alerts` with organization/project fingerprint uniqueness and CAS
+versions. No legacy metric or alert data is deleted or rewritten destructively.
