@@ -1,0 +1,47 @@
+ALTER TABLE delivery_metric_snapshots
+  ADD COLUMN fixture_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'legacy' AFTER dataset_version,
+  ADD COLUMN window_sequence INT NOT NULL DEFAULT 1 AFTER fixture_version,
+  ADD COLUMN data_through DATETIME(6) NULL AFTER window_end;
+UPDATE delivery_metric_snapshots SET data_through = window_end WHERE data_through IS NULL;
+ALTER TABLE delivery_metric_snapshots MODIFY data_through DATETIME(6) NOT NULL,
+  DROP INDEX uq_delivery_metric_dataset,
+  ADD UNIQUE KEY uq_delivery_metric_dataset_window (organization_id, execution_id, dataset_version, fixture_version, window_sequence);
+
+CREATE TABLE delivery_alerts (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  plan_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  execution_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  monitored_entity JSON NOT NULL,
+  alert_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  rule_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  rule_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  detail TEXT NOT NULL,
+  severity VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  window_json JSON NOT NULL,
+  metric_definition JSON NOT NULL,
+  owner_json JSON NOT NULL,
+  evidence_refs JSON NOT NULL,
+  source VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  is_simulated BOOLEAN NOT NULL,
+  scenario VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  dataset_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  fixture_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  freshness JSON NOT NULL,
+  version BIGINT NOT NULL,
+  created_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  acknowledged_at DATETIME(6) NULL,
+  dismissed_at DATETIME(6) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  resolved_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  UNIQUE KEY uq_delivery_alert_fingerprint (organization_id, project_id, fingerprint),
+  KEY idx_delivery_alert_list (organization_id, project_id, status, id),
+  CONSTRAINT fk_delivery_alert_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT chk_delivery_alert_type CHECK (alert_type IN ('review_rejected','spend_spike','zero_conversion','cost_worsening')),
+  CONSTRAINT chk_delivery_alert_status CHECK (status IN ('open','acknowledged','dismissed'))
+);

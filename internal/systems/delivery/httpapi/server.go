@@ -36,6 +36,9 @@ type Application interface {
 	GetExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ExecutionResult, error)
 	CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error)
 	ListMetricSnapshots(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryMetricSnapshot, error)
+	EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error)
+	ListAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.AlertFilter) ([]delivery.DeliveryAlert, error)
+	UpdateAlert(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdateAlertRequest) (delivery.DeliveryAlert, error)
 }
 
 type Server struct {
@@ -61,7 +64,57 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.createMetricSnapshot)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.listMetricSnapshots)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/alerts:evaluate", server.evaluateAlerts)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/alerts", server.listAlerts)
+	server.mux.HandleFunc("PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}", server.updateAlert)
 	return server
+}
+
+func (s *Server) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
+	var body delivery.EvaluateAlertsRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	v, err := s.app.EvaluateAlerts(r.Context(), mustActor(r), projectID(r), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	v, err := s.app.ListAlerts(r.Context(), mustActor(r), projectID(r), delivery.AlertFilter{Status: delivery.AlertStatus(q.Get("status")), Type: delivery.AlertType(q.Get("type")), Severity: q.Get("severity"), Fixture: delivery.AlertEvaluationScenario(q.Get("fixture")), Cursor: q.Get("cursor"), Limit: queryLimit(r)})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	next := ""
+	if len(v) == queryLimit(r) {
+		next = v[len(v)-1].ID
+	}
+	writeJSON(w, http.StatusOK, delivery.AlertList{Items: v, NextCursor: next, Source: delivery.MetricSourceDemoFixture, IsSimulated: true})
+}
+func (s *Server) updateAlert(w http.ResponseWriter, r *http.Request) {
+	var body delivery.UpdateAlertRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	v, err := s.app.UpdateAlert(r.Context(), mustActor(r), projectID(r), r.PathValue("alert_id"), body)
+	if err != nil {
+		if errors.Is(err, delivery.ErrVersionConflict) {
+			requestContext, _ := contract.RequestContextFrom(r.Context())
+			writeJSON(w, http.StatusConflict, struct {
+				Error    contract.Error    `json:"error"`
+				Source   delivery.Source   `json:"source"`
+				Scenario delivery.Scenario `json:"scenario"`
+			}{Error: contract.Error{Code: "VERSION_CONFLICT", Message: "resource version conflict", RequestID: requestContext.RequestID, Retryable: false, Details: []contract.FieldViolation{}}, Source: delivery.SourceMock, Scenario: "version_conflict"})
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {

@@ -343,6 +343,81 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/DeliveryMetricSnapshot' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/alerts:evaluate:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: evaluateDeliveryMonitoringAlerts
+      summary: Evaluate deterministic project-scoped monitoring alerts from one fixture
+      description: >-
+        This controlled mock evaluation never polls or writes a real advertising
+        platform. It evaluates the selected fixture, persists any resulting alert
+        projections with their evaluated metric windows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertEvaluationRequest' }
+      responses:
+        '200':
+          description: Fixture evaluation and its resulting alerts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertEvaluationResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/alerts:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listDeliveryMonitoringAlerts
+      summary: List project-scoped monitoring alerts with cursor pagination
+      parameters:
+        - $ref: '#/components/parameters/AlertStatusFilter'
+        - $ref: '#/components/parameters/AlertTypeFilter'
+        - $ref: '#/components/parameters/AlertSeverityFilter'
+        - $ref: '#/components/parameters/AlertFixtureFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Alerts ordered by most recently triggered first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertList' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/alerts/{alert_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AlertID'
+    patch:
+      operationId: updateDeliveryMonitoringAlert
+      summary: Acknowledge or dismiss an open project-scoped monitoring alert
+      description: >-
+        The only valid transitions are open to acknowledged or open to dismissed.
+        expected_version provides optimistic concurrency; terminal alert states
+        cannot be reopened through this endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAlert' }
+      responses:
+        '200':
+          description: Updated alert projection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryMonitoringAlert' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: VERSION_CONFLICT or INVALID_STATE.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     sessionCookie:
@@ -375,6 +450,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    AlertID:
+      name: alert_id
+      in: path
+      required: true
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -385,6 +465,27 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque continuation cursor returned by the previous alert list response.
+      schema: { type: string, minLength: 1 }
+    AlertStatusFilter:
+      name: status
+      in: query
+      schema: { $ref: '#/components/schemas/AlertStatus' }
+    AlertTypeFilter:
+      name: type
+      in: query
+      schema: { $ref: '#/components/schemas/AlertType' }
+    AlertSeverityFilter:
+      name: severity
+      in: query
+      schema: { $ref: '#/components/schemas/AlertSeverity' }
+    AlertFixtureFilter:
+      name: fixture
+      in: query
+      schema: { $ref: '#/components/schemas/MonitoringFixture' }
   requestBodies:
     ExpectedVersion:
       required: true
@@ -813,6 +914,164 @@ components:
             spend_cents: { type: integer, minimum: 0 }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
+    MonitoringFixture:
+      type: string
+      description: Deterministic fixture used only by the controlled monitoring evaluator.
+      enum: [normal_day, anomaly_day, stale_data, insufficient_data]
+    AlertType:
+      type: string
+      description: The four supported delivery monitoring alert classifications.
+      enum: [review_rejected, spend_spike, zero_conversion, cost_worsening]
+    AlertStatus:
+      type: string
+      enum: [open, acknowledged, dismissed]
+    AlertSeverity:
+      type: string
+      enum: [critical, high, medium, low]
+    AlertWindow:
+      type: object
+      additionalProperties: false
+      required: [start, end, timezone, data_through]
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        timezone: { type: string }
+        data_through: { type: string, format: date-time }
+        baseline_start: { type: string, format: date-time }
+        baseline_end: { type: string, format: date-time }
+    AlertMetricDefinition:
+      type: object
+      additionalProperties: false
+      required: [name, unit]
+      properties:
+        name: { type: string }
+        unit: { type: string }
+        numerator: { type: number }
+        denominator: { type: number }
+        observed_value: { type: number }
+        baseline_value: { type: number }
+        threshold: { type: number }
+    AlertOwner:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, source]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        source: { type: string }
+    AlertFreshness:
+      type: object
+      additionalProperties: false
+      required: [status, as_of, evaluated_at, age_seconds, max_age_seconds]
+      properties:
+        status: { type: string, enum: [fresh, stale, unknown, insufficient_data] }
+        as_of: { type: string, format: date-time }
+        evaluated_at: { type: string, format: date-time }
+        age_seconds: { type: integer, minimum: 0 }
+        max_age_seconds: { type: integer, minimum: 0 }
+        missing_metrics:
+          type: array
+          items: { type: string }
+    DeliveryMonitoringAlert:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, plan_id, execution_id, monitored_entity, type, rule_id, rule_version, fingerprint, severity, status, version, window, metric_definition, owner, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        plan_id: { type: string, minLength: 1 }
+        execution_id: { type: string, minLength: 1 }
+        monitored_entity:
+          type: object
+          additionalProperties: false
+          required: [type, id, advertiser_id]
+          properties:
+            type: { type: string, const: delivery_plan }
+            id: { type: string }
+            advertiser_id: { type: string }
+        type: { $ref: '#/components/schemas/AlertType' }
+        rule_id: { type: string }
+        rule_version: { type: string, const: v1 }
+        fingerprint: { type: string, minLength: 1 }
+        severity: { $ref: '#/components/schemas/AlertSeverity' }
+        status: { $ref: '#/components/schemas/AlertStatus' }
+        window: { $ref: '#/components/schemas/AlertWindow' }
+        metric_definition: { $ref: '#/components/schemas/AlertMetricDefinition' }
+        owner: { $ref: '#/components/schemas/AlertOwner' }
+        evidence_refs:
+          type: array
+          minItems: 1
+          items: { type: string }
+        source: { type: string, const: demo_fixture }
+        is_simulated: { type: boolean, const: true }
+        scenario: { $ref: '#/components/schemas/MonitoringFixture' }
+        dataset_version: { type: string, const: preroll-demo/v1 }
+        fixture_version: { type: string, minLength: 1 }
+        acknowledged_at:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+        acknowledged_by:
+          oneOf:
+            - { type: string }
+            - { type: 'null' }
+        dismissed_at:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+        dismissed_by:
+          oneOf:
+            - { type: string }
+            - { type: 'null' }
+        version: { type: integer, minimum: 1 }
+        freshness: { $ref: '#/components/schemas/AlertFreshness' }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AlertEvaluationRequest:
+      type: object
+      additionalProperties: false
+      required: [fixture]
+      properties:
+        fixture: { $ref: '#/components/schemas/MonitoringFixture' }
+    AlertEvaluationResult:
+      type: object
+      additionalProperties: false
+      required: [items, created_count, reused_count, source, is_simulated, scenario, evaluated_at]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryMonitoringAlert' }
+        created_count: { type: integer, minimum: 0 }
+        reused_count: { type: integer, minimum: 0 }
+        source: { type: string, const: demo_fixture }
+        is_simulated: { type: boolean, const: true }
+        scenario: { $ref: '#/components/schemas/MonitoringFixture' }
+        evaluated_at: { type: string, format: date-time }
+    AlertList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, source, is_simulated]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryMonitoringAlert' }
+        next_cursor:
+          oneOf:
+            - { type: string, minLength: 1 }
+            - { type: 'null' }
+        source: { type: string, const: demo_fixture }
+        is_simulated: { type: boolean, const: true }
+    UpdateAlert:
+      type: object
+      additionalProperties: false
+      required: [action, expected_version]
+      properties:
+        action:
+          type: string
+          enum: [acknowledge, dismiss]
+        expected_version: { type: integer, minimum: 1 }
     PlanDetail:
       type: object
       required: [plan, change_sets, executions]

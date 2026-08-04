@@ -1,5 +1,12 @@
 import { platformClient } from '../data/platformClient'
 
+export class DeliveryApiError extends Error {
+  constructor(readonly code: string | undefined, readonly status: number, message: string) {
+    super(message)
+    this.name = 'DeliveryApiError'
+  }
+}
+
 export type PreflightCheck = {
   code: 'confirmed_brief' | 'ready_creative' | 'budget_boundary'
   passed: boolean
@@ -478,6 +485,116 @@ export const deliveryExecutionApi = {
   },
 }
 
+/** Server-authoritative monitoring records. No client-side alert synthesis is permitted. */
+export type DeliveryAlertFixture = 'normal_day' | 'anomaly_day' | 'stale_data' | 'insufficient_data'
+export type DeliveryAlertStatus = 'open' | 'acknowledged' | 'dismissed'
+export type DeliveryAlertAction = 'acknowledge' | 'dismiss'
+
+export type DeliveryAlert = {
+  id: string
+  organizationId: string
+  projectId: string
+  planId: string
+  executionId: string
+  monitoredEntity: { type: 'delivery_plan'; id: string; advertiserId: string }
+  type: 'review_rejected' | 'spend_spike' | 'zero_conversion' | 'cost_worsening'
+  ruleId: string
+  ruleVersion: string
+  fingerprint: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  status: DeliveryAlertStatus
+  version: number
+  window: { start: string; end: string; timezone: string; dataThrough: string; baselineStart?: string; baselineEnd?: string }
+  metricDefinition: { name: string; unit: string; numerator?: number; denominator?: number; observedValue?: number; baselineValue?: number; threshold?: number }
+  owner: { id: string; displayName: string; source: string }
+  evidenceRefs: string[]
+  source: 'demo_fixture'
+  isSimulated: true
+  scenario: DeliveryAlertFixture
+  datasetVersion: string
+  fixtureVersion: string
+  freshness: { status: 'fresh' | 'stale' | 'unknown' | 'insufficient_data'; asOf: string; evaluatedAt: string; ageSeconds: number; maxAgeSeconds: number; missingMetrics?: string[] }
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type DeliveryAlertEvaluation = {
+  items: DeliveryAlert[]
+  createdCount: number
+  reusedCount: number
+  source: 'demo_fixture'
+  isSimulated: true
+  scenario: DeliveryAlertFixture
+  evaluatedAt: string
+}
+
+type WireDeliveryAlert = {
+  id: string
+  organization_id: string
+  project_id: string
+  plan_id: string
+  execution_id: string
+  monitored_entity: { type: 'delivery_plan'; id: string; advertiser_id: string }
+  type: DeliveryAlert['type']
+  rule_id: string
+  rule_version: string
+  fingerprint: string
+  severity: DeliveryAlert['severity']
+  status: DeliveryAlertStatus
+  version: number
+  window: { start: string; end: string; timezone: string; data_through: string; baseline_start?: string; baseline_end?: string }
+  metric_definition: { name: string; unit: string; numerator?: number; denominator?: number; observed_value?: number; baseline_value?: number; threshold?: number }
+  owner: { id: string; display_name: string; source: string }
+  evidence_refs: string[]
+  source: 'demo_fixture'
+  is_simulated: true
+  scenario: DeliveryAlertFixture
+  dataset_version: string
+  fixture_version: string
+  freshness: { status: DeliveryAlert['freshness']['status']; as_of: string; evaluated_at: string; age_seconds: number; max_age_seconds: number; missing_metrics?: string[] | null }
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+type WireDeliveryAlertEvaluation = {
+  items: WireDeliveryAlert[]
+  created_count: number
+  reused_count: number
+  source: 'demo_fixture'
+  is_simulated: true
+  scenario: DeliveryAlertFixture
+  evaluated_at: string
+}
+
+export const deliveryAlertApi = {
+  async evaluate(projectId: string, fixture: DeliveryAlertFixture): Promise<DeliveryAlertEvaluation> {
+    const response = await deliveryPlanRequest<WireDeliveryAlertEvaluation>(projectId, '/alerts:evaluate', {
+      method: 'POST',
+      body: JSON.stringify({ fixture }),
+    })
+    return toDeliveryAlertEvaluation(response)
+  },
+  async list(projectId: string): Promise<DeliveryAlert[]> {
+    const items: DeliveryAlert[] = []
+    let cursor: string | null = null
+    do {
+      const query: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+      const response: { items: WireDeliveryAlert[]; next_cursor: string | null; source: 'demo_fixture'; is_simulated: true } = await deliveryPlanRequest(projectId, `/alerts${query}`)
+      items.push(...response.items.map(toDeliveryAlert))
+      cursor = response.next_cursor ?? null
+    } while (cursor !== null)
+    return items
+  },
+  async action(projectId: string, alertId: string, action: DeliveryAlertAction, expectedVersion: number): Promise<DeliveryAlert> {
+    return toDeliveryAlert(await deliveryPlanRequest<WireDeliveryAlert>(projectId, `/alerts/${encodeURIComponent(alertId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action, expected_version: expectedVersion }),
+    }))
+  },
+}
+
 async function deliveryChangeSetAction(
   projectId: string,
   changeSetId: string,
@@ -492,6 +609,71 @@ async function deliveryChangeSetAction(
   return toDeliveryControlChangeSet(response)
 }
 
+function toDeliveryAlertEvaluation(value: WireDeliveryAlertEvaluation): DeliveryAlertEvaluation {
+  return {
+    items: value.items.map(toDeliveryAlert),
+    createdCount: value.created_count,
+    reusedCount: value.reused_count,
+    source: value.source,
+    isSimulated: value.is_simulated,
+    scenario: value.scenario,
+    evaluatedAt: value.evaluated_at,
+  }
+}
+
+function toDeliveryAlert(value: WireDeliveryAlert): DeliveryAlert {
+  return {
+    id: value.id,
+    organizationId: value.organization_id,
+    projectId: value.project_id,
+    planId: value.plan_id,
+    executionId: value.execution_id,
+    monitoredEntity: { type: value.monitored_entity.type, id: value.monitored_entity.id, advertiserId: value.monitored_entity.advertiser_id },
+    type: value.type,
+    ruleId: value.rule_id,
+    ruleVersion: value.rule_version,
+    fingerprint: value.fingerprint,
+    severity: value.severity,
+    status: value.status,
+    version: value.version,
+    window: {
+      start: value.window.start,
+      end: value.window.end,
+      timezone: value.window.timezone,
+      dataThrough: value.window.data_through,
+      baselineStart: value.window.baseline_start,
+      baselineEnd: value.window.baseline_end,
+    },
+    metricDefinition: {
+      name: value.metric_definition.name,
+      unit: value.metric_definition.unit,
+      numerator: value.metric_definition.numerator,
+      denominator: value.metric_definition.denominator,
+      observedValue: value.metric_definition.observed_value,
+      baselineValue: value.metric_definition.baseline_value,
+      threshold: value.metric_definition.threshold,
+    },
+    owner: { id: value.owner.id, displayName: value.owner.display_name, source: value.owner.source },
+    evidenceRefs: value.evidence_refs ?? [],
+    source: value.source,
+    isSimulated: value.is_simulated,
+    scenario: value.scenario,
+    datasetVersion: value.dataset_version,
+    fixtureVersion: value.fixture_version,
+    freshness: {
+      status: value.freshness.status,
+      asOf: value.freshness.as_of,
+      evaluatedAt: value.freshness.evaluated_at,
+      ageSeconds: value.freshness.age_seconds,
+      maxAgeSeconds: value.freshness.max_age_seconds,
+      missingMetrics: value.freshness.missing_metrics ?? undefined,
+    },
+    createdBy: value.created_by,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
+  }
+}
+
 async function deliveryPlanRequest<T>(projectId: string, path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
@@ -499,7 +681,7 @@ async function deliveryPlanRequest<T>(projectId: string, path: string, init: Req
   const payload = await response.json() as T | { error?: { code?: string; message?: string } }
   if (!response.ok) {
     const problem = payload as { error?: { code?: string; message?: string } }
-    throw new Error(problem.error?.code === 'VERSION_CONFLICT'
+    throw new DeliveryApiError(problem.error?.code, response.status, problem.error?.code === 'VERSION_CONFLICT'
       ? '计划已被其他版本更新，请刷新后再试。'
       : problem.error?.message ?? 'Delivery API 请求失败')
   }
