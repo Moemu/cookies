@@ -113,6 +113,7 @@ type Creative struct {
 	GamePrerollPlannerModelAlias   string
 	BrandFilmModelPlannerEnabled   bool
 	BrandFilmPlannerModelAlias     string
+	AINativeMaxActiveUnits         int
 }
 
 // Research configures backend-owned web research. MCP fields are retained only
@@ -142,6 +143,7 @@ type Provider struct {
 	VideoAdapter      string
 	TextAdapter       string
 	AudioAdapter      string
+	SpeechAdapter     string
 	MasterKey         string
 	MasterKeyVersion  string
 	OutputBucket      string
@@ -151,6 +153,7 @@ type Provider struct {
 	ArkText           ArkText
 	OpenAIImage       OpenAIImage
 	VolcengineASR     VolcengineASR
+	VolcengineSpeech  VolcengineSpeech
 }
 
 type ArkImage struct {
@@ -189,6 +192,13 @@ type VolcengineASR struct {
 	APIKey      string
 	ResourceID  string
 	Model       string
+}
+
+type VolcengineSpeech struct {
+	Endpoint     string
+	APIKey       string
+	ResourceID   string
+	DefaultVoice string
 }
 
 // MySQL contains only connection-pool configuration. No business module owns
@@ -413,6 +423,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			GamePrerollPlannerModelAlias:   valueOr(lookup, "COOKIES_CREATIVE_GAME_PREROLL_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 			BrandFilmModelPlannerEnabled:   brandFilmModelPlannerEnabled,
 			BrandFilmPlannerModelAlias:     valueOr(lookup, "COOKIES_CREATIVE_BRAND_FILM_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+			AINativeMaxActiveUnits:         intValueOr(lookup, "COOKIES_AI_AD_MAX_ACTIVE_UNITS", 2),
 		},
 		Strategy: Strategy{
 			Enabled:                     strategyEnabled,
@@ -454,6 +465,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			VideoAdapter:      valueOr(lookup, "COOKIES_PROVIDER_VIDEO_ADAPTER", "fake"),
 			TextAdapter:       valueOr(lookup, "COOKIES_PROVIDER_TEXT_ADAPTER", "fake"),
 			AudioAdapter:      valueOr(lookup, "COOKIES_PROVIDER_AUDIO_ADAPTER", "fake"),
+			SpeechAdapter:     valueOr(lookup, "COOKIES_PROVIDER_SPEECH_ADAPTER", "fake"),
 			MasterKey:         valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY", ""),
 			MasterKeyVersion:  valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY_VERSION", "v1"),
 			OutputBucket:      valueOr(lookup, "COOKIES_PROVIDER_OUTPUT_BUCKET", "cookies-provider-output"),
@@ -486,6 +498,12 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 				APIKey:      valueOr(lookup, "COOKIES_VOLCENGINE_ASR_API_KEY", ""),
 				ResourceID:  valueOr(lookup, "COOKIES_VOLCENGINE_ASR_RESOURCE_ID", "volc.bigasr.auc_turbo"),
 				Model:       valueOr(lookup, "COOKIES_VOLCENGINE_ASR_MODEL", "bigmodel"),
+			},
+			VolcengineSpeech: VolcengineSpeech{
+				Endpoint:     valueOr(lookup, "COOKIES_VOLCENGINE_SPEECH_ENDPOINT", "https://openspeech.bytedance.com/api/v3/tts/unidirectional"),
+				APIKey:       valueOr(lookup, "COOKIES_VOLCENGINE_SPEECH_API_KEY", ""),
+				ResourceID:   valueOr(lookup, "COOKIES_VOLCENGINE_SPEECH_RESOURCE_ID", "seed-tts-2.0"),
+				DefaultVoice: valueOr(lookup, "COOKIES_VOLCENGINE_SPEECH_DEFAULT_VOICE", ""),
 			},
 		},
 	}
@@ -571,6 +589,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Creative.BrandFilmPlannerModelAlias) == "" {
 		return fmt.Errorf("Creative brand film planner model alias is required")
 	}
+	if c.Creative.AINativeMaxActiveUnits < 1 || c.Creative.AINativeMaxActiveUnits > 10 {
+		return fmt.Errorf("COOKIES_AI_AD_MAX_ACTIVE_UNITS must be between 1 and 10")
+	}
 	if c.Research.TimeoutSeconds < 1 || c.Research.TimeoutSeconds > 600 {
 		return fmt.Errorf("COOKIES_RESEARCH_TIMEOUT_SECONDS must be between 1 and 600")
 	}
@@ -613,6 +634,9 @@ func (c Config) Validate() error {
 	}
 	if c.Provider.AudioAdapter != "fake" && c.Provider.AudioAdapter != "volcengine_asr" {
 		return fmt.Errorf("COOKIES_PROVIDER_AUDIO_ADAPTER must be fake or volcengine_asr")
+	}
+	if c.Provider.SpeechAdapter != "fake" && c.Provider.SpeechAdapter != "volcengine_speech" && c.Provider.SpeechAdapter != "minimax_speech" {
+		return fmt.Errorf("COOKIES_PROVIDER_SPEECH_ADAPTER must be fake, volcengine_speech, or minimax_speech")
 	}
 	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires a real text adapter")
@@ -695,9 +719,19 @@ func (c Config) Validate() error {
 			return fmt.Errorf("COOKIES_VOLCENGINE_ASR_AUTH_MODE must be legacy or api_key")
 		}
 	}
+	if c.Provider.SpeechAdapter == "volcengine_speech" {
+		endpoint, err := url.Parse(c.Provider.VolcengineSpeech.Endpoint)
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" {
+			return fmt.Errorf("COOKIES_VOLCENGINE_SPEECH_ENDPOINT must be an absolute HTTPS URL")
+		}
+		if strings.TrimSpace(c.Provider.VolcengineSpeech.APIKey) == "" || strings.TrimSpace(c.Provider.VolcengineSpeech.ResourceID) == "" || strings.TrimSpace(c.Provider.VolcengineSpeech.DefaultVoice) == "" {
+			return fmt.Errorf("volcengine_speech requires API key, resource ID and default voice")
+		}
+	}
 	usesGenerationBroker := c.Provider.ImageAdapter == "adapter_gateway" ||
 		c.Provider.TextAdapter == "adapter_gateway" ||
-		c.Provider.VideoAdapter == "ark_video"
+		c.Provider.VideoAdapter == "ark_video" ||
+		c.Provider.SpeechAdapter == "minimax_speech"
 	usesCredentialBroker := usesGenerationBroker || c.Research.SeedEnabled
 	if usesCredentialBroker && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {
 		return fmt.Errorf("configured Provider adapter requires COOKIES_PROVIDER_MASTER_KEY and COOKIES_PROVIDER_MASTER_KEY_VERSION")

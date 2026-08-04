@@ -547,6 +547,90 @@ func (s *Server) composeBrandFilmPreview(w http.ResponseWriter, r *http.Request)
 	s.writeBrandFilmResult(w, r, value, err)
 }
 
+func (s *Server) getBrandFilmAudio(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GetBrandFilmWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	if value.VideoDraft == nil || value.VideoDraft.BrandFilm == nil || value.VideoDraft.BrandFilm.Audio == nil {
+		s.notFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, value.VideoDraft.BrandFilm.Audio)
+}
+
+func (s *Server) prepareBrandFilmAudio(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.PrepareBrandFilmAudio(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) updateBrandFilmAudioMix(w http.ResponseWriter, r *http.Request) {
+	var body creative.UpdateBrandAudioMixRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.UpdateBrandFilmAudioMix(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) selectBrandFilmAudioVariant(w http.ResponseWriter, r *http.Request) {
+	var body creative.SelectBrandAudioVariantRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.SelectBrandFilmAudioVariant(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) materializeBrandFilmAudioAssets(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.MaterializeBrandFilmAudioAssets(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) renderBrandFilmAudioPreview(w http.ResponseWriter, r *http.Request) {
+	var body creative.BrandFilmRevisionRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.RenderBrandFilmAudioPreview(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) generateBrandFilmVoiceClip(w http.ResponseWriter, r *http.Request) {
+	var body creative.GenerateBrandVoiceClipRequest
+	if !s.decodeBrandFilmCommand(w, r, &body) {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.GenerateBrandFilmVoiceClip(r.Context(), rc, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body)
+	s.writeBrandFilmResult(w, r, value, err)
+}
+
+func (s *Server) probeBrandFilmSpeech(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.ProbeBrandFilmSpeech(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) runBrandFilmQuality(w http.ResponseWriter, r *http.Request) {
 	var body creative.RunBrandFilmQualityRequest
 	if !s.decodeBrandFilmCommand(w, r, &body) {

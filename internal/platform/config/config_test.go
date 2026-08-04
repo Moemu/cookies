@@ -36,6 +36,9 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if value.Provider.AudioAdapter != "fake" {
 		t.Fatalf("unexpected audio adapter default: %q", value.Provider.AudioAdapter)
 	}
+	if value.Provider.SpeechAdapter != "fake" {
+		t.Fatalf("unexpected speech adapter default: %q", value.Provider.SpeechAdapter)
+	}
 	if !value.Creative.ShortDramaModelPlannerEnabled ||
 		value.Creative.ShortDramaPlannerModelAlias != "cookies.text.standard" ||
 		!value.Creative.GamePrerollModelPlannerEnabled ||
@@ -43,6 +46,25 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		!value.Creative.BrandFilmModelPlannerEnabled ||
 		value.Creative.BrandFilmPlannerModelAlias != "cookies.text.standard" {
 		t.Fatalf("unexpected Creative planner defaults: %#v", value.Creative)
+	}
+}
+
+func TestVolcengineSpeechConfigurationRequiresIndependentAPIKeyAndVoice(t *testing.T) {
+	_, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_SPEECH_ADAPTER": "volcengine_speech"}))
+	if err == nil {
+		t.Fatal("speech adapter without speech credentials must be rejected")
+	}
+	value, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_PROVIDER_SPEECH_ADAPTER":         "volcengine_speech",
+		"COOKIES_VOLCENGINE_SPEECH_API_KEY":       "speech-key",
+		"COOKIES_VOLCENGINE_SPEECH_RESOURCE_ID":   "seed-tts-2.0",
+		"COOKIES_VOLCENGINE_SPEECH_DEFAULT_VOICE": "zh_female_test",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Provider.VolcengineSpeech.APIKey != "speech-key" || value.Provider.VolcengineSpeech.ResourceID != "seed-tts-2.0" {
+		t.Fatalf("unexpected speech configuration: %#v", value.Provider.VolcengineSpeech)
 	}
 }
 

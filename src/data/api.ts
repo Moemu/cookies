@@ -800,6 +800,7 @@ export type ApiBrandFilmShot = {
 
 export type ApiBrandFilmPlan = {
   revision: number
+  master_duration_ms?: number
   concept_id: string
   title: string
   story_summary: string
@@ -815,6 +816,123 @@ export type ApiBrandFilmPlan = {
   prompt_version: string
   created_at: string
 }
+
+export type ApiBrandAudioClip = {
+  id: string
+  track_id: string
+  order: number
+  fixture_uri?: string
+  asset_ref?: ApiAssetVersionRef
+  label: string
+  timeline_start_ms: number
+  timeline_end_ms: number
+  gain_db: number
+  fade_in_ms: number
+  fade_out_ms: number
+  narration_source_ref?: { plan_revision: number; shot_id: string; voiceover_hash: string }
+  cue_ref?: string
+  generation_attempt_id?: string
+  waveform_peaks?: number[]
+  word_timings?: Array<{ text: string; begin_ms: number; end_ms: number }>
+}
+
+export type ApiBrandAudioTrack = {
+  id: string
+  type: 'source_audio' | 'voiceover' | 'music' | 'sfx'
+  role: string
+  muted: boolean
+  solo: boolean
+  gain_db: number
+  locked: boolean
+  rights_status: string
+  clips: ApiBrandAudioClip[]
+}
+
+export type ApiBrandAudioWorkspace = {
+  contract_version: 'creative-brand-audio-workspace/v1'
+  plan_revision: number
+  master_duration_ms: number
+  visual_preview_asset_ref: ApiAssetVersionRef
+  blueprint_versions: Array<{
+    revision: number
+    plan_revision: number
+    master_duration_ms: number
+    voice_profile: { voice_alias: string; language: string; direction: string; speed: number; volume: number; pitch: number; emotion: string }
+    narration_cues: Array<{ id: string; shot_id: string; start_ms: number; end_ms: number; text: string; reason: string; confidence: number; estimated_duration_ms: number; available_duration_ms: number; fit_status: 'fits' | 'spacious' | 'overrun'; suggested_text?: string }>
+    music_arc: { start_ms: number; end_ms: number; direction: string }
+    sound_effect_cues: Array<{ id: string; shot_id: string; start_ms: number; end_ms: number; label: string; reason: string }>
+    pronunciations: Array<{ term: string; spoken_as: string; reason: string }>
+    director_decisions: Array<{ id: string; kind: string; target_id: string; summary: string; reason: string; confidence: number; editable: boolean }>
+    semantic_checks: Array<{ id: string; shot_id: string; status: 'pass' | 'warning'; summary: string; evidence: string; suggestion?: string }>
+    planner_version: string
+    status: string
+    content_hash: string
+  }>
+  variants: Array<{
+    id: string
+    label: string
+    variant_type: 'tone' | 'language' | 'custom'
+    language: string
+    style_preset: string
+    mix_versions: Array<{
+      id: string
+      revision: number
+      content_hash: string
+      master_duration_ms: number
+      status: string
+      tracks: ApiBrandAudioTrack[]
+    }>
+    active_mix_revision: number
+    status: string
+  }>
+  active_variant_id: string
+  active_mix_revision: number
+  mixed_preview_asset_ref?: ApiAssetVersionRef
+  final_mixed_asset_ref?: ApiAssetVersionRef
+  generation_attempts: Array<{
+    id: string
+    clip_id: string
+    ordinal: number
+    retry_of?: string
+    status: 'succeeded' | 'failed'
+    provider?: string
+    provider_snapshot?: string
+    provider_job_id?: string
+    output_asset_ref?: ApiAssetVersionRef
+    fixture_mode: boolean
+    error_code?: string
+    error_message?: string
+  }>
+  render_jobs: Array<{
+    id: string
+    mix_revision: number
+    mix_content_hash: string
+    kind: 'preview' | 'final'
+    status: 'queued' | 'running' | 'succeeded' | 'failed'
+    renderer_version: string
+    output_asset_ref?: ApiAssetVersionRef
+    error_code?: string
+    error_message?: string
+  }>
+  status: string
+  updated_at: string
+}
+
+export type ApiSpeechCapability = {
+  provider: string
+  model?: string
+  voice_id?: string
+  available: boolean
+  error_code?: string
+  error_message?: string
+  voice_aliases: string[]
+}
+
+export type ApiBrandAudioMixOperation =
+  | { op: 'set_track_gain'; track_id: string; gain_db: number }
+  | { op: 'set_track_muted'; track_id: string; muted: boolean }
+  | { op: 'replace_clip_asset'; clip_id: string; asset_ref: ApiAssetVersionRef }
+  | { op: 'set_clip_timing'; clip_id: string; timeline_start_ms: number; timeline_end_ms: number }
 
 export type ApiBrandFilmGenerationAttempt = {
   id: string
@@ -903,7 +1021,7 @@ export type ApiBrandFilmWorkspace = {
     brand_film: {
       contract_version: 'creative-brand-film-draft/v1'
       revision: number
-      stage: 'waiting_for_input' | 'brief_analysis_draft' | 'brief_confirmed' | 'concept_selection' | 'concept_confirmed' | 'production_plan_draft' | 'production_plan_confirmed' | 'generation_ready' | 'generating' | 'generation_review' | 'generation_locked' | 'quality_review' | 'ready_for_review' | 'approved' | 'delivered'
+      stage: 'waiting_for_input' | 'brief_analysis_draft' | 'brief_confirmed' | 'concept_selection' | 'concept_confirmed' | 'production_plan_draft' | 'production_plan_confirmed' | 'generation_ready' | 'generating' | 'generation_review' | 'generation_locked' | 'audio_draft' | 'quality_review' | 'ready_for_review' | 'approved' | 'delivered'
       source_snapshot: {
         fixture_id: string
         fixture_version: number
@@ -943,12 +1061,14 @@ export type ApiBrandFilmWorkspace = {
       generation?: {
         contract_version: 'creative-brand-film-generation/v1'
         plan_revision: number
+        master_duration_ms?: number
         reference_asset: ApiAssetVersionRef
         units: ApiBrandFilmGenerationUnit[]
         preview_asset?: ApiAssetVersionRef
         created_at: string
         updated_at: string
       }
+      audio?: ApiBrandAudioWorkspace
       quality_runs: ApiBrandFilmQualityRun[] | null
       delivery?: {
         quality_run_id: string
@@ -3845,6 +3965,50 @@ async function composeBrandFilmPreview(projectId: string, taskId: string, expect
   }, { 'Idempotency-Key': `brand-film-preview-${taskId}-${expectedRevision}` })
 }
 
+async function prepareBrandFilmAudio(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':prepare-audio'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-audio-${taskId}-${expectedRevision}` })
+}
+
+async function materializeBrandFilmAudioAssets(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':materialize-audio-assets'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-audio-assets-${taskId}-${expectedRevision}` })
+}
+
+async function updateBrandFilmAudioMix(projectId: string, taskId: string, expectedRevision: number, operations: ApiBrandAudioMixOperation[]) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, '/audio/mix'), 'PATCH', {
+    expected_revision: expectedRevision,
+    operations,
+  })
+}
+
+async function selectBrandFilmAudioVariant(projectId: string, taskId: string, expectedRevision: number, variantId: string) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, '/audio:select-variant'), 'POST', {
+    expected_revision: expectedRevision,
+    variant_id: variantId,
+  }, { 'Idempotency-Key': `brand-film-audio-variant-${taskId}-${expectedRevision}-${variantId}` })
+}
+
+async function renderBrandFilmAudioPreview(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':render-audio-preview'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-audio-preview-${taskId}-${expectedRevision}` })
+}
+
+async function probeBrandFilmSpeech(projectId: string) {
+  return creativeRequest<ApiSpeechCapability>(`/projects/${encodeURIComponent(projectId)}/brand-film/speech-capability`)
+}
+
+async function generateBrandFilmVoiceClip(projectId: string, taskId: string, expectedRevision: number, clipId: string, voiceAlias: string) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':generate-voice'), 'POST', {
+    expected_revision: expectedRevision,
+    clip_id: clipId,
+    voice_alias: voiceAlias,
+  }, { 'Idempotency-Key': `brand-film-voice-${taskId}-${expectedRevision}-${clipId}-${voiceAlias}` })
+}
+
 async function runBrandFilmQuality(projectId: string, taskId: string, expectedRevision: number) {
   return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':run-quality'), 'POST', {
     expected_revision: expectedRevision,
@@ -4782,6 +4946,13 @@ export const api = {
   reconcileBrandFilmUnit,
   lockBrandFilmUnit,
   composeBrandFilmPreview,
+  prepareBrandFilmAudio,
+  materializeBrandFilmAudioAssets,
+  updateBrandFilmAudioMix,
+  selectBrandFilmAudioVariant,
+  renderBrandFilmAudioPreview,
+  probeBrandFilmSpeech,
+  generateBrandFilmVoiceClip,
   runBrandFilmQuality,
   confirmBrandFilmQuality,
   finalizeBrandFilmVersion,

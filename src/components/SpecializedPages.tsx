@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
   Check,
@@ -44,6 +44,8 @@ import {
   useTaskStrategyCreativeIntake,
   useTaskStrategyTaskHandoffDetail,
 } from '../features/creative/TaskStrategyHandoff'
+
+const AINativeAdWorkspace = lazy(() => import('../features/ai-native-ad/AINativeAdWorkspace').then(module => ({ default: module.AINativeAdWorkspace })))
 
 export { DeliveryPlanLifecyclePage as DeliveryPlanPage } from './DeliveryPlanLifecyclePage'
 export { DeliveryApprovalCenterPage as ApprovalCenterPage } from './DeliveryApprovalCenterPage'
@@ -137,12 +139,17 @@ export function LegacyImageTextCreationPage({ state, activeTaskId }: { state: Da
 
 export { ImageTextWorkspacePage as ImageTextCreationPage } from './ImageTextWorkspacePage'
 
-const performanceModes = [
+const prerollModes = [
   { id: 'short-drama', label: '短剧前贴', detail: '用人物冲突、风险升级和结果反转，在 6 秒内建立继续观看的理由。', guard: '人物连续性与静音可理解' },
   { id: 'game', label: '游戏前贴', detail: '用可读目标、失败瞬间和即时反馈建立挑战感，再衔接产品或正片。', guard: '玩法真实性与结果可读性' },
   { id: 'pre-roll', label: '电商前贴', detail: '为商品视频生成 4–10 秒高注意力开场并无缝拼接。', guard: '商品保真与静音可理解' },
-  { id: 'viral-remake', label: '爆款复刻', detail: '拆解爆款结构与节奏，完成品牌映射和原创改写。', guard: '相似性与授权检查' },
 ]
+
+const performanceSections = [
+  { id: 'preroll', label: '前贴广告', detail: '短剧、游戏与电商短片段开场' },
+  { id: 'viral-remake', label: '爆款复刻', detail: '结构拆解、品牌映射与原创改写' },
+  { id: 'ai-native', label: 'AI 效果广告生成', detail: '从商品需求到完整广告视频' },
+] as const
 
 const preRollPresets = {
   'short-drama': {
@@ -164,7 +171,8 @@ const preRollPresets = {
 export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask }: { state: DataState, activeView: string, activeTaskId?: string, onOpenTask: (id: string) => void }) {
   const { currentProject, createTask } = useProject()
   const industry = industryProfile(currentProject.industry)
-  const [selected, setSelected] = useState('short-drama')
+  const [selectedSection, setSelectedSection] = useState<(typeof performanceSections)[number]['id']>('preroll')
+  const [selectedPreroll, setSelectedPreroll] = useState('short-drama')
   const [notice, setNotice] = useState('')
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
   const activeTaskType = activeTask?.type
@@ -174,7 +182,18 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
     Boolean(activeTaskId && !activeTask),
   )
   const category = activeView === '品牌广告' ? 'brand' : activeView === '素材剪辑' ? 'editing' : 'performance'
-  const activeMode = performanceModes.find(item => item.id === selected) ?? performanceModes[0]
+  const activePrerollMode = prerollModes.find(item => item.id === selectedPreroll) ?? prerollModes[0]
+  const activePerformanceLabel = selectedSection === 'viral-remake' ? '爆款复刻' : selectedSection === 'ai-native' ? 'AI 效果广告生成' : activePrerollMode.label
+  const selectLegacyPerformanceMode = (mode: string) => {
+    if (mode === 'viral-remake') {
+      setSelectedSection('viral-remake')
+      return
+    }
+    if (prerollModes.some(item => item.id === mode)) {
+      setSelectedSection('preroll')
+      setSelectedPreroll(mode)
+    }
+  }
   useEffect(() => {
     if (!activeTaskType) return
     const modeByType: Partial<Record<BusinessTaskType, string>> = {
@@ -185,24 +204,24 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       video: 'short-drama',
     }
     const nextMode = modeByType[activeTaskType]
-    if (nextMode) setSelected(nextMode)
+    if (nextMode) selectLegacyPerformanceMode(nextMode)
   }, [activeTaskType])
   useEffect(() => {
     if (!handoffIntake) return
     const nextMode = taskStrategyPerformanceMode(
       handoffIntake.request.task_strategy_input.business_code,
     )
-    if (nextMode) setSelected(nextMode)
+    if (nextMode) selectLegacyPerformanceMode(nextMode)
     setNotice('任务策略已冻结到 Creative；请补齐生产素材和人工确认后继续。')
   }, [handoffIntake])
   const create = async () => {
-    const name = category === 'performance' ? activeMode.label : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
+    const name = category === 'performance' ? activePerformanceLabel : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
     const type: BusinessTaskType = category === 'brand' ? 'brand_video'
       : category === 'editing' ? 'video_edit'
-      : activeMode.id === 'short-drama' ? 'short_drama_preroll'
-      : activeMode.id === 'game' ? 'game_preroll'
-      : activeMode.id === 'pre-roll' ? 'commerce_preroll'
-      : 'viral_remake'
+      : selectedSection === 'viral-remake' ? 'viral_remake'
+      : activePrerollMode.id === 'short-drama' ? 'short_drama_preroll'
+      : activePrerollMode.id === 'game' ? 'game_preroll'
+      : 'commerce_preroll'
     try {
       const task = await createTask({
         type,
@@ -218,14 +237,19 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 确认到剧本分镜形成可追溯闭环。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
   const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '从 Brief、创意与分镜，到生成锁定、质量确认和版本交付，形成可追溯的品牌广告制作闭环。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
-    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activeMode.label}</button> : null}</header>
+    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' && selectedSection !== 'ai-native' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activePerformanceLabel}</button> : null}</header>
     <IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/>
     <ProjectMediaContext />
-    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selected === 'short-drama' ? <PreRollWorkspace handoffIntake={handoffIntake ?? undefined} key={selected} mode={selected} onNotice={setNotice}/> : selected === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <div className="performance-workflow">
-      <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
-      <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
-      <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
-    </div>}</> : category === 'brand' ? <BrandFilmWorkspace onNotice={setNotice}/> : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }}/>}
+    {category === 'performance' ? <>
+      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
+      {selectedSection === 'preroll' ? <>
+        <div className="preroll-subnav">
+          <span className="preroll-subnav-label"><b>前贴广告</b><i>/</i>选择类型</span>
+          <div className="performance-mode-tabs preroll-mode-tabs" role="tablist" aria-label="前贴广告类型">{prerollModes.map(mode => <button key={mode.id} id={`preroll-mode-${mode.id}`} role="tab" title={mode.guard} aria-selected={selectedPreroll === mode.id} className={selectedPreroll === mode.id ? 'active' : ''} onClick={() => { setSelectedPreroll(mode.id); setNotice('') }}><b>{mode.label}</b></button>)}</div>
+        </div>
+        {selectedPreroll === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selectedPreroll === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : <PreRollWorkspace handoffIntake={handoffIntake ?? undefined} mode="short-drama" onNotice={setNotice}/>}
+      </> : selectedSection === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <Suspense fallback={<div className="ai-native-feature-loading">正在加载 AI 效果广告工作台…</div>}><AINativeAdWorkspace projectId={currentProject.id} onNotice={setNotice}/></Suspense>}
+    </> : category === 'brand' ? <BrandFilmWorkspace onNotice={setNotice}/> : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }}/>}
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </section></StateBoundary>
 }

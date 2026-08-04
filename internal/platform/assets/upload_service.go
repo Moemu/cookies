@@ -38,6 +38,7 @@ type UploadService struct {
 	Now              func() time.Time
 	NewID            ids.Generator
 	VideoProbe       VideoMetadataProbe
+	AudioProbe       AudioMetadataProbe
 }
 
 func (s UploadService) Create(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, key contract.IdempotencyKey, request CreateUploadRequest) (CreateUploadResponse, error) {
@@ -405,6 +406,84 @@ func (s UploadService) IngestDerivedImage(ctx context.Context, requestContext co
 	return ref, nil
 }
 
+// IngestDerivedAudio persists processor- or fixture-produced audio with stable
+// derivation identity and Creative resource lineage. The bytes pass through
+// the same scanner, MIME sniffing, FFprobe, and project authorization gates as
+// uploaded and provider-generated assets.
+func (s UploadService) IngestDerivedAudio(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, derivationID string, content io.Reader, sizeBytes int64, mimeType string, sourceResources []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+	if err := s.validateDependencies(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if err := requestContext.Validate(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if !requestContext.Actor.HasScope("assets.write") {
+		return contract.ProjectAssetRef{}, fmt.Errorf("assets.write scope is required")
+	}
+	if strings.TrimSpace(derivationID) == "" || len(derivationID) > 128 || content == nil || sizeBytes < 1 || sizeBytes > MaxAudioBytes || !allowedDeclaredAudioMIME(mimeType) || len(sourceResources) == 0 {
+		return contract.ProjectAssetRef{}, fmt.Errorf("derivation_id, lineage, and supported audio content are required")
+	}
+	for index, source := range sourceResources {
+		if err := source.Validate(); err != nil {
+			return contract.ProjectAssetRef{}, fmt.Errorf("source resource %d: %w", index, err)
+		}
+	}
+	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	newID := s.idGenerator()
+	assetIDValue, err := newID("asset")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	blobID, err := newID("blob")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	stagingID, err := newID("audiostage")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	staged, err := s.Blobs.Put(ctx, s.QuarantineBucket, quarantineKey(requestContext.Actor.OrganizationID, stagingID), io.LimitReader(content, MaxAudioBytes+1), sizeBytes, mimeType)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	defer s.Blobs.Delete(ctx, staged.ObjectLocation)
+	commit, err := s.ingestStoredObject(ctx, requestContext.Actor.OrganizationID, projectID, contract.AssetID(assetIDValue), blobID,
+		project.ProjectContextVersion, contract.AssetSourceDerived, staged.ObjectLocation, "", "", "", requestContext.TraceID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	commit.DerivationID = derivationID
+	commit.Event.Data, err = json.Marshal(contract.AssetReadyData{
+		AssetKind: commit.Kind, MIMEType: commit.MIMEType, SizeBytes: commit.SizeBytes,
+		SourceType: contract.AssetSourceDerived, DerivationID: derivationID,
+	})
+	if err != nil {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, err
+	}
+	for _, source := range sourceResources {
+		commit.Relations = append(commit.Relations, AssetRelation{
+			OrganizationID: requestContext.Actor.OrganizationID,
+			ProjectID:      projectID,
+			OutputAsset:    contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version},
+			RelationType:   AssetRelationDerivedFrom,
+			Source:         source,
+		})
+	}
+	ref, err := s.Repository.CompleteDerived(ctx, derivationID, commit, s.now())
+	if err != nil {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, err
+	}
+	if ref.AssetVersion.AssetID != commit.AssetID || ref.AssetVersion.Version != commit.Version {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+	}
+	return ref, nil
+}
+
 // IngestRenderedImage is the Assets-owned boundary for deterministic Creative
 // image composition. The caller supplies only stable lineage references;
 // Assets validates the bytes and persists the immutable rendered version.
@@ -550,6 +629,7 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 		return AssetCommit{}, err
 	}
 	defer reader.Close()
+	info.MIMEType = canonicalDetectedMediaMIME(info.MIMEType)
 	assetKind, maxBytes, supported := generatedAssetPolicy(info.MIMEType)
 	if !supported || info.SizeBytes < 1 || info.SizeBytes > maxBytes {
 		return AssetCommit{}, fmt.Errorf("%w: size or media type is outside the supported range", ErrInvalidAssetContent)
@@ -564,6 +644,7 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	mimeType := http.DetectContentType(data[:min(len(data), 512)])
 	width, height := 0, 0
 	var videoMetadata VideoMetadata
+	var audioMetadata AudioMetadata
 	switch assetKind {
 	case contract.AssetImage:
 		if !allowedDeclaredImageMIME(mimeType) {
@@ -594,6 +675,22 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 			return AssetCommit{}, fmt.Errorf("%w: video metadata probe is unavailable", ErrInvalidAssetContent)
 		}
 		mimeType = "video/mp4"
+	case contract.AssetAudio:
+		detectedAudioMIME, ok := detectAudioMIME(data)
+		if !ok || detectedAudioMIME != info.MIMEType {
+			return AssetCommit{}, fmt.Errorf("%w: detected content is not the declared audio type", ErrInvalidAssetContent)
+		}
+		if s.AudioProbe == nil {
+			return AssetCommit{}, fmt.Errorf("%w: audio metadata probe is unavailable", ErrInvalidAssetContent)
+		}
+		audioMetadata, err = s.AudioProbe.Probe(ctx, data, detectedAudioMIME)
+		if err != nil {
+			return AssetCommit{}, fmt.Errorf("%w: %v", ErrInvalidAssetContent, err)
+		}
+		if err := audioMetadata.Validate(); err != nil {
+			return AssetCommit{}, fmt.Errorf("%w: %v", ErrInvalidAssetContent, err)
+		}
+		mimeType = detectedAudioMIME
 	}
 	if err := s.Scanner.Scan(ctx, bytes.NewReader(data)); err != nil {
 		if errors.Is(err, ErrMalwareDetected) {
@@ -620,6 +717,8 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 		} else {
 			media = mediaMetadataFromVideo(videoMetadata)
 		}
+	} else if assetKind == contract.AssetAudio {
+		media = mediaMetadataFromAudio(audioMetadata)
 	}
 	eventID, err := s.idGenerator()("event")
 	if err != nil {
@@ -649,10 +748,42 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 		BlobID: blobID, OrganizationID: organizationID, ProjectID: projectID, AssetID: assetID, Version: 1,
 		Kind: assetKind, SourceType: source, OwnerSystem: "assets", MIMEType: mimeType,
 		SizeBytes: int64(len(data)), SHA256: sha256Value, WidthPixels: width, HeightPixels: height, Media: media,
-		DurationMS: videoMetadata.DurationMS, FrameRate: videoMetadata.FrameRate, VideoCodec: videoMetadata.VideoCodec, AudioCodec: videoMetadata.AudioCodec,
+		DurationMS: max(videoMetadata.DurationMS, audioMetadata.DurationMS), FrameRate: videoMetadata.FrameRate, VideoCodec: videoMetadata.VideoCodec, AudioCodec: firstNonEmpty(videoMetadata.AudioCodec, audioMetadata.Codec),
 		RenderJobID: renderJobID, ProviderJobID: providerJobID, ProviderOutputID: providerOutputID, ProjectContextVersion: projectContextVersion,
 		Location: durable.ObjectLocation, Event: event,
 	}, nil
+}
+
+func canonicalDetectedMediaMIME(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "audio/wave", "audio/x-wav":
+		return "audio/wav"
+	case "audio/mp3":
+		return "audio/mpeg"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func mediaMetadataFromAudio(value AudioMetadata) MediaMetadata {
+	return MediaMetadata{
+		DurationSeconds: float64(value.DurationMS) / 1000,
+		Codec:           value.Codec,
+		BitrateBPS:      value.BitrateBPS,
+		AudioCodec:      value.Codec,
+		AudioChannels:   value.Channels,
+		AudioSampleRate: value.SampleRate,
+		ProbeStatus:     MediaProbeSucceeded,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func mediaMetadataFromVideo(value VideoMetadata) MediaMetadata {
