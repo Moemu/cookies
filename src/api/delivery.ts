@@ -40,7 +40,7 @@ export const deliveryApi = {
 }
 
 export type DeliverySource = 'mock'
-export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue'
+export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue' | 'missing_required_field' | 'orphan_dependency' | 'missing_confirmation' | 'platform_fields_pending'
 
 export type DeliveryPlanDraft = {
   name: string
@@ -87,6 +87,72 @@ export type DeliveryPlanVersion = DeliveryPlanDraft & {
   scenario: DeliveryScenario
   createdBy: { kind: 'user' | 'service'; id: string }
   createdAt: string
+  /** Server-compiled, three-tier mock configuration. */
+  threeTierConfiguration?: DeliveryThreeTierConfiguration
+}
+
+export type DeliveryFieldValue = string | number | boolean | null | string[]
+
+export type DeliveryThreeTierField = {
+  key: string
+  label: string
+  recommendedValue?: DeliveryFieldValue
+  manualValue?: DeliveryFieldValue
+  effectiveValue?: DeliveryFieldValue
+  valueType: string
+  effectiveSource: string
+  sourceRefs: string[]
+  dependencyRefs: string[]
+  riskRefs: string[]
+  evidenceRefs: string[]
+  mockRequired: boolean
+  platformRequired: boolean
+  platformStatus: string
+  editable: boolean
+  confirmation?: { required: boolean; label?: string; confirmed?: boolean }
+}
+
+export type DeliveryThreeTierCreative = { id: string; label: string; fields: DeliveryThreeTierField[] }
+export type DeliveryThreeTierPlan = { id: string; label: string; fields: DeliveryThreeTierField[]; creatives: DeliveryThreeTierCreative[] }
+export type DeliveryThreeTierGroup = { id: string; label: string; fields: DeliveryThreeTierField[]; plans: DeliveryThreeTierPlan[] }
+
+export type DeliveryThreeTierConfiguration = {
+  schema: string
+  source: DeliverySource
+  scenario: string
+  generatedAt: string
+  evidenceRefs: string[]
+  groups: DeliveryThreeTierGroup[]
+}
+
+export type DeliveryRecommendation = {
+  id: string
+  planId: string
+  planVersion: number
+  status: 'pending' | 'accepted' | 'rejected' | string
+  version: number
+  evidenceRefs: string[]
+  action: string
+  impact: string
+  risks: string[]
+  observation: string
+  cooldown?: string
+  source: DeliverySource
+  scenario: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ManualActionPackage = {
+  id: string
+  changeSetId: string
+  planId: string
+  source: DeliverySource
+  scenario: string
+  generatedAt: string
+  instructions: Array<{ fieldKey: string; effectiveValue: DeliveryFieldValue; source: string; confirmationRequired: boolean; expectedResult: string; evidenceRefs: string[] }>
+  forbiddenActions: string[]
+  evidenceRefs: string[]
 }
 
 export type DeliveryPlan = {
@@ -106,7 +172,7 @@ export type DeliveryPlan = {
 }
 
 export type DeliveryPreflightCheck = {
-  code: 'advertiser_available' | 'budget_positive' | 'schedule_valid' | 'creative_present' | 'creative_confirmed' | 'tracking_complete'
+  code: 'advertiser_available' | 'budget_positive' | 'schedule_valid' | 'creative_present' | 'creative_confirmed' | 'tracking_complete' | 'three_tier_structure' | 'three_tier_required_fields' | 'three_tier_dependencies' | 'three_tier_confirmation' | 'three_tier_platform_pending'
   severity: 'error' | 'warning'
   passed: boolean
   message: string
@@ -262,6 +328,80 @@ type WireDeliveryPlanVersion = WireDeliveryPlanDraft & {
   source: DeliverySource
   scenario: DeliveryScenario
   created_by: { kind: 'user' | 'service'; id: string }
+  created_at: string
+  three_tier_configuration?: WireDeliveryThreeTierConfiguration | null
+}
+
+type WireDeliveryThreeTierField = {
+  key: string
+  label?: string
+  recommended: { type: string; value: DeliveryFieldValue }
+  manual?: { type: string; value: DeliveryFieldValue } | null
+  effective: { type: string; value: DeliveryFieldValue }
+  source: string
+  effective_source?: string
+  source_refs?: string[] | null
+  dependency?: string
+  dependency_refs?: string[] | null
+  risk?: string
+  risk_refs?: string[] | null
+  evidence_refs: string[]
+  mock_required: boolean
+  platform_required: boolean
+  platform_status: string
+  editable: boolean
+  confirmation: boolean
+}
+
+type WireDeliveryThreeTierCreative = { id: string; name: string; fields: WireDeliveryThreeTierField[] }
+type WireDeliveryThreeTierPlan = { id: string; name: string; fields?: WireDeliveryThreeTierField[] | null; creatives: WireDeliveryThreeTierCreative[] }
+type WireDeliveryThreeTierGroup = { id: string; name: string; fields?: WireDeliveryThreeTierField[] | null; plans: WireDeliveryThreeTierPlan[] }
+type WireDeliveryThreeTierConfiguration = {
+  schema?: string
+  contract_version?: string
+  source: DeliverySource
+  scenario: string
+  fixture_scenario?: string
+  generated_at?: string
+  evidence?: string[] | null
+  evidence_refs?: string[] | null
+  groups: WireDeliveryThreeTierGroup[]
+}
+
+type WireDeliveryRecommendation = {
+  id: string
+  plan_id: string
+  plan_version: number
+  target_snapshot?: WireDeliveryThreeTierConfiguration | null
+  status?: string
+  state?: string
+  version: number
+  evidence?: string[] | null
+  evidence_refs?: string[] | null
+  action: unknown
+  impact: unknown
+  risks?: unknown[] | null
+  observation?: unknown
+  observation_window?: unknown
+  cooldown_until?: string | null
+  cooldown?: unknown
+  provenance: string
+  source?: DeliverySource
+  scenario?: string
+  created_at?: string
+  updated_at?: string
+}
+
+type WireManualActionPackage = {
+  id: string
+  change_set_id: string
+  instructions?: Array<{ field_key: string; effective: { type: string; value: DeliveryFieldValue }; source: string; confirmation_required: boolean; expected_result: string; evidence_refs?: string[] | null }> | null
+  layers?: Array<{ fields: Array<{ field_key: string; value: { type: string; value: DeliveryFieldValue }; source: string; confirmation: { required: boolean; confirmed: boolean }; expected_result: string; evidence_refs?: string[] | null }> }> | null
+  source?: DeliverySource
+  scenario?: string
+  evidence?: string[] | null
+  evidence_refs?: string[] | null
+  forbidden_actions?: string[] | null
   created_at: string
 }
 
@@ -452,6 +592,90 @@ export const deliveryPlanApi = {
   },
   async approveChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
     return deliveryChangeSetAction(projectId, changeSetId, 'approve', expectedVersion)
+  },
+}
+
+/** Three-tier configuration compilation and recommendation lifecycle; all records remain mock-only. */
+export const deliveryConfigurationApi = {
+  async compile(projectId: string, planId: string, expectedVersion: number, fixture: string): Promise<DeliveryPlan> {
+    return toDeliveryPlan(await deliveryPlanRequest<WireDeliveryPlan>(
+      projectId,
+      `/plans/${encodeURIComponent(planId)}/configuration:compile`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion, fixture }) },
+    ))
+  },
+  async override(projectId: string, planId: string, input: {
+    expectedVersion: number
+    groupId: string
+    planId: string
+    creativeId: string
+    fieldKey: string
+    value: { type: string; value: DeliveryFieldValue }
+    confirmed: boolean
+  }): Promise<DeliveryPlan> {
+    const { expectedVersion, groupId, planId: targetPlanId, creativeId, fieldKey, value, confirmed } = input
+    return toDeliveryPlan(await deliveryPlanRequest<WireDeliveryPlan>(
+      projectId,
+      `/plans/${encodeURIComponent(planId)}/configuration:override`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expected_version: expectedVersion,
+          group_id: groupId,
+          plan_id: targetPlanId,
+          creative_id: creativeId,
+          field_key: fieldKey,
+          value,
+          confirmed,
+        }),
+      },
+    ))
+  },
+  async generateRecommendations(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryRecommendation> {
+    const response = await deliveryPlanRequest<WireDeliveryRecommendation>(
+      projectId,
+      `/plans/${encodeURIComponent(planId)}/recommendations:generate`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+    )
+    return toDeliveryRecommendation(response)
+  },
+  async listRecommendations(projectId: string): Promise<DeliveryRecommendation[]> {
+    const response = await deliveryPlanRequest<{ items?: WireDeliveryRecommendation[] | null }>(projectId, '/recommendations')
+    return (response.items ?? []).map(toDeliveryRecommendation)
+  },
+  async getRecommendation(projectId: string, recommendationId: string): Promise<DeliveryRecommendation> {
+    return toDeliveryRecommendation(await deliveryPlanRequest<WireDeliveryRecommendation>(projectId, `/recommendations/${encodeURIComponent(recommendationId)}`))
+  },
+  async acceptRecommendation(projectId: string, recommendationId: string, expectedVersion: number, idempotencyKey: string): Promise<{
+    recommendation: DeliveryRecommendation
+    changeSet: DeliveryControlChangeSet
+  }> {
+    const response = await deliveryPlanRequest<{ recommendation: WireDeliveryRecommendation; change_set: WireDeliveryControlChangeSet }>(
+      projectId,
+      `/recommendations/${encodeURIComponent(recommendationId)}:accept`,
+      { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ expected_version: expectedVersion }) },
+    )
+    return { recommendation: toDeliveryRecommendation(response.recommendation), changeSet: toDeliveryControlChangeSet(response.change_set) }
+  },
+  async rejectRecommendation(projectId: string, recommendationId: string, expectedVersion: number): Promise<DeliveryRecommendation> {
+    return toDeliveryRecommendation(await deliveryPlanRequest<WireDeliveryRecommendation>(
+      projectId,
+      `/recommendations/${encodeURIComponent(recommendationId)}:reject`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+    ))
+  },
+  async compileManualActionPackage(projectId: string, changeSetId: string, expectedVersion: number): Promise<ManualActionPackage> {
+    return toManualActionPackage(await deliveryPlanRequest<WireManualActionPackage>(
+      projectId,
+      `/change-sets/${encodeURIComponent(changeSetId)}/manual-action-package`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+    ))
+  },
+  async getManualActionPackage(projectId: string, changeSetId: string): Promise<ManualActionPackage> {
+    return toManualActionPackage(await deliveryPlanRequest<WireManualActionPackage>(
+      projectId,
+      `/change-sets/${encodeURIComponent(changeSetId)}/manual-action-package`,
+    ))
   },
 }
 
@@ -761,6 +985,108 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     scenario: version.scenario,
     createdBy: version.created_by,
     createdAt: version.created_at,
+    threeTierConfiguration: version.three_tier_configuration ? toThreeTierConfiguration(version.three_tier_configuration, version.created_at) : undefined,
+  }
+}
+
+function toThreeTierField(value: WireDeliveryThreeTierField): DeliveryThreeTierField {
+  return {
+    key: value.key,
+    label: value.label ?? '未标注字段',
+    recommendedValue: value.recommended.value,
+    manualValue: value.manual?.value,
+    effectiveValue: value.effective.value,
+    valueType: value.effective.type,
+    effectiveSource: value.effective_source ?? value.source,
+    sourceRefs: value.source_refs ?? [],
+    dependencyRefs: value.dependency_refs ?? (value.dependency ? [value.dependency] : []),
+    riskRefs: value.risk_refs ?? (value.risk ? [value.risk] : []),
+    evidenceRefs: value.evidence_refs ?? [],
+    mockRequired: value.mock_required,
+    platformRequired: value.platform_required,
+    platformStatus: value.platform_status,
+    editable: value.editable,
+    confirmation: { required: !value.confirmation, confirmed: value.confirmation },
+  }
+}
+
+function toThreeTierConfiguration(value: WireDeliveryThreeTierConfiguration, versionCreatedAt: string): DeliveryThreeTierConfiguration {
+  return {
+    schema: value.schema ?? value.contract_version ?? 'delivery-three-tier/v1',
+    source: value.source,
+    scenario: value.fixture_scenario ?? value.scenario,
+    generatedAt: value.generated_at ?? versionCreatedAt,
+    evidenceRefs: value.evidence_refs ?? value.evidence ?? [],
+    groups: value.groups.map(group => ({
+      id: group.id,
+      label: group.name,
+      fields: (group.fields ?? []).map(toThreeTierField),
+      plans: group.plans.map(plan => ({
+        id: plan.id,
+        label: plan.name,
+        fields: (plan.fields ?? []).map(toThreeTierField),
+        creatives: plan.creatives.map(creative => ({
+          id: creative.id,
+          label: creative.name,
+          fields: creative.fields.map(toThreeTierField),
+        })),
+      })),
+    })),
+  }
+}
+
+function toDeliveryRecommendation(value: WireDeliveryRecommendation): DeliveryRecommendation {
+  return {
+    id: value.id,
+    planId: value.plan_id,
+    planVersion: value.plan_version,
+    status: value.state ?? value.status ?? 'proposed',
+    version: value.version,
+    evidenceRefs: value.evidence_refs ?? value.evidence ?? [],
+    action: stringValue(value.action),
+    impact: stringValue(value.impact),
+    risks: (value.risks ?? []).map(stringValue),
+    observation: stringValue(value.observation_window ?? value.observation),
+    cooldown: value.cooldown_until ?? (value.cooldown === undefined ? undefined : stringValue(value.cooldown)),
+    source: value.source ?? value.target_snapshot?.source ?? 'mock',
+    scenario: value.scenario ?? value.target_snapshot?.scenario ?? 'golden_path',
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
+  }
+}
+
+function stringValue(value: unknown) {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return '未提供'
+  return JSON.stringify(value)
+}
+
+function toManualActionPackage(value: WireManualActionPackage): ManualActionPackage {
+  const layerInstructions = (value.layers ?? []).flatMap(layer => layer.fields.map(field => ({
+    fieldKey: field.field_key,
+    effectiveValue: field.value.value,
+    source: field.source,
+    confirmationRequired: field.confirmation.required && !field.confirmation.confirmed,
+    expectedResult: field.expected_result,
+    evidenceRefs: field.evidence_refs ?? [],
+  })))
+  return {
+    id: value.id,
+    changeSetId: value.change_set_id,
+    planId: '',
+    source: value.source ?? 'mock',
+    scenario: value.scenario ?? 'manual_action_package',
+    generatedAt: value.created_at,
+    instructions: layerInstructions.length ? layerInstructions : (value.instructions ?? []).map(instruction => ({
+      fieldKey: instruction.field_key,
+      effectiveValue: instruction.effective.value,
+      source: instruction.source,
+      confirmationRequired: instruction.confirmation_required,
+      expectedResult: instruction.expected_result,
+      evidenceRefs: instruction.evidence_refs ?? [],
+    })),
+    forbiddenActions: value.forbidden_actions ?? [],
+    evidenceRefs: value.evidence_refs ?? value.evidence ?? [],
   }
 }
 

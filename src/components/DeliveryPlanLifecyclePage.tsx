@@ -23,6 +23,10 @@ const scenarioLabels: Record<DeliveryScenario | 'unsaved_draft', string> = {
   incomplete_draft: '草稿不完整',
   project_plan_list: '计划列表',
   approval_queue: '审批队列',
+  missing_required_field: '三层配置必填项缺失',
+  orphan_dependency: '三层配置依赖缺失',
+  missing_confirmation: '三层配置待人工确认',
+  platform_fields_pending: '平台字段待人工填写',
   unsaved_draft: '未保存草稿',
 }
 
@@ -33,6 +37,11 @@ const preflightCheckLabels: Record<DeliveryPreflightResult['checks'][number]['co
   creative_present: '素材引用完整',
   creative_confirmed: '素材已确认',
   tracking_complete: '追踪配置完整',
+  three_tier_structure: '三层配置结构有效',
+  three_tier_required_fields: '三层配置必填项完整',
+  three_tier_dependencies: '三层配置依赖可解析',
+  three_tier_confirmation: '三层配置已人工确认',
+  three_tier_platform_pending: '平台字段待人工填写',
 }
 
 function scenarioMetadata(scenario: DeliveryScenario | 'unsaved_draft') {

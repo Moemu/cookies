@@ -18,7 +18,7 @@ func RunPreflight(version DeliveryPlanVersion) []PreflightCheck {
 			break
 		}
 	}
-	return []PreflightCheck{
+	checks := []PreflightCheck{
 		check(
 			"advertiser_available",
 			CheckSeverityError,
@@ -68,6 +68,65 @@ func RunPreflight(version DeliveryPlanVersion) []PreflightCheck {
 			RepairTarget{Field: "tracking_pixel_id", Section: "追踪", Label: "修复追踪配置"},
 		),
 	}
+	// Three-tier configuration is strictly additive: plans without a snapshot receive the
+	// exact legacy check set and therefore retain old behavior and hashes.
+	if version.ThreeTierConfiguration == nil {
+		return checks
+	}
+	config := version.ThreeTierConfiguration
+	structureValid := config.Validate() == nil
+	missing, orphan, unconfirmed, platformPending := false, false, false, false
+	known := map[string]bool{}
+	fields := threeTierFields(config)
+	for _, f := range fields {
+		if f.Key == "" {
+			missing = true
+			continue
+		}
+		known[f.Key] = true
+		if f.MockRequired && (f.Effective.Type == "" || f.Effective.Value == nil) {
+			missing = true
+		}
+		if !f.Confirmed {
+			unconfirmed = true
+		}
+		if f.PlatformRequired && f.PlatformStatus == "pending" {
+			platformPending = true
+		}
+	}
+	for _, f := range fields {
+		dependencies := append([]string(nil), f.DependencyRefs...)
+		if f.Dependency != "" {
+			dependencies = append(dependencies, f.Dependency)
+		}
+		for _, dependency := range dependencies {
+			if !known[strings.TrimPrefix(dependency, "field:")] {
+				orphan = true
+			}
+		}
+	}
+	checks = append(checks,
+		check("three_tier_structure", CheckSeverityError, structureValid, "Three-tier snapshot structure is valid", "Three-tier snapshot structure is invalid", RepairTarget{Field: "three_tier_configuration", Section: "configuration", Label: "recompile the three-tier fixture"}),
+		check("three_tier_required_fields", CheckSeverityError, !missing, "Three-tier fields complete", "Three-tier snapshot has a missing required field", RepairTarget{Field: "three_tier_configuration", Section: "configuration", Label: "compile a complete fixture"}),
+		check("three_tier_dependencies", CheckSeverityError, !orphan, "Three-tier dependencies resolve", "Three-tier snapshot has an orphan dependency", RepairTarget{Field: "dependency", Section: "configuration", Label: "repair dependency"}),
+		check("three_tier_confirmation", CheckSeverityError, !unconfirmed, "Three-tier fields confirmed", "Three-tier snapshot requires confirmation", RepairTarget{Field: "confirmed", Section: "configuration", Label: "confirm field"}),
+		check("three_tier_platform_pending", CheckSeverityWarning, !platformPending, "No platform values pending", "Real-platform values remain pending", RepairTarget{Field: "platform_status", Section: "configuration", Label: "platform values are not executable"}),
+	)
+	return checks
+}
+
+func threeTierFields(config *ThreeTierConfiguration) []ThreeTierField {
+	fields := make([]ThreeTierField, 0)
+	for _, group := range config.Groups {
+		fields = append(fields, group.Fields...)
+		for _, plan := range group.Plans {
+			fields = append(fields, plan.Fields...)
+			for _, creative := range plan.Creatives {
+				fields = append(fields, creative.Fields...)
+			}
+		}
+	}
+	return fields
 }
 
 func check(code string, severity CheckSeverity, passed bool, successMessage, failureMessage string, repair RepairTarget) PreflightCheck {

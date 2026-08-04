@@ -18,7 +18,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// A fresh schema applies every module-owned migration and can legitimately
+	// exceed 30 seconds on local Docker/WSL storage. Keep one bounded context,
+	// but leave enough headroom for the documented fresh-database verification.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	db, err := database.Open(ctx, cfg.MySQL)
 	if err != nil {

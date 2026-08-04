@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, CircleCheck, FileCheck2, RotateCcw, ShieldCheck, ThumbsUp } from 'lucide-react'
 import {
   deliveryPlanApi,
@@ -31,6 +31,9 @@ export function DeliveryApprovalCenterPage({ state }: { state: DataState }) {
   const [selectedId, setSelectedId] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const listRequest = useRef(0)
+  const activeProjectId = useRef(projectId)
+  activeProjectId.current = projectId
 
   const selected = useMemo(
     () => changeSets.find(changeSet => changeSet.id === selectedId),
@@ -39,25 +42,31 @@ export function DeliveryApprovalCenterPage({ state }: { state: DataState }) {
 
   const refresh = useCallback(async () => {
     if (!projectId) return
+    const request = ++listRequest.current
+    const requestedProjectId = projectId
     setBusy(true)
     try {
       const records = await deliveryPlanApi.listChangeSets(projectId)
+      if (request !== listRequest.current || activeProjectId.current !== requestedProjectId) return
       setChangeSets(records)
       setSelectedId(current => records.some(record => record.id === current) ? current : records[0]?.id ?? '')
       setNotice(records.length ? `已加载 ${records.length} 个 Delivery ChangeSet。` : '当前 Project 暂无 Delivery ChangeSet。')
     } catch (error) {
+      if (request !== listRequest.current || activeProjectId.current !== requestedProjectId) return
       setNotice(error instanceof Error ? error.message : '加载审批队列失败')
     } finally {
-      setBusy(false)
+      if (request === listRequest.current && activeProjectId.current === requestedProjectId) setBusy(false)
     }
   }, [projectId])
 
   useEffect(() => {
     void refresh()
+    return () => { listRequest.current += 1 }
   }, [refresh])
 
   const apply = async (action: 'approve') => {
     if (!selected) return
+    listRequest.current += 1
     setBusy(true)
     try {
       const updated = await deliveryPlanApi.approveChangeSet(projectId, selected.id, selected.version)
