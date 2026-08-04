@@ -60,6 +60,7 @@ type AssetVersion struct {
 	VideoCodec            string                   `json:"video_codec,omitempty"`
 	AudioCodec            string                   `json:"audio_codec,omitempty"`
 	RenderJobID           string                   `json:"render_job_id,omitempty"`
+	DerivationID          string                   `json:"derivation_id,omitempty"`
 	ProviderJobID         string                   `json:"provider_job_id,omitempty"`
 	ProviderOutputID      string                   `json:"provider_output_id,omitempty"`
 	ProjectContextVersion int64                    `json:"project_context_version,omitempty"`
@@ -75,6 +76,7 @@ type AssetRelationType string
 
 const (
 	AssetRelationGeneratedFrom AssetRelationType = "generated_from"
+	AssetRelationDerivedFrom   AssetRelationType = "derived_from"
 )
 
 type AssetRelation struct {
@@ -93,7 +95,7 @@ func (r AssetRelation) Validate() error {
 	if err := r.OutputAsset.Validate(); err != nil {
 		return fmt.Errorf("output asset: %w", err)
 	}
-	if r.RelationType != AssetRelationGeneratedFrom {
+	if r.RelationType != AssetRelationGeneratedFrom && r.RelationType != AssetRelationDerivedFrom {
 		return fmt.Errorf("asset relation type is invalid")
 	}
 	if err := r.Source.Validate(); err != nil {
@@ -278,6 +280,7 @@ type AssetCommit struct {
 	VideoCodec            string
 	AudioCodec            string
 	RenderJobID           string
+	DerivationID          string
 	ProviderJobID         string
 	ProviderOutputID      string
 	ProjectContextVersion int64

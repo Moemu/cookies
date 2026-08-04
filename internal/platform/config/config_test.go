@@ -39,8 +39,10 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 	if !value.Creative.ShortDramaModelPlannerEnabled ||
 		value.Creative.ShortDramaPlannerModelAlias != "cookies.text.standard" ||
 		!value.Creative.GamePrerollModelPlannerEnabled ||
-		value.Creative.GamePrerollPlannerModelAlias != "cookies.text.standard" {
-		t.Fatalf("unexpected Creative game preroll defaults: %#v", value.Creative)
+		value.Creative.GamePrerollPlannerModelAlias != "cookies.text.standard" ||
+		!value.Creative.BrandFilmModelPlannerEnabled ||
+		value.Creative.BrandFilmPlannerModelAlias != "cookies.text.standard" {
+		t.Fatalf("unexpected Creative planner defaults: %#v", value.Creative)
 	}
 }
 

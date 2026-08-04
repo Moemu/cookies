@@ -103,6 +103,23 @@ func TestDeliveryHTTPMapsStableApprovalErrorsWithMockProvenance(t *testing.T) {
 	}
 }
 
+func TestExecutionHTTPRequiresIdempotencyKeyAndCreates(t *testing.T) {
+	server := New(&applicationStub{changeSet: delivery.ChangeSet{ID: "change_1", Version: 2}})
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/change-sets/change_1:execute", `{"expected_version":2,"scenario":"success"}`)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/change-sets/change_1:execute", `{"expected_version":2,"scenario":"success"}`)
+	request.Header.Set("Idempotency-Key", "key_1")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -162,14 +179,18 @@ func (s *applicationStub) Preflight(context.Context, contract.ActorContext, cont
 func (s *applicationStub) Approve(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error) {
 	return s.changeSet, nil
 }
-func (s *applicationStub) Execute(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ExecutionResult, error) {
-	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: time.Now()}}, nil
+func (s *applicationStub) Execute(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.ExecuteRequest) (delivery.ExecutionResult, bool, error) {
+	now := time.Now()
+	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: &now}}, false, nil
 }
 func (s *applicationStub) Rollback(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error) {
 	return s.changeSet, nil
 }
 func (s *applicationStub) ListExecutions(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.ExecutionResult, error) {
 	return nil, nil
+}
+func (s *applicationStub) GetExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ExecutionResult, error) {
+	return delivery.ExecutionResult{}, nil
 }
 func (s *applicationStub) CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error) {
 	return delivery.DeliveryMetricSnapshot{ID: "deliverymetric_1", IsSimulated: true}, nil

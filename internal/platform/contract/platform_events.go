@@ -23,6 +23,7 @@ const (
 	AssetSourceImported          AssetSourceType = "imported"
 	AssetSourceCaptured          AssetSourceType = "captured"
 	AssetSourceRendered          AssetSourceType = "rendered"
+	AssetSourceDerived           AssetSourceType = "derived"
 )
 
 type AssetReadyData struct {
@@ -33,6 +34,7 @@ type AssetReadyData struct {
 	ProviderJobID string          `json:"provider_job_id,omitempty"`
 	OutputID      string          `json:"output_id,omitempty"`
 	RenderJobID   string          `json:"render_job_id,omitempty"`
+	DerivationID  string          `json:"derivation_id,omitempty"`
 }
 
 func (d AssetReadyData) Validate() error {
@@ -44,6 +46,9 @@ func (d AssetReadyData) Validate() error {
 	}
 	if d.SourceType == AssetSourceRendered && strings.TrimSpace(d.RenderJobID) == "" {
 		return fmt.Errorf("rendered asset requires render_job_id")
+	}
+	if d.SourceType == AssetSourceDerived && strings.TrimSpace(d.DerivationID) == "" {
+		return fmt.Errorf("derived asset requires derivation_id")
 	}
 	return nil
 }
@@ -59,7 +64,7 @@ func (k AssetKind) valid() bool {
 
 func (s AssetSourceType) valid() bool {
 	switch s {
-	case AssetSourceUpload, AssetSourceProviderGenerated, AssetSourceImported, AssetSourceCaptured, AssetSourceRendered:
+	case AssetSourceUpload, AssetSourceProviderGenerated, AssetSourceImported, AssetSourceCaptured, AssetSourceRendered, AssetSourceDerived:
 		return true
 	default:
 		return false

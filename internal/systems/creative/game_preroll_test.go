@@ -1,14 +1,18 @@
 package creative
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/media"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -246,6 +250,8 @@ func TestManualGamePrerollRequiresHumanSelectionBeforeVideoGeneration(t *testing
 	service.Assets = testAssetReader{snapshot: CreativeAssetSnapshot{
 		Ref: sourceVideo, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true,
 	}}
+	service.GameEvidenceFrames = gameFrameExtractor{}
+	service.DerivedAssets = &gameDerivedWriter{}
 	rc := testRequestContext()
 	manual := testManualGamePrerollInput(sourceVideo)
 
@@ -290,9 +296,17 @@ func TestManualGamePrerollRequiresHumanSelectionBeforeVideoGeneration(t *testing
 	if _, _, err := service.GamePrerollProviderInput(context.Background(), rc.Actor, "project_1", task.ID); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("provider input before human selection error = %v, want ErrInvalidState", err)
 	}
+	prepared, err := service.PrepareGamePrerollEvidence(context.Background(), rc, "project_1", task.ID, PrepareGamePrerollEvidenceRequest{ExpectedRevision: detail.VideoDraft.Revision})
+	if err != nil {
+		t.Fatalf("prepare evidence: %v", err)
+	}
+	game = prepared.VideoDraft.GamePreroll
+	if game.ContractVersion != "creative-game-preroll-draft/v2" || game.EvidenceAssets == nil || len(game.EvidenceAssets.Frames) != 3 {
+		t.Fatalf("prepared evidence = %#v", game.EvidenceAssets)
+	}
 
 	selected, err := service.SelectGamePrerollCandidate(context.Background(), rc.Actor, "project_1", task.ID, SelectGamePrerollCandidateRequest{
-		ExpectedRevision: detail.VideoDraft.Revision,
+		ExpectedRevision: prepared.VideoDraft.Revision,
 		CandidateID:      game.Candidates[1].ID,
 	})
 	if err != nil {
@@ -307,7 +321,7 @@ func TestManualGamePrerollRequiresHumanSelectionBeforeVideoGeneration(t *testing
 		t.Fatalf("build game provider input: %v", err)
 	}
 	if providerInput.DurationSeconds != 6 || providerInput.AspectRatio != "9:16" ||
-		providerInput.Prompt == "" || promptHash == "" {
+		providerInput.Prompt == "" || promptHash == "" || providerInput.InputMode != provider.VideoInputFirstLastFrame || len(providerInput.ConditioningAssets) != 2 {
 		t.Fatalf("provider input = %#v, prompt hash = %q", providerInput, promptHash)
 	}
 	attempt, err := service.RegisterGamePrerollGenerationAttempt(
@@ -349,6 +363,20 @@ func TestManualGamePrerollRequiresHumanSelectionBeforeVideoGeneration(t *testing
 		len(regenerated.VideoDraft.GamePreroll.Candidates) != 3 {
 		t.Fatalf("regenerated game draft = %#v", regenerated.VideoDraft.GamePreroll)
 	}
+}
+
+type gameFrameExtractor struct{}
+
+func (gameFrameExtractor) ExtractFrame(_ context.Context, request media.FrameExtractionRequest) (media.ExtractedFrame, error) {
+	content := []byte("png")
+	return media.ExtractedFrame{Content: io.NopCloser(bytes.NewReader(content)), SizeBytes: int64(len(content)), MIMEType: "image/png", Version: media.EvidenceFrameExtractorVersion}, nil
+}
+
+type gameDerivedWriter struct{ count int }
+
+func (w *gameDerivedWriter) IngestDerivedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, _ string, _ contract.AssetVersionRef, _ io.Reader, _ int64, _ string) (contract.ProjectAssetRef, error) {
+	w.count++
+	return contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID(fmt.Sprintf("frame_%d", w.count)), Version: 1}}, nil
 }
 
 func testManualGamePrerollInput(sourceVideo contract.AssetVersionRef) ManualGamePrerollInput {

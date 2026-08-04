@@ -30,9 +30,10 @@ type Application interface {
 	CreateChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	Preflight(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	Approve(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
-	Execute(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ExecutionResult, error)
+	Execute(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.ExecuteRequest) (delivery.ExecutionResult, bool, error)
 	Rollback(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	ListExecutions(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.ExecutionResult, error)
+	GetExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ExecutionResult, error)
 	CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error)
 	ListMetricSnapshots(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryMetricSnapshot, error)
 }
@@ -57,6 +58,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}", server.getChangeSet)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/change-sets/{change_set_action}", server.changeSetAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.createMetricSnapshot)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.listMetricSnapshots)
 	return server
@@ -211,9 +213,7 @@ func (s *Server) getChangeSet(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) changeSetAction(writer http.ResponseWriter, request *http.Request) {
 	action := request.PathValue("change_set_action")
-	var body struct {
-		ExpectedVersion int64 `json:"expected_version"`
-	}
+	var body delivery.ExecuteRequest
 	if !decode(writer, request, &body) || body.ExpectedVersion < 1 {
 		if body.ExpectedVersion < 1 {
 			writeError(writer, request, delivery.ErrInvalidRequest)
@@ -230,7 +230,22 @@ func (s *Server) changeSetAction(writer http.ResponseWriter, request *http.Reque
 	case strings.HasSuffix(action, ":approve"):
 		value, err = s.app.Approve(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":approve"), body.ExpectedVersion)
 	case strings.HasSuffix(action, ":execute"):
-		value, err = s.app.Execute(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":execute"), body.ExpectedVersion)
+		key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+		if key == "" {
+			writeError(writer, request, delivery.ErrInvalidRequest)
+			return
+		}
+		result, replay, executeErr := s.app.Execute(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":execute"), key, body)
+		if executeErr != nil {
+			writeError(writer, request, executeErr)
+			return
+		}
+		if replay {
+			writeJSON(writer, http.StatusOK, result)
+		} else {
+			writeJSON(writer, http.StatusCreated, result)
+		}
+		return
 	case strings.HasSuffix(action, ":rollback"):
 		value, err = s.app.Rollback(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":rollback"), body.ExpectedVersion)
 	default:
@@ -250,7 +265,16 @@ func (s *Server) listExecutions(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, request, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values, "source": delivery.SourceMock, "scenario": "execution_list"})
+}
+
+func (s *Server) getExecution(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.app.GetExecution(request.Context(), mustActor(request), projectID(request), request.PathValue("execution_id"))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) createMetricSnapshot(writer http.ResponseWriter, request *http.Request) {
@@ -340,6 +364,8 @@ func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 		status, code, message, retryable = http.StatusConflict, "APPROVAL_CONTENT_MISMATCH", "审批绑定的内容已变化，请重新预检并审批", false
 	case errors.Is(err, delivery.ErrApprovalScopeExceeded):
 		status, code, message, retryable = http.StatusForbidden, "APPROVAL_SCOPE_EXCEEDED", "执行范围或预算超出批准快照", false
+	case errors.Is(err, delivery.ErrIdempotencyConflict):
+		status, code, message, retryable = http.StatusConflict, "IDEMPOTENCY_CONFLICT", "idempotency key conflicts with a different request", false
 	case errors.Is(err, delivery.ErrVersionConflict):
 		status, code, message, retryable = http.StatusPreconditionFailed, "VERSION_CONFLICT", "资源已被更新，请刷新后重试", false
 	case strings.Contains(err.Error(), "scope is required"):

@@ -325,6 +325,86 @@ func (s UploadService) IngestRenderedVideo(ctx context.Context, requestContext c
 	return ref, nil
 }
 
+// IngestDerivedImage persists a processor-produced image as an immutable Asset
+// and records its exact source AssetVersion. derivationID is the stable retry
+// identity (source version + processor version + parameters), not a filename.
+func (s UploadService) IngestDerivedImage(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, derivationID string, source contract.AssetVersionRef, content io.Reader, sizeBytes int64, mimeType string) (contract.ProjectAssetRef, error) {
+	if err := s.validateDependencies(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if err := requestContext.Validate(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if !requestContext.Actor.HasScope("assets.write") {
+		return contract.ProjectAssetRef{}, fmt.Errorf("assets.write scope is required")
+	}
+	if strings.TrimSpace(derivationID) == "" || len(derivationID) > 128 || content == nil || sizeBytes < 1 || sizeBytes > MaxImageBytes || !allowedDeclaredImageMIME(mimeType) {
+		return contract.ProjectAssetRef{}, fmt.Errorf("derivation_id and supported image content are required")
+	}
+	if err := source.Validate(); err != nil {
+		return contract.ProjectAssetRef{}, fmt.Errorf("source asset: %w", err)
+	}
+	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	sourceAsset, err := s.Repository.GetProjectAsset(ctx, requestContext.Actor.OrganizationID, projectID, source)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if sourceAsset.Asset.Status != AssetReady || sourceAsset.Asset.Kind != contract.AssetVideo {
+		return contract.ProjectAssetRef{}, fmt.Errorf("%w: derived frame source must be a ready video", ErrUnsupportedAsset)
+	}
+	newID := s.idGenerator()
+	assetIDValue, err := newID("asset")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	blobID, err := newID("blob")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	stagingID, err := newID("derivestage")
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	staged, err := s.Blobs.Put(ctx, s.QuarantineBucket, quarantineKey(requestContext.Actor.OrganizationID, stagingID), io.LimitReader(content, MaxImageBytes+1), sizeBytes, mimeType)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	defer s.Blobs.Delete(ctx, staged.ObjectLocation)
+	commit, err := s.ingestStoredObject(ctx, requestContext.Actor.OrganizationID, projectID, contract.AssetID(assetIDValue), blobID,
+		project.ProjectContextVersion, contract.AssetSourceDerived, staged.ObjectLocation, "", "", "", requestContext.TraceID)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	commit.DerivationID = derivationID
+	commit.Event.Data, err = json.Marshal(contract.AssetReadyData{
+		AssetKind: commit.Kind, MIMEType: commit.MIMEType, SizeBytes: commit.SizeBytes,
+		SourceType: contract.AssetSourceDerived, DerivationID: derivationID,
+	})
+	if err != nil {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, err
+	}
+	commit.Relations = []AssetRelation{{
+		OrganizationID: requestContext.Actor.OrganizationID,
+		ProjectID:      projectID,
+		OutputAsset:    contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version},
+		RelationType:   AssetRelationDerivedFrom,
+		Source:         contract.ResourceRef{Type: "asset_version", ID: string(source.AssetID), Version: &source.Version},
+	}}
+	ref, err := s.Repository.CompleteDerived(ctx, derivationID, commit, s.now())
+	if err != nil {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+		return contract.ProjectAssetRef{}, err
+	}
+	if ref.AssetVersion.AssetID != commit.AssetID || ref.AssetVersion.Version != commit.Version {
+		_ = s.Blobs.Delete(ctx, commit.Location)
+	}
+	return ref, nil
+}
+
 // IngestRenderedImage is the Assets-owned boundary for deterministic Creative
 // image composition. The caller supplies only stable lineage references;
 // Assets validates the bytes and persists the immutable rendered version.

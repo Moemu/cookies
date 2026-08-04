@@ -16,7 +16,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { BackendApiError } from '../../backend/platform'
 import type { ApiProjectMediaAsset } from '../../data/api'
 import { platformClient } from '../../data/platformClient'
-import type { SystemKey } from '../../types'
 import { createMutationKey, strategyApi } from './api'
 import { createRouteRevisionChannelStrategy, findPublishedPackageForDraft } from './creativeTaskPlanning'
 import type {
@@ -36,12 +35,12 @@ type Props = {
   briefVersion: BriefVersion | null
   draft: StrategyDraft | null
   onCreateRouteRevision: (channelStrategy: unknown) => Promise<boolean>
+  onOpenCreative: (navId: string, view: string, contextId: string) => void
   onOpenStrategy: () => void
-  onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
   projectId: string
 }
 
-export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision, onOpenProject, onOpenStrategy, projectId }: Props) {
+export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision, onOpenCreative, onOpenStrategy, projectId }: Props) {
   const [catalogHash, setCatalogHash] = useState('')
   const [profiles, setProfiles] = useState<CreativeBusinessProfile[]>([])
   const [capabilities, setCapabilities] = useState<CreativeBusinessCapability[]>([])
@@ -319,12 +318,20 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
         plan,
         `task-strategy-handoff-${plan.id}-${plan.current_strategy.version}`,
       )
-      const destinationId = intake.id
-      onOpenProject(
-        projectId,
-        'creative',
+      let destinationId = intake.id
+      if (capability.can_create_task_immediately && capability.format === 'image_text') {
+        const angle = plan.current_strategy.document.business_strategy.content_angle
+        const task = await strategyApi.createImageTextTaskFromHandoff(
+          projectId,
+          intake.id,
+          typeof angle === 'string' && angle.trim()
+            ? angle
+            : plan.current_strategy.document.core_message,
+        )
+        destinationId = task.id
+      }
+      onOpenCreative(
         capability.destination_area,
-        undefined,
         capability.destination_view,
         destinationId,
       )

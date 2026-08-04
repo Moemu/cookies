@@ -1483,7 +1483,13 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   const taskCenter = item.id === 'tasks' && taskDomain !== null
   const specialized = system.key === 'strategy' && item.id === 'tasks' ? <KanonStrategyTaskCenter activeView={activeView} onOpenWorkspace={id => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, '概览')} onRequestCreate={() => setTaskDialog({ domain: 'strategy', initialType: 'strategy' })}/>
     : taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
-    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace activeView={activeView} workspaceId={objectId} onOpenProject={onOpenProject}/>
+    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace
+      activeView={activeView}
+      workspaceId={objectId}
+      onOpenWorkspace={(workspaceId, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', workspaceId, view)}
+      onOpenCreative={(navId, view, contextId) => onOpenProject(currentProject.id, 'creative', navId, undefined, view, contextId)}
+      onOpenProject={onOpenProject}
+    />
     : system.key === 'strategy' && item.id === 'briefs' ? <KanonBriefCenter activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
     : system.key === 'strategy' && item.id === 'strategies' ? <KanonStrategyLibrary activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
     : system.key === 'strategy' && item.id === 'research' ? <KanonResearchEvidenceCenter activeView={activeView}/>

@@ -36,14 +36,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("backfill Delivery approvals: %v", err)
 	}
+	executionBackfilled, err := delivery.BackfillLegacyExecutions(ctx, db)
+	if err != nil {
+		log.Fatalf("backfill Delivery executions: %v", err)
+	}
 	backfilled, err := strategy.BackfillCreativeHandoffs(ctx, db)
 	if err != nil {
 		log.Fatalf("backfill Strategy Creative Handoffs: %v", err)
 	}
 	log.Printf(
-		"migrations are current; backfilled %d DeliveryPlan canonical hashes, %d Delivery approvals, and %d Strategy Creative Handoffs",
+		"migrations are current; backfilled %d DeliveryPlan canonical hashes, %d Delivery approvals, %d Delivery executions, and %d Strategy Creative Handoffs",
 		deliveryBackfilled,
 		approvalBackfilled,
+		executionBackfilled,
 		backfilled,
 	)
 }

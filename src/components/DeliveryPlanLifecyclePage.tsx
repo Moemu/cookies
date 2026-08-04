@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, CircleCheck, FilePlus, History, Plus, Save, Send, Wrench } from 'lucide-react'
 import {
   deliveryPlanApi,
@@ -53,6 +53,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const [preflight, setPreflight] = useState<DeliveryPreflightResult>()
   const [inspectedVersionNumber, setInspectedVersionNumber] = useState<number>()
   const [repairField, setRepairField] = useState('')
+  const preserveEditorState = useRef(false)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
   const inspectedVersion = useMemo(
@@ -63,10 +64,12 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   useEffect(() => {
     let active = true
     if (!projectId) return () => { active = false }
+    preserveEditorState.current = false
     setBusy(true)
     void deliveryPlanApi.list(projectId).then(records => {
       if (!active) return
       setPlans(records)
+      if (preserveEditorState.current) return
       const latest = records[0]
       if (latest) {
         setSelectedId(latest.id)
@@ -101,12 +104,14 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   }, [repairField, section])
 
   const changeDraft = (update: (current: DeliveryPlanDraft) => DeliveryPlanDraft) => {
+    preserveEditorState.current = true
     setDraft(update)
     setDirty(true)
     setPreflight(undefined)
   }
 
   const beginNew = () => {
+    preserveEditorState.current = true
     setSelectedId('')
     setDraft(newMockDraft(currentProject))
     setSection('目标与账户')
@@ -118,6 +123,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   }
 
   const selectPlan = (plan: DeliveryPlan) => {
+    preserveEditorState.current = true
     setSelectedId(plan.id)
     setDraft(draftFromVersion(plan.currentVersion))
     setIsNew(false)

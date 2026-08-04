@@ -778,6 +778,244 @@ export type ApiCommercePrerollWorkspace = {
   }>
 }
 
+export type ApiBrandBriefFact = {
+  text: string
+  locator: string
+  confidence: number
+  status: 'brief_fact' | 'needs_confirmation'
+}
+
+export type ApiBrandBriefAssetCandidate = {
+  id: string
+  role: string
+  label: string
+  source_locator: string
+  fixture_uri?: string
+  asset_ref?: ApiAssetVersionRef
+  rights_status: string
+  user_confirmed: boolean
+  replacement_note?: string
+}
+
+export type ApiBrandBriefAnalysis = {
+  revision: number
+  summary: string
+  audience: string
+  core_message: string
+  selling_points: ApiBrandBriefFact[]
+  mandatory_elements: string[]
+  prohibited_claims: string[]
+  image_requirements: string[]
+  video_requirements: string[]
+  voice_direction: string
+  asset_candidates: ApiBrandBriefAssetCandidate[]
+  uncertainties: string[]
+  confirmed: boolean
+  confirmed_by?: string
+  confirmed_at?: string
+  model_alias: string
+  model_version: string
+  route_revision_id?: string
+  prompt_version: string
+  created_at: string
+}
+
+export type ApiBrandCreativeConcept = {
+  id: string
+  title: string
+  one_liner: string
+  story_mechanism: string
+  brand_entrance: string
+  visual_language: string[]
+  sound_idea: string
+  brief_rationale: string
+  risk: string
+  selected: boolean
+  confirmed: boolean
+}
+
+export type ApiBrandFilmShot = {
+  id: string
+  order: number
+  start_second: number
+  end_second: number
+  purpose: string
+  visual: string
+  action: string
+  camera: string
+  lighting: string
+  voiceover: string
+  on_screen_text: string
+  reference_role: string
+  continuity_notes: string
+}
+
+export type ApiBrandFilmPlan = {
+  revision: number
+  concept_id: string
+  title: string
+  story_summary: string
+  voice_direction: string
+  music_direction: string
+  shots: ApiBrandFilmShot[]
+  confirmed: boolean
+  confirmed_by?: string
+  confirmed_at?: string
+  model_alias: string
+  model_version: string
+  route_revision_id?: string
+  prompt_version: string
+  created_at: string
+}
+
+export type ApiBrandFilmGenerationAttempt = {
+  id: string
+  ordinal: number
+  prompt_hash: string
+  provider_job_id: string
+  retry_of?: string
+  feedback?: string
+  status: string
+  output_asset_ref?: ApiAssetVersionRef
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiBrandFilmGenerationUnit = {
+  id: string
+  order: number
+  shot_ids: string[]
+  start_second: number
+  end_second: number
+  prompt_packages: Array<{
+    revision: number
+    content_hash: string
+    feedback?: string
+    duration_seconds: number
+    composite_prompt: string
+  }>
+  attempts: ApiBrandFilmGenerationAttempt[]
+  locked_attempt_id?: string
+}
+
+export type ApiBrandFilmManualCheck = {
+  code: 'product_fidelity' | 'brand_logo_packaging' | 'subtitle_voiceover' | 'sound_music'
+  passed: boolean
+  note?: string
+  unit_id?: string
+}
+
+export type ApiBrandFilmQualityRun = {
+  id: string
+  revision: number
+  preview_asset: ApiAssetVersionRef
+  status: 'failed' | 'awaiting_human' | 'passed'
+  checks: Array<{
+    code: string
+    category: 'shot' | 'technical' | 'copy' | 'audio' | 'brand'
+    scope: string
+    passed: boolean
+    severity: 'info' | 'blocking'
+    evidence: string
+    repair_advice?: string
+  }>
+  manual_checks: ApiBrandFilmManualCheck[]
+  metrics: {
+    unit_count: number
+    attempt_count: number
+    succeeded_attempts: number
+    failed_attempts: number
+    regeneration_count: number
+    success_rate: number
+    availability_rate: number
+    regeneration_reasons: Record<string, number>
+  }
+  automatic_passed: boolean
+  human_confirmed: boolean
+  human_confirmed_by?: string
+  human_confirmed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export type ApiBrandFilmWorkspace = {
+  task: {
+    id: string
+    status: string
+    performance_mode: 'brand_video'
+    updated_at: string
+  }
+  intake: {
+    id: string
+    version: number
+  }
+  video_draft: {
+    revision: number
+    brand_film: {
+      contract_version: 'creative-brand-film-draft/v1'
+      revision: number
+      stage: 'waiting_for_input' | 'brief_analysis_draft' | 'brief_confirmed' | 'concept_selection' | 'concept_confirmed' | 'production_plan_draft' | 'production_plan_confirmed' | 'generation_ready' | 'generating' | 'generation_review' | 'generation_locked' | 'quality_review' | 'ready_for_review' | 'approved' | 'delivered'
+      source_snapshot: {
+        fixture_id: string
+        fixture_version: number
+        fixture_hash: string
+        brief_name: string
+        product_name: string
+        channel: string
+        duration_seconds: number
+        aspect_ratio: string
+        evidence_refs: string[]
+      }
+      brief_analysis_versions: ApiBrandBriefAnalysis[] | null
+      concept_sets: Array<{
+        revision: number
+        analysis_revision: number
+        candidates: ApiBrandCreativeConcept[]
+        model_alias: string
+        model_version: string
+        route_revision_id?: string
+        prompt_version: string
+        created_at: string
+      }> | null
+      selected_concept_id?: string
+      film_plan_versions: ApiBrandFilmPlan[] | null
+      readiness: {
+        planning_ready: boolean
+        generation_ready: boolean
+        production_ready: boolean
+        blockers: string[]
+      }
+      generation_seam: {
+        contract_version: 'creative-brand-generation-seam/v1'
+        unit_policy: string
+        prompt_contract: string
+        attempt_policy: string
+      }
+      generation?: {
+        contract_version: 'creative-brand-film-generation/v1'
+        plan_revision: number
+        reference_asset: ApiAssetVersionRef
+        units: ApiBrandFilmGenerationUnit[]
+        preview_asset?: ApiAssetVersionRef
+        created_at: string
+        updated_at: string
+      }
+      quality_runs: ApiBrandFilmQualityRun[] | null
+      delivery?: {
+        quality_run_id: string
+        creative_version_id?: string
+        creative_package_id?: string
+        approved_by?: string
+        approved_at?: string
+        delivered_by?: string
+        delivered_at?: string
+      }
+      updated_at: string
+    }
+  }
+}
+
 export type ApiVideoPurpose = 'preroll'
 export type ApiPrerollType = 'short_drama' | 'game' | 'commerce'
 
@@ -1001,6 +1239,7 @@ export type ApiGamePrerollWorkspace = {
   video_draft: {
     revision: number
     game_preroll: {
+      contract_version: 'creative-game-preroll-draft/v1' | 'creative-game-preroll-draft/v2'
       revision: number
       selected_candidate_id?: string
       input_snapshot: {
@@ -1037,6 +1276,29 @@ export type ApiGamePrerollWorkspace = {
         created_at: string
       }
       candidates: ApiGamePrerollCandidate[]
+      evidence_assets?: {
+        source_video: ApiAssetVersionRef
+        status: 'ready' | 'preparing' | 'failed'
+        content_hash: string
+        frames: Array<{
+          evidence_moment_id: string
+          source_start_milliseconds: number
+          source_end_milliseconds: number
+          representative_frame_milliseconds: number
+          frame_asset: { project_id: string; asset_version: ApiAssetVersionRef }
+          extraction_version: string
+        }>
+      }
+      generation_spec?: {
+        contract_version: 'creative-game-preroll-generation-spec/v1'
+        input_mode: 'first_last_frame'
+        conditioning_assets: Array<{
+          role: 'first_frame' | 'last_frame'
+          evidence_moment_id: string
+          reference: { project_id: string; asset_version: ApiAssetVersionRef }
+        }>
+        hash: string
+      }
     }
   }
   game_preroll_generation_attempts?: Array<{
@@ -3563,6 +3825,169 @@ function commerceRequestFingerprint(value: unknown) {
   return (hash >>> 0).toString(36)
 }
 
+function brandFilmPath(projectId: string, taskId: string, suffix: string) {
+  return `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/brand-film${suffix}`
+}
+
+async function ensureBrandFilmFixtureWorkspace(projectId: string): Promise<ApiBrandFilmWorkspace> {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-workspaces/brand-film:ensure-fixture`,
+    'POST',
+    undefined,
+    { 'Idempotency-Key': `brand-film-fixture-${projectId}-guerlain-v1` },
+  )
+}
+
+async function analyzeBrandFilmBrief(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, ':analyze-brief'),
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `brand-film-analyze-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function updateBrandFilmBrief(projectId: string, taskId: string, expectedRevision: number, analysis: ApiBrandBriefAnalysis) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, '/brief'),
+    'PATCH',
+    { expected_revision: expectedRevision, analysis },
+  )
+}
+
+async function confirmBrandFilmBrief(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, ':confirm-brief'),
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `brand-film-confirm-brief-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function generateBrandFilmConcepts(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, ':generate-concepts'),
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `brand-film-concepts-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function updateBrandFilmConcepts(projectId: string, taskId: string, expectedRevision: number, candidates: ApiBrandCreativeConcept[]) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, '/concepts'),
+    'PATCH',
+    { expected_revision: expectedRevision, candidates },
+  )
+}
+
+async function selectBrandFilmConcept(projectId: string, taskId: string, expectedRevision: number, conceptId: string) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, ':select-concept'),
+    'POST',
+    { expected_revision: expectedRevision, concept_id: conceptId },
+    { 'Idempotency-Key': `brand-film-select-${taskId}-${expectedRevision}-${conceptId}` },
+  )
+}
+
+async function generateBrandFilmPlan(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, ':generate-plan'),
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `brand-film-plan-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function updateBrandFilmPlan(projectId: string, taskId: string, expectedRevision: number, plan: ApiBrandFilmPlan) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, '/plan'),
+    'PATCH',
+    { expected_revision: expectedRevision, plan },
+  )
+}
+
+async function confirmBrandFilmPlan(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(
+    brandFilmPath(projectId, taskId, ':confirm-plan'),
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `brand-film-confirm-plan-${taskId}-${expectedRevision}` },
+  )
+}
+
+async function prepareBrandFilmGeneration(projectId: string, taskId: string, expectedRevision: number, referenceAsset: ApiAssetVersionRef) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':prepare-generation'), 'POST', {
+    expected_revision: expectedRevision,
+    reference_asset: referenceAsset,
+  }, { 'Idempotency-Key': `brand-film-prepare-${taskId}-${expectedRevision}-${referenceAsset.asset_id}-${referenceAsset.version}` })
+}
+
+async function generateBrandFilmUnit(projectId: string, taskId: string, expectedRevision: number, unitId: string, feedback = '') {
+  const value = await creativeRequest<{ workspace: ApiBrandFilmWorkspace; provider_job: ApiProviderJobWire }>(
+    brandFilmPath(projectId, taskId, ':generate-unit'), 'POST',
+    { expected_revision: expectedRevision, unit_id: unitId, feedback, model_alias: 'cookies.video.standard' },
+    { 'Idempotency-Key': `brand-film-unit-${taskId}-${unitId}-${Date.now()}` },
+  )
+  return { workspace: value.workspace, job: mapViralProviderJob(value.provider_job) }
+}
+
+async function getBrandFilmUnitJob(projectId: string, jobId: string) {
+  return getViralVideoJob(projectId, jobId)
+}
+
+async function reconcileBrandFilmUnit(projectId: string, taskId: string, unitId: string, providerJobId: string) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':reconcile-unit'), 'POST', {
+    unit_id: unitId,
+    provider_job_id: providerJobId,
+  }, { 'Idempotency-Key': `brand-film-reconcile-${taskId}-${providerJobId}` })
+}
+
+async function lockBrandFilmUnit(projectId: string, taskId: string, expectedRevision: number, unitId: string, attemptId: string) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':lock-unit'), 'POST', {
+    expected_revision: expectedRevision,
+    unit_id: unitId,
+    attempt_id: attemptId,
+  }, { 'Idempotency-Key': `brand-film-lock-${taskId}-${unitId}-${attemptId}` })
+}
+
+async function composeBrandFilmPreview(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':compose-preview'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-preview-${taskId}-${expectedRevision}` })
+}
+
+async function runBrandFilmQuality(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':run-quality'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-quality-${taskId}-${expectedRevision}` })
+}
+
+async function confirmBrandFilmQuality(projectId: string, taskId: string, expectedRevision: number, manualChecks: ApiBrandFilmManualCheck[]) {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':confirm-quality'), 'POST', {
+    expected_revision: expectedRevision,
+    manual_checks: manualChecks,
+  }, { 'Idempotency-Key': `brand-film-confirm-quality-${taskId}-${expectedRevision}` })
+}
+
+async function finalizeBrandFilmVersion(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<{ workspace: ApiBrandFilmWorkspace; creative_version: ApiCreativeVersion }>(brandFilmPath(projectId, taskId, ':finalize-version'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-finalize-${taskId}-${expectedRevision}` })
+}
+
+async function approveBrandFilmVersion(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<{ workspace: ApiBrandFilmWorkspace; creative_version: ApiCreativeVersion }>(brandFilmPath(projectId, taskId, ':approve-version'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-approve-${taskId}-${expectedRevision}` })
+}
+
+async function deliverBrandFilmVersion(projectId: string, taskId: string, expectedRevision: number) {
+  return creativeRequest<{ workspace: ApiBrandFilmWorkspace; creative_package: { id: string; creative_version_id: string; content_hash: string } }>(brandFilmPath(projectId, taskId, ':deliver-version'), 'POST', {
+    expected_revision: expectedRevision,
+  }, { 'Idempotency-Key': `brand-film-deliver-${taskId}-${expectedRevision}` })
+}
+
 async function ensureCommercePrerollFixtureWorkspace(
   projectId: string,
 ): Promise<ApiCommercePrerollWorkspace> {
@@ -3744,6 +4169,19 @@ async function selectGamePrerollCandidate(
     'POST',
     { expected_revision: expectedRevision, candidate_id: candidateId },
     { 'Idempotency-Key': `game-preroll-select-${taskId}-${expectedRevision}-${candidateId}` },
+  )
+}
+
+async function prepareGamePrerollEvidence(
+  projectId: string,
+  taskId: string,
+  expectedRevision: number,
+): Promise<ApiGamePrerollWorkspace> {
+  return creativeRequest<ApiGamePrerollWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/game-preroll:prepare-evidence`,
+    'POST',
+    { expected_revision: expectedRevision },
+    { 'Idempotency-Key': `game-preroll-evidence-${taskId}-${expectedRevision}` },
   )
 }
 
@@ -4441,6 +4879,27 @@ export const api = {
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
   listCreativeTasks,
+  ensureBrandFilmFixtureWorkspace,
+  analyzeBrandFilmBrief,
+  updateBrandFilmBrief,
+  confirmBrandFilmBrief,
+  generateBrandFilmConcepts,
+  updateBrandFilmConcepts,
+  selectBrandFilmConcept,
+  generateBrandFilmPlan,
+  updateBrandFilmPlan,
+  confirmBrandFilmPlan,
+  prepareBrandFilmGeneration,
+  generateBrandFilmUnit,
+  getBrandFilmUnitJob,
+  reconcileBrandFilmUnit,
+  lockBrandFilmUnit,
+  composeBrandFilmPreview,
+  runBrandFilmQuality,
+  confirmBrandFilmQuality,
+  finalizeBrandFilmVersion,
+  approveBrandFilmVersion,
+  deliverBrandFilmVersion,
   getImageTextWorkspace,
   getCreativeIntake,
   createManualImageTextIntake,
@@ -4470,6 +4929,7 @@ export const api = {
   confirmCommercePrerollGeneration,
   createCommercePrerollWorkspaceVideoJob,
   createManualGamePrerollWorkspace,
+  prepareGamePrerollEvidence,
   selectGamePrerollCandidate,
   regenerateGamePrerollCandidates,
   createGamePrerollVideoJob,
