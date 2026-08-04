@@ -158,6 +158,48 @@ func TestChangeSetGoldenFlowAndMetricProvenance(t *testing.T) {
 	}
 }
 
+func TestAlertsAreDeterministicAndUseCAS(t *testing.T) {
+	service, actor := newTestService()
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{PlanDraft: goldenDraft()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := service.Repository.(*memoryRepository)
+	repo.metrics = append(repo.metrics, DeliveryMetricSnapshot{ID: "metric_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution_1", PlanID: plan.ID, DatasetVersion: DemoMetricDatasetVersion, FixtureVersion: "v1", WindowSequence: 1, WindowStart: plan.StartAt, WindowEnd: plan.EndAt, DataThrough: plan.EndAt})
+	response, err := service.EvaluateAlerts(context.Background(), actor, "project_a", EvaluateAlertsRequest{Fixture: AlertScenarioAnomalyDay})
+	if err != nil || response.CreatedCount != 4 || len(response.Items) != 4 {
+		t.Fatalf("evaluate=%#v err=%v", response, err)
+	}
+	byType := map[AlertType]DeliveryAlert{}
+	for _, alert := range response.Items {
+		byType[alert.Type] = alert
+	}
+	if got := *byType[AlertSpendSpike].MetricDefinition.ObservedValue; got != 60000 {
+		t.Fatalf("spend spike must evaluate the anomaly window, got %v", got)
+	}
+	if got := *byType[AlertZeroConversion].MetricDefinition.ObservedValue; got != 0 {
+		t.Fatalf("zero conversion must evaluate the anomaly window, got %v", got)
+	}
+	if got := *byType[AlertCostWorsening].MetricDefinition.ObservedValue; got != 60000 {
+		t.Fatalf("cost worsening must use its safe zero-conversion denominator, got %v", got)
+	}
+	replayed, err := service.EvaluateAlerts(context.Background(), actor, "project_a", EvaluateAlertsRequest{Fixture: AlertScenarioAnomalyDay})
+	if err != nil || replayed.ReusedCount != 4 {
+		t.Fatalf("replay=%#v err=%v", replayed, err)
+	}
+	alert := response.Items[0]
+	updated, err := service.UpdateAlert(context.Background(), actor, "project_a", alert.ID, UpdateAlertRequest{Action: AlertAcknowledge, ExpectedVersion: alert.Version})
+	if err != nil || updated.Status != AlertAcknowledged || updated.Version != 2 {
+		t.Fatalf("update=%#v err=%v", updated, err)
+	}
+	if _, err := service.UpdateAlert(context.Background(), actor, "project_a", alert.ID, UpdateAlertRequest{Action: AlertDismiss, ExpectedVersion: 1}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale terminal action error=%v", err)
+	}
+	if _, err := service.EvaluateAlerts(context.Background(), actor, "project_a", EvaluateAlertsRequest{Fixture: AlertScenarioStaleData}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestApprovalRemainsValidAfterExecutionAndRollbackLifecycleTransitions(t *testing.T) {
 	service, actor, _ := newTestServiceClock()
 	approved := approveGoldenChangeSet(t, &service, actor)
@@ -784,6 +826,7 @@ type memoryRepository struct {
 	approvals  map[string][]DeliveryApproval
 	executions []ExecutionResult
 	metrics    []DeliveryMetricSnapshot
+	alerts     map[string]DeliveryAlert
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -1060,6 +1103,11 @@ func (r *memoryRepository) GetExecutionByChangeSet(_ context.Context, organizati
 }
 
 func (r *memoryRepository) CreateMetricSnapshot(_ context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {
+	for _, existing := range r.metrics {
+		if existing.OrganizationID == value.OrganizationID && existing.ExecutionID == value.ExecutionID && existing.DatasetVersion == value.DatasetVersion && existing.FixtureVersion == value.FixtureVersion && existing.WindowSequence == value.WindowSequence {
+			return existing, false, nil
+		}
+	}
 	r.metrics = append(r.metrics, value)
 	return value, true, nil
 }
@@ -1072,6 +1120,62 @@ func (r *memoryRepository) ListMetricSnapshots(_ context.Context, organizationID
 		}
 	}
 	return values, nil
+}
+
+func (r *memoryRepository) ListProjectMetricSnapshots(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, _ int) ([]DeliveryMetricSnapshot, error) {
+	values := make([]DeliveryMetricSnapshot, 0)
+	for _, v := range r.metrics {
+		if v.OrganizationID == organizationID && v.ProjectID == projectID {
+			values = append(values, v)
+		}
+	}
+	return values, nil
+}
+func (r *memoryRepository) UpsertAlert(_ context.Context, value DeliveryAlert) (DeliveryAlert, error) {
+	if r.alerts == nil {
+		r.alerts = map[string]DeliveryAlert{}
+	}
+	for _, existing := range r.alerts {
+		if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.Fingerprint == value.Fingerprint {
+			return existing, nil
+		}
+	}
+	r.alerts[repositoryKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+	return value, nil
+}
+func (r *memoryRepository) ListAlerts(_ context.Context, org contract.OrganizationID, project contract.ProjectID, f AlertFilter) ([]DeliveryAlert, error) {
+	values := make([]DeliveryAlert, 0)
+	for _, v := range r.alerts {
+		if v.OrganizationID == org && v.ProjectID == project && (f.Status == "" || v.Status == f.Status) && (f.Type == "" || v.Type == f.Type) && (f.Severity == "" || v.Severity == f.Severity) && (f.Fixture == "" || v.Scenario == f.Fixture) {
+			values = append(values, v)
+		}
+	}
+	return values, nil
+}
+func (r *memoryRepository) UpdateAlert(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, action AlertAction, expected int64, actor string, now time.Time) (DeliveryAlert, error) {
+	key := repositoryKey(org, project, id)
+	v, ok := r.alerts[key]
+	if !ok {
+		return DeliveryAlert{}, ErrNotFound
+	}
+	next, _ := alertStatus(action)
+	if v.Status == next {
+		return v, nil
+	}
+	if v.Version != expected {
+		return DeliveryAlert{}, ErrVersionConflict
+	}
+	if v.Status != AlertOpen {
+		return DeliveryAlert{}, ErrInvalidState
+	}
+	v.Status, v.Version, v.ResolvedBy, v.UpdatedAt = next, v.Version+1, actor, now
+	if next == AlertAcknowledged {
+		v.AcknowledgedAt = &now
+	} else {
+		v.DismissedAt = &now
+	}
+	r.alerts[key] = v
+	return v, nil
 }
 
 var _ Repository = (*memoryRepository)(nil)

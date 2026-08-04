@@ -24,24 +24,25 @@ const (
 )
 
 type DeliveryApproval struct {
-	ApprovalID        string                  `json:"approval_id"`
-	OrganizationID    contract.OrganizationID `json:"organization_id"`
-	ProjectID         contract.ProjectID      `json:"project_id"`
-	PlanID            string                  `json:"plan_id"`
-	PlanVersion       int64                   `json:"plan_version"`
-	ChangeSetID       string                  `json:"change_set_id"`
-	ChangeSetVersion  int64                   `json:"change_set_version"`
-	PlanCanonicalHash string                  `json:"plan_canonical_hash"`
-	ActionHash        string                  `json:"action_hash"`
-	Action            ApprovalAction          `json:"action"`
-	Scope             ApprovalScope           `json:"scope"`
-	BudgetLimitMinor  int64                   `json:"budget_limit_minor"`
-	Currency          string                  `json:"currency"`
-	ApprovedBy        string                  `json:"approved_by"`
-	ApprovedAt        time.Time               `json:"approved_at"`
-	ExpiresAt         time.Time               `json:"expires_at"`
-	Source            Source                  `json:"source"`
-	Scenario          Scenario                `json:"scenario"`
+	ApprovalID         string                  `json:"approval_id"`
+	OrganizationID     contract.OrganizationID `json:"organization_id"`
+	ProjectID          contract.ProjectID      `json:"project_id"`
+	PlanID             string                  `json:"plan_id"`
+	PlanVersion        int64                   `json:"plan_version"`
+	ChangeSetID        string                  `json:"change_set_id"`
+	ChangeSetVersion   int64                   `json:"change_set_version"`
+	PlanCanonicalHash  string                  `json:"plan_canonical_hash"`
+	TargetSnapshotHash string                  `json:"target_snapshot_hash,omitempty"`
+	ActionHash         string                  `json:"action_hash"`
+	Action             ApprovalAction          `json:"action"`
+	Scope              ApprovalScope           `json:"scope"`
+	BudgetLimitMinor   int64                   `json:"budget_limit_minor"`
+	Currency           string                  `json:"currency"`
+	ApprovedBy         string                  `json:"approved_by"`
+	ApprovedAt         time.Time               `json:"approved_at"`
+	ExpiresAt          time.Time               `json:"expires_at"`
+	Source             Source                  `json:"source"`
+	Scenario           Scenario                `json:"scenario"`
 }
 
 type ApprovalView struct {
@@ -53,30 +54,32 @@ type ApprovalView struct {
 }
 
 type planCanonicalPayload struct {
-	Name                  string              `json:"name"`
-	Objective             string              `json:"objective"`
-	Advertiser            AdvertiserInput     `json:"advertiser"`
-	Budget                Budget              `json:"budget"`
-	Schedule              Schedule            `json:"schedule"`
-	Tracking              Tracking            `json:"tracking"`
-	CreativeReferences    []CreativeReference `json:"creative_references"`
-	SourceStrategyVersion string              `json:"source_strategy_version"`
-	Source                Source              `json:"source"`
-	Platform              string              `json:"platform"`
+	Name                   string                  `json:"name"`
+	Objective              string                  `json:"objective"`
+	Advertiser             AdvertiserInput         `json:"advertiser"`
+	Budget                 Budget                  `json:"budget"`
+	Schedule               Schedule                `json:"schedule"`
+	Tracking               Tracking                `json:"tracking"`
+	CreativeReferences     []CreativeReference     `json:"creative_references"`
+	SourceStrategyVersion  string                  `json:"source_strategy_version"`
+	Source                 Source                  `json:"source"`
+	Platform               string                  `json:"platform"`
+	ThreeTierConfiguration *ThreeTierConfiguration `json:"three_tier_configuration,omitempty"`
 }
 
 type approvalActionPayload struct {
-	OrganizationID    contract.OrganizationID `json:"organization_id"`
-	ProjectID         contract.ProjectID      `json:"project_id"`
-	PlanID            string                  `json:"plan_id"`
-	PlanVersion       int64                   `json:"plan_version"`
-	ChangeSetID       string                  `json:"change_set_id"`
-	ChangeSetVersion  int64                   `json:"change_set_version"`
-	PlanCanonicalHash string                  `json:"plan_canonical_hash"`
-	Action            ApprovalAction          `json:"action"`
-	Scope             ApprovalScope           `json:"scope"`
-	BudgetLimit       int64                   `json:"budget_limit"`
-	Currency          string                  `json:"currency"`
+	OrganizationID     contract.OrganizationID `json:"organization_id"`
+	ProjectID          contract.ProjectID      `json:"project_id"`
+	PlanID             string                  `json:"plan_id"`
+	PlanVersion        int64                   `json:"plan_version"`
+	ChangeSetID        string                  `json:"change_set_id"`
+	ChangeSetVersion   int64                   `json:"change_set_version"`
+	PlanCanonicalHash  string                  `json:"plan_canonical_hash"`
+	Action             ApprovalAction          `json:"action"`
+	Scope              ApprovalScope           `json:"scope"`
+	BudgetLimit        int64                   `json:"budget_limit"`
+	Currency           string                  `json:"currency"`
+	TargetSnapshotHash string                  `json:"target_snapshot_hash,omitempty"`
 }
 
 func PlanCanonicalHash(version DeliveryPlanVersion) (string, error) {
@@ -92,29 +95,31 @@ func PlanCanonicalHash(version DeliveryPlanVersion) (string, error) {
 			Name:     version.Advertiser.Name,
 			Platform: version.Advertiser.Platform,
 		},
-		Budget:                version.Budget,
-		Schedule:              version.Schedule,
-		Tracking:              version.Tracking,
-		CreativeReferences:    append([]CreativeReference(nil), version.CreativeReferences...),
-		SourceStrategyVersion: version.SourceStrategyVersion,
-		Source:                version.Source,
-		Platform:              platform,
+		Budget:                 version.Budget,
+		Schedule:               version.Schedule,
+		Tracking:               version.Tracking,
+		CreativeReferences:     append([]CreativeReference(nil), version.CreativeReferences...),
+		SourceStrategyVersion:  version.SourceStrategyVersion,
+		Source:                 version.Source,
+		Platform:               platform,
+		ThreeTierConfiguration: cloneThreeTierConfiguration(version.ThreeTierConfiguration),
 	})
 }
 
 func ApprovalActionHash(approval DeliveryApproval) (string, error) {
 	return contract.CanonicalJSONHash(approvalActionPayload{
-		OrganizationID:    approval.OrganizationID,
-		ProjectID:         approval.ProjectID,
-		PlanID:            approval.PlanID,
-		PlanVersion:       approval.PlanVersion,
-		ChangeSetID:       approval.ChangeSetID,
-		ChangeSetVersion:  approval.ChangeSetVersion,
-		PlanCanonicalHash: approval.PlanCanonicalHash,
-		Action:            approval.Action,
-		Scope:             approval.Scope,
-		BudgetLimit:       approval.BudgetLimitMinor,
-		Currency:          approval.Currency,
+		OrganizationID:     approval.OrganizationID,
+		ProjectID:          approval.ProjectID,
+		PlanID:             approval.PlanID,
+		PlanVersion:        approval.PlanVersion,
+		ChangeSetID:        approval.ChangeSetID,
+		ChangeSetVersion:   approval.ChangeSetVersion,
+		PlanCanonicalHash:  approval.PlanCanonicalHash,
+		Action:             approval.Action,
+		Scope:              approval.Scope,
+		BudgetLimit:        approval.BudgetLimitMinor,
+		Currency:           approval.Currency,
+		TargetSnapshotHash: approval.TargetSnapshotHash,
 	})
 }
 

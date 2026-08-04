@@ -76,24 +76,25 @@ type PlanDraft struct {
 }
 
 type DeliveryPlanVersion struct {
-	PlanID                string                  `json:"plan_id"`
-	OrganizationID        contract.OrganizationID `json:"organization_id"`
-	ProjectID             contract.ProjectID      `json:"project_id"`
-	VersionNumber         int                     `json:"version_number"`
-	CanonicalHash         string                  `json:"canonical_hash"`
-	Name                  string                  `json:"name"`
-	Objective             string                  `json:"objective"`
-	Advertiser            MockAdvertiser          `json:"advertiser"`
-	Budget                Budget                  `json:"budget"`
-	Schedule              Schedule                `json:"schedule"`
-	Tracking              Tracking                `json:"tracking"`
-	CreativeReferences    []CreativeReference     `json:"creative_references"`
-	SourceStrategyVersion string                  `json:"source_strategy_version"`
-	Platform              string                  `json:"platform"`
-	Source                Source                  `json:"source"`
-	Scenario              Scenario                `json:"scenario"`
-	CreatedBy             contract.Principal      `json:"created_by"`
-	CreatedAt             time.Time               `json:"created_at"`
+	PlanID                 string                  `json:"plan_id"`
+	OrganizationID         contract.OrganizationID `json:"organization_id"`
+	ProjectID              contract.ProjectID      `json:"project_id"`
+	VersionNumber          int                     `json:"version_number"`
+	CanonicalHash          string                  `json:"canonical_hash"`
+	Name                   string                  `json:"name"`
+	Objective              string                  `json:"objective"`
+	Advertiser             MockAdvertiser          `json:"advertiser"`
+	Budget                 Budget                  `json:"budget"`
+	Schedule               Schedule                `json:"schedule"`
+	Tracking               Tracking                `json:"tracking"`
+	CreativeReferences     []CreativeReference     `json:"creative_references"`
+	SourceStrategyVersion  string                  `json:"source_strategy_version"`
+	Platform               string                  `json:"platform"`
+	Source                 Source                  `json:"source"`
+	Scenario               Scenario                `json:"scenario"`
+	CreatedBy              contract.Principal      `json:"created_by"`
+	CreatedAt              time.Time               `json:"created_at"`
+	ThreeTierConfiguration *ThreeTierConfiguration `json:"three_tier_configuration,omitempty"`
 }
 
 type UpdatePlanRequest struct {
@@ -228,5 +229,6 @@ func draftFromVersion(version DeliveryPlanVersion) PlanDraft {
 
 func cloneVersion(version DeliveryPlanVersion) DeliveryPlanVersion {
 	version.CreativeReferences = append([]CreativeReference(nil), version.CreativeReferences...)
+	version.ThreeTierConfiguration = cloneThreeTierConfiguration(version.ThreeTierConfiguration)
 	return version
 }
