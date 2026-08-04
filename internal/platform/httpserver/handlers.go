@@ -1782,6 +1782,10 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusServiceUnavailable, "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", "视觉分析模型网关暂时不可用，请稍后重试。", true
 	case errors.Is(err, creative.ErrViralAnalysisResponseInvalid):
 		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_RESPONSE_INVALID", "视觉分析模型未返回可用的五维拆解结果，请稍后重试。", true
+	case errors.Is(err, creative.ErrInvalidAINativeRequirement):
+		status, code, message, retryable = http.StatusBadRequest, "INVALID_AI_NATIVE_REQUIREMENT", "AI 原生广告需求参数不符合当前抖音 P0 规则。", false
+	case errors.Is(err, creative.ErrAINativeProductUnavailable):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "AI_NATIVE_PRODUCT_UNAVAILABLE", "商品链接无法解析或未提供可用商品信息。", false
 	case errors.Is(err, project.ErrNotActive):
 		status, code, message, retryable = http.StatusConflict, contract.ErrorProjectNotActive, "The project must be active and brand-bound.", false
 	case errors.Is(err, project.ErrVersionConflict):

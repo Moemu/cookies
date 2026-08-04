@@ -11,6 +11,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
 	"github.com/shikanon/cookies/internal/platform/media"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 type ActiveProjectResolver interface {
@@ -41,6 +42,10 @@ type AssetReader interface {
 
 type DerivedImageWriter interface {
 	IngestDerivedImage(context.Context, contract.RequestContext, contract.ProjectID, string, contract.AssetVersionRef, io.Reader, int64, string) (contract.ProjectAssetRef, error)
+}
+
+type AudioAssetWriter interface {
+	IngestDerivedAudio(context.Context, contract.RequestContext, contract.ProjectID, string, io.Reader, int64, string, []contract.ResourceRef) (contract.ProjectAssetRef, error)
 }
 
 type CreativeAssetSnapshot struct {
@@ -90,6 +95,10 @@ type Service struct {
 	Assets                              AssetReader
 	GameEvidenceFrames                  media.FrameExtractor
 	DerivedAssets                       DerivedImageWriter
+	AudioAssets                         AudioAssetWriter
+	AudioMixRenderer                    media.AudioMixRenderer
+	AudioMixScheduler                   AudioMixRenderScheduler
+	BrandFilmSpeech                     provider.SpeechSynthesizer
 	Composer                            media.VideoComposer
 	BrandFilmComposer                   media.SegmentComposer
 	RenderedAssets                      RenderedAssetWriter
@@ -104,6 +113,25 @@ type Service struct {
 	ImageRenderer                       *ImageTextRenderer
 	ImageBaseAssets                     ImageBaseAssetReader
 	RenderedImages                      RenderedImageWriter
+	AINativeProducts                    AINativeProductResolver
+	AINativeRequirementPlanner          AINativeRequirementPlanner
+	AINativeRequirements                AINativeRequirementRepository
+	AINativeProductMediaImporter        AINativeProductMediaImporter
+	AINativeOperationCanceller          AINativeOperationCanceller
+	AINativeScripts                     AINativeScriptRepository
+	AINativeScriptPlanner               AINativeScriptPlanner
+	AINativeScriptProfiles              ChannelCreativeProfileRegistry
+	AINativeScriptScheduler             AINativeScriptScheduler
+	AINativeStoryboards                 AINativeStoryboardRepository
+	AINativeStoryboardPlanner           AINativeStoryboardPlanner
+	AINativeStoryboardAssetPreparer     AINativeStoryboardAssetPreparer
+	AINativeStoryboardScheduler         AINativeStoryboardScheduler
+	AINativeProductions                 AINativeProductionRepository
+	AINativeProductionScheduler         AINativeProductionScheduler
+	AINativeVideoJobs                   AINativeVideoJobManager
+	AINativeSpeech                      provider.SpeechSynthesizer
+	AINativeTimelineRenderer            media.TimelineRenderer
+	AINativeMaxActiveUnits              int
 	AllowLegacyTaskStrategyIntakeWrites bool
 	NewID                               ids.Generator
 	Now                                 func() time.Time

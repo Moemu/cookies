@@ -28,6 +28,7 @@ const (
 	BrandFilmGenerating       BrandFilmStage = "generating"
 	BrandFilmGenerationReview BrandFilmStage = "generation_review"
 	BrandFilmGenerationLocked BrandFilmStage = "generation_locked"
+	BrandFilmAudioDraft       BrandFilmStage = "audio_draft"
 	BrandFilmQualityReview    BrandFilmStage = "quality_review"
 	BrandFilmReadyForReview   BrandFilmStage = "ready_for_review"
 	BrandFilmApproved         BrandFilmStage = "approved"
@@ -179,27 +180,28 @@ type BrandFilmShot struct {
 }
 
 type BrandFilmPlanVersion struct {
-	Revision        int64           `json:"revision"`
-	ConceptID       string          `json:"concept_id"`
-	Title           string          `json:"title"`
-	StorySummary    string          `json:"story_summary"`
-	VoiceDirection  string          `json:"voice_direction"`
-	MusicDirection  string          `json:"music_direction"`
-	Shots           []BrandFilmShot `json:"shots"`
-	Confirmed       bool            `json:"confirmed"`
-	ConfirmedBy     string          `json:"confirmed_by,omitempty"`
-	ConfirmedAt     *time.Time      `json:"confirmed_at,omitempty"`
-	ModelAlias      string          `json:"model_alias"`
-	ModelVersion    string          `json:"model_version"`
-	RouteRevisionID string          `json:"route_revision_id,omitempty"`
-	PromptVersion   string          `json:"prompt_version"`
-	CreatedAt       time.Time       `json:"created_at"`
+	Revision         int64           `json:"revision"`
+	MasterDurationMS int             `json:"master_duration_ms,omitempty"`
+	ConceptID        string          `json:"concept_id"`
+	Title            string          `json:"title"`
+	StorySummary     string          `json:"story_summary"`
+	VoiceDirection   string          `json:"voice_direction"`
+	MusicDirection   string          `json:"music_direction"`
+	Shots            []BrandFilmShot `json:"shots"`
+	Confirmed        bool            `json:"confirmed"`
+	ConfirmedBy      string          `json:"confirmed_by,omitempty"`
+	ConfirmedAt      *time.Time      `json:"confirmed_at,omitempty"`
+	ModelAlias       string          `json:"model_alias"`
+	ModelVersion     string          `json:"model_version"`
+	RouteRevisionID  string          `json:"route_revision_id,omitempty"`
+	PromptVersion    string          `json:"prompt_version"`
+	CreatedAt        time.Time       `json:"created_at"`
 }
 
 func (v BrandFilmPlanVersion) Validate() error {
 	if v.Revision < 1 || strings.TrimSpace(v.ConceptID) == "" || strings.TrimSpace(v.Title) == "" ||
 		strings.TrimSpace(v.StorySummary) == "" || strings.TrimSpace(v.VoiceDirection) == "" ||
-		len(v.Shots) < 3 || v.CreatedAt.IsZero() {
+		len(v.Shots) == 0 || v.CreatedAt.IsZero() {
 		return fmt.Errorf("brand film plan is incomplete")
 	}
 	end := 0
@@ -210,8 +212,12 @@ func (v BrandFilmPlanVersion) Validate() error {
 		}
 		end = shot.EndSecond
 	}
-	if end != 15 {
-		return fmt.Errorf("brand film plan must total 15 seconds")
+	masterDurationMS := v.MasterDurationMS
+	if masterDurationMS == 0 {
+		masterDurationMS = end * 1000
+	}
+	if _, err := PlanBrandFilmGenerationUnits(masterDurationMS, v.Shots); err != nil {
+		return err
 	}
 	return nil
 }
@@ -230,6 +236,7 @@ type BrandFilmDraft struct {
 	Readiness         CreativeReadiness               `json:"readiness"`
 	PromptSeam        BrandFilmReservedGenerationSeam `json:"generation_seam"`
 	Generation        *BrandFilmGeneration            `json:"generation,omitempty"`
+	Audio             *BrandAudioWorkspace            `json:"audio,omitempty"`
 	QualityRuns       []BrandFilmQualityRun           `json:"quality_runs"`
 	Delivery          *BrandFilmDeliveryLifecycle     `json:"delivery,omitempty"`
 	CreatedAt         time.Time                       `json:"created_at"`
@@ -237,13 +244,14 @@ type BrandFilmDraft struct {
 }
 
 type BrandFilmGeneration struct {
-	ContractVersion string                    `json:"contract_version"`
-	PlanRevision    int64                     `json:"plan_revision"`
-	ReferenceAsset  contract.AssetVersionRef  `json:"reference_asset"`
-	Units           []BrandFilmGenerationUnit `json:"units"`
-	PreviewAsset    *contract.AssetVersionRef `json:"preview_asset,omitempty"`
-	CreatedAt       time.Time                 `json:"created_at"`
-	UpdatedAt       time.Time                 `json:"updated_at"`
+	ContractVersion  string                    `json:"contract_version"`
+	PlanRevision     int64                     `json:"plan_revision"`
+	MasterDurationMS int                       `json:"master_duration_ms,omitempty"`
+	ReferenceAsset   contract.AssetVersionRef  `json:"reference_asset"`
+	Units            []BrandFilmGenerationUnit `json:"units"`
+	PreviewAsset     *contract.AssetVersionRef `json:"preview_asset,omitempty"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
 }
 
 type BrandFilmGenerationUnit struct {
@@ -351,9 +359,12 @@ type BrandFilmDeliveryLifecycle struct {
 
 func (d BrandFilmDraft) Validate() error {
 	if d.ContractVersion != "creative-brand-film-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
-		!validSHA256Ref(d.SourceHash) || d.SourceSnapshot.Duration != 15 || d.SourceSnapshot.AspectRatio != "9:16" ||
+		!validSHA256Ref(d.SourceHash) || d.SourceSnapshot.AspectRatio != "9:16" ||
 		d.PromptSeam.ContractVersion != "creative-brand-generation-seam/v1" || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
 		return fmt.Errorf("brand film draft is incomplete")
+	}
+	if _, err := ResolveBrandFilmDurationProfile(d.SourceSnapshot.Duration); err != nil {
+		return err
 	}
 	for _, analysis := range d.BriefAnalyses {
 		if err := analysis.Validate(); err != nil {
@@ -367,11 +378,20 @@ func (d BrandFilmDraft) Validate() error {
 	}
 	for _, plan := range d.FilmPlans {
 		if err := plan.Validate(); err != nil {
-			return err
+			if d.Generation == nil || validateCompletedLegacyBrandFilmGeneration(*d.Generation) != nil || validateBrandAudioSourcePlan(plan) != nil {
+				return err
+			}
 		}
 	}
 	if d.Generation != nil {
 		if err := d.Generation.Validate(); err != nil {
+			if legacyErr := validateCompletedLegacyBrandFilmGeneration(*d.Generation); legacyErr != nil {
+				return err
+			}
+		}
+	}
+	if d.Audio != nil {
+		if err := d.Audio.Validate(); err != nil {
 			return err
 		}
 	}
@@ -379,6 +399,44 @@ func (d BrandFilmDraft) Validate() error {
 		if err := run.Validate(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Completed previews created before the one-shot/one-generation policy remain
+// valid project history. New generation still goes through the strict profile;
+// this compatibility path only permits fully locked, already-rendered work.
+func validateCompletedLegacyBrandFilmGeneration(generation BrandFilmGeneration) error {
+	if generation.ContractVersion != "creative-brand-film-generation/v1" || generation.PlanRevision < 1 ||
+		generation.ReferenceAsset.Validate() != nil || generation.PreviewAsset == nil || generation.PreviewAsset.Validate() != nil ||
+		len(generation.Units) == 0 || generation.CreatedAt.IsZero() || generation.UpdatedAt.IsZero() {
+		return fmt.Errorf("legacy brand film generation is incomplete")
+	}
+	endSecond := 0
+	for index, unit := range generation.Units {
+		if unit.Order != index+1 || unit.StartSecond != endSecond || unit.EndSecond-unit.StartSecond < 4 ||
+			unit.EndSecond-unit.StartSecond > 15 || len(unit.ShotIDs) == 0 || len(unit.PromptPackages) == 0 || unit.LockedAttemptID == "" {
+			return fmt.Errorf("legacy brand film generation unit %d is invalid", index+1)
+		}
+		pkg := unit.PromptPackages[len(unit.PromptPackages)-1]
+		if pkg.UnitID != unit.ID || pkg.DurationSeconds != unit.EndSecond-unit.StartSecond ||
+			!validSHA256Ref(pkg.ContentHash) || pkg.ContractVersion != "brand-shot-prompt-package/v1" {
+			return fmt.Errorf("legacy brand film prompt package %d is invalid", index+1)
+		}
+		locked := false
+		for _, attempt := range unit.Attempts {
+			if attempt.ID == unit.LockedAttemptID && attempt.Status == "succeeded" && attempt.OutputAssetRef != nil && attempt.OutputAssetRef.Validate() == nil {
+				locked = true
+				break
+			}
+		}
+		if !locked {
+			return fmt.Errorf("legacy brand film generation unit %d is not locked", index+1)
+		}
+		endSecond = unit.EndSecond
+	}
+	if generation.MasterDurationMS != 0 && generation.MasterDurationMS != endSecond*1000 {
+		return fmt.Errorf("legacy brand film generation master duration does not match units")
 	}
 	return nil
 }
@@ -403,7 +461,7 @@ func (g BrandFilmGeneration) Validate() error {
 	end := 0
 	for index, unit := range g.Units {
 		if unit.Order != index+1 || unit.StartSecond != end || unit.EndSecond-unit.StartSecond < 4 ||
-			unit.EndSecond-unit.StartSecond > 15 || len(unit.ShotIDs) == 0 || len(unit.PromptPackages) == 0 {
+			unit.EndSecond-unit.StartSecond > 15 || len(unit.ShotIDs) != 1 || len(unit.PromptPackages) == 0 {
 			return fmt.Errorf("brand film generation unit %d is invalid", index+1)
 		}
 		pkg := unit.PromptPackages[len(unit.PromptPackages)-1]
@@ -413,8 +471,12 @@ func (g BrandFilmGeneration) Validate() error {
 		}
 		end = unit.EndSecond
 	}
-	if end != 15 {
-		return fmt.Errorf("brand film generation units must total 15 seconds")
+	profile, err := ResolveBrandFilmDurationProfile(end)
+	if err != nil || len(g.Units) != profile.ShotCount {
+		return fmt.Errorf("brand film generation units do not match duration profile")
+	}
+	if g.MasterDurationMS != 0 && g.MasterDurationMS != end*1000 {
+		return fmt.Errorf("brand film generation master duration does not match units")
 	}
 	return nil
 }

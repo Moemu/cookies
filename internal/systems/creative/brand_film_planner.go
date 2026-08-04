@@ -69,14 +69,12 @@ func (DeterministicBrandFilmPlanner) GenerateConcepts(_ context.Context, _ contr
 
 func (DeterministicBrandFilmPlanner) GenerateFilmPlan(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, _ BrandFilmSourceSnapshot, _ BrandBriefAnalysisVersion, concept BrandCreativeConcept, revision int64, now time.Time) (BrandFilmPlanVersion, error) {
 	shots := []BrandFilmShot{
-		{ID: "shot_01", Order: 1, StartSecond: 0, EndSecond: 3, Purpose: "建立品牌世界", Visual: "暗金背景中一滴清水落入蜂巢纹理，光线沿六边形缓慢苏醒。", Action: "水滴扩散为柔和金色波纹。", Camera: "微距缓慢推进", Lighting: "低照度暖金轮廓光", Voiceover: "当自然的修护能量，被轻盈唤醒。", ReferenceRole: "style", ContinuityNotes: "金色温度与后续产品高光一致。"},
-		{ID: "shot_02", Order: 2, StartSecond: 3, EndSecond: 6, Purpose: "完成品牌进入", Visual: "蜂巢光影汇聚，娇兰 25X 蜂皇水瓶身清晰出现。", Action: "瓶身从水雾中稳定显形并保持标签正面。", Camera: "中近景轻微环绕", Lighting: "暖金侧光与黑色轮廓高光", Voiceover: "娇兰二十五倍蜂皇水。", OnScreenText: "娇兰 25X蜂皇水", ReferenceRole: "required_identity", ContinuityNotes: "瓶型、黑色瓶盖、标签比例必须保持真实。"},
-		{ID: "shot_03", Order: 3, StartSecond: 6, EndSecond: 10, Purpose: "展示质地与使用", Visual: "轻盈水感掠过肌肤，人物将浸润化妆棉贴于面颊。", Action: "一次自然湿敷动作，不做前后对比。", Camera: "水感微距切至面部近景", Lighting: "柔和晨光与金色反射", Voiceover: "轻盈不黏腻，温柔补水修护。", ReferenceRole: "composition", ContinuityNotes: "人物、肤色与产品方向连续。"},
-		{ID: "shot_04", Order: 4, StartSecond: 10, EndSecond: 13, Purpose: "沉淀感受", Visual: "人物取下化妆棉，水光与金色波纹在肌肤边缘自然呼应。", Action: "轻微转头，神态放松。", Camera: "固定近景", Lighting: "干净柔光", Voiceover: "让每一次护理，都回到柔润与从容。", ReferenceRole: "style", ContinuityNotes: "不表现夸张即时功效。"},
-		{ID: "shot_05", Order: 5, StartSecond: 13, EndSecond: 15, Purpose: "品牌定格", Visual: "产品正面在暖金蜂巢背景前稳定定格，品牌留白清晰。", Action: "仅保留细微光线流动。", Camera: "固定商品英雄镜头", Lighting: "高端暖金主光", Voiceover: "法国娇兰。", OnScreenText: "法国娇兰 · 25X蜂皇水", ReferenceRole: "required_identity", ContinuityNotes: "不新增价格、促销或错误文字。"},
+		{ID: "shot_01", Order: 1, StartSecond: 0, EndSecond: 5, Purpose: "建立品牌世界并完成产品进入", Visual: "暗金背景中一滴清水落入蜂巢纹理，光线沿六边形苏醒并汇聚出娇兰 25X 蜂皇水正面瓶身。", Action: "水滴扩散为金色波纹，瓶身从水雾中稳定显形。", Camera: "微距推进后转为中近景轻微环绕", Lighting: "低照度暖金轮廓光与瓶身侧光", Voiceover: "当自然的修护能量被轻盈唤醒，娇兰二十五倍蜂皇水。", OnScreenText: "娇兰 25X蜂皇水", ReferenceRole: "required_identity", ContinuityNotes: "瓶型、黑色瓶盖、标签比例必须保持真实。"},
+		{ID: "shot_02", Order: 2, StartSecond: 5, EndSecond: 10, Purpose: "展示质地与湿敷体验", Visual: "轻盈水感掠过肌肤，人物将浸润化妆棉贴于面颊，金色波纹在肌肤边缘自然呼应。", Action: "完成一次自然湿敷并轻微转头，不做前后对比。", Camera: "水感微距切至稳定面部近景", Lighting: "柔和晨光与克制金色反射", Voiceover: "轻盈不黏腻，温柔补水修护，让护理回到柔润与从容。", ReferenceRole: "composition", ContinuityNotes: "人物、肤色与产品方向连续，不表现夸张即时功效。"},
+		{ID: "shot_03", Order: 3, StartSecond: 10, EndSecond: 15, Purpose: "品牌定格与行动收束", Visual: "产品正面在暖金蜂巢背景前稳定定格，品牌与产品信息留白清晰。", Action: "仅保留细微水光和金色光线流动。", Camera: "固定商品英雄镜头", Lighting: "高端暖金主光", Voiceover: "法国娇兰，二十五倍蜂皇水。", OnScreenText: "法国娇兰 · 25X蜂皇水", ReferenceRole: "required_identity", ContinuityNotes: "不新增价格、促销或错误文字。"},
 	}
 	return BrandFilmPlanVersion{
-		Revision: revision, ConceptID: concept.ID, Title: "《" + concept.Title + "》", StorySummary: concept.OneLiner,
+		Revision: revision, MasterDurationMS: 15000, ConceptID: concept.ID, Title: "《" + concept.Title + "》", StorySummary: concept.OneLiner,
 		VoiceDirection: "温柔、克制的年轻成熟女声，中低语速。", MusicDirection: concept.SoundIdea, Shots: shots,
 		ModelAlias: "fixture.deterministic", ModelVersion: "guerlain-brand-v1", PromptVersion: brandFilmPromptVersion, CreatedAt: now,
 	}, nil
@@ -203,7 +201,7 @@ func (p ModelBrandFilmPlanner) GenerateFilmPlan(ctx context.Context, actor contr
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
 		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-film-plan-%s-%d", source.FixtureHash[7:19], revision)),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "你是品牌广告导演。输出可编辑的 15 秒、9:16 剧本分镜。镜头必须从 0 秒连续覆盖到 15 秒，至少 3 个；用户编辑镜头表而不是模型 Prompt。只输出 JSON。"},
+			{Role: provider.TextRoleSystem, Content: fmt.Sprintf("你是品牌广告导演。输出可编辑的 %d 秒、9:16 剧本分镜。镜头必须从 0 秒连续覆盖到 %d 秒且固定为 %d 个，每个镜头 4～15 秒；用户编辑镜头表而不是模型 Prompt。只输出 JSON。", source.Duration, source.Duration, (source.Duration+4)/5)},
 			{Role: provider.TextRoleUser, Content: "基于已确认 Brief 与创意方向生成剧本、旁白和镜头表。INPUT=" + string(input)},
 		}, OutputJSONSchema: brandFilmPlanSchema,
 	})
@@ -214,7 +212,7 @@ func (p ModelBrandFilmPlanner) GenerateFilmPlan(ctx context.Context, actor contr
 	if err := decodeBrandStructured(response, &value); err != nil {
 		return BrandFilmPlanVersion{}, err
 	}
-	value.Revision, value.ConceptID, value.Confirmed, value.ConfirmedAt = revision, concept.ID, false, nil
+	value.Revision, value.MasterDurationMS, value.ConceptID, value.Confirmed, value.ConfirmedAt = revision, source.Duration*1000, concept.ID, false, nil
 	for index := range value.Shots {
 		value.Shots[index].ID, value.Shots[index].Order = fmt.Sprintf("shot_%02d", index+1), index+1
 	}

@@ -1,5 +1,7 @@
 # Creative migrations
 
+- `20260804130000_creative_ai_native_storyboards` adds recoverable storyboard planning, immutable storyboard revisions, and confirmed-storyboard lineage for AI native performance ads.
+
 Owner: Creative team.
 
 `20260723150000_creative_image_text_m1.up.sql` creates Creative-owned Intakes,
@@ -31,3 +33,31 @@ overlay. `20260731102000_creative_direction_planning.up.sql` stores immutable
 LLM candidate batches and the explicitly confirmed CreativeDirection.
 `20260731103000_creative_intake_identity_index.up.sql` makes the canonical
 `input_identity_hash` the concurrency-safe deduplication key.
+
+`20260803150000_creative_ai_native_requirement_workspaces.up.sql` stores the
+AI-native-ad requirement workspace and every immutable RequirementRevision.
+The workspace is linked to one manual CreativeIntake and one video CreativeTask
+with `performance_mode=ai_ad_generation`. It owns the aggregate stage and
+optimistic `workspace_version`; edits append JSON revisions, confirmation
+freezes the current pointer, and reopening supersedes rather than overwrites the
+confirmed revision.
+
+`20260804110000_creative_ai_native_scripts.up.sql` extends that aggregate with
+durable script generation state and immutable `AdScriptRevision` records. Each
+script records its confirmed Requirement revision/hash, channel profile/hash,
+model route metadata and regeneration lineage; edits and reopen operations
+append revisions instead of overwriting prior content.
+
+`20260804130000_creative_ai_native_storyboards.up.sql` adds recoverable
+storyboard planning and immutable storyboard revisions. Product identity keeps
+an Assets-owned reference and cannot be replaced by generated media.
+
+`20260804150000_creative_ai_native_production.up.sql` adds the durable AI ad
+ProductionPlan, GenerationUnit/Attempt state, active operation, server progress
+source and terminal assets-ready/failed/cancelled states. Successful Provider
+assets remain referenced across Worker restarts and local Unit retries.
+
+`20260804170000_creative_ai_native_final_render.up.sql` extends Production with
+rendering/completed/render-failed states. The frozen Timeline consumes only
+Assets-owned video and audio versions; its final H.264/AAC MP4 is ingested with
+a stable render identity so a Worker retry cannot create duplicate outputs.

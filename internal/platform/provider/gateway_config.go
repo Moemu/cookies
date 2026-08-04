@@ -71,6 +71,7 @@ type GatewayRouteSnapshot struct {
 	PollIntervalMS       int                      `json:"poll_interval_ms,omitempty"`
 	VideoInputModes      []VideoInputMode         `json:"video_input_modes,omitempty"`
 	VideoAudioPolicies   []VideoAudioPolicy       `json:"video_audio_policies,omitempty"`
+	SpeechVoiceAliases   map[string]string        `json:"speech_voice_aliases,omitempty"`
 }
 
 func (s GatewayRouteSnapshot) Validate() error {
@@ -182,6 +183,10 @@ type VideoRouteResolver interface {
 	ResolveVideoRoute(context.Context, contract.OrganizationID, string) (VideoRouteSnapshot, error)
 }
 
+type SpeechRouteResolver interface {
+	ResolveSpeechRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
+}
+
 // ImageRouteSnapshot is retained as a source-compatible alias for the
 // existing durable ProviderJob JSON contract.
 type ImageRouteSnapshot = GatewayRouteSnapshot
@@ -265,6 +270,10 @@ func (s MySQLGatewayConfigStore) ResolveVideoRoute(ctx context.Context, organiza
 	return s.resolveRoute(ctx, organizationID, "video.generate", modelAlias, "ark")
 }
 
+func (s MySQLGatewayConfigStore) ResolveSpeechRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "speech.synthesize", modelAlias, "minimax_speech")
+}
+
 func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationID contract.OrganizationID, capability, modelAlias, connectionType string) (ImageRouteSnapshot, error) {
 	if s.DB == nil {
 		return ImageRouteSnapshot{}, fmt.Errorf("MySQL database is required")
@@ -306,6 +315,10 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		if err := applyVideoRouteConstraints(&snapshot, constraintsJSON); err != nil {
 			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
 		}
+	} else if capability == "speech.synthesize" {
+		if err := applySpeechRouteConstraints(&snapshot, constraintsJSON); err != nil {
+			return ImageRouteSnapshot{}, fmt.Errorf("invalid MiniMax speech route %q constraints: %w", modelAlias, err)
+		}
 	}
 	validate := snapshot.ValidateWithPolicy
 	if capability == "text.generate" {
@@ -317,6 +330,32 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q: %w", modelAlias, err)
 	}
 	return snapshot, nil
+}
+
+func applySpeechRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {
+	if snapshot == nil {
+		return fmt.Errorf("route snapshot is required")
+	}
+	var constraints struct {
+		VoiceAliases map[string]string `json:"voice_aliases"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &constraints); err != nil {
+			return err
+		}
+	}
+	if len(constraints.VoiceAliases) == 0 {
+		return fmt.Errorf("speech route requires at least one logical voice alias")
+	}
+	snapshot.SpeechVoiceAliases = make(map[string]string, len(constraints.VoiceAliases))
+	for alias, voiceID := range constraints.VoiceAliases {
+		alias, voiceID = strings.TrimSpace(alias), strings.TrimSpace(voiceID)
+		if alias == "" || voiceID == "" {
+			return fmt.Errorf("speech voice alias mapping is invalid")
+		}
+		snapshot.SpeechVoiceAliases[alias] = voiceID
+	}
+	return nil
 }
 
 func applyVideoRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {

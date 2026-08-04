@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-ai-native-script-v1.schema.json",
+  "title": "AI Native Ad Script Revision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "revision", "status", "title", "creative_summary",
+    "channel_profile_id", "channel_profile_hash", "duration_seconds", "segments",
+    "based_on_requirement_revision", "based_on_requirement_hash", "generation"
+  ],
+  "properties": {
+    "contract_version": {"const": "creative.ai-native.script/v1"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["draft", "confirmed", "superseded"]},
+    "title": {"type": "string", "minLength": 1},
+    "creative_summary": {"type": "string", "minLength": 1},
+    "channel_profile_id": {"type": "string", "minLength": 1},
+    "channel_profile_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "duration_seconds": {"type": "integer", "minimum": 15, "maximum": 30},
+    "segments": {
+      "type": "array", "minItems": 3, "maxItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "start_ms", "end_ms", "purpose", "visual_intent", "voiceover", "subtitle", "selling_point_ids"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "start_ms": {"type": "integer", "minimum": 0},
+          "end_ms": {"type": "integer", "minimum": 1},
+          "purpose": {"enum": ["hook", "pain", "proof", "benefit", "cta"]},
+          "visual_intent": {"type": "string", "minLength": 1},
+          "voiceover": {"type": "string", "minLength": 1},
+          "subtitle": {"type": "string", "minLength": 1},
+          "selling_point_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "conversion_action": {"type": "string"}
+        }
+      }
+    },
+    "regeneration_note": {"type": "string", "maxLength": 2000},
+    "based_on_revision": {"type": "integer", "minimum": 1},
+    "based_on_requirement_revision": {"type": "integer", "minimum": 1},
+    "based_on_requirement_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "generation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_alias", "model_version", "prompt_version", "profile_hash"],
+      "properties": {
+        "model_alias": {"type": "string", "minLength": 1},
+        "model_version": {"type": "string", "minLength": 1},
+        "route_revision_id": {"type": "string"},
+        "prompt_version": {"const": "ai-ad-script/douyin/v1"},
+        "profile_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0},
+        "latency_ms": {"type": "integer", "minimum": 0}
+      }
+    },
+    "created_by": {"type": "string"},
+    "confirmed_by": {"type": "string"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "confirmed_at": {"type": "string", "format": "date-time"}
+  }
+}

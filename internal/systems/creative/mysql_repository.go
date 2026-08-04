@@ -235,8 +235,11 @@ func (r MySQLRepository) ReviseVideoDraft(ctx context.Context, organizationID co
 	if r.DB == nil {
 		return VideoDraft{}, fmt.Errorf("creative MySQL database is required")
 	}
-	if draft.TaskID != taskID || draft.Revision != expectedRevision+1 || draft.Validate() != nil {
+	if draft.TaskID != taskID || draft.Revision != expectedRevision+1 {
 		return VideoDraft{}, fmt.Errorf("next creative video draft revision is invalid")
+	}
+	if err := draft.Validate(); err != nil {
+		return VideoDraft{}, fmt.Errorf("next creative video draft revision is invalid: %w", err)
 	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -333,7 +336,16 @@ func (r MySQLRepository) GetTaskDetail(ctx context.Context, organizationID contr
 	}
 	var draft ImageTextDraft
 	var videoDraft *VideoDraft
-	if task.Format == FormatVideo {
+	var aiNativeWorkspaceID string
+	if task.Format == FormatVideo && task.PerformanceMode == PerformanceModeAINativeAd {
+		if err = r.DB.QueryRowContext(ctx, `SELECT workspace_id FROM creative_ai_native_requirement_workspaces
+			WHERE organization_id=? AND project_id=? AND creative_task_id=?`, organizationID, projectID, taskID).Scan(&aiNativeWorkspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return TaskDetail{}, ErrNotFound
+			}
+			return TaskDetail{}, err
+		}
+	} else if task.Format == FormatVideo {
 		value, videoErr := r.getLatestVideoDraft(ctx, organizationID, taskID)
 		if videoErr != nil {
 			return TaskDetail{}, videoErr
@@ -358,7 +370,7 @@ func (r MySQLRepository) GetTaskDetail(ctx context.Context, organizationID contr
 		return TaskDetail{}, err
 	}
 	return TaskDetail{
-		Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft,
+		Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft, AINativeWorkspaceID: aiNativeWorkspaceID,
 		ProductionJobs: jobs, ShortDramaGenerationAttempts: attempts,
 		GamePrerollGenerationAttempts: gameAttempts,
 	}, nil
