@@ -97,7 +97,7 @@ export function PreLaunchInsightPage({ state, onOpenProject }: { state: DataStat
         const artifacts = await api.listArtifacts(currentProject.id)
         const brief = artifacts.find(artifact => artifact.id === currentProject.artifacts.brief.id)
         if (brief && !brief.content.includes(selected.id)) {
-          await api.updateArtifact(brief.id, { content: `${brief.content}\n\n投前洞察引用 ${selected.id}：${selected.recommendation}` })
+          await api.updateArtifact(currentProject.id, brief.id, { content: `${brief.content}\n\n投前洞察引用 ${selected.id}：${selected.recommendation}`, version: brief.version })
         }
       }
       if (target === 'creative') {

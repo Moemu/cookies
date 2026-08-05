@@ -1285,11 +1285,12 @@ export const api = {
     content: string
     status?: ApiArtifact['status']
     sourceJobId?: string
-  }) => request<ApiArtifact>('/artifacts', 'POST', input),
+  }) => platformClient.createArtifact(input.projectId, input),
   updateArtifact: (
+    projectId: string,
     id: string,
-    input: Partial<Pick<ApiArtifact, 'content' | 'status' | 'sourceJobId'>>,
-  ) => request<ApiArtifact>(`/artifacts/${encodeURIComponent(id)}`, 'PATCH', input),
+    input: Partial<Pick<ApiArtifact, 'content' | 'status' | 'sourceJobId' | 'version'>>,
+  ) => platformClient.updateArtifact(projectId, id, input),
   listJobs: (projectId?: string) =>
     projectId ? platformClient.listJobs(projectId) : Promise.resolve([]),
   listPrerollJobs: (scope: ApiPrerollScope) =>

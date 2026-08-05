@@ -234,6 +234,74 @@ func (s MySQLStore) UpdateProject(ctx context.Context, project Project, runtime 
 	return tx.Commit()
 }
 
+func (s MySQLStore) CreateProjectArtifact(ctx context.Context, artifact ProjectArtifact) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO platform_project_artifacts
+		(organization_id, project_id, id, kind, status, content, source_job_id, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
+		artifact.OrganizationID, artifact.ProjectID, artifact.ID, artifact.Kind, artifact.Status, artifact.Content,
+		artifact.SourceJobID, artifact.Version, artifact.CreatedAt, artifact.UpdatedAt)
+	return err
+}
+
+func (s MySQLStore) ListProjectArtifacts(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]ProjectArtifact, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("project database is required")
+	}
+	rows, err := s.DB.QueryContext(ctx, projectArtifactSelect+` WHERE organization_id=? AND project_id=? ORDER BY updated_at DESC, id`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	artifacts := make([]ProjectArtifact, 0)
+	for rows.Next() {
+		artifact, err := scanProjectArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	return artifacts, rows.Err()
+}
+
+func (s MySQLStore) GetProjectArtifact(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, artifactID string) (ProjectArtifact, error) {
+	if s.DB == nil {
+		return ProjectArtifact{}, fmt.Errorf("project database is required")
+	}
+	return scanProjectArtifact(s.DB.QueryRowContext(ctx, projectArtifactSelect+` WHERE organization_id=? AND project_id=? AND id=?`, organizationID, projectID, artifactID))
+}
+
+func (s MySQLStore) UpdateProjectArtifact(ctx context.Context, artifact ProjectArtifact, expectedVersion int64) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE platform_project_artifacts SET content=?, status=?, source_job_id=NULLIF(?, ''),
+		version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=?`,
+		artifact.Content, artifact.Status, artifact.SourceJobID, artifact.UpdatedAt,
+		artifact.OrganizationID, artifact.ProjectID, artifact.ID, expectedVersion)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 1 {
+		return nil
+	}
+	var exists int
+	err = s.DB.QueryRowContext(ctx, `SELECT 1 FROM platform_project_artifacts WHERE organization_id=? AND project_id=? AND id=?`, artifact.OrganizationID, artifact.ProjectID, artifact.ID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	return ErrVersionConflict
+}
+
 func (s MySQLStore) GetProjectRuntime(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (ProjectRuntime, error) {
 	if s.DB == nil {
 		return ProjectRuntime{}, fmt.Errorf("project database is required")
@@ -934,6 +1002,9 @@ const changeSetSelect = `SELECT organization_id, project_id, id, name, status, a
 const auditEventSelect = `SELECT organization_id, project_id, id, actor, action, entity_type, entity_id,
 	metadata, created_at FROM platform_audit_events`
 
+const projectArtifactSelect = `SELECT organization_id, project_id, id, kind, status, content, source_job_id,
+	version, created_at, updated_at FROM platform_project_artifacts`
+
 type projectScanner interface{ Scan(...any) error }
 
 func scanBusinessTask(row projectScanner) (BusinessTask, error) {
@@ -977,6 +1048,21 @@ func scanOperationalRecord(row projectScanner) (OperationalRecord, error) {
 		record.Fields = map[string]any{}
 	}
 	return record, nil
+}
+
+func scanProjectArtifact(row projectScanner) (ProjectArtifact, error) {
+	var artifact ProjectArtifact
+	var sourceJobID sql.NullString
+	err := row.Scan(&artifact.OrganizationID, &artifact.ProjectID, &artifact.ID, &artifact.Kind, &artifact.Status,
+		&artifact.Content, &sourceJobID, &artifact.Version, &artifact.CreatedAt, &artifact.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProjectArtifact{}, ErrNotFound
+	}
+	if err != nil {
+		return ProjectArtifact{}, err
+	}
+	artifact.SourceJobID = sourceJobID.String
+	return artifact, nil
 }
 
 func scanChangeSet(row projectScanner) (ChangeSet, error) {

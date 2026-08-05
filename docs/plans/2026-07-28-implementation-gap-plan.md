@@ -39,7 +39,7 @@
 | --- | --- |
 | 运维与身份 | `GET /healthz`、`GET /readyz`、`GET /platform/v1/context`、`GET /platform/v1/me` |
 | Brand 与 Project | `POST /platform/v1/brands`；Project 创建、列表、详情、更新、上下文读取 |
-| Project 任务 | Project 下 Task 的创建、列表、详情、更新 |
+| Project 产物与任务 | Project 下 Artifact 的创建、列表、详情、乐观并发更新；Task 的创建、列表、详情、更新 |
 | Project 运营记录 | Project 下 Operation 的创建、列表、详情、幂等更新 |
 | ChangeSet 与审计 | ChangeSet 创建、列表、详情、预检、批准、模拟执行、模拟回滚；AuditEvent 列表 |
 | 媒体资产 | 上传会话创建、内容写入、完成上传、资产列表、预览、内容读取、版本删除、AssetFeature 读写与列表 |
@@ -71,7 +71,7 @@
 - 短剧前贴候选规划。
 - 公共视频洞察 CSV 的总览、筛选、列表和详情。
 
-这些接口服务于本地兼容和演示，不应继续扩展为生产权威数据源。当前前端仍有 Artifact 写入、短剧前贴和公共洞察等调用依赖该服务，后续需要迁移到 Go 契约；Project 更新和 Project scoped AuditEvent 读取已迁至 Go。
+这些接口服务于本地兼容和演示，不应继续扩展为生产权威数据源。Project 更新、Project scoped AuditEvent 读取以及通用 Artifact 的创建、读取和更新均已迁至 Go；短剧前贴和公共洞察等调用仍依赖该服务，后续需要继续迁移。
 
 ## 3. 已实现功能及实现等级
 
@@ -79,7 +79,8 @@
 | --- | --- | --- |
 | 登录与本地身份 | 已实现 | 演示账号 + Go 本地身份注入；非企业 SSO |
 | Project 工作台 | 已实现 | 可读取真实 Go Project 快照、任务、运营记录、ChangeSet 和资产摘要 |
-| Project 创建 | 已实现 | 已落 Go；Project 编辑仍走 TypeScript 旧接口，数据源未统一 |
+| Project 创建与编辑 | 已实现 | 已落 Go，更新具备 ProjectContextVersion 乐观并发 |
+| 通用 Artifact/产物 | 已实现 | Project scoped Go 契约已持久化 Brief、图像、视频和文档产物，支持创建、读取、列表、状态更新与版本冲突检测 |
 | Project 任务 | 已实现 | 可创建、筛选、查看和更新状态，Go/MySQL 持久化 |
 | Project/四模块导航 | 已实现 | 路由和页面入口完整；入口完整不代表每个业务对象已实现 |
 | 素材上传与读取 | API 已实现 | Go 接口和对象存储 seam 已有；当前 React 没有完整上传、摄取、权利管理流程 |
@@ -241,8 +242,6 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 
 迁移并删除以下前端依赖后，才能把 TypeScript 服务缩减为纯本地登录兼容层或完全移除：
 
-- Project 更新。
-- Artifact 创建与更新。
 - GenerationJob 取消和部分列表查询。
 - 短剧前贴候选规划。
 - Provider 配置管理。
@@ -306,7 +305,7 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 
 | 阶段 | 优先目标 | 完成判据 |
 | --- | --- | --- |
-| P0-A：统一数据权威 | 已完成 Project 更新和 Project scoped Audit 查询迁移（2026-07-28）；继续补 Artifact/产物契约、Provider 能力，并迁移剩余前端旧 `/api` 调用 | Project 主路径不再跨 Go/TypeScript 双写或读取不同权威源 |
+| P0-A：统一数据权威 | 已完成 Project 更新、Project scoped Audit 查询以及通用 Artifact/产物读写迁移（2026-07-28～29）；继续补 Provider 能力，并迁移剩余前端旧 `/api` 调用 | Project 主路径不再跨 Go/TypeScript 双写或读取不同权威源 |
 | P0-B：闭合策略与创意 | Conversation/Brief/Strategy 和 CreativeTask/Draft/Version/Review/Delivery | 能从需求输入生成并批准稳定 Brief/Strategy，再产出可评审和可交付 CreativeVersion |
 | P0-C：闭合素材洞察 | Connector、映射、指标、AnalysisRun、Insight、Experience | 投放数据和素材版本可复现关联，结论有证据、口径、限制和人工确认 |
 | P0-D：闭合安全投放 | DeliveryPlan、账户绑定、Computer Use、监控、证据 | 在受控测试账户完成计划、审批、执行、验证、暂停和审计，不再只是模拟 |
@@ -337,3 +336,4 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 | 日期 | 迭代 | 已完成内容 | 验证 |
 | --- | --- | --- | --- |
 | 2026-07-28 | P0-A / Project 数据权威 | 新增 `PATCH /platform/v1/projects/{project_id}`；支持名称、展示品牌、目标、行业和可选 `expected_context_version` 更新；MySQL 原子递增 ProjectContextVersion 并写入对应上下文快照；前端 Project 创建/更新与 Project scoped Audit 查询均改走 Go 平台客户端 | Go Project/HTTP/OpenAPI 契约测试、前端 platform client 测试、`npm run build` |
+| 2026-07-29 | P0-A / Artifact 产物契约 | 新增 Project scoped Artifact 的创建、列表、详情和乐观并发更新；MySQL 持久化版本化产物和审计事件；前端 Artifact 读写与 Project 快照改走 Go 平台客户端，消除通用 Artifact 对 TypeScript JSON 兼容服务的写入依赖 | Go Project/HTTP 测试、前端 platform client 测试、`npm run build` |

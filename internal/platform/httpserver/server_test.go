@@ -65,6 +65,24 @@ func TestProjectWorkflowRoutesCoverDetailTasksOperationsChangeSetsAndAudit(t *te
 		Projects:          manager,
 	})
 
+	createArtifact := httptest.NewRecorder()
+	createArtifactRequest := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/artifacts", strings.NewReader(`{"kind":"brief","status":"draft","content":"首版策略 Brief"}`))
+	createArtifactRequest.Header.Set("Idempotency-Key", "artifact-create-1")
+	server.ServeHTTP(createArtifact, createArtifactRequest)
+	if createArtifact.Code != http.StatusCreated || createArtifact.Header().Get("Location") != "/platform/v1/projects/project_1/artifacts/artifact_1" {
+		t.Fatalf("create artifact status=%d location=%q body=%s", createArtifact.Code, createArtifact.Header().Get("Location"), createArtifact.Body.String())
+	}
+	listArtifacts := httptest.NewRecorder()
+	server.ServeHTTP(listArtifacts, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/artifacts", nil))
+	if listArtifacts.Code != http.StatusOK || !strings.Contains(listArtifacts.Body.String(), `"id":"artifact_1"`) {
+		t.Fatalf("list artifacts status=%d body=%s", listArtifacts.Code, listArtifacts.Body.String())
+	}
+	patchArtifact := httptest.NewRecorder()
+	server.ServeHTTP(patchArtifact, httptest.NewRequest(http.MethodPatch, "/platform/v1/projects/project_1/artifacts/artifact_1", strings.NewReader(`{"content":"已确认策略 Brief","status":"ready","expected_version":1}`)))
+	if patchArtifact.Code != http.StatusOK || !strings.Contains(patchArtifact.Body.String(), `"version":2`) {
+		t.Fatalf("patch artifact status=%d body=%s", patchArtifact.Code, patchArtifact.Body.String())
+	}
+
 	taskBody := `{"type":"creative","name":"生成素材","objective":"生成首版广告素材","source_task_ids":["task_strategy"],"source_artifact_ids":["brief_v1"]}`
 	createTask := httptest.NewRecorder()
 	createTaskRequest := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/tasks", strings.NewReader(taskBody))
@@ -1313,6 +1331,7 @@ type workflowProjectManager struct {
 	staticProjectManager
 	projectValue project.Project
 	runtime      project.ProjectRuntime
+	artifact     project.ProjectArtifact
 	task         project.BusinessTask
 	operations   []project.OperationalRecord
 	changeSet    project.ChangeSet
@@ -1362,6 +1381,50 @@ func (m *workflowProjectManager) UpdateProject(_ context.Context, _ contract.Act
 	}
 	m.projectValue.ProjectContextVersion++
 	return m.projectValue, nil
+}
+
+func (m *workflowProjectManager) CreateProjectArtifact(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID, request project.CreateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	now := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	m.artifact = project.ProjectArtifact{
+		ID: "artifact_1", OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		Kind: request.Kind, Status: request.Status, Content: request.Content, SourceJobID: request.SourceJobID,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	return m.artifact, nil
+}
+
+func (m *workflowProjectManager) ListProjectArtifacts(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectArtifact, error) {
+	if m.artifact.ID == "" {
+		return []project.ProjectArtifact{}, nil
+	}
+	return []project.ProjectArtifact{m.artifact}, nil
+}
+
+func (m *workflowProjectManager) GetProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ProjectArtifact, error) {
+	if m.artifact.ID == "" {
+		return project.ProjectArtifact{}, project.ErrNotFound
+	}
+	return m.artifact, nil
+}
+
+func (m *workflowProjectManager) UpdateProjectArtifact(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request project.UpdateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	if m.artifact.ID == "" {
+		return project.ProjectArtifact{}, project.ErrNotFound
+	}
+	if request.ExpectedVersion != nil && *request.ExpectedVersion != m.artifact.Version {
+		return project.ProjectArtifact{}, project.ErrVersionConflict
+	}
+	if request.Content != nil {
+		m.artifact.Content = *request.Content
+	}
+	if request.Status != nil {
+		m.artifact.Status = *request.Status
+	}
+	if request.SourceJobID != nil {
+		m.artifact.SourceJobID = *request.SourceJobID
+	}
+	m.artifact.Version++
+	return m.artifact, nil
 }
 
 func (m *workflowProjectManager) GetWorkbench(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (project.Workbench, error) {
@@ -1730,6 +1793,18 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 
 func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
 	return project.ProjectDetail{}, nil
+}
+func (staticProjectManager) CreateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, project.CreateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) ListProjectArtifacts(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectArtifact, error) {
+	return nil, nil
+}
+func (staticProjectManager) GetProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) UpdateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
 }
 func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
 	return project.Workbench{}, nil

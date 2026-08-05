@@ -20,6 +20,10 @@ type Store interface {
 	CreateBrand(context.Context, Brand) error
 	CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error
 	UpdateProject(context.Context, Project, ProjectRuntime, int64) error
+	CreateProjectArtifact(context.Context, ProjectArtifact) error
+	ListProjectArtifacts(context.Context, contract.OrganizationID, contract.ProjectID) ([]ProjectArtifact, error)
+	GetProjectArtifact(context.Context, contract.OrganizationID, contract.ProjectID, string) (ProjectArtifact, error)
+	UpdateProjectArtifact(context.Context, ProjectArtifact, int64) error
 	GetProject(context.Context, contract.OrganizationID, contract.ProjectID) (Project, error)
 	GetProjectRuntime(context.Context, contract.OrganizationID, contract.ProjectID) (ProjectRuntime, error)
 	UpsertProjectRuntime(context.Context, contract.OrganizationID, contract.ProjectID, ProjectRuntime) error

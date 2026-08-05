@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createPlatformClient,
+  toApiProjectArtifact,
   toApiBusinessTask,
   toApiGenerationJob,
   toApiProject,
@@ -9,6 +10,7 @@ import {
   type PlatformBusinessTask,
   type PlatformChangeSet,
   type PlatformProjectDetail,
+  type PlatformProjectArtifact,
   type PlatformProviderJob,
 } from "../src/data/platformClient.ts";
 
@@ -89,6 +91,18 @@ test("platform adapters preserve legacy Project, Task, ChangeSet and Job models"
     createdAt: now,
     updatedAt: now,
   });
+
+  assert.deepEqual(toApiProjectArtifact(sampleProjectArtifact()), {
+    id: "artifact_1",
+    projectId: "project_demo",
+    kind: "brief",
+    status: "ready",
+    content: "已确认策略 Brief",
+    sourceJobId: "job_1",
+    version: 2,
+    createdAt: now,
+    updatedAt: now,
+  });
 });
 
 test("platform client uses project-scoped /platform/v1 endpoints", async () => {
@@ -103,6 +117,12 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
       }
       if (String(url).endsWith("/projects/project_demo")) {
         return jsonResponse(sampleProjectDetail());
+      }
+      if (String(url).endsWith("/projects/project_demo/artifacts")) {
+        return jsonResponse(init.method === "POST" ? sampleProjectArtifact() : { items: [sampleProjectArtifact()] }, init.method === "POST" ? 201 : 200);
+      }
+      if (String(url).endsWith("/projects/project_demo/artifacts/artifact_1")) {
+        return jsonResponse(sampleProjectArtifact());
       }
       if (String(url).endsWith("/projects/project_demo/tasks")) {
         return jsonResponse(sampleProjectDetail().tasks[0], 201);
@@ -119,6 +139,9 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
 
   await client.listProjects();
   await client.getProjectDetail("project_demo");
+  await client.listArtifacts("project_demo");
+  await client.createArtifact("project_demo", { kind: "brief", content: "首版策略 Brief", status: "draft" });
+  await client.updateArtifact("project_demo", "artifact_1", { content: "已确认策略 Brief", status: "ready", version: 1 });
   await client.createTask("project_demo", { type: "creative", name: "生成创意", objective: "产出可投放素材" });
   await client.createChangeSet("project_demo", { name: "素材组合与探索预算优化", artifactIds: ["asset_1"], budgetLimit: 88000 });
   await client.createMedia("project_demo", "image", "launch poster", "brief_1");
@@ -127,17 +150,28 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
     "https://cookies.example/platform/v1/projects",
     "https://cookies.example/platform/v1/projects/project_demo",
     "https://cookies.example/platform/v1/projects/project_demo",
+    "https://cookies.example/platform/v1/projects/project_demo/artifacts",
+    "https://cookies.example/platform/v1/projects/project_demo/artifacts",
+    "https://cookies.example/platform/v1/projects/project_demo/artifacts/artifact_1",
     "https://cookies.example/platform/v1/projects/project_demo/tasks",
     "https://cookies.example/platform/v1/projects/project_demo/change-sets",
     "https://cookies.example/platform/v1/projects/project_demo/model/jobs",
   ]);
-  assert.equal(calls[3].init.method, "POST");
-  assert.equal(new Headers(calls[3].init.headers).get("Idempotency-Key"), "test-key");
-  assert.equal(JSON.parse(calls[3].init.body as string).source_task_ids.length, 0);
-  assert.deepEqual(JSON.parse(calls[4].init.body as string).artifact_refs, [
+  assert.equal(calls[4].init.method, "POST");
+  assert.equal(new Headers(calls[4].init.headers).get("Idempotency-Key"), "test-key");
+  assert.deepEqual(JSON.parse(calls[4].init.body as string), {
+    kind: "brief", content: "首版策略 Brief", status: "draft",
+  });
+  assert.deepEqual(JSON.parse(calls[5].init.body as string), {
+    content: "已确认策略 Brief", status: "ready", expected_version: 1,
+  });
+  assert.equal(calls[6].init.method, "POST");
+  assert.equal(new Headers(calls[6].init.headers).get("Idempotency-Key"), "test-key");
+  assert.equal(JSON.parse(calls[6].init.body as string).source_task_ids.length, 0);
+  assert.deepEqual(JSON.parse(calls[7].init.body as string).artifact_refs, [
     { project_id: "project_demo", asset_version: { asset_id: "asset_1", version: 1 } },
   ]);
-  assert.equal(JSON.parse(calls[5].init.body as string).capability, "image.generate");
+  assert.equal(JSON.parse(calls[8].init.body as string).capability, "image.generate");
 });
 
 test("platform client updates a Project through the Go authority with its context version", async () => {
@@ -257,6 +291,20 @@ function sampleProjectDetail(): PlatformProjectDetail {
     tasks: [sampleTask()],
     operations: [],
     change_sets: [sampleChangeSet()],
+  };
+}
+
+function sampleProjectArtifact(): PlatformProjectArtifact {
+  return {
+    id: "artifact_1",
+    project_id: "project_demo",
+    kind: "brief",
+    status: "ready",
+    content: "已确认策略 Brief",
+    source_job_id: "job_1",
+    version: 2,
+    created_at: now,
+    updated_at: now,
   };
 }
 
