@@ -2617,6 +2617,7 @@ components:
           format: date-time
         declared_mime_type:
           type: string
+          enum: [image/jpeg, image/png, video/mp4, audio/wav, audio/mpeg, audio/aac]
           minLength: 1
         declared_size_bytes:
           type: integer
@@ -3684,7 +3685,7 @@ components:
           maxLength: 512
         declared_mime_type:
           type: string
-          pattern: ^(image/jpeg|image/png|video/.+)$
+          enum: [image/jpeg, image/png, video/mp4, audio/wav, audio/mpeg, audio/aac]
         declared_size_bytes:
           type: integer
           minimum: 1

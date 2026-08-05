@@ -967,6 +967,7 @@ type GamePrerollGenerationAttempt struct {
 type TaskDetail struct {
 	Task                          CreativeTask                   `json:"task"`
 	Intake                        CreativeIntake                 `json:"intake"`
+	AINativeWorkspaceID           string                         `json:"ai_native_workspace_id,omitempty"`
 	Draft                         ImageTextDraft                 `json:"draft"`
 	VideoDraft                    *VideoDraft                    `json:"video_draft,omitempty"`
 	ProductionJobs                []ProductionJob                `json:"production_jobs"`

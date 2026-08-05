@@ -129,6 +129,95 @@ func TestUploadPersistsVideoProbeMetadata(t *testing.T) {
 	}
 }
 
+func TestUploadPersistsProjectAuthorizedAudioWithProbeMetadata(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	blobs := NewMemoryBlobStore()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: blobs, Scanner: NoopScanner{},
+		QuarantineBucket: "quarantine", AssetsBucket: "assets", Now: func() time.Time { return now }, NewID: sequenceIDs(),
+		AudioProbe: fakeAudioProbe{metadata: AudioMetadata{DurationMS: 2400, Codec: "pcm_s16le", Channels: 1, SampleRate: 48000, BitrateBPS: 768000}},
+	}
+	data := testWAV(48000, 2400)
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "audio-upload-key", CreateUploadRequest{Filename: "voice.wav", DeclaredMIMEType: "audio/wav", DeclaredSizeBytes: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", result.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Asset.Kind != contract.AssetAudio || stored.Version.MIMEType != "audio/wav" || stored.Version.DurationMS != 2400 {
+		t.Fatalf("audio asset = %#v", stored)
+	}
+	if stored.Version.Media.AudioCodec != "pcm_s16le" || stored.Version.Media.AudioChannels != 1 || stored.Version.Media.AudioSampleRate != 48000 || stored.Version.Media.ProbeStatus != MediaProbeSucceeded {
+		t.Fatalf("audio metadata = %#v", stored.Version.Media)
+	}
+	preview, info, err := service.OpenPreview(context.Background(), rc.Actor, "project_1", result.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer preview.Close()
+	got, err := io.ReadAll(preview)
+	if err != nil || !bytes.Equal(got, data) || info.MIMEType != "audio/wav" {
+		t.Fatalf("audio preview size=%d mime=%q err=%v", len(got), info.MIMEType, err)
+	}
+}
+
+func TestDerivedAudioIntakeIsIdempotentAndPreservesCreativeLineage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 4, 12, 30, 0, 0, time.UTC)
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+		AudioProbe: fakeAudioProbe{metadata: AudioMetadata{DurationMS: 600, Codec: "pcm_s16le", Channels: 1, SampleRate: 48000, BitrateBPS: 768000}},
+	}
+	contents := testWAV(48000, 600)
+	planRevision := int64(2)
+	sources := []contract.ResourceRef{{Type: "creative_brand_film_plan", ID: "task_1", Version: &planRevision}}
+	rc := testRequestContext("org_1", "project_1")
+	first, err := service.IngestDerivedAudio(context.Background(), rc, "project_1", "brand-audio-fixture-abc", bytes.NewReader(contents), int64(len(contents)), "audio/wav", sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.IngestDerivedAudio(context.Background(), rc, "project_1", "brand-audio-fixture-abc", bytes.NewReader(contents), int64(len(contents)), "audio/wav", sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("derived audio retry created a second asset: first=%+v second=%+v", first, second)
+	}
+	asset, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil || asset.Asset.Kind != contract.AssetAudio || asset.Version.SourceType != contract.AssetSourceDerived {
+		t.Fatalf("derived audio = %#v err=%v", asset, err)
+	}
+	relations, err := repository.ListAssetRelations(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil || len(relations) != 1 || relations[0].Source.Type != "creative_brand_film_plan" || relations[0].Source.ID != "task_1" {
+		t.Fatalf("derived audio lineage = %#v err=%v", relations, err)
+	}
+}
+
+func TestCanonicalDetectedMediaMIMEAcceptsFilesystemWAVAlias(t *testing.T) {
+	t.Parallel()
+	if got := canonicalDetectedMediaMIME("audio/wave"); got != "audio/wav" {
+		t.Fatalf("canonical WAV MIME = %q", got)
+	}
+	if got := canonicalDetectedMediaMIME("audio/x-wav"); got != "audio/wav" {
+		t.Fatalf("canonical x-wav MIME = %q", got)
+	}
+}
+
 func TestUploadKeepsVideoWhenProbeFails(t *testing.T) {
 	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
 	repo := newFakeRepository()

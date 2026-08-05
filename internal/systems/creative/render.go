@@ -178,7 +178,7 @@ func (s Service) ExecuteRenderJob(ctx context.Context, organizationID contract.O
 func boundedError(err error) string {
 	value := strings.TrimSpace(err.Error())
 	if len(value) > 1000 {
-		return value[:1000]
+		return value[:350] + " … " + value[len(value)-645:]
 	}
 	return value
 }

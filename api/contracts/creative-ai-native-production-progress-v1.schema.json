@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-ai-native-production-progress-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "progress_percent", "current_step", "completed_video_units", "total_video_units", "completed_video_duration_ms", "completed_speech_units", "total_speech_units", "eta_seconds", "available_actions"],
+  "properties": {
+    "status": {"enum": ["running", "assets_ready", "rendering", "completed", "render_failed", "failed", "cancelled"]},
+    "progress_percent": {"type": "integer", "minimum": 0, "maximum": 100},
+    "current_step": {"type": "string"},
+    "completed_video_units": {"type": "integer", "minimum": 0},
+    "total_video_units": {"type": "integer", "minimum": 0},
+    "completed_video_duration_ms": {"type": "integer", "minimum": 0},
+    "completed_speech_units": {"type": "integer", "minimum": 0},
+    "total_speech_units": {"type": "integer", "minimum": 0},
+    "eta_seconds": {"type": "integer", "minimum": 0},
+    "available_actions": {"type": "array", "items": {"type": "string"}}
+  }
+}

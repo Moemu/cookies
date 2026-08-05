@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Check, FileText, Film, Image, LoaderCircle, Lock, RefreshCw, Sparkles, Upload, WandSparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Check, FileText, Film, Image, LoaderCircle, Lock, RefreshCw, Sparkles, Upload, Volume2, VolumeX, WandSparkles } from 'lucide-react'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiAssetVersionRef, type ApiBrandBriefAnalysis, type ApiBrandCreativeConcept, type ApiBrandFilmPlan, type ApiBrandFilmWorkspace } from '../data/api'
+import { api, type ApiAssetVersionRef, type ApiBrandAudioMixOperation, type ApiBrandAudioWorkspace, type ApiBrandBriefAnalysis, type ApiBrandCreativeConcept, type ApiBrandFilmGenerationAttempt, type ApiBrandFilmPlan, type ApiBrandFilmWorkspace, type ApiSpeechCapability } from '../data/api'
 
 type Props = { onNotice: (message: string) => void }
 const last = <T,>(items?: T[] | null) => items?.at(-1)
@@ -53,6 +53,87 @@ function ShotEditor({ shot, disabled, onChange }: { shot: ApiBrandFilmPlan['shot
   return <article><header><b>镜头 {String(shot.order).padStart(2, '0')}</b><span>{shot.start_second}s–{shot.end_second}s</span><small>{shot.purpose}</small></header><div className="brand-shot-fields"><label>镜头目的<input disabled={disabled} value={shot.purpose} onChange={event => onChange({ purpose: event.target.value })}/></label><label>参考角色<input disabled={disabled} value={shot.reference_role} onChange={event => onChange({ reference_role: event.target.value })}/></label><label>画面<textarea disabled={disabled} value={shot.visual} onChange={event => onChange({ visual: event.target.value })}/></label><label>动作<textarea disabled={disabled} value={shot.action} onChange={event => onChange({ action: event.target.value })}/></label><label>运镜<textarea disabled={disabled} value={shot.camera} onChange={event => onChange({ camera: event.target.value })}/></label><label>旁白<textarea disabled={disabled} value={shot.voiceover} onChange={event => onChange({ voiceover: event.target.value })}/></label><label>屏幕字<textarea disabled={disabled} value={shot.on_screen_text} onChange={event => onChange({ on_screen_text: event.target.value })}/></label><label>光线<textarea disabled={disabled} value={shot.lighting} onChange={event => onChange({ lighting: event.target.value })}/></label><label className="wide">连贯性<textarea disabled={disabled} value={shot.continuity_notes} onChange={event => onChange({ continuity_notes: event.target.value })}/></label></div></article>
 }
 
+function GenerationUnitActions({ attempt, busy, feedback, onFeedback, onGenerate, onLock }: {
+  attempt?: ApiBrandFilmGenerationAttempt
+  busy: boolean
+  feedback: string
+  onFeedback: (value: string) => void
+  onGenerate: (feedback?: string) => void
+  onLock: (attemptId: string) => void
+}) {
+  if (!attempt) return <button className="primary-button" disabled={busy} onClick={() => onGenerate()}>生成此片段</button>
+  if (attempt.status === 'queued' || attempt.status === 'running') {
+    return <div className="brand-unit-progress"><LoaderCircle className="spin" size={14}/><span>{attempt.status === 'queued' ? '已进入生成队列，请稍候…' : '正在生成视频，请稍候…'}</span></div>
+  }
+  if (attempt.status === 'succeeded' && attempt.output_asset_ref) {
+    return <><textarea placeholder="对当前视频填写局部反馈，例如：稳定瓶身标签，减少镜头环绕" value={feedback} onChange={event => onFeedback(event.target.value)}/><button className="secondary-button" disabled={busy || !feedback.trim()} onClick={() => onGenerate(feedback)}><RefreshCw size={13}/>按反馈重生成</button><button className="primary-button" disabled={busy} onClick={() => onLock(attempt.id)}><Lock size={13}/>锁定此片段</button></>
+  }
+  return <><div className="brand-unit-error"><b>本次生成未成功</b><span>{attempt.error_message || `状态：${attempt.status}`}</span></div><button className="primary-button" disabled={busy} onClick={() => onGenerate()}>重新生成此片段</button></>
+}
+
+function activeAudioMix(audio: ApiBrandAudioWorkspace) {
+  const variant = audio.variants.find(item => item.id === audio.active_variant_id)
+  return variant?.mix_versions.find(item => item.revision === audio.active_mix_revision)
+}
+
+function brandAudioMaterialized(audio: ApiBrandAudioWorkspace) {
+  const mix = activeAudioMix(audio)
+  return Boolean(mix && mix.tracks.flatMap(track => track.clips).every(clip => Boolean(clip.asset_ref)))
+}
+
+function brandAudioProgress(audio: ApiBrandAudioWorkspace) {
+  if (audio.mixed_preview_asset_ref || audio.status === 'preview_ready') return { title: 'Audio A2 混音预览已就绪', next: '可继续微调音轨或切换 A/B 声音方案', detail: '当前完整视频已经包含旁白、音乐与音效；修改声音不会重新生成画面。' }
+  if (audio.status === 'preview_queued' || audio.status === 'preview_rendering') return { title: 'Audio A2 正在混音', next: 'FFmpeg 正在合成完整视频', detail: '可以离开页面，任务状态和结果都会持久化。' }
+  if (audio.status === 'preview_failed') return { title: 'Audio A2 混音需要重试', next: '修复音轨后重新生成混音预览', detail: '音频资产仍然保留，不需要重新生成画面或重新入库。' }
+  if (brandAudioMaterialized(audio)) return { title: 'Audio A1 项目资产已就绪', next: '下一步：A2 FFmpeg 混音预览', detail: '旁白、音乐与音效均可试听和替换；当前 Fixture 会被明确标记。' }
+  return { title: 'Audio A0 草稿已保存', next: '下一步：将 Fixture 物化为项目音频资产', detail: '结构已持久化，尚未产生可试听音频。' }
+}
+
+function AudioWorkspaceEditor({ audio, videoURL, mixedVideoURL, assetURLs, speechCapability, busy, onMaterialize, onReplace, onSave, onRender, onProbeSpeech, onGenerateVoice, onSelectVariant, onPlanDirector }: {
+  audio: ApiBrandAudioWorkspace
+  videoURL?: string
+  mixedVideoURL?: string
+  assetURLs: Record<string, string>
+  speechCapability?: ApiSpeechCapability
+  busy: boolean
+  onMaterialize: () => void
+  onReplace: (clipId: string, file?: File) => void
+  onSave: (operations: ApiBrandAudioMixOperation[]) => void
+  onRender: () => void
+  onProbeSpeech: () => void
+  onGenerateVoice: (clipId: string, voiceAlias: string) => void
+  onSelectVariant: (variantId: string) => void
+  onPlanDirector: () => void
+}) {
+  const mix = activeAudioMix(audio)
+  const [trackDrafts, setTrackDrafts] = useState(() => Object.fromEntries((mix?.tracks ?? []).map(track => [track.id, { gain: track.gain_db, muted: track.muted }])))
+  const [timingDrafts, setTimingDrafts] = useState(() => Object.fromEntries((mix?.tracks.find(track => track.type === 'voiceover')?.clips ?? []).map(clip => [clip.id, { start: clip.timeline_start_ms, end: clip.timeline_end_ms }])))
+  const blueprint = audio.blueprint_versions.at(-1)
+  const defaultVoiceAlias = audio.blueprint_versions.at(-1)?.voice_profile.voice_alias ?? 'cookies.voice.brand.warm_female'
+  const [voiceAlias, setVoiceAlias] = useState(defaultVoiceAlias)
+  if (!mix) return <p className="brand-locked">当前音轨修订不可用，请重新准备音轨草稿。</p>
+  const materialized = brandAudioMaterialized(audio)
+  const operations: ApiBrandAudioMixOperation[] = []
+  for (const track of mix.tracks) {
+    const draft = trackDrafts[track.id]
+    if (!draft) continue
+    if (draft.gain !== track.gain_db) operations.push({ op: 'set_track_gain', track_id: track.id, gain_db: draft.gain })
+    if (draft.muted !== track.muted) operations.push({ op: 'set_track_muted', track_id: track.id, muted: draft.muted })
+  }
+  for (const clip of mix.tracks.find(track => track.type === 'voiceover')?.clips ?? []) {
+    const timing = timingDrafts[clip.id]
+    if (timing && (timing.start !== clip.timeline_start_ms || timing.end !== clip.timeline_end_ms)) operations.push({ op: 'set_clip_timing', clip_id: clip.id, timeline_start_ms: timing.start, timeline_end_ms: timing.end })
+  }
+  return <div className="brand-audio-workspace">
+    {blueprint?.planner_version === 'brand-audio-director/v1' ? <section className="brand-audio-director"><header><div><span className="section-label">AUDIO A4 · AI 声音导演</span><h4>声画策略已经排好，每项决定都可以理解和调整</h4></div><div className="brand-audio-variants">{audio.variants.map(variant => <button key={variant.id} className={variant.id === audio.active_variant_id ? 'active' : ''} disabled={busy || variant.id === audio.active_variant_id} onClick={() => onSelectVariant(variant.id)}>{variant.label}<small>{variant.style_preset}</small></button>)}</div></header><div className="brand-director-grid"><article><h5>品牌发音词典</h5><div className="brand-pronunciations">{(blueprint.pronunciations ?? []).map(item => <span key={item.term}><b>{item.term}</b><em>{item.spoken_as}</em><small>{item.reason}</small></span>)}</div></article><article><h5>声画语义检查</h5>{(blueprint.semantic_checks ?? []).map(item => <div className={`brand-semantic-check ${item.status}`} key={item.id}><b>{item.status === 'pass' ? '通过' : '建议修复'} · {item.shot_id}</b><span>{item.summary}</span><small>{item.suggestion || item.evidence}</small></div>)}</article></div><div className="brand-narration-fit">{blueprint.narration_cues.map(cue => { const clip = mix.tracks.find(track => track.type === 'voiceover')?.clips.find(item => item.narration_source_ref?.shot_id === cue.shot_id); if (!clip) return null; const timing = timingDrafts[clip.id] ?? { start: clip.timeline_start_ms, end: clip.timeline_end_ms }; return <article className={cue.fit_status} key={cue.id}><header><b>{cue.shot_id} · {cue.fit_status === 'overrun' ? '预计超时' : cue.fit_status === 'spacious' ? '空间充足' : '时长合适'}</b><span>预计 {(cue.estimated_duration_ms / 1000).toFixed(1)}s / 可用 {(cue.available_duration_ms / 1000).toFixed(1)}s</span></header><p>{cue.text}</p>{cue.suggested_text ? <small>精简建议：{cue.suggested_text}</small> : null}<div><label>开始 ms<input type="number" min={0} max={audio.master_duration_ms - 1} value={timing.start} onChange={event => setTimingDrafts(value => ({ ...value, [clip.id]: { ...timing, start: Number(event.target.value) } }))}/></label><label>结束 ms<input type="number" min={1} max={audio.master_duration_ms} value={timing.end} onChange={event => setTimingDrafts(value => ({ ...value, [clip.id]: { ...timing, end: Number(event.target.value) } }))}/></label></div></article>})}</div><details><summary>查看 {(blueprint.director_decisions ?? []).length} 项自动决定</summary><div className="brand-director-decisions">{(blueprint.director_decisions ?? []).map(item => <article key={item.id}><b>{item.summary}</b><span>{item.reason}</span><small>置信度 {Math.round(item.confidence * 100)}% · {item.editable ? '可通过音轨参数修改' : '只读'}</small></article>)}</div></details></section> : <section className="brand-audio-director legacy"><div><span className="section-label">AUDIO A4 · UPGRADE</span><h4>当前是早期音轨草稿，可保留素材并升级为 AI 声音导演方案。</h4></div><button className="primary-button" disabled={busy} onClick={onPlanDirector}>升级声音导演</button></section>}
+    <div className={speechCapability?.available ? 'brand-speech-capability ready' : 'brand-speech-capability'}><div><span className="section-label">AUDIO A3 · MINIMAX TTS</span><b>{speechCapability?.available ? `真实语音可用 · ${speechCapability.model}` : speechCapability ? 'MiniMax 不可用，继续使用 Fixture' : '尚未检测 MiniMax 语音能力'}</b><small>{speechCapability?.error_message || '能力检测会真实生成一句极短测试音频，不会暴露 API Key。'}</small></div>{speechCapability?.available ? <label>逻辑音色<select value={voiceAlias} onChange={event => setVoiceAlias(event.target.value)}>{speechCapability.voice_aliases.map(alias => <option key={alias} value={alias}>{alias}</option>)}</select></label> : <button className="secondary-button" disabled={busy} onClick={onProbeSpeech}>检测 MiniMax TTS</button>}</div>
+    {speechCapability?.available ? <div className="brand-voice-clips">{mix.tracks.find(track => track.type === 'voiceover')?.clips.map(clip => { const attempt = audio.generation_attempts.filter(item => item.clip_id === clip.id).at(-1); return <article key={clip.id}><div><b>{clip.label}</b><small>{attempt?.status === 'succeeded' && !attempt.fixture_mode ? `MiniMax · ${attempt.provider_snapshot}` : attempt?.status === 'failed' ? `生成失败：${attempt.error_code} · 当前保留 Fixture` : '当前为 Fixture 旁白'}</small></div><button className="secondary-button" disabled={busy} onClick={() => onGenerateVoice(clip.id, voiceAlias)}>{attempt?.status === 'succeeded' && !attempt.fixture_mode ? '重新生成此句' : '生成真实旁白'}</button></article> })}</div> : null}
+    <div className="brand-audio-preview">{mixedVideoURL ? <video controls src={mixedVideoURL}/> : videoURL ? <video controls muted src={videoURL}/> : <div><Film size={24}/><span>视觉预览正在恢复</span></div>}<aside><span className="section-label">{mixedVideoURL ? 'AUDIO A2 · MIXED PREVIEW' : materialized ? 'AUDIO A1 · ASSET READY' : 'AUDIO A0 · BLUEPRINT'}</span><b>{audio.variants.find(item => item.id === audio.active_variant_id)?.label ?? '默认声音方案'}</b><small>{audio.master_duration_ms / 1000} 秒 · Mix r{mix.revision}</small><p>{mixedVideoURL ? '当前播放的是画面与旁白、音乐、音效合成后的完整预览。修改任何轨道后可重新渲染，不会重生成画面。' : materialized ? '音频已经项目级入库，可逐段试听和替换；点击生成混音预览后会自动压低旁白下方的音乐并统一响度。' : '轨道结构已经排好。将 Fixture 物化为 WAV 项目资产后即可试听，并为后续真实 TTS 保留相同 AssetRef seam。'}</p></aside></div>
+    <div className="brand-audio-timeline"><div className="brand-audio-ruler"><span>00:00</span><span>{String(audio.master_duration_ms / 2000).padStart(2, '0')}s</span><span>{audio.master_duration_ms / 1000}s</span></div>{mix.tracks.map(track => { const draft = trackDrafts[track.id] ?? { gain: track.gain_db, muted: track.muted }; return <article key={track.id}><header><span>{draft.muted ? <VolumeX size={14}/> : <Volume2 size={14}/>}<b>{track.role}</b><small>{track.rights_status}</small></span><label>音量 <input type="range" min={-48} max={12} step={1} value={draft.gain} onChange={event => setTrackDrafts(value => ({ ...value, [track.id]: { ...draft, gain: Number(event.target.value) } }))}/><em>{draft.gain} dB</em></label><label className="brand-audio-mute"><input type="checkbox" checked={draft.muted} onChange={event => setTrackDrafts(value => ({ ...value, [track.id]: { ...draft, muted: event.target.checked } }))}/>静音</label></header><div className="brand-audio-lane">{track.clips.map(clip => <span key={clip.id} style={{ left: `${clip.timeline_start_ms / audio.master_duration_ms * 100}%`, width: `${(clip.timeline_end_ms - clip.timeline_start_ms) / audio.master_duration_ms * 100}%` }} title={`${clip.timeline_start_ms / 1000}s–${clip.timeline_end_ms / 1000}s`}><b>{clip.label || clip.id}</b><small>{clip.timeline_start_ms / 1000}s–{clip.timeline_end_ms / 1000}s</small></span>)}</div>{track.clips.length ? <div className="brand-audio-assets">{track.clips.map(clip => <div key={clip.id}><span className="brand-audio-waveform" aria-label={`${clip.label} 波形`}>{(clip.waveform_peaks ?? []).map((peak, index) => <i key={index} style={{ height: `${Math.max(8, peak * 100)}%` }}/>)}</span><b>{clip.label || clip.id}</b>{assetURLs[clip.id] ? <audio controls preload="metadata" src={assetURLs[clip.id]}/> : <small>等待项目音频资产</small>}<label className="secondary-button brand-upload"><Upload size={12}/>替换<input type="file" accept="audio/wav,audio/mpeg,audio/aac" disabled={busy} onChange={event => { onReplace(clip.id, event.target.files?.[0]); event.target.value = '' }}/></label></div>)}</div> : null}</article>})}</div>
+    <div className="brand-actions">{materialized ? <span className="brand-confirmed"><Check size={14}/>Audio A1 项目资产已就绪</span> : <button className="primary-button" disabled={busy} onClick={onMaterialize}>入库并生成可试听 Fixture</button>}<button className="secondary-button" disabled={busy || operations.length === 0} onClick={() => onSave(operations)}>保存音轨修改</button><button className="primary-button" disabled={busy || !materialized || operations.length > 0 || audio.status === 'preview_queued' || audio.status === 'preview_rendering'} onClick={onRender}>{audio.status === 'preview_queued' || audio.status === 'preview_rendering' ? <><LoaderCircle className="spin" size={14}/>正在合成音轨</> : mixedVideoURL ? '重新生成混音预览' : '生成混音预览'}</button></div>
+  </div>
+}
+
 export function BrandFilmWorkspace({ onNotice }: Props) {
   const { currentProject } = useProject()
   const [workspace, setWorkspace] = useState<ApiBrandFilmWorkspace | null>(null)
@@ -68,7 +149,11 @@ export function BrandFilmWorkspace({ onNotice }: Props) {
   const [generationReferencePreview, setGenerationReferencePreview] = useState('')
   const [attemptPreviews, setAttemptPreviews] = useState<Record<string, string>>({})
   const [finalPreview, setFinalPreview] = useState('')
+  const [audioClipPreviews, setAudioClipPreviews] = useState<Record<string, string>>({})
+  const [mixedAudioPreview, setMixedAudioPreview] = useState('')
+  const [speechCapability, setSpeechCapability] = useState<ApiSpeechCapability>()
   const [feedbackByUnit, setFeedbackByUnit] = useState<Record<string, string>>({})
+  const planConfirmationInFlight = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -117,6 +202,27 @@ export function BrandFilmWorkspace({ onNotice }: Props) {
       void api.getProjectAssetPreview(currentProject.id, generation.preview_asset).then(setFinalPreview).catch(() => setFinalPreview(''))
     }
   }, [currentProject.id, workspace?.video_draft.brand_film.generation])
+
+  useEffect(() => {
+    const audio = workspace?.video_draft.brand_film.audio
+    const mix = audio ? activeAudioMix(audio) : undefined
+    const clips = (mix?.tracks ?? []).flatMap(track => track.clips).filter(clip => clip.asset_ref)
+    let active = true
+    if (!clips.length) {
+      setAudioClipPreviews({})
+      return () => { active = false }
+    }
+    void Promise.all(clips.map(async clip => [clip.id, await api.getProjectAssetPreview(currentProject.id, clip.asset_ref!)] as const)).then(entries => {
+      if (active) setAudioClipPreviews(Object.fromEntries(entries))
+    }).catch(() => { if (active) setAudioClipPreviews({}) })
+    return () => { active = false }
+  }, [currentProject.id, workspace?.video_draft.brand_film.audio?.active_mix_revision])
+
+  useEffect(() => {
+    const ref = workspace?.video_draft.brand_film.audio?.mixed_preview_asset_ref
+    if (!ref) { setMixedAudioPreview(''); return }
+    void api.getProjectAssetPreview(currentProject.id, ref).then(setMixedAudioPreview).catch(() => setMixedAudioPreview(''))
+  }, [currentProject.id, workspace?.video_draft.brand_film.audio?.mixed_preview_asset_ref])
 
   useEffect(() => () => {
     if (generationReferencePreview) URL.revokeObjectURL(generationReferencePreview)
@@ -180,13 +286,30 @@ export function BrandFilmWorkspace({ onNotice }: Props) {
   const generatePlan = () => commit('plan', () => api.generateBrandFilmPlan(currentProject.id, workspace.task.id, revision), '15 秒剧本与分镜已生成。')
   const savePlan = () => plan && commit('save-plan', () => api.updateBrandFilmPlan(currentProject.id, workspace.task.id, revision, plan), '剧本与分镜修改已保存为新的待确认修订，视频生成结果已等待重新生成。')
   const confirmPlan = async () => {
-    if (!plan) return
+    if (!plan || planConfirmationInFlight.current) return
+    planConfirmationInFlight.current = true
     setBusy('confirm-plan')
     try {
       const saved = await api.updateBrandFilmPlan(currentProject.id, workspace.task.id, revision, plan)
       setWorkspace(await api.confirmBrandFilmPlan(currentProject.id, workspace.task.id, saved.video_draft.revision))
       onNotice('剧本与分镜已保存并确认。')
-    } catch (cause) { onNotice(cause instanceof Error ? cause.message : '剧本与分镜确认失败。') } finally { setBusy('') }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '剧本与分镜确认失败。'
+      try {
+        const latest = await api.ensureBrandFilmFixtureWorkspace(currentProject.id)
+        setWorkspace(latest)
+        if (last(latest.video_draft.brand_film.film_plan_versions)?.confirmed) {
+          onNotice('剧本与分镜已确认；页面已同步到服务端最新修订。')
+        } else {
+          onNotice(message)
+        }
+      } catch {
+        onNotice(message)
+      }
+    } finally {
+      planConfirmationInFlight.current = false
+      setBusy('')
+    }
   }
 
   const updateAsset = (id: string, changes: Partial<ApiBrandBriefAnalysis['asset_candidates'][number]>) => setBrief(value => value ? { ...value, asset_candidates: value.asset_candidates.map(asset => asset.id === id ? { ...asset, ...changes } : asset) } : value)
@@ -229,11 +352,93 @@ export function BrandFilmWorkspace({ onNotice }: Props) {
   }
   const lockUnit = (unitId: string, attemptId: string) => commit(`lock-${unitId}`, () => api.lockBrandFilmUnit(currentProject.id, workspace.task.id, revision, unitId, attemptId), '片段已锁定。')
   const composePreview = () => commit('compose-preview', () => api.composeBrandFilmPreview(currentProject.id, workspace.task.id, revision), '15 秒品牌广告预览已完成裁切与拼接。')
+  const prepareAudio = () => commit('prepare-audio', () => api.prepareBrandFilmAudio(currentProject.id, workspace.task.id, revision), '旁白、音乐与音效草稿已自动编排。')
+  const startAudioDirector = async () => {
+    setBusy('start-audio-director')
+    try {
+      let value = await api.prepareBrandFilmAudio(currentProject.id, workspace.task.id, revision)
+	  setWorkspace(value)
+      if (value.video_draft.brand_film.audio && !brandAudioMaterialized(value.video_draft.brand_film.audio)) {
+        value = await api.materializeBrandFilmAudioAssets(currentProject.id, workspace.task.id, value.video_draft.revision)
+		setWorkspace(value)
+      }
+      if (value.video_draft.brand_film.audio && brandAudioMaterialized(value.video_draft.brand_film.audio)) {
+        value = await api.renderBrandFilmAudioPreview(currentProject.id, workspace.task.id, value.video_draft.revision)
+		setWorkspace(value)
+      }
+      onNotice('AI 声音导演已完成默认编排与音频入库，完整混音预览正在生成。')
+    } catch (cause) {
+      try { setWorkspace(await api.ensureBrandFilmFixtureWorkspace(currentProject.id)) } catch { /* keep the last successful step */ }
+      onNotice(cause instanceof Error ? cause.message : 'AI 声音导演启动失败。')
+    } finally { setBusy('') }
+  }
+  const materializeAudio = () => commit('materialize-audio', () => api.materializeBrandFilmAudioAssets(currentProject.id, workspace.task.id, revision), 'Audio A1 Fixture 已真实入库，现在可以逐段试听。')
+  const replaceAudioClip = async (clipId: string, file?: File) => {
+    if (!file) return
+    setBusy(`replace-audio-${clipId}`)
+    try {
+      const ref = await api.uploadProjectAsset(currentProject.id, file)
+      setWorkspace(await api.updateBrandFilmAudioMix(currentProject.id, workspace.task.id, revision, [{ op: 'replace_clip_asset', clip_id: clipId, asset_ref: ref }]))
+      onNotice('音频片段已替换，并保存为新的 Mix 修订。')
+    } catch (cause) { onNotice(cause instanceof Error ? cause.message : '音频替换失败。') } finally { setBusy('') }
+  }
+  const saveAudio = (operations: ApiBrandAudioMixOperation[]) => commit('save-audio', () => api.updateBrandFilmAudioMix(currentProject.id, workspace.task.id, revision, operations), '音轨修改已保存为新的 Mix 修订。')
+  const selectAudioVariant = async (variantId: string) => {
+    setBusy('select-audio-variant')
+    try {
+      let value = await api.selectBrandFilmAudioVariant(currentProject.id, workspace.task.id, revision, variantId)
+	  setWorkspace(value)
+      if (value.video_draft.brand_film.audio && !brandAudioMaterialized(value.video_draft.brand_film.audio)) {
+        value = await api.materializeBrandFilmAudioAssets(currentProject.id, workspace.task.id, value.video_draft.revision)
+		setWorkspace(value)
+      }
+      if (value.video_draft.brand_film.audio && brandAudioMaterialized(value.video_draft.brand_film.audio)) {
+        value = await api.renderBrandFilmAudioPreview(currentProject.id, workspace.task.id, value.video_draft.revision)
+		setWorkspace(value)
+      }
+      onNotice('声音 A/B 方案已切换并开始生成对应混音，锁定画面保持不变。')
+    } catch (cause) {
+      try { setWorkspace(await api.ensureBrandFilmFixtureWorkspace(currentProject.id)) } catch { /* keep the last successful step */ }
+      onNotice(cause instanceof Error ? cause.message : '声音方案切换失败。')
+    } finally { setBusy('') }
+  }
+  const probeSpeech = async () => {
+    setBusy('probe-speech')
+    try {
+      const capability = await api.probeBrandFilmSpeech(currentProject.id)
+      setSpeechCapability(capability)
+      onNotice(capability.available ? `MiniMax TTS 可用：${capability.model}` : `MiniMax TTS 不可用，继续使用 Fixture：${capability.error_code ?? '未配置'}`)
+    } catch (cause) { onNotice(cause instanceof Error ? cause.message : 'MiniMax TTS 能力检测失败。') } finally { setBusy('') }
+  }
+  const generateVoice = async (clipId: string, voiceAlias: string) => {
+    setBusy(`generate-voice-${clipId}`)
+    try {
+      const value = await api.generateBrandFilmVoiceClip(currentProject.id, workspace.task.id, revision, clipId, voiceAlias)
+      setWorkspace(value)
+      const attempt = value.video_draft.brand_film.audio?.generation_attempts.filter(item => item.clip_id === clipId).at(-1)
+      onNotice(attempt?.status === 'succeeded' ? 'MiniMax 真实旁白已生成并入库；请试听后重新生成混音预览。' : `MiniMax 生成失败，已保留 Fixture：${attempt?.error_code ?? 'unknown'}`)
+    } catch (cause) { onNotice(cause instanceof Error ? cause.message : '旁白生成失败。') } finally { setBusy('') }
+  }
+  const renderAudioPreview = async () => {
+    setBusy('render-audio-preview')
+    try {
+      let value = await api.renderBrandFilmAudioPreview(currentProject.id, workspace.task.id, revision)
+      setWorkspace(value)
+      for (let attempt = 0; attempt < 45 && ['preview_queued', 'preview_rendering'].includes(value.video_draft.brand_film.audio?.status ?? ''); attempt++) {
+        await new Promise(resolve => window.setTimeout(resolve, 2000))
+        value = await api.ensureBrandFilmFixtureWorkspace(currentProject.id)
+        setWorkspace(value)
+      }
+      const audio = value.video_draft.brand_film.audio
+      const failed = audio?.render_jobs.at(-1)?.status === 'failed'
+      onNotice(failed ? `混音预览失败：${audio?.render_jobs.at(-1)?.error_message ?? '请重试'}` : audio?.mixed_preview_asset_ref ? 'Audio A2 混音预览已生成，画面没有重新生成。' : '混音任务仍在处理中，可稍后刷新查看。')
+    } catch (cause) { onNotice(cause instanceof Error ? cause.message : '混音预览生成失败。') } finally { setBusy('') }
+  }
 
   return <div className="brand-film-workspace">
     <aside className="brand-film-source"><span className="section-label">DEVELOPMENT FIXTURE</span><h3>{source.product_name}</h3><p>{source.brief_name}</p><dl><div><dt>来源</dt><dd>{source.fixture_id} v{source.fixture_version}</dd></div><div><dt>规格</dt><dd>{source.duration_seconds}s · {source.aspect_ratio} · {source.channel}</dd></div><div><dt>任务修订</dt><dd>r{revision}</dd></div></dl><div className="brand-film-stage"><span>当前阶段</span><b>{draft.stage}</b></div><p className="brand-film-scope">视频创作页负责 Brief、创意、分镜与成片生成；后续质量检查和交付统一进入独立中心。</p></aside>
     <main className="brand-film-main">
-      <nav className="brand-film-steps" aria-label="品牌广告制作阶段"><span className={brief ? 'done' : 'active'}><b>01</b>Brief 分析确认</span><span className={draft.selected_concept_id ? 'done' : brief?.confirmed ? 'active' : ''}><b>02</b>创意候选选择</span><span className={plan?.confirmed ? 'done' : draft.selected_concept_id ? 'active' : ''}><b>03</b>剧本分镜确认</span><span className={draft.generation?.preview_asset ? 'done' : plan?.confirmed ? 'active' : ''}><b>04</b>生成与锁定</span></nav>
+      <nav className="brand-film-steps" aria-label="品牌广告制作阶段"><span className={brief ? 'done' : 'active'}><b>01</b>Brief 分析确认</span><span className={draft.selected_concept_id ? 'done' : brief?.confirmed ? 'active' : ''}><b>02</b>创意候选选择</span><span className={plan?.confirmed ? 'done' : draft.selected_concept_id ? 'active' : ''}><b>03</b>剧本分镜确认</span><span className={draft.generation?.preview_asset ? 'done' : plan?.confirmed ? 'active' : ''}><b>04</b>生成与锁定</span><span className={draft.audio ? 'done' : draft.generation?.preview_asset ? 'active' : ''}><b>05</b>音轨编排</span></nav>
 
       <section className="brand-film-section"><header><div><span className="section-label">PHASE 01</span><h3>Brief 分析与事实确认</h3></div><ModelBadge alias={brief?.model_alias} version={brief?.model_version}/></header>
         {!brief ? <div className="brand-film-empty"><FileText size={24}/><p>使用 Seed-2-pro 解析固定娇兰 Brief；不可用时回退固定样例。</p><button className="primary-button" disabled={Boolean(busy)} onClick={() => void analyze()}><WandSparkles size={15}/>解析 Brief</button></div> : <>
@@ -249,9 +454,11 @@ export function BrandFilmWorkspace({ onNotice }: Props) {
 
       <section className="brand-film-section" aria-disabled={!draft.selected_concept_id || conceptEditMode}><header><div><span className="section-label">PHASE 02B</span><h3>15 秒剧本与镜头表</h3></div><ModelBadge alias={plan?.model_alias} version={plan?.model_version}/></header>{conceptEditMode ? <p className="brand-locked">请先保存创意修改并重新选择方向。</p> : !draft.selected_concept_id ? <p className="brand-locked">选择创意方向后开放。</p> : !plan ? <div className="brand-film-empty compact"><p>用户编辑剧本、旁白和镜头字段，底层 Prompt 不直接暴露。</p><button className="primary-button" disabled={Boolean(busy)} onClick={() => void generatePlan()}>生成剧本与分镜</button></div> : <>{!lockedPlan && plan.confirmed ? <div className="brand-edit-notice">当前正在修改已确认剧本。保存后会形成新的待确认修订，并清空旧视频生成与交付结果。</div> : null}<div className="brand-form-grid"><label>片名<input disabled={lockedPlan} value={plan.title} onChange={event => setPlan({ ...plan, title: event.target.value })}/></label><label>音乐方向<input disabled={lockedPlan} value={plan.music_direction} onChange={event => setPlan({ ...plan, music_direction: event.target.value })}/></label><label className="wide">故事概要<textarea disabled={lockedPlan} value={plan.story_summary} onChange={event => setPlan({ ...plan, story_summary: event.target.value })}/></label><label className="wide">口播方向<textarea disabled={lockedPlan} value={plan.voice_direction} onChange={event => setPlan({ ...plan, voice_direction: event.target.value })}/></label></div><div className="brand-shot-list">{plan.shots.map((shot, index) => <ShotEditor key={shot.id} shot={shot} disabled={lockedPlan} onChange={changes => setPlan({ ...plan, shots: plan.shots.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) })}/>)}</div><div className="brand-actions">{!lockedPlan ? <><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void generatePlan()}>重新生成整版</button><button className="primary-button" disabled={Boolean(busy)} onClick={() => void savePlan()}>保存剧本修改</button><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void confirmPlan()}>确认剧本与分镜</button></> : <><span className="brand-confirmed"><Check size={14}/>剧本与分镜已确认</span><button className="secondary-button" disabled={Boolean(busy)} onClick={() => setPlanEditMode(true)}>编辑剧本与分镜</button></>}</div></>}</section>
 
-      <section className="brand-film-section" aria-disabled={!planReady}><header><div><span className="section-label">PHASE 03</span><h3>视频生成、反馈重试与片段锁定</h3></div><span className="brand-model-badge">Seedance 2.0 · 单候选</span></header>{!planReady ? <p className="brand-locked">保存并确认剧本与分镜后开放。</p> : !draft.generation ? <div className="brand-film-empty"><Film size={24}/><p>确认商品参考图后，系统把镜头表编排为 4–15 秒生成单元并冻结 PromptPackage。</p><div className="brand-generation-reference">{generationReferencePreview ? <img src={generationReferencePreview} alt="商品参考图"/> : generationReference ? <span>Asset {generationReference.asset_id} v{generationReference.version}</span> : <span>尚未选择商品参考图</span>}<label className="secondary-button brand-upload"><Upload size={13}/>上传 / 更换<input type="file" accept="image/png,image/jpeg" onChange={event => { void uploadGenerationReference(event.target.files?.[0]) }}/></label></div><button className="primary-button" disabled={Boolean(busy) || !generationReference} onClick={() => void prepareGeneration()}>确认并编排生成单元</button></div> : <><div className="brand-generation-units">{draft.generation.units.map(unit => { const latestAttempt = unit.attempts.at(-1); const locked = Boolean(unit.locked_attempt_id); return <article key={unit.id} className={locked ? 'locked' : ''}><header><div><b>生成单元 {String(unit.order).padStart(2, '0')}</b><span>{unit.start_second}s–{unit.end_second}s · {unit.shot_ids.join(' + ')}</span></div>{locked ? <span className="brand-confirmed"><Lock size={13}/>已锁定</span> : null}</header><small>PromptPackage r{unit.prompt_packages.at(-1)?.revision} · {unit.prompt_packages.at(-1)?.content_hash.slice(0, 18)}…</small>{latestAttempt?.output_asset_ref ? <video controls src={attemptPreviews[latestAttempt.id]}/> : <div className="brand-unit-placeholder"><Film size={20}/><span>{latestAttempt ? `Attempt ${latestAttempt.ordinal} · ${latestAttempt.status}` : '尚未生成候选'}</span></div>}{!locked ? <div className="brand-unit-actions">{!latestAttempt ? <button className="primary-button" disabled={Boolean(busy)} onClick={() => void generateUnit(unit.id)}>生成此片段</button> : <><textarea placeholder="填写局部反馈，例如：稳定瓶身标签，减少镜头环绕" value={feedbackByUnit[unit.id] ?? ''} onChange={event => setFeedbackByUnit(value => ({ ...value, [unit.id]: event.target.value }))}/><button className="secondary-button" disabled={Boolean(busy) || !(feedbackByUnit[unit.id] ?? '').trim()} onClick={() => void generateUnit(unit.id, feedbackByUnit[unit.id])}><RefreshCw size={13}/>按反馈重生成</button>{latestAttempt.output_asset_ref ? <button className="primary-button" disabled={Boolean(busy)} onClick={() => void lockUnit(unit.id, latestAttempt.id)}><Lock size={13}/>锁定此片段</button> : null}</>}</div> : null}</article>})}</div>{finalPreview ? <div className="brand-final-preview"><div><span className="section-label">15 SECOND PREVIEW</span><h4>已锁定片段合成预览</h4><small>720×1280 · H.264/AAC · 项目素材可追溯</small></div><video controls src={finalPreview}/></div> : null}<div className="brand-actions"><button className="primary-button" disabled={Boolean(busy) || draft.generation.units.some(unit => !unit.locked_attempt_id) || Boolean(draft.generation.preview_asset)} onClick={() => void composePreview()}>裁切并拼接 15 秒预览</button>{draft.generation.preview_asset ? <span className="brand-confirmed"><Check size={14}/>预览 Asset {draft.generation.preview_asset.asset_id} v{draft.generation.preview_asset.version}</span> : null}</div></>}</section>
+      <section className="brand-film-section" aria-disabled={!planReady}><header><div><span className="section-label">PHASE 03</span><h3>视频生成、反馈重试与片段锁定</h3></div><span className="brand-model-badge">Seedance 2.0 · 单候选</span></header>{!planReady ? <p className="brand-locked">保存并确认剧本与分镜后开放。</p> : !draft.generation ? <div className="brand-film-empty"><Film size={24}/><p>确认商品参考图后，系统把镜头表编排为 4–15 秒生成单元并冻结 PromptPackage。</p><div className="brand-generation-reference">{generationReferencePreview ? <img src={generationReferencePreview} alt="商品参考图"/> : generationReference ? <span>Asset {generationReference.asset_id} v{generationReference.version}</span> : <span>尚未选择商品参考图</span>}<label className="secondary-button brand-upload"><Upload size={13}/>上传 / 更换<input type="file" accept="image/png,image/jpeg" onChange={event => { void uploadGenerationReference(event.target.files?.[0]) }}/></label></div><button className="primary-button" disabled={Boolean(busy) || !generationReference} onClick={() => void prepareGeneration()}>确认并编排生成单元</button></div> : <><div className="brand-generation-units">{draft.generation.units.map(unit => { const latestAttempt = unit.attempts.at(-1); const locked = Boolean(unit.locked_attempt_id); return <article key={unit.id} className={locked ? 'locked' : ''}><header><div><b>生成单元 {String(unit.order).padStart(2, '0')}</b><span>{unit.start_second}s–{unit.end_second}s · {unit.shot_ids.join(' + ')}</span></div>{locked ? <span className="brand-confirmed"><Lock size={13}/>已锁定</span> : null}</header><small>PromptPackage r{unit.prompt_packages.at(-1)?.revision} · {unit.prompt_packages.at(-1)?.content_hash.slice(0, 18)}…</small>{latestAttempt?.output_asset_ref ? <video controls src={attemptPreviews[latestAttempt.id]}/> : <div className="brand-unit-placeholder"><Film size={20}/><span>{latestAttempt ? `Attempt ${latestAttempt.ordinal} · ${latestAttempt.status}` : '尚未生成候选'}</span></div>}{!locked ? <div className="brand-unit-actions"><GenerationUnitActions attempt={latestAttempt} busy={Boolean(busy)} feedback={feedbackByUnit[unit.id] ?? ''} onFeedback={feedback => setFeedbackByUnit(value => ({ ...value, [unit.id]: feedback }))} onGenerate={feedback => void generateUnit(unit.id, feedback)} onLock={attemptId => void lockUnit(unit.id, attemptId)}/></div> : null}</article>})}</div>{finalPreview ? <div className="brand-final-preview"><div><span className="section-label">15 SECOND PREVIEW</span><h4>已锁定片段合成预览</h4><small>720×1280 · H.264/AAC · 项目素材可追溯</small></div><video controls src={finalPreview}/></div> : null}<div className="brand-actions"><button className="primary-button" disabled={Boolean(busy) || draft.generation.units.some(unit => !unit.locked_attempt_id) || Boolean(draft.generation.preview_asset)} onClick={() => void composePreview()}>裁切并拼接 15 秒预览</button>{draft.generation.preview_asset ? <span className="brand-confirmed"><Check size={14}/>预览 Asset {draft.generation.preview_asset.asset_id} v{draft.generation.preview_asset.version}</span> : null}</div></>}</section>
 
-      {draft.generation?.preview_asset && planReady && !conceptEditMode ? <footer className="brand-generation-seam"><b>成片预览已完成</b><span>下一步：素材检查 → 交付中心</span><small>视频创作页不再重复承载质检、审批和交付操作，请通过左侧独立中心继续处理。</small></footer> : null}
+      <section className="brand-film-section" aria-disabled={!draft.generation?.preview_asset}><header><div><span className="section-label">AUDIO A0–A4</span><h3>AI 声音导演、真实旁白与完整混音预览</h3></div><span className="brand-model-badge">Audio Director · MiniMax · FFmpeg</span></header>{!draft.generation?.preview_asset ? <p className="brand-locked">完成并合成视觉预览后开放。</p> : !draft.audio ? <div className="brand-film-empty"><Volume2 size={24}/><p>进入后自动获得带发音词典、时长适配、声画检查和 A/B 声音方案的默认音轨，不需要从空白配置开始。</p><button className="primary-button" disabled={Boolean(busy)} onClick={() => void startAudioDirector()}>启动 AI 声音导演</button></div> : <AudioWorkspaceEditor key={`${draft.audio.active_variant_id}-${activeAudioMix(draft.audio)?.content_hash}`} audio={draft.audio} videoURL={finalPreview} mixedVideoURL={mixedAudioPreview} assetURLs={audioClipPreviews} speechCapability={speechCapability} busy={Boolean(busy)} onMaterialize={() => void materializeAudio()} onReplace={(clipId, file) => void replaceAudioClip(clipId, file)} onSave={operations => void saveAudio(operations)} onRender={() => void renderAudioPreview()} onProbeSpeech={() => void probeSpeech()} onGenerateVoice={(clipId, voiceAlias) => void generateVoice(clipId, voiceAlias)} onSelectVariant={variantId => void selectAudioVariant(variantId)} onPlanDirector={() => void prepareAudio()}/>}</section>
+
+      {draft.audio && planReady && !conceptEditMode ? (() => { const progress = brandAudioProgress(draft.audio); return <footer className="brand-generation-seam"><b>{progress.title}</b><span>{progress.next}</span><small>{progress.detail}</small></footer> })() : null}
     </main>
   </div>
 }

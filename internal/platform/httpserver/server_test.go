@@ -2343,6 +2343,27 @@ func (s *creativeManagerStub) LockBrandFilmGenerationUnit(context.Context, contr
 func (s *creativeManagerStub) ComposeBrandFilmPreview(context.Context, contract.RequestContext, contract.ProjectID, string, creative.ComposeBrandFilmPreviewRequest) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
+func (s *creativeManagerStub) PrepareBrandFilmAudio(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) MaterializeBrandFilmAudioAssets(context.Context, contract.RequestContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmAudioMix(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandAudioMixRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) SelectBrandFilmAudioVariant(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectBrandAudioVariantRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RenderBrandFilmAudioPreview(context.Context, contract.RequestContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GenerateBrandFilmVoiceClip(context.Context, contract.RequestContext, contract.ProjectID, string, creative.GenerateBrandVoiceClipRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ProbeBrandFilmSpeech(context.Context, contract.ActorContext, contract.ProjectID) (provider.SpeechCapability, error) {
+	return provider.SpeechCapability{Provider: "fixture", Available: false, VoiceAliases: []string{}}, nil
+}
 func (s *creativeManagerStub) RunBrandFilmQuality(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RunBrandFilmQualityRequest) (creative.TaskDetail, error) {
 	return s.detail, nil
 }

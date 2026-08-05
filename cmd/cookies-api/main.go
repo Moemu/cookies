@@ -21,6 +21,7 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
+	"github.com/shikanon/cookies/internal/integrations/productsource"
 	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
@@ -118,13 +119,20 @@ func main() {
 	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
 	if cfg.Media.FFprobePath != "" {
 		uploadService.VideoProbe = assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
+		uploadService.AudioProbe = assets.FFprobeAudioProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 	}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 	creativeRepository := creative.MySQLRepository{DB: db}
 	creativeService := &creative.Service{
 		Repository: creativeRepository, ViralRemakes: creativeRepository,
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
+		AudioAssets:        creativeAudioAssetWriter{uploads: uploadService},
 		CommerceWorkspaces: creativeRepository, Directions: creativeRepository,
+		AINativeProducts:             creativeProductResolver{resolver: productsource.NewDouyinResolver()},
+		AINativeRequirements:         creativeRepository,
+		AINativeScripts:              creativeRepository,
+		AINativeScriptProfiles:       creative.NewChannelCreativeProfileRegistry(),
+		AINativeProductMediaImporter: creativeProductMediaImporter{uploads: uploadService},
 	}
 	if cfg.Creative.DirectionPlanningEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -262,6 +270,7 @@ func main() {
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
 	runtimeStore := jobruntime.MySQLStore{DB: db}
+	creativeService.AINativeOperationCanceller = creativeAINativeOperationCanceller{store: runtimeStore}
 	var researchRunner knowledge.ExternalResearchRunner
 	if cfg.Research.SeedEnabled {
 		cipher, cipherErr := provider.NewAESGCMCredentialCipher(
@@ -332,6 +341,11 @@ func main() {
 		}
 		textProvider = &provider.Service{TextAdapter: textAdapter}
 	}
+	if textProvider != nil {
+		creativeService.AINativeRequirementPlanner = creative.ModelAINativeRequirementPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
+		creativeService.AINativeScriptPlanner = creative.ModelAINativeScriptPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
+		creativeService.AINativeStoryboardPlanner = creative.ModelAINativeStoryboardPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
+	}
 	insightsService := &insights.Service{
 		Repository:  insights.MySQLRepository{DB: db},
 		Assets:      insights.MySQLRepository{DB: db},
@@ -353,6 +367,10 @@ func main() {
 	defer stopWorkers()
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	creativeService.AINativeScriptScheduler = creative.JobRuntimeAINativeScriptScheduler{
+		Store: runtimeStore,
+	}
+	runtimeHandlers[creative.AINativeScriptJobKind] = creativeService.HandleAINativeScriptJob
 	if researchRunner != nil {
 		runtimeHandlers[knowledge.ResearchJobKind] = knowledgeService.HandleResearchJob
 	}
@@ -361,6 +379,9 @@ func main() {
 	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
+	}
+	creativeService.AudioMixScheduler = creative.JobRuntimeAudioMixRenderScheduler{
+		Store: runtimeStore, NewID: func() (string, error) { return ids.New("audiomixrenderexec") },
 	}
 	if cfg.Media.FFmpegPath != "" && cfg.Media.FFprobePath != "" {
 		probe := assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
@@ -371,6 +392,17 @@ func main() {
 		creativeService.Composer = composer
 		creativeService.BrandFilmComposer = composer
 		creativeService.RenderedAssets = creativeRenderedAssetWriter{uploads: uploadService}
+		creativeService.AudioMixRenderer = media.FFmpegAudioMixRenderer{
+			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			Videos: creativeMediaSource{repository: assetRepository, blobs: blobs},
+			Audio:  creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
+		}
+		creativeService.AINativeTimelineRenderer = media.FFmpegTimelineRenderer{
+			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			Videos: creativeMediaSource{repository: assetRepository, blobs: blobs},
+			Audio:  creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
+		}
+		runtimeHandlers[creative.AudioMixRenderJobKind] = creative.AudioMixRenderRuntimeHandler(*creativeService)
 		for kind, handler := range creative.NewRenderRuntimeWorker(runtimeStore, *creativeService).Handlers {
 			runtimeHandlers[kind] = handler
 		}
@@ -466,6 +498,34 @@ func main() {
 			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher}
 		}
 		dependencies.ProviderJobs = providerService
+		creativeService.AINativeStoryboards = creativeRepository
+		creativeService.AINativeStoryboardAssetPreparer = creativeAINativeStoryboardAssetPreparer{provider: &providerService}
+		creativeService.AINativeStoryboardScheduler = creative.JobRuntimeAINativeStoryboardScheduler{Store: runtimeStore}
+		runtimeHandlers[creative.AINativeStoryboardJobKind] = creativeService.HandleAINativeStoryboardJob
+		var speechSynthesizer provider.SpeechSynthesizer = provider.FakeSpeechAdapter{}
+		if cfg.Provider.SpeechAdapter == "volcengine_speech" {
+			speechSynthesizer, err = provider.NewVolcengineSpeechAdapter(provider.VolcengineSpeechConfig{
+				Endpoint: cfg.Provider.VolcengineSpeech.Endpoint, APIKey: cfg.Provider.VolcengineSpeech.APIKey,
+				ResourceID: cfg.Provider.VolcengineSpeech.ResourceID, DefaultVoice: cfg.Provider.VolcengineSpeech.DefaultVoice,
+			})
+			if err != nil {
+				log.Fatalf("configure Volcengine speech adapter: %v", err)
+			}
+		} else if cfg.Provider.SpeechAdapter == "minimax_speech" {
+			cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+			if cipherErr != nil {
+				log.Fatalf("configure MiniMax speech credential encryption: %v", cipherErr)
+			}
+			routes := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
+			speechSynthesizer = provider.MiniMaxSpeechAdapter{Routes: routes, Credentials: routes, ModelAlias: provider.DefaultMiniMaxSpeechModelAlias, DefaultVoiceAlias: "cookies.voice.brand.warm_female"}
+			creativeService.BrandFilmSpeech = speechSynthesizer
+		}
+		creativeService.AINativeProductions = creativeRepository
+		creativeService.AINativeProductionScheduler = creative.JobRuntimeAINativeProductionScheduler{Store: runtimeStore}
+		creativeService.AINativeVideoJobs = &providerService
+		creativeService.AINativeSpeech = speechSynthesizer
+		creativeService.AINativeMaxActiveUnits = cfg.Creative.AINativeMaxActiveUnits
+		runtimeHandlers[creative.AINativeProductionJobKind] = creativeService.HandleAINativeProductionJob
 		imageTextReconciler := creative.ImageTextReconciler{
 			Service: creativeService, Repository: creativeRepository,
 			Provider: providerService, Limit: 100,
@@ -617,6 +677,28 @@ type assetVisionSourceResolver struct{ uploads *assets.UploadService }
 
 type creativeAssetReader struct{ uploads *assets.UploadService }
 
+type creativeProductResolver struct{ resolver productsource.DouyinResolver }
+
+func (r creativeProductResolver) Resolve(ctx context.Context, input string) (creative.AINativeProductSnapshot, error) {
+	value, err := r.resolver.Resolve(ctx, input)
+	if err != nil {
+		return creative.AINativeProductSnapshot{}, err
+	}
+	images := make([]creative.AINativeProductImage, 0, len(value.Images))
+	for _, image := range value.Images {
+		images = append(images, creative.AINativeProductImage{URL: image.URL, Role: image.Role})
+	}
+	return creative.AINativeProductSnapshot{
+		Source: value.Source, ProductID: value.ProductID, Name: value.Name, Description: value.Description,
+		Images: images,
+		Price: creative.AINativeProductPrice{
+			MinRaw: value.Price.MinRaw, MaxRaw: value.Price.MaxRaw, Currency: value.Price.Currency,
+			DisplayUnconfirmed: value.Price.DisplayUnconfirmed,
+		},
+		Sales: value.Sales, SourceURL: value.SourceURL,
+	}, nil
+}
+
 type creativeMediaSource struct {
 	repository assets.Repository
 	blobs      assets.BlobStore
@@ -644,7 +726,31 @@ func (s creativeMediaSource) OpenVideo(ctx context.Context, organizationID contr
 	return value.Version, reader, nil
 }
 
+func (s creativeMediaSource) OpenAudio(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, ref contract.AssetVersionRef) (assets.AssetVersion, io.ReadCloser, error) {
+	if s.repository == nil || s.blobs == nil {
+		return assets.AssetVersion{}, nil, fmt.Errorf("creative media source is unavailable")
+	}
+	value, err := s.repository.GetProjectAsset(ctx, organizationID, projectID, ref)
+	if err != nil {
+		return assets.AssetVersion{}, nil, err
+	}
+	if value.Asset.Status != assets.AssetReady || value.Version.Status != assets.AssetReady || value.Asset.Kind != contract.AssetAudio || (value.Version.MIMEType != "audio/wav" && value.Version.MIMEType != "audio/mpeg" && value.Version.MIMEType != "audio/aac") {
+		return assets.AssetVersion{}, nil, fmt.Errorf("creative media source is not ready supported audio")
+	}
+	reader, info, err := s.blobs.Open(ctx, value.Version.Blob)
+	if err != nil {
+		return assets.AssetVersion{}, nil, err
+	}
+	if info.SizeBytes != value.Version.SizeBytes {
+		reader.Close()
+		return assets.AssetVersion{}, nil, assets.ErrOutputMetadataMismatch
+	}
+	return value.Version, reader, nil
+}
+
 type creativeRenderedAssetWriter struct{ uploads *assets.UploadService }
+
+type creativeAudioAssetWriter struct{ uploads *assets.UploadService }
 
 type creativeImageAssetIO struct{ uploads *assets.UploadService }
 
@@ -655,6 +761,13 @@ func (w creativeRenderedAssetWriter) IngestRenderedVideo(ctx context.Context, re
 		return contract.ProjectAssetRef{}, fmt.Errorf("rendered asset intake is unavailable")
 	}
 	return w.uploads.IngestRenderedVideo(ctx, requestContext, projectID, renderJobID, content, sizeBytes)
+}
+
+func (w creativeAudioAssetWriter) IngestDerivedAudio(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, derivationID string, content io.Reader, sizeBytes int64, mimeType string, sourceResources []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+	if w.uploads == nil {
+		return contract.ProjectAssetRef{}, fmt.Errorf("audio asset intake is unavailable")
+	}
+	return w.uploads.IngestDerivedAudio(ctx, requestContext, projectID, derivationID, content, sizeBytes, mimeType, sourceResources)
 }
 
 func (r creativeImageAssetIO) OpenImage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {

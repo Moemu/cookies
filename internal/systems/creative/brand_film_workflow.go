@@ -209,7 +209,7 @@ func (s Service) AnalyzeBrandFilmBrief(ctx context.Context, actor contract.Actor
 	next.BrandFilm.Stage = BrandFilmBriefDraft
 	next.BrandFilm.BriefAnalyses = append(next.BrandFilm.BriefAnalyses, analysis)
 	next.BrandFilm.ConceptSets, next.BrandFilm.FilmPlans, next.BrandFilm.SelectedConceptID = nil, nil, ""
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
@@ -236,7 +236,7 @@ func (s Service) UpdateBrandFilmBrief(ctx context.Context, actor contract.ActorC
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmBriefDraft
 	next.BrandFilm.BriefAnalyses = append(next.BrandFilm.BriefAnalyses, value)
 	next.BrandFilm.ConceptSets, next.BrandFilm.FilmPlans, next.BrandFilm.SelectedConceptID = nil, nil, ""
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
@@ -294,7 +294,7 @@ func (s Service) GenerateBrandFilmConcepts(ctx context.Context, actor contract.A
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmConceptSelection
 	next.BrandFilm.ConceptSets = append(next.BrandFilm.ConceptSets, concepts)
 	next.BrandFilm.SelectedConceptID, next.BrandFilm.FilmPlans = "", nil
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -324,7 +324,7 @@ func (s Service) UpdateBrandFilmConcepts(ctx context.Context, actor contract.Act
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmConceptSelection
 	next.BrandFilm.ConceptSets = append(next.BrandFilm.ConceptSets, value)
 	next.BrandFilm.SelectedConceptID, next.BrandFilm.FilmPlans = "", nil
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: true, GenerationReady: false, ProductionReady: false, Blockers: []string{"creative_concept_selection", "production_plan_confirmation", "prompt_package"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
@@ -353,7 +353,7 @@ func (s Service) SelectBrandFilmConcept(ctx context.Context, actor contract.Acto
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmConceptConfirmed
 	next.BrandFilm.SelectedConceptID, next.BrandFilm.FilmPlans = request.ConceptID, nil
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -389,7 +389,7 @@ func (s Service) GenerateBrandFilmPlan(ctx context.Context, actor contract.Actor
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmPlanDraft
 	next.BrandFilm.FilmPlans = append(next.BrandFilm.FilmPlans, plan)
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
@@ -414,7 +414,7 @@ func (s Service) UpdateBrandFilmPlan(ctx context.Context, actor contract.ActorCo
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmPlanDraft
 	next.BrandFilm.FilmPlans = append(next.BrandFilm.FilmPlans, value)
-	next.BrandFilm.Generation, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil
+	next.BrandFilm.Generation, next.BrandFilm.Audio, next.BrandFilm.QualityRuns, next.BrandFilm.Delivery = nil, nil, nil, nil
 	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: true, GenerationReady: false, ProductionReady: false, Blockers: []string{"production_plan_confirmation", "prompt_package", "generation_confirmation"}}
 	next.BrandFilm.UpdatedAt = s.now()
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)

@@ -58,27 +58,30 @@ func (s Service) PrepareBrandFilmGeneration(ctx context.Context, actor contract.
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmGenerationReady
 	next.BrandFilm.Generation = &BrandFilmGeneration{
-		ContractVersion: "creative-brand-film-generation/v1", PlanRevision: plan.Revision,
+		ContractVersion: "creative-brand-film-generation/v1", PlanRevision: plan.Revision, MasterDurationMS: plan.Shots[len(plan.Shots)-1].EndSecond * 1000,
 		ReferenceAsset: request.ReferenceAsset, Units: units, CreatedAt: now, UpdatedAt: now,
 	}
+	next.BrandFilm.Audio = nil
 	next.BrandFilm.Readiness = CreativeReadiness{PlanningReady: true, GenerationReady: true, ProductionReady: false, Blockers: []string{"generated_units", "locked_units", "preview_composition"}}
 	next.BrandFilm.UpdatedAt = now
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
 
 func compileBrandFilmGenerationUnits(analysis BrandBriefAnalysisVersion, plan BrandFilmPlanVersion, now time.Time) ([]BrandFilmGenerationUnit, error) {
-	groups, err := groupBrandFilmShots(plan.Shots)
+	masterDurationMS := plan.MasterDurationMS
+	if masterDurationMS == 0 {
+		masterDurationMS = plan.Shots[len(plan.Shots)-1].EndSecond * 1000
+	}
+	planned, err := PlanBrandFilmGenerationUnits(masterDurationMS, plan.Shots)
 	if err != nil {
 		return nil, err
 	}
-	units := make([]BrandFilmGenerationUnit, 0, len(groups))
-	for index, shots := range groups {
+	units := make([]BrandFilmGenerationUnit, 0, len(planned))
+	for index, plannedUnit := range planned {
+		shots := []BrandFilmShot{plan.Shots[index]}
 		unit := BrandFilmGenerationUnit{
-			ID: fmt.Sprintf("generation_unit_%02d", index+1), Order: index + 1,
-			StartSecond: shots[0].StartSecond, EndSecond: shots[len(shots)-1].EndSecond,
-		}
-		for _, shot := range shots {
-			unit.ShotIDs = append(unit.ShotIDs, shot.ID)
+			ID: fmt.Sprintf("generation_unit_%02d", index+1), Order: plannedUnit.Order,
+			ShotIDs: append([]string{}, plannedUnit.ShotIDs...), StartSecond: plannedUnit.TimelineStartMS / 1000, EndSecond: plannedUnit.TimelineEndMS / 1000,
 		}
 		pkg, err := compileBrandFilmPromptPackage(analysis, plan, unit, shots, 1, "", now)
 		if err != nil {
@@ -89,42 +92,6 @@ func compileBrandFilmGenerationUnits(analysis BrandBriefAnalysisVersion, plan Br
 		units = append(units, unit)
 	}
 	return units, nil
-}
-
-func groupBrandFilmShots(shots []BrandFilmShot) ([][]BrandFilmShot, error) {
-	if len(shots) == 0 {
-		return nil, fmt.Errorf("brand film shots are required")
-	}
-	groups := [][]BrandFilmShot{}
-	current := []BrandFilmShot{}
-	start := shots[0].StartSecond
-	for _, shot := range shots {
-		if len(current) > 0 && shot.EndSecond-start > 15 {
-			groups = append(groups, current)
-			current, start = nil, shot.StartSecond
-		}
-		current = append(current, shot)
-		if shot.EndSecond-start >= 4 {
-			groups = append(groups, current)
-			current = nil
-			if shot.EndSecond < 15 {
-				start = shot.EndSecond
-			}
-		}
-	}
-	if len(current) > 0 {
-		if len(groups) == 0 || current[len(current)-1].EndSecond-groups[len(groups)-1][0].StartSecond > 15 {
-			return nil, fmt.Errorf("film plan cannot be represented by 4-15 second generation units")
-		}
-		groups[len(groups)-1] = append(groups[len(groups)-1], current...)
-	}
-	for _, group := range groups {
-		duration := group[len(group)-1].EndSecond - group[0].StartSecond
-		if duration < 4 || duration > 15 {
-			return nil, fmt.Errorf("generation unit duration %d is outside provider limits", duration)
-		}
-	}
-	return groups, nil
 }
 
 func compileBrandFilmPromptPackage(analysis BrandBriefAnalysisVersion, plan BrandFilmPlanVersion, unit BrandFilmGenerationUnit, shots []BrandFilmShot, revision int64, feedback string, now time.Time) (BrandFilmPromptPackage, error) {
@@ -388,6 +355,7 @@ func (s Service) ComposeBrandFilmPreview(ctx context.Context, requestContext con
 	next.Revision++
 	next.BrandFilm.Revision, next.BrandFilm.Stage = next.Revision, BrandFilmGenerationLocked
 	next.BrandFilm.Generation.PreviewAsset = &ref.AssetVersion
+	next.BrandFilm.Audio = nil
 	next.BrandFilm.QualityRuns = []BrandFilmQualityRun{}
 	next.BrandFilm.Delivery = nil
 	next.BrandFilm.Generation.UpdatedAt, next.BrandFilm.UpdatedAt = now, now

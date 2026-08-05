@@ -11,6 +11,7 @@ import (
 
 const MaxImageBytes int64 = 20 * 1024 * 1024
 const MaxVideoBytes int64 = 200 * 1024 * 1024
+const MaxAudioBytes int64 = 50 * 1024 * 1024
 const MaxImageDimension = 16384
 const MaxImagePixels int64 = 100_000_000
 
@@ -219,7 +220,7 @@ func (r CreateUploadRequest) Validate() error {
 	}
 	_, maxBytes, supported := generatedAssetPolicy(r.DeclaredMIMEType)
 	if !supported {
-		return fmt.Errorf("declared_mime_type must be image/jpeg, image/png, or video/mp4")
+		return fmt.Errorf("declared_mime_type must be a supported image, video, or audio MIME type")
 	}
 	if r.DeclaredSizeBytes < 1 || r.DeclaredSizeBytes > maxBytes {
 		return fmt.Errorf("declared_size_bytes must be between 1 and %d", maxBytes)
@@ -297,12 +298,19 @@ func allowedDeclaredVideoMIME(value string) bool {
 	return value == "video/mp4"
 }
 
+func allowedDeclaredAudioMIME(value string) bool {
+	return value == "audio/wav" || value == "audio/mpeg" || value == "audio/aac"
+}
+
 func generatedAssetPolicy(mimeType string) (contract.AssetKind, int64, bool) {
 	if allowedDeclaredImageMIME(mimeType) {
 		return contract.AssetImage, MaxImageBytes, true
 	}
 	if allowedDeclaredVideoMIME(mimeType) {
 		return contract.AssetVideo, MaxVideoBytes, true
+	}
+	if allowedDeclaredAudioMIME(mimeType) {
+		return contract.AssetAudio, MaxAudioBytes, true
 	}
 	return "", 0, false
 }
