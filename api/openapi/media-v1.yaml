@@ -1,0 +1,97 @@
+openapi: 3.1.0
+info:
+  title: cookies Media Understanding API
+  version: 1.0.0
+  description: Project-scoped, evidence-first image and 15–90 second video understanding.
+servers:
+  - url: /
+security:
+  - cookiesAuth: []
+paths:
+  /api/media/v1/projects/{project_id}/understandings:
+    post:
+      operationId: createMediaUnderstanding
+      summary: Create or replay an immutable understanding artifact for one AssetVersion.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [asset_id, version]
+              properties:
+                asset_id: {type: string, minLength: 1, maxLength: 128}
+                version: {type: integer, minimum: 1}
+                profile: {type: string, enum: [strategy.multimodal.p0]}
+      responses:
+        '202':
+          description: Durable understanding work was accepted or replayed.
+          headers:
+            Location: {schema: {type: string}}
+            Idempotent-Replay: {schema: {type: string, enum: ['true']}}
+          content:
+            application/json:
+              schema: {$ref: '../contracts/platform-media-understanding-artifact-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /api/media/v1/projects/{project_id}/understandings/{artifact_id}:
+    get:
+      operationId: getMediaUnderstanding
+      summary: Read one immutable media understanding artifact and its current execution status.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: artifact_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Media understanding artifact.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/platform-media-understanding-artifact-v1.schema.json'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/media/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/understanding:
+    get:
+      operationId: getLatestMediaUnderstandingForAssetVersion
+      summary: Resolve the latest artifact for an exact immutable AssetVersion.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: asset_id, in: path, required: true, schema: {type: string, minLength: 1}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200':
+          description: Latest artifact for the exact AssetVersion.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/platform-media-understanding-artifact-v1.schema.json'}
+        '404': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    cookiesAuth:
+      type: apiKey
+      in: cookie
+      name: cookies_session
+  parameters:
+    ProjectID:
+      name: project_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+  responses:
+    Problem:
+      description: Request failed.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: {type: string}
+                  message: {type: string}
+                additionalProperties: false
+            additionalProperties: false

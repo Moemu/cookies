@@ -57,16 +57,28 @@ func scanTask(row rowScanner) (Task, error) {
 }
 
 const messageSelect = `SELECT id, organization_id, project_id, conversation_id, role,
-	content_type, content, ai_generated, COALESCE(agent_task_id, ''), skill_run_ids,
+	content_type, content, content_blocks, requested_policy, ai_generated, COALESCE(agent_task_id, ''), skill_run_ids,
 	created_by, created_at FROM strategy_messages`
 
 func scanMessage(row rowScanner) (Message, error) {
 	var value Message
-	var skillRuns []byte
+	var contentBlocks, requestedPolicy, skillRuns []byte
 	if err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ConversationID,
-		&value.Role, &value.ContentType, &value.Content, &value.AIGenerated, &value.AgentTaskID,
+		&value.Role, &value.ContentType, &value.Content, &contentBlocks, &requestedPolicy, &value.AIGenerated, &value.AgentTaskID,
 		&skillRuns, &value.CreatedBy, &value.CreatedAt); err != nil {
 		return Message{}, mapNotFound(err)
+	}
+	if len(contentBlocks) > 0 {
+		if err := json.Unmarshal(contentBlocks, &value.ContentBlocks); err != nil {
+			return Message{}, err
+		}
+	}
+	if len(requestedPolicy) > 0 {
+		var policy MessageRequestedPolicy
+		if err := json.Unmarshal(requestedPolicy, &policy); err != nil {
+			return Message{}, err
+		}
+		value.RequestedPolicy = &policy
 	}
 	if len(skillRuns) > 0 {
 		_ = json.Unmarshal(skillRuns, &value.SkillRunIDs)
@@ -133,12 +145,20 @@ func insertMessage(ctx context.Context, executor interface {
 	if len(message.SkillRunIDs) > 0 {
 		skillRuns = mustJSON(message.SkillRunIDs)
 	}
+	contentBlocks := any(nil)
+	if message.ContentBlocks != nil {
+		contentBlocks = mustJSON(message.ContentBlocks)
+	}
+	requestedPolicy := any(nil)
+	if message.RequestedPolicy != nil {
+		requestedPolicy = mustJSON(message.RequestedPolicy)
+	}
 	_, err := executor.ExecContext(ctx, `INSERT INTO strategy_messages
-		(id, organization_id, project_id, conversation_id, role, content_type, content,
-		 ai_generated, agent_task_id, skill_run_ids, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`, message.ID,
+		(id, organization_id, project_id, conversation_id, role, content_type, content, content_blocks,
+		 requested_policy, ai_generated, agent_task_id, skill_run_ids, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`, message.ID,
 		message.OrganizationID, message.ProjectID, message.ConversationID, message.Role,
-		message.ContentType, message.Content, message.AIGenerated, message.AgentTaskID,
+		message.ContentType, message.Content, contentBlocks, requestedPolicy, message.AIGenerated, message.AgentTaskID,
 		skillRuns, message.CreatedBy, message.CreatedAt)
 	return err
 }

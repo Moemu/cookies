@@ -36,6 +36,10 @@ type TaskOverlayReader interface {
 	ReadTaskOverlayForCreative(context.Context, contract.ActorContext, contract.ProjectID, TaskOverlayReference) (TaskOverlaySnapshot, error)
 }
 
+type RequirementSnapshotReader interface {
+	ReadRequirementForCreative(context.Context, contract.ActorContext, contract.ProjectID, RequirementSnapshotReference, BusinessCapabilityReference) (RequirementSnapshot, error)
+}
+
 type AssetReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
 }
@@ -91,6 +95,7 @@ type Service struct {
 	StrategyPackages                    StrategyPackageReader
 	TaskStrategies                      TaskStrategyReader
 	TaskOverlays                        TaskOverlayReader
+	Requirements                        RequirementSnapshotReader
 	Sources                             CreativeSourceReader
 	Assets                              AssetReader
 	GameEvidenceFrames                  media.FrameExtractor
@@ -109,6 +114,7 @@ type Service struct {
 	BrandFilmPlanner                    BrandFilmPlanner
 	DirectionPlanner                    CreativeDirectionPlanner
 	Directions                          DirectionRepository
+	DirectionScheduler                  DirectionGenerationScheduler
 	ImageTextDraftPlanner               ImageTextDraftPlanner
 	ImageRenderer                       *ImageTextRenderer
 	ImageBaseAssets                     ImageBaseAssetReader
@@ -175,7 +181,36 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	if !channelAllowed {
 		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
 	}
-	if route.RouteType != PerformanceModeShortDramaPreroll && route.RouteType != PerformanceModeBrandFilm {
+	isManualBrandFilm := intake.Source == IntakeSourceManual && route.RouteID == ManualBrandFilmRouteID
+	isDirectViralRemake := (intake.Source == IntakeSourceManual || intake.Source == IntakeSourceRequirement) && route.RouteType == PerformanceModeViralRemake
+	var confirmedDirection *CreativeDirectionVersion
+	if route.RouteType == CreativeRouteBrandVideo && !isManualBrandFilm {
+		if s.Directions == nil || strings.TrimSpace(request.DirectionID) == "" {
+			return CreativeTask{}, fmt.Errorf("confirmed direction_id is required for a brand-video task")
+		}
+		direction, directionErr := s.Directions.GetDirection(ctx, actor.OrganizationID, projectID, request.DirectionID)
+		if directionErr != nil {
+			return CreativeTask{}, directionErr
+		}
+		if direction.Status != DirectionStatusConfirmed || direction.IntakeID != intake.ID ||
+			direction.InputIdentityHash != intake.InputIdentityHash || direction.RouteID != route.RouteID {
+			return CreativeTask{}, fmt.Errorf("brand-video direction does not match the confirmed intake lineage")
+		}
+		if strings.TrimSpace(request.CallToAction) != "" {
+			return CreativeTask{}, fmt.Errorf("brand-video task cannot introduce a performance CTA")
+		}
+		confirmedDirection = &direction
+		request.Concept = direction.Concept
+		request.Prompt = brandVideoOutlineFromDirection(direction)
+	}
+	hasSourceVideo := strings.TrimSpace(string(request.SourceVideo.AssetID)) != "" || request.SourceVideo.Version != 0
+	needsSourceVideo := route.RouteType != PerformanceModeShortDramaPreroll &&
+		!isManualBrandFilm &&
+		(route.RouteType != CreativeRouteBrandVideo || hasSourceVideo)
+	if needsSourceVideo {
+		if err := request.SourceVideo.Validate(); err != nil {
+			return CreativeTask{}, fmt.Errorf("source_video: %w", err)
+		}
 		if s.Assets == nil {
 			return CreativeTask{}, fmt.Errorf("creative video dependencies are incomplete")
 		}
@@ -191,7 +226,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	var shortDramaDraft *ShortDramaPrerollDraft
 	var gamePrerollDraft *GamePrerollDraft
 	var brandFilmDraft *BrandFilmDraft
-	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+	if isDirectViralRemake {
 		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
 		}
@@ -226,10 +261,18 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		},
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	if confirmedDirection != nil {
+		task.Direction.DirectionVersionID = confirmedDirection.ID
+		task.Direction.InputIdentityHash = confirmedDirection.InputIdentityHash
+	}
+	resolution := route.Resolution
+	if strings.TrimSpace(resolution) == "" {
+		resolution = "720p"
+	}
 	draft := VideoDraft{
 		ContractVersion: "creative-video-draft/v1", TaskID: task.ID, Revision: 1,
 		Concept: request.Concept, Prompt: request.Prompt, DurationSeconds: route.TargetDurationSeconds,
-		AspectRatio: route.AspectRatio, Resolution: "720p", SourceVideo: request.SourceVideo,
+		AspectRatio: route.AspectRatio, Resolution: resolution, VideoPurpose: route.VideoPurpose, SourceVideo: request.SourceVideo,
 		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
 		CallToAction: request.CallToAction, CreatedAt: now,
 	}
@@ -261,7 +304,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 		draft.BrandFilm = brandFilmDraft
 	}
-	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+	if isDirectViralRemake {
 		manual := intake.Request.ManualViralRemake
 		snapshot := ViralRemakeInputSnapshot{
 			Source: intake.Source, SelectedRouteID: route.RouteID,
@@ -406,6 +449,20 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	return s.Repository.CreateVideoTask(ctx, task, draft)
 }
 
+func brandVideoOutlineFromDirection(direction CreativeDirectionVersion) string {
+	parts := []string{
+		"品牌概念：" + direction.Concept,
+		"创意依据：" + direction.CreativeRationale,
+		"情绪转变：" + direction.EmotionalArc,
+		"影像语法：" + direction.VisualGrammar,
+		"品牌记忆装置：" + direction.BrandMemoryDevice,
+		"人物瞬间：" + direction.HumanMoment,
+		"信息顺序：" + strings.Join(direction.MessagePlan, "；"),
+		"执行轮廓：" + strings.Join(direction.ExecutionOutline, "；"),
+	}
+	return strings.Join(parts, "\n")
+}
+
 func selectedVideoRoute(intake CreativeIntake, request CreateVideoTaskRequest) (CreativeRouteSnapshot, error) {
 	if request.SelectedRouteID != "" {
 		for _, route := range intake.Request.CreativeRoutes {
@@ -465,6 +522,16 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	if request.Source == IntakeSourceTaskStrategy && !s.AllowLegacyTaskStrategyIntakeWrites {
 		return CreativeIntake{}, fmt.Errorf("legacy task_strategy intake creation is read-only; use a v3 strategy_package intake with an optional task_overlay_ref")
 	}
+	if request.Source == IntakeSourceManual && request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+		request.Format = FormatImageText
+		request.SelectedRouteID = ManualImageTextRouteID
+		request.CreativeRoutes = []CreativeRouteSnapshot{{
+			RouteID: ManualImageTextRouteID, RouteType: CreativeRouteImageText,
+			Channels:    []string{string(ChannelXiaohongshu)},
+			Reason:      "用户在图文创作工作区直接提交创作需求",
+			AspectRatio: "3:4", RequiresHumanConfirmation: true, ReadinessStatus: "ready",
+		}}
+	}
 	project, err := s.Projects.RequireActiveContext(ctx, requestContext.Actor, projectID)
 	if err != nil {
 		return CreativeIntake{}, err
@@ -483,6 +550,16 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			parent.Status != IntakeReady ||
 			!taskStrategyParentSupports(parent.Request.TaskStrategyInput.BusinessCode, request.PerformanceMode) {
 			return CreativeIntake{}, fmt.Errorf("parent_intake_id is not a compatible ready task strategy handoff")
+		}
+	}
+	requirementMissing := []string{}
+	requirementWarnings := []string{}
+	if request.Source == IntakeSourceRequirement {
+		request, requirementMissing, requirementWarnings, err = s.resolveRequirementIntake(
+			ctx, requestContext.Actor, projectID, request,
+		)
+		if err != nil {
+			return CreativeIntake{}, err
 		}
 	}
 	strategyReady := true
@@ -531,6 +608,7 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			return CreativeIntake{}, err
 		}
 		selectedRouteFound := selectedRouteID == ""
+		selectedRouteReady := false
 		for _, route := range request.CreativeRoutes {
 			if selectedRouteID != "" && route.RouteID != selectedRouteID {
 				continue
@@ -539,11 +617,18 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			if err := route.Validate(); err != nil {
 				return CreativeIntake{}, err
 			}
+			if selectedRouteID != "" {
+				selectedRouteReady = route.ReadinessStatus == "ready"
+			}
 		}
 		if !selectedRouteFound {
 			return CreativeIntake{}, fmt.Errorf("selected_route_id is not present in the Strategy handoff")
 		}
-		strategyReady = snapshot.CreativeReady
+		// A frozen package can be blocked by optional market/language context while
+		// its explicitly selected route is already executable. Route readiness is
+		// authoritative for this handoff; required creative facts are still checked
+		// by request.missingFields below.
+		strategyReady = snapshot.CreativeReady || selectedRouteReady
 	}
 	if request.Source == IntakeSourceTaskStrategy {
 		if s.TaskStrategies == nil {
@@ -598,12 +683,46 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			intakeContractVersion = CreativeIntakeV3ContractVersion
 		}
 	}
+	if request.Source == IntakeSourceManual && request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+		identityHash, identityErr := contract.NewContentHash(request)
+		if identityErr != nil {
+			return CreativeIntake{}, fmt.Errorf("hash manual creative planning input identity: %w", identityErr)
+		}
+		inputIdentityHash = string(identityHash)
+		intakeContractVersion = CreativeIntakeV3ContractVersion
+	}
+	if request.Source == IntakeSourceRequirement && request.ContractVersion == CreativeIntakeCreateV4ContractVersion {
+		identityHash, identityErr := contract.NewContentHash(struct {
+			Requirement *RequirementSnapshotReference `json:"requirement_snapshot_ref"`
+			Capability  *BusinessCapabilityReference  `json:"business_capability_ref"`
+			RouteID     string                        `json:"selected_route_id"`
+		}{request.RequirementSnapshotRef, request.BusinessCapabilityRef, request.SelectedRouteID})
+		if identityErr != nil {
+			return CreativeIntake{}, fmt.Errorf("hash requirement intake identity: %w", identityErr)
+		}
+		inputIdentityHash = string(identityHash)
+		intakeContractVersion = CreativeIntakeV4ContractVersion
+	}
+	if request.Source == IntakeSourceTaskStrategy && request.TaskStrategy != nil && request.SelectedRouteID != "" {
+		identityHash, identityErr := contract.NewContentHash(struct {
+			TaskStrategy *TaskStrategyReference `json:"task_strategy"`
+			RouteID      string                 `json:"selected_route_id"`
+		}{request.TaskStrategy, request.SelectedRouteID})
+		if identityErr != nil {
+			return CreativeIntake{}, fmt.Errorf("hash task strategy intake identity: %w", identityErr)
+		}
+		inputIdentityHash = string(identityHash)
+		intakeContractVersion = CreativeIntakeV3ContractVersion
+	}
 	intakeID, err := s.idGenerator()("creativeintake")
 	if err != nil {
 		return CreativeIntake{}, err
 	}
 	now := s.now()
 	missing := request.missingFields()
+	if request.Source == IntakeSourceRequirement {
+		missing = requirementMissing
+	}
 	status := IntakeReady
 	confirmedBy := requestContext.Actor.Principal.ID
 	if len(missing) > 0 {
@@ -616,12 +735,22 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	value := CreativeIntake{
 		ContractVersion: intakeContractVersion,
 		ID:              intakeID, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, Source: request.Source, Status: status,
-		Request: request, MissingFields: missing, Warnings: []string{}, ConfirmedBy: confirmedBy, Principal: requestContext.Actor.Principal,
+		Request: request, MissingFields: missing, Warnings: requirementWarnings, ConfirmedBy: confirmedBy, Principal: requestContext.Actor.Principal,
 		IdempotencyKey: key, RequestHash: hash, InputIdentityHash: inputIdentityHash,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	stored, _, err := s.Repository.CreateIntake(ctx, value)
-	return stored, err
+	stored, existed, err := s.Repository.CreateIntake(ctx, value)
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	if existed && value.Status == IntakeReady && stored.Status == IntakeNeedsClarification &&
+		value.InputIdentityHash != "" && value.InputIdentityHash == stored.InputIdentityHash {
+		return s.Repository.UpdateIntakeReadiness(
+			ctx, value.OrganizationID, value.ProjectID, stored.ID, stored.Version,
+			IntakeReady, nil, value.ConfirmedBy, now,
+		)
+	}
+	return stored, nil
 }
 
 func taskStrategyParentSupports(businessCode, performanceMode string) bool {
@@ -1185,11 +1314,56 @@ func evaluateVersion(version CreativeVersion, intake CreativeIntake, actorID str
 		}
 	}
 	for _, mandatory := range intake.Request.Mandatory {
-		if needle := strings.ToLower(strings.TrimSpace(mandatory)); needle != "" && !strings.Contains(copyText, needle) {
+		if !mandatoryElementSatisfied(mandatory, copyText) {
 			warnings = append(warnings, fmt.Sprintf("mandatory element is not found in text: %s", mandatory))
 		}
 	}
 	return CreativeCheck{Passed: len(blockers) == 0, Blockers: blockers, Warnings: warnings, CheckedBy: actorID, CheckedAt: now}
+}
+
+func mandatoryElementSatisfied(requirement string, copyText string) bool {
+	requirement = strings.ToLower(strings.TrimSpace(requirement))
+	if requirement == "" || strings.Contains(copyText, requirement) {
+		return true
+	}
+
+	hasScene := containsAny(copyText, "新产品", "打样", "替换供应商", "供应商", "项目")
+	hasEvidence := containsAny(copyText, "可核验", "核验", "判断依据", "工程评估", "资质", "文件")
+	hasConsultation := containsAny(copyText, "私信", "咨询", "评论", "联系", "沟通")
+
+	// Strategy hand-offs describe semantic requirements, not copy that must be
+	// repeated verbatim. Recognize the three cross-route requirement classes so
+	// a valid draft does not receive a warning simply for using natural wording.
+	if strings.Contains(requirement, "触发场景") && strings.Contains(requirement, "证据") && strings.Contains(requirement, "咨询") {
+		return hasScene && hasEvidence && hasConsultation
+	}
+	if strings.Contains(requirement, "触发场景") {
+		return hasScene
+	}
+	if strings.Contains(requirement, "证据位") || strings.Contains(requirement, "可核验") || strings.Contains(requirement, "待核验") {
+		return hasEvidence
+	}
+	if strings.Contains(requirement, "低摩擦") || strings.Contains(requirement, "咨询动作") {
+		return hasConsultation
+	}
+
+	// Policy directives constrain how copy is written; they are not visible-copy
+	// requirements. Prohibited claims are checked separately above, while these
+	// directives remain part of the immutable intake for audit and human review.
+	return strings.HasPrefix(requirement, "不得") ||
+		strings.HasPrefix(requirement, "禁止") ||
+		strings.HasPrefix(requirement, "避免") ||
+		strings.HasPrefix(requirement, "仅使用") ||
+		strings.HasPrefix(requirement, "所有内容需")
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Service) now() time.Time {

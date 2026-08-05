@@ -7,12 +7,14 @@ import type {
   BriefDraft,
   BriefVersion,
   ConversationBundle,
+  ConversationCapabilities,
   ConversationMemory,
   CreativeBusinessProfile,
   CreativeBusinessCapability,
   CreativeBusinessRecommendationSnapshot,
   CreativeTaskPlan,
   CreativeIntakeV3,
+  CreativeIntakeV4,
   DeepReviewAnalysis,
   DraftRevision,
   EvidenceReference,
@@ -20,7 +22,9 @@ import type {
   GenerationProbe,
   GenerationReadiness,
   KnowledgeDocument,
+  MediaUnderstandingArtifact,
   Message,
+  MessageCreateV2,
   PackageVersion,
   StrategyCreativeHandoff,
   ResearchRun,
@@ -31,6 +35,7 @@ import type {
   SkillRun,
   SkillDescriptor,
   StrategyDraft,
+  StrategyP0Metrics,
   StrategyCenterSummary,
   StrategyTask,
   StrategyTaskBundle,
@@ -56,6 +61,12 @@ export const strategyApi = {
 
   listWorkspaces: (projectId: string, signal?: AbortSignal) =>
     apiRequest<{ items: Workspace[] }>(`${root}/projects/${encodeURIComponent(projectId)}/workspaces`, { signal }),
+
+  getP0Metrics: (projectId: string, days = 30, signal?: AbortSignal) =>
+    apiRequest<StrategyP0Metrics>(
+      `${root}/projects/${encodeURIComponent(projectId)}/p0-metrics?days=${days}`,
+      { signal },
+    ),
 
   listTasks: (projectId: string, lifecycle: 'active' | 'archived' | 'all' = 'active', signal?: AbortSignal) =>
     apiRequest<{ items: StrategyTaskListItem[] }>(
@@ -220,6 +231,57 @@ export const strategyApi = {
     )
   },
 
+  createRequirementViralIntake: (
+	projectId: string,
+	brief: BriefVersion,
+	capability: CreativeBusinessProfile,
+	mutationKey?: string,
+  ) =>
+	apiRequest<CreativeIntakeV4>(
+	  `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+	  {
+		method: 'POST',
+		headers: mutationHeaders(mutationKey),
+		body: JSON.stringify({
+		  contract_version: 'creative-intake-create/v4',
+		  source: 'requirement_snapshot',
+		  requirement_snapshot_ref: {
+			brief_id: brief.brief_id,
+			brief_version: brief.version,
+			content_hash: brief.content_hash,
+		  },
+		  business_capability_ref: {
+			business_code: capability.business_code,
+			version: capability.version,
+			content_hash: capability.content_hash,
+		  },
+		  selected_route_id: 'route_manual_viral_remake_v1',
+		}),
+	  },
+	),
+
+  createRequirementViralTask: (projectId: string, intake: CreativeIntakeV4) => {
+	const sourceVideo = intake.request.manual_viral_remake?.reference_video
+	if (!sourceVideo) throw new Error('爆款裂变仍缺少可用的参考视频')
+	return apiRequest<{ id: string }>(
+	  `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+	  {
+		method: 'POST',
+		body: JSON.stringify({
+		  selected_route_id: 'route_manual_viral_remake_v1',
+		  channel: 'douyin',
+		  source_video: sourceVideo,
+		  concept: `基于参考结构的${intake.request.manual_viral_remake?.product_name || '原创短视频'}`,
+		  prompt: '等待参考视频多模态分析后生成原创改写指令',
+		  call_to_action: '了解更多',
+		  mandatory_elements: intake.request.mandatory_elements ?? [],
+		  prohibited_claims: intake.request.prohibited_claims ?? [],
+		  confirm_route: true,
+		}),
+	  },
+	)
+  },
+
   createImageTextTaskFromHandoff: (
     projectId: string,
     intakeId: string,
@@ -303,13 +365,16 @@ export const strategyApi = {
   getConversationMemory: (conversationId: string, signal?: AbortSignal) =>
     apiRequest<ConversationMemory>(`${root}/conversations/${encodeURIComponent(conversationId)}/memory`, { signal }),
 
-  sendMessage: (conversationId: string, content: string, mutationKey?: string) =>
+  getConversationCapabilities: (signal?: AbortSignal) =>
+    apiRequest<ConversationCapabilities>(`${root}/conversation-capabilities`, { signal }),
+
+  sendMessage: (conversationId: string, content: string | MessageCreateV2, mutationKey?: string) =>
     apiRequest<{ message: Message; agent_task: AgentTask }>(
       `${root}/conversations/${encodeURIComponent(conversationId)}/messages`,
       {
         method: 'POST',
         headers: mutationHeaders(mutationKey),
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(typeof content === 'string' ? { content } : content),
       },
     ),
 
@@ -538,6 +603,61 @@ export const strategyApi = {
     )
   },
 
+  uploadMediaForUnderstanding: async (projectId: string, file: File) => {
+    if (!['image/jpeg', 'image/png', 'video/mp4'].includes(file.type)) {
+      throw new Error('仅支持 JPG、PNG 图片或 MP4 视频。')
+    }
+    const sha256 = await sha256Hex(file)
+    const created = await apiRequest<{
+      session: { id: string; project_asset_ref: null | { project_id: string; asset_version: { asset_id: string; version: number } } }
+      upload: null | { url: string; method: 'PUT'; headers: Record<string, string> }
+    }>(`/platform/v1/projects/${encodeURIComponent(projectId)}/assets/uploads`, {
+      method: 'POST',
+      headers: mutationHeaders(createMutationKey('strategy-media-upload')),
+      body: JSON.stringify({
+        filename: file.name,
+        declared_mime_type: file.type,
+        declared_size_bytes: file.size,
+        declared_sha256: sha256,
+      }),
+    })
+    let assetRef = created.session.project_asset_ref?.asset_version
+    if (!assetRef) {
+      if (!created.upload) throw new Error('素材上传会话没有返回可用地址。')
+      const headers = new Headers(created.upload.headers)
+      headers.delete('host')
+      headers.delete('content-length')
+      if (!headers.has('Content-Type')) headers.set('Content-Type', file.type)
+      const response = await fetch(created.upload.url, { method: created.upload.method, headers, body: file })
+      if (!response.ok) throw new Error(`素材上传失败（HTTP ${response.status}）。`)
+      const completed = await apiRequest<{
+        project_asset_ref: null | { project_id: string; asset_version: { asset_id: string; version: number } }
+      }>(`/platform/v1/projects/${encodeURIComponent(projectId)}/assets/uploads/${encodeURIComponent(created.session.id)}:finalize`, { method: 'POST' })
+      assetRef = completed.project_asset_ref?.asset_version
+    }
+    if (!assetRef) throw new Error('素材已上传，但没有生成可用的 AssetVersion。')
+    return apiRequest<MediaUnderstandingArtifact>(
+      `/api/media/v1/projects/${encodeURIComponent(projectId)}/understandings`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(createMutationKey('strategy-media-understanding')),
+        body: JSON.stringify({ asset_id: assetRef.asset_id, version: assetRef.version }),
+      },
+    )
+  },
+
+  getMediaUnderstanding: (projectId: string, artifactId: string, signal?: AbortSignal) =>
+    apiRequest<MediaUnderstandingArtifact>(
+      `/api/media/v1/projects/${encodeURIComponent(projectId)}/understandings/${encodeURIComponent(artifactId)}`,
+      { signal },
+    ),
+
+  getLatestMediaUnderstanding: (projectId: string, assetId: string, version: number, signal?: AbortSignal) =>
+    apiRequest<MediaUnderstandingArtifact>(
+      `/api/media/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/versions/${version}/understanding`,
+      { signal },
+    ),
+
   runExternalResearch: (
     projectId: string,
     request: {
@@ -570,4 +690,10 @@ export const strategyApi = {
       `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs/${encodeURIComponent(researchRunId)}`,
       { signal },
     ),
+}
+
+async function sha256Hex(blob: Blob) {
+  if (!globalThis.crypto?.subtle) throw new Error('当前浏览器不支持素材 SHA-256 校验。')
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }

@@ -120,9 +120,10 @@ func (r VisionUnderstandRequest) Validate() error {
 }
 
 type VisionAdapterRequest struct {
-	ModelAlias string
-	Input      VisionUnderstandingInput
-	Sources    []VisionSource
+	OrganizationID contract.OrganizationID
+	ModelAlias     string
+	Input          VisionUnderstandingInput
+	Sources        []VisionSource
 }
 
 type VisionProviderAdapter interface {
@@ -264,14 +265,21 @@ func (s Service) UnderstandVision(ctx context.Context, request VisionUnderstandR
 	for _, source := range sources {
 		defer source.Content.Close()
 	}
-	result, err := s.VisionAdapter.UnderstandVision(ctx, VisionAdapterRequest{ModelAlias: request.ModelAlias, Input: request.Input, Sources: sources})
+	result, err := s.VisionAdapter.UnderstandVision(ctx, VisionAdapterRequest{OrganizationID: request.Actor.OrganizationID, ModelAlias: request.ModelAlias, Input: request.Input, Sources: sources})
 	if err != nil {
 		return SynchronousResponse{}, err
 	}
 	if err := result.Validate(); err != nil {
 		return SynchronousResponse{}, fmt.Errorf("vision provider response: %w", err)
 	}
-	return SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}, nil
+	response := SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}
+	if result.RouteSnapshot != nil {
+		response.RouteRevisionID = result.RouteSnapshot.RouteRevisionID
+		response.ResponseMode = result.RouteSnapshot.TextResponseMode
+		response.APIMode = result.RouteSnapshot.TextAPIMode
+		response.Background = result.RouteSnapshot.Background
+	}
+	return response, nil
 }
 
 func validateVisionSources(requested []contract.ProjectAssetRef, sources []VisionSource) error {

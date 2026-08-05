@@ -23,15 +23,28 @@ var conversationFieldQuestions = map[string]string{
 }
 
 var requiredConversationFieldsV2 = []string{
-	"brand.name", "product.name", "industry", "region", "language",
-	"campaign.objective", "audience.primary", "proposition", "channels",
+	"product.name", "campaign.objective", "audience.primary", "proposition",
 }
 
 var requiredConversationFieldsV1 = []string{
 	"campaign.objective", "audience.primary", "proposition", "channels",
 }
 
+type conversationGrounding struct {
+	Source  FieldSource
+	Content string
+}
+
 func sanitizeConversationDecision(draft BriefDraft, message Message, decision ConversationTurnDecision) ConversationTurnDecision {
+	return sanitizeConversationDecisionWithGrounding(draft, message, decision, nil)
+}
+
+func sanitizeConversationDecisionWithGrounding(
+	draft BriefDraft,
+	message Message,
+	decision ConversationTurnDecision,
+	grounding []conversationGrounding,
+) ConversationTurnDecision {
 	decision.Intent = strings.TrimSpace(decision.Intent)
 	switch decision.Intent {
 	case "greeting", "provide_requirements", "answer_question", "correct_information",
@@ -48,7 +61,9 @@ func sanitizeConversationDecision(draft BriefDraft, message Message, decision Co
 	for _, operation := range decision.Patch.Operations {
 		// Only explicit, high-confidence facts are written into the Brief.
 		// Lower-confidence inferences remain questions instead of becoming data.
-		if operation.Confidence != "high" || !conversationOperationIsGrounded(message.Content, operation) {
+		// Attached document chunks are explicit evidence, but only when the
+		// operation value can be found in that exact chunk.
+		if operation.Confidence != "high" || !conversationOperationHasGrounding(message.Content, grounding, operation) {
 			continue
 		}
 		operations = append(operations, operation)
@@ -78,22 +93,42 @@ func sanitizeConversationDecision(draft BriefDraft, message Message, decision Co
 	return decision
 }
 
+func conversationOperationHasGrounding(messageContent string, grounding []conversationGrounding, operation BriefPatchOperation) bool {
+	if conversationOperationIsGrounded(messageContent, operation) {
+		return true
+	}
+	for _, source := range grounding {
+		// Web findings may answer the user's question, but must never become a
+		// confirmed business requirement without an explicit user statement.
+		if source.Source.Type == "research_artifact" {
+			continue
+		}
+		if conversationOperationIsGrounded(source.Content, operation) {
+			return true
+		}
+	}
+	return false
+}
+
+func conversationOperationSource(message Message, grounding []conversationGrounding, operation BriefPatchOperation) FieldSource {
+	if conversationOperationIsGrounded(message.Content, operation) {
+		return FieldSource{Type: "conversation_message", ID: message.ID}
+	}
+	for _, source := range grounding {
+		if conversationOperationIsGrounded(source.Content, operation) {
+			return source.Source
+		}
+	}
+	return FieldSource{Type: "conversation_message", ID: message.ID}
+}
+
 func conversationOperationIsGrounded(content string, operation BriefPatchOperation) bool {
 	content = strings.ToLower(strings.TrimSpace(content))
 	if content == "" {
 		return false
 	}
 	if operation.FieldPath == "channels" {
-		for _, marker := range []string{
-			"小红书", "rednote", "red note", "redbook", "red book",
-			"抖音", "douyin", "淘宝", "天猫", "taobao", "tmall",
-			"微信", "公众号", "视频号", "wechat",
-		} {
-			if strings.Contains(content, marker) {
-				return true
-			}
-		}
-		return false
+		return conversationChannelsAreGrounded(content, operation.Value)
 	}
 	var value string
 	if json.Unmarshal(operation.Value, &value) == nil {
@@ -106,6 +141,39 @@ func conversationOperationIsGrounded(content string, operation BriefPatchOperati
 	}
 	for _, item := range values {
 		if !conversationValueIsGrounded(content, item) {
+			return false
+		}
+	}
+	return true
+}
+
+func conversationChannelsAreGrounded(content string, raw json.RawMessage) bool {
+	var values []string
+	if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
+		return false
+	}
+	aliases := map[string][]string{
+		"xiaohongshu": {"小红书", "xiaohongshu", "rednote", "red note", "redbook", "red book"},
+		"rednote":     {"小红书", "xiaohongshu", "rednote", "red note", "redbook", "red book"},
+		"douyin":      {"抖音", "douyin"},
+		"taobao":      {"淘宝", "taobao"},
+		"tmall":       {"天猫", "tmall"},
+		"wechat":      {"微信", "公众号", "视频号", "wechat"},
+	}
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		markers := aliases[normalized]
+		if len(markers) == 0 {
+			markers = []string{normalized}
+		}
+		grounded := false
+		for _, marker := range markers {
+			if marker != "" && strings.Contains(content, marker) {
+				grounded = true
+				break
+			}
+		}
+		if !grounded {
 			return false
 		}
 	}
@@ -269,8 +337,19 @@ func pendingConversationFields(draft BriefDraft) []string {
 	if draft.Document.ContractVersion == "strategy-brief-version/v2" {
 		required = requiredConversationFieldsV2
 	}
-	result := make([]string, 0, len(required))
-	for _, field := range required {
+	// Confirmation follows what the user has actually supplied, not only the
+	// minimum fields that block Creative intake. This keeps optional evidence
+	// and context trustworthy without turning them into form requirements.
+	candidates := append([]string{}, required...)
+	for _, field := range []string{
+		"brand.name", "product.name", "industry", "region", "language",
+		"campaign.objective", "audience.primary", "proposition", "channels",
+		"budget.total", "schedule.window", "measurement.primary_kpi",
+	} {
+		candidates = appendUnique(candidates, field)
+	}
+	result := make([]string, 0, len(candidates))
+	for _, field := range candidates {
 		if briefFieldPresent(draft.Document, field) && draft.FieldStates[field].Confirmation == "unconfirmed" {
 			result = append(result, field)
 		}

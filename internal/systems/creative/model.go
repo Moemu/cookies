@@ -24,6 +24,7 @@ const (
 	IntakeSourceTaskStrategy     IntakeSource = "task_strategy"
 	IntakeSourceUploadedDocument IntakeSource = "uploaded_document"
 	IntakeSourceConversation     IntakeSource = "conversation"
+	IntakeSourceRequirement      IntakeSource = "requirement_snapshot"
 )
 
 type IntakeStatus string
@@ -67,8 +68,11 @@ const (
 )
 
 type CreateIntakeRequest struct {
-	ContractVersion string       `json:"contract_version,omitempty"`
-	Source          IntakeSource `json:"source"`
+	ContractVersion          string                        `json:"contract_version,omitempty"`
+	Source                   IntakeSource                  `json:"source"`
+	RequirementSnapshotRef   *RequirementSnapshotReference `json:"requirement_snapshot_ref,omitempty"`
+	BusinessCapabilityRef    *BusinessCapabilityReference  `json:"business_capability_ref,omitempty"`
+	RequirementSnapshotInput *RequirementSnapshotInput     `json:"requirement_snapshot_input,omitempty"`
 	// ParentIntakeID links a production-specific manual intake back to a
 	// task-strategy handoff without allowing the manual flow to rewrite it.
 	ParentIntakeID string `json:"parent_intake_id,omitempty"`
@@ -117,6 +121,7 @@ type CreativeRouteSnapshot struct {
 	Reason                    string                     `json:"reason"`
 	TargetDurationSeconds     int                        `json:"target_duration_seconds"`
 	AspectRatio               string                     `json:"aspect_ratio"`
+	Resolution                string                     `json:"resolution,omitempty"`
 	SourceAssetRefs           []contract.AssetVersionRef `json:"source_asset_refs"`
 	EvidenceRefs              []string                   `json:"evidence_refs"`
 	RequiresHumanConfirmation bool                       `json:"requires_human_confirmation"`
@@ -237,6 +242,9 @@ func (r CreateIntakeRequest) Validate() error {
 	if r.Source == "" {
 		return fmt.Errorf("source is required")
 	}
+	if r.Source != IntakeSourceRequirement && (r.RequirementSnapshotRef != nil || r.BusinessCapabilityRef != nil || r.RequirementSnapshotInput != nil) {
+		return fmt.Errorf("requirement snapshot fields are only valid for requirement_snapshot intake")
+	}
 	switch r.Source {
 	case IntakeSourceManual:
 		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil ||
@@ -258,7 +266,7 @@ func (r CreateIntakeRequest) Validate() error {
 		if r.ManualBrandFilm != nil {
 			return r.validateManualBrandFilm()
 		}
-		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
+		if len(r.CreativeRoutes) != 0 || r.SelectedRouteID != "" || r.Format == FormatVideo || r.PerformanceMode != "" {
 			return fmt.Errorf("manual image intake must not include video routing")
 		}
 	case IntakeSourceStrategyPackage:
@@ -304,6 +312,8 @@ func (r CreateIntakeRequest) Validate() error {
 			return fmt.Errorf("task strategy mapped fields are resolved by Creative and must not be submitted by a caller")
 		}
 		return r.TaskStrategy.Validate()
+	case IntakeSourceRequirement:
+		return r.validateRequirementSnapshotV4()
 	default:
 		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
@@ -499,6 +509,7 @@ type CreativeTask struct {
 
 type CreateVideoTaskRequest struct {
 	SelectedRouteID string                   `json:"selected_route_id,omitempty"`
+	DirectionID     string                   `json:"direction_id,omitempty"`
 	RouteIndex      int                      `json:"route_index"`
 	Channel         CreativeChannel          `json:"channel"`
 	SourceVideo     contract.AssetVersionRef `json:"source_video,omitempty"`
@@ -512,15 +523,11 @@ type CreateVideoTaskRequest struct {
 
 func (r CreateVideoTaskRequest) Validate() error {
 	if (strings.TrimSpace(r.SelectedRouteID) == "" && r.RouteIndex < 0) ||
-		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
+		(r.Channel != ChannelXiaohongshu && r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if r.SelectedRouteID != ManualShortDramaPrerollRouteID && r.SelectedRouteID != ManualBrandFilmRouteID {
-		if err := r.SourceVideo.Validate(); err != nil {
-			return fmt.Errorf("source_video: %w", err)
-		}
-	}
-	if strings.TrimSpace(r.Concept) == "" || len(r.Concept) > 500 || strings.TrimSpace(r.Prompt) == "" || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
+	if (strings.TrimSpace(r.DirectionID) == "" && (strings.TrimSpace(r.Concept) == "" || strings.TrimSpace(r.Prompt) == "")) ||
+		len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
 	}
 	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
@@ -538,6 +545,7 @@ type VideoDraft struct {
 	DurationSeconds   int                      `json:"duration_seconds"`
 	AspectRatio       string                   `json:"aspect_ratio"`
 	Resolution        string                   `json:"resolution"`
+	VideoPurpose      string                   `json:"video_purpose,omitempty"`
 	SourceVideo       contract.AssetVersionRef `json:"source_video,omitempty"`
 	Mandatory         []string                 `json:"mandatory_elements"`
 	Prohibited        []string                 `json:"prohibited_claims"`
@@ -553,10 +561,10 @@ type VideoDraft struct {
 func (d VideoDraft) Validate() error {
 	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
 		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds < 4 || d.DurationSeconds > 60 ||
-		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.CreatedAt.IsZero() {
+		strings.TrimSpace(d.AspectRatio) == "" || strings.TrimSpace(d.Resolution) == "" || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
-	if d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.BrandFilm == nil && d.SourceVideo.Validate() != nil {
+	if d.VideoPurpose != "brand" && d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.BrandFilm == nil && d.SourceVideo.Validate() != nil {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
 	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {

@@ -10,13 +10,24 @@ export class AINativeApiError extends Error {
   }
 }
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch(`${backendOrigin}/api/creative/v1${path}`, {
-    method,
-    credentials: 'include',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 0): Promise<T> {
+  const controller = new AbortController()
+  const timeout = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined
+  let response: Response
+  try {
+    response = await fetch(`${backendOrigin}/api/creative/v1${path}`, {
+      method,
+      credentials: 'include',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (cause) {
+    if (controller.signal.aborted) throw new AINativeApiError('AI 效果广告接口请求超时，请重试。', 408, 'CLIENT_TIMEOUT')
+    throw cause
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
   const responseText = await response.text()
   let payload: T | { error?: { message?: string; code?: string; request_id?: string } }
   try {
@@ -51,6 +62,17 @@ export function getRequirementWorkspace(projectId: string, workspaceId: string) 
   return request<AINativeRequirementWorkspace>(
     `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}`,
   )
+}
+
+export async function getLatestRequirementWorkspace(projectId: string) {
+  try {
+    return await request<AINativeRequirementWorkspace>(
+      `/projects/${encodeURIComponent(projectId)}/ai-native-ads:latest`,
+    )
+  } catch (cause) {
+    if (cause instanceof AINativeApiError && cause.status === 404) return null
+    throw cause
+  }
 }
 
 export function updateRequirement(projectId: string, workspaceId: string, requirement: AINativeRequirement) {
@@ -143,6 +165,7 @@ export function generateStoryboard(projectId: string, workspaceId: string, expec
     `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/storyboard:generate`,
     'POST',
     { expected_workspace_version: expectedWorkspaceVersion },
+    30_000,
   )
 }
 

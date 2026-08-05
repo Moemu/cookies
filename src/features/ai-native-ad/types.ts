@@ -77,6 +77,8 @@ export type AINativeRequirementWorkspace = {
   confirmed_storyboard_revision?: number
   storyboard?: StoryboardDraft
   storyboard_plan?: StoryboardDraft
+  storyboard_error_code?: string
+  storyboard_error_message?: string
   production_status?: 'running' | 'assets_ready' | 'rendering' | 'completed' | 'render_failed' | 'failed' | 'cancelled'
   current_production_revision?: number
   production_plan?: ProductionPlan

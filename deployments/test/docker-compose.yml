@@ -40,15 +40,20 @@ services:
       COOKIES_LOCAL_PRINCIPAL_ID: user_local
       COOKIES_LOCAL_PROJECT_ID: project_local
       COOKIES_LOCAL_SCOPES: project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand,creative.read,creative.write,strategy.read,strategy.write,strategy.confirm,strategy.review,strategy.approve,strategy.package.read,delivery.read,delivery.write,delivery.approve,delivery.execute,insights.read,insights.write,insights.confirm
-      COOKIES_PROVIDER_IMAGE_ADAPTER: fake
-      COOKIES_PROVIDER_TEXT_ADAPTER: fake
+      COOKIES_PROVIDER_IMAGE_ADAPTER: ${COOKIES_PROVIDER_IMAGE_ADAPTER:-fake}
+      COOKIES_PROVIDER_TEXT_ADAPTER: ${COOKIES_PROVIDER_TEXT_ADAPTER:-fake}
+      COOKIES_PROVIDER_MASTER_KEY: ${COOKIES_PROVIDER_MASTER_KEY:-}
+      COOKIES_PROVIDER_MASTER_KEY_VERSION: ${COOKIES_PROVIDER_MASTER_KEY_VERSION:-v1}
+      COOKIES_PROVIDER_ALLOW_INSECURE_HTTP: ${COOKIES_PROVIDER_ALLOW_INSECURE_HTTP:-false}
+      COOKIES_PROVIDER_OUTPUT_BUCKET: ${COOKIES_PROVIDER_OUTPUT_BUCKET:-cookies-provider-output}
       COOKIES_STRATEGY_ENABLED: "true"
       COOKIES_STRATEGY_V2_ENABLED: "true"
-      COOKIES_STRATEGY_REAL_PROVIDER_ENABLED: "false"
+      COOKIES_STRATEGY_REAL_PROVIDER_ENABLED: ${COOKIES_STRATEGY_REAL_PROVIDER_ENABLED:-false}
       COOKIES_STRATEGY_APPROVE_ENABLED: "true"
       COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED: "true"
-      COOKIES_STRATEGY_TEXT_MODEL_ALIAS: cookies.text.standard
-      COOKIES_STRATEGY_PROMPT_VERSION: strategy.generate.v3
+      COOKIES_STRATEGY_TEXT_MODEL_ALIAS: ${COOKIES_STRATEGY_TEXT_MODEL_ALIAS:-cookies.text.standard}
+      COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS: ${COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS:-cookies.text.deep_review}
+      COOKIES_STRATEGY_PROMPT_VERSION: strategy.generate.v4
       COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION: strategy.conversation.v4
       COOKIES_STRATEGY_REVISE_PROMPT_VERSION: strategy.revise.v3
       COOKIES_STRATEGY_REVIEW_PROMPT_VERSION: strategy.review.deep.v2

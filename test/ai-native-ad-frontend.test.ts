@@ -3,9 +3,12 @@ import test from 'node:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RequirementMediaGallery } from '../src/features/ai-native-ad/RequirementStage'
+import { StoryboardStage } from '../src/features/ai-native-ad/StoryboardStage'
 import { aiNativeReducer, initialAINativeState } from '../src/features/ai-native-ad/reducer'
 import type { AdScriptDraft, AINativeRequirement, AINativeRequirementWorkspace, StoryboardDraft } from '../src/features/ai-native-ad/types'
 import { aiNativeWorkspaceLocation, readAINativeWorkspaceLocation } from '../src/features/ai-native-ad/navigation'
+import { readAINativeStageDraft, readAINativeWorkspacePointer, rememberAINativeStageDraft, rememberAINativeWorkspace } from '../src/features/ai-native-ad/storage'
+import { createSerialAutosave } from '../src/features/ai-native-ad/autosave'
 
 const requirement: AINativeRequirement = {
   contract_version: 'creative.ai-native.requirement/v1',
@@ -34,6 +37,89 @@ const requirement: AINativeRequirement = {
   needs_confirmation: [],
   generation: { mode: 'model', model_alias: 'cookies.text.standard', model_version: 'test', prompt_version: 'ai-native-requirement/douyin-v1' },
 }
+
+test('AI native ad remembers the latest workspace pointer per project', () => {
+  const values = new Map<string, string>()
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+    removeItem: (key: string) => { values.delete(key) },
+  }
+
+  rememberAINativeWorkspace('project-1', { workspaceId: 'workspace-1', stage: 'storyboard' }, storage)
+
+  assert.deepEqual(readAINativeWorkspacePointer('project-1', storage), { workspaceId: 'workspace-1', stage: 'storyboard' })
+  assert.equal(readAINativeWorkspacePointer('project-2', storage), null)
+})
+
+test('AI native ad ignores corrupt or unsupported workspace pointers', () => {
+  const values = new Map<string, string>([
+    ['cookies.ai-native.current.v1:project-1', '{bad json'],
+    ['cookies.ai-native.current.v1:project-2', JSON.stringify({ version: 2, workspaceId: 'workspace-2', stage: 'script' })],
+  ])
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+    removeItem: (key: string) => { values.delete(key) },
+  }
+
+  assert.equal(readAINativeWorkspacePointer('project-1', storage), null)
+  assert.equal(readAINativeWorkspacePointer('project-2', storage), null)
+})
+
+test('AI native ad only restores a local stage draft against the same server revision', () => {
+  const values = new Map<string, string>()
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+    removeItem: (key: string) => { values.delete(key) },
+  }
+  const draft = { product_name: 'edited product' }
+
+  rememberAINativeStageDraft('project-1', 'workspace-1', 'requirement', 3, draft, storage)
+
+  assert.deepEqual(readAINativeStageDraft('project-1', 'workspace-1', 'requirement', 3, storage), draft)
+  assert.equal(readAINativeStageDraft('project-1', 'workspace-1', 'requirement', 4, storage), null)
+  assert.equal(readAINativeStageDraft('project-1', 'workspace-2', 'requirement', 3, storage), null)
+})
+
+test('AI native autosave serializes writes and keeps only the latest pending edit', async () => {
+  const releases: Array<() => void> = []
+  const started: string[] = []
+  const autosave = createSerialAutosave<string>({
+    delayMs: 0,
+    fingerprint: value => value,
+    save: async value => {
+      started.push(value)
+      await new Promise<void>(resolve => { releases.push(resolve) })
+    },
+  })
+
+  autosave.schedule('first')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  autosave.schedule('second')
+  autosave.schedule('latest')
+  assert.deepEqual(started, ['first'])
+  releases.shift()?.()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.deepEqual(started, ['first', 'latest'])
+  releases.shift()?.()
+  await autosave.flush()
+  autosave.dispose()
+})
+
+test('AI native autosave skips content whose fingerprint is already saved', async () => {
+  const started: string[] = []
+  const autosave = createSerialAutosave<string>({ delayMs: 0, fingerprint: value => value, save: async value => { started.push(value) } })
+
+  autosave.schedule('same')
+  await autosave.flush()
+  autosave.schedule('same')
+  await autosave.flush()
+
+  assert.deepEqual(started, ['same'])
+  autosave.dispose()
+})
 
 Object.assign(globalThis, { React })
 
@@ -143,6 +229,62 @@ test('确认需求后进入单脚本生成，确认脚本后进入故事板生�
   assert.equal(afterConfirm.stage_status.storyboard, 'generating')
 })
 
+test('故事板启动失败不会把已确认脚本标记为失败或继续无限转圈', () => {
+  const afterRequirement = aiNativeReducer(initialAINativeState, { type: 'requirement-confirmed', workspace })
+  const afterScript = aiNativeReducer(afterRequirement, { type: 'script-generated', script })
+  const afterConfirm = aiNativeReducer(afterScript, { type: 'script-confirmed' })
+  const failed = aiNativeReducer(afterConfirm, { type: 'operation-failed', stage: 'storyboard', message: '故事板启动失败' })
+
+  assert.equal(failed.active_stage, 'storyboard')
+  assert.equal(failed.stage_status.script, 'confirmed')
+  assert.equal(failed.stage_status.storyboard, 'failed')
+  assert.equal(failed.error, '故事板启动失败')
+})
+
+test('故事板启动失败后展示错误和重新生成入口', () => {
+  const props = {
+    projectId: 'project-1',
+    storyboard: null,
+    canGenerate: true,
+    onChange: () => undefined,
+    onSave: () => undefined,
+    onConfirm: () => undefined,
+    onEdit: () => undefined,
+    onRetry: () => undefined,
+  } as const
+  const markup = renderToStaticMarkup(React.createElement(StoryboardStage, {
+    ...props,
+    status: 'failed',
+    error: '故事板启动失败，请稍后重试。',
+  }))
+  const refreshedMarkup = renderToStaticMarkup(React.createElement(StoryboardStage, {
+    ...props,
+    status: 'empty',
+    error: '',
+  }))
+
+  assert.match(markup, /故事板启动失败，请稍后重试。/)
+  assert.match(markup, /重新生成故事板/)
+  assert.doesNotMatch(markup, /正在生成故事板/)
+  assert.match(refreshedMarkup, /重新生成故事板/)
+})
+
+test('恢复失败的故事板工作区时展示服务端具体原因', () => {
+  const restored = aiNativeReducer(initialAINativeState, {
+    type: 'requirement-loaded',
+    workspace: {
+      ...workspace,
+      current_stage: 'storyboard',
+      storyboard_status: 'failed',
+      storyboard_error_code: 'AI_NATIVE_STORYBOARD_GENERATION_FAILED',
+      storyboard_error_message: '素材 product_1 与固定商品素材 ID 重复',
+    },
+  })
+
+  assert.equal(restored.stage_status.storyboard, 'failed')
+  assert.equal(restored.error, '素材 product_1 与固定商品素材 ID 重复')
+})
+
 test('重新编辑脚本会作废故事板和视频但保留需求', () => {
   const storyboard: StoryboardDraft = {
     contract_version: 'creative.ai-native.storyboard/v1', revision: 1, status: 'confirmed', duration_seconds: 20,
@@ -221,4 +363,28 @@ test('视频阶段只采用服务端 ProductionProgress 且素材就绪不冒充
   assert.equal(completed.video?.status, 'completed')
   assert.equal(completed.video?.progress, 100)
   assert.equal(completed.stage_status.video, 'confirmed')
+})
+
+test('视频 Unit 提交失败后恢复具体原因而不是继续显示生成中', () => {
+  const failedWorkspace: AINativeRequirementWorkspace = {
+    ...workspace,
+    current_stage: 'production',
+    production_status: 'failed',
+    production_plan: {
+      contract_version: 'creative.ai-native.production-plan/v1', revision: 1, based_on_storyboard_revision: 1,
+      based_on_storyboard_hash: 'a'.repeat(64), channel_profile_id: 'douyin.performance.v1', channel_profile_hash: 'b'.repeat(64),
+      status: 'failed', total_duration_ms: 20000, aspect_ratio: '9:16', video_model_alias: 'cookies.video.standard', speech_model_alias: 'cookies.speech.standard',
+      units: [{ id: 'video-unit-01', order: 1, shot_ids: ['shot-1'], start_ms: 0, end_ms: 4000, duration_seconds: 4, prompt: 'prompt', prompt_hash: 'c'.repeat(64), aspect_ratio: '9:16', resolution: '720p', product_identity_required: false,
+        attempts: [{ id: 'attempt-1', ordinal: 1, status: 'failed', error_code: 'AI_NATIVE_VIDEO_SUBMISSION_FAILED', error_message: '视频任务创建失败：来源 ID 过长', created_at: '2026-08-05T08:00:00Z', updated_at: '2026-08-05T08:00:01Z' }] }],
+      speech_units: [], created_at: '2026-08-05T08:00:00Z', updated_at: '2026-08-05T08:00:01Z',
+    },
+    production_progress: {
+      status: 'failed', progress_percent: 5, current_step: '视频素材生成失败', completed_video_units: 0, total_video_units: 1,
+      completed_video_duration_ms: 0, completed_speech_units: 0, total_speech_units: 0, eta_seconds: 0, available_actions: ['retry_failed_unit'],
+    },
+  }
+  const failed = aiNativeReducer(initialAINativeState, { type: 'requirement-loaded', workspace: failedWorkspace })
+  assert.equal(failed.stage_status.video, 'failed')
+  assert.equal(failed.video?.status, 'failed')
+  assert.match(failed.error, /来源 ID 过长/)
 })

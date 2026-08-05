@@ -155,6 +155,7 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 		ChannelProfileHash: storyboard.ChannelProfileHash, TotalDurationMS: requirement.DurationSeconds * 1000, AspectRatio: requirement.AspectRatio,
 		VideoModelAlias: "cookies.video.standard", SpeechModelAlias: "cookies.speech.standard", Units: []AINativeGenerationUnit{}, SpeechUnits: []AINativeSpeechUnit{}, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 	unitOrder := 0
+	usedNonProductReferences := map[string]struct{}{}
 	for shotIndex, shot := range storyboard.Shots {
 		cursor := shot.StartMS
 		for cursor < shot.EndMS {
@@ -174,18 +175,45 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 			unit := AINativeGenerationUnit{ID: fmt.Sprintf("video-unit-%02d", unitOrder), Order: unitOrder, ShotIDs: []string{shot.ID}, StartMS: cursor, EndMS: cursor + durationMS,
 				DurationSeconds: providerDuration, Prompt: compileAINativeVideoUnitPrompt(requirement, shot, cursor-shot.StartMS, durationMS), AspectRatio: requirement.AspectRatio, Resolution: "720p",
 				ProductIdentityRequired: shot.ProductIdentityRequired, Attempts: []AINativeGenerationAttempt{}}
+			selectedReferenceID := ""
+			selectedReferencePriority := 0
 			for _, refID := range shot.ReferenceAssetIDs {
 				asset, ok := assetByID[refID]
 				if !ok {
 					return AINativeProductionPlan{}, fmt.Errorf("shot %s references missing asset %s", shot.ID, refID)
 				}
-				if unit.ReferenceAsset == nil || asset.Role == AINativeStoryboardAssetRoleProductIdentity {
+				if shot.ProductIdentityRequired && asset.Role == AINativeStoryboardAssetRoleProductIdentity {
 					ref := *asset.AssetRef
 					unit.ReferenceAsset, unit.ReferenceRole = &ref, asset.Role
-				}
-				if asset.Role == AINativeStoryboardAssetRoleProductIdentity {
 					break
 				}
+				if shot.ProductIdentityRequired {
+					continue
+				}
+				priority := 0
+				switch asset.Role {
+				case AINativeStoryboardAssetRoleCompositionReference:
+					priority = 3
+				case AINativeStoryboardAssetRoleSceneReference:
+					priority = 2
+				case AINativeStoryboardAssetRoleProductIdentity:
+					priority = 1
+				default:
+					continue
+				}
+				if asset.Role != AINativeStoryboardAssetRoleProductIdentity {
+					if _, reused := usedNonProductReferences[string(asset.AssetRef.AssetID)]; reused {
+						continue
+					}
+				}
+				if priority > selectedReferencePriority {
+					ref := *asset.AssetRef
+					unit.ReferenceAsset, unit.ReferenceRole = &ref, asset.Role
+					selectedReferenceID, selectedReferencePriority = string(asset.AssetRef.AssetID), priority
+				}
+			}
+			if selectedReferenceID != "" && unit.ReferenceRole != AINativeStoryboardAssetRoleProductIdentity {
+				usedNonProductReferences[selectedReferenceID] = struct{}{}
 			}
 			if shot.ProductIdentityRequired && unit.ReferenceRole != AINativeStoryboardAssetRoleProductIdentity {
 				return AINativeProductionPlan{}, fmt.Errorf("shot %s requires a real product identity asset", shot.ID)
@@ -291,7 +319,11 @@ func (p AINativeProductionPlan) RetryUnit(unitID, attemptID string, now time.Tim
 		if selectedAttemptSucceeded(unit.Attempts, unit.SelectedAttemptID) || len(unit.Attempts) == 0 || unit.Attempts[len(unit.Attempts)-1].Status != AINativeAttemptFailedStatus {
 			return AINativeProductionPlan{}, ErrInvalidState
 		}
-		retryOf := unit.Attempts[len(unit.Attempts)-1].ID
+		failedAttempt := unit.Attempts[len(unit.Attempts)-1]
+		if strings.HasPrefix(failedAttempt.ErrorCode, "InputImageSensitiveContentDetected") && !unit.ProductIdentityRequired && unit.ReferenceRole == AINativeStoryboardAssetRolePersonIdentity {
+			unit.ReferenceAsset, unit.ReferenceRole = nil, ""
+		}
+		retryOf := failedAttempt.ID
 		unit.Attempts = append(unit.Attempts, AINativeGenerationAttempt{ID: attemptID, Ordinal: len(unit.Attempts) + 1, RetryOf: retryOf, Status: AINativeAttemptPlannedStatus, CreatedAt: now.UTC(), UpdatedAt: now.UTC()})
 		p.Status, p.UpdatedAt = AINativeProductionRunningStatus, now.UTC()
 		return p, nil

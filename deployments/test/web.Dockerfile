@@ -1,10 +1,12 @@
 FROM node:24-alpine AS build
 
 WORKDIR /app
-COPY web/package.json web/package-lock.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY web/ ./
+COPY index.html tsconfig.app.json tsconfig.json tsconfig.node.json vite.config.ts ./
+COPY public/ ./public/
+COPY src/ ./src/
 RUN npm run build
 
 FROM nginx:1.29-alpine

@@ -85,6 +85,7 @@ func (r MySQLRepository) GetAINativeRequirementWorkspace(ctx context.Context, or
 		w.status, w.current_stage, w.workspace_version, w.active_operation_id, w.active_operation_version, w.current_revision,
 		w.confirmed_revision, w.script_status, w.current_script_revision, w.confirmed_script_revision,
 		w.storyboard_status, w.current_storyboard_revision, w.confirmed_storyboard_revision, w.storyboard_plan_payload,
+		w.storyboard_error_code, w.storyboard_error_message,
 		w.production_status, w.current_production_revision, w.production_plan_payload,
 		w.created_by, w.confirmed_by, w.created_at, w.updated_at,
 		r.content_payload, s.content_payload, sb.content_payload
@@ -99,6 +100,25 @@ func (r MySQLRepository) GetAINativeRequirementWorkspace(ctx context.Context, or
 		  ON sb.organization_id=w.organization_id AND sb.project_id=w.project_id
 		 AND sb.workspace_id=w.workspace_id AND sb.revision=w.current_storyboard_revision
 		WHERE w.organization_id=? AND w.project_id=? AND w.workspace_id=?`, organizationID, projectID, workspaceID))
+}
+
+func (r MySQLRepository) GetLatestAINativeRequirementWorkspace(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (AINativeRequirementWorkspace, error) {
+	if r.DB == nil {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("creative repository database is required")
+	}
+	var workspaceID string
+	err := r.DB.QueryRowContext(ctx, `SELECT workspace_id
+		FROM creative_ai_native_requirement_workspaces
+		WHERE organization_id=? AND project_id=?
+		ORDER BY updated_at DESC, workspace_id DESC
+		LIMIT 1`, organizationID, projectID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AINativeRequirementWorkspace{}, ErrNotFound
+	}
+	if err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	return r.GetAINativeRequirementWorkspace(ctx, organizationID, projectID, workspaceID)
 }
 
 func (r MySQLRepository) AppendAINativeRequirementRevision(ctx context.Context, next AINativeRequirementWorkspace, expectedRevision int64, actorID string) (AINativeRequirementWorkspace, error) {
@@ -370,6 +390,7 @@ func scanAINativeRequirementWorkspace(row aiNativeRequirementRow) (AINativeRequi
 	var storyboardStatus sql.NullString
 	var currentStoryboardRevision, confirmedStoryboardRevision sql.NullInt64
 	var storyboardPlanPayload, storyboardPayload []byte
+	var storyboardErrorCode, storyboardErrorMessage sql.NullString
 	var productionStatus sql.NullString
 	var currentProductionRevision sql.NullInt64
 	var productionPlanPayload []byte
@@ -377,6 +398,7 @@ func scanAINativeRequirementWorkspace(row aiNativeRequirementRow) (AINativeRequi
 		&value.Status, &value.CurrentStage, &value.WorkspaceVersion, &activeOperationID, &activeOperationVersion, &value.CurrentRevision,
 		&confirmedRevision, &scriptStatus, &currentScriptRevision, &confirmedScriptRevision,
 		&storyboardStatus, &currentStoryboardRevision, &confirmedStoryboardRevision, &storyboardPlanPayload,
+		&storyboardErrorCode, &storyboardErrorMessage,
 		&productionStatus, &currentProductionRevision, &productionPlanPayload,
 		&value.CreatedBy, &confirmedBy, &value.CreatedAt, &value.UpdatedAt, &payload, &scriptPayload, &storyboardPayload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -411,6 +433,12 @@ func scanAINativeRequirementWorkspace(row aiNativeRequirementRow) (AINativeRequi
 	}
 	if confirmedStoryboardRevision.Valid {
 		value.ConfirmedStoryboardRevision = &confirmedStoryboardRevision.Int64
+	}
+	if storyboardErrorCode.Valid {
+		value.StoryboardErrorCode = storyboardErrorCode.String
+	}
+	if storyboardErrorMessage.Valid {
+		value.StoryboardErrorMessage = storyboardErrorMessage.String
 	}
 	if productionStatus.Valid {
 		value.ProductionStatus = productionStatus.String

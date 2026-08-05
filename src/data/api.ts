@@ -501,6 +501,7 @@ export type ApiImageTextWorkspace = {
   draft: {
     contract_version?: string
     version: number
+    generation_source_version?: number
     selected_title?: string
     title_candidates: string[]
     body: string
@@ -540,6 +541,11 @@ export type ApiCreativeDirection = {
   message_plan: string[]
   execution_outline: string[]
   guardrail_trace: string[]
+  direction_mode?: 'emotional' | 'cinematic' | 'utility'
+  emotional_arc?: string
+  visual_grammar?: string
+  brand_memory_device?: string
+  human_moment?: string
   status: 'candidate' | 'confirmed' | 'superseded'
 }
 
@@ -547,21 +553,37 @@ export type ApiCreativeDirectionBatch = {
   contract_version: 'creative-direction-candidate-batch/v1'
   batch_id: string
   intake_id: string
-  status: string
+  status: 'generating' | 'ready' | 'failed'
   candidates: ApiCreativeDirection[]
+  failure_code?: string
+  created_at: string
 }
 
 export type ApiCreativeIntakeBootstrap = {
   id: string
   source: string
   status: string
+  selected_route_id?: string
   request?: {
     objective?: string
     audience?: string
     core_message?: string
     concept?: string
+    selected_route_id?: string
+    creative_routes?: Array<{
+      route_id: string
+      route_type?: string
+      channels: string[]
+    }>
   }
   base_handoff?: {
+    routes?: Array<{
+      route_id: string
+      deliverable_type?: string
+      purpose?: string
+      performance_mode?: string
+      channels: string[]
+    }>
     creative_view?: {
       objective?: { statement?: string }
       communication?: { single_minded_proposition?: string }
@@ -569,12 +591,58 @@ export type ApiCreativeIntakeBootstrap = {
   }
 }
 
+export type ApiCreativeTaskSummary = {
+  id: string
+  organization_id: string
+  project_id: string
+  intake_id: string
+  format: 'image_text' | 'video'
+  channel: string
+  video_purpose?: string
+  performance_mode?: string
+  status: string
+  direction: {
+    direction_version_id?: string
+    input_identity_hash?: string
+    content_type?: string
+    focus: string
+    audience: string
+    core_message: string
+    call_to_action: string
+    concept: string
+    tone: string[]
+    visual_keywords: string[]
+  }
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export type ApiCreateManualImageTextInput = {
+  objective: string
+  audience: string
+  coreMessage: string
+  callToAction: string
+  tone: string[]
+  visualKeywords: string[]
+  mandatoryElements: string[]
+  prohibitedClaims: string[]
+}
+
 export type ApiCreativeVersion = {
   id: string
-  task_id: string
+  creative_task_id: string
   draft_version: number
   status: 'created' | 'checked' | 'approved' | 'delivered'
-  check?: { passed: boolean; issues?: string[] }
+  check?: { passed: boolean; blockers: string[]; warnings: string[] }
+}
+
+export type ApiCreativePackage = {
+  id: string
+  creative_version_id: string
+  format: 'image_text' | 'video'
+  content_hash: string
+  created_at: string
 }
 
 export type ApiPreparedCommercePreroll = {
@@ -3461,12 +3529,54 @@ function getCreativeIntake(projectId: string, intakeId: string) {
   )
 }
 
+function listCreativeTasks(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativeTaskSummary[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=${limit}`,
+  )
+}
+
+function createManualImageTextIntake(
+  projectId: string,
+  input: ApiCreateManualImageTextInput,
+) {
+  return creativeRequest<ApiCreativeIntakeBootstrap>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      contract_version: 'creative-intake-create/v3',
+      source: 'manual',
+      channel: 'xiaohongshu',
+      objective: input.objective.trim(),
+      audience: input.audience.trim(),
+      core_message: input.coreMessage.trim(),
+      call_to_action: input.callToAction.trim(),
+      concept: '',
+      tone: input.tone,
+      visual_keywords: input.visualKeywords,
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+    },
+    { 'Idempotency-Key': `manual-image-text-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+}
+
 function generateCreativeDirections(projectId: string, intakeId: string) {
   return creativeRequest<ApiCreativeDirectionBatch>(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/direction-candidate-batches`,
     'POST',
     { candidate_count: 3 },
   )
+}
+
+async function getLatestCreativeDirectionBatch(projectId: string, intakeId: string) {
+  try {
+    return await creativeRequest<ApiCreativeDirectionBatch>(
+      `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/direction-candidate-batches/latest`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
 }
 
 function confirmCreativeDirection(projectId: string, directionId: string) {
@@ -3488,6 +3598,27 @@ function createImageTextTaskFromDirection(
   )
 }
 
+function createBrandVideoTaskFromDirection(
+  projectId: string,
+  intakeId: string,
+  directionId: string,
+  selectedRouteId: string,
+  channel: 'xiaohongshu' | 'douyin' | 'kuaishou',
+) {
+  return creativeRequest<ApiCreativeTaskSummary>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: selectedRouteId,
+      direction_id: directionId,
+      channel,
+      mandatory_elements: [],
+      prohibited_claims: [],
+      confirm_route: true,
+    },
+  )
+}
+
 function generateImageTextDraft(projectId: string, taskId: string, expectedTaskVersion: number, expectedDirectionId: string) {
   return creativeRequest<ApiImageTextWorkspace['draft']>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/image-text-draft:generate`,
@@ -3504,6 +3635,8 @@ function updateImageTextDraft(
     selectedTitle: string
     body: string
     overlayCopy: Record<number, string>
+    visualBrief?: Record<number, string>
+    caption?: Record<number, string>
   },
 ) {
   return creativeRequest<ApiImageTextWorkspace['draft']>(
@@ -3521,6 +3654,8 @@ function updateImageTextDraft(
       image_plan: workspace.draft.image_plan.map(item => ({
         ...item,
         overlay_copy: input.overlayCopy[item.order] ?? item.overlay_copy,
+        visual_brief: input.visualBrief?.[item.order] ?? item.visual_brief,
+        caption: input.caption?.[item.order] ?? item.caption,
       })),
     },
   )
@@ -3573,6 +3708,12 @@ function listImageTextVersions(projectId: string, taskId: string) {
   )
 }
 
+function listCreativePackages(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativePackage[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-packages?limit=${limit}`,
+  )
+}
+
 function freezeImageTextVersion(projectId: string, taskId: string, draftVersion: number) {
   return creativeRequest<ApiCreativeVersion>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:freeze-version`,
@@ -3597,7 +3738,7 @@ function approveImageTextVersion(projectId: string, versionId: string) {
 }
 
 function deliverImageTextVersion(projectId: string, versionId: string) {
-  return creativeRequest(
+  return creativeRequest<ApiCreativePackage>(
     `/projects/${encodeURIComponent(projectId)}/creative-versions/${encodeURIComponent(versionId)}:deliver`,
     'POST',
   )
@@ -4931,6 +5072,7 @@ export const api = {
   createManualShortDramaPrerollWorkspace,
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
+  listCreativeTasks,
   ensureBrandFilmFixtureWorkspace,
   analyzeBrandFilmBrief,
   updateBrandFilmBrief,
@@ -4961,15 +5103,19 @@ export const api = {
   deliverBrandFilmVersion,
   getImageTextWorkspace,
   getCreativeIntake,
+  createManualImageTextIntake,
   generateCreativeDirections,
+  getLatestCreativeDirectionBatch,
   confirmCreativeDirection,
   createImageTextTaskFromDirection,
+  createBrandVideoTaskFromDirection,
   generateImageTextDraft,
   updateImageTextDraft,
   generateImageTextSlot,
   adoptImageTextAttempt,
   getProjectAssetPreview,
   listImageTextVersions,
+  listCreativePackages,
   freezeImageTextVersion,
   checkImageTextVersion,
   approveImageTextVersion,

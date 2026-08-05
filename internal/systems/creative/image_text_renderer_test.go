@@ -38,6 +38,9 @@ func TestImageTextRendererProducesDeterministicThreeByFourPNG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewImageRenderSpec() error = %v", err)
 	}
+	if spec.RendererVersion != ImageRendererV2 {
+		t.Fatalf("renderer version = %q, want %q", spec.RendererVersion, ImageRendererV2)
+	}
 	first, err := renderer.Render(bytes.NewReader(base.Bytes()), spec)
 	if err != nil {
 		t.Fatalf("first Render() error = %v", err)
@@ -56,6 +59,10 @@ func TestImageTextRendererProducesDeterministicThreeByFourPNG(t *testing.T) {
 	if format != "png" || decoded.Bounds().Dx() != ImageTextFinalWidth ||
 		decoded.Bounds().Dy() != ImageTextFinalHeight {
 		t.Fatalf("rendered output = %s %v, want png %dx%d", format, decoded.Bounds(), ImageTextFinalWidth, ImageTextFinalHeight)
+	}
+	mid := color.RGBAModel.Convert(decoded.At(ImageTextFinalWidth/2, 520)).(color.RGBA)
+	if int(mid.R)+int(mid.G)+int(mid.B) < 100 {
+		t.Fatalf("modern renderer still paints the legacy opaque center card: %+v", mid)
 	}
 }
 

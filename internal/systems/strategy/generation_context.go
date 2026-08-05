@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -437,10 +439,26 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	if len(document.CreativeRecommendations) < 3 || !hasNonEmptyStrings(document.CreativeRecommendations) {
 		report.Errors = append(report.Errors, "at least three creative recommendations are required")
 	}
+	if generation.PromptVersion == promptkit.GenerateV4 && len(document.CreativeRecommendations) != 3 {
+		report.Errors = append(report.Errors, "creative recommendations must contain exactly three directions")
+	}
+	if generation.PromptVersion == promptkit.GenerateV4 && duplicatedCreativeRecommendations(document.CreativeRecommendations) {
+		report.Errors = append(report.Errors, "creative recommendations are not meaningfully distinct")
+	}
 	for _, recommendation := range document.CreativeRecommendations {
 		if isVagueRecommendation(recommendation) {
 			report.Warnings = append(report.Warnings, "vague creative recommendation: "+strings.TrimSpace(recommendation))
 		}
+		if generation.PromptVersion == promptkit.GenerateV4 &&
+			strings.Count(recommendation, "｜")+strings.Count(recommendation, "|") < 4 {
+			report.Errors = append(report.Errors, "creative recommendation is missing decision anatomy: "+strings.TrimSpace(recommendation))
+		}
+	}
+	if generation.PromptVersion == promptkit.GenerateV4 && len([]rune(strings.TrimSpace(document.ExecutiveSummary))) > 220 {
+		report.Warnings = append(report.Warnings, "executive_summary is too long for a decision brief")
+	}
+	if generation.PromptVersion == promptkit.GenerateV4 {
+		report.Errors = append(report.Errors, unsupportedQuantitativeClaims(document, generation)...)
 	}
 	if len(document.ExperimentMatrix) == 0 {
 		report.Errors = append(report.Errors, "at least one experiment is required")
@@ -465,6 +483,10 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	if unknown := unknownEvidenceRefs(document.EvidenceRefs, generation); len(unknown) > 0 {
 		report.Errors = append(report.Errors, "evidence_refs contain unknown references: "+strings.Join(unknown, ", "))
 	}
+	if generation.PromptVersion == promptkit.GenerateV4 && document.ContractVersion == "strategy-draft/v2" &&
+		len(generation.Brief.Snapshot.ReferenceIDs) > 0 && len(document.EvidenceRefs) == 0 {
+		report.Errors = append(report.Errors, "evidence_refs omitted all confirmed Brief references")
+	}
 	report.Score -= len(report.Errors) * 20
 	report.Score -= len(report.Warnings) * 2
 	if report.Score < 0 {
@@ -472,6 +494,52 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	}
 	report.Passed = len(report.Errors) == 0
 	return report
+}
+
+var quantitativeClaimPattern = regexp.MustCompile(`(?i)[0-9]+(\.[0-9]+)?\s*(%|％|mm|毫米|μm|um|天|小时|分钟|件|项|条|台|万元|万|元|年|个月|月|周|倍)`)
+
+func unsupportedQuantitativeClaims(document StrategyDocument, generation GenerationContext) []string {
+	sourceParts := []string{mustJSONText(generation.Brief.Snapshot)}
+	for _, evidence := range generation.Evidence {
+		sourceParts = append(sourceParts, mustJSONText(evidence.Value))
+	}
+	for _, sourceDocument := range generation.Documents {
+		sourceParts = append(sourceParts, sourceDocument.Content)
+	}
+	source := normalizeQuantitativeText(strings.Join(sourceParts, "\n"))
+	issues := []string{}
+	check := func(section string, values ...string) {
+		seen := map[string]struct{}{}
+		for _, value := range values {
+			for _, claim := range quantitativeClaimPattern.FindAllString(value, -1) {
+				normalized := normalizeQuantitativeText(claim)
+				if _, exists := seen[normalized]; exists || strings.Contains(source, normalized) {
+					continue
+				}
+				seen[normalized] = struct{}{}
+				issues = append(issues, section+" contains unsupported quantitative claim: "+strings.TrimSpace(claim))
+			}
+		}
+	}
+	check("audience.insights", document.Audience.Insights...)
+	check("creative recommendations", document.CreativeRecommendations...)
+	check("executive summary", document.ExecutiveSummary)
+	for _, plan := range document.PlatformPlans {
+		values := []string{plan.Role, plan.AudienceAngle}
+		values = append(values, plan.ContentPillars...)
+		values = append(values, plan.CreativeIdeas...)
+		check("platform plans", values...)
+	}
+	return issues
+}
+
+func mustJSONText(value any) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
+}
+
+func normalizeQuantitativeText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), ""))
 }
 
 func sameStrategyInput(actual, confirmed string) bool {
@@ -612,6 +680,51 @@ func isVagueRecommendation(value string) bool {
 	return false
 }
 
+func duplicatedCreativeRecommendations(values []string) bool {
+	for left := 0; left < len(values); left++ {
+		for right := left + 1; right < len(values); right++ {
+			if creativeRecommendationSimilarity(values[left], values[right]) >= 0.70 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func creativeRecommendationSimilarity(left, right string) float64 {
+	leftPairs := recommendationRunePairs(left)
+	rightPairs := recommendationRunePairs(right)
+	if len(leftPairs) == 0 || len(rightPairs) == 0 {
+		return 0
+	}
+	intersection := 0
+	union := make(map[string]struct{}, len(leftPairs)+len(rightPairs))
+	for pair := range leftPairs {
+		union[pair] = struct{}{}
+		if _, ok := rightPairs[pair]; ok {
+			intersection++
+		}
+	}
+	for pair := range rightPairs {
+		union[pair] = struct{}{}
+	}
+	return float64(intersection) / float64(len(union))
+}
+
+func recommendationRunePairs(value string) map[string]struct{} {
+	normalized := make([]rune, 0, len(value))
+	for _, current := range []rune(strings.ToLower(value)) {
+		if unicode.IsLetter(current) || unicode.IsNumber(current) {
+			normalized = append(normalized, current)
+		}
+	}
+	pairs := make(map[string]struct{})
+	for index := 0; index+1 < len(normalized); index++ {
+		pairs[string(normalized[index:index+2])] = struct{}{}
+	}
+	return pairs
+}
+
 type RevisionScope struct {
 	Sections    []string
 	ExplicitAll bool
@@ -718,6 +831,10 @@ func repairSectionsForErrors(errors []string) []string {
 			add("channel_strategy")
 		case strings.Contains(value, "creative"):
 			add("creative_recommendations")
+		case strings.Contains(value, "executive summary"):
+			add("executive_summary")
+		case strings.Contains(value, "evidence"):
+			add("evidence_refs", "assumptions_and_gaps")
 		case strings.Contains(value, "experiment"):
 			add("experiment_matrix")
 		case strings.Contains(value, "measurement"), strings.Contains(value, "primary kpi"):

@@ -115,3 +115,18 @@ func TestViralStrategyDoesNotRequireKnownRightsStatus(t *testing.T) {
 		t.Fatalf("rights and production-use confirmations should remain warnings: %#v", completeness)
 	}
 }
+
+func TestCreativeBusinessMustMatchSelectedFrozenRoute(t *testing.T) {
+	t.Parallel()
+	imageRoute := CreativeHandoffRoute{
+		RouteID: "route_xiaohongshu_image_text", DeliverableType: "image_text", Purpose: "brand",
+	}
+	brandRoute := CreativeHandoffRoute{
+		RouteID: "route_brand_video", DeliverableType: "video", Purpose: "brand", PerformanceMode: "brand_video",
+	}
+	if !creativeBusinessMatchesRoute("xiaohongshu_image_text", imageRoute) ||
+		creativeBusinessMatchesRoute("brand_video", imageRoute) ||
+		!creativeBusinessMatchesRoute("brand_video", brandRoute) {
+		t.Fatal("creative business and frozen route compatibility is incorrect")
+	}
+}

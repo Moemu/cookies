@@ -38,3 +38,38 @@ func TestEvaluateComplianceWarnsWhenEvidenceReferencesAreMissing(t *testing.T) {
 		t.Fatalf("missing evidence should be warning-only: %#v", report)
 	}
 }
+
+func TestEvaluateComplianceDoesNotTreatGuardrailsOrFirstPersonPerspectiveAsClaims(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{Snapshot: EmptyBriefDocumentV2()}
+	brief.Snapshot.Creative.ProhibitedClaims = []string{"绝对健康"}
+	document := StrategyDocument{
+		ContractVersion: "strategy-draft/v2",
+		Objective:       "提升品牌认知",
+		CreativeRecommendations: []string{
+			"使用第一视角记录通勤体验",
+			"所有内容禁用减肥、治疗、绝对健康等违规表述",
+		},
+		Constraints: []string{"不得使用绝对健康等表述"},
+		PlatformPlans: []PlatformPlan{{
+			Platform: "xiaohongshu", Constraints: []string{"禁止绝对化承诺"},
+		}},
+	}
+
+	report := evaluateCompliance(document, brief, time.Now())
+	if !report.Passed {
+		t.Fatalf("guardrails and first-person perspective must not be treated as claims: %#v", report)
+	}
+}
+
+func TestEvaluateComplianceBlocksExplicitRankingClaim(t *testing.T) {
+	t.Parallel()
+	report := evaluateCompliance(
+		StrategyDocument{ContractVersion: "strategy-draft/v2", Proposition: "销量第一"},
+		BriefVersion{Snapshot: EmptyBriefDocumentV2()},
+		time.Now(),
+	)
+	if report.Passed {
+		t.Fatalf("explicit ranking claim must be blocked: %#v", report)
+	}
+}

@@ -46,18 +46,20 @@ type Conversation struct {
 }
 
 type Message struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	ConversationID string                  `json:"conversation_id"`
-	Role           string                  `json:"role"`
-	ContentType    string                  `json:"content_type"`
-	Content        string                  `json:"content"`
-	AIGenerated    bool                    `json:"ai_generated"`
-	AgentTaskID    string                  `json:"agent_task_id,omitempty"`
-	SkillRunIDs    []string                `json:"skill_run_ids,omitempty"`
-	CreatedBy      string                  `json:"created_by"`
-	CreatedAt      time.Time               `json:"created_at"`
+	ID              string                  `json:"id"`
+	OrganizationID  contract.OrganizationID `json:"organization_id"`
+	ProjectID       contract.ProjectID      `json:"project_id"`
+	ConversationID  string                  `json:"conversation_id"`
+	Role            string                  `json:"role"`
+	ContentType     string                  `json:"content_type"`
+	Content         string                  `json:"content"`
+	ContentBlocks   []MessageContentBlock   `json:"content_blocks,omitempty"`
+	RequestedPolicy *MessageRequestedPolicy `json:"requested_policy,omitempty"`
+	AIGenerated     bool                    `json:"ai_generated"`
+	AgentTaskID     string                  `json:"agent_task_id,omitempty"`
+	SkillRunIDs     []string                `json:"skill_run_ids,omitempty"`
+	CreatedBy       string                  `json:"created_by"`
+	CreatedAt       time.Time               `json:"created_at"`
 }
 
 type ConversationEvent struct {
@@ -120,23 +122,30 @@ type TaskBundle struct {
 }
 
 type BriefDocument struct {
-	ContractVersion string           `json:"contract_version"`
-	Brand           BriefBrand       `json:"brand,omitempty"`
-	Product         BriefProduct     `json:"product,omitempty"`
-	Industry        string           `json:"industry,omitempty"`
-	Region          string           `json:"region,omitempty"`
-	Language        string           `json:"language,omitempty"`
-	Campaign        BriefCampaign    `json:"campaign"`
-	Audience        BriefAudience    `json:"audience"`
-	Proposition     string           `json:"proposition"`
-	Channels        []string         `json:"channels"`
-	Budget          BriefBudget      `json:"budget"`
-	Schedule        BriefSchedule    `json:"schedule"`
-	Constraints     []string         `json:"constraints"`
-	Measurement     BriefMeasurement `json:"measurement"`
-	PlatformBriefs  []BriefPlatform  `json:"platform_briefs,omitempty"`
-	Creative        BriefCreative    `json:"creative,omitempty"`
-	ReferenceIDs    []string         `json:"reference_ids,omitempty"`
+	ContractVersion string                     `json:"contract_version"`
+	Core            BriefCoreV3                `json:"-"`
+	Facts           []BriefFactV3              `json:"-"`
+	Assumptions     []BriefAssumptionV3        `json:"-"`
+	Unknowns        []BriefUnknownV3           `json:"-"`
+	Conflicts       []BriefConflictV3          `json:"-"`
+	AssetRefs       []contract.AssetVersionRef `json:"-"`
+	Extensions      map[string]json.RawMessage `json:"-"`
+	Brand           BriefBrand                 `json:"brand,omitempty"`
+	Product         BriefProduct               `json:"product,omitempty"`
+	Industry        string                     `json:"industry,omitempty"`
+	Region          string                     `json:"region,omitempty"`
+	Language        string                     `json:"language,omitempty"`
+	Campaign        BriefCampaign              `json:"campaign"`
+	Audience        BriefAudience              `json:"audience"`
+	Proposition     string                     `json:"proposition"`
+	Channels        []string                   `json:"channels"`
+	Budget          BriefBudget                `json:"budget"`
+	Schedule        BriefSchedule              `json:"schedule"`
+	Constraints     []string                   `json:"constraints"`
+	Measurement     BriefMeasurement           `json:"measurement"`
+	PlatformBriefs  []BriefPlatform            `json:"platform_briefs,omitempty"`
+	Creative        BriefCreative              `json:"creative,omitempty"`
+	ReferenceIDs    []string                   `json:"reference_ids,omitempty"`
 }
 
 type BriefBrand struct {
@@ -181,9 +190,12 @@ type BriefCreative struct {
 	ProhibitedClaims  []string `json:"prohibited_claims,omitempty"`
 }
 
-// MarshalJSON keeps the frozen v1 wire shape byte-for-byte stable while allowing
-// v2-only fields to coexist in the Go projection used by readers.
+// MarshalJSON keeps the frozen v1/v2 wire shapes stable while allowing the v3
+// requirement aggregate to expose a smaller, evidence-aware contract.
 func (d BriefDocument) MarshalJSON() ([]byte, error) {
+	if d.ContractVersion == BriefContractVersionV3 {
+		return marshalBriefDocumentV3(d)
+	}
 	if d.ContractVersion != "strategy-brief-version/v1" {
 		type alias BriefDocument
 		return json.Marshal(alias(d))
@@ -211,6 +223,25 @@ func (d BriefDocument) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (d *BriefDocument) UnmarshalJSON(data []byte) error {
+	var header struct {
+		ContractVersion string `json:"contract_version"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return err
+	}
+	if header.ContractVersion == BriefContractVersionV3 {
+		return unmarshalBriefDocumentV3(data, d)
+	}
+	type alias BriefDocument
+	var value alias
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*d = BriefDocument(value)
+	return nil
+}
+
 func EmptyBriefDocument() BriefDocument {
 	return BriefDocument{
 		ContractVersion: "strategy-brief-version/v1",
@@ -226,6 +257,20 @@ func EmptyBriefDocumentV2() BriefDocument {
 		Constraints:     []string{},
 		PlatformBriefs:  []BriefPlatform{},
 		ReferenceIDs:    []string{},
+	}
+}
+
+func EmptyBriefDocumentV3() BriefDocument {
+	return BriefDocument{
+		ContractVersion: BriefContractVersionV3,
+		Facts:           []BriefFactV3{},
+		Constraints:     []string{},
+		Assumptions:     []BriefAssumptionV3{},
+		Unknowns:        []BriefUnknownV3{},
+		Conflicts:       []BriefConflictV3{},
+		AssetRefs:       []contract.AssetVersionRef{},
+		ReferenceIDs:    []string{},
+		Extensions:      map[string]json.RawMessage{},
 	}
 }
 

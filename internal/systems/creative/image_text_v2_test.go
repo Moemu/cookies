@@ -2,6 +2,7 @@ package creative
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,15 @@ func TestCompileImagePromptPackageFreezesLineageAndSourceAssets(t *testing.T) {
 	if len(prompt.SourceAssetRefs) != 1 || prompt.SourceAssetRefs[0] != source {
 		t.Fatalf("source assets = %+v, want %+v", prompt.SourceAssetRefs, source)
 	}
+	if prompt.CompilerVersion != ImagePromptCompilerV2 ||
+		!strings.Contains(prompt.CompiledPrompt, "one single full-bleed photorealistic commercial photograph") ||
+		!strings.Contains(prompt.CompiledPrompt, "Do not create a collage, triptych, split screen") ||
+		!strings.Contains(prompt.CompiledPrompt, "Cover role") {
+		t.Fatalf("compiled prompt does not enforce the clean photographic base layer: %q", prompt.CompiledPrompt)
+	}
+	if strings.Contains(prompt.CompiledPrompt, "show evidence") || strings.Contains(prompt.CompiledPrompt, "close with CTA") {
+		t.Fatalf("compiled prompt leaked cross-slot execution instructions: %q", prompt.CompiledPrompt)
+	}
 	withoutSource, err := CompileImagePromptPackage(
 		"prompt_2", actor, "project_1", task, draft, slot, direction,
 		nil, prompt.CreatedAt,
@@ -75,6 +85,72 @@ func TestImageTextDraftPlanRequiresFrozenThreeSlotRoles(t *testing.T) {
 	plan.ImagePlan[1].Role = "cover"
 	if err := plan.Validate(); err == nil {
 		t.Fatal("plan with duplicated role was accepted")
+	}
+}
+
+func TestImagePlanWithoutAssetsPreservesAuthoringFields(t *testing.T) {
+	asset := contract.AssetVersionRef{AssetID: "asset_old", Version: 2}
+	input := []ImagePlanItem{{
+		Order: 1, Role: "cover", Purpose: "cover", VisualBrief: "single hero photograph",
+		Caption: "caption", OverlayCopy: "headline", LayoutPreset: "cover_center_v1", AssetRef: &asset,
+	}}
+	result := imagePlanWithoutAssets(input)
+	if result[0].AssetRef != nil || result[0].VisualBrief != input[0].VisualBrief || result[0].OverlayCopy != input[0].OverlayCopy {
+		t.Fatalf("rework plan = %+v, want authoring fields without the old asset", result[0])
+	}
+	if input[0].AssetRef == nil {
+		t.Fatal("imagePlanWithoutAssets mutated the materialized source draft")
+	}
+}
+
+func TestImageTextDraftPlanRejectsHighRiskOutboundClaims(t *testing.T) {
+	plan := ImageTextDraftPlan{
+		TitleCandidates: []string{"夏日场景清单", "三种饮用场景", "通勤聚会饮品参考"},
+		SelectedTitle:   "夏日场景清单",
+		Body:            "这款饮品完全没负担，控糖人群可以放心入。",
+		Topics:          []string{"夏季饮品"},
+		ImagePlan: []ImagePlanItem{
+			{Order: 1, Role: "cover", Purpose: "cover", VisualBrief: "visual", Caption: "caption", OverlayCopy: "场景清单", LayoutPreset: "cover_center_v1"},
+			{Order: 2, Role: "proof", Purpose: "proof", VisualBrief: "visual", Caption: "caption", OverlayCopy: "产品信息", LayoutPreset: "proof_lower_left_v1"},
+			{Order: 3, Role: "cta", Purpose: "cta", VisualBrief: "visual", Caption: "caption", OverlayCopy: "了解更多", LayoutPreset: "cta_bottom_v1"},
+		},
+	}
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "完全没负担") {
+		t.Fatalf("Validate() error = %v, want high-risk claim rejection", err)
+	}
+}
+
+func TestImageTextDraftPlanRejectsUnsupportedGroupPreference(t *testing.T) {
+	plan := ImageTextDraftPlan{
+		TitleCandidates: []string{"夏日场景清单", "三种饮用场景", "通勤聚会饮品参考"},
+		SelectedTitle:   "夏日场景清单",
+		Body:            "聚会饮品适合多数人的喜好，饮用无额外负担。",
+		Topics:          []string{"夏季饮品"},
+		ImagePlan: []ImagePlanItem{
+			{Order: 1, Role: "cover", Purpose: "cover", VisualBrief: "visual", Caption: "caption", OverlayCopy: "场景清单", LayoutPreset: "cover_center_v1"},
+			{Order: 2, Role: "proof", Purpose: "proof", VisualBrief: "visual", Caption: "caption", OverlayCopy: "产品信息", LayoutPreset: "proof_lower_left_v1"},
+			{Order: 3, Role: "cta", Purpose: "cta", VisualBrief: "visual", Caption: "caption", OverlayCopy: "了解更多", LayoutPreset: "cta_bottom_v1"},
+		},
+	}
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "无额外负担") {
+		t.Fatalf("Validate() error = %v, want unsupported group preference rejection", err)
+	}
+}
+
+func TestImageTextDraftPlanRejectsGroupPreferenceVariants(t *testing.T) {
+	plan := ImageTextDraftPlan{
+		TitleCandidates: []string{"夏日场景清单", "三种饮用场景", "通勤聚会饮品参考"},
+		SelectedTitle:   "夏日场景清单",
+		Body:            "这款饮品适配多数人饮用偏好。",
+		Topics:          []string{"夏季饮品"},
+		ImagePlan: []ImagePlanItem{
+			{Order: 1, Role: "cover", Purpose: "cover", VisualBrief: "visual", Caption: "caption", OverlayCopy: "场景清单", LayoutPreset: "cover_center_v1"},
+			{Order: 2, Role: "proof", Purpose: "proof", VisualBrief: "visual", Caption: "caption", OverlayCopy: "产品信息", LayoutPreset: "proof_lower_left_v1"},
+			{Order: 3, Role: "cta", Purpose: "cta", VisualBrief: "visual", Caption: "caption", OverlayCopy: "了解更多", LayoutPreset: "cta_bottom_v1"},
+		},
+	}
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "群体普适性表述") {
+		t.Fatalf("Validate() error = %v, want group preference rejection", err)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
 import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
@@ -24,13 +24,16 @@ import { PostLaunchAnalysisPage } from './PostLaunchAnalysisPage'
 import { ExperienceLibraryPage } from './ExperienceLibraryPage'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
-import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
 import { KanonStrategyTaskCenter, KanonStrategyTaskDialog } from '../features/strategy/KanonStrategyTaskCenter'
 import { KanonBriefCenter, KanonResearchEvidenceCenter, KanonStrategyLibrary } from '../features/strategy/KanonStrategyCenters'
 import type { StrategyTaskBundle } from '../features/strategy/types'
 import { KanonSkillsOperations } from '../features/strategy/KanonSkillsOperations'
 import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
 import { industryProfile } from '../data/industry-profiles'
+
+const KanonStrategyWorkspace = lazy(() => import('../features/strategy/KanonStrategyWorkspace').then(module => ({
+  default: module.KanonStrategyWorkspace,
+})))
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
 
@@ -1485,19 +1488,27 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   const taskCenter = item.id === 'tasks' && taskDomain !== null
   const specialized = system.key === 'strategy' && item.id === 'tasks' ? <KanonStrategyTaskCenter activeView={activeView} onOpenWorkspace={id => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, '概览')} onRequestCreate={() => setTaskDialog({ domain: 'strategy', initialType: 'strategy' })}/>
     : taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
-    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace
-      activeView={activeView}
-      workspaceId={objectId}
-      onOpenWorkspace={(workspaceId, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', workspaceId, view)}
-      onOpenCreative={(navId, view, contextId) => onOpenProject(currentProject.id, 'creative', navId, undefined, view, contextId)}
-    />
+    : system.key === 'strategy' && item.id === 'workspaces' ? <Suspense fallback={<div className="kanon-strategy-state" role="status">正在加载策略工作区…</div>}>
+      <KanonStrategyWorkspace
+        activeView={activeView}
+        workspaceId={objectId}
+        onOpenWorkspace={(workspaceId, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', workspaceId, view)}
+        onOpenCreative={(navId, view, contextId) => onOpenProject(currentProject.id, 'creative', navId, undefined, view, contextId)}
+        onOpenProject={onOpenProject}
+      />
+    </Suspense>
     : system.key === 'strategy' && item.id === 'briefs' ? <KanonBriefCenter activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
     : system.key === 'strategy' && item.id === 'strategies' ? <KanonStrategyLibrary activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
     : system.key === 'strategy' && item.id === 'research' ? <KanonResearchEvidenceCenter activeView={activeView}/>
     : system.key === 'strategy' && item.id === 'operations' ? <KanonSkillsOperations activeView={activeView}/>
     : system.key === 'strategy' && item.id === 'reviews' ? <KanonReviewCenter activeView={activeView} onOpenReview={() => onOpenProject(currentProject.id, 'strategy', 'workspaces', undefined, '评审')}/>
-    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={contextId ?? objectId} onTaskCreated={id => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView, id)}/>
-    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
+    : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage
+        state={dataState}
+        activeTaskId={contextId ?? objectId}
+        onTaskCreated={id => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView, id)}
+        onBack={() => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView)}
+      />
+    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)} onOpenBrandTask={id => onOpenProject(currentProject.id, 'creative', 'video', undefined, '品牌广告', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>

@@ -29,7 +29,10 @@ func (p creativeAINativeStoryboardAssetPreparer) PrepareAINativeStoryboardAsset(
 		return nil, nil, err
 	}
 	providerActor := actor
-	providerActor.Scopes = append(append([]contract.Scope{}, actor.Scopes...), provider.ScopeJobCreate)
+	providerActor.Scopes = append([]contract.Scope{}, actor.Scopes...)
+	if !providerActor.HasScope(provider.ScopeJobCreate) {
+		providerActor.Scopes = append(providerActor.Scopes, provider.ScopeJobCreate)
+	}
 	job, _, err := p.provider.CreateImageJob(ctx, provider.CreateImageJobRequest{
 		Actor: providerActor, Project: project, IdempotencyKey: contract.IdempotencyKey("ai-native-storyboard-" + operation.ID + "-" + asset.ID),
 		RequestHash: requestHash, ModelAlias: "cookies.image.standard", SourceSystem: "creative.ai_native.storyboard", SourceTaskID: operation.ID + "/" + asset.ID,

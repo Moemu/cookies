@@ -13,8 +13,12 @@ import (
 )
 
 type creativeDirectionManager interface {
-	GenerateDirectionCandidates(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateDirectionRequest) (creative.CreativeDirectionBatch, error)
+	StartDirectionGeneration(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateDirectionRequest) (creative.CreativeDirectionBatch, error)
 	ConfirmDirection(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionVersion, error)
+}
+
+type creativeDirectionReader interface {
+	GetLatestDirectionBatch(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionBatch, error)
 }
 
 type creativeImageTextManager interface {
@@ -23,6 +27,7 @@ type creativeImageTextManager interface {
 	UpdateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateImageTextDraftRequest) (creative.ImageTextDraft, error)
 	PrepareImageSlotGeneration(context.Context, contract.RequestContext, contract.ProjectID, string, int, creative.PrepareImageSlotRequest, contract.IdempotencyKey) (creative.ImagePromptPackage, creative.ImageGenerationAttempt, bool, error)
 	AttachImageProviderJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.ImageGenerationAttempt, error)
+	FailImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, string) (creative.ImageGenerationAttempt, error)
 	AdoptImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, int, string, creative.AdoptImageAttemptRequest) (creative.ImageSlotSelection, error)
 }
 
@@ -141,10 +146,14 @@ func (s *Server) generateCreativeImageTextSlot(w http.ResponseWriter, r *http.Re
 	for _, ref := range prompt.SourceAssetRefs {
 		sourceAssets = append(sourceAssets, contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: ref})
 	}
+	operation := "image.generate"
+	if len(sourceAssets) > 0 {
+		operation = "image.edit"
+	}
 	job, _, err := s.providerJobs.CreateImageJob(r.Context(), provider.CreateImageJobRequest{
 		Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: attempt.RequestHash,
 		ModelAlias: attempt.GenerationSpec.ModelAlias, SourceSystem: "creative", SourceTaskID: taskID,
-		Operation: "creative.image_text.generate",
+		Operation: operation,
 		Input: provider.ImageGenerationInput{
 			Prompt: prompt.CompiledPrompt, Width: attempt.GenerationSpec.Width, Height: attempt.GenerationSpec.Height,
 			SourceAssets: sourceAssets,
@@ -159,6 +168,10 @@ func (s *Server) generateCreativeImageTextSlot(w http.ResponseWriter, r *http.Re
 		},
 	})
 	if err != nil {
+		_, _ = manager.FailImageGenerationAttempt(
+			r.Context(), rc.Actor, projectID, attempt.ID,
+			"PROVIDER_JOB_CREATE_FAILED", err.Error(),
+		)
 		s.writeServiceError(w, r, err)
 		return
 	}
@@ -885,7 +898,7 @@ func (s *Server) createCreativeDirectionBatch(w http.ResponseWriter, r *http.Req
 		return
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
-	value, err := manager.GenerateDirectionCandidates(
+	value, err := manager.StartDirectionGeneration(
 		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
 		r.PathValue("intake_id"), body,
 	)
@@ -897,7 +910,25 @@ func (s *Server) createCreativeDirectionBatch(w http.ResponseWriter, r *http.Req
 		"/api/creative/v1/projects/%s/creative-direction-batches/%s",
 		r.PathValue("project_id"), value.ID,
 	))
-	writeJSON(w, http.StatusCreated, value)
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) getLatestCreativeDirectionBatch(w http.ResponseWriter, r *http.Request) {
+	reader, ok := s.creative.(creativeDirectionReader)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := reader.GetLatestDirectionBatch(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("intake_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) confirmCreativeDirection(w http.ResponseWriter, r *http.Request) {

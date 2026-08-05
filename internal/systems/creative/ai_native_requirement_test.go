@@ -71,6 +71,12 @@ func (r *memoryAINativeRequirementRepository) GetAINativeRequirementWorkspace(_ 
 	}
 	return r.workspace, nil
 }
+func (r *memoryAINativeRequirementRepository) GetLatestAINativeRequirementWorkspace(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (AINativeRequirementWorkspace, error) {
+	if r.workspace.OrganizationID != organizationID || r.workspace.ProjectID != projectID || r.workspace.WorkspaceID == "" {
+		return AINativeRequirementWorkspace{}, ErrNotFound
+	}
+	return r.workspace, nil
+}
 func (r *memoryAINativeRequirementRepository) AppendAINativeRequirementRevision(_ context.Context, next AINativeRequirementWorkspace, expectedRevision int64, _ string) (AINativeRequirementWorkspace, error) {
 	if r.workspace.CurrentRevision != expectedRevision {
 		return AINativeRequirementWorkspace{}, ErrVersionConflict
@@ -140,6 +146,22 @@ func (r *memoryAINativeRequirementRepository) ReopenAINativeRequirement(_ contex
 func (g *aiNativeTextGeneratorStub) GenerateText(_ context.Context, request provider.TextGenerateRequest) (provider.SynchronousResponse, error) {
 	g.request = request
 	return g.response, g.err
+}
+
+func TestGetLatestAINativeRequirementWorkspaceRestoresProjectWorkspace(t *testing.T) {
+	t.Parallel()
+	value := AINativeRequirementWorkspace{WorkspaceID: "ainativeworkspace_1", OrganizationID: "org_1", ProjectID: "project_1", CurrentStage: AINativeStageScript}
+	repository := &memoryAINativeRequirementRepository{workspace: value}
+	service := Service{Projects: testProjects{}, AINativeRequirements: repository}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeRead}}
+
+	restored, err := service.GetLatestAINativeRequirementWorkspace(context.Background(), actor, value.ProjectID)
+	if err != nil {
+		t.Fatalf("GetLatestAINativeRequirementWorkspace() error = %v", err)
+	}
+	if restored.WorkspaceID != value.WorkspaceID || restored.CurrentStage != value.CurrentStage {
+		t.Fatalf("restored workspace = %+v", restored)
+	}
 }
 
 func TestAnalyzeAINativeRequirementAppliesP0Defaults(t *testing.T) {

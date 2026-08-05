@@ -777,6 +777,17 @@ func oneOf(value string, allowed ...string) bool {
 }
 
 func creativeObjectiveType(snapshot PackageSnapshot) (string, bool) {
+	objectiveText := strings.ToLower(strings.Join(append(
+		[]string{snapshot.Strategy.Objective, snapshot.Brief.Snapshot.Campaign.Objective},
+		snapshot.Strategy.Measurement...,
+	), " "))
+	if containsAny(objectiveText,
+		"performance", "conversion", "转化", "获客", "留资", "线索", "成交", "销售", "购买", "安装", "注册") {
+		return "performance", true
+	}
+	if containsAny(objectiveText, "brand awareness", "品牌认知", "品牌心智", "品牌资产") {
+		return "brand", true
+	}
 	brand := false
 	performance := false
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
@@ -823,8 +834,18 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 	blockers := make([]HandoffIssue, 0)
 	warnings := make([]HandoffIssue, 0)
 	seen := map[string]bool{}
+	brandVideoChannels := make([]string, 0)
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
 		platform := strings.ToLower(strings.TrimSpace(channel.Platform))
+		if supportsBrandVideoPlatform(platform) && containsVideoFormat(channel.Formats) {
+			purpose, known := creativeRoutePurpose(channel.Role)
+			if !known && objectiveTypeKnown && objectiveType != "mixed" {
+				purpose, known = objectiveType, true
+			}
+			if (known && purpose == "brand") || creativeHandoffHasBrandGoal(snapshot) {
+				brandVideoChannels = appendUnique(brandVideoChannels, platform)
+			}
+		}
 		if platform != "xiaohongshu" || seen[platform] || !containsImageTextFormat(channel.Formats) {
 			continue
 		}
@@ -844,6 +865,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 		}
 		seen[platform] = true
 		routeBlockers := make([]HandoffIssue, 0)
+		routeWarnings := make([]HandoffIssue, 0)
 		ctaPolicy := CreativeCTAPolicy{
 			RequiredForGeneration: false, RequiredForDelivery: false, CTAIntent: "",
 		}
@@ -855,11 +877,12 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 					Message: "效果 Route 需要明确产品引用。", Source: "strategy", SourceRefIDs: []string{},
 				})
 			}
-			routeBlockers = append(routeBlockers, HandoffIssue{
-				Code: "cta_missing", Stage: "planning",
+			routeWarnings = append(routeWarnings, HandoffIssue{
+				Code: "cta_missing", Stage: "generation",
 				Path:    "routes.route_xiaohongshu_image_text.cta_policy.cta_intent",
-				Message: "效果 Route 需要显式确认 CTA intent。", Source: "strategy", SourceRefIDs: []string{},
+				Message: "效果 Route 需要在任务计划中显式确认 CTA intent。", Source: "strategy", SourceRefIDs: []string{},
 			})
+			ctaPolicy.RequiredForGeneration = true
 			ctaPolicy.RequiredForDelivery = true
 		}
 		routeStatus := "ready"
@@ -867,6 +890,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			routeStatus = "blocked"
 			blockers = append(blockers, routeBlockers...)
 		}
+		warnings = append(warnings, routeWarnings...)
 		routes = append(routes, CreativeHandoffRoute{
 			RouteID: "route_xiaohongshu_image_text", DeliverableType: "image_text",
 			Purpose: purpose, Channels: []string{"xiaohongshu"},
@@ -877,16 +901,43 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			CTAPolicy: ctaPolicy,
 			ClaimRefs: []string{}, AssetRequirements: []CreativeAssetRequirement{},
 			AssetRefs: []string{}, RouteReadiness: HandoffReadiness{
-				Status: routeStatus, Blockers: routeBlockers, Warnings: []HandoffIssue{},
+				Status: routeStatus, Blockers: routeBlockers, Warnings: routeWarnings,
+			},
+		})
+	}
+	if len(brandVideoChannels) > 0 {
+		routes = append(routes, CreativeHandoffRoute{
+			RouteID: "route_brand_video", DeliverableType: "video", Purpose: "brand",
+			PerformanceMode: "brand_video", Channels: brandVideoChannels,
+			Reason: creativeBrandVideoReason(snapshot.Strategy, brandVideoChannels),
+			Spec: CreativeRouteSpec{
+				TargetDurationSeconds: 30, AspectRatio: "9:16", Resolution: "1080x1920",
+				HookDeadlineSeconds: 3, CompositionRequired: true,
+			},
+			CTAPolicy: CreativeCTAPolicy{}, ClaimRefs: []string{},
+			AssetRequirements: []CreativeAssetRequirement{
+				{Role: "brand_identity", RequiredStage: "production"},
+				{Role: "product_visuals", RequiredStage: "production"},
+				{Role: "music_and_voice_rights", RequiredStage: "production"},
+			},
+			AssetRefs: []string{}, RouteReadiness: HandoffReadiness{
+				Status: "ready", Blockers: []HandoffIssue{}, Warnings: []HandoffIssue{},
 			},
 		})
 	}
 	if len(snapshot.CreativeRoutes) > 0 {
-		blockers = append(blockers, HandoffIssue{
+		issue := HandoffIssue{
 			Code: "creative_route_mode_missing", Stage: "planning", Path: "routes",
 			Message: "旧版 pre_roll Route 没有冻结契约要求的稳定 Route ID 和 performance mode。",
 			Source:  "strategy", SourceRefIDs: []string{},
-		})
+		}
+		if len(routes) == 0 {
+			blockers = append(blockers, issue)
+		} else {
+			issue.Code = "creative_route_legacy_ignored"
+			issue.Message = "旧版 pre_roll Route 未迁移；已冻结的新 Route 仍可独立交接。"
+			warnings = append(warnings, issue)
+		}
 	}
 	return routes, blockers, warnings
 }
@@ -923,12 +974,56 @@ func creativeRouteReason(document StrategyDocument, platform string) string {
 
 func containsImageTextFormat(formats []string) bool {
 	for _, format := range formats {
-		switch strings.ToLower(strings.TrimSpace(format)) {
-		case "图文", "图文笔记", "image_text", "image-text", "image text":
+		normalized := strings.ToLower(strings.TrimSpace(format))
+		if strings.Contains(normalized, "图文") || strings.Contains(normalized, "image_text") ||
+			strings.Contains(normalized, "image-text") || strings.Contains(normalized, "image text") ||
+			strings.Contains(normalized, "图片") || strings.Contains(normalized, "配图") ||
+			strings.Contains(normalized, "长图") || strings.Contains(normalized, "海报") ||
+			strings.Contains(normalized, "三联图") || strings.Contains(normalized, "对比图") ||
+			strings.Contains(normalized, "步骤图") || strings.Contains(normalized, "实拍图") ||
+			strings.Contains(normalized, "carousel") || strings.Contains(normalized, "poster") ||
+			strings.Contains(normalized, "static image") || strings.Contains(normalized, "photo post") {
 			return true
 		}
 	}
 	return false
+}
+
+func containsVideoFormat(formats []string) bool {
+	for _, format := range formats {
+		normalized := strings.ToLower(strings.TrimSpace(format))
+		if strings.Contains(normalized, "视频") || strings.Contains(normalized, "video") ||
+			strings.Contains(normalized, "短片") || strings.Contains(normalized, "tvc") {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsBrandVideoPlatform(platform string) bool {
+	return oneOf(platform, "xiaohongshu", "wechat_official_account", "douyin", "kuaishou")
+}
+
+func creativeHandoffHasBrandGoal(snapshot PackageSnapshot) bool {
+	objective := strings.Join([]string{
+		snapshot.Brief.Snapshot.Campaign.Objective,
+		snapshot.Strategy.Objective,
+		snapshot.Strategy.CrossPlatformRole,
+	}, " ")
+	return containsAny(strings.ToLower(objective), "品牌广告", "品牌认知", "品牌心智", "品牌资产", "brand", "awareness")
+}
+
+func creativeBrandVideoReason(document StrategyDocument, channels []string) string {
+	reasons := make([]string, 0, len(channels))
+	for _, channel := range channels {
+		if reason := creativeRouteReason(document, channel); reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}
+	if len(reasons) == 0 {
+		return strings.TrimSpace(document.Proposition)
+	}
+	return strings.Join(reasons, "；")
 }
 
 func productIDStrings(values []contract.ProductID) []string {

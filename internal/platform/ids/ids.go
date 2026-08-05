@@ -10,9 +10,11 @@ import (
 
 type Generator func(prefix string) (string, error)
 
+const maxPrefixLength = 24
+
 func New(prefix string) (string, error) {
 	if !validPrefix(prefix) {
-		return "", fmt.Errorf("ID prefix must contain only lowercase ASCII letters and digits")
+		return "", fmt.Errorf("ID prefix must contain at most %d lowercase ASCII letters and digits", maxPrefixLength)
 	}
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
@@ -22,7 +24,7 @@ func New(prefix string) (string, error) {
 }
 
 func validPrefix(prefix string) bool {
-	if strings.TrimSpace(prefix) == "" || len(prefix) > 24 {
+	if strings.TrimSpace(prefix) == "" || len(prefix) > maxPrefixLength {
 		return false
 	}
 	for _, character := range prefix {

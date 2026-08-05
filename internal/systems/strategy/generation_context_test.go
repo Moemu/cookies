@@ -88,6 +88,129 @@ func TestStrategyQualityRejectsConfirmedBriefDrift(t *testing.T) {
 	}
 }
 
+func TestStrategyQualityRejectsDuplicatedCreativeDirectionsAndMissingEvidence(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{Snapshot: BriefDocument{
+		Campaign:     BriefCampaign{Objective: "获取有效线索"},
+		Audience:     BriefAudience{Primary: "制造企业研发负责人"},
+		Proposition:  "用可核验精度缩短供应商判断周期",
+		Channels:     []string{"xiaohongshu"},
+		Measurement:  BriefMeasurement{PrimaryKPI: "有效销售线索数"},
+		ReferenceIDs: []string{"doc_precision"},
+	}}
+	document := StrategyDocument{
+		ContractVersion: "strategy-draft/v2",
+		Objective:       brief.Snapshot.Campaign.Objective,
+		Audience: StrategyAudience{
+			Primary:  brief.Snapshot.Audience.Primary,
+			Insights: []string{"需要先验证精度与交付能力"},
+		},
+		Proposition: brief.Snapshot.Proposition,
+		ChannelStrategy: []ChannelStrategy{{
+			Platform: "xiaohongshu", Role: "供应商选型决策入口", Formats: []string{"图文笔记"},
+		}},
+		CreativeRecommendations: []string{
+			"精度证据｜打样选型｜实测拆解｜引用检测报告｜评论咨询",
+			"精度证据｜打样选型｜实测拆解｜引用检测报告｜私信咨询",
+			"交付复盘｜项目延期｜流程复盘｜交付记录待补｜收藏清单",
+		},
+		ExperimentMatrix: []Experiment{{Hypothesis: "实测证据提高咨询意愿", Variable: "证据呈现方式", Metric: "有效销售线索数"}},
+		Measurement:      []string{"有效销售线索数"},
+		ExecutiveSummary: "围绕研发负责人的供应商选型判断，用可核验精度证据降低咨询门槛。",
+		PlatformPlans: []PlatformPlan{{
+			Platform: "xiaohongshu", Role: "供应商选型决策入口", AudienceAngle: "打样选型",
+			ContentPillars: []string{"精度证据"}, Formats: []string{"图文笔记"},
+			ConversionPath: "搜索 → 阅读 → 评论咨询", Cadence: "两周三轮",
+			PrimaryKPI: "有效销售线索数", CreativeIdeas: []string{"实测拆解"},
+		}},
+		Lineage: StrategyLineage{BriefID: "brief_1", BriefVersion: 1, ProjectContextVersion: 1},
+	}
+	report := evaluateStrategyQuality(document, GenerationContext{
+		Brief: brief, PromptVersion: promptkit.GenerateV4,
+	})
+	joined := strings.Join(report.Errors, "\n")
+	if report.Passed || !strings.Contains(joined, "not meaningfully distinct") ||
+		!strings.Contains(joined, "omitted all confirmed Brief references") {
+		t.Fatalf("quality report = %#v", report)
+	}
+}
+
+func TestCreativeRecommendationSimilaritySeparatesDistinctMechanisms(t *testing.T) {
+	t.Parallel()
+	if similarity := creativeRecommendationSimilarity(
+		"精度证据｜打样选型｜实测拆解｜检测报告｜评论咨询",
+		"交付复盘｜项目延期｜流程拆解｜交付记录｜收藏清单",
+	); similarity >= 0.70 {
+		t.Fatalf("distinct recommendations similarity = %f", similarity)
+	}
+	if similarity := creativeRecommendationSimilarity(
+		"精度证据｜打样选型｜实测拆解｜检测报告｜评论咨询",
+		"精度证据｜打样选型｜实测拆解｜检测报告｜私信咨询",
+	); similarity < 0.70 {
+		t.Fatalf("duplicated recommendations similarity = %f", similarity)
+	}
+}
+
+func TestGenerateV4RequiresExactlyThreeStructuredCreativeDirections(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{
+		BriefID: "brief_1", Version: 1,
+		Snapshot: BriefDocument{
+			Campaign: BriefCampaign{Objective: "获取销售线索"},
+			Audience: BriefAudience{Primary: "研发负责人"}, Proposition: "缩短研发周期",
+			Channels: []string{"xiaohongshu"}, Measurement: BriefMeasurement{PrimaryKPI: "有效线索数"},
+		},
+	}
+	document := StrategyDocument{
+		ContractVersion: "strategy-draft/v2", Objective: "获取销售线索",
+		Audience:        StrategyAudience{Primary: "研发负责人", Insights: []string{"需要验证加工稳定性"}},
+		Proposition:     "缩短研发周期",
+		ChannelStrategy: []ChannelStrategy{{Platform: "xiaohongshu"}},
+		CreativeRecommendations: []string{
+			"精度实测",
+			"交付复盘｜项目延期｜工序时间轴｜排产记录｜预约评审",
+			"图纸保密｜首次询价｜脱敏演示｜保密流程｜私信咨询",
+			"工程师问答｜方案比较｜评论答疑｜案例记录｜领取清单",
+		},
+		ExperimentMatrix: []Experiment{{Hypothesis: "证据提高咨询", Variable: "首图证据", Metric: "有效线索数"}},
+		Measurement:      []string{"有效线索数"}, AssumptionsAndGaps: []string{"检测报告待补"},
+		PlatformPlans: []PlatformPlan{{Platform: "xiaohongshu"}},
+		Lineage:       StrategyLineage{BriefID: "brief_1", BriefVersion: 1, ProjectContextVersion: 1},
+	}
+
+	report := evaluateStrategyQuality(document, GenerationContext{Brief: brief, PromptVersion: promptkit.GenerateV4})
+	joined := strings.Join(report.Errors, "\n")
+	if !strings.Contains(joined, "exactly three") || !strings.Contains(joined, "missing decision anatomy") {
+		t.Fatalf("quality report = %#v", report)
+	}
+}
+
+func TestGenerateV4RejectsQuantitativeClaimsMissingFromSources(t *testing.T) {
+	t.Parallel()
+	brief := BriefVersion{Snapshot: BriefDocument{
+		Budget: BriefBudget{Total: "10 万元"}, Schedule: BriefSchedule{Window: "21 天"},
+	}}
+	document := StrategyDocument{
+		Audience:                StrategyAudience{Insights: []string{"83%的研发负责人会先规避风险", "21天内完成验证"}},
+		CreativeRecommendations: []string{"清单｜搜索｜拆解3000件门槛和12项核验点｜研究证据｜咨询"},
+		PlatformPlans:           []PlatformPlan{{CreativeIdeas: []string{"用0.005mm精度做首图"}}},
+	}
+	generation := GenerationContext{
+		Brief: brief, PromptVersion: promptkit.GenerateV4,
+		Documents: []KnowledgeExcerpt{{Content: "检测报告记录0.005mm精度"}},
+	}
+
+	issues := strings.Join(unsupportedQuantitativeClaims(document, generation), "\n")
+	if !strings.Contains(issues, "83%") || !strings.Contains(issues, "3000件") || !strings.Contains(issues, "12项") {
+		t.Fatalf("issues = %q", issues)
+	}
+	for _, supported := range []string{"21天", "0.005mm", "10万元"} {
+		if strings.Contains(issues, supported) {
+			t.Fatalf("supported claim %q was rejected: %s", supported, issues)
+		}
+	}
+}
+
 func TestNormalizeGeneratedStrategyRepairsCommonModelDriftLocally(t *testing.T) {
 	t.Parallel()
 	brief := BriefVersion{
@@ -299,6 +422,10 @@ func TestDeterministicStrategyBuildsDistinctPlansForEveryV2Platform(t *testing.T
 	if len(roles) != 4 || roles["xiaohongshu"] == roles["douyin"] ||
 		roles["douyin"] == roles["taobao_tmall"] || roles["taobao_tmall"] == roles["wechat_ecosystem"] {
 		t.Fatalf("platform roles are not distinct: %#v", roles)
+	}
+	quality := evaluateStrategyQuality(document, GenerationContext{Brief: brief, PromptVersion: promptkit.GenerateV4})
+	if !quality.Passed {
+		t.Fatalf("deterministic strategy does not satisfy GenerateV4 quality: %#v", quality)
 	}
 }
 

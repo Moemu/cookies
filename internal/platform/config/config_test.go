@@ -17,12 +17,13 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		!value.Strategy.ContextSelectionEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
 		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
-		value.Strategy.PromptVersion != "strategy.generate.v3" ||
+		value.Strategy.PromptVersion != "strategy.generate.v4" ||
 		value.Strategy.ConversationPromptVersion != "strategy.conversation.v5" ||
 		value.Strategy.RevisePromptVersion != "strategy.revise.v3" ||
 		value.Strategy.ReviewPromptVersion != "strategy.review.deep.v2" ||
 		value.Strategy.RepairPromptVersion != "strategy.repair.v2" ||
 		!value.Strategy.CreativeTaskPlanningEnabled ||
+		!value.Strategy.QuickViralRemakeEnabled ||
 		value.Strategy.CreativeTaskPromptVersion != "strategy.creative_task.generate.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
@@ -93,6 +94,9 @@ func TestProductionKeepsPreviousStrategyPromptDefaults(t *testing.T) {
 		config.Strategy.ContextSelectionEnabled || config.Strategy.CreativeTaskPlanningEnabled {
 		t.Fatalf("production prompt defaults = %#v", config.Strategy)
 	}
+	if config.Strategy.QuickViralRemakeEnabled {
+		t.Fatalf("production quick viral remake must start disabled: %#v", config.Strategy)
+	}
 }
 
 func TestStrategyContextSelectionRejectsInvalidBoolean(t *testing.T) {
@@ -101,6 +105,16 @@ func TestStrategyContextSelectionRejectsInvalidBoolean(t *testing.T) {
 		"COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED": "sometimes",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStrategyQuickViralRemakeRejectsInvalidBoolean(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_STRATEGY_QUICK_VIRAL_REMAKE_ENABLED": "sometimes",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_QUICK_VIRAL_REMAKE_ENABLED") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -127,6 +141,20 @@ func TestStrategyRolloutAllowsExplicitCreativeIntegration(t *testing.T) {
 	value, err := FromLookup(mapLookup(map[string]string{"COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED": "true"}))
 	if err != nil || !value.Strategy.PackageToCreativeEnabled {
 		t.Fatalf("expected explicit Strategy-to-Creative integration to be enabled: %#v, %v", value.Strategy, err)
+	}
+}
+
+func TestCreativeImageFontUsesUnifiedConfigurationLookup(t *testing.T) {
+	t.Parallel()
+	value, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_CREATIVE_IMAGE_FONT_PATH":   "C:/fonts/chinese.ttf",
+		"COOKIES_CREATIVE_IMAGE_FONT_SHA256": "ABCDEF",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Creative.ImageFontPath != "C:/fonts/chinese.ttf" || value.Creative.ImageFontSHA256 != "abcdef" {
+		t.Fatalf("unexpected Creative image font config: %#v", value.Creative)
 	}
 }
 

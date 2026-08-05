@@ -70,6 +70,15 @@ function videoStatusFromWorkspace(workspace: AINativeRequirementWorkspace, curre
   }
 }
 
+export function productionFailureMessage(workspace: AINativeRequirementWorkspace): string {
+  const failedVideo = workspace.production_plan?.units.find(unit => unit.attempts.at(-1)?.status === 'failed')
+  const failedSpeech = workspace.production_plan?.speech_units.find(unit => unit.attempts.at(-1)?.status === 'failed')
+  const attempt = failedVideo?.attempts.at(-1) ?? failedSpeech?.attempts.at(-1)
+  if (attempt?.error_message) return attempt.error_message
+  if (workspace.production_status === 'render_failed') return workspace.production_plan?.render?.error_message || '最终视频渲染失败，已生成的片段与旁白仍会保留。'
+  return '部分视频片段或旁白生成失败，可只重试失败片段。'
+}
+
 export function aiNativeReducer(state: AINativeFrontendState, action: AINativeAction): AINativeFrontendState {
   switch (action.type) {
     case 'reset':
@@ -104,7 +113,11 @@ export function aiNativeReducer(state: AINativeFrontendState, action: AINativeAc
           storyboard: action.workspace.storyboard_status ?? state.stage_status.storyboard,
           video: videoStatusFromWorkspace(action.workspace, state.stage_status.video),
         },
-        error: '',
+        error: action.workspace.storyboard_status === 'failed'
+          ? action.workspace.storyboard_error_message || '故事板或参考图片生成失败，请重试。'
+          : action.workspace.production_status === 'failed' || action.workspace.production_status === 'render_failed'
+            ? productionFailureMessage(action.workspace)
+            : '',
       }
     case 'requirement-confirmed':
       return {

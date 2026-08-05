@@ -91,6 +91,7 @@ type Strategy struct {
 	ApproveEnabled              bool
 	PackageToCreativeEnabled    bool
 	CreativeTaskPlanningEnabled bool
+	QuickViralRemakeEnabled     bool
 	TextModelAlias              string
 	DeepReviewModelAlias        string
 	PromptVersion               string
@@ -107,6 +108,8 @@ type Strategy struct {
 type Creative struct {
 	DirectionPlanningEnabled       bool
 	DirectionPlannerModelAlias     string
+	ImageFontPath                  string
+	ImageFontSHA256                string
 	ShortDramaModelPlannerEnabled  bool
 	ShortDramaPlannerModelAlias    string
 	GamePrerollModelPlannerEnabled bool
@@ -331,6 +334,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	strategyQuickViralRemakeEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_STRATEGY_QUICK_VIRAL_REMAKE_ENABLED",
+		environment != EnvironmentProduction,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	gamePrerollModelPlannerEnabled, err := strictBoolValueOr(
 		lookup,
 		"COOKIES_CREATIVE_GAME_PREROLL_MODEL_PLANNER_ENABLED",
@@ -377,7 +388,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	reviewPromptDefault := "strategy.review.deep.v1"
 	repairPromptDefault := "strategy.repair.v1"
 	if environment == EnvironmentLocal || environment == EnvironmentTest {
-		generatePromptDefault = "strategy.generate.v3"
+		generatePromptDefault = "strategy.generate.v4"
 		conversationPromptDefault = "strategy.conversation.v5"
 		revisePromptDefault = "strategy.revise.v3"
 		reviewPromptDefault = "strategy.review.deep.v2"
@@ -417,6 +428,8 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		Creative: Creative{
 			DirectionPlanningEnabled:       directionPlanningEnabled,
 			DirectionPlannerModelAlias:     valueOr(lookup, "COOKIES_CREATIVE_DIRECTION_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
+			ImageFontPath:                  valueOr(lookup, "COOKIES_CREATIVE_IMAGE_FONT_PATH", ""),
+			ImageFontSHA256:                strings.ToLower(strings.TrimSpace(valueOr(lookup, "COOKIES_CREATIVE_IMAGE_FONT_SHA256", ""))),
 			ShortDramaModelPlannerEnabled:  shortDramaModelPlannerEnabled,
 			ShortDramaPlannerModelAlias:    valueOr(lookup, "COOKIES_CREATIVE_SHORT_DRAMA_PLANNER_MODEL_ALIAS", "cookies.text.standard"),
 			GamePrerollModelPlannerEnabled: gamePrerollModelPlannerEnabled,
@@ -432,6 +445,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ApproveEnabled:              strategyApproveEnabled,
 			PackageToCreativeEnabled:    strategyPackageToCreativeEnabled,
 			CreativeTaskPlanningEnabled: strategyCreativeTaskPlanningEnabled,
+			QuickViralRemakeEnabled:     strategyQuickViralRemakeEnabled,
 			TextModelAlias:              valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
 			DeepReviewModelAlias:        valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
 			PromptVersion:               valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", generatePromptDefault),
@@ -650,7 +664,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Strategy.PromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION must not be empty")
 	}
-	if !oneOf(c.Strategy.PromptVersion, "strategy.generate.v2", "strategy.generate.v3") {
+	if !oneOf(c.Strategy.PromptVersion, "strategy.generate.v2", "strategy.generate.v3", "strategy.generate.v4") {
 		return fmt.Errorf("COOKIES_STRATEGY_PROMPT_VERSION is unsupported")
 	}
 	if strings.TrimSpace(c.Strategy.ConversationPromptVersion) == "" {

@@ -1306,6 +1306,7 @@ func TestCreativeImageTextSlotGenerationUsesFrozenPromptAndPortraitProfile(t *te
 	}
 	if jobs.request.Input.Width != creative.ImageTextSourceWidth ||
 		jobs.request.Input.Height != creative.ImageTextSourceHeight ||
+		jobs.request.Operation != "image.edit" ||
 		jobs.request.Input.Prompt != "frozen portrait prompt" ||
 		len(jobs.request.Input.SourceAssets) != 1 ||
 		jobs.request.Input.PromptRef == nil ||
@@ -1630,6 +1631,41 @@ func TestGetLatestShortDramaWorkspaceRestoresThePersistedTask(t *testing.T) {
 	}
 	if manager.latestShortDramaProjectID != "project_1" {
 		t.Fatalf("latest short drama workspace project = %q", manager.latestShortDramaProjectID)
+	}
+}
+
+func TestGetLatestAINativeWorkspaceRestoresThePersistedStage(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{latestAINativeWorkspace: creative.AINativeRequirementWorkspace{
+		WorkspaceID: "ainativeworkspace_1", OrganizationID: "org_1", ProjectID: "project_1", CurrentStage: creative.AINativeStageStoryboard,
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/ai-native-ads:latest", nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"workspace_id":"ainativeworkspace_1"`) ||
+		!strings.Contains(response.Body.String(), `"current_stage":"storyboard"`) {
+		t.Fatalf("workspace body = %s", response.Body.String())
+	}
+	if manager.latestAINativeProjectID != "project_1" {
+		t.Fatalf("latest AI native workspace project = %q", manager.latestAINativeProjectID)
 	}
 }
 
@@ -2261,6 +2297,8 @@ type creativeManagerStub struct {
 	regenerateGameTaskID               string
 	regenerateGameRequest              creative.RegenerateGamePrerollCandidatesRequest
 	latestShortDramaProjectID          contract.ProjectID
+	latestAINativeWorkspace            creative.AINativeRequirementWorkspace
+	latestAINativeProjectID            contract.ProjectID
 	latestGamePrerollProjectID         contract.ProjectID
 	selectedGameTaskID                 string
 	selectedGameRequest                creative.SelectGamePrerollCandidateRequest
@@ -2270,6 +2308,12 @@ type creativeManagerStub struct {
 	imageAttempt                       creative.ImageGenerationAttempt
 	preparedImageOrder                 int
 	attachedImageProviderJobID         string
+	failedImageAttemptID               string
+}
+
+func (s *creativeManagerStub) GetLatestAINativeRequirementWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.AINativeRequirementWorkspace, error) {
+	s.latestAINativeProjectID = projectID
+	return s.latestAINativeWorkspace, nil
 }
 
 func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {
@@ -2568,6 +2612,19 @@ func (s *creativeManagerStub) AttachImageProviderJob(
 ) (creative.ImageGenerationAttempt, error) {
 	s.attachedImageProviderJobID = providerJobID
 	s.imageAttempt.ProviderJobID = providerJobID
+	return s.imageAttempt, nil
+}
+
+func (s *creativeManagerStub) FailImageGenerationAttempt(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	attemptID string,
+	_ string,
+	_ string,
+) (creative.ImageGenerationAttempt, error) {
+	s.failedImageAttemptID = attemptID
+	s.imageAttempt.Status = creative.ImageAttemptFailed
 	return s.imageAttempt, nil
 }
 

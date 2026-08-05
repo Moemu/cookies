@@ -3,6 +3,7 @@ import { api, type ApiAgencyWorkbench, type ApiArtifact, type ApiBusinessTask, t
 import type { ArtifactKey, ArtifactStatus, BusinessTaskRecord, ChangeSetRecord, ProjectArtifact, ProjectRecord } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { presentCreativeStatus } from '../lib/media-status'
+import { useAuth } from './AuthContext'
 
 interface ProjectContextValue {
   projects: ProjectRecord[]
@@ -31,6 +32,7 @@ interface ProjectContextValue {
 const ProjectContext = createContext<ProjectContextValue | null>(null)
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
+  const { session, isLoading: isAuthLoading } = useAuth()
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [agencyWorkbench, setAgencyWorkbench] = useState<ApiAgencyWorkbench | null>(null)
   const [targetProjectId, setTargetProjectId] = useState('')
@@ -93,7 +95,24 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => { void reloadProjects() }, [reloadProjects])
+  useEffect(() => {
+    if (isAuthLoading) return
+    if (!session.authenticated) {
+      reloadRequestRef.current += 1
+      projectsRef.current = []
+      targetProjectIdRef.current = ''
+      loadedProjectIdRef.current = ''
+      setProjects([])
+      setAgencyWorkbench(null)
+      setTargetProjectId('')
+      setLoadedProjectId('')
+      setError(null)
+      setRouteDiagnostic(null)
+      setIsLoading(false)
+      return
+    }
+    void reloadProjects()
+  }, [isAuthLoading, reloadProjects, session.authenticated])
 
   const selectProject = useCallback((id: string) => {
     targetProjectIdRef.current = id
