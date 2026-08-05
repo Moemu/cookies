@@ -72,7 +72,7 @@ func (r *memoryAINativeProductionRepository) BeginAINativeProduction(_ context.C
 
 func (r *memoryAINativeProductionRepository) SaveAINativeProductionPlan(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, _ string, _ AINativeProductionOperation, plan AINativeProductionPlan, _ time.Time) (AINativeRequirementWorkspace, error) {
 	r.workspace.ProductionPlan, r.workspace.ProductionStatus = &plan, plan.Status
-	if plan.Status == AINativeProductionReadyStatus || plan.Status == AINativeProductionCompletedStatus || plan.Status == AINativeProductionRenderFailedStatus {
+	if plan.Status == AINativeProductionReadyStatus || plan.Status == AINativeProductionCompletedStatus || plan.Status == AINativeProductionRenderFailedStatus || plan.Status == AINativeProductionFailedStatus {
 		r.workspace.ActiveOperationID, r.workspace.ActiveOperationVersion = "", nil
 	}
 	return r.workspace, nil
@@ -92,11 +92,20 @@ func (s *productionSchedulerStub) ScheduleAINativeProduction(_ context.Context, 
 }
 
 type productionVideoJobsStub struct {
-	created int
+	created       int
+	sourceTaskIDs []string
+	createErr     error
 }
 
 func (s *productionVideoJobsStub) CreateVideoJob(_ context.Context, request provider.CreateVideoJobRequest) (contract.ProviderJob, bool, error) {
 	s.created++
+	s.sourceTaskIDs = append(s.sourceTaskIDs, request.SourceTaskID)
+	if len(request.SourceTaskID) > 96 {
+		return contract.ProviderJob{}, false, errors.New("source task id exceeds provider storage limit")
+	}
+	if s.createErr != nil {
+		return contract.ProviderJob{}, false, s.createErr
+	}
 	return contract.ProviderJob{ID: "provider-job-" + request.SourceTaskID, OrganizationID: request.Actor.OrganizationID, ProjectID: request.Project.ProjectID, ProviderStatus: contract.ProviderJobSubmitted}, false, nil
 }
 
@@ -172,6 +181,33 @@ func TestCompileAINativeProductionPlanMapsConfirmedStoryboardToProviderUnits(t *
 	}
 	if len(plan.SpeechUnits) != 3 || plan.TotalDurationMS != 20000 {
 		t.Fatalf("unexpected production plan totals: %#v", plan)
+	}
+}
+
+func TestCompileAINativeProductionPlanDoesNotReusePersonIdentityAsVideoConditioning(t *testing.T) {
+	requirement, _ := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	storyboard.Shots[0].ProductIdentityRequired = false
+	storyboard.Shots[0].ReferenceAssetIDs = []string{"person_1", "scene_1"}
+	storyboard.Shots[1].ProductIdentityRequired = false
+	storyboard.Shots[1].ReferenceAssetIDs = []string{"person_1"}
+
+	plan, err := CompileAINativeProductionPlan(requirement, storyboard, contract.ProjectID("project-1"), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unit := range plan.Units {
+		if unit.ReferenceRole == AINativeStoryboardAssetRolePersonIdentity {
+			t.Fatalf("unit %s passed reusable person identity directly to the video provider: %#v", unit.ID, unit)
+		}
+	}
+	if plan.Units[0].ReferenceRole != AINativeStoryboardAssetRoleSceneReference {
+		t.Fatalf("first non-product shot did not prefer its scene reference: %#v", plan.Units[0])
+	}
+	for _, unit := range plan.Units {
+		if unit.ShotIDs[0] == storyboard.Shots[1].ID && unit.ReferenceAsset != nil {
+			t.Fatalf("person-only shot should safely fall back to text-only generation: %#v", unit)
+		}
 	}
 }
 
@@ -266,6 +302,78 @@ func TestAINativeProductionJobResumesWithoutRepeatingSucceededSpeechOrVideoSubmi
 	}
 }
 
+func TestAINativeProductionJobUsesProviderSafeSourceTaskIDsForLongWorkspaces(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	revision := int64(1)
+	workspaceID := "ainativeworkspace_784e703c2a0d8b02c88bb684062917f4"
+	repository := &memoryAINativeProductionRepository{workspace: AINativeRequirementWorkspace{WorkspaceID: workspaceID, CreativeIntakeID: "intake-1", CreativeTaskID: "task-1", OrganizationID: "org-1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageStoryboard, WorkspaceVersion: 7, CurrentRevision: 1, ConfirmedRevision: &revision, Requirement: requirement,
+		ScriptStatus: AINativeScriptConfirmedStatus, CurrentScriptRevision: &revision, ConfirmedScriptRevision: &revision, Script: &script,
+		StoryboardStatus: AINativeStoryboardConfirmedStatus, CurrentStoryboardRevision: &revision, ConfirmedStoryboardRevision: &revision, Storyboard: &storyboard,
+		CreatedBy: "user-1", ConfirmedBy: "user-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+	scheduler, videos := &productionSchedulerStub{}, &productionVideoJobsStub{}
+	sequence := 0
+	now := time.Date(2026, 8, 5, 8, 0, 0, 0, time.UTC)
+	service := Service{Projects: testProjects{}, AINativeProductions: repository, AINativeProductionScheduler: scheduler, AINativeVideoJobs: videos,
+		AINativeSpeech: &productionSpeechStub{}, AudioAssets: &productionAudioWriterStub{}, AINativeMaxActiveUnits: 1,
+		NewID: func(prefix string) (string, error) { sequence++; return prefix + "_" + strings.Repeat("a", 32), nil }, Now: func() time.Time { return now }}
+	actor := contract.ActorContext{OrganizationID: "org-1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user-1"}, Scopes: []contract.Scope{ScopeWrite, provider.ScopeJobCreate, "assets.write"}}
+	if _, err := service.StartAINativeProduction(context.Background(), actor, "project_1", workspaceID, StartAINativeProductionRequest{ExpectedWorkspaceVersion: 7}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(AINativeProductionJobPayload{Operation: scheduler.operation})
+	claim := jobruntime.Claim{Job: contract.Job{Kind: AINativeProductionJobKind, OrganizationID: "org-1", ProjectID: "project_1"}, Payload: payload}
+	if _, err := service.HandleAINativeProductionJob(context.Background(), claim); err == nil {
+		t.Fatal("first pass should defer while the submitted video is running")
+	} else {
+		var deferred jobruntime.DeferredError
+		if !errors.As(err, &deferred) {
+			t.Fatalf("first pass error = %T %v, want DeferredError", err, err)
+		}
+	}
+	if len(videos.sourceTaskIDs) != 1 || len(videos.sourceTaskIDs[0]) > 96 {
+		t.Fatalf("provider source task ids = %#v, want one id of at most 96 characters", videos.sourceTaskIDs)
+	}
+}
+
+func TestAINativeProductionJobPersistsVideoSubmissionFailureForRetry(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	revision := int64(1)
+	repository := &memoryAINativeProductionRepository{workspace: AINativeRequirementWorkspace{WorkspaceID: "workspace-1", CreativeIntakeID: "intake-1", CreativeTaskID: "task-1", OrganizationID: "org-1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageStoryboard, WorkspaceVersion: 7, CurrentRevision: 1, ConfirmedRevision: &revision, Requirement: requirement,
+		ScriptStatus: AINativeScriptConfirmedStatus, CurrentScriptRevision: &revision, ConfirmedScriptRevision: &revision, Script: &script,
+		StoryboardStatus: AINativeStoryboardConfirmedStatus, CurrentStoryboardRevision: &revision, ConfirmedStoryboardRevision: &revision, Storyboard: &storyboard,
+		CreatedBy: "user-1", ConfirmedBy: "user-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+	scheduler := &productionSchedulerStub{}
+	videos := &productionVideoJobsStub{createErr: errors.New("provider rejected video request")}
+	sequence := 0
+	now := time.Date(2026, 8, 5, 8, 10, 0, 0, time.UTC)
+	service := Service{Projects: testProjects{}, AINativeProductions: repository, AINativeProductionScheduler: scheduler, AINativeVideoJobs: videos,
+		AINativeSpeech: &productionSpeechStub{}, AudioAssets: &productionAudioWriterStub{}, AINativeMaxActiveUnits: 1,
+		NewID: func(prefix string) (string, error) { sequence++; return prefix + "-" + string(rune('a'+sequence)), nil }, Now: func() time.Time { return now }}
+	actor := contract.ActorContext{OrganizationID: "org-1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user-1"}, Scopes: []contract.Scope{ScopeWrite, provider.ScopeJobCreate, "assets.write"}}
+	if _, err := service.StartAINativeProduction(context.Background(), actor, "project_1", "workspace-1", StartAINativeProductionRequest{ExpectedWorkspaceVersion: 7}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(AINativeProductionJobPayload{Operation: scheduler.operation})
+	claim := jobruntime.Claim{Job: contract.Job{Kind: AINativeProductionJobKind, OrganizationID: "org-1", ProjectID: "project_1"}, Payload: payload}
+	_, err := service.HandleAINativeProductionJob(context.Background(), claim)
+	var execution jobruntime.ExecutionError
+	if !errors.As(err, &execution) || execution.JobError.Code != "AI_NATIVE_VIDEO_SUBMISSION_FAILED" {
+		t.Fatalf("job error = %T %v, want AI_NATIVE_VIDEO_SUBMISSION_FAILED", err, err)
+	}
+	failed := repository.workspace
+	if failed.ProductionStatus != AINativeProductionFailedStatus || failed.ActiveOperationID != "" {
+		t.Fatalf("workspace remained active after terminal submission failure: %#v", failed)
+	}
+	attempt := failed.ProductionPlan.Units[0].Attempts[len(failed.ProductionPlan.Units[0].Attempts)-1]
+	if attempt.Status != AINativeAttemptFailedStatus || attempt.ErrorCode != "AI_NATIVE_VIDEO_SUBMISSION_FAILED" || !strings.Contains(attempt.ErrorMessage, "provider rejected") {
+		t.Fatalf("failed attempt did not retain actionable error: %#v", attempt)
+	}
+}
+
 func TestAINativeProductionProgressUsesCompletedDurationAndPreservesSuccessfulUnits(t *testing.T) {
 	requirement, _ := validAINativeStoryboardInputs()
 	plan, err := CompileAINativeProductionPlan(requirement, readyConfirmedAINativeStoryboard(), contract.ProjectID("project-1"), time.Now().UTC())
@@ -292,6 +400,28 @@ func TestAINativeProductionProgressUsesCompletedDurationAndPreservesSuccessfulUn
 	}
 	if len(retried.Units[1].Attempts) != 2 || retried.Units[1].Attempts[1].RetryOf != "attempt-2" {
 		t.Fatalf("retry did not append one local attempt: %#v", retried.Units[1])
+	}
+}
+
+func TestAINativeProductionRetryDropsPrivacyRejectedPersonReference(t *testing.T) {
+	now := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
+	personRef := contract.AssetVersionRef{AssetID: "person-asset", Version: 1}
+	plan := AINativeProductionPlan{Status: AINativeProductionFailedStatus, Units: []AINativeGenerationUnit{{
+		ID: "video-unit-01", ReferenceAsset: &personRef, ReferenceRole: AINativeStoryboardAssetRolePersonIdentity, ProductIdentityRequired: false,
+		Attempts: []AINativeGenerationAttempt{{ID: "attempt-1", Ordinal: 1, Status: AINativeAttemptFailedStatus,
+			ErrorCode: "InputImageSensitiveContentDetected.PrivacyInformation", ErrorMessage: "input image may contain real person"}},
+	}}}
+
+	retried, err := plan.RetryUnit("video-unit-01", "attempt-2", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := retried.Units[0]
+	if unit.ReferenceAsset != nil || unit.ReferenceRole != "" {
+		t.Fatalf("privacy-rejected person reference was reused: %#v", unit)
+	}
+	if len(unit.Attempts) != 2 || unit.Attempts[1].Status != AINativeAttemptPlannedStatus || unit.Attempts[1].RetryOf != "attempt-1" {
+		t.Fatalf("retry attempt was not appended correctly: %#v", unit.Attempts)
 	}
 }
 

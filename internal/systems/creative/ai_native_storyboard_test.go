@@ -71,6 +71,60 @@ func TestModelAINativeStoryboardPlannerPreservesProductAssetsAndReturnsCompleteS
 	}
 }
 
+func TestModelAINativeStoryboardPlannerKeepsFixedProductWhenGeneratedAssetReusesItsID(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	output, err := json.Marshal(modelAINativeStoryboard{
+		Assets: []modelAINativeStoryboardAsset{
+			{ID: "product_1", Role: AINativeStoryboardAssetRolePersonIdentity, Name: "通勤女性", GenerationBrief: "自然通勤状态，人物一致"},
+			{ID: "scene_1", Role: AINativeStoryboardAssetRoleSceneReference, Name: "地铁入口", GenerationBrief: "清晨城市地铁入口"},
+		},
+		Shots: []modelAINativeStoryboardShot{
+			{ID: "shot_1", StartMS: 0, EndMS: 4000, VisualContent: "通勤痛点", SubjectsProductsActions: "人物背着真实商品快步行走", ShotSize: "中景", CameraMovement: "跟拍", ReferenceAssetIDs: []string{"product_1", "scene_1"}, Voiceover: "通勤装得多。", Subtitle: "轻松通勤", SoundEffect: "脚步声", BGMDirection: "轻快", Transition: "硬切", ProductIdentityRequired: true},
+			{ID: "shot_2", StartMS: 4000, EndMS: 15000, VisualContent: "展示商品结构", SubjectsProductsActions: "人物取下真实商品并展示", ShotSize: "中近景", CameraMovement: "环绕", ReferenceAssetIDs: []string{"product_1"}, Voiceover: "容量与舒适兼顾。", Subtitle: "舒适大容量", SoundEffect: "拉链声", BGMDirection: "节奏延续", Transition: "动作切", ProductIdentityRequired: true},
+			{ID: "shot_3", StartMS: 15000, EndMS: 20000, VisualContent: "商品定格", SubjectsProductsActions: "真实商品正面定格", ShotSize: "特写", CameraMovement: "轻推", ReferenceAssetIDs: []string{"product_1"}, Voiceover: "点击了解更多。", Subtitle: "点击了解更多", SoundEffect: "提示音", BGMDirection: "收束", Transition: "淡出", ProductIdentityRequired: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := &aiNativeTextGeneratorStub{response: provider.SynchronousResponse{ProviderCode: "ark", ModelAlias: "cookies.text.standard", ModelVersion: "seed", StructuredOutput: output}}
+	profile, err := NewChannelCreativeProfileRegistry().Resolve("douyin", "performance", "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	storyboard, err := (ModelAINativeStoryboardPlanner{Text: text, ModelAlias: "cookies.text.standard"}).Plan(context.Background(), contract.ActorContext{}, contract.ProjectContext{}, requirement, script, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetIDs := make(map[string]bool, len(storyboard.Assets))
+	personID := ""
+	for _, asset := range storyboard.Assets {
+		if assetIDs[asset.ID] {
+			t.Fatalf("storyboard contains duplicate asset ID %q", asset.ID)
+		}
+		assetIDs[asset.ID] = true
+		if asset.Role == AINativeStoryboardAssetRolePersonIdentity {
+			personID = asset.ID
+		}
+	}
+	if !assetIDs["product_1"] || personID == "" || personID == "product_1" {
+		t.Fatalf("fixed product and generated person IDs were not preserved independently: %#v", storyboard.Assets)
+	}
+	if !containsString(storyboard.Shots[0].ReferenceAssetIDs, "product_1") || !containsString(storyboard.Shots[0].ReferenceAssetIDs, personID) {
+		t.Fatalf("colliding reference was not expanded to the fixed product and renamed person: %#v", storyboard.Shots[0].ReferenceAssetIDs)
+	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func validAINativeStoryboardInputs() (AINativeRequirementDraft, AINativeScriptRevision) {
 	requirement := validRequirementForScript()
 	requirement.Media = []AINativeRequirementMedia{{ID: "media_1", Role: "product", Source: "product_link", AssetRef: &contract.AssetVersionRef{AssetID: "asset_product", Version: 1}}}

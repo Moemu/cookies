@@ -42,6 +42,18 @@ paths:
               schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '422': {description: The product link could not be resolved into usable commerce data.}
+  /api/creative/v1/projects/{project_id}/ai-native-ads:latest:
+    get:
+      operationId: getLatestAINativeAdWorkspace
+      summary: Restore the most recently updated AI-native-ad workspace for this project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Most recently updated AI-native-ad workspace, including its current stage.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}:
     get:
       operationId: getAINativeAdRequirementWorkspace

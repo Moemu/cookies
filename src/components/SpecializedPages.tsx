@@ -153,6 +153,19 @@ const performanceSections = [
   { id: 'ai-native', label: 'AI 效果广告生成', detail: '从商品需求到完整广告视频' },
 ] as const
 
+type PerformanceSectionId = (typeof performanceSections)[number]['id']
+
+function initialPerformanceSection(): PerformanceSectionId {
+  const section = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('section')
+  return performanceSections.some(item => item.id === section) ? section as PerformanceSectionId : 'preroll'
+}
+
+function rememberPerformanceSection(section: PerformanceSectionId) {
+  const search = new URLSearchParams(window.location.search)
+  search.set('section', section)
+  window.history.replaceState(null, '', `${window.location.pathname}?${search.toString()}${window.location.hash}`)
+}
+
 const preRollPresets = {
   'short-drama': {
     eyebrow: 'SHORT DRAMA HOOK',
@@ -173,7 +186,7 @@ const preRollPresets = {
 export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask, onOpenBrandTask }: { state: DataState, activeView: string, activeTaskId?: string, onOpenTask: (id: string) => void, onOpenBrandTask: (id: string) => void }) {
   const { currentProject, createTask } = useProject()
   const industry = industryProfile(currentProject.industry)
-  const [selectedSection, setSelectedSection] = useState<(typeof performanceSections)[number]['id']>('preroll')
+  const [selectedSection, setSelectedSection] = useState<PerformanceSectionId>(initialPerformanceSection)
   const [selectedPreroll, setSelectedPreroll] = useState('short-drama')
   const [notice, setNotice] = useState('')
   const [brandIntake, setBrandIntake] = useState<ApiCreativeIntakeBootstrap | null>(null)
@@ -402,7 +415,7 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask,
     <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : brandIntake ? <div className="creative-task-banner compact"><span>Strategy → Brand Film</span><b>{brandIntake.base_handoff?.creative_view?.communication?.single_minded_proposition || '品牌策略已冻结'}</b><small>先选创意方向，再创建真实视频任务</small></div> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{(category === 'performance' && selectedSection !== 'ai-native') || (category === 'brand' && !brandIntake) ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activePerformanceLabel : '品牌广告'}</button> : null}</header>
     {!brandIntake ? <><IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/><ProjectMediaContext /></> : null}
     {category === 'performance' ? <>
-      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
+      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); rememberPerformanceSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
       {selectedSection === 'preroll' ? <>
         <div className="preroll-subnav">
           <span className="preroll-subnav-label"><b>前贴广告</b><i>/</i>选择类型</span>

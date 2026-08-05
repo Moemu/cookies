@@ -83,7 +83,7 @@ func (s Service) GenerateAINativeStoryboard(ctx context.Context, actor contract.
 	if err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
-	id, err := s.idGenerator()("ainativestoryboardoperation")
+	id, err := s.idGenerator()("ainativestoryboardop")
 	if err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
