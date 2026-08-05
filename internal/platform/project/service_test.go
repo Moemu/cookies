@@ -44,6 +44,16 @@ func (*stubProjectStore) CreateProject(context.Context, Project, contract.Princi
 func (*stubProjectStore) UpdateProject(context.Context, Project, ProjectRuntime, int64) error {
 	return nil
 }
+func (*stubProjectStore) CreateProjectArtifact(context.Context, ProjectArtifact) error { return nil }
+func (*stubProjectStore) ListProjectArtifacts(context.Context, contract.OrganizationID, contract.ProjectID) ([]ProjectArtifact, error) {
+	return nil, nil
+}
+func (*stubProjectStore) GetProjectArtifact(context.Context, contract.OrganizationID, contract.ProjectID, string) (ProjectArtifact, error) {
+	return ProjectArtifact{}, ErrNotFound
+}
+func (*stubProjectStore) UpdateProjectArtifact(context.Context, ProjectArtifact, int64) error {
+	return nil
+}
 func (s *stubProjectStore) GetProject(context.Context, contract.OrganizationID, contract.ProjectID) (Project, error) {
 	s.read = true
 	return Project{}, ErrNotFound

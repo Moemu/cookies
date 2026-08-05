@@ -40,14 +40,99 @@ func (s Service) GetDetail(ctx context.Context, actor contract.ActorContext, pro
 	if err != nil {
 		return ProjectDetail{}, err
 	}
+	artifacts, err := s.Store.ListProjectArtifacts(ctx, actor.OrganizationID, projectID)
+	if err != nil {
+		return ProjectDetail{}, err
+	}
 	return ProjectDetail{
 		Project:    projectValue,
 		Runtime:    runtime,
-		Artifacts:  []ProjectArtifactSummary{},
+		Artifacts:  summarizeProjectArtifacts(artifacts),
 		Tasks:      tasks,
 		Operations: operations,
 		ChangeSets: changeSets,
 	}, nil
+}
+
+func (s Service) CreateProjectArtifact(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreateProjectArtifactRequest) (ProjectArtifact, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return ProjectArtifact{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ProjectArtifact{}, err
+	}
+	id, err := s.newID("artifact")
+	if err != nil {
+		return ProjectArtifact{}, err
+	}
+	now := time.Now().UTC()
+	artifact := ProjectArtifact{
+		ID:             id,
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      projectID,
+		Kind:           request.Kind,
+		Status:         request.Status,
+		Content:        strings.TrimSpace(request.Content),
+		SourceJobID:    strings.TrimSpace(request.SourceJobID),
+		Version:        1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.Store.CreateProjectArtifact(ctx, artifact); err != nil {
+		return ProjectArtifact{}, err
+	}
+	if err := s.appendArtifactAudit(ctx, actor, artifact, "artifact.created"); err != nil {
+		return ProjectArtifact{}, err
+	}
+	return artifact, nil
+}
+
+func (s Service) ListProjectArtifacts(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]ProjectArtifact, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.Store.ListProjectArtifacts(ctx, actor.OrganizationID, projectID)
+}
+
+func (s Service) GetProjectArtifact(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, artifactID string) (ProjectArtifact, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return ProjectArtifact{}, err
+	}
+	return s.Store.GetProjectArtifact(ctx, actor.OrganizationID, projectID, strings.TrimSpace(artifactID))
+}
+
+func (s Service) UpdateProjectArtifact(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, artifactID string, request UpdateProjectArtifactRequest) (ProjectArtifact, error) {
+	if err := s.authorizeWorkflow(ctx, actor, projectID); err != nil {
+		return ProjectArtifact{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ProjectArtifact{}, err
+	}
+	artifact, err := s.Store.GetProjectArtifact(ctx, actor.OrganizationID, projectID, strings.TrimSpace(artifactID))
+	if err != nil {
+		return ProjectArtifact{}, err
+	}
+	if request.ExpectedVersion != nil && *request.ExpectedVersion != artifact.Version {
+		return ProjectArtifact{}, ErrVersionConflict
+	}
+	if request.Content != nil {
+		artifact.Content = strings.TrimSpace(*request.Content)
+	}
+	if request.Status != nil {
+		artifact.Status = *request.Status
+	}
+	if request.SourceJobID != nil {
+		artifact.SourceJobID = strings.TrimSpace(*request.SourceJobID)
+	}
+	artifact.UpdatedAt = time.Now().UTC()
+	if err := s.Store.UpdateProjectArtifact(ctx, artifact, artifact.Version); err != nil {
+		return ProjectArtifact{}, err
+	}
+	artifact.Version++
+	if err := s.appendArtifactAudit(ctx, actor, artifact, "artifact.updated"); err != nil {
+		return ProjectArtifact{}, err
+	}
+	return s.Store.GetProjectArtifact(ctx, actor.OrganizationID, projectID, artifact.ID)
 }
 
 func (s Service) GetWorkbench(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (Workbench, error) {
@@ -611,6 +696,46 @@ func (s Service) appendChangeSetAudit(ctx context.Context, actor contract.ActorC
 		Metadata:       metadata,
 		CreatedAt:      time.Now().UTC(),
 	})
+}
+
+func (s Service) appendArtifactAudit(ctx context.Context, actor contract.ActorContext, artifact ProjectArtifact, action string) error {
+	id, err := s.newID("audit")
+	if err != nil {
+		return err
+	}
+	return s.Store.AppendAuditEvent(ctx, AuditEvent{
+		ID:             id,
+		OrganizationID: actor.OrganizationID,
+		ProjectID:      artifact.ProjectID,
+		Actor:          actorLabel(actor),
+		Action:         action,
+		EntityType:     AuditEntityArtifact,
+		EntityID:       artifact.ID,
+		Metadata: map[string]any{
+			"kind":    artifact.Kind,
+			"status":  artifact.Status,
+			"version": artifact.Version,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
+}
+
+func summarizeProjectArtifacts(artifacts []ProjectArtifact) []ProjectArtifactSummary {
+	result := make([]ProjectArtifactSummary, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		result = append(result, ProjectArtifactSummary{
+			ID:            artifact.ID,
+			Key:           string(artifact.Kind),
+			Label:         string(artifact.Kind),
+			Version:       fmt.Sprintf("v%d.0", artifact.Version),
+			Status:        string(artifact.Status),
+			Owner:         "服务端存档",
+			UpdatedAt:     artifact.UpdatedAt,
+			Summary:       artifact.Content,
+			SourceVersion: artifact.SourceJobID,
+		})
+	}
+	return result
 }
 
 func operationalRecordFromRequest(organizationID contract.OrganizationID, projectID contract.ProjectID, id string, request UpsertOperationalRecordRequest) OperationalRecord {
