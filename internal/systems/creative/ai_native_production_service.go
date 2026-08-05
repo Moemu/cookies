@@ -94,7 +94,7 @@ func (s Service) StartAINativeProduction(ctx context.Context, actor contract.Act
 		}
 		plan.SpeechUnits[index].Attempts = []AINativeGenerationAttempt{{ID: attemptID, Ordinal: 1, Status: AINativeAttemptPlannedStatus, CreatedAt: s.now(), UpdatedAt: s.now()}}
 	}
-	operationID, err := s.idGenerator()("ainativeproductionoperation")
+	operationID, err := s.idGenerator()("ainativeproductionop")
 	if err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
@@ -161,13 +161,13 @@ func (s Service) HandleAINativeProductionJob(ctx context.Context, claim jobrunti
 			}
 			input, inputErr := unit.ProviderInput(project.ProjectID)
 			if inputErr != nil {
-				return jobruntime.Result{}, inputErr
+				return s.failAINativeProductionAttempt(ctx, claim, op, &plan, attempt, "AI_NATIVE_VIDEO_INPUT_INVALID", inputErr)
 			}
 			job, _, createErr := s.AINativeVideoJobs.CreateVideoJob(ctx, provider.CreateVideoJobRequest{Actor: op.Actor, Project: project,
 				IdempotencyKey: contract.IdempotencyKey("ai-native-video-" + attempt.ID), RequestHash: unit.PromptHash, ModelAlias: plan.VideoModelAlias,
-				SourceSystem: "creative.ai-native-ad", SourceTaskID: op.WorkspaceID + ":" + unit.ID + ":" + attempt.ID, Input: input})
+				SourceSystem: "creative.ai-native-ad", SourceTaskID: unit.ID + ":" + attempt.ID, Input: input})
 			if createErr != nil {
-				return jobruntime.Result{}, createErr
+				return s.failAINativeProductionAttempt(ctx, claim, op, &plan, attempt, "AI_NATIVE_VIDEO_SUBMISSION_FAILED", createErr)
 			}
 			attempt.ProviderJobID, attempt.Status, attempt.UpdatedAt = job.ID, AINativeAttemptSubmittedStatus, s.now()
 			active++
@@ -249,6 +249,16 @@ func (s Service) HandleAINativeProductionJob(ctx context.Context, claim jobrunti
 	}
 	revision := plan.Revision
 	return jobruntime.Result{Ref: &contract.ResourceRef{Type: "creative_ai_native_production_plan", ID: workspace.WorkspaceID, Version: &revision}}, nil
+}
+
+func (s Service) failAINativeProductionAttempt(ctx context.Context, claim jobruntime.Claim, op AINativeProductionOperation, plan *AINativeProductionPlan, attempt *AINativeGenerationAttempt, code string, cause error) (jobruntime.Result, error) {
+	message := boundedError(cause)
+	attempt.Status, attempt.ErrorCode, attempt.ErrorMessage, attempt.UpdatedAt = AINativeAttemptFailedStatus, code, message, s.now()
+	plan.Status, plan.UpdatedAt = AINativeProductionFailedStatus, s.now()
+	if _, err := s.AINativeProductions.SaveAINativeProductionPlan(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, *plan, s.now()); err != nil {
+		return jobruntime.Result{}, fmt.Errorf("persist AI native production failure: %w", err)
+	}
+	return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: code, Message: message, Retryable: false}}
 }
 
 func (s Service) renderAINativeFinal(ctx context.Context, claim jobruntime.Claim, op AINativeProductionOperation, workspace AINativeRequirementWorkspace, plan AINativeProductionPlan) (jobruntime.Result, error) {
@@ -373,7 +383,7 @@ func (s Service) RetryAINativeProductionUnit(ctx context.Context, actor contract
 			return AINativeRequirementWorkspace{}, err
 		}
 	}
-	operationID, err := s.idGenerator()("ainativeproductionoperation")
+	operationID, err := s.idGenerator()("ainativeproductionop")
 	if err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}

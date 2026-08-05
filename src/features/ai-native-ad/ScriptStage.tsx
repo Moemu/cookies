@@ -24,8 +24,8 @@ export function ScriptStage({ status, script, onChange, onRegenerate, onConfirm,
   </section>
 }
 
-function StageEmpty({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
-  return <section className="ai-native-stage-panel stage-empty" role="tabpanel"><div>{icon}<h3>{title}</h3><p>{detail}</p></div><div className="empty-structure"><span/><span/><span/><span/></div></section>
+function StageEmpty({ icon, title, detail, action }: { icon: React.ReactNode; title: string; detail: string; action?: React.ReactNode }) {
+  return <section className="ai-native-stage-panel stage-empty" role="tabpanel"><div>{icon}<h3>{title}</h3><p>{detail}</p>{action}</div><div className="empty-structure"><span/><span/><span/><span/></div></section>
 }
 
 function StageLoading({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {

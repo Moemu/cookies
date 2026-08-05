@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Image, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, Image, LoaderCircle, RefreshCw } from 'lucide-react'
 import { getAssetPreview } from './api'
 import { StageEmpty, StageLoading } from './ScriptStage'
 import type { AINativeStageStatus, StoryboardAsset, StoryboardDraft } from './types'
@@ -13,14 +13,17 @@ const assetGroupLabels: Record<StoryboardAsset['role'], string> = {
   brand_element: '品牌元素',
 }
 
-export function StoryboardStage({ projectId, status, storyboard, onChange, onSave, onConfirm, onEdit }: {
+export function StoryboardStage({ projectId, status, storyboard, canGenerate, error, onChange, onSave, onConfirm, onEdit, onRetry }: {
   projectId: string
   status: AINativeStageStatus
   storyboard: StoryboardDraft | null
+  canGenerate: boolean
+  error: string
   onChange: (storyboard: StoryboardDraft) => void
   onSave: () => void
   onConfirm: () => void
   onEdit: () => void
+  onRetry: () => void
 }) {
   const locked = status === 'confirmed'
   const [previews, setPreviews] = useState<Record<string, string>>({})
@@ -41,7 +44,16 @@ export function StoryboardStage({ projectId, status, storyboard, onChange, onSav
   }, [projectId, storyboard?.revision])
 
   if (status === 'generating') return <StageLoading icon={<LoaderCircle className="spin" size={24}/>} title="正在生成故事板" detail="AI 正在整理人物、商品和场景素材，并把脚本转换为完整分镜；生成图片会先进入项目 Assets。"/>
-  if (!storyboard) return <StageEmpty icon={<Image size={24}/>} title={status === 'invalidated' ? '故事板已因上游修改而作废' : '尚未生成故事板'} detail="确认脚本后，这里将展示素材板和每个镜头的完整制作信息。"/>
+  if (!storyboard) {
+    const failed = status === 'failed'
+    const action = canGenerate ? <button className="secondary-button" onClick={onRetry}><RefreshCw size={14}/>重新生成故事板</button> : undefined
+    return <StageEmpty
+      icon={failed ? <AlertTriangle size={24}/> : <Image size={24}/>}
+      title={failed ? '故事板生成未启动' : status === 'invalidated' ? '故事板已因上游修改而作废' : '尚未生成故事板'}
+      detail={failed ? error || '故事板生成任务启动失败，请稍后重试。' : '确认脚本后，这里将展示素材板和每个镜头的完整制作信息。'}
+      action={action}
+    />
+  }
 
   const roles = Object.keys(assetGroupLabels) as StoryboardAsset['role'][]
   const groups = roles.map(role => ({ role, assets: storyboard.assets.filter(asset => asset.role === role) })).filter(group => group.assets.length)

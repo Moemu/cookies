@@ -25,10 +25,29 @@ type aiNativeRequirementManager interface {
 	ReopenAINativeStoryboard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReopenAINativeRequirementRequest) (creative.AINativeRequirementWorkspace, error)
 }
 
+type aiNativeLatestRequirementManager interface {
+	GetLatestAINativeRequirementWorkspace(context.Context, contract.ActorContext, contract.ProjectID) (creative.AINativeRequirementWorkspace, error)
+}
+
 type aiNativeProductionManager interface {
 	StartAINativeProduction(context.Context, contract.ActorContext, contract.ProjectID, string, creative.StartAINativeProductionRequest) (creative.AINativeRequirementWorkspace, error)
 	RetryAINativeProductionUnit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RetryAINativeProductionUnitRequest) (creative.AINativeRequirementWorkspace, error)
 	CancelAINativeProduction(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (creative.AINativeRequirementWorkspace, error)
+}
+
+func (s *Server) getLatestAINativeRequirementWorkspace(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeLatestRequirementManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.GetLatestAINativeRequirementWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) startAINativeProduction(w http.ResponseWriter, r *http.Request) {

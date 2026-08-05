@@ -52,6 +52,11 @@ type modelAINativeStoryboardShot struct {
 	ProductIdentityRequired bool     `json:"product_identity_required"`
 }
 
+type aiNativeStoryboardAssetReferenceRewrite struct {
+	keepOriginal bool
+	replacements []string
+}
+
 var aiNativeStoryboardSchema = json.RawMessage(`{
   "type":"object","additionalProperties":false,"required":["assets","shots"],
   "properties":{
@@ -101,9 +106,9 @@ func (p ModelAINativeStoryboardPlanner) Plan(ctx context.Context, actor contract
 }
 
 func (p ModelAINativeStoryboardPlanner) generate(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, input string, repair bool) (provider.SynchronousResponse, error) {
-	system := "你是抖音效果广告故事板导演。只使用已确认需求、脚本和固定商品素材 ID。输出完整闭合时间线；每个镜头必须填写画面、人物商品动作、景别、运镜、参考素材、旁白、字幕、音效、BGM 和转场。商品出现时必须引用 fixed_product_assets 中的真实素材，绝不计划或生成替代商品图。人物、场景和构图缺失时可给出生成计划。只输出符合 JSON Schema 的 JSON。"
+	system := "你是抖音效果广告故事板导演。只使用已确认需求、脚本和固定商品素材 ID。输出完整闭合时间线；每个镜头必须填写画面、人物商品动作、景别、运镜、参考素材、旁白、字幕、音效、BGM 和转场。商品出现时必须引用 fixed_product_assets 中的真实素材，绝不计划或生成替代商品图。assets 只能规划人物、场景和构图素材，ID 必须分别使用 person_、scene_、composition_ 前缀；严禁输出 product_ 前缀或复用 fixed_product_assets 的任何 ID。只输出符合 JSON Schema 的 JSON。"
 	if repair {
-		system = "你是故事板结构修复器。只修复字段完整性、闭合时间线和素材引用。不得新增商品事实，不得用 AI 素材替代 fixed_product_assets。只输出符合 JSON Schema 的 JSON。"
+		system = "你是故事板结构修复器。只修复字段完整性、闭合时间线和素材引用。不得新增商品事实，不得用 AI 素材替代 fixed_product_assets。assets 只能使用 person_、scene_、composition_ 前缀，严禁复用 fixed_product_assets 的任何 ID。只输出符合 JSON Schema 的 JSON。"
 	}
 	return p.Text.GenerateText(ctx, provider.TextGenerateRequest{Actor: actor, Project: project, ModelAlias: p.ModelAlias,
 		Messages: []provider.TextMessage{{Role: provider.TextRoleSystem, Content: system}, {Role: provider.TextRoleUser, Content: input}}, OutputJSONSchema: aiNativeStoryboardSchema})
@@ -132,15 +137,34 @@ func decodeModelAINativeStoryboard(response provider.SynchronousResponse, requir
 		return AINativeStoryboardRevision{}, fmt.Errorf("decode AI native storyboard output: %w", err)
 	}
 	assets := append([]AINativeStoryboardAsset{}, productAssets...)
+	usedAssetIDs := make(map[string]bool, len(productAssets)+len(output.Assets))
+	for _, asset := range productAssets {
+		usedAssetIDs[asset.ID] = true
+	}
+	rewrites := make(map[string]aiNativeStoryboardAssetReferenceRewrite)
 	for _, planned := range output.Assets {
-		assets = append(assets, AINativeStoryboardAsset{ID: strings.TrimSpace(planned.ID), Role: strings.TrimSpace(planned.Role), Name: strings.TrimSpace(planned.Name),
+		rawID := strings.TrimSpace(planned.ID)
+		role := strings.TrimSpace(planned.Role)
+		prefix := storyboardGeneratedAssetIDPrefix(role)
+		normalizedID := rawID
+		collides := usedAssetIDs[rawID]
+		if rawID == "" || collides || !strings.HasPrefix(rawID, prefix+"_") {
+			normalizedID = nextStoryboardGeneratedAssetID(prefix, usedAssetIDs)
+			rewrite := rewrites[rawID]
+			rewrite.keepOriginal = rewrite.keepOriginal || collides
+			rewrite.replacements = append(rewrite.replacements, normalizedID)
+			rewrites[rawID] = rewrite
+		}
+		usedAssetIDs[normalizedID] = true
+		assets = append(assets, AINativeStoryboardAsset{ID: normalizedID, Role: role, Name: strings.TrimSpace(planned.Name),
 			Source: AINativeStoryboardAssetSourceAIGenerated, GenerationBrief: strings.TrimSpace(planned.GenerationBrief), Status: AINativeStoryboardAssetPlanned})
 	}
 	shots := make([]AINativeStoryboardShot, 0, len(output.Shots))
 	for _, shot := range output.Shots {
+		referenceAssetIDs := rewriteStoryboardAssetReferences(shot.ReferenceAssetIDs, rewrites)
 		shots = append(shots, AINativeStoryboardShot{ID: strings.TrimSpace(shot.ID), StartMS: shot.StartMS, EndMS: shot.EndMS, DurationMS: shot.EndMS - shot.StartMS,
 			VisualContent: strings.TrimSpace(shot.VisualContent), SubjectsProductsActions: strings.TrimSpace(shot.SubjectsProductsActions), ShotSize: strings.TrimSpace(shot.ShotSize), CameraMovement: strings.TrimSpace(shot.CameraMovement),
-			ReferenceAssetIDs: append([]string{}, shot.ReferenceAssetIDs...), Voiceover: strings.TrimSpace(shot.Voiceover), Subtitle: strings.TrimSpace(shot.Subtitle), SoundEffect: strings.TrimSpace(shot.SoundEffect),
+			ReferenceAssetIDs: referenceAssetIDs, Voiceover: strings.TrimSpace(shot.Voiceover), Subtitle: strings.TrimSpace(shot.Subtitle), SoundEffect: strings.TrimSpace(shot.SoundEffect),
 			BGMDirection: strings.TrimSpace(shot.BGMDirection), Transition: strings.TrimSpace(shot.Transition), ProductIdentityRequired: shot.ProductIdentityRequired})
 	}
 	requirementHash, err := contract.CanonicalJSONHash(requirement)
@@ -163,4 +187,53 @@ func decodeModelAINativeStoryboard(response provider.SynchronousResponse, requir
 		return AINativeStoryboardRevision{}, err
 	}
 	return value, nil
+}
+
+func storyboardGeneratedAssetIDPrefix(role string) string {
+	switch role {
+	case AINativeStoryboardAssetRolePersonIdentity:
+		return "person"
+	case AINativeStoryboardAssetRoleSceneReference:
+		return "scene"
+	case AINativeStoryboardAssetRoleCompositionReference:
+		return "composition"
+	default:
+		return "generated"
+	}
+}
+
+func nextStoryboardGeneratedAssetID(prefix string, used map[string]bool) string {
+	for ordinal := 1; ; ordinal++ {
+		candidate := fmt.Sprintf("%s_%d", prefix, ordinal)
+		if !used[candidate] {
+			return candidate
+		}
+	}
+}
+
+func rewriteStoryboardAssetReferences(referenceIDs []string, rewrites map[string]aiNativeStoryboardAssetReferenceRewrite) []string {
+	result := make([]string, 0, len(referenceIDs))
+	seen := make(map[string]bool, len(referenceIDs))
+	appendUnique := func(value string) {
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	for _, rawID := range referenceIDs {
+		assetID := strings.TrimSpace(rawID)
+		rewrite, ok := rewrites[assetID]
+		if !ok {
+			appendUnique(assetID)
+			continue
+		}
+		if rewrite.keepOriginal {
+			appendUnique(assetID)
+		}
+		for _, replacement := range rewrite.replacements {
+			appendUnique(replacement)
+		}
+	}
+	return result
 }

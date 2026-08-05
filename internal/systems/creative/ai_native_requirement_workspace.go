@@ -40,6 +40,8 @@ type AINativeRequirementWorkspace struct {
 	ConfirmedStoryboardRevision *int64                      `json:"confirmed_storyboard_revision,omitempty"`
 	Storyboard                  *AINativeStoryboardRevision `json:"storyboard,omitempty"`
 	StoryboardPlan              *AINativeStoryboardRevision `json:"storyboard_plan,omitempty"`
+	StoryboardErrorCode         string                      `json:"storyboard_error_code,omitempty"`
+	StoryboardErrorMessage      string                      `json:"storyboard_error_message,omitempty"`
 	ProductionStatus            string                      `json:"production_status,omitempty"`
 	CurrentProductionRevision   *int64                      `json:"current_production_revision,omitempty"`
 	ProductionPlan              *AINativeProductionPlan     `json:"production_plan,omitempty"`
@@ -112,6 +114,7 @@ func (w AINativeRequirementWorkspace) Validate() error {
 type AINativeRequirementRepository interface {
 	CreateAINativeRequirementWorkspace(context.Context, AINativeRequirementWorkspace) (AINativeRequirementWorkspace, error)
 	GetAINativeRequirementWorkspace(context.Context, contract.OrganizationID, contract.ProjectID, string) (AINativeRequirementWorkspace, error)
+	GetLatestAINativeRequirementWorkspace(context.Context, contract.OrganizationID, contract.ProjectID) (AINativeRequirementWorkspace, error)
 	AppendAINativeRequirementRevision(context.Context, AINativeRequirementWorkspace, int64, string) (AINativeRequirementWorkspace, error)
 	ConfirmAINativeRequirement(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (AINativeRequirementWorkspace, error)
 	GetAINativeReopenImpact(context.Context, contract.OrganizationID, contract.ProjectID, string, string) (AINativeReopenImpact, error)
@@ -172,6 +175,19 @@ func (s Service) GetAINativeRequirementWorkspace(ctx context.Context, actor cont
 		return AINativeRequirementWorkspace{}, err
 	}
 	return s.AINativeRequirements.GetAINativeRequirementWorkspace(ctx, actor.OrganizationID, projectID, strings.TrimSpace(workspaceID))
+}
+
+func (s Service) GetLatestAINativeRequirementWorkspace(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (AINativeRequirementWorkspace, error) {
+	if s.Projects == nil || s.AINativeRequirements == nil {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("AI native requirement persistence is unavailable")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	return s.AINativeRequirements.GetLatestAINativeRequirementWorkspace(ctx, actor.OrganizationID, projectID)
 }
 
 func (s Service) UpdateAINativeRequirement(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, workspaceID string, request UpdateAINativeRequirementRequest) (AINativeRequirementWorkspace, error) {

@@ -151,6 +151,19 @@ const performanceSections = [
   { id: 'ai-native', label: 'AI 效果广告生成', detail: '从商品需求到完整广告视频' },
 ] as const
 
+type PerformanceSectionId = (typeof performanceSections)[number]['id']
+
+function initialPerformanceSection(): PerformanceSectionId {
+  const section = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('section')
+  return performanceSections.some(item => item.id === section) ? section as PerformanceSectionId : 'preroll'
+}
+
+function rememberPerformanceSection(section: PerformanceSectionId) {
+  const search = new URLSearchParams(window.location.search)
+  search.set('section', section)
+  window.history.replaceState(null, '', `${window.location.pathname}?${search.toString()}${window.location.hash}`)
+}
+
 const preRollPresets = {
   'short-drama': {
     eyebrow: 'SHORT DRAMA HOOK',
@@ -171,7 +184,7 @@ const preRollPresets = {
 export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask }: { state: DataState, activeView: string, activeTaskId?: string, onOpenTask: (id: string) => void }) {
   const { currentProject, createTask } = useProject()
   const industry = industryProfile(currentProject.industry)
-  const [selectedSection, setSelectedSection] = useState<(typeof performanceSections)[number]['id']>('preroll')
+  const [selectedSection, setSelectedSection] = useState<PerformanceSectionId>(initialPerformanceSection)
   const [selectedPreroll, setSelectedPreroll] = useState('short-drama')
   const [notice, setNotice] = useState('')
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
@@ -237,11 +250,14 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
   const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 确认到剧本分镜形成可追溯闭环。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
   const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '从 Brief、创意与分镜，到生成锁定、质量确认和版本交付，形成可追溯的品牌广告制作闭环。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
-    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' && selectedSection !== 'ai-native' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activePerformanceLabel}</button> : null}</header>
+    <header className="video-workspace-header">
+      <div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>
+      {category === 'brand' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建品牌广告</button> : category === 'performance' && selectedSection !== 'ai-native' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activePerformanceLabel}</button> : null}
+    </header>
     <IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/>
     <ProjectMediaContext />
     {category === 'performance' ? <>
-      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
+      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); rememberPerformanceSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
       {selectedSection === 'preroll' ? <>
         <div className="preroll-subnav">
           <span className="preroll-subnav-label"><b>前贴广告</b><i>/</i>选择类型</span>
