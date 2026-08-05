@@ -171,9 +171,10 @@ func CreativeBusinessCapabilities() []CreativeBusinessCapability {
 		},
 		{
 			BusinessCode: BusinessBrandVideo, DisplayName: "品牌广告",
-			Status: "preview", Format: FormatVideo,
-			ProductionInputs: []string{"品牌资产", "脚本与分镜", "人才和音乐权利", "审批人"},
-			Limitation:       "Strategy 已可生成任务策略；Creative 当前只有方案演示，尚未接入稳定生成与交付链路。",
+			Status: "available", Format: FormatVideo, Channel: ChannelXiaohongshu,
+			PerformanceMode: CreativeRouteBrandVideo,
+			DestinationArea: "video", DestinationView: "品牌广告",
+			ProductionInputs: []string{"品牌资产", "品牌创意方向", "人才和音乐权利", "审批人"},
 		},
 		{
 			BusinessCode: BusinessWechatArticle, DisplayName: "公众号文章",
@@ -229,7 +230,9 @@ func resolvedTaskStrategyRequest(reference *TaskStrategyReference, snapshot Task
 		Mandatory: append([]string{}, snapshot.Mandatory...), Prohibited: append([]string{}, snapshot.Prohibited...),
 	}
 	if capability.Format == FormatVideo {
-		request.CreativeRoutes = []CreativeRouteSnapshot{taskStrategyVideoRoute(snapshot, capability)}
+		route := taskStrategyVideoRoute(snapshot, capability)
+		request.SelectedRouteID = route.RouteID
+		request.CreativeRoutes = []CreativeRouteSnapshot{route}
 	}
 	return request, request.validateResolvedTaskStrategy()
 }
@@ -237,11 +240,14 @@ func resolvedTaskStrategyRequest(reference *TaskStrategyReference, snapshot Task
 func taskStrategyVideoRoute(snapshot TaskStrategySnapshot, capability CreativeBusinessCapability) CreativeRouteSnapshot {
 	duration := 5
 	routeType := "pre_roll"
+	videoPurpose := "performance"
 	switch snapshot.BusinessCode {
 	case BusinessShortDramaPreroll:
 		duration, routeType = 6, PerformanceModeShortDramaPreroll
 	case BusinessViralRemake:
 		duration, routeType = 15, PerformanceModeViralRemake
+	case BusinessBrandVideo:
+		duration, routeType, videoPurpose = 30, CreativeRouteBrandVideo, "brand"
 	}
 	sourceRefs := make([]contract.AssetVersionRef, 0, len(snapshot.Media))
 	for _, item := range snapshot.Media {
@@ -251,7 +257,7 @@ func taskStrategyVideoRoute(snapshot TaskStrategySnapshot, capability CreativeBu
 	}
 	return CreativeRouteSnapshot{
 		RouteID:   "route_task_strategy_" + snapshot.BusinessCode + "_v1",
-		RouteType: routeType, VideoPurpose: "performance", Channels: []string{string(capability.Channel)},
+		RouteType: routeType, VideoPurpose: videoPurpose, Channels: []string{string(capability.Channel)},
 		Reason:                "用户从冻结的创意任务策略显式进入 Creative 工作台",
 		TargetDurationSeconds: duration, AspectRatio: "9:16", SourceAssetRefs: sourceRefs,
 		EvidenceRefs:              append([]string{}, snapshot.ClaimsAndEvidence...),

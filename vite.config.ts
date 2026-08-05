@@ -21,6 +21,7 @@ export default defineConfig({
       '/api/creative/v1': platformProxyTarget,
       '/api/delivery/v1': platformProxyTarget,
       '/api/insights/v1': platformProxyTarget,
+      '/api/media/v1': platformProxyTarget,
       '/api': compatibilityApiProxyTarget,
       '/platform': platformProxyTarget,
     },

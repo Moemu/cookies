@@ -904,10 +904,12 @@ paths:
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches:
     post:
       operationId: generateCreativeDirectionCandidates
-      summary: Generate schema-constrained CreativeDirection candidates from one frozen v3 Strategy intake.
+      summary: Start durable schema-constrained CreativeDirection generation from one frozen v3 Strategy intake.
       description: >-
-        This is the first LLM-authored creative step. Strategy facts and
-        guardrails are immutable inputs; provider failures are returned and
+        This is the first LLM-authored creative step. The endpoint persists a
+        generating batch and enqueues background work before returning, so the
+        status can be restored after navigation or refresh. Strategy facts and
+        guardrails are immutable inputs; provider failures are persisted and
         never replaced with a fabricated fallback concept.
       parameters:
         - {$ref: '#/components/parameters/ProjectID'}
@@ -925,13 +927,31 @@ paths:
               properties:
                 candidate_count: {type: integer, minimum: 2, maximum: 4, default: 3}
       responses:
-        '201':
-          description: Immutable candidate batch.
+        '202':
+          description: Persisted generating batch. Poll the latest-batch endpoint until ready or failed.
           content:
             application/json:
               schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches/latest:
+    get:
+      operationId: getLatestCreativeDirectionBatch
+      summary: Restore the latest persisted CreativeDirection batch for one frozen intake.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: intake_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Latest persisted candidate batch with authoritative lifecycle statuses.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/creative/v1/projects/{project_id}/creative-directions/{direction_id}/confirm:
     post:
       operationId: confirmCreativeDirection
@@ -1451,6 +1471,10 @@ components:
           properties:
             asset_id: {type: string, minLength: 1}
             version: {type: integer, minimum: 1}
+    CreativeIntakeCreateV4:
+      $ref: '../contracts/creative-intake-create-v4.schema.json'
+    CreativeIntakeV4:
+      $ref: '../contracts/creative-intake-v4.schema.json'
     PrepareImageSlotRequest:
       type: object
       additionalProperties: false
@@ -1484,9 +1508,13 @@ components:
             contract_version: {const: creative-intake-create/v3}
             source: {const: strategy_package}
           required: [contract_version, strategy_package_ref, selected_route_id]
+        - properties:
+            contract_version: {const: creative-intake-create/v4}
+            source: {const: requirement_snapshot}
+          required: [contract_version, requirement_snapshot_ref, business_capability_ref, selected_route_id]
       properties:
-        contract_version: {const: creative-intake-create/v3}
-        source: {enum: [manual, strategy_package]}
+        contract_version: {enum: [creative-intake-create/v3, creative-intake-create/v4]}
+        source: {enum: [manual, strategy_package, requirement_snapshot]}
         strategy_package:
           type: object
           additionalProperties: false
@@ -1504,6 +1532,22 @@ components:
           required: [overlay_id, content_hash]
           properties:
             overlay_id: {type: string, minLength: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        requirement_snapshot_ref:
+          type: object
+          additionalProperties: false
+          required: [brief_id, brief_version, content_hash]
+          properties:
+            brief_id: {type: string, minLength: 1}
+            brief_version: {type: integer, minimum: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        business_capability_ref:
+          type: object
+          additionalProperties: false
+          required: [business_code, version, content_hash]
+          properties:
+            business_code: {const: viral_remake}
+            version: {type: string, minLength: 1}
             content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
         format: {enum: [image_text, video]}
         performance_mode: {enum: [viral_remake]}

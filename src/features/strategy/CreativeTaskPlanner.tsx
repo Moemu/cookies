@@ -28,6 +28,7 @@ import type {
   CreativeTaskPlan,
   PackageVersion,
   StrategyCreativeHandoff,
+  StrategyCreativeHandoffIssue,
   StrategyDraft,
 } from './types'
 
@@ -83,10 +84,19 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
   const selectedRecommendation = recommendation?.recommended.find(item =>
     item.business_code === selectedCode,
   ) ?? recommendation?.alternatives.find(item => item.business_code === selectedCode)
-  const readyRoutes = creativeHandoff?.routes.filter(route => route.route_readiness.status === 'ready') ?? []
+  const readyRoutes = useMemo(
+    () => creativeHandoff?.routes.filter(route => route.route_readiness.status === 'ready') ?? [],
+    [creativeHandoff],
+  )
+  const compatibleRoutes = useMemo(
+    () => readyRoutes.filter(route => creativeBusinessMatchesRoute(selectedCode, route)),
+    [readyRoutes, selectedCode],
+  )
   const routeBlockers = Array.from(new Set([
-    ...(creativeHandoff?.upstream_readiness.blockers ?? []),
-    ...(creativeHandoff?.routes.flatMap(route => route.route_readiness.blockers ?? []) ?? []),
+    ...handoffHardBlockers(creativeHandoff, selectedRouteId),
+    ...(creativeHandoff?.routes
+      .filter(route => !selectedCode || creativeBusinessMatchesRoute(selectedCode, route))
+      .flatMap(route => route.route_readiness.blockers ?? []) ?? []),
   ].map(routeIssueMessage)))
   const routeState = !strategyPackage
     ? {
@@ -100,16 +110,16 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
           title: '已发布策略包没有生成 Route',
           detail: routeBlockers[0] || '渠道策略需要明确图文内容形式、品牌或效果目的，保存新 Revision 后重新评审发布。',
         }
-      : !readyRoutes.length
+      : !compatibleRoutes.length
         ? {
-            title: '当前 Route 尚未就绪',
-            detail: routeBlockers[0] || '请先补齐 Route 的规划阻断项，再重新发布策略包。',
+            title: selectedProfile ? `当前策略没有可用的「${selectedProfile.display_name}」创作路线` : '当前创作路线尚未就绪',
+            detail: routeBlockers[0] || '请回到策略补充对应的渠道、内容形式和品牌/效果目的，保存新 Revision 后重新发布。',
           }
         : null
   const createPlanLabel = !strategyPackage
     ? '等待策略评审发布'
-    : !readyRoutes.length
-      ? '等待可用 Route'
+    : !compatibleRoutes.length
+      ? '等待可用创作路线'
       : '确认此业务并创建任务计划'
   const routeRevision = draft?.revision
     ? createRouteRevisionChannelStrategy(draft.revision.document.channel_strategy)
@@ -122,6 +132,12 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     return (answerExists || savedAnswerExists) &&
       JSON.stringify(activePlan.answers[question.id]) !== JSON.stringify(answers[question.id])
   }))
+
+  useEffect(() => {
+    if (!selectedCode || !readyRoutes.length) return
+    if (compatibleRoutes.some(route => route.route_id === selectedRouteId)) return
+    setSelectedRouteId(compatibleRoutes[0]?.route_id ?? '')
+  }, [compatibleRoutes, readyRoutes.length, selectedCode, selectedRouteId])
 
   const load = async (signal?: AbortSignal) => {
     if (!briefVersion) return
@@ -150,6 +166,9 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     setStrategyPackage(nextPackage)
     setCreativeHandoff(nextHandoff)
     setSelectedRouteId(current => {
+      if (nextPlan?.selected_route_id && nextHandoff?.routes.some(route => route.route_id === nextPlan.selected_route_id && route.route_readiness.status === 'ready')) {
+        return nextPlan.selected_route_id
+      }
       if (nextHandoff?.routes.some(route => route.route_id === current && route.route_readiness.status === 'ready')) return current
       return nextHandoff?.routes.find(route => route.route_readiness.status === 'ready')?.route_id ?? ''
     })
@@ -318,6 +337,19 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
         plan,
         `task-strategy-handoff-${plan.id}-${plan.current_strategy.version}`,
       )
+      if (intake.status !== 'ready') {
+        const missing = intake.missing_fields?.map(field => {
+          if (field === 'strategy_package.creative_ready') {
+            return '冻结 Handoff 仍缺少市场、语言或可执行创作路线'
+          }
+          return field
+        }) ?? []
+        throw new Error(
+          missing.length
+            ? `创意交接尚未就绪：${missing.join('；')}`
+            : '创意交接尚未就绪，请先处理冻结 Handoff 的阻断项',
+        )
+      }
       let destinationId = intake.id
       if (capability.can_create_task_immediately && capability.format === 'image_text') {
         const angle = plan.current_strategy.document.business_strategy.content_angle
@@ -374,7 +406,9 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
       ? <StrategyResult
         busy={busy === 'handoff'}
         capability={capabilities.find(item => item.business_code === activePlan.business_code)}
+        handoff={creativeHandoff}
         onHandoff={handoff}
+        onRepair={onOpenStrategy}
         plan={activePlan}
         profile={selectedProfile}
       />
@@ -418,7 +452,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
               onClick={() => setSelectedCode(profile.business_code)}
             >
               <span>{recommendationItem
-                ? `推荐 ${recommendationItem.rank} · ${confidenceLabel(recommendationItem.confidence)}`
+                ? `${recommendationItem.rank === 1 ? '首选推荐' : `推荐 ${recommendationItem.rank}`} · ${confidenceLabel(recommendationItem.confidence)}`
                 : '可自主选择'}</span>
               <b>{profile.display_name}</b>
               <p>{profile.summary}</p>
@@ -433,12 +467,13 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
           profile={selectedProfile}
           recommendation={selectedRecommendation}
         /> : null}
-        {!activePlan ? <div className="creative-question">
-          <span><label htmlFor="creative-route-select">策略交接 Route</label><em>任务计划强绑定</em></span>
-          {readyRoutes.length
+        {!activePlan ? <div className="creative-question creative-route-picker">
+          <span><label htmlFor="creative-route-select">本次创作路线</label><em>决定进入哪个创作工作台</em></span>
+          <small>路线会冻结渠道、内容形式以及品牌/效果目的，避免 Strategy 与 Creative 各自理解一套。</small>
+          {compatibleRoutes.length
             ? <select id="creative-route-select" value={selectedRouteId} onChange={event => setSelectedRouteId(event.target.value)}>
-              {readyRoutes.map(route => <option key={route.route_id} value={route.route_id}>
-                {route.channels.join('/')} · {route.deliverable_type} · {route.reason}
+              {compatibleRoutes.map(route => <option key={route.route_id} value={route.route_id}>
+                {creativeRouteLabel(route)} · {route.reason}
               </option>)}
             </select>
             : routeState ? <div className="creative-route-state" role="status"><AlertCircle size={16}/><span><b>{routeState.title}</b><small>{routeState.detail}</small>{routeBlockers.length > 1 ? <small>另有 {routeBlockers.length - 1} 项需补齐</small> : null}</span><button className="text-button" disabled={Boolean(busy)} onClick={() => void createRouteRevision()} type="button">{busy === 'route-repair' ? '正在创建…' : routeRevision?.changed ? '创建 Route 修订' : '去策略创建修订'}</button></div> : null}
@@ -587,6 +622,7 @@ function RecommendationBasis({ recommendation, projectId }: {
   projectId: string
 }) {
   const signals = recommendation.signals
+  const primary = recommendation.recommended[0]
   const signalItems = [
     ['目标', objectiveLabel(signals.objective_type)],
     ['渠道', signals.channels.map(channelLabel).join('、') || '未识别'],
@@ -595,9 +631,12 @@ function RecommendationBasis({ recommendation, projectId }: {
   ]
   return <section className="creative-recommendation-basis">
     <header>
-      <div><ShieldCheck size={15}/><b>推荐依据</b><span>只读 Brief v{recommendation.brief_version}</span></div>
+      <div><ShieldCheck size={15}/><b>{primary ? `系统首选：${primary.display_name}` : '当前没有自动推荐'}</b><span>只读 Brief v{recommendation.brief_version}</span></div>
       <small>{recommendation.policy_version}</small>
     </header>
+    <p className={primary ? 'recommendation-summary' : 'recommendation-summary warning'}>{primary
+      ? `${confidenceLabel(primary.confidence)}：${primary.reasons.slice(0, 2).join('；')}`
+      : 'Brief 缺少可识别的目标、渠道或交付形式；你仍可自主选择，但系统不会伪装成有依据的推荐。'}</p>
     <div className="creative-signal-chips">
       {signalItems.map(([label, value]) => <span key={label}><small>{label}</small>{value}</span>)}
     </div>
@@ -605,6 +644,52 @@ function RecommendationBasis({ recommendation, projectId }: {
       ? <MediaAssessmentPanel assessment={recommendation.media} projectId={projectId} title="Brief 素材有效性"/>
       : <p><CircleHelp size={13}/>Brief 没有可核验的图片或视频引用；推荐不会假装看过素材。</p>}
   </section>
+}
+
+function creativeBusinessMatchesRoute(
+  businessCode: string,
+  route: StrategyCreativeHandoff['routes'][number],
+) {
+  switch (businessCode) {
+    case 'xiaohongshu_image_text':
+      return route.deliverable_type === 'image_text'
+    case 'wechat_article':
+      return route.deliverable_type === 'image_text' && route.channels.some(channel =>
+        channel === 'wechat_ecosystem' || channel === 'wechat_official_account',
+      )
+    case 'brand_video':
+      return route.deliverable_type === 'video' && route.purpose === 'brand'
+    case 'short_drama_preroll':
+    case 'game_preroll':
+    case 'commerce_preroll':
+    case 'viral_remake':
+      return route.deliverable_type === 'video' &&
+        route.purpose === 'performance' &&
+        route.performance_mode === businessCode
+    default:
+      return false
+  }
+}
+
+function creativeRouteLabel(route: StrategyCreativeHandoff['routes'][number]) {
+  const purpose = route.purpose === 'brand' ? '品牌广告' : '效果广告'
+  const channels = route.channels.map(channelLabel).join(' / ') || '渠道待确认'
+  return `${channels} · ${deliverableLabel(route.deliverable_type)} · ${purpose}`
+}
+
+function handoffIssueIsOptionalContext(issue: StrategyCreativeHandoffIssue) {
+  return issue.code === 'market_missing' || issue.code === 'language_missing'
+}
+
+function handoffHardBlockers(handoff: StrategyCreativeHandoff | null, selectedRouteId: string) {
+  if (!handoff) return []
+  const selectedRouteReady = handoff.routes.some(route =>
+    route.route_id === selectedRouteId && route.route_readiness.status === 'ready',
+  )
+  return (handoff.upstream_readiness.blockers ?? []).filter(issue =>
+    !handoffIssueIsOptionalContext(issue) &&
+    !(issue.code === 'strategy_creative_not_ready' && selectedRouteReady),
+  )
 }
 
 function SelectedBusinessPreview({ profile, recommendation }: {
@@ -631,10 +716,12 @@ function SelectedBusinessPreview({ profile, recommendation }: {
   </section>
 }
 
-function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
+function StrategyResult({ busy, capability, handoff, onHandoff, onRepair, plan, profile }: {
   busy: boolean
   capability?: CreativeBusinessCapability
+  handoff: StrategyCreativeHandoff | null
   onHandoff: (plan: CreativeTaskPlan, capability: CreativeBusinessCapability) => Promise<void>
+  onRepair: () => void
   plan: CreativeTaskPlan
   profile: CreativeBusinessProfile
 }) {
@@ -643,9 +730,13 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
   const document = strategy.document
   const hasFrozenLineage = plan.contract_version === 'strategy-creative-task-plan/v2' &&
     Boolean(plan.package_ref && plan.handoff_ref && plan.selected_route_id && strategy.task_overlay_ref)
-  const handoffAvailable = capability?.status === 'available' && hasFrozenLineage
+  const selectedRoute = handoff?.routes.find(route => route.route_id === plan.selected_route_id)
+  const hardBlockers = handoffHardBlockers(handoff, plan.selected_route_id ?? '')
+  const contextWarnings = handoff?.upstream_readiness.blockers?.filter(handoffIssueIsOptionalContext) ?? []
+  const routeReady = selectedRoute?.route_readiness.status === 'ready'
+  const handoffAvailable = capability?.status === 'available' && hasFrozenLineage && routeReady && !hardBlockers.length
   const handoffLimitation = hasFrozenLineage
-    ? capability?.limitation
+    ? hardBlockers[0] ? routeIssueMessage(hardBlockers[0]) : capability?.limitation || '当前创作路线尚未就绪。'
     : '历史 v1 计划没有冻结交接血缘；请新建业务选择并创建 v2 任务计划。'
   return <div className="creative-strategy-result">
     <div className="creative-result-heading">
@@ -665,7 +756,7 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
             : handoffLimitation}
         >
           {busy ? <LoaderCircle className="spin" size={14}/> : <Rocket size={14}/>}
-          {handoffAvailable ? '进入创意创作' : hasFrozenLineage ? '创作侧未接通' : '需新建 v2 计划'}
+          {handoffAvailable ? '进入创意创作' : hasFrozenLineage ? '先修复交接条件' : '需新建 v2 计划'}
         </button>
         <a className="secondary-button" download href={`/api/strategy/v1/creative-task-plans/${encodeURIComponent(plan.id)}/strategy-versions/${strategy.version}/export.md`}>
           <Download size={14}/>导出 Markdown
@@ -674,15 +765,22 @@ function StrategyResult({ busy, capability, onHandoff, plan, profile }: {
     </div>
     <div className={`creative-handoff-status ${handoffAvailable ? 'available' : 'unavailable'}`}>
       <div>
-        <b>{handoffAvailable ? '已可交接到 Creative' : hasFrozenLineage ? '任务策略可用，生产链路未开放' : '历史计划仅供查看'}</b>
+        <b>{handoffAvailable ? '已可交接到创意工作台' : hasFrozenLineage ? '任务策略已冻结，但交接条件未完成' : '历史计划仅供查看'}</b>
         <span>{handoffAvailable
           ? '交接后会继承目标、受众、业务专属判断、约束、素材引用和版本血缘。'
           : handoffLimitation}</span>
       </div>
-      {capability?.production_inputs.length
+      {!handoffAvailable && hasFrozenLineage
+        ? <button className="text-button" onClick={onRepair} type="button">回到策略修复</button>
+        : capability?.production_inputs.length
         ? <small>进入生产后还需确认：{capability.production_inputs.join('、')}</small>
         : null}
     </div>
+    {handoffAvailable && contextWarnings.length ? <div className="creative-context-warning" role="status">
+      <CircleHelp size={14}/><span><b>可继续，不强迫补表</b><small>{contextWarnings
+        .map(issue => routeIssueMessage(issue).replace(/[。；]+$/, ''))
+        .join('；')}。需要时在创作前确认。</small></span>
+    </div> : null}
     <div className="creative-strategy-summary">
       <article><span>目标</span><b>{document.objective}</b></article>
       <article><span>核心信息</span><b>{document.core_message}</b></article>

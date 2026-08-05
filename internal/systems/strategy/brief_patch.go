@@ -316,6 +316,9 @@ func decodeString(raw json.RawMessage, target *string, path string) error {
 }
 
 func ComputeCompleteness(document BriefDocument, states map[string]FieldState) Completeness {
+	if document.ContractVersion == BriefContractVersionV3 {
+		return computeBriefV3Completeness(document, states)
+	}
 	required := []struct {
 		path  string
 		value bool
@@ -327,16 +330,18 @@ func ComputeCompleteness(document BriefDocument, states map[string]FieldState) C
 	}
 	result := Completeness{Blockers: []ValidationError{}, Warnings: []ValidationError{}}
 	if document.ContractVersion == "strategy-brief-version/v2" {
-		required = append([]struct {
+		// Brief v2 predates the Requirement aggregate, but its confirmation gate
+		// now follows the same business rule: only facts required to start a
+		// Creative intake are blockers. Brand taxonomy, region, language and
+		// channels remain useful context instead of mandatory form fields.
+		required = []struct {
 			path  string
 			value bool
 		}{
-			{"brand.name", strings.TrimSpace(document.Brand.Name) != ""},
 			{"product.name", strings.TrimSpace(document.Product.Name) != ""},
-			{"industry", strings.TrimSpace(document.Industry) != ""},
-			{"region", strings.TrimSpace(document.Region) != ""},
-			{"language", strings.TrimSpace(document.Language) != ""},
-		}, required...)
+			{"campaign.objective", strings.TrimSpace(document.Campaign.Objective) != ""},
+			{"audience.primary", strings.TrimSpace(document.Audience.Primary) != ""},
+		}
 	}
 	for _, field := range required {
 		if !field.value {
@@ -352,6 +357,49 @@ func ComputeCompleteness(document BriefDocument, states map[string]FieldState) C
 	}
 	if strings.TrimSpace(document.Measurement.PrimaryKPI) == "" {
 		result.Warnings = append(result.Warnings, ValidationError{Field: "measurement.primary_kpi", Reason: "未提供核心指标，洞察准备度将为未就绪"})
+	}
+	if document.ContractVersion == "strategy-brief-version/v2" && strings.TrimSpace(document.Proposition) == "" {
+		result.Warnings = append(result.Warnings, ValidationError{Field: "proposition", Reason: "未提供核心主张，快捷创作将以产品主题兜底"})
+	}
+	if document.ContractVersion == "strategy-brief-version/v2" && len(document.Channels) == 0 {
+		result.Warnings = append(result.Warnings, ValidationError{Field: "channels", Reason: "未指定渠道，快捷业务将使用其默认渠道"})
+	}
+	result.Ready = len(result.Blockers) == 0
+	return result
+}
+
+func computeBriefV3Completeness(document BriefDocument, states map[string]FieldState) Completeness {
+	required := []struct {
+		path  string
+		value bool
+	}{
+		{"core.objective", strings.TrimSpace(document.Core.Objective) != ""},
+		{"core.deliverable_intent", strings.TrimSpace(document.Core.DeliverableIntent) != ""},
+		{"core.product_or_subject", strings.TrimSpace(document.Core.ProductOrSubject) != ""},
+		{"core.audience", strings.TrimSpace(document.Core.Audience) != ""},
+	}
+	result := Completeness{Blockers: []ValidationError{}, Warnings: []ValidationError{}}
+	for _, field := range required {
+		if !field.value {
+			result.Blockers = append(result.Blockers, ValidationError{Field: field.path, Reason: "缺少进入创作所需的核心信息"})
+			continue
+		}
+		if states[field.path].Confirmation != "confirmed" {
+			result.Blockers = append(result.Blockers, ValidationError{Field: field.path, Reason: "需要用户确认"})
+		}
+	}
+	for _, unknown := range document.Unknowns {
+		if unknown.RequiredFor == "creative_intake" {
+			result.Blockers = append(result.Blockers, ValidationError{Field: "unknowns." + unknown.ID, Reason: unknown.Question})
+		}
+	}
+	for _, conflict := range document.Conflicts {
+		if conflict.Status == "open" {
+			result.Blockers = append(result.Blockers, ValidationError{Field: "conflicts." + conflict.ID, Reason: "存在尚未解决的关键冲突"})
+		}
+	}
+	if len(document.Assumptions) > 0 {
+		result.Warnings = append(result.Warnings, ValidationError{Field: "assumptions", Reason: "包含尚未证实的假设，生成结果会明确标注"})
 	}
 	result.Ready = len(result.Blockers) == 0
 	return result

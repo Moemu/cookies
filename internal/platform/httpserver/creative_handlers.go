@@ -13,8 +13,12 @@ import (
 )
 
 type creativeDirectionManager interface {
-	GenerateDirectionCandidates(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateDirectionRequest) (creative.CreativeDirectionBatch, error)
+	StartDirectionGeneration(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateDirectionRequest) (creative.CreativeDirectionBatch, error)
 	ConfirmDirection(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionVersion, error)
+}
+
+type creativeDirectionReader interface {
+	GetLatestDirectionBatch(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionBatch, error)
 }
 
 type creativeImageTextManager interface {
@@ -894,7 +898,7 @@ func (s *Server) createCreativeDirectionBatch(w http.ResponseWriter, r *http.Req
 		return
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
-	value, err := manager.GenerateDirectionCandidates(
+	value, err := manager.StartDirectionGeneration(
 		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
 		r.PathValue("intake_id"), body,
 	)
@@ -906,7 +910,25 @@ func (s *Server) createCreativeDirectionBatch(w http.ResponseWriter, r *http.Req
 		"/api/creative/v1/projects/%s/creative-direction-batches/%s",
 		r.PathValue("project_id"), value.ID,
 	))
-	writeJSON(w, http.StatusCreated, value)
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) getLatestCreativeDirectionBatch(w http.ResponseWriter, r *http.Request) {
+	reader, ok := s.creative.(creativeDirectionReader)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := reader.GetLatestDirectionBatch(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("intake_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) confirmCreativeDirection(w http.ResponseWriter, r *http.Request) {

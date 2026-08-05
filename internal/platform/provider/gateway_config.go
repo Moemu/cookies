@@ -18,6 +18,8 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
+var ErrGatewayRouteNotFound = errors.New("adapter gateway route not found")
+
 type TextResponseMode string
 
 const (
@@ -175,6 +177,10 @@ type TextRouteResolver interface {
 	ResolveTextRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
 }
 
+type VisionRouteResolver interface {
+	ResolveVisionRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
+}
+
 type ResearchRouteResolver interface {
 	ResolveResearchRoute(context.Context, contract.OrganizationID, string) (GatewayRouteSnapshot, error)
 }
@@ -262,6 +268,10 @@ func (s MySQLGatewayConfigStore) ResolveTextRoute(ctx context.Context, organizat
 	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "adapter_gateway")
 }
 
+func (s MySQLGatewayConfigStore) ResolveVisionRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
+	return s.resolveRoute(ctx, organizationID, "vision.understand", modelAlias, "adapter_gateway")
+}
+
 func (s MySQLGatewayConfigStore) ResolveResearchRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
 	return s.resolveRoute(ctx, organizationID, "research.web", modelAlias, "ark")
 }
@@ -302,12 +312,12 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes, &constraintsJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ImageRouteSnapshot{}, fmt.Errorf("no enabled %s %s route for model alias %q", connectionType, capability, modelAlias)
+		return ImageRouteSnapshot{}, fmt.Errorf("%w: no enabled %s %s route for model alias %q", ErrGatewayRouteNotFound, connectionType, capability, modelAlias)
 	}
 	if err != nil {
 		return ImageRouteSnapshot{}, err
 	}
-	if capability == "text.generate" {
+	if capability == "text.generate" || capability == "vision.understand" {
 		if err := applyTextRouteConstraints(&snapshot, constraintsJSON); err != nil {
 			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
 		}
@@ -321,7 +331,7 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		}
 	}
 	validate := snapshot.ValidateWithPolicy
-	if capability == "text.generate" {
+	if capability == "text.generate" || capability == "vision.understand" {
 		validate = snapshot.ValidateTextWithPolicy
 	} else if capability == "video.generate" {
 		validate = snapshot.ValidateVideoWithPolicy

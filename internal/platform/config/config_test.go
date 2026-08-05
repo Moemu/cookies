@@ -23,6 +23,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		value.Strategy.ReviewPromptVersion != "strategy.review.deep.v2" ||
 		value.Strategy.RepairPromptVersion != "strategy.repair.v2" ||
 		!value.Strategy.CreativeTaskPlanningEnabled ||
+		!value.Strategy.QuickViralRemakeEnabled ||
 		value.Strategy.CreativeTaskPromptVersion != "strategy.creative_task.generate.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
@@ -93,6 +94,9 @@ func TestProductionKeepsPreviousStrategyPromptDefaults(t *testing.T) {
 		config.Strategy.ContextSelectionEnabled || config.Strategy.CreativeTaskPlanningEnabled {
 		t.Fatalf("production prompt defaults = %#v", config.Strategy)
 	}
+	if config.Strategy.QuickViralRemakeEnabled {
+		t.Fatalf("production quick viral remake must start disabled: %#v", config.Strategy)
+	}
 }
 
 func TestStrategyContextSelectionRejectsInvalidBoolean(t *testing.T) {
@@ -101,6 +105,16 @@ func TestStrategyContextSelectionRejectsInvalidBoolean(t *testing.T) {
 		"COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED": "sometimes",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStrategyQuickViralRemakeRejectsInvalidBoolean(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_STRATEGY_QUICK_VIRAL_REMAKE_ENABLED": "sometimes",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "COOKIES_STRATEGY_QUICK_VIRAL_REMAKE_ENABLED") {
 		t.Fatalf("err = %v", err)
 	}
 }

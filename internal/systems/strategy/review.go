@@ -384,6 +384,12 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		ProjectID: draft.ProjectID, Snapshot: snapshot, ContentHash: contentHash,
 		Status: "published", PublishedBy: actor.Principal.ID, PublishedAt: now,
 	}
+	packageVersion, handoff, err := packageVersionWithHandoffReadiness(packageVersion, projectContext.ProductIDs)
+	if err != nil {
+		return PackageVersion{}, false, err
+	}
+	snapshot = packageVersion.Snapshot
+	contentHash = packageVersion.ContentHash
 	if latestVersion == 0 {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_packages
 			(id, organization_id, project_id, strategy_id, latest_version, status, created_at, updated_at)
@@ -410,10 +416,6 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`, packageID, versionNumber,
 		actor.OrganizationID, draft.ProjectID, strategyID, revision.Revision, review.ID,
 		snapshotJSONValue, contentHash, actor.Principal.ID, now); err != nil {
-		return PackageVersion{}, false, err
-	}
-	handoff, err := BuildCreativeHandoff(packageVersion, projectContext.ProductIDs)
-	if err != nil {
 		return PackageVersion{}, false, err
 	}
 	handoffSnapshot, err := json.Marshal(handoff)
@@ -504,6 +506,37 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		return PackageVersion{}, false, err
 	}
 	return packageVersion, false, nil
+}
+
+// packageVersionWithHandoffReadiness keeps the package summary and the frozen
+// creative handoff from making contradictory readiness claims. The handoff is
+// the stricter, route-aware authority for whether Creative can safely consume a
+// published package. Publishing itself remains allowed when the handoff is
+// blocked; only the creative_ready projection is downgraded.
+func packageVersionWithHandoffReadiness(value PackageVersion, productIDs []contract.ProductID) (PackageVersion, CreativeHandoff, error) {
+	handoff, err := BuildCreativeHandoff(value, productIDs)
+	if err != nil {
+		return PackageVersion{}, CreativeHandoff{}, err
+	}
+	if handoff.UpstreamReadiness.Status == "ready" || !value.Snapshot.Readiness.CreativeReady {
+		return value, handoff, nil
+	}
+
+	value.Snapshot.Readiness.CreativeReady = false
+	contentHash, err := PackageContentHash(value.Snapshot)
+	if err != nil {
+		return PackageVersion{}, CreativeHandoff{}, err
+	}
+	value.Snapshot.Approval.ContentHash = contentHash
+	value.ContentHash = contentHash
+	if err := VerifyPackageContentHash(value.Snapshot); err != nil {
+		return PackageVersion{}, CreativeHandoff{}, err
+	}
+	handoff, err = BuildCreativeHandoff(value, productIDs)
+	if err != nil {
+		return PackageVersion{}, CreativeHandoff{}, err
+	}
+	return value, handoff, nil
 }
 
 func calculateReadiness(brief BriefVersion, document StrategyDocument) Readiness {

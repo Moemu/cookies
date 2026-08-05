@@ -3,7 +3,6 @@ import {
   Archive,
   BadgeCheck,
   BookOpen,
-  Bot,
   Check,
   ChevronRight,
   CircleCheck,
@@ -16,15 +15,15 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Send,
   ShieldCheck,
   Sparkles,
   Upload,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from '../../context/ProjectContext'
 import type { SystemKey } from '../../types'
 import { CreativeTaskPlanner } from './CreativeTaskPlanner'
+import { StrategyConversationPane } from './StrategyConversationPane'
 import { useStrategyWorkspace } from './useStrategyWorkspace'
 import type {
   BriefDraft,
@@ -126,11 +125,34 @@ export function KanonStrategyWorkspace({
             view,
           )}
         /> : null}
-        {activeView === '对话' ? <ConversationPane
+        {activeView === '对话' ? <StrategyConversationPane
           brief={state.brief}
-          busy={state.busy === 'message' || Boolean(state.pendingAgentTaskId)}
+          briefVersion={state.briefVersion}
+          busy={state.busy}
+          conversationCapabilities={state.conversationCapabilities}
+          documents={state.documents}
+          mediaArtifacts={state.mediaArtifacts}
           messages={state.messages}
+          onConfirmRequirement={actions.confirmRequirement}
+          onOpenBrief={() => onOpenProject(
+            currentProject.id,
+            'strategy',
+            'workspaces',
+            state.detail?.workspace.id,
+            'Brief',
+          )}
+          onOpenFullStrategy={() => onOpenProject(
+            currentProject.id,
+            'strategy',
+            'workspaces',
+            state.detail?.workspace.id,
+            '策略',
+          )}
+          onReadyViralRemake={taskId => onOpenCreative('video', '效果广告', taskId)}
           onSend={actions.sendMessage}
+          onStartViralRemake={actions.createRequirementViralRemake}
+          onUploadDocument={actions.uploadConversationDocument}
+          onUploadMedia={actions.uploadConversationMedia}
           pending={Boolean(state.pendingAgentTaskId)}
         /> : null}
         {activeView === 'Brief' ? <BriefPane
@@ -283,10 +305,16 @@ function OverviewPane({ state, onNavigate }: { state: WorkspaceState; onNavigate
           : { view: '创意任务策略' as const, eyebrow: '策略已就绪', title: '把策略变成可执行创意', detail: '选择业务 Route，补齐任务级约束，并一键进入图文或品牌广告生产。', action: '开始创意交接' }
 
   const evidenceCount = document?.evidence_refs?.length ?? state.brief?.document.reference_ids?.length ?? 0
+  const evidenceSummary = state.brief?.document.product?.evidence?.[0]
+    || (evidenceCount > 0 ? '已绑定来源文档，可回到研究页核对原文和采用状态。' : '当前没有已确认的产品事实或来源，创意不能把推测写成卖点。')
   const primaryChannel = document?.channel_strategy?.[0]
   const progress = Math.round((stages.filter(stage => stage.complete).length / (stages.length - 1)) * 100)
   const qualityReport = state.metadata?.quality_report
   const usesDecisionQualityGate = state.metadata?.prompt_version === 'strategy.generate.v4'
+  const p0Metrics = state.p0Metrics
+  const requirementRate = p0Metrics && p0Metrics.funnel.conversations_engaged > 0
+    ? Math.round(p0Metrics.funnel.requirements_confirmed / p0Metrics.funnel.conversations_engaged * 100)
+    : null
 
   return <section className="kanon-strategy-overview">
     <div className="kanon-command-hero">
@@ -323,6 +351,40 @@ function OverviewPane({ state, onNavigate }: { state: WorkspaceState; onNavigate
       </button>)}
     </nav>
 
+    {p0Metrics ? <section className="kanon-p0-evidence" aria-label="P0 业务成效证据">
+      <header>
+        <div><span className="section-label">P0 RELEASE EVIDENCE</span><h3>观察到的业务漏斗</h3></div>
+        <small>近 {p0Metrics.window.days} 天 · 仅代表行为记录，不代表因果提升</small>
+      </header>
+      <div>
+        <article>
+          <span>需求冻结率</span>
+          <strong>{requirementRate === null ? '—' : `${requirementRate}%`}</strong>
+          <small>{p0Metrics.funnel.requirements_confirmed} / {p0Metrics.funnel.conversations_engaged} 个有效对话</small>
+        </article>
+        <article>
+          <span>需求确认 P50</span>
+          <strong>{formatMetricDuration(p0Metrics.timings.median_seconds_to_requirement)}</strong>
+          <small>{p0Metrics.timings.requirement_samples} 个样本 · 平均 {p0Metrics.timings.average_user_turns_to_requirement ?? '—'} 轮输入</small>
+        </article>
+        <article>
+          <span>进入创意的路径</span>
+          <strong>{p0Metrics.paths.quick_intakes}<i> quick</i> / {p0Metrics.paths.full_intakes}<i> full</i></strong>
+          <small>{p0Metrics.funnel.creative_tasks_created} 个 Creative Task</small>
+        </article>
+        <article>
+          <span>高级能力实用量</span>
+          <strong>{p0Metrics.turns.deep_turns}<i> deep</i> / {p0Metrics.turns.web_search_turns}<i> web</i></strong>
+          <small>{p0Metrics.turns.failed_agent_turns} 次对话 Agent 失败</small>
+        </article>
+        <article>
+          <span>明确有用反馈</span>
+          <strong>{p0Metrics.feedback.useful_rate === null ? '—' : `${Math.round(p0Metrics.feedback.useful_rate * 100)}%`}</strong>
+          <small>{p0Metrics.feedback.responses} 份人工反馈，不能用模型评分替代</small>
+        </article>
+      </div>
+    </section> : null}
+
     <div className="kanon-decision-grid">
       <article className="kanon-decision-card primary">
         <span className="section-label">核心判断</span>
@@ -336,14 +398,16 @@ function OverviewPane({ state, onNavigate }: { state: WorkspaceState; onNavigate
         <ul>{document?.audience.insights?.slice(0, 3).map(insight => <li key={insight}>{insight}</li>) ?? <li>完成策略后显示关键人群洞察</li>}</ul>
       </article>
       <article className="kanon-decision-card channel">
-        <span className="section-label">从哪里切入</span>
+        <span className="section-label">渠道与内容切口</span>
         <h3>{primaryChannel ? `${primaryChannel.platform} · ${primaryChannel.role}` : '待明确首要渠道角色'}</h3>
         <p>{primaryChannel?.formats?.length ? primaryChannel.formats.join(' / ') : '策略会明确内容形式、渠道分工与交付目的。'}</p>
+        <small>品牌广告还是效果广告，会在“创意任务策略”中作为创作路线明确确认。</small>
       </article>
       <article className="kanon-decision-card evidence">
-        <span className="section-label">为什么可信</span>
+        <span className="section-label">用户为什么相信</span>
         <div className="kanon-evidence-number"><strong>{evidenceCount}</strong><small>条已绑定证据</small></div>
-        <p>{document?.constraints?.[0] || '证据、约束和开放问题共同定义策略边界。'}</p>
+        <p>{evidenceSummary}</p>
+        <small>可信依据是可追溯的产品事实、客户材料或研究来源，不是策略自己写出的判断。</small>
         <button className="text-button" onClick={() => onNavigate('研究')} type="button">查看证据 <ChevronRight size={13}/></button>
       </article>
       <article className="kanon-decision-card ideas">
@@ -361,78 +425,11 @@ function OverviewPane({ state, onNavigate }: { state: WorkspaceState; onNavigate
   </section>
 }
 
-function ConversationPane({ brief, busy, messages, onSend, pending }: {
-  brief: BriefDraft | null
-  busy: boolean
-  messages: WorkspaceState['messages']
-  onSend: (content: string) => Promise<boolean>
-  pending: boolean
-}) {
-  const [content, setContent] = useState('')
-  const listRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    const list = listRef.current
-    if (list) list.scrollTop = list.scrollHeight
-  }, [messages, pending])
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 88), 180)}px`
-  }, [content])
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    const value = content.trim()
-    if (!value) return
-    setContent('')
-    const sent = await onSend(value)
-    if (!sent) setContent(current => current.trim() ? current : value)
-  }
-
-  return <section className="kanon-conversation">
-    <div className="kanon-strategy-heading">
-      <div><span className="section-label">STRATEGY COPILOT</span><h2>把模糊需求聊清楚</h2><p>同一 Conversation 持续更新服务端 Brief 草稿。</p></div>
-      <span className="source-chip">{brief?.completeness.ready ? '信息已完整' : '实时整理 Brief'}</span>
-    </div>
-    <div className="kanon-message-list" ref={listRef}>
-      {!messages.length ? <div className="kanon-conversation-empty">
-        <Bot size={22}/><b>从现在最确定的部分开始</b>
-        <p>描述品牌、产品、目标受众或这次推广最想解决的问题。</p>
-      </div> : null}
-      {messages.map(message => <article className={`kanon-message ${message.role}`} key={message.id}>
-        <span>{message.role === 'user' ? '我' : message.role === 'assistant' ? 'AI' : '•'}</span>
-        <div><small>{message.role === 'user' ? '需求方' : message.role === 'assistant' ? 'Strategy 助手' : '系统事件'} · {formatTime(message.created_at)}</small><p>{message.content}</p></div>
-      </article>)}
-      {pending ? <article className="kanon-message assistant thinking">
-        <span>AI</span><div><small>Strategy 助手</small><p><LoaderCircle className="spin" size={14}/>正在更新对话共识与 Brief…</p></div>
-      </article> : null}
-    </div>
-    <form className="kanon-composer" onSubmit={submit}>
-      <label htmlFor="kanon-strategy-message"><span>继续描述需求</span><small>{brief?.completeness.ready ? 'Brief 信息已完整，可继续补充' : 'AI 会同步整理到 Brief'}</small></label>
-      <textarea
-        aria-describedby="kanon-strategy-message-help"
-        id="kanon-strategy-message"
-        maxLength={4000}
-        onChange={event => setContent(event.target.value)}
-        onKeyDown={event => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault()
-            event.currentTarget.form?.requestSubmit()
-          }
-        }}
-        placeholder="输入品牌、产品、目标受众、预算或希望解决的问题…"
-        ref={textareaRef}
-        rows={3}
-        value={content}
-      />
-      <div>
-        <span id="kanon-strategy-message-help"><small>Enter 发送 · Shift + Enter 换行</small><small className="kanon-composer-count">{content.length} / 4000</small></span>
-        <button aria-label="发送需求消息" className="primary-button" disabled={busy || !content.trim()} type="submit"><Send size={15}/>{busy ? '处理中…' : '发送'}</button>
-      </div>
-    </form>
-  </section>
+function formatMetricDuration(seconds: number | null) {
+  if (seconds === null) return '—'
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  return `${Math.round(seconds / 360) / 10}h`
 }
 
 const briefFields: Array<{
@@ -466,6 +463,9 @@ function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField }: {
 }) {
   if (!brief) return <UnavailablePane title="Brief 尚未创建" detail="请先进入对话并发送第一条需求信息。"/>
   const frozen = brief.status === 'confirmed'
+  const populatedCount = briefFields.filter(field => field.value(brief).trim()).length
+  const confirmedCount = briefFields.filter(field => field.value(brief).trim() && brief.field_states[field.path]?.confirmation === 'confirmed').length
+  const optionalCreativeContext = briefFields.filter(field => ['brand.name', 'industry', 'region', 'language'].includes(field.path) && !field.value(brief).trim())
   const unconfirmedFields = briefFields.flatMap(field => {
     const value = field.value(brief)
     if (!value.trim() || brief.field_states[field.path]?.confirmation === 'confirmed') return []
@@ -476,10 +476,18 @@ function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField }: {
       <div><span className="section-label">BRIEF DRAFT v{brief.version}</span><h2>确认策略输入</h2><p>字段修改使用服务端版本校验，确认后冻结为不可变 BriefVersion。</p></div>
       <span className={`source-chip ${brief.completeness.ready ? '' : 'alert'}`}>{frozen ? '已冻结' : brief.completeness.ready ? '可以确认' : `${brief.completeness.blockers.length} 个阻断项`}</span>
     </div>
+    <div className="kanon-brief-health" role="status">
+      <div><b>{populatedCount}<small> / {briefFields.length}</small></b><span>已填写</span></div>
+      <div><b>{confirmedCount}</b><span>已确认</span></div>
+      <p>{optionalCreativeContext.length
+        ? `${optionalCreativeContext.map(field => field.label).join('、')}未提供；这些信息会在需要时于创作前补充，不再阻断当前交接。`
+        : '品牌、市场与语言上下文完整，可直接用于创意交接。'}</p>
+    </div>
     <div className="kanon-field-grid">
       {briefFields.map(field => <EditableField
         busy={busy === `brief:${field.path}`}
         disabled={frozen || Boolean(busy)}
+        frozen={frozen}
         key={field.path}
         label={field.label}
         multiline={field.multiline}
@@ -505,9 +513,10 @@ function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField }: {
   </section>
 }
 
-function EditableField({ busy, disabled, label, multiline, onSave, state, value }: {
+function EditableField({ busy, disabled, frozen, label, multiline, onSave, state, value }: {
   busy: boolean
   disabled: boolean
+  frozen: boolean
   label: string
   multiline?: boolean
   onSave: (value: string) => Promise<boolean>
@@ -518,9 +527,12 @@ function EditableField({ busy, disabled, label, multiline, onSave, state, value 
   useEffect(() => setDraftValue(value), [value])
   const changed = draftValue.trim() !== value.trim()
   const needsConfirmation = Boolean(value.trim()) && state?.confirmation !== 'confirmed'
-  return <label className={`kanon-field ${multiline ? 'wide' : ''}`}>
+  const empty = !draftValue.trim()
+  return <label className={`kanon-field ${multiline ? 'wide' : ''}${empty ? ' empty' : ''}`}>
     <span>{label}<small>{state?.confirmation === 'confirmed' ? '已确认' : state ? `${state.confidence} 置信度` : '待补充'}</small></span>
-    {multiline
+    {frozen
+      ? <output>{empty ? '未提供' : draftValue}</output>
+      : multiline
       ? <textarea disabled={disabled} rows={3} value={draftValue} onChange={event => setDraftValue(event.target.value)}/>
       : <input disabled={disabled} value={draftValue} onChange={event => setDraftValue(event.target.value)}/>}
     {(changed || needsConfirmation) && !disabled ? <button disabled={busy} type="button" onClick={() => void onSave(draftValue)}>{busy ? '处理中…' : changed ? '保存并确认' : '确认此字段'}</button> : null}
@@ -637,7 +649,7 @@ function StructuredStrategyEditor({ disabled, onChange, section, value }: {
   value: unknown
 }) {
   if (typeof value === 'string') {
-    const singleLine = ['平台', '核心 KPI', '实验变量', '衡量指标', '预算', '内容节奏'].includes(section)
+    const singleLine = ['平台', '核心 KPI', '实验变量', '衡量指标'].includes(section) && value.length < 54
     return <label className="kanon-structured-field wide"><span>{strategySectionLabel(section)}</span>{singleLine
       ? <input disabled={disabled} value={value} onChange={event => onChange(event.target.value)}/>
       : <textarea disabled={disabled} rows={Math.max(3, Math.min(6, Math.ceil(value.length / 70) + 2))} value={value} onChange={event => onChange(event.target.value)}/>}</label>

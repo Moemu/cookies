@@ -91,6 +91,7 @@ type Strategy struct {
 	ApproveEnabled              bool
 	PackageToCreativeEnabled    bool
 	CreativeTaskPlanningEnabled bool
+	QuickViralRemakeEnabled     bool
 	TextModelAlias              string
 	DeepReviewModelAlias        string
 	PromptVersion               string
@@ -333,6 +334,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	strategyQuickViralRemakeEnabled, err := strictBoolValueOr(
+		lookup,
+		"COOKIES_STRATEGY_QUICK_VIRAL_REMAKE_ENABLED",
+		environment != EnvironmentProduction,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	gamePrerollModelPlannerEnabled, err := strictBoolValueOr(
 		lookup,
 		"COOKIES_CREATIVE_GAME_PREROLL_MODEL_PLANNER_ENABLED",
@@ -436,6 +445,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ApproveEnabled:              strategyApproveEnabled,
 			PackageToCreativeEnabled:    strategyPackageToCreativeEnabled,
 			CreativeTaskPlanningEnabled: strategyCreativeTaskPlanningEnabled,
+			QuickViralRemakeEnabled:     strategyQuickViralRemakeEnabled,
 			TextModelAlias:              valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
 			DeepReviewModelAlias:        valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
 			PromptVersion:               valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", generatePromptDefault),

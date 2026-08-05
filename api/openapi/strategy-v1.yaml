@@ -300,6 +300,17 @@ paths:
       responses:
         '201': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/conversation-capabilities:
+    get:
+      operationId: getStrategyConversationCapabilities
+      summary: Read server-effective deep reasoning and web research capabilities.
+      responses:
+        '200':
+          description: Effective conversation capabilities for the authenticated organization.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-conversation-capabilities-v1.schema.json'}
+        '403': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/conversations/{conversation_id}:
     get:
       operationId: getStrategyConversation
@@ -308,6 +319,23 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/p0-metrics:
+    get:
+      operationId: getStrategyP0Metrics
+      summary: Read observed P0 funnel, path, timing, mode, and feedback evidence.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: days
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 90, default: 30}
+      responses:
+        '200':
+          description: Observed project activity; not a causal product-effect claim.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-p0-metrics-v1.schema.json'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/conversations/{conversation_id}/memory:
     get:
       operationId: getStrategyConversationMemory
@@ -335,11 +363,13 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [content]
-              properties:
-                content: {type: string, minLength: 1, maxLength: 65536}
-              additionalProperties: false
+              oneOf:
+                - type: object
+                  required: [content]
+                  properties:
+                    content: {type: string, minLength: 1, maxLength: 65536}
+                  additionalProperties: false
+                - $ref: '../contracts/strategy-conversation-message-create-v2.schema.json'
       responses:
         '202': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
@@ -803,6 +833,8 @@ components:
                   details: {type: array, items: {type: object}}
             additionalProperties: false
   schemas:
+    BriefDocumentV3:
+      $ref: '../contracts/strategy-brief-version-v3.schema.json'
     SHA256:
       type: string
       pattern: '^sha256:[0-9a-f]{64}$'

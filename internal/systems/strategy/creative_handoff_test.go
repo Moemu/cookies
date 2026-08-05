@@ -130,6 +130,37 @@ func TestBuildCreativeHandoffDiagnosesMissingPlanningFields(t *testing.T) {
 	}
 }
 
+func TestPackageVersionWithHandoffReadinessDowngradesContradictoryPackage(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Readiness.CreativeReady = true
+	value := packageVersionForHandoffTest(t, snapshot)
+	originalHash := value.ContentHash
+
+	normalized, handoff, err := packageVersionWithHandoffReadiness(value, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Snapshot.Readiness.CreativeReady {
+		t.Fatal("creative_ready remained true for a blocked frozen handoff")
+	}
+	if handoff.UpstreamReadiness.Status != "blocked" {
+		t.Fatalf("readiness = %#v", handoff.UpstreamReadiness)
+	}
+	if normalized.ContentHash.Equal(originalHash) {
+		t.Fatalf("readiness mutation retained content hash %q", originalHash)
+	}
+	if !normalized.Snapshot.Approval.ContentHash.Equal(normalized.ContentHash) {
+		t.Fatalf("approval hash = %q, package hash = %q", normalized.Snapshot.Approval.ContentHash, normalized.ContentHash)
+	}
+	if !handoff.PackageRef.PackageContentHash.Equal(normalized.ContentHash) {
+		t.Fatalf("handoff package hash = %q, package hash = %q", handoff.PackageRef.PackageContentHash, normalized.ContentHash)
+	}
+	if err := VerifyPackageContentHash(normalized.Snapshot); err != nil {
+		t.Fatalf("normalized package hash invalid: %v", err)
+	}
+}
+
 func TestBuildCreativeHandoffRejectsFrozenSchemaLengthViolation(t *testing.T) {
 	t.Parallel()
 	snapshot := packageHashFixture()

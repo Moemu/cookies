@@ -24,6 +24,7 @@ const (
 	IntakeSourceTaskStrategy     IntakeSource = "task_strategy"
 	IntakeSourceUploadedDocument IntakeSource = "uploaded_document"
 	IntakeSourceConversation     IntakeSource = "conversation"
+	IntakeSourceRequirement      IntakeSource = "requirement_snapshot"
 )
 
 type IntakeStatus string
@@ -67,8 +68,11 @@ const (
 )
 
 type CreateIntakeRequest struct {
-	ContractVersion string       `json:"contract_version,omitempty"`
-	Source          IntakeSource `json:"source"`
+	ContractVersion          string                        `json:"contract_version,omitempty"`
+	Source                   IntakeSource                  `json:"source"`
+	RequirementSnapshotRef   *RequirementSnapshotReference `json:"requirement_snapshot_ref,omitempty"`
+	BusinessCapabilityRef    *BusinessCapabilityReference  `json:"business_capability_ref,omitempty"`
+	RequirementSnapshotInput *RequirementSnapshotInput     `json:"requirement_snapshot_input,omitempty"`
 	// ParentIntakeID links a production-specific manual intake back to a
 	// task-strategy handoff without allowing the manual flow to rewrite it.
 	ParentIntakeID string `json:"parent_intake_id,omitempty"`
@@ -238,6 +242,9 @@ func (r CreateIntakeRequest) Validate() error {
 	if r.Source == "" {
 		return fmt.Errorf("source is required")
 	}
+	if r.Source != IntakeSourceRequirement && (r.RequirementSnapshotRef != nil || r.BusinessCapabilityRef != nil || r.RequirementSnapshotInput != nil) {
+		return fmt.Errorf("requirement snapshot fields are only valid for requirement_snapshot intake")
+	}
 	switch r.Source {
 	case IntakeSourceManual:
 		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil ||
@@ -305,6 +312,8 @@ func (r CreateIntakeRequest) Validate() error {
 			return fmt.Errorf("task strategy mapped fields are resolved by Creative and must not be submitted by a caller")
 		}
 		return r.TaskStrategy.Validate()
+	case IntakeSourceRequirement:
+		return r.validateRequirementSnapshotV4()
 	default:
 		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
@@ -514,7 +523,7 @@ type CreateVideoTaskRequest struct {
 
 func (r CreateVideoTaskRequest) Validate() error {
 	if (strings.TrimSpace(r.SelectedRouteID) == "" && r.RouteIndex < 0) ||
-		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
+		(r.Channel != ChannelXiaohongshu && r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
 	if (strings.TrimSpace(r.DirectionID) == "" && (strings.TrimSpace(r.Concept) == "" || strings.TrimSpace(r.Prompt) == "")) ||

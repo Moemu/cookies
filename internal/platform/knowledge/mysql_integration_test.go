@@ -75,6 +75,26 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		documents[0].SourceType != "prelaunch_insight" {
 		t.Fatalf("persisted knowledge metadata=%#v err=%v", documents, err)
 	}
+	secondDocument, err := service.ImportDocument(ctx, actor, projectID, knowledge.ImportDocumentRequest{
+		Title: "品牌边界", SourceURI: "cookies://brand-guardrails/BG-001",
+		SourceType: "docs", Text: "品牌表达必须克制，不使用治疗承诺。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversationChunks, err := service.SelectConversationChunks(
+		ctx, actor, projectID, []string{document.ID, secondDocument.ID}, "历史项目验证",
+	)
+	if err != nil {
+		t.Fatalf("SelectConversationChunks() error=%v", err)
+	}
+	coveredDocuments := map[string]bool{}
+	for _, result := range conversationChunks {
+		coveredDocuments[result.Chunk.DocumentID] = true
+	}
+	if !coveredDocuments[document.ID] || !coveredDocuments[secondDocument.ID] {
+		t.Fatalf("conversation chunks did not cover every ready attachment: %#v", coveredDocuments)
+	}
 
 	run, err := service.RunResearch(ctx, actor, projectID, knowledge.ResearchRequest{
 		Mode: "web", Category: "audience", Query: "研发负责人决策因素",

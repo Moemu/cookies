@@ -612,6 +612,17 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		intake.Request.StrategyPackage.PackageID != published.PackageID {
 		t.Fatalf("Strategy package handoff: intake=%#v err=%v", intake, err)
 	}
+	metrics, err := service.GetP0Metrics(ctx, actor, projectID, 30)
+	if err != nil {
+		t.Fatalf("get P0 metrics: %v", err)
+	}
+	if metrics.ContractVersion != strategy.P0MetricsContractV1 ||
+		metrics.Funnel.ConversationsStarted < 1 || metrics.Funnel.RequirementsConfirmed < 1 ||
+		metrics.Funnel.StrategiesStarted < 1 || metrics.Funnel.PackagesPublished < 1 ||
+		metrics.Paths.FullIntakes < 1 || metrics.Feedback.Useful < 1 ||
+		metrics.Timings.RequirementSamples < 1 || metrics.Timings.PublishedPackageSamples < 1 {
+		t.Fatalf("incomplete P0 metrics: %#v", metrics)
+	}
 	replayed, duplicate, err := service.ApproveStrategy(ctx, actor, contract.IdempotencyKey("approve_"+suffix), strategyDraft.ID, strategy.ApproveRequest{
 		ReviewID: review.ID, CandidateContentHash: review.CandidateContentHash, ExpectedVersion: strategyDraft.Version,
 	})

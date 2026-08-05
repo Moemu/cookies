@@ -2,12 +2,95 @@ package creative
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/jobruntime"
 )
+
+func TestDirectionGenerationPersistsBeforeBackgroundExecutionAndRecovers(t *testing.T) {
+	service := testService()
+	intake := CreativeIntake{
+		ContractVersion: CreativeIntakeV3ContractVersion,
+		ID:              "intake_async", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: IntakeSourceStrategyPackage, Status: IntakeReady,
+		InputIdentityHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Request: CreateIntakeRequest{SelectedRouteID: "route_brand", CoreMessage: "让关键判断回到人手中", CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteID: "route_brand", RouteType: CreativeRouteBrandVideo, Channels: []string{"brand_film"}, Reason: "品牌认知", ReadinessStatus: "ready",
+		}}},
+	}
+	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	repository := &directionRepositoryStub{}
+	scheduler := &directionGenerationSchedulerStub{}
+	service.Directions = repository
+	service.DirectionScheduler = scheduler
+	planner := &directionPlannerStub{result: DirectionPlannerResult{
+		Model: "test-model", PromptVersion: "direction-test-v1", Candidates: []DirectionCandidate{
+			{Concept: "判断被交还的瞬间", CreativeRationale: "以人物终于能专注判断为情绪落点", MessagePlan: []string{"先重复工作，后关键判断"}, ExecutionOutline: []string{"机械重复与人物抬头形成反差"}, GuardrailTrace: []string{"不承诺绝对效率"}, DirectionMode: "emotional", EmotionalArc: "压迫到释然", VisualGrammar: "重复蒙太奇", BrandMemoryDevice: "抬头一刻", HumanMoment: "同事交换确认眼神"},
+			{Concept: "留白给重要的事", CreativeRationale: "通过空间留白建立品牌秩序感", MessagePlan: []string{"先噪声，后留白"}, ExecutionOutline: []string{"密集界面逐步退场"}, GuardrailTrace: []string{"不虚构功能指标"}, DirectionMode: "cinematic", EmotionalArc: "拥挤到从容", VisualGrammar: "宽银幕留白", BrandMemoryDevice: "空出的桌面", HumanMoment: "人物放下手中清单"},
+		},
+	}}
+	service.DirectionPlanner = planner
+	actor := testRequestContext().Actor
+	batch, err := service.StartDirectionGeneration(context.Background(), actor, "project_1", intake.ID, GenerateDirectionRequest{CandidateCount: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.Status != DirectionBatchGenerating || len(batch.Candidates) != 0 || scheduler.calls != 1 {
+		t.Fatalf("generation was not durably started: batch=%+v calls=%d", batch, scheduler.calls)
+	}
+	replayed, err := service.StartDirectionGeneration(context.Background(), actor, "project_1", intake.ID, GenerateDirectionRequest{CandidateCount: 2})
+	if err != nil || replayed.ID != batch.ID || scheduler.calls != 1 {
+		t.Fatalf("active generation was not deduplicated: batch=%+v calls=%d err=%v", replayed, scheduler.calls, err)
+	}
+	payload, err := json.Marshal(scheduler.operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.HandleDirectionGenerationJob(context.Background(), jobruntime.Claim{Job: contract.Job{
+		Kind: DirectionGenerationJobKind, OrganizationID: actor.OrganizationID, ProjectID: "project_1",
+	}, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := service.GetLatestDirectionBatch(context.Background(), actor, "project_1", intake.ID)
+	if err != nil || restored.Status != DirectionBatchReady || len(restored.Candidates) != 2 {
+		t.Fatalf("completed batch was not recoverable: batch=%+v err=%v", restored, err)
+	}
+	if planner.context.GenerationID != batch.ID {
+		t.Fatalf("generation batch ID was not bound to the model invocation context: %+v", planner.context)
+	}
+}
+
+func TestDirectionGenerationPersistsFailureForRefresh(t *testing.T) {
+	service := testService()
+	intake := CreativeIntake{ContractVersion: CreativeIntakeV3ContractVersion, ID: "intake_failed", OrganizationID: "org_1", ProjectID: "project_1", Source: IntakeSourceStrategyPackage, Status: IntakeReady,
+		InputIdentityHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Request:           CreateIntakeRequest{SelectedRouteID: "route_xhs", CreativeRoutes: []CreativeRouteSnapshot{{RouteID: "route_xhs", RouteType: CreativeRouteImageText, Channels: []string{"xiaohongshu"}, Reason: "内容", ReadinessStatus: "ready"}}}}
+	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	repository := &directionRepositoryStub{}
+	scheduler := &directionGenerationSchedulerStub{}
+	service.Directions = repository
+	service.DirectionScheduler = scheduler
+	service.DirectionPlanner = &directionPlannerStub{err: errors.New("provider timeout")}
+	actor := testRequestContext().Actor
+	batch, err := service.StartDirectionGeneration(context.Background(), actor, "project_1", intake.ID, GenerateDirectionRequest{CandidateCount: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(scheduler.operation)
+	_, err = service.HandleDirectionGenerationJob(context.Background(), jobruntime.Claim{Job: contract.Job{Kind: DirectionGenerationJobKind, OrganizationID: actor.OrganizationID, ProjectID: "project_1"}, Payload: payload})
+	if err == nil {
+		t.Fatal("expected background generation failure")
+	}
+	restored, getErr := service.GetLatestDirectionBatch(context.Background(), actor, "project_1", intake.ID)
+	if getErr != nil || restored.ID != batch.ID || restored.Status != DirectionBatchFailed || restored.FailureCode != "DIRECTION_PROVIDER_FAILED" {
+		t.Fatalf("failed batch was not recoverable: batch=%+v err=%v", restored, getErr)
+	}
+}
 
 func TestGenerateDirectionCandidatesStartsCreativeAuthorship(t *testing.T) {
 	service := testService()
@@ -196,6 +279,27 @@ func TestValidateDirectionBatchQualityRejectsPerformanceCTAInBrandVideo(t *testi
 	}
 }
 
+func TestBrandQualityAllowsProductToolLanguageAndNarrativeClick(t *testing.T) {
+	t.Parallel()
+	candidate := DirectionCandidate{
+		Concept: "把重复工作交给自动化", CreativeRationale: "让效率工具退到幕后，把关键判断还给人",
+		DirectionMode: "emotional", MessagePlan: []string{"重复操作退场，人的判断出现"},
+		ExecutionOutline: []string{"人物点击确认按钮后抬头，与同事交换眼神"}, GuardrailTrace: []string{"不承诺绝对效率"},
+		EmotionalArc: "从机械疲惫到重新专注", VisualGrammar: "重复蒙太奇转为克制长镜头",
+		BrandMemoryDevice: "确认声后的一秒静默", HumanMoment: "操作者点击确认后把注意力转向同事",
+	}
+	if isUtilityLedDirection(candidate) {
+		t.Fatal("describing the product as an efficiency tool must not become utility-led content")
+	}
+	if cue := firstBrandPerformanceCue(candidate); cue != "" {
+		t.Fatalf("a character clicking a work control is narrative action, not a performance CTA: %s", cue)
+	}
+	candidate.ExecutionOutline = []string{"结尾点击了解更多并立即咨询"}
+	if cue := firstBrandPerformanceCue(candidate); cue != "点击了解" {
+		t.Fatalf("an audience-facing click CTA must still be rejected: %s", cue)
+	}
+}
+
 func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) {
 	service := testService()
 	intake := CreativeIntake{
@@ -341,6 +445,21 @@ type directionRepositoryStub struct {
 	batch CreativeDirectionBatch
 }
 
+type directionGenerationSchedulerStub struct {
+	operation DirectionGenerationOperation
+	calls     int
+}
+
+func (s *directionGenerationSchedulerStub) ScheduleDirectionGeneration(
+	_ context.Context,
+	_ contract.ProjectID,
+	operation DirectionGenerationOperation,
+) error {
+	s.calls++
+	s.operation = operation
+	return nil
+}
+
 type taskOverlayReaderStub struct {
 	snapshot TaskOverlaySnapshot
 	err      error
@@ -365,6 +484,51 @@ func (r taskOverlayReaderStub) ReadTaskOverlayForCreative(
 func (r *directionRepositoryStub) CreateDirectionBatch(_ context.Context, value CreativeDirectionBatch) (CreativeDirectionBatch, error) {
 	r.batch = value
 	return value, nil
+}
+
+func (r *directionRepositoryStub) GetDirectionBatch(
+	_ context.Context,
+	_ contract.OrganizationID,
+	_ contract.ProjectID,
+	batchID string,
+) (CreativeDirectionBatch, error) {
+	if r.batch.ID != batchID {
+		return CreativeDirectionBatch{}, ErrNotFound
+	}
+	return r.batch, nil
+}
+
+func (r *directionRepositoryStub) GetLatestDirectionBatch(
+	_ context.Context,
+	_ contract.OrganizationID,
+	_ contract.ProjectID,
+	intakeID string,
+) (CreativeDirectionBatch, error) {
+	if r.batch.IntakeID != intakeID {
+		return CreativeDirectionBatch{}, ErrNotFound
+	}
+	return r.batch, nil
+}
+
+func (r *directionRepositoryStub) CompleteDirectionBatch(_ context.Context, value CreativeDirectionBatch) (CreativeDirectionBatch, error) {
+	value.Status = DirectionBatchReady
+	r.batch = value
+	return value, nil
+}
+
+func (r *directionRepositoryStub) FailDirectionBatch(
+	_ context.Context,
+	_ contract.OrganizationID,
+	_ contract.ProjectID,
+	batchID string,
+	failureCode string,
+) error {
+	if r.batch.ID != batchID {
+		return ErrNotFound
+	}
+	r.batch.Status = DirectionBatchFailed
+	r.batch.FailureCode = failureCode
+	return nil
 }
 
 func (r *directionRepositoryStub) GetDirection(

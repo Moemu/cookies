@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/workspaces", server.listWorkspaces)
 	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}", server.getWorkspace)
 	mux.HandleFunc("POST /api/strategy/v1/conversations", server.createConversation)
+	mux.HandleFunc("GET /api/strategy/v1/conversation-capabilities", server.getConversationCapabilities)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}", server.getConversation)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/memory", server.getConversationMemory)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/messages", server.listMessages)
@@ -57,6 +59,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/generation-readiness", server.getGenerationReadiness)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/p0-metrics", server.getP0Metrics)
 	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/generation-probe", server.probeGeneration)
 	mux.HandleFunc("GET /api/strategy/v1/skills", server.listSkills)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/creative-businesses", server.listCreativeBusinesses)
@@ -249,6 +252,27 @@ func (s *Server) getConversation(writer http.ResponseWriter, request *http.Reque
 	writeResult(writer, value, err)
 }
 
+func (s *Server) getConversationCapabilities(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetConversationCapabilities(request.Context(), mustActor(request))
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getP0Metrics(writer http.ResponseWriter, request *http.Request) {
+	days := 0
+	if raw := strings.TrimSpace(request.URL.Query().Get("days")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		days = value
+	}
+	value, err := s.Service.GetP0Metrics(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")), days,
+	)
+	writeResult(writer, value, err)
+}
+
 func (s *Server) getConversationMemory(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetConversationMemory(
 		request.Context(), mustActor(request), request.PathValue("conversation_id"),
@@ -268,12 +292,49 @@ func (s *Server) listMessages(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) sendMessage(writer http.ResponseWriter, request *http.Request) {
 	var body struct {
-		Content string `json:"content"`
+		ContractVersion string                           `json:"contract_version,omitempty"`
+		Content         json.RawMessage                  `json:"content"`
+		RequestedPolicy *strategy.MessageRequestedPolicy `json:"requested_policy,omitempty"`
 	}
 	if !decode(writer, request, &body) {
 		return
 	}
-	value, duplicate, err := s.Service.SendMessage(request.Context(), mustActor(request), idempotencyKey(request), request.PathValue("conversation_id"), body.Content)
+	var value strategy.SendMessageResult
+	var duplicate bool
+	var err error
+	if body.ContractVersion == "" {
+		if body.RequestedPolicy != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		var content string
+		if err := decodeRawStrict(body.Content, &content); err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		value, duplicate, err = s.Service.SendMessage(request.Context(), mustActor(request), idempotencyKey(request), request.PathValue("conversation_id"), content)
+	} else {
+		if body.ContractVersion != strategy.MessageCreateContractV2 {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		var blocks []strategy.MessageContentBlock
+		if err := decodeRawStrict(body.Content, &blocks); err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		value, duplicate, err = s.Service.SendMessageV2(
+			request.Context(),
+			mustActor(request),
+			idempotencyKey(request),
+			request.PathValue("conversation_id"),
+			strategy.SendMessageV2Request{
+				ContractVersion: body.ContractVersion,
+				Content:         blocks,
+				RequestedPolicy: body.RequestedPolicy,
+			},
+		)
+	}
 	if err != nil {
 		writeError(writer, err)
 		return
@@ -282,6 +343,18 @@ func (s *Server) sendMessage(writer http.ResponseWriter, request *http.Request) 
 		writer.Header().Set("Idempotent-Replay", "true")
 	}
 	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func decodeRawStrict(raw json.RawMessage, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return strategy.ErrInvalidRequest
+	}
+	return nil
 }
 
 func (s *Server) getTask(writer http.ResponseWriter, request *http.Request) {

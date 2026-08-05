@@ -36,6 +36,10 @@ type TaskOverlayReader interface {
 	ReadTaskOverlayForCreative(context.Context, contract.ActorContext, contract.ProjectID, TaskOverlayReference) (TaskOverlaySnapshot, error)
 }
 
+type RequirementSnapshotReader interface {
+	ReadRequirementForCreative(context.Context, contract.ActorContext, contract.ProjectID, RequirementSnapshotReference, BusinessCapabilityReference) (RequirementSnapshot, error)
+}
+
 type AssetReader interface {
 	ReadForCreative(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (CreativeAssetSnapshot, error)
 }
@@ -91,6 +95,7 @@ type Service struct {
 	StrategyPackages                    StrategyPackageReader
 	TaskStrategies                      TaskStrategyReader
 	TaskOverlays                        TaskOverlayReader
+	Requirements                        RequirementSnapshotReader
 	Sources                             CreativeSourceReader
 	Assets                              AssetReader
 	GameEvidenceFrames                  media.FrameExtractor
@@ -109,6 +114,7 @@ type Service struct {
 	BrandFilmPlanner                    BrandFilmPlanner
 	DirectionPlanner                    CreativeDirectionPlanner
 	Directions                          DirectionRepository
+	DirectionScheduler                  DirectionGenerationScheduler
 	ImageTextDraftPlanner               ImageTextDraftPlanner
 	ImageRenderer                       *ImageTextRenderer
 	ImageBaseAssets                     ImageBaseAssetReader
@@ -176,6 +182,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		return CreativeTask{}, fmt.Errorf("selected channel is not approved by the Strategy route")
 	}
 	isManualBrandFilm := intake.Source == IntakeSourceManual && route.RouteID == ManualBrandFilmRouteID
+	isDirectViralRemake := (intake.Source == IntakeSourceManual || intake.Source == IntakeSourceRequirement) && route.RouteType == PerformanceModeViralRemake
 	var confirmedDirection *CreativeDirectionVersion
 	if route.RouteType == CreativeRouteBrandVideo && !isManualBrandFilm {
 		if s.Directions == nil || strings.TrimSpace(request.DirectionID) == "" {
@@ -219,7 +226,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	var shortDramaDraft *ShortDramaPrerollDraft
 	var gamePrerollDraft *GamePrerollDraft
 	var brandFilmDraft *BrandFilmDraft
-	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+	if isDirectViralRemake {
 		if intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable manual intake snapshot")
 		}
@@ -297,7 +304,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 		draft.BrandFilm = brandFilmDraft
 	}
-	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeViralRemake {
+	if isDirectViralRemake {
 		manual := intake.Request.ManualViralRemake
 		snapshot := ViralRemakeInputSnapshot{
 			Source: intake.Source, SelectedRouteID: route.RouteID,
@@ -545,6 +552,16 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			return CreativeIntake{}, fmt.Errorf("parent_intake_id is not a compatible ready task strategy handoff")
 		}
 	}
+	requirementMissing := []string{}
+	requirementWarnings := []string{}
+	if request.Source == IntakeSourceRequirement {
+		request, requirementMissing, requirementWarnings, err = s.resolveRequirementIntake(
+			ctx, requestContext.Actor, projectID, request,
+		)
+		if err != nil {
+			return CreativeIntake{}, err
+		}
+	}
 	strategyReady := true
 	if request.Source == IntakeSourceStrategyPackage {
 		requestedContractVersion := request.ContractVersion
@@ -591,6 +608,7 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			return CreativeIntake{}, err
 		}
 		selectedRouteFound := selectedRouteID == ""
+		selectedRouteReady := false
 		for _, route := range request.CreativeRoutes {
 			if selectedRouteID != "" && route.RouteID != selectedRouteID {
 				continue
@@ -599,11 +617,18 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			if err := route.Validate(); err != nil {
 				return CreativeIntake{}, err
 			}
+			if selectedRouteID != "" {
+				selectedRouteReady = route.ReadinessStatus == "ready"
+			}
 		}
 		if !selectedRouteFound {
 			return CreativeIntake{}, fmt.Errorf("selected_route_id is not present in the Strategy handoff")
 		}
-		strategyReady = snapshot.CreativeReady
+		// A frozen package can be blocked by optional market/language context while
+		// its explicitly selected route is already executable. Route readiness is
+		// authoritative for this handoff; required creative facts are still checked
+		// by request.missingFields below.
+		strategyReady = snapshot.CreativeReady || selectedRouteReady
 	}
 	if request.Source == IntakeSourceTaskStrategy {
 		if s.TaskStrategies == nil {
@@ -666,12 +691,38 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 		inputIdentityHash = string(identityHash)
 		intakeContractVersion = CreativeIntakeV3ContractVersion
 	}
+	if request.Source == IntakeSourceRequirement && request.ContractVersion == CreativeIntakeCreateV4ContractVersion {
+		identityHash, identityErr := contract.NewContentHash(struct {
+			Requirement *RequirementSnapshotReference `json:"requirement_snapshot_ref"`
+			Capability  *BusinessCapabilityReference  `json:"business_capability_ref"`
+			RouteID     string                        `json:"selected_route_id"`
+		}{request.RequirementSnapshotRef, request.BusinessCapabilityRef, request.SelectedRouteID})
+		if identityErr != nil {
+			return CreativeIntake{}, fmt.Errorf("hash requirement intake identity: %w", identityErr)
+		}
+		inputIdentityHash = string(identityHash)
+		intakeContractVersion = CreativeIntakeV4ContractVersion
+	}
+	if request.Source == IntakeSourceTaskStrategy && request.TaskStrategy != nil && request.SelectedRouteID != "" {
+		identityHash, identityErr := contract.NewContentHash(struct {
+			TaskStrategy *TaskStrategyReference `json:"task_strategy"`
+			RouteID      string                 `json:"selected_route_id"`
+		}{request.TaskStrategy, request.SelectedRouteID})
+		if identityErr != nil {
+			return CreativeIntake{}, fmt.Errorf("hash task strategy intake identity: %w", identityErr)
+		}
+		inputIdentityHash = string(identityHash)
+		intakeContractVersion = CreativeIntakeV3ContractVersion
+	}
 	intakeID, err := s.idGenerator()("creativeintake")
 	if err != nil {
 		return CreativeIntake{}, err
 	}
 	now := s.now()
 	missing := request.missingFields()
+	if request.Source == IntakeSourceRequirement {
+		missing = requirementMissing
+	}
 	status := IntakeReady
 	confirmedBy := requestContext.Actor.Principal.ID
 	if len(missing) > 0 {
@@ -684,12 +735,22 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	value := CreativeIntake{
 		ContractVersion: intakeContractVersion,
 		ID:              intakeID, OrganizationID: requestContext.Actor.OrganizationID, ProjectID: projectID, Source: request.Source, Status: status,
-		Request: request, MissingFields: missing, Warnings: []string{}, ConfirmedBy: confirmedBy, Principal: requestContext.Actor.Principal,
+		Request: request, MissingFields: missing, Warnings: requirementWarnings, ConfirmedBy: confirmedBy, Principal: requestContext.Actor.Principal,
 		IdempotencyKey: key, RequestHash: hash, InputIdentityHash: inputIdentityHash,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	stored, _, err := s.Repository.CreateIntake(ctx, value)
-	return stored, err
+	stored, existed, err := s.Repository.CreateIntake(ctx, value)
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	if existed && value.Status == IntakeReady && stored.Status == IntakeNeedsClarification &&
+		value.InputIdentityHash != "" && value.InputIdentityHash == stored.InputIdentityHash {
+		return s.Repository.UpdateIntakeReadiness(
+			ctx, value.OrganizationID, value.ProjectID, stored.ID, stored.Version,
+			IntakeReady, nil, value.ConfirmedBy, now,
+		)
+	}
+	return stored, nil
 }
 
 func taskStrategyParentSupports(businessCode, performanceMode string) bool {

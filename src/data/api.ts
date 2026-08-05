@@ -553,21 +553,37 @@ export type ApiCreativeDirectionBatch = {
   contract_version: 'creative-direction-candidate-batch/v1'
   batch_id: string
   intake_id: string
-  status: string
+  status: 'generating' | 'ready' | 'failed'
   candidates: ApiCreativeDirection[]
+  failure_code?: string
+  created_at: string
 }
 
 export type ApiCreativeIntakeBootstrap = {
   id: string
   source: string
   status: string
+  selected_route_id?: string
   request?: {
     objective?: string
     audience?: string
     core_message?: string
     concept?: string
+    selected_route_id?: string
+    creative_routes?: Array<{
+      route_id: string
+      route_type?: string
+      channels: string[]
+    }>
   }
   base_handoff?: {
+    routes?: Array<{
+      route_id: string
+      deliverable_type?: string
+      purpose?: string
+      performance_mode?: string
+      channels: string[]
+    }>
     creative_view?: {
       objective?: { statement?: string }
       communication?: { single_minded_proposition?: string }
@@ -3552,6 +3568,17 @@ function generateCreativeDirections(projectId: string, intakeId: string) {
   )
 }
 
+async function getLatestCreativeDirectionBatch(projectId: string, intakeId: string) {
+  try {
+    return await creativeRequest<ApiCreativeDirectionBatch>(
+      `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/direction-candidate-batches/latest`,
+    )
+  } catch (cause) {
+    if (cause instanceof CreativeApiError && cause.status === 404) return null
+    throw cause
+  }
+}
+
 function confirmCreativeDirection(projectId: string, directionId: string) {
   return creativeRequest<ApiCreativeDirection>(
     `/projects/${encodeURIComponent(projectId)}/creative-directions/${encodeURIComponent(directionId)}/confirm`,
@@ -3575,14 +3602,16 @@ function createBrandVideoTaskFromDirection(
   projectId: string,
   intakeId: string,
   directionId: string,
+  selectedRouteId: string,
+  channel: 'xiaohongshu' | 'douyin' | 'kuaishou',
 ) {
   return creativeRequest<ApiCreativeTaskSummary>(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`,
     'POST',
     {
-      selected_route_id: 'route_brand_video',
+      selected_route_id: selectedRouteId,
       direction_id: directionId,
-      channel: 'douyin',
+      channel,
       mandatory_elements: [],
       prohibited_claims: [],
       confirm_route: true,
@@ -5075,6 +5104,7 @@ export const api = {
   getCreativeIntake,
   createManualImageTextIntake,
   generateCreativeDirections,
+  getLatestCreativeDirectionBatch,
   confirmCreativeDirection,
   createImageTextTaskFromDirection,
   createBrandVideoTaskFromDirection,

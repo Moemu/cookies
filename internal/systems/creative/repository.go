@@ -9,12 +9,13 @@ import (
 )
 
 var (
-	ErrNotFound            = errors.New("creative resource not found")
-	ErrIdempotencyConflict = errors.New("creative idempotency key conflicts with an earlier request")
-	ErrIntakeNotReady      = errors.New("creative intake needs clarification before task creation")
-	ErrProviderJobConflict = errors.New("production job already registered with a different provider job")
-	ErrVersionConflict     = errors.New("creative resource version conflict")
-	ErrInvalidState        = errors.New("creative resource is not in a state that allows this action")
+	ErrNotFound             = errors.New("creative resource not found")
+	ErrIdempotencyConflict  = errors.New("creative idempotency key conflicts with an earlier request")
+	ErrIntakeNotReady       = errors.New("creative intake needs clarification before task creation")
+	ErrProviderJobConflict  = errors.New("production job already registered with a different provider job")
+	ErrVersionConflict      = errors.New("creative resource version conflict")
+	ErrInvalidState         = errors.New("creative resource is not in a state that allows this action")
+	ErrFullStrategyRequired = errors.New("the selected creative business requires the full Strategy workflow")
 	// Viral analysis failures are intentionally classified at the domain seam so
 	// HTTP clients can distinguish a retryable model-gateway issue from an
 	// invalid or unreadable source video without receiving provider internals.
@@ -27,6 +28,7 @@ var (
 
 type Repository interface {
 	CreateIntake(context.Context, CreativeIntake) (CreativeIntake, bool, error)
+	UpdateIntakeReadiness(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, IntakeStatus, []string, string, time.Time) (CreativeIntake, error)
 	ListIntakes(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]CreativeIntake, error)
 	GetIntake(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeIntake, error)
 	CreateTask(context.Context, CreativeTask, ImageTextDraft) (CreativeTask, error)

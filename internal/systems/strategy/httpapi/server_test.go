@@ -74,10 +74,40 @@ func TestTaskAndDeepReviewRoutesRejectInvalidBodies(t *testing.T) {
 	}
 }
 
+func TestMessageV2RejectsUnknownNestedFieldsBeforeService(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost,
+		"/api/strategy/v1/conversations/conversation_1/messages",
+		strings.NewReader(`{"contract_version":"strategy-conversation-message-create/v2","content":[{"type":"text","text":"hello","provider_model":"bypass"}]}`),
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestLegacyMessageRejectsV2PolicyWithoutContract(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost,
+		"/api/strategy/v1/conversations/conversation_1/messages",
+		strings.NewReader(`{"content":"hello","requested_policy":{"reasoning_mode":"deep"}}`),
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
 	t.Parallel()
 	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
 	for _, path := range []string{
+		"/api/strategy/v1/conversation-capabilities",
+		"/api/strategy/v1/projects/project_1/p0-metrics",
 		"/api/strategy/v1/projects/project_1/briefs",
 		"/api/strategy/v1/projects/project_1/briefs/brief_1",
 		"/api/strategy/v1/projects/project_1/strategy-drafts",
@@ -88,6 +118,20 @@ func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
 		if response.Code == http.StatusNotFound {
 			t.Fatalf("%s was not mounted", path)
 		}
+	}
+}
+
+func TestP0MetricsRejectsInvalidWindowBeforeService(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet,
+		"/api/strategy/v1/projects/project_1/p0-metrics?days=forever",
+		nil,
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

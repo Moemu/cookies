@@ -54,12 +54,94 @@ export type StrategyTaskBundle = {
   brief_draft: BriefDraft
 }
 
+export type MessageContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'document_ref'; document_id: string; expected_content_sha256: string }
+  | { type: 'asset_ref'; asset_kind: 'image' | 'video'; asset_id: string; asset_version: number }
+  | { type: 'research_ref'; research_artifact_id: string; expected_content_hash: string }
+
+export type MessageRequestedPolicy = {
+  reasoning_mode?: 'standard' | 'deep'
+  web_search?: 'disabled' | 'allowed'
+  // P0 intentionally accepts no server ids; the field is reserved for the
+  // separately reviewed Remote MCP phase.
+  mcp_server_ids?: []
+}
+
+export type MessageCreateV2 = {
+  contract_version: 'strategy-conversation-message-create/v2'
+  content: MessageContentBlock[]
+  requested_policy?: MessageRequestedPolicy
+}
+
+export type ConversationCapability = {
+  available: boolean
+  estimated_wait_seconds?: number
+  disclosure?: 'query_only'
+}
+
+export type ConversationCapabilities = {
+  contract_version: 'strategy-conversation-capabilities/v1'
+  multimodal_input: ConversationCapability
+  deep_reasoning: ConversationCapability
+  web_search: ConversationCapability
+  quick_viral_remake: ConversationCapability
+}
+
+export type StrategyP0Metrics = {
+  contract_version: 'strategy-p0-metrics/v1'
+  window: { days: number; from: string; to: string }
+  funnel: {
+    conversations_started: number
+    conversations_engaged: number
+    requirements_confirmed: number
+    strategies_started: number
+    packages_published: number
+    creative_tasks_created: number
+  }
+  turns: {
+    user_turns: number
+    assistant_turns: number
+    failed_agent_turns: number
+    deep_turns: number
+    web_search_turns: number
+    document_ref_turns: number
+    media_ref_turns: number
+    research_ref_turns: number
+  }
+  paths: {
+    quick_intakes: number
+    quick_ready_intakes: number
+    full_intakes: number
+    full_ready_intakes: number
+  }
+  timings: {
+    requirement_samples: number
+    median_seconds_to_requirement: number | null
+    average_user_turns_to_requirement: number | null
+    quick_task_samples: number
+    median_seconds_to_quick_task: number | null
+    published_package_samples: number
+    median_seconds_to_published_package: number | null
+  }
+  feedback: {
+    responses: number
+    useful: number
+    partly_useful: number
+    not_useful: number
+    useful_rate: number | null
+  }
+  interpretation: 'observed_activity_not_causal_effect'
+}
+
 export type Message = {
   id: string
   conversation_id: string
   role: 'user' | 'assistant' | 'system_event'
   content_type: 'text' | 'business_card' | 'error_notice'
   content: string
+  content_blocks?: MessageContentBlock[]
+  requested_policy?: MessageRequestedPolicy
   ai_generated: boolean
   agent_task_id?: string
   skill_run_ids?: string[]
@@ -108,6 +190,36 @@ export type BriefDocument = {
     prohibited_claims?: string[]
   }
   reference_ids?: string[]
+}
+
+export type BriefDocumentV3 = {
+  contract_version: 'strategy-brief-version/v3'
+  core: {
+    objective: string
+    deliverable_intent: string
+    product_or_subject: string
+    audience: string
+  }
+  facts: Array<{
+    id: string
+    kind: 'brand' | 'proposition' | 'industry' | 'region' | 'language' | 'channel' | 'selling_point' | 'budget' | 'schedule' | 'primary_kpi' | 'claim' | 'custom'
+    label?: string
+    value: string | number | boolean | string[]
+    source_refs: Array<{ type: string; id: string; locator?: string }>
+    confidence: 'low' | 'medium' | 'high'
+  }>
+  constraints: string[]
+  assumptions: Array<{ id: string; statement: string; reason?: string; source_refs: Array<{ type: string; id: string; locator?: string }> }>
+  unknowns: Array<{ id: string; question: string; impact?: string; required_for: 'creative_intake' | 'production' | 'optional' }>
+  conflicts: Array<{
+    id: string
+    field: string
+    candidates: Array<{ value: unknown; source_refs: Array<{ type: string; id: string; locator?: string }> }>
+    status: 'open' | 'resolved'
+  }>
+  asset_refs: Array<{ asset_id: string; version: number }>
+  reference_ids: string[]
+  extensions: Record<string, unknown>
 }
 
 export type BriefDraft = {
@@ -408,6 +520,33 @@ export type CreativeIntakeV3 = {
   id: string
   status: CreativeIntakeStatus
   selected_route_id: string
+  missing_fields?: string[]
+  warnings?: string[]
+  input_identity_hash: string
+}
+
+export type CreativeIntakeV4 = {
+  contract_version: 'creative-intake/v4'
+  id: string
+  source: 'requirement_snapshot'
+  status: CreativeIntakeStatus
+  request: {
+    objective: string
+    audience: string
+    core_message: string
+    mandatory_elements: string[]
+    prohibited_claims: string[]
+    creative_routes: Array<{
+      route_id: string
+      source_asset_refs: Array<{ asset_id: string; version: number }>
+    }>
+    manual_viral_remake?: {
+      product_name: string
+      reference_video: { asset_id: string; version: number }
+    }
+  }
+  missing_fields: string[]
+  warnings: string[]
   input_identity_hash: string
 }
 
@@ -724,6 +863,57 @@ export type KnowledgeDocument = {
   parse_error_message?: string
   parsed_at?: string
   created_at: string
+}
+
+export type MediaEvidence = {
+  id: string
+  text: string
+  confidence: number
+  locator: {
+    kind: 'image' | 'video' | 'video_frame'
+    asset_ref: { project_id: string; asset_version: { asset_id: string; version: number } }
+    timestamp_ms?: number
+    frame_ref?: { project_id: string; asset_version: { asset_id: string; version: number } }
+  }
+}
+
+export type MediaUnderstandingArtifact = {
+  contract_version: 'platform-media-understanding-artifact/v1'
+  id: string
+  project_id: string
+  asset_ref: { project_id: string; asset_version: { asset_id: string; version: number } }
+  asset_kind: 'image' | 'video'
+  asset_sha256: string
+  profile: string
+  profile_version: string
+  input_identity_hash: string
+  status: 'running' | 'ready' | 'partial' | 'failed'
+  job_id?: string
+  summary?: string
+  visible_text: MediaEvidence[]
+  observations: MediaEvidence[]
+  inferences: MediaEvidence[]
+  risks: MediaEvidence[]
+  unknowns: MediaEvidence[]
+  keyframes: Array<{
+    timestamp_ms: number
+    frame_ref: { project_id: string; asset_version: { asset_id: string; version: number } }
+  }>
+  transcript: MediaEvidence[]
+  warnings: string[]
+  model_lineage: {
+    provider_code?: string
+    model_alias?: string
+    model_version?: string
+    route_revision_id?: string
+    prompt_version: string
+    schema_version: string
+  }
+  content_hash: string
+  error_code?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
 }
 
 export type AgentTask = {

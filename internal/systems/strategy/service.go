@@ -17,6 +17,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
 	"github.com/shikanon/cookies/internal/platform/knowledge"
+	"github.com/shikanon/cookies/internal/platform/mediaunderstanding"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -35,6 +36,14 @@ type KnowledgeReader interface {
 	GetReference(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.Reference, error)
 }
 
+type ConversationKnowledgeReader interface {
+	SelectConversationChunks(context.Context, contract.ActorContext, contract.ProjectID, []string, string) ([]knowledge.SearchResult, error)
+}
+
+type ConversationMediaReader interface {
+	GetLatestForAsset(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (mediaunderstanding.Artifact, error)
+}
+
 type CreativeAssetReader interface {
 	Get(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (assets.ProjectAsset, error)
 	OpenPreview(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (io.ReadCloser, assets.ObjectInfo, error)
@@ -42,29 +51,34 @@ type CreativeAssetReader interface {
 }
 
 type Service struct {
-	DB                          *sql.DB
-	Projects                    ProjectReader
-	Knowledge                   KnowledgeReader
-	CreativeAssets              CreativeAssetReader
-	Agents                      agent.TransactionalTaskWriter
-	Text                        *provider.Service
-	TextModelAlias              string
-	DeepReviewModelAlias        string
-	PromptVersion               string
-	ConversationPromptVersion   string
-	RevisePromptVersion         string
-	ReviewPromptVersion         string
-	RepairPromptVersion         string
-	CreativeTaskPromptVersion   string
-	CriticEnabled               bool
-	ContextSelectionEnabled     bool
-	ContextSelector             ContextSelector
-	V2Enabled                   bool
-	CreativeTaskPlanningEnabled bool
-	DisableApproval             bool
-	AllowedOrganizations        map[contract.OrganizationID]struct{}
-	NewID                       func(string) (string, error)
-	Now                         func() time.Time
+	DB                           *sql.DB
+	Projects                     ProjectReader
+	Knowledge                    KnowledgeReader
+	ConversationKnowledge        ConversationKnowledgeReader
+	ConversationMedia            ConversationMediaReader
+	CreativeAssets               CreativeAssetReader
+	MessageReferences            MessageReferenceValidator
+	Agents                       agent.TransactionalTaskWriter
+	Text                         *provider.Service
+	TextModelAlias               string
+	DeepReviewModelAlias         string
+	PromptVersion                string
+	ConversationPromptVersion    string
+	RevisePromptVersion          string
+	ReviewPromptVersion          string
+	RepairPromptVersion          string
+	CreativeTaskPromptVersion    string
+	CriticEnabled                bool
+	ContextSelectionEnabled      bool
+	ContextSelector              ContextSelector
+	V2Enabled                    bool
+	CreativeTaskPlanningEnabled  bool
+	QuickViralRemakeEnabled      bool
+	ConversationWebSearchEnabled bool
+	DisableApproval              bool
+	AllowedOrganizations         map[contract.OrganizationID]struct{}
+	NewID                        func(string) (string, error)
+	Now                          func() time.Time
 }
 
 func (s Service) now() time.Time {
@@ -648,10 +662,53 @@ type SendMessageResult struct {
 }
 
 func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, key contract.IdempotencyKey, conversationID, content string) (SendMessageResult, bool, error) {
+	content = strings.TrimSpace(content)
+	request := struct {
+		ConversationID string `json:"conversation_id"`
+		Content        string `json:"content"`
+	}{conversationID, content}
+	return s.sendMessage(ctx, actor, key, conversationID, messageCreateInput{
+		Content:          content,
+		RequestHashShape: request,
+	})
+}
+
+func (s Service) SendMessageV2(ctx context.Context, actor contract.ActorContext, key contract.IdempotencyKey, conversationID string, request SendMessageV2Request) (SendMessageResult, bool, error) {
+	if !s.V2Enabled {
+		return SendMessageResult{}, false, ErrFeatureDisabled
+	}
+	normalized, err := normalizeMessageV2(request)
+	if err != nil {
+		return SendMessageResult{}, false, err
+	}
+	hashShape := struct {
+		ConversationID  string                  `json:"conversation_id"`
+		ContractVersion string                  `json:"contract_version"`
+		Content         []MessageContentBlock   `json:"content"`
+		RequestedPolicy *MessageRequestedPolicy `json:"requested_policy,omitempty"`
+	}{conversationID, MessageCreateContractV2, normalized.ContentBlocks, normalized.RequestedPolicy}
+	return s.sendMessage(ctx, actor, key, conversationID, messageCreateInput{
+		ContractVersion:  MessageCreateContractV2,
+		Content:          normalized.Projection,
+		ContentBlocks:    normalized.ContentBlocks,
+		RequestedPolicy:  normalized.RequestedPolicy,
+		RequestHashShape: hashShape,
+	})
+}
+
+type messageCreateInput struct {
+	ContractVersion  string
+	Content          string
+	ContentBlocks    []MessageContentBlock
+	RequestedPolicy  *MessageRequestedPolicy
+	RequestHashShape any
+}
+
+func (s Service) sendMessage(ctx context.Context, actor contract.ActorContext, key contract.IdempotencyKey, conversationID string, input messageCreateInput) (SendMessageResult, bool, error) {
 	if err := requireScope(actor, ScopeWrite); err != nil {
 		return SendMessageResult{}, false, err
 	}
-	if err := key.Validate(); err != nil || strings.TrimSpace(content) == "" || len(content) > 64<<10 {
+	if err := key.Validate(); err != nil || input.Content == "" || len(input.Content) > messageTextLimit {
 		return SendMessageResult{}, false, ErrInvalidRequest
 	}
 	conversation, err := scanConversation(s.DB.QueryRowContext(ctx, conversationSelect+` WHERE organization_id = ? AND id = ?`, actor.OrganizationID, conversationID))
@@ -675,17 +732,18 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	if task.DiscardedAt != nil {
 		return SendMessageResult{}, false, ErrInvalidState
 	}
-	request := struct {
-		ConversationID string `json:"conversation_id"`
-		Content        string `json:"content"`
-	}{conversationID, strings.TrimSpace(content)}
-	hash, _ := contract.CanonicalJSONHash(request)
+	hash, _ := contract.CanonicalJSONHash(input.RequestHashShape)
 	var prior SendMessageResult
 	found, err := s.loadReceipt(ctx, actor, conversation.ProjectID, "message.create", key, hash, &prior)
 	if found || err != nil {
 		return prior, found, err
 	}
-	if err := s.ensureTextProviderReady(ctx, actor.OrganizationID); err != nil {
+	if input.ContractVersion == MessageCreateContractV2 {
+		if err := s.validateMessageReferences(ctx, actor, conversation.ProjectID, input.ContentBlocks); err != nil {
+			return SendMessageResult{}, false, err
+		}
+	}
+	if err := s.ensureConversationPolicyReady(ctx, actor.OrganizationID, input.RequestedPolicy); err != nil {
 		return SendMessageResult{}, false, err
 	}
 	messageID, err := s.newID("msg")
@@ -700,14 +758,26 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	if err != nil {
 		return SendMessageResult{}, false, err
 	}
+	turnEventID := ""
+	if input.ContractVersion == MessageCreateContractV2 {
+		turnEventID, err = s.newID("stratevent")
+		if err != nil {
+			return SendMessageResult{}, false, err
+		}
+	}
 	now := s.now()
-	message := Message{ID: messageID, OrganizationID: actor.OrganizationID, ProjectID: conversation.ProjectID, ConversationID: conversationID, Role: "user", ContentType: "text", Content: request.Content, CreatedBy: actor.Principal.ID, CreatedAt: now}
-	input, _ := snapshotJSON(map[string]string{
+	message := Message{ID: messageID, OrganizationID: actor.OrganizationID, ProjectID: conversation.ProjectID, ConversationID: conversationID, Role: "user", ContentType: "text", Content: input.Content, ContentBlocks: input.ContentBlocks, RequestedPolicy: input.RequestedPolicy, CreatedBy: actor.Principal.ID, CreatedAt: now}
+	agentInput := map[string]any{
 		"strategy_task_id": task.ID,
 		"message_id":       message.ID,
 		"prompt_version":   s.conversationPromptVersion(),
-	})
-	agentTask := agent.Task{ID: agentTaskID, OrganizationID: actor.OrganizationID, ProjectID: conversation.ProjectID, SourceSystem: "strategy", SourceType: "strategy_task", SourceID: task.ID, Kind: AgentKindBriefExtract, Status: agent.TaskDispatchPending, Version: 1, InputSnapshot: input, CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now}
+	}
+	if input.ContractVersion != "" {
+		agentInput["message_contract_version"] = input.ContractVersion
+		agentInput["requested_policy"] = input.RequestedPolicy
+	}
+	inputSnapshot, _ := snapshotJSON(agentInput)
+	agentTask := agent.Task{ID: agentTaskID, OrganizationID: actor.OrganizationID, ProjectID: conversation.ProjectID, SourceSystem: "strategy", SourceType: "strategy_task", SourceID: task.ID, Kind: AgentKindBriefExtract, Status: agent.TaskDispatchPending, Version: 1, InputSnapshot: inputSnapshot, CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return SendMessageResult{}, false, err
@@ -716,9 +786,23 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	if err := insertMessage(ctx, tx, message); err != nil {
 		return SendMessageResult{}, false, err
 	}
-	eventPayload, _ := snapshotJSON(map[string]any{"message_id": message.ID, "role": message.Role})
+	eventData := map[string]any{"message_id": message.ID, "role": message.Role}
+	if input.ContractVersion != "" {
+		eventData["contract_version"] = input.ContractVersion
+	}
+	eventPayload, _ := snapshotJSON(eventData)
 	if err := insertConversationEvent(ctx, tx, eventID, actor.OrganizationID, conversation.ProjectID, conversationID, "message.created", eventPayload, now); err != nil {
 		return SendMessageResult{}, false, err
+	}
+	if turnEventID != "" {
+		turnPayload, _ := snapshotJSON(map[string]any{
+			"agent_task_id":    agentTask.ID,
+			"message_id":       message.ID,
+			"requested_policy": input.RequestedPolicy,
+		})
+		if err := insertConversationEvent(ctx, tx, turnEventID, actor.OrganizationID, conversation.ProjectID, conversationID, "turn.accepted", turnPayload, now); err != nil {
+			return SendMessageResult{}, false, err
+		}
 	}
 	writer, err := s.agentWriter()
 	if err != nil {

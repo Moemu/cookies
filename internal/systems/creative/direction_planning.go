@@ -14,6 +14,7 @@ import (
 type CreativePlanningContext struct {
 	ContractVersion   string                   `json:"contract_version"`
 	InputIdentityHash string                   `json:"input_identity_hash"`
+	GenerationID      string                   `json:"generation_id,omitempty"`
 	SelectedRoute     CreativeRouteSnapshot    `json:"selected_route"`
 	Objective         json.RawMessage          `json:"objective"`
 	Audience          []json.RawMessage        `json:"audience"`
@@ -130,8 +131,34 @@ type CreativeDirectionPlanner interface {
 
 type DirectionRepository interface {
 	CreateDirectionBatch(context.Context, CreativeDirectionBatch) (CreativeDirectionBatch, error)
+	GetDirectionBatch(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeDirectionBatch, error)
+	CompleteDirectionBatch(context.Context, CreativeDirectionBatch) (CreativeDirectionBatch, error)
+	FailDirectionBatch(context.Context, contract.OrganizationID, contract.ProjectID, string, string) error
 	GetDirection(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeDirectionVersion, error)
 	ConfirmDirection(context.Context, contract.OrganizationID, contract.ProjectID, string, string, time.Time) (CreativeDirectionVersion, error)
+}
+
+type DirectionBatchReader interface {
+	GetLatestDirectionBatch(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeDirectionBatch, error)
+}
+
+func (s Service) GetLatestDirectionBatch(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	intakeID string,
+) (CreativeDirectionBatch, error) {
+	reader, ok := s.Directions.(DirectionBatchReader)
+	if s.Projects == nil || !ok {
+		return CreativeDirectionBatch{}, fmt.Errorf("creative direction history is unavailable")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return CreativeDirectionBatch{}, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeDirectionBatch{}, err
+	}
+	return reader.GetLatestDirectionBatch(ctx, actor.OrganizationID, projectID, intakeID)
 }
 
 func (s Service) GenerateDirectionCandidates(
@@ -147,34 +174,64 @@ func (s Service) GenerateDirectionCandidates(
 	if !actor.HasScope(ScopeWrite) {
 		return CreativeDirectionBatch{}, fmt.Errorf("%s scope is required", ScopeWrite)
 	}
-	project, err := s.Projects.RequireActiveContext(ctx, actor, projectID)
+	prepared, err := s.prepareDirectionPlanning(ctx, actor, projectID, intakeID, request)
 	if err != nil {
 		return CreativeDirectionBatch{}, err
+	}
+	batchID, err := s.idGenerator()("directionbatch")
+	if err != nil {
+		return CreativeDirectionBatch{}, err
+	}
+	batch, err := s.planDirectionBatch(ctx, actor, prepared, batchID, s.now())
+	if err != nil {
+		return CreativeDirectionBatch{}, err
+	}
+	return s.Directions.CreateDirectionBatch(ctx, batch)
+}
+
+type preparedDirectionPlanning struct {
+	Project         contract.ProjectContext
+	Intake          CreativeIntake
+	Route           CreativeRouteSnapshot
+	PlanningContext CreativePlanningContext
+	CandidateCount  int
+}
+
+func (s Service) prepareDirectionPlanning(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	intakeID string,
+	request GenerateDirectionRequest,
+) (preparedDirectionPlanning, error) {
+	project, err := s.Projects.RequireActiveContext(ctx, actor, projectID)
+	if err != nil {
+		return preparedDirectionPlanning{}, err
 	}
 	intake, err := s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
 	if err != nil {
-		return CreativeDirectionBatch{}, err
+		return preparedDirectionPlanning{}, err
 	}
 	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.Status != IntakeReady ||
 		intake.InputIdentityHash == "" || intake.Request.SelectedRouteID == "" {
-		return CreativeDirectionBatch{}, fmt.Errorf("a ready v3 creative intake is required")
+		return preparedDirectionPlanning{}, fmt.Errorf("a ready v3 creative intake is required")
 	}
 	route, err := selectedPlanningRoute(intake.Request.CreativeRoutes, intake.Request.SelectedRouteID)
 	if err != nil {
-		return CreativeDirectionBatch{}, err
+		return preparedDirectionPlanning{}, err
 	}
 	if route.RouteType != CreativeRouteImageText && route.RouteType != CreativeRouteBrandVideo {
-		return CreativeDirectionBatch{}, fmt.Errorf("creative direction planning is not enabled for route %q", route.RouteType)
+		return preparedDirectionPlanning{}, fmt.Errorf("creative direction planning is not enabled for route %q", route.RouteType)
 	}
 	if request.CandidateCount == 0 {
 		request.CandidateCount = 3
 	}
 	if request.CandidateCount < 2 || request.CandidateCount > 4 {
-		return CreativeDirectionBatch{}, fmt.Errorf("candidate_count must be between 2 and 4")
+		return preparedDirectionPlanning{}, fmt.Errorf("candidate_count must be between 2 and 4")
 	}
 	planningContext, err := planningContextFromIntake(intake, route)
 	if err != nil {
-		return CreativeDirectionBatch{}, err
+		return preparedDirectionPlanning{}, err
 	}
 	if overlay := intake.Request.TaskOverlayInput; overlay != nil {
 		planningContext.TaskRefinements = &CreativeTaskRefinements{
@@ -186,19 +243,26 @@ func (s Service) GenerateDirectionCandidates(
 			OpenQuestions:      append([]string{}, overlay.OpenQuestions...),
 		}
 	}
-	result, err := s.DirectionPlanner.Generate(ctx, actor, project, planningContext, request.CandidateCount)
+	return preparedDirectionPlanning{Project: project, Intake: intake, Route: route, PlanningContext: planningContext, CandidateCount: request.CandidateCount}, nil
+}
+
+func (s Service) planDirectionBatch(
+	ctx context.Context,
+	actor contract.ActorContext,
+	prepared preparedDirectionPlanning,
+	batchID string,
+	createdAt time.Time,
+) (CreativeDirectionBatch, error) {
+	planningContext := prepared.PlanningContext
+	planningContext.GenerationID = batchID
+	result, err := s.DirectionPlanner.Generate(ctx, actor, prepared.Project, planningContext, prepared.CandidateCount)
 	if err != nil {
 		return CreativeDirectionBatch{}, fmt.Errorf("generate creative directions: %w", err)
 	}
 	if strings.TrimSpace(result.Model) == "" || strings.TrimSpace(result.PromptVersion) == "" ||
-		len(result.Candidates) != request.CandidateCount {
+		len(result.Candidates) != prepared.CandidateCount {
 		return CreativeDirectionBatch{}, fmt.Errorf("creative direction provider returned an invalid candidate batch")
 	}
-	batchID, err := s.idGenerator()("directionbatch")
-	if err != nil {
-		return CreativeDirectionBatch{}, err
-	}
-	now := s.now()
 	directions := make([]CreativeDirectionVersion, 0, len(result.Candidates))
 	seenConcepts := map[string]bool{}
 	for _, candidate := range result.Candidates {
@@ -219,8 +283,8 @@ func (s Service) GenerateDirectionCandidates(
 		}
 		value := CreativeDirectionVersion{
 			ContractVersion: CreativeDirectionVersionV1, ID: directionID,
-			OrganizationID: actor.OrganizationID, ProjectID: projectID, BatchID: batchID,
-			IntakeID: intakeID, InputIdentityHash: intake.InputIdentityHash, RouteID: route.RouteID,
+			OrganizationID: actor.OrganizationID, ProjectID: prepared.Project.ProjectID, BatchID: batchID,
+			IntakeID: prepared.Intake.ID, InputIdentityHash: prepared.Intake.InputIdentityHash, RouteID: prepared.Route.RouteID,
 			Concept: candidate.Concept, CreativeRationale: candidate.CreativeRationale,
 			MessagePlan:      append([]string{}, candidate.MessagePlan...),
 			ExecutionOutline: append([]string{}, candidate.ExecutionOutline...),
@@ -228,7 +292,7 @@ func (s Service) GenerateDirectionCandidates(
 			DirectionMode:    candidate.DirectionMode, EmotionalArc: candidate.EmotionalArc,
 			VisualGrammar: candidate.VisualGrammar, BrandMemoryDevice: candidate.BrandMemoryDevice,
 			HumanMoment: candidate.HumanMoment,
-			Status:      DirectionStatusCandidate, Version: 1, CreatedAt: now,
+			Status:      DirectionStatusCandidate, Version: 1, CreatedAt: createdAt,
 		}
 		contentHash, hashErr := contract.NewContentHash(value)
 		if hashErr != nil {
@@ -237,17 +301,17 @@ func (s Service) GenerateDirectionCandidates(
 		value.ContentHash = string(contentHash)
 		directions = append(directions, value)
 	}
-	if err := validateDirectionBatchQuality(planningContext, result.Candidates); err != nil {
+	if err := validateDirectionBatchQuality(prepared.PlanningContext, result.Candidates); err != nil {
 		return CreativeDirectionBatch{}, err
 	}
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1, ID: batchID,
-		OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intakeID,
-		InputIdentityHash: intake.InputIdentityHash, Status: DirectionBatchReady, Candidates: directions,
+		OrganizationID: actor.OrganizationID, ProjectID: prepared.Project.ProjectID, IntakeID: prepared.Intake.ID,
+		InputIdentityHash: prepared.Intake.InputIdentityHash, Status: DirectionBatchReady, Candidates: directions,
 		Model: result.Model, PromptVersion: result.PromptVersion,
-		CreatedBy: actor.Principal.ID, CreatedAt: now,
+		CreatedBy: actor.Principal.ID, CreatedAt: createdAt,
 	}
-	return s.Directions.CreateDirectionBatch(ctx, batch)
+	return batch, nil
 }
 
 func validateDirectionBatchQuality(planningContext CreativePlanningContext, candidates []DirectionCandidate) error {
@@ -296,7 +360,10 @@ func firstBrandPerformanceCue(candidate DirectionCandidate) string {
 		[]string{candidate.Concept, candidate.CreativeRationale, candidate.VisualGrammar, candidate.HumanMoment},
 		candidate.ExecutionOutline...,
 	), "\n"))
-	for _, phrase := range []string{"点击", "评论区", "私信", "扣1", "扣 1", "领取", "领完整", "立即咨询", "获取专属", "4k", "8k"} {
+	for _, phrase := range []string{
+		"点击了解", "点击查看", "点击购买", "点击咨询", "点击领取", "点击链接", "点击主页", "点击下单", "点击获取",
+		"评论区", "私信", "扣1", "扣 1", "领取福利", "领取优惠", "领取资料", "领完整", "立即咨询", "获取专属", "4k", "8k",
+	} {
 		if strings.Contains(text, phrase) {
 			return phrase
 		}
@@ -309,7 +376,10 @@ func isUtilityLedDirection(candidate DirectionCandidate) bool {
 		[]string{candidate.Concept, candidate.CreativeRationale},
 		candidate.MessagePlan...,
 	), "\n"))
-	for _, phrase := range []string{"指南", "清单", "三步", "步骤", "避坑", "工具", "教程", "科普", "方法论", "checklist", "how-to", "how to"} {
+	for _, phrase := range []string{
+		"指南", "清单", "三步", "步骤", "避坑", "教程", "科普", "方法论", "checklist", "how-to", "how to",
+		"判断工具", "核验工具", "评估工具", "选择工具", "决策工具", "工具箱",
+	} {
 		if strings.Contains(text, phrase) {
 			return true
 		}
