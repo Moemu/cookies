@@ -1,0 +1,45 @@
+{
+  "contract_version": "strategy-creative-task-overlay/v1",
+  "overlay_id": "overlay_xhs_launch_01",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "package_ref": {
+    "package_id": "strategy_package_03",
+    "package_version": 3,
+    "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handoff_contract_version": "strategy-creative-handoff/v1",
+    "handoff_content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "handoff_ref": {
+    "contract_version": "strategy-creative-handoff/v1",
+    "content_hash": "sha256:1fa6c8192ae4d1c3c876f05932311f0e72c83e18f3d0307cc916a351a5eb807c"
+  },
+  "selected_route_id": "route_xhs_image_text",
+  "task_strategy_ref": {
+    "plan_id": "strategy_task_plan_01",
+    "version": 1,
+    "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "objective_refinement": "优先验证真实使用场景能否提升有效咨询意愿。",
+  "audience_refinement": "聚焦首次接触新品、需要可信证据降低决策风险的人群。",
+  "message_priorities": [
+    "先呈现真实使用场景",
+    "再使用已批准证据解释产品价值"
+  ],
+  "strategy_dimensions": {
+    "content_angle": "从高频通勤场景验证可信修护表达",
+    "evidence_order": [
+      "真实场景",
+      "已批准功效证据"
+    ]
+  },
+  "hypotheses": [
+    "场景先行比产品先行更容易建立代入感"
+  ],
+  "guardrails": [
+    "不得使用未经批准的绝对化功效承诺"
+  ],
+  "open_questions": [],
+  "content_hash": "sha256:16c8efaae785146616c2c7650d91253cce8eb6f5ad7eea2e93571e7ccae476b6",
+  "created_at": "2026-07-31T08:00:00Z"
+}

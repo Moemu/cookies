@@ -29,10 +29,12 @@ var ErrVersionConflict = errors.New("provider job version conflict")
 // Prompt contents may be persisted in protected Provider storage, but callers
 // must never place them in events or ordinary logs.
 type ImageGenerationInput struct {
-	Prompt       string                     `json:"prompt"`
-	Width        int                        `json:"width"`
-	Height       int                        `json:"height"`
-	SourceAssets []contract.ProjectAssetRef `json:"source_assets,omitempty"`
+	Prompt             string                     `json:"prompt"`
+	Width              int                        `json:"width"`
+	Height             int                        `json:"height"`
+	SourceAssets       []contract.ProjectAssetRef `json:"source_assets,omitempty"`
+	PromptRef          *contract.ResourceRef      `json:"prompt_ref,omitempty"`
+	SourceResourceRefs []contract.ResourceRef     `json:"source_resource_refs,omitempty"`
 }
 
 func (i ImageGenerationInput) Validate() error {
@@ -52,6 +54,16 @@ func (i ImageGenerationInput) Validate() error {
 			return fmt.Errorf("image source asset at index %d is duplicated", index)
 		}
 		seen[key] = struct{}{}
+	}
+	if i.PromptRef != nil {
+		if err := i.PromptRef.Validate(); err != nil {
+			return fmt.Errorf("invalid image prompt_ref: %w", err)
+		}
+	}
+	for index, ref := range i.SourceResourceRefs {
+		if err := ref.Validate(); err != nil {
+			return fmt.Errorf("invalid image source resource at index %d: %w", index, err)
+		}
 	}
 	return nil
 }
@@ -130,11 +142,29 @@ type JobRecord struct {
 	SourceSystem          string
 	SourceTaskID          string
 	Input                 ImageGenerationInput
+	VideoInput            VideoGenerationInput
 	ProviderCode          string
 	ModelVersion          string
 	ExternalTaskID        string
 	Outputs               []OutputRecord
+	Route                 *ImageRouteSnapshot
+	SubmissionState       SubmissionState
+	AdapterRequestID      string
+	ActualProvider        string
+	ActualModel           string
+	ExecutionDeadlineAt   *time.Time
+	SubmittedAt           *time.Time
+	ResponseReceivedAt    *time.Time
 }
+
+type SubmissionState string
+
+const (
+	SubmissionNotStarted SubmissionState = "not_started"
+	SubmissionInFlight   SubmissionState = "in_flight"
+	SubmissionCompleted  SubmissionState = "completed"
+	SubmissionUnknown    SubmissionState = "unknown"
+)
 
 type OutputStatus string
 
@@ -174,13 +204,23 @@ type Service struct {
 	Store         JobStore
 	Scheduler     ExecutionScheduler
 	ImageAdapter  ImageProviderAdapter
+	VideoAdapter  VideoProviderAdapter
 	TextAdapter   TextProviderAdapter
 	VisionAdapter VisionProviderAdapter
 	VisionSources VisionSourceResolver
 	Intake        GeneratedIntakeClient
 	OutputHandles OutputHandleStore
+	Routes        ImageRouteResolver
+	VideoRoutes   VideoRouteResolver
 	NewID         func() (string, error)
 	Now           func() time.Time
+}
+
+// ProcessVideoJob uses the same Assets intake protocol as image generation.
+// The durable output MIME type and provenance capability distinguish the
+// resulting asset; Assets remains the owner of storage and asset versions.
+func (s Service) ProcessVideoJob(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, jobID string) (contract.ProviderJob, *time.Time, error) {
+	return s.ProcessImageJob(ctx, organizationID, projectID, jobID)
 }
 
 func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobRequest) (contract.ProviderJob, bool, error) {
@@ -208,6 +248,17 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		return contract.ProviderJob{}, false, fmt.Errorf("generate provider job ID: %w", err)
 	}
 	createdAt := now().UTC()
+	var route *ImageRouteSnapshot
+	if s.Routes != nil {
+		resolved, resolveErr := s.Routes.ResolveImageRoute(ctx, request.Actor.OrganizationID, request.ModelAlias)
+		if resolveErr != nil {
+			return contract.ProviderJob{}, false, fmt.Errorf("resolve provider image route: %w", resolveErr)
+		}
+		if !adapterGatewayImageSizeSupported(request.Input.Width, request.Input.Height) {
+			return contract.ProviderJob{}, false, fmt.Errorf("adapter gateway image dimensions are unsupported")
+		}
+		route = &resolved
+	}
 	job := contract.ProviderJob{
 		ID:               providerJobID,
 		Kind:             imageJobKindForOperation(request.Operation),
@@ -237,6 +288,8 @@ func (s Service) CreateImageJob(ctx context.Context, request CreateImageJobReque
 		SourceSystem:          request.SourceSystem,
 		SourceTaskID:          request.SourceTaskID,
 		Input:                 request.Input,
+		Route:                 route,
+		SubmissionState:       SubmissionNotStarted,
 	})
 	if err != nil {
 		return contract.ProviderJob{}, false, err
@@ -302,8 +355,9 @@ func (s Service) ProcessImageJob(ctx context.Context, organizationID contract.Or
 					ProviderCode:          record.ProviderCode,
 					ModelAlias:            record.ModelAlias,
 					ModelVersion:          record.ModelVersion,
-					PromptRef:             nil,
-					SourceAssetRefs:       imageSourceAssetVersionRefs(record.Input.SourceAssets),
+					PromptRef:             record.Input.PromptRef,
+					SourceAssetRefs:       generationSourceAssetVersionRefs(record),
+					SourceResourceRefs:    append([]contract.ResourceRef{}, record.Input.SourceResourceRefs...),
 					ProjectContextVersion: record.ProjectContextVersion,
 					GeneratedAt:           now,
 				},
@@ -442,6 +496,17 @@ func imageSourceAssetVersionRefs(refs []contract.ProjectAssetRef) []contract.Ass
 		versions = append(versions, ref.AssetVersion)
 	}
 	return versions
+}
+
+func generationSourceAssetVersionRefs(record JobRecord) []contract.AssetVersionRef {
+	if record.Operation != videoGenerateOperation {
+		return imageSourceAssetVersionRefs(record.Input.SourceAssets)
+	}
+	refs := make([]contract.AssetVersionRef, 0, len(record.VideoInput.ConditioningAssets))
+	for _, asset := range record.VideoInput.ConditioningAssets {
+		refs = append(refs, asset.Reference.AssetVersion)
+	}
+	return refs
 }
 
 func (s Service) nowUTC() time.Time {

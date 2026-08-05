@@ -1,0 +1,23 @@
+CREATE TABLE creative_versions (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  task_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version BIGINT NOT NULL,
+  draft_version BIGINT NOT NULL,
+  status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  snapshot_payload JSON NOT NULL,
+  content_hash CHAR(71) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_by VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  idempotency_key VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  UNIQUE KEY uq_creative_versions_org_id (organization_id, id),
+  UNIQUE KEY uq_creative_versions_task_draft (organization_id, task_id, draft_version),
+  UNIQUE KEY uq_creative_versions_idempotency (organization_id, project_id, created_by, idempotency_key),
+  KEY idx_creative_versions_scope (organization_id, project_id, created_at),
+  CONSTRAINT fk_creative_versions_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT fk_creative_versions_task FOREIGN KEY (organization_id, task_id) REFERENCES creative_tasks(organization_id, id),
+  CONSTRAINT chk_creative_versions_number CHECK (version > 0 AND draft_version > 0),
+  CONSTRAINT chk_creative_versions_status CHECK (status IN ('created', 'checked', 'approved', 'superseded'))
+);

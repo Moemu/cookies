@@ -27,8 +27,15 @@ type denyingAuthorizer struct{}
 func (denyingAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
 	return identity.ErrProjectAccessDenied
 }
+func (denyingAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return identity.ErrProjectAccessDenied
+}
 
-type stubProjectStore struct{ read bool }
+type stubProjectStore struct {
+	read      bool
+	workbench Workbench
+	saved     Workbench
+}
 
 func (*stubProjectStore) CreateBrand(context.Context, Brand) error { return nil }
 func (*stubProjectStore) CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error {
@@ -57,10 +64,17 @@ func (*stubProjectStore) GetProjectRuntime(context.Context, contract.Organizatio
 func (*stubProjectStore) UpsertProjectRuntime(context.Context, contract.OrganizationID, contract.ProjectID, ProjectRuntime) error {
 	return nil
 }
-func (*stubProjectStore) GetWorkbench(context.Context, contract.OrganizationID, contract.ProjectID) (Workbench, error) {
-	return Workbench{}, ErrNotFound
+func (s *stubProjectStore) GetWorkbench(context.Context, contract.OrganizationID, contract.ProjectID) (Workbench, error) {
+	if s.workbench.Project.ProjectID == "" {
+		return Workbench{}, ErrNotFound
+	}
+	return s.workbench, nil
 }
-func (*stubProjectStore) UpsertWorkbench(context.Context, Workbench) error { return nil }
+func (s *stubProjectStore) UpsertWorkbench(_ context.Context, value Workbench) error {
+	s.saved = value
+	s.workbench = value
+	return nil
+}
 func (s *stubProjectStore) GetContext(context.Context, contract.OrganizationID, contract.ProjectID) (contract.ProjectContext, error) {
 	s.read = true
 	return contract.ProjectContext{}, ErrNotFound

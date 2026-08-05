@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-image-text-workspace-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "task", "intake", "direction", "draft", "slots", "readiness"],
+  "properties": {
+    "contract_version": {"const": "creative-image-text-workspace/v1"},
+    "task": {"type": "object"},
+    "intake": {"type": "object"},
+    "direction": {"type": "object"},
+    "draft": {"oneOf": [{"$ref": "creative-image-text-draft-v2.schema.json"}, {"$ref": "creative-image-text-draft-v1.schema.json"}]},
+    "slots": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order", "role", "status", "selection_version", "attempts"],
+        "properties": {
+          "order": {"type": "integer", "minimum": 1, "maximum": 3},
+          "role": {"enum": ["cover", "proof", "cta"]},
+          "status": {"enum": ["empty", "queued", "running", "base_asset_ready", "rendering", "succeeded", "failed", "stale"]},
+          "adopted_attempt_id": {"type": "string"},
+          "selection_version": {"type": "integer", "minimum": 0},
+          "attempts": {"type": "array", "items": {"$ref": "creative-image-generation-attempt-v1.schema.json"}}
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["draft_generation_ready", "image_generation_ready", "review_ready", "blocking_reasons"],
+      "properties": {
+        "draft_generation_ready": {"type": "boolean"},
+        "image_generation_ready": {"type": "boolean"},
+        "review_ready": {"type": "boolean"},
+        "blocking_reasons": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

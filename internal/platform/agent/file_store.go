@@ -51,7 +51,7 @@ func (s *FileStore) Get(ctx context.Context, actor contract.ActorContext, projec
 	defer s.mu.Unlock()
 	run, ok := s.runs[id]
 	if !ok || run.OrganizationID != actor.OrganizationID || run.ProjectID != projectID {
-		return AgentRun{}, ErrNotFound
+		return AgentRun{}, ErrRunNotFound
 	}
 	return cloneRun(run), nil
 }

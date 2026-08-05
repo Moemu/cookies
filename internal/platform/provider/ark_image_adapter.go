@@ -54,6 +54,8 @@ func NewArkImageAdapter(config ArkImageConfig, handles OutputHandleStore) (*ArkI
 	return newCompatibleImageAdapter(config.APIKey, config.Model, baseURL, "/images/generations", arkProviderCode, "Ark", handles)
 }
 
+func (a *ArkImageAdapter) ProviderCode() string { return a.providerCode }
+
 func (a *ArkImageAdapter) Submit(ctx context.Context, request ImageGenerationRequest) (ImageSubmission, error) {
 	if err := request.Validate(); err != nil {
 		return ImageSubmission{}, err
@@ -223,7 +225,7 @@ type arkImageResult struct {
 func arkImageSize(width, height int) (string, error) {
 	size := fmt.Sprintf("%dx%d", width, height)
 	switch size {
-	case "1024x1024", "2048x2048", "1024x768", "768x1024", "1365x1024", "1024x1365":
+	case "1024x1024", "1024x1536", "1536x1024", "2048x2048", "1024x768", "768x1024", "1365x1024", "1024x1365":
 		return size, nil
 	default:
 		return "", fmt.Errorf("image dimensions %s are not supported by this image adapter", size)

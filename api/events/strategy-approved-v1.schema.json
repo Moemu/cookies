@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/events/strategy-approved-v1.schema.json",
+  "title": "strategy.approved.v1",
+  "allOf": [
+    {"$ref": "./event-envelope.schema.json"},
+    {
+      "type": "object",
+      "required": ["event_type", "producer", "project_id", "subject", "data"],
+      "properties": {
+        "event_type": {"const": "strategy.approved.v1"},
+        "producer": {"const": "strategy"},
+        "project_id": {"type": "string", "minLength": 1},
+        "subject": {
+          "type": "object",
+          "required": ["type", "id", "version"],
+          "properties": {
+            "type": {"const": "strategy_package"},
+            "id": {"type": "string", "minLength": 1},
+            "version": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "data": {
+          "type": "object",
+          "required": ["package_id", "package_version", "content_hash"],
+          "properties": {
+            "package_id": {"type": "string", "minLength": 1},
+            "package_version": {"type": "integer", "minimum": 1},
+            "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

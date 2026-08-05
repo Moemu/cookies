@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-intake-create-v3.schema.json",
+  "title": "creative-intake-create/v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "source", "strategy_package_ref", "selected_route_id"],
+  "properties": {
+    "contract_version": {"const": "creative-intake-create/v3"},
+    "source": {"const": "strategy_package"},
+    "strategy_package_ref": {"$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef"},
+    "selected_route_id": {"type": "string", "minLength": 1},
+    "task_overlay_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overlay_id", "content_hash"],
+      "properties": {
+        "overlay_id": {"type": "string", "minLength": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

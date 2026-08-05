@@ -1,5 +1,6 @@
 # Agent platform module
 
-Reserved for Agent Task, Skills, Tools, and Worker orchestration. It will use
-the shared Context, Job, Provider, and Knowledge contracts without owning any
-vertical-system business facts.
+Owns durable Agent Tasks, version-pinned Skill Runs, reliable dispatch records,
+and the Job Runtime adapter. Domain handlers remain in their vertical system;
+this module does not own Brief, Strategy, Creative, Delivery, or Insights
+state.

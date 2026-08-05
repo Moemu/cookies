@@ -16,8 +16,3 @@ These instructions apply to the entire repository.
 - Stage only files that belong to the current task. Never include unrelated working-tree changes in a CI-fix commit.
 - Do not weaken, skip, or remove quality checks to make CI pass unless the user explicitly requests a policy change.
 - Prefer the smallest root-cause fix that preserves existing behavior.
-
-## Secrets and sensitive information
-
-- Never commit API keys, passwords, tokens, private certificates, connection strings, or other sensitive information to the repository.
-- Keep sensitive values in ignored local environment files or the deployment secret manager, and verify staged changes do not contain them before committing.

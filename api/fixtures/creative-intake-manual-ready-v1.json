@@ -1,0 +1,26 @@
+{
+  "id": "creativeintake_fixture_01",
+  "organization_id": "org_fixture",
+  "project_id": "project_fixture",
+  "source": "manual",
+  "status": "ready",
+  "request": {
+    "source": "manual",
+    "channel": "xiaohongshu",
+    "objective": "建立新品认知",
+    "audience": "关注生活方式的年轻上班族",
+    "core_message": "一杯咖啡，也可以成为从容开始的仪式",
+    "call_to_action": "收藏这份晨间灵感",
+    "concept": "柔和自然光下的蓝白咖啡桌",
+    "tone": ["自然", "克制"],
+    "visual_keywords": ["蓝白", "晨光"],
+    "mandatory_elements": ["产品主体"],
+    "prohibited_claims": []
+  },
+  "missing_fields": [],
+  "warnings": [],
+  "confirmed_by": "usr_fixture",
+  "version": 1,
+  "created_at": "2026-07-23T09:00:00Z",
+  "updated_at": "2026-07-23T09:00:00Z"
+}

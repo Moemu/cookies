@@ -10,7 +10,8 @@ import (
 )
 
 const MaxImageBytes int64 = 20 * 1024 * 1024
-const MaxVideoBytes int64 = 500 * 1024 * 1024
+const MaxVideoBytes int64 = 200 * 1024 * 1024
+const MaxAudioBytes int64 = 50 * 1024 * 1024
 const MaxImageDimension = 16384
 const MaxImagePixels int64 = 100_000_000
 
@@ -55,6 +56,12 @@ type AssetVersion struct {
 	WidthPixels           int                      `json:"width_pixels,omitempty"`
 	HeightPixels          int                      `json:"height_pixels,omitempty"`
 	Media                 MediaMetadata            `json:"media"`
+	DurationMS            int64                    `json:"duration_ms,omitempty"`
+	FrameRate             string                   `json:"frame_rate,omitempty"`
+	VideoCodec            string                   `json:"video_codec,omitempty"`
+	AudioCodec            string                   `json:"audio_codec,omitempty"`
+	RenderJobID           string                   `json:"render_job_id,omitempty"`
+	DerivationID          string                   `json:"derivation_id,omitempty"`
 	ProviderJobID         string                   `json:"provider_job_id,omitempty"`
 	ProviderOutputID      string                   `json:"provider_output_id,omitempty"`
 	ProjectContextVersion int64                    `json:"project_context_version,omitempty"`
@@ -70,6 +77,7 @@ type AssetRelationType string
 
 const (
 	AssetRelationGeneratedFrom AssetRelationType = "generated_from"
+	AssetRelationDerivedFrom   AssetRelationType = "derived_from"
 )
 
 type AssetRelation struct {
@@ -88,7 +96,7 @@ func (r AssetRelation) Validate() error {
 	if err := r.OutputAsset.Validate(); err != nil {
 		return fmt.Errorf("output asset: %w", err)
 	}
-	if r.RelationType != AssetRelationGeneratedFrom {
+	if r.RelationType != AssetRelationGeneratedFrom && r.RelationType != AssetRelationDerivedFrom {
 		return fmt.Errorf("asset relation type is invalid")
 	}
 	if err := r.Source.Validate(); err != nil {
@@ -210,11 +218,12 @@ func (r CreateUploadRequest) Validate() error {
 	if strings.TrimSpace(r.Filename) == "" || len(r.Filename) > 512 {
 		return fmt.Errorf("filename must be between 1 and 512 characters")
 	}
-	if !allowedDeclaredAssetMIME(r.DeclaredMIMEType) {
-		return fmt.Errorf("declared_mime_type must be image/jpeg, image/png, or video/*")
+	_, maxBytes, supported := generatedAssetPolicy(r.DeclaredMIMEType)
+	if !supported {
+		return fmt.Errorf("declared_mime_type must be a supported image, video, or audio MIME type")
 	}
-	if r.DeclaredSizeBytes < 1 || r.DeclaredSizeBytes > maxBytesForMIME(r.DeclaredMIMEType) {
-		return fmt.Errorf("declared_size_bytes is outside the supported range for %s", r.DeclaredMIMEType)
+	if r.DeclaredSizeBytes < 1 || r.DeclaredSizeBytes > maxBytes {
+		return fmt.Errorf("declared_size_bytes must be between 1 and %d", maxBytes)
 	}
 	if r.DeclaredSHA256 != nil && !validSHA256(*r.DeclaredSHA256) {
 		return fmt.Errorf("declared_sha256 must be a lowercase hexadecimal SHA-256 digest")
@@ -267,6 +276,12 @@ type AssetCommit struct {
 	WidthPixels           int
 	HeightPixels          int
 	Media                 MediaMetadata
+	DurationMS            int64
+	FrameRate             string
+	VideoCodec            string
+	AudioCodec            string
+	RenderJobID           string
+	DerivationID          string
 	ProviderJobID         string
 	ProviderOutputID      string
 	ProjectContextVersion int64
@@ -280,16 +295,22 @@ func allowedDeclaredImageMIME(value string) bool {
 }
 
 func allowedDeclaredVideoMIME(value string) bool {
-	return strings.HasPrefix(value, "video/")
+	return value == "video/mp4"
 }
 
-func allowedDeclaredAssetMIME(value string) bool {
-	return allowedDeclaredImageMIME(value) || allowedDeclaredVideoMIME(value)
+func allowedDeclaredAudioMIME(value string) bool {
+	return value == "audio/wav" || value == "audio/mpeg" || value == "audio/aac"
 }
 
-func maxBytesForMIME(value string) int64 {
-	if allowedDeclaredVideoMIME(value) {
-		return MaxVideoBytes
+func generatedAssetPolicy(mimeType string) (contract.AssetKind, int64, bool) {
+	if allowedDeclaredImageMIME(mimeType) {
+		return contract.AssetImage, MaxImageBytes, true
 	}
-	return MaxImageBytes
+	if allowedDeclaredVideoMIME(mimeType) {
+		return contract.AssetVideo, MaxVideoBytes, true
+	}
+	if allowedDeclaredAudioMIME(mimeType) {
+		return contract.AssetAudio, MaxAudioBytes, true
+	}
+	return "", 0, false
 }

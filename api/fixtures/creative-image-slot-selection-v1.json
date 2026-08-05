@@ -1,0 +1,12 @@
+{
+  "contract_version": "creative-image-slot-selection/v1",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "task_id": "creative_task_image_01",
+  "draft_revision": 2,
+  "image_plan_order": 1,
+  "adopted_attempt_id": "image_attempt_01",
+  "version": 1,
+  "adopted_by": "user_01",
+  "adopted_at": "2026-07-31T08:04:00Z"
+}

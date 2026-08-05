@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-direction-candidate-batch-v1.schema.json",
+  "title": "creative-direction-candidate-batch/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "batch_id", "organization_id", "project_id", "intake_id", "input_identity_hash", "status", "candidates", "model", "prompt_version", "created_by", "created_at"],
+  "properties": {
+    "contract_version": {"const": "creative-direction-candidate-batch/v1"},
+    "batch_id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "intake_id": {"type": "string", "minLength": 1},
+    "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "status": {"enum": ["generating", "ready", "failed"]},
+    "candidates": {
+      "type": "array",
+      "items": {"$ref": "./creative-direction-v1.schema.json"}
+    },
+    "model": {"type": "string", "minLength": 1},
+    "prompt_version": {"type": "string", "minLength": 1},
+    "failure_code": {"type": "string"},
+    "created_by": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

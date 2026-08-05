@@ -1,0 +1,15 @@
+{
+  "name": "objective.conversion",
+  "version": "v1.0.0",
+  "kind": "objective",
+  "match": ["conversion"],
+  "instructions": [
+    "明确转化动作、决策阻力、证据和促成路径。",
+    "内容建议要区分新客说服与已知需求承接。",
+    "实验应围绕价值表达、证据、价格或 CTA 变量，并使用转化结果指标。"
+  ],
+  "quality_checks": [
+    "strategy 包含具体转化动作。",
+    "measurement 至少包含一个转化效率指标。"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "creative_version_01JABC",
+  "organization_id": "org_local",
+  "project_id": "project_local",
+  "creative_task_id": "creative_task_01JABC",
+  "version": 1,
+  "draft_version": 1,
+  "status": "created",
+  "snapshot": {
+    "task_id": "creative_task_01JABC",
+    "version": 1,
+    "status": "draft",
+    "title_candidates": ["夏日轻饮", "通勤一杯", "自然清爽"],
+    "body": "一杯好喝、清爽的夏日灵感。",
+    "topics": ["夏日饮品", "通勤"],
+    "cover_copy": "清爽从这一杯开始",
+    "image_plan": [{"order": 1, "purpose": "封面", "visual_brief": "晨光中的饮品桌面", "caption": "夏日清爽"}],
+    "created_at": "2026-07-23T08:00:00Z"
+  },
+  "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "created_by": "user_local",
+  "created_at": "2026-07-23T08:05:00Z"
+}

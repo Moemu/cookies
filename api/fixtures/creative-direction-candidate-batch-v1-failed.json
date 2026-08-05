@@ -1,0 +1,15 @@
+{
+  "contract_version": "creative-direction-candidate-batch/v1",
+  "batch_id": "creative_direction_batch_02",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "intake_id": "creative_intake_03",
+  "input_identity_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "status": "failed",
+  "candidates": [],
+  "model": "cookies.text.standard",
+  "prompt_version": "creative.direction.generate.v1",
+  "failure_code": "MODEL_OUTPUT_INVALID",
+  "created_by": "user_01",
+  "created_at": "2026-07-31T08:06:00Z"
+}

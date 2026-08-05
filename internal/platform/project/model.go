@@ -50,6 +50,44 @@ type Project struct {
 	UpdatedAt               time.Time               `json:"updated_at"`
 }
 
+type ProjectMembership struct {
+	OrganizationID contract.OrganizationID `json:"organization_id"`
+	ProjectID      contract.ProjectID      `json:"project_id"`
+	PrincipalKind  contract.PrincipalKind  `json:"principal_kind"`
+	PrincipalID    string                  `json:"principal_id"`
+	DisplayName    string                  `json:"display_name"`
+	Role           string                  `json:"role"`
+	Status         string                  `json:"status"`
+	CreatedAt      time.Time               `json:"created_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
+}
+
+type UpdateProjectMembershipRequest struct {
+	Role              string    `json:"role"`
+	Status            string    `json:"status"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+}
+
+func ValidProjectRole(value string) bool {
+	switch value {
+	case "owner", "editor", "viewer", "worker":
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidProjectRoleForPrincipal(kind contract.PrincipalKind, role string) bool {
+	switch kind {
+	case contract.PrincipalUser:
+		return role == "owner" || role == "editor" || role == "viewer"
+	case contract.PrincipalService:
+		return role == "worker"
+	default:
+		return false
+	}
+}
+
 type ProjectDetail struct {
 	Project    Project                  `json:"project"`
 	Runtime    ProjectRuntime           `json:"runtime"`
@@ -218,6 +256,24 @@ type WorkbenchAssetAuthorization struct {
 type WorkbenchDeliveryTarget struct {
 	Platform string `json:"platform"`
 	Region   string `json:"region"`
+}
+
+type RunWorkbenchQualityCheckRequest struct {
+	AssetID      string `json:"-"`
+	AssetVersion int    `json:"-"`
+}
+
+type RecordWorkbenchMaterialConfirmationRequest struct {
+	AssetID      string `json:"-"`
+	AssetVersion int    `json:"-"`
+	Status       string `json:"status"`
+	Scope        string `json:"scope"`
+	Note         string `json:"note"`
+}
+
+type UpdateWorkbenchAssetPointerRequest struct {
+	AssetID         string `json:"-"`
+	DeliveryVersion *int   `json:"delivery_version"`
 }
 
 type ProjectArtifactSummary struct {

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-image-text-draft-v1.schema.json",
+  "title": "CreativeImageTextDraftV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "version", "status", "title_candidates", "body", "topics", "cover_copy", "image_plan", "created_at"],
+  "properties": {
+    "task_id": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["draft", "ready_for_review", "approved", "superseded"]},
+    "title_candidates": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+    "body": {"type": "string"},
+    "topics": {"type": "array", "items": {"type": "string"}},
+    "cover_copy": {"type": "string"},
+    "image_plan": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/imagePlanItem"}},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "imagePlanItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "purpose", "visual_brief", "caption"],
+      "properties": {
+        "order": {"type": "integer", "minimum": 1},
+        "purpose": {"type": "string"},
+        "visual_brief": {"type": "string"},
+        "caption": {"type": "string"}
+      }
+    }
+  }
+}

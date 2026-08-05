@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-creative-task-plan-v2.schema.json",
+  "title": "strategy-creative-task-plan/v2",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["contract_version", "id", "project_id", "package_ref", "handoff_ref", "selected_route_id", "status", "business_code", "answers", "completeness", "current_revision", "current_strategy_version", "version"],
+  "properties": {
+    "contract_version": {"const": "strategy-creative-task-plan/v2"},
+    "id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "package_ref": {"$ref": "./strategy-creative-handoff-v1.schema.json#/$defs/intakePackageRef"},
+    "handoff_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "content_hash"],
+      "properties": {
+        "contract_version": {"const": "strategy-creative-handoff/v1"},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "selected_route_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["collecting", "ready", "generating", "generated", "failed", "superseded"]},
+    "business_code": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
+    "answers": {"type": "object"},
+    "completeness": {"type": "object"},
+    "current_revision": {"type": "integer", "minimum": 1},
+    "current_strategy_version": {"type": "integer", "minimum": 0},
+    "version": {"type": "integer", "minimum": 1}
+  }
+}

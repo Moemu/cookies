@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-draft-v1.schema.json",
+  "title": "strategy-draft/v1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "objective",
+    "audience",
+    "proposition",
+    "channel_strategy",
+    "creative_recommendations",
+    "constraints",
+    "budget_and_cadence",
+    "experiment_matrix",
+    "measurement",
+    "assumptions_and_gaps",
+    "lineage"
+  ],
+  "properties": {
+    "contract_version": {"const": "strategy-draft/v1"},
+    "objective": {"type": "string", "minLength": 1},
+    "audience": {
+      "type": "object",
+      "required": ["primary", "insights"],
+      "properties": {
+        "primary": {"type": "string", "minLength": 1},
+        "insights": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "proposition": {"type": "string", "minLength": 1},
+    "channel_strategy": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["platform", "role", "formats"],
+        "properties": {
+          "platform": {"const": "xiaohongshu"},
+          "role": {"type": "string", "minLength": 1},
+          "formats": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "creative_recommendations": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "budget_and_cadence": {
+      "type": "object",
+      "required": ["budget", "cadence"],
+      "properties": {
+        "budget": {"type": "string"},
+        "cadence": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "experiment_matrix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["hypothesis", "variable", "metric"],
+        "properties": {
+          "hypothesis": {"type": "string"},
+          "variable": {"type": "string"},
+          "metric": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "measurement": {"type": "array", "items": {"type": "string"}},
+    "assumptions_and_gaps": {"type": "array", "items": {"type": "string"}},
+    "lineage": {
+      "type": "object",
+      "required": ["brief_id", "brief_version", "project_context_version", "skill_versions"],
+      "properties": {
+        "brief_id": {"type": "string", "minLength": 1},
+        "brief_version": {"type": "integer", "minimum": 1},
+        "project_context_version": {"type": "integer", "minimum": 1},
+        "skill_versions": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

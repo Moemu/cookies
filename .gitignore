@@ -26,17 +26,20 @@ go.work.sum
 
 # Local environment files may contain credentials. Keep only the empty template.
 .env
-.env.*
-!.env.example
+.codex-runtime/
 
 # Node / Vite frontend artifacts
 node_modules/
 web/dist/
 web/.vite/
+test-results/
 *.tsbuildinfo
 
 # Local persistent object storage
 .data/
+.tmp/
+tmp/
+/.cache/
 
 # Local MVP backend persistence. Keep deployable public insight examples.
 /data/*
@@ -56,3 +59,6 @@ dist/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+# 本地播种脚本的临时产物（scripts/seed-*.sql 才是提交的那份）
+.tmp-seed/

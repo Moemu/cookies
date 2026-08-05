@@ -1,95 +1,147 @@
 package knowledge
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"errors"
 	"testing"
-	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-func TestServiceImportsAndSearchesProjectKnowledgeWithCitations(t *testing.T) {
+func TestExtractMarkdownAndDOCX(t *testing.T) {
 	t.Parallel()
-	nextID := 0
-	service := NewMemoryService(func(prefix string) (string, error) {
-		nextID++
-		return prefix + "_" + string(rune('0'+nextID)), nil
-	})
-	service.nowUTC = func() time.Time { return time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC) }
-	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}}
-
-	document, err := service.ImportDocument(context.Background(), actor, "project_1", ImportDocumentRequest{
-		Title:      "电商前贴策略",
-		SourceURI:  "docs/策略/06-电商广告前贴与钩子视频生成策略.md",
-		SourceType: "strategy",
-		Text:       "# Hook\n首屏需要商品露出和强钩子。\n\n# Quality\n质检必须保留 citation。",
-	})
-	if err != nil {
-		t.Fatalf("ImportDocument() error = %v", err)
-	}
-	if document.ID != "knowledgedoc_1" || document.ChunkCount != 2 || document.SourceType != "strategy" {
-		t.Fatalf("document = %#v", document)
+	markdown, mimeType, err := extractDocument(".md", []byte("\xef\xbb\xbf# 标题\n\n正文"))
+	if err != nil || markdown != "# 标题\n\n正文" || mimeType != "text/markdown" {
+		t.Fatalf("markdown extraction = %q, %q, %v", markdown, mimeType, err)
 	}
 
-	results, err := service.Search(context.Background(), actor, "project_1", SearchRequest{Query: "商品 露出 citation", Limit: 5})
+	var content bytes.Buffer
+	writer := zip.NewWriter(&content)
+	part, err := writer.Create("word/document.xml")
 	if err != nil {
-		t.Fatalf("Search() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("results length = %d, want 2: %#v", len(results), results)
+	_, _ = part.Write([]byte(`<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>第一段</w:t></w:r></w:p><w:p><w:r><w:t>第二段</w:t></w:r></w:p></w:body></w:document>`))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if results[0].Score < results[1].Score {
-		t.Fatalf("results are not sorted by score: %#v", results)
-	}
-	citation := results[0].Citations[0]
-	if citation.DocumentID != document.ID || citation.ChunkID == "" || citation.Title != "电商前贴策略" {
-		t.Fatalf("citation = %#v", citation)
-	}
-	if citation.SourceURI != "docs/策略/06-电商广告前贴与钩子视频生成策略.md" || citation.StartLine < 1 || citation.EndLine < citation.StartLine {
-		t.Fatalf("citation source range = %#v", citation)
-	}
-	if citation.Snippet == "" {
-		t.Fatal("citation snippet is required")
+	docx, mimeType, err := extractDocument(".docx", content.Bytes())
+	if err != nil || docx != "第一段\n第二段" ||
+		mimeType != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		t.Fatalf("docx extraction = %q, %q, %v", docx, mimeType, err)
 	}
 }
 
-func TestServiceKeepsKnowledgeScopedToProjectAndOrganization(t *testing.T) {
+func TestExtractDocumentRejectsUnsupportedOrMalformedContent(t *testing.T) {
 	t.Parallel()
-	nextID := 0
-	service := NewMemoryService(func(prefix string) (string, error) {
-		nextID++
-		return prefix + "_" + string(rune('a'+nextID)), nil
-	})
-	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}}
-	otherActor := contract.ActorContext{OrganizationID: "org_2", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_2"}}
-	_, err := service.ImportDocument(context.Background(), actor, "project_1", ImportDocumentRequest{Title: "项目一策略", Text: "钩子 素材 商品"})
-	if err != nil {
-		t.Fatal(err)
+	if _, _, err := extractDocument(".pdf", []byte("pdf")); !errors.Is(err, ErrInvalidDocument) {
+		t.Fatalf("unsupported extension error = %v", err)
 	}
-	_, err = service.ImportDocument(context.Background(), actor, "project_2", ImportDocumentRequest{Title: "项目二策略", Text: "钩子 素材 商品"})
-	if err != nil {
-		t.Fatal(err)
+	if _, _, err := extractDocument(".docx", []byte("not a zip")); !errors.Is(err, ErrInvalidDocument) {
+		t.Fatalf("malformed docx error = %v", err)
 	}
+}
 
-	documents, err := service.ListDocuments(context.Background(), actor, "project_1", 10)
-	if err != nil {
-		t.Fatalf("ListDocuments() error = %v", err)
+func TestResearchRequiresPerCallConfirmationBeforeDatabaseOrRunner(t *testing.T) {
+	t.Parallel()
+	service := Service{Projects: allowingProjects{}}
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
 	}
-	if len(documents) != 1 || documents[0].ProjectID != "project_1" {
-		t.Fatalf("documents = %#v", documents)
+	_, err := service.RunResearch(context.Background(), actor, "project_1", ResearchRequest{
+		Mode: "web", Query: "行业案例", Confirmed: false,
+	})
+	if !errors.Is(err, ErrExternalConfirmationRequired) {
+		t.Fatalf("unconfirmed research error = %v", err)
 	}
-	projectResults, err := service.Search(context.Background(), actor, "project_1", SearchRequest{Query: "钩子", Limit: 10})
-	if err != nil {
-		t.Fatalf("Search(project_1) error = %v", err)
+}
+
+func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		request   ResearchRequest
+		wantError bool
+	}{
+		{
+			name: "query only",
+			request: ResearchRequest{
+				Mode: "web", Query: "行业案例", DisclosedFields: []string{"query"},
+			},
+		},
+		{
+			name: "document content declared",
+			request: ResearchRequest{
+				Mode: "web", Query: "竞品研究", DocumentIDs: []string{"doc_1"},
+				DisclosedFields: []string{"query", "document_content"},
+			},
+		},
+		{
+			name: "document content omitted",
+			request: ResearchRequest{
+				Mode: "web", Query: "行业案例", DocumentIDs: []string{"doc_1"},
+				DisclosedFields: []string{"query"},
+			},
+			wantError: true,
+		},
+		{
+			name: "mcp is not a public research mode",
+			request: ResearchRequest{
+				Mode: "mcp", Query: "竞品研究", DisclosedFields: []string{"query"},
+			},
+			wantError: true,
+		},
+		{
+			name: "disclosure overstates payload",
+			request: ResearchRequest{
+				Mode: "web", Query: "行业案例",
+				DisclosedFields: []string{"query", "document_content"},
+			},
+			wantError: true,
+		},
+		{
+			name: "unknown disclosure field",
+			request: ResearchRequest{
+				Mode: "web", Query: "行业案例", DisclosedFields: []string{"query", "cookies"},
+			},
+			wantError: true,
+		},
 	}
-	if len(projectResults) != 1 || projectResults[0].Chunk.ProjectID != "project_1" {
-		t.Fatalf("project results = %#v", projectResults)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := validateResearchRequest(test.request)
+			if test.wantError != errors.Is(err, ErrInvalidResearchRequest) {
+				t.Fatalf("error = %v, want invalid=%t", err, test.wantError)
+			}
+		})
 	}
-	orgResults, err := service.Search(context.Background(), otherActor, "project_1", SearchRequest{Query: "钩子", Limit: 10})
-	if err != nil {
-		t.Fatalf("Search(other org) error = %v", err)
+}
+
+func TestResearchCategoryIsExplicitAndBounded(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"", "general", "audience", "competitor", "industry", " Audience "} {
+		if !validResearchCategory(value, true) {
+			t.Fatalf("category %q should be valid", value)
+		}
 	}
-	if len(orgResults) != 0 {
-		t.Fatalf("cross-org results = %#v", orgResults)
+	for _, value := range []string{"creative", "brand", "unknown"} {
+		if validResearchCategory(value, true) {
+			t.Fatalf("category %q should be rejected", value)
+		}
 	}
+	if normalizedResearchCategory("") != "general" ||
+		normalizedResearchCategory(" Competitor ") != "competitor" {
+		t.Fatal("research category normalization changed unexpectedly")
+	}
+}
+
+type allowingProjects struct{}
+
+func (allowingProjects) GetContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
+	return contract.ProjectContext{OrganizationID: actor.OrganizationID, ProjectID: projectID, ProjectContextVersion: 1}, nil
 }

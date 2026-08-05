@@ -1,0 +1,134 @@
+{
+  "contract_version": "creative-intake/v3",
+  "id": "creative_intake_03",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "source": "strategy_package",
+  "status": "ready",
+  "strategy_package_ref": {
+    "package_id": "strategy_package_03",
+    "package_version": 3,
+    "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handoff_contract_version": "strategy-creative-handoff/v1",
+    "handoff_content_hash": "sha256:4469648a24f258499e26b157a4b14c8bde9b80bee15d9238cfcf3687766fb860"
+  },
+  "selected_route_id": "route_xhs_image_text",
+  "base_handoff": {
+    "contract_version": "strategy-creative-handoff/v1",
+    "organization_id": "org_01",
+    "project_id": "project_01",
+    "package_ref": {
+      "package_id": "strategy_package_03",
+      "package_version": 3,
+      "package_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "approved_at": "2026-07-28T06:00:00Z"
+    },
+    "handoff_content_hash": "sha256:4469648a24f258499e26b157a4b14c8bde9b80bee15d9238cfcf3687766fb860",
+    "creative_view": {
+      "market": "CN",
+      "language": "zh-CN",
+      "objective": {
+        "objective_type": "brand",
+        "statement": "建立新品高端修护认知。",
+        "success_signals": [
+          "有效咨询率提升"
+        ]
+      },
+      "audience_segments": [
+        {
+          "segment_id": "audience_urban_25_35",
+          "label": "25—35 岁高线城市功效护肤人群",
+          "priority": 1,
+          "insight": "需要可信证据降低决策风险。",
+          "tension": "担心夸张功效表达。",
+          "evidence_ref_ids": []
+        }
+      ],
+      "product_and_offer": {
+        "product_ref_ids": [
+          "product_abeille_royale_01"
+        ],
+        "campaign_mechanism": "新品上市种草",
+        "offer_text": "",
+        "landing_destination": ""
+      },
+      "communication": {
+        "single_minded_proposition": "以可验证的修护体验回应可信修护需求。",
+        "message_hierarchy": [
+          {
+            "priority": 1,
+            "message": "先呈现真实使用场景。",
+            "evidence_ref_ids": []
+          }
+        ],
+        "cta_intent": "了解更多新品信息",
+        "approved_ctas": [
+          "了解更多新品信息"
+        ],
+        "tone_constraints": [
+          "可信",
+          "克制"
+        ]
+      },
+      "guardrails": [],
+      "claims": [],
+      "assets": [],
+      "creative_hypotheses": [],
+      "open_questions": [],
+      "source_refs": []
+    },
+    "routes": [
+      {
+        "route_id": "route_xhs_image_text",
+        "deliverable_type": "image_text",
+        "purpose": "brand",
+        "channels": [
+          "xiaohongshu"
+        ],
+        "reason": "以真实体验建立新品认知。",
+        "spec": {
+          "aspect_ratio": "3:4",
+          "resolution": "1080x1440",
+          "composition_required": false
+        },
+        "cta_policy": {
+          "required_for_generation": false,
+          "required_for_delivery": false,
+          "cta_intent": "了解更多新品信息"
+        },
+        "claim_refs": [],
+        "asset_requirements": [],
+        "asset_refs": [],
+        "route_readiness": {
+          "status": "ready",
+          "blockers": [],
+          "warnings": []
+        }
+      }
+    ],
+    "upstream_readiness": {
+      "status": "ready",
+      "blockers": [],
+      "warnings": []
+    },
+    "published_at": "2026-07-28T06:00:00Z"
+  },
+  "input_identity_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": true,
+    "production_ready": false
+  },
+  "blockers": [],
+  "warnings": [
+    {
+      "code": "main_video_missing",
+      "stage": "production"
+    }
+  ],
+  "assumptions": [],
+  "confirmed_by": "user_01",
+  "version": 1,
+  "created_at": "2026-07-31T08:00:00Z",
+  "updated_at": "2026-07-31T08:00:00Z"
+}

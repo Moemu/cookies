@@ -36,6 +36,28 @@ func TestJobRuntimeSchedulerEnqueuesOpaqueProviderJobReference(t *testing.T) {
 	}
 }
 
+func TestJobRuntimeSchedulerUsesVideoExecutionKind(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 27, 7, 0, 0, 0, time.UTC)
+	store := &schedulerStore{}
+	scheduler := JobRuntimeScheduler{Store: store, NewID: func() (string, error) { return "execution_video_1", nil }, Now: func() time.Time { return now }}
+	job := providerJobForScheduler(now)
+	job.ID = "provider_video_1"
+	job.Kind = videoGenerateJobKind
+	job.MaxAttempts = videoExecutionMaxAttempts
+
+	if err := scheduler.Schedule(context.Background(), job); err != nil {
+		t.Fatalf("Schedule() error = %v", err)
+	}
+	if store.request.Job.Kind != videoExecutionJobKind || store.request.Job.MaxAttempts != videoExecutionMaxAttempts {
+		t.Fatalf("unexpected video runtime job: %+v", store.request.Job)
+	}
+	worker := NewRuntimeWorker(store, Service{})
+	if _, exists := worker.Handlers[videoExecutionJobKind]; !exists {
+		t.Fatalf("runtime worker does not register %q", videoExecutionJobKind)
+	}
+}
+
 func TestRuntimeHandlerMirrorsExecutionAttemptsToProviderJob(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 7, 15, 0, 0, time.UTC)
@@ -59,6 +81,35 @@ func TestRuntimeHandlerMirrorsExecutionAttemptsToProviderJob(t *testing.T) {
 	}
 	if store.record.Job.AttemptCount != 2 || store.record.Job.MaxAttempts != 100 {
 		t.Fatalf("ProviderJob execution attempts were not mirrored: %+v", store.record.Job)
+	}
+}
+
+func TestRuntimeHandlerDefersWhenExecutionAttemptCannotBeRecorded(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 27, 9, 30, 0, 0, time.UTC)
+	record := executableImageJobRecord(now)
+	store := &attemptRecordingFailureStore{
+		processingStore: processingStore{record: record},
+		err:             errors.New("temporary database interruption"),
+	}
+	service := Service{Store: store, ImageAdapter: failingImageAdapter{}, Now: func() time.Time { return now }}
+	payload, err := json.Marshal(struct {
+		ProviderJobID string `json:"provider_job_id"`
+	}{ProviderJobID: record.Job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = RuntimeHandler(service)(context.Background(), jobruntime.Claim{Job: contract.Job{
+		ID: "execution_job_1", Kind: imageExecutionJobKind, OrganizationID: record.Job.OrganizationID, ProjectID: record.Job.ProjectID,
+		Status: contract.JobRunning, Cancellable: false, AttemptCount: 3, MaxAttempts: 100, Version: 3, CreatedAt: now, UpdatedAt: now,
+	}, Payload: payload, LockOwner: "worker_1"})
+	var deferred jobruntime.DeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("handler error = %v, want deferred execution after a temporary attempt-recording failure", err)
+	}
+	if !deferred.AvailableAt.After(time.Now().UTC()) {
+		t.Fatalf("deferred time %s is not in the future", deferred.AvailableAt)
 	}
 }
 
@@ -123,6 +174,15 @@ type schedulerStore struct{ request jobruntime.CreateRequest }
 type failingImageAdapter struct{}
 
 type unknownSubmissionAdapter struct{}
+
+type attemptRecordingFailureStore struct {
+	processingStore
+	err error
+}
+
+func (s *attemptRecordingFailureStore) Update(context.Context, JobRecord) (JobRecord, error) {
+	return JobRecord{}, s.err
+}
 
 func (unknownSubmissionAdapter) Submit(context.Context, ImageGenerationRequest) (ImageSubmission, error) {
 	return ImageSubmission{}, ExecutionError{JobError: contract.JobError{Code: "MODEL_SUBMISSION_UNKNOWN", Message: "unknown", Retryable: false}}

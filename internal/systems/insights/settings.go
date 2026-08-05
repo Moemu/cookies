@@ -1,0 +1,336 @@
+package insights
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
+)
+
+// 系统设置（03 §78 与 19 §289 的五个视图：样本门槛、观察窗口、通知、确认权限、报告模板；
+// 20 §121「**MVP 可采用保守默认值**」「单列分组表单，重要阈值显示影响说明和默认推荐；
+// 不使用仪表盘布局」；22 §239 记的问题是「缺少实际阈值影响说明」）。
+//
+// 这一整页只读，一张表都不建。
+//
+// 它要解决的不是「让人改阈值」，而是**让人知道现在生效的阈值是多少、调它会动到什么**。
+// 眼下所有阈值都是代码常量，散在 connectors.go / performance.go / operations.go /
+// quality.go / prelaunch.go 五个文件里。它们决定了页面上什么时候说「充分」、什么时候说
+// 「样本不足」、什么时候干脆不给结论——但除了读源码，没有任何地方能看到这些数字。
+// 一个看不见的阈值和一个错的阈值，在使用者那里是同一种东西。
+//
+// 所以这里直接引用那些常量本身，而不是抄一份数字过来。抄一份迟早会和代码对不上，
+// 那时候这一页就从「说明」变成了「误导」——比不做更糟。
+//
+// 反过来，这也意味着改阈值要走代码评审。这在 MVP 是有意的：03 §17.3 把「最低样本由
+// 全局规则还是行业模板配置」列为**待确认**，在那条定下来之前，做一套可视化配置等于
+// 先替它选了「全局规则」这个答案。
+
+// SettingGroupState 说明这一组设置现在是什么处境。
+type SettingGroupState string
+
+const (
+	// SettingInEffect 这一组的值现在真的在生效，页面上的判定就是按它们做的。
+	SettingInEffect SettingGroupState = "in_effect"
+	// SettingNotBuilt 这一组还没有任何东西。列出来是为了不让人以为它在默默生效。
+	SettingNotBuilt SettingGroupState = "not_built"
+)
+
+// SettingItem 是一条设置。20 §121 要求「重要阈值显示影响说明和默认推荐」，
+// 所以 Effect 和 Recommended 不是可选的注释，是这一页存在的理由。
+type SettingItem struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	// Value 是现在生效的值，已经格式化成人能读的样子（含单位）。
+	Value string `json:"value"`
+	// Effect 说明调大调小会发生什么。写「会影响置信度」没有意义，要写清楚
+	// 哪一句话会从「有结论」变成「没结论」。
+	Effect string `json:"effect"`
+	// Recommended 是默认推荐值。和 Value 一致时前端不必强调，不一致时要提示。
+	//
+	// 这里一律写字面量，不从常量算出来。算出来它就永远等于 Value，「推荐」这个字段
+	// 也就没有独立含义了；写死之后，谁改了常量而没回来说明理由，测试会当场拦下。
+	Recommended string `json:"recommended"`
+	// Deviates 表示当前值偏离了推荐值，页面据此提示「有人调过它」。
+	//
+	// 由各组自己判定，而不是让前端拿 Value 和 Recommended 比字符串：确认权限那组的
+	// 「当前值」是这个权限管到哪些操作、「推荐」是该发给谁，本来就是两件事，
+	// 字面永远不同——前端一比就会给每一条都打上「被调过」，那是凭空造出来的告警。
+	Deviates bool `json:"deviates"`
+	// Source 是这个值在代码里的位置，方便直接翻过去看上下文。
+	Source string `json:"source"`
+	// Basis 是文档依据。没有依据的阈值要显式写「无文档依据」，那本身就是个待办。
+	Basis string `json:"basis"`
+}
+
+// SettingGroup 对应导航上的一个二级视图。
+type SettingGroup struct {
+	Key   string            `json:"key"`
+	Label string            `json:"label"`
+	State SettingGroupState `json:"state"`
+	// Summary 一句话说明这一组管什么。
+	Summary string `json:"summary"`
+	// Missing 只在 State 为 not_built 时有内容：缺的到底是什么、现在怎么替代。
+	Missing []string      `json:"missing"`
+	Items   []SettingItem `json:"items"`
+}
+
+// InsightSettings 是整页的返回值。
+type InsightSettings struct {
+	GeneratedAt time.Time `json:"generated_at"`
+	// Editable 恒为 false。前端据此决定不渲染任何输入框——渲染一个改不动的输入框，
+	// 比直接说「这里改不了」更让人恼火。
+	Editable bool `json:"editable"`
+	// EditableNote 说明为什么改不了、想改要走什么路径。
+	EditableNote string `json:"editable_note"`
+	// ProjectScoped 恒为 false：这些值对整个部署生效，不分 Project。
+	// 路径上带 project_id 只是为了沿用同一套鉴权，不代表值会因项目而不同。
+	ProjectScoped bool           `json:"project_scoped"`
+	Groups        []SettingGroup `json:"groups"`
+}
+
+// GetInsightSettings 汇总当前生效的阈值与规则。
+//
+// 不读库：这里没有一个值来自数据，全部来自代码常量。要的就是「代码里是什么，
+// 页面上就是什么」——中间隔一层存储，就会有对不上的那一天。
+func (s Service) GetInsightSettings(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (InsightSettings, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return InsightSettings{}, err
+	}
+	return InsightSettings{
+		GeneratedAt:   s.now(),
+		Editable:      false,
+		ProjectScoped: false,
+		EditableNote: "这一页只读。所有阈值都是代码常量，改动要走代码评审——" +
+			"03 §17.3 把「最低样本由全局规则还是行业模板配置」列为待确认，" +
+			"在那条定下来之前做成可配置，等于先替它选了答案。",
+		Groups: []SettingGroup{
+			sampleThresholdSettings(),
+			windowSettings(),
+			notificationSettings(),
+			confirmationSettings(),
+			reportTemplateSettings(),
+		},
+	}, nil
+}
+
+// --- 样本门槛 ---
+
+func sampleThresholdSettings() SettingGroup {
+	return SettingGroup{
+		Key: "sample", Label: "样本门槛", State: SettingInEffect,
+		Summary: "决定一个数字什么时候可以被当成结论。低于门槛时系统说「样本不足」，而不是给一个看起来很确定的比率。",
+		Missing: []string{},
+		Items: markDeviations([]SettingItem{{
+			Key: "sufficient_sample_impressions", Label: "充分样本（曝光）",
+			Value: fmt.Sprintf("%d 次曝光", sufficientSampleImpressions),
+			Effect: "达到这个量才把置信标成「充分」。调低会让小样本的随机波动被当成结论——" +
+				"两条素材的 CTR 差一倍，在几百次曝光下是常事，和素材本身没关系。",
+			Recommended: "10000 次曝光",
+			Source:      "internal/systems/insights/connectors.go:267",
+			Basis:       "03 §17.3 列为待确认，现取保守值",
+		}, {
+			Key: "directional_sample_impressions", Label: "方向性样本（曝光）",
+			Value: fmt.Sprintf("%d 次曝光", directionalSampleImpressions),
+			Effect: "低于这个量连方向都不给，直接判「样本不足」。介于两者之间时给「方向性」，" +
+				"意思是可以据此决定下一步测什么，但不能写进结论。",
+			Recommended: "1000 次曝光",
+			Source:      "internal/systems/insights/connectors.go:268",
+			Basis:       "03 §17.3 列为待确认，现取保守值",
+		}, {
+			Key: "min_driver_assets", Label: "驱动因素每组最少素材数",
+			Value: fmt.Sprintf("%d 条素材", minDriverAssets),
+			Effect: "某个特征取值下不足这么多条素材，就不参与驱动因素比较。" +
+				"设成 1 会让「某一条素材恰好表现好」被读成「这个取值有效」。",
+			Recommended: "2 条素材",
+			Source:      "internal/systems/insights/performance.go:952",
+			Basis:       "03 §7.5 驱动因素为相关性分析",
+		}, {
+			Key: "min_trend_days", Label: "趋势与疲劳最少天数",
+			Value: fmt.Sprintf("%d 天", minTrendDays),
+			Effect: "窗口内有数据的天数少于这个，趋势判「看不出走势」、疲劳不给结论。" +
+				"疲劳本来就是个趋势判断，两三天看不出趋势，只能看出波动。",
+			Recommended: "4 天",
+			Source:      "internal/systems/insights/performance.go:213",
+			Basis:       "03 §7.4 疲劳识别",
+		}, {
+			Key: "min_anomaly_days", Label: "异常检测最少天数",
+			Value:       fmt.Sprintf("%d 天", minAnomalyDays),
+			Effect:      "少于这么多天就没有「常态」可言，此时算出来的异常全是噪声，所以一条都不报。",
+			Recommended: "5 天",
+			Source:      "internal/systems/insights/performance.go:216",
+			Basis:       "03 §7.4 异常识别",
+		}, {
+			Key: "anomaly_mad_multiple", Label: "异常判定倍数（MAD）",
+			Value: fmt.Sprintf("%.1f 倍", anomalyMADMultiple),
+			Effect: "偏离中位数超过这么多个 MAD 才算异常。用 MAD 不用标准差，是因为标准差" +
+				"会被它想找的那个异常点自己抬高，越异常越不容易被发现。调低会让正常波动天天报警。",
+			Recommended: "3.5 倍",
+			Source:      "internal/systems/insights/performance.go:219",
+			Basis:       "无文档指定值，取统计惯例",
+		}, {
+			Key: "min_evaluation_samples", Label: "Skill 准确率最少复核数",
+			Value: fmt.Sprintf("%d 条已复核特征", minEvaluationSamples),
+			Effect: "低于这个数不显示准确率。一次复核算 100%、两次算 50%，这种数字放在治理面上" +
+				"比没有更糟：它看上去像个指标，实际只是随机数。",
+			Recommended: "10 条已复核特征",
+			Source:      "internal/systems/insights/operations.go:354",
+			Basis:       "20 §4.1 支持算法升级与回归",
+		}, {
+			Key: "mapping_rate_blocking_below", Label: "花费映射率 · 阻断线",
+			Value: fmt.Sprintf("%.0f%%", mappingRateBlockingBelow*100),
+			Effect: "能归到素材上的花费低于这个比例，整个 Project 暂停强结论——" +
+				"大半的钱不知道花在哪条素材上时，任何「这条素材更好」都是猜的。",
+			Recommended: "80%",
+			Source:      "internal/systems/insights/quality.go:264",
+			Basis:       "doc10 §7、§12.6 对账要求",
+		}, {
+			Key: "mapping_rate_warning_below", Label: "花费映射率 · 警告线",
+			Value:       fmt.Sprintf("%.0f%%", mappingRateWarningBelow*100),
+			Effect:      "低于这个比例仍可给结论，但每次都要带着这条一起看。",
+			Recommended: "95%",
+			Source:      "internal/systems/insights/quality.go:265",
+			Basis:       "doc10 §7、§12.6 对账要求",
+		}}),
+	}
+}
+
+// markDeviations 给数值阈值标出「当前值和推荐对不上」。只对可比的项用：
+// 两边都是同一个东西的两种取值时，字面比对才有意义。
+func markDeviations(items []SettingItem) []SettingItem {
+	for index := range items {
+		items[index].Deviates = items[index].Value != items[index].Recommended
+	}
+	return items
+}
+
+// --- 观察窗口 ---
+
+func windowSettings() SettingGroup {
+	return SettingGroup{
+		Key: "window", Label: "观察窗口", State: SettingInEffect,
+		Summary: "一次分析回看多久、一次请求最多处理多少。这些是上限不是默认值：调大不会让结论更准，只会让请求更慢。",
+		Missing: []string{},
+		Items: markDeviations([]SettingItem{{
+			Key: "max_window_days", Label: "单次分析最长窗口",
+			Value: fmt.Sprintf("%d 天", maxWindowDays),
+			Effect: "超过这个天数的请求直接拒绝。上限存在的理由是保护数据库，不是业务判断——" +
+				"但窗口拉得越长，跨口径变更的风险越大（改过归因窗口的两段数据不能直接并排）。",
+			Recommended: "400 天",
+			Source:      "internal/systems/insights/connectors.go:1110",
+			Basis:       "无文档指定值，按一年零余量取",
+		}, {
+			Key: "prelaunch_quality_window_days", Label: "投前洞察数据质量回看窗口",
+			Value: fmt.Sprintf("%d 天", preLaunchQualityWindowDays),
+			Effect: "投前洞察判断「引用的经验背后有没有数据问题」时回看这么多天。" +
+				"调短会漏掉更早发生但还没修的问题，调长会把早已修复的旧问题一直挂在提示里。",
+			Recommended: "30 天",
+			Source:      "internal/systems/insights/prelaunch.go:287",
+			Basis:       "03 §8 投前证据需标注数据基础",
+		}, {
+			Key: "freshness_delayed_after_days", Label: "数据延迟判定",
+			Value: fmt.Sprintf("落后超过 %d 天", freshnessDelayedAfterDays),
+			Effect: "数据截止时间落后当天超过这个天数就标「延迟」，并降低整体置信。" +
+				"多数平台的报表本身就有 1 天延迟，设成 1 会天天报警。",
+			Recommended: "落后超过 2 天",
+			Source:      "internal/systems/insights/connectors.go:269",
+			Basis:       "doc10 §11 任何洞察必须展示数据截止时间",
+		}, {
+			Key: "max_comparison_assets", Label: "素材对比一次最多几条",
+			Value: fmt.Sprintf("%d 条素材", maxComparisonAssets),
+			Effect: "超出的按花费截断。这条更多是可读性约束：一次并排二十条，人看不出哪两条只差一个变量，" +
+				"而「只差一个变量」正是对比能不能归因的前提。",
+			Recommended: "8 条素材",
+			Source:      "internal/systems/insights/performance.go:206",
+			Basis:       "03 §7.3 变量单一时分析相对表现",
+		}, {
+			Key: "max_import_rows", Label: "单次报表导入行数上限",
+			Value: fmt.Sprintf("%d 行", maxImportRows),
+			Effect: "超出的整批拒绝，不做部分导入——半批数据入库比不入库更难查，" +
+				"因为指标看上去是完整的，只是少了一截。",
+			Recommended: "5000 行",
+			Source:      "internal/systems/insights/connectors.go:615",
+			Basis:       "无文档指定值，按单请求处理时间取",
+		}, {
+			Key: "max_feature_values_per_field", Label: "治理面每个字段最多列几个取值",
+			Value:       fmt.Sprintf("%d 个取值", maxFeatureValuesPerField),
+			Effect:      "只影响能力运营页上的展示，不影响任何判定。超出的折进「共 N 种取值」里。",
+			Recommended: "12 个取值",
+			Source:      "internal/systems/insights/operations.go:356",
+			Basis:       "展示约束，无文档依据",
+		}}),
+	}
+}
+
+// --- 通知 ---
+
+func notificationSettings() SettingGroup {
+	return SettingGroup{
+		Key: "notification", Label: "通知", State: SettingNotBuilt,
+		Summary: "还没有任何通知机制。所有需要人注意的事，现在都只能靠人主动打开对应页面才看得到。",
+		Missing: []string{
+			"没有通知对象，也没有触发规则。代码里没有一处会主动往外发消息。",
+			"三件本该主动提醒的事，现在都是被动的：数据源延迟到超过阈值、AI 提出来的特征堆在待复核里没人看、已确认的经验到了复审期。",
+			"其中最要紧的是待复核堆积——人工复核是这套系统唯一的质量闸门，没人看就等于没有闸门，而它现在不会提醒任何人。",
+		},
+		Items: []SettingItem{},
+	}
+}
+
+// --- 确认权限 ---
+
+func confirmationSettings() SettingGroup {
+	return SettingGroup{
+		Key: "confirmation", Label: "确认权限", State: SettingInEffect,
+		Summary: "谁能把一条结论从「机器说的」变成「我们认的」。这三个权限已经在每个接口上生效，但目前只能按账号授予，不能按角色配。",
+		Missing: []string{},
+		Items: []SettingItem{{
+			Key: "insights.read", Label: "读取（insights.read）",
+			Value:       "所有查询接口",
+			Effect:      "没有它连页面都打不开。素材、指标、质量、洞察、经验的全部只读接口都要它。",
+			Recommended: "分析相关的所有人",
+			Source:      "internal/systems/insights/service.go:17",
+			Basis:       "doc22 §6.2 按角色控制治理入口",
+		}, {
+			Key: "insights.write", Label: "编辑（insights.write）",
+			Value: "登记素材、导入报表、填写特征、发起 AI 提取、提请复审",
+			Effect: "能改数据，但改不动「已确认」这个状态。发起 AI 提取也在这一档——" +
+				"提取只写待确认的那一层，不产生结论，所以不需要确认权限。",
+			Recommended: "分析师与运营",
+			Source:      "internal/systems/insights/service.go:18",
+			Basis:       "03 §11.1 状态机",
+		}, {
+			Key: "insights.confirm", Label: "确认（insights.confirm）",
+			Value: "确认分析结论、确认复盘报告、确认与驳回经验、下线素材与经验",
+			Effect: "这是唯一能让一条结论进入「可被引用」状态的权限。分开授予的意义在于：" +
+				"提特征的人和认结论的人可以不是同一个人。",
+			Recommended: "对结论负责的人，人数宜少",
+			Source:      "internal/systems/insights/service.go:19",
+			Basis:       "03 §11.1、AM-006",
+		}, {
+			Key: "confirm_requires_full_review", Label: "确认前必须逐项复核",
+			Value: "强制开启，不可关闭",
+			Effect: "只要还有一项 AI 特征没被人认可或推翻，确认动作就会被拒绝。" +
+				"所以「已确认」永远意味着有人看过每一个字段，而不是有人点过一次按钮。",
+			Recommended: "保持强制",
+			Source:      "internal/systems/insights/assets.go:927 ConfirmAssetAnalysis",
+			Basis:       "AM-006、doc09 §8",
+		}},
+	}
+}
+
+// --- 报告模板 ---
+
+func reportTemplateSettings() SettingGroup {
+	return SettingGroup{
+		Key: "report_template", Label: "报告模板", State: SettingNotBuilt,
+		Summary: "还没有模板对象。报告中心现在只有一种报告：任务复盘，它的结构写死在代码里。",
+		Missing: []string{
+			"没有模板、没有调度、没有导出产物三类对象，所以「周期报告」「自定义报告」「版本与导出」都无从配置。",
+			"03 §9 的功能需求表里，报告中心只有 AM-015 任务复盘一条有需求编号，其余几项写在导航表里但没有需求支撑（基线文档冲突 10，待你确认是补需求还是删视图）。",
+			"复盘报告本身是能用的：投后分析结论 → 复盘 → 确认后沉淀成经验，这条链路已经跑通，只是它的版式不可配置。",
+		},
+		Items: []SettingItem{},
+	}
+}

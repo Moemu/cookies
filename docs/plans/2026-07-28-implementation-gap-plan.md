@@ -15,8 +15,8 @@
 2. Project 资产上传、读取、预览、删除、特征读写和生成产物回流。
 3. Provider 图片任务，以及本地环境下的策略提案生成、策略批准、创意计划和图片任务。
 4. AI 混剪计划、渲染任务契约、质量报告、爆款拆解、商品映射、前贴、反馈、评测和诊断 Agent 的 MVP seam。
-5. ChangeSet 预检、审批、模拟执行、模拟回滚和审计记录。
-6. React 中的 Project 中心化导航、任务中心、部分图文/视频生成、素材剪辑演示、素材洞察展示、投放计划与审批演示。
+5. Project-scoped DeliveryPlan/不可变版本、权威预检、ChangeSet、内容哈希绑定审批、持久化 mock Execution/Step 场景、恢复决策和审计记录。
+6. React 中的 Project 中心化导航、任务中心、部分图文/视频生成、素材剪辑演示、素材洞察展示，以及投放计划、审批与持久化 mock Execution 演示。
 
 但四个业务系统尚未完整实现。当前主要缺口是：
 
@@ -58,7 +58,7 @@
 | 需求与策略 | 创建 Proposal、基于 Proposal 生成 Strategy、批准 Strategy | 只覆盖 proposal-to-strategy 路径；未覆盖对话、Brief、研究和通用评审 |
 | 创意创作 | 创建/读取 CreativePlan、基于计划创建图片 Job | 只覆盖已批准策略到图片任务；未覆盖完整 Draft、Version、视频、评审与交付 |
 | 素材洞察 | 无 `/api/insights/v1/*` 业务路由 | 只有共享 AssetFeature、Remix 分析 seam 和兼容服务公共样例 |
-| 智能投放 | 无 `/api/delivery/v1/*` 业务路由 | 只有共享 ChangeSet 的本地模拟 |
+| 智能投放 | 已有 Project-in-path 的 Plan/Version/Preflight/ChangeSet/Approval/持久化 mock Execution 路由 | A03/A04 是明确 `source=mock` 的受控闭环；尚无真实账户、Computer Use、监控和优化 |
 
 ### 2.3 TypeScript 兼容 API
 
@@ -94,8 +94,8 @@
 | Agent | 单工作流实现 | 仅同步执行 render diagnosis；不是通用 Codex/Skill 任务运行时 |
 | 素材洞察 | 展示 + 局部数据 | 公共 CSV 洞察、Project 运营记录和 AssetFeature 可展示；没有指标接入与分析领域模型 |
 | 素材检查 | 样例驱动 | QualityCheckRun、MaterialConfirmation、版本指针来自前端 sample 过滤，不是服务端权威对象 |
-| 投放计划 | 演示实现 | 页面可配置本地字段并构建 ChangeSet；没有 DeliveryPlan 业务实体持久化 |
-| 审批与执行 | 模拟实现 | 预检、批准、模拟执行和模拟回滚可审计；不会写真实广告平台 |
+| 投放计划 | Mock 业务实现 | DeliveryPlan 与不可变版本已持久化；支持乐观并发、Project 隔离和服务端权威预检 |
+| 审批与执行 | 受控 Mock 实现 | Approval 绑定 Plan/ChangeSet 版本、canonical/action hash、24 小时有效期、execute_mock scope 和预算快照；A04 以 Idempotency-Key + canonical request hash 持久化 Execution/Step、证据和恢复决策，不会写真实广告平台 |
 | 监控、优化、账户环境 | 展示实现 | 多数页面复用 Project 运营记录或 agency sample，无 Connector/平台实时数据 |
 
 ## 4. 未实现接口清单
@@ -158,14 +158,9 @@
 
 ### 4.4 P0：智能投放与 Computer Use
 
-当前没有注册任何 `/api/delivery/v1/*` 或 Computer Use 路由。需要实现：
+当前已经注册 Project-scoped `/api/delivery/v1/projects/{project_id}/...` 的 Plan/Version/Preflight/ChangeSet/Approval 和持久化 mock Execution 子集：`POST ...change-sets/{id}:execute` 带 `Idempotency-Key` 与 `{expected_version,scenario}`，以及 Execution 列表/详情读取。Execution 只支持 `success`、`failed`、`partial`、`result_unknown` fixture，返回显式 mock provenance；`result_unknown` 先查询/恢复决策而非盲目重试。以下仍需实现：
 
 - `POST /api/delivery/v1/conversations`
-- `POST /api/delivery/v1/plans`
-- DeliveryPlan 详情、列表、更新和不可变版本接口
-- `POST /api/delivery/v1/plans/{id}/preflight`
-- `POST /api/delivery/v1/plans/{id}/change-sets`
-- `POST /api/delivery/v1/change-sets/{id}/approve`
 - `POST /api/delivery/v1/plans/{id}/pause`
 - `GET /api/delivery/v1/plans/{id}/evidence`
 - `GET /api/delivery/v1/plans/{id}/metrics`
@@ -283,9 +278,8 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 
 ### 5.4 智能投放
 
-- DeliveryPlan 持久化和版本化。
 - 真实广告账户授权、资产同步、权限与登录健康。
-- 平台级预检、风险分级和绑定内容哈希的审批。
+- 真实平台级预检、组织预算策略与通用多级审批；当前仅实现固定 mock 规则、单级 24 小时 Approval 与 execute_mock 门禁。
 - Computer Use 受控环境、等待用户、接管、恢复和结果未知处理。
 - 真实广告平台创建、暂停、扩量和回滚/补偿。
 - 预算、效果、拒审、追踪、素材疲劳监控和告警。
