@@ -192,7 +192,7 @@ export function PreLaunchInsightPage({ state, activeView, onOpenProject }: {
         const brief = artifacts.find(artifact => artifact.id === currentProject.artifacts.brief.id)
         // 已经引用过就不再追加：重复引用要留在引用记录里，不该把 Brief 越写越长。
         if (brief && !brief.content.includes(card.experience_id)) {
-          await api.updateArtifact(brief.id, {
+          await api.updateArtifact(currentProject.id, brief.id, {
             content: `${brief.content}\n\n投前洞察引用 ${card.experience_id}（${cardTypeLabels[card.type]}·置信${confidenceLabels[card.confidence]}）：${card.recommended_action || card.conclusion}`,
           })
         }

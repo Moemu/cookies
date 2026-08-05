@@ -2180,6 +2180,18 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
 	return project.ProjectDetail{}, nil
 }
+func (staticProjectManager) CreateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, project.CreateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) ListProjectArtifacts(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectArtifact, error) {
+	return nil, nil
+}
+func (staticProjectManager) GetProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) UpdateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
 func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
 	return project.Workbench{}, nil
 }

@@ -193,7 +193,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const content = key === 'brief' || key === 'creative' ? summary : `[${key}] ${summary}`
     const status = artifactStatus(patch.status ?? artifact.status)
     if (artifact.id) {
-      await api.updateArtifact(artifact.id, { content, status })
+      await api.updateArtifact(project.id, artifact.id, { content, status })
     } else {
       await api.createArtifact({ projectId: project.id, kind: artifactKind(key), content, status })
     }

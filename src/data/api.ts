@@ -4921,7 +4921,7 @@ export const api = {
   updateProject: (id: string, input: Partial<Pick<ApiProject, 'name' | 'brand' | 'objective' | 'industry'>> & { expectedContextVersion?: number }) =>
     platformClient.updateProject(id, input),
   listArtifacts: (projectId?: string) =>
-    projectId ? listKanonArtifacts(projectId) : Promise.resolve([]),
+    projectId ? platformClient.listArtifacts(projectId) : Promise.resolve([]),
   listPrerollArtifacts: async (scope: ApiPrerollScope) =>
     (await listKanonArtifacts(scope.projectId))
       .filter(artifact => artifact.kind === 'video')
@@ -4951,11 +4951,12 @@ export const api = {
     content: string
     status?: ApiArtifact['status']
     sourceJobId?: string
-  }) => Promise.reject<ApiArtifact>(unsupportedKanonWrite('通用产物创建')),
+  }) => platformClient.createArtifact(input.projectId, input),
   updateArtifact: (
+    projectId: string,
     id: string,
-    input: Partial<Pick<ApiArtifact, 'content' | 'status' | 'sourceJobId'>>,
-  ) => Promise.reject<ApiArtifact>(unsupportedKanonWrite(`产物 ${id} 更新`)),
+    input: Partial<Pick<ApiArtifact, 'content' | 'status' | 'sourceJobId' | 'version'>>,
+  ) => platformClient.updateArtifact(projectId, id, input),
   listJobs: (projectId?: string) =>
     projectId ? listKanonJobs(projectId) : Promise.resolve([]),
   listPrerollJobs: async (scope: ApiPrerollScope) =>

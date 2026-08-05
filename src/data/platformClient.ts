@@ -62,6 +62,18 @@ export type PlatformProjectArtifactSummary = {
   asset_ref?: PlatformProjectAssetRef | null;
 };
 
+export type PlatformProjectArtifact = {
+  id: string;
+  project_id: string;
+  kind: ApiArtifact["kind"];
+  status: ApiArtifact["status"];
+  content: string;
+  source_job_id?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PlatformProjectAsset = {
   ref?: PlatformProjectAssetRef;
   asset?: {
@@ -264,10 +276,13 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
       }
     },
     getProjectSnapshot: async (projectId: string) => {
-      const detail = await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`);
+      const [detail, artifactResponse] = await Promise.all([
+        request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
+        request<ItemsResponse<PlatformProjectArtifact>>(`/projects/${encodeURIComponent(projectId)}/artifacts`),
+      ]);
       return {
         project: toApiProject(detail),
-        artifacts: asArray(detail.artifacts).map(summary => toApiArtifact(summary, detail.project.id)),
+        artifacts: asArray(artifactResponse.items).map(toApiProjectArtifact),
         jobs: asArray(detail.artifacts).map(summary => toApiGenerationJobFromArtifact(summary, detail.project.id)).filter((job): job is ApiGenerationJob => Boolean(job)),
         tasks: asArray(detail.tasks).map(toApiBusinessTask),
         operations: asArray(detail.operations).map(toApiOperationalRecord),
@@ -275,8 +290,28 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
       };
     },
     listArtifacts: (projectId: string) =>
-      request<PlatformProjectDetail>(`/projects/${encodeURIComponent(projectId)}`)
-        .then(detail => asArray(detail.artifacts).map(summary => toApiArtifact(summary, detail.project.id))),
+      request<ItemsResponse<PlatformProjectArtifact>>(`/projects/${encodeURIComponent(projectId)}/artifacts`)
+        .then(response => asArray(response.items).map(toApiProjectArtifact)),
+    createArtifact: (projectId: string, input: Pick<ApiArtifact, "kind" | "content"> & Partial<Pick<ApiArtifact, "status" | "sourceJobId">>) =>
+      request<PlatformProjectArtifact>(`/projects/${encodeURIComponent(projectId)}/artifacts`, withIdempotency({
+        method: "POST",
+        body: JSON.stringify({
+          kind: input.kind,
+          content: input.content,
+          status: input.status ?? "draft",
+          source_job_id: input.sourceJobId,
+        }),
+      })).then(toApiProjectArtifact),
+    updateArtifact: (projectId: string, artifactId: string, input: Partial<Pick<ApiArtifact, "content" | "status" | "sourceJobId" | "version">>) =>
+      request<PlatformProjectArtifact>(`/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          content: input.content,
+          status: input.status,
+          source_job_id: input.sourceJobId,
+          expected_version: input.version,
+        }),
+      }).then(toApiProjectArtifact),
     listProjectMediaAssets: (projectId: string) =>
       request<ItemsResponse<PlatformProjectAsset>>(`/projects/${encodeURIComponent(projectId)}/assets`)
         .then(response => asArray(response.items).flatMap(asset => toApiProjectMediaAsset(asset, projectId))),
@@ -403,6 +438,20 @@ export function toApiArtifact(summary: PlatformProjectArtifactSummary, projectId
     version: versionNumber(summary.version),
     createdAt: summary.updated_at,
     updatedAt: summary.updated_at,
+  };
+}
+
+export function toApiProjectArtifact(artifact: PlatformProjectArtifact): ApiArtifact {
+  return {
+    id: artifact.id,
+    projectId: artifact.project_id,
+    kind: artifact.kind,
+    status: artifact.status,
+    content: artifact.content,
+    sourceJobId: artifact.source_job_id,
+    version: artifact.version,
+    createdAt: artifact.created_at,
+    updatedAt: artifact.updated_at,
   };
 }
 
