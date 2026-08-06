@@ -109,6 +109,9 @@ type Service struct {
 	RenderedAssets                      RenderedAssetWriter
 	RenderScheduler                     RenderScheduler
 	ShortDramaPrerollPlanner            ShortDramaPrerollPlanner
+	ShortDramaV2Analyzer                ShortDramaV2Analyzer
+	ShortDramaV2Planner                 ShortDramaV2Planner
+	ShortDramaV2Images                  ShortDramaV2ImageJobCreator
 	GamePrerollPlanner                  GamePrerollPlanner
 	CommerceWorkspaces                  CommerceWorkspaceRepository
 	BrandFilmPlanner                    BrandFilmPlanner
@@ -130,6 +133,7 @@ type Service struct {
 	AINativeScriptScheduler             AINativeScriptScheduler
 	AINativeStoryboards                 AINativeStoryboardRepository
 	AINativeStoryboardPlanner           AINativeStoryboardPlanner
+	AINativeVoiceoverFitter             AINativeVoiceoverFitter
 	AINativeStoryboardAssetPreparer     AINativeStoryboardAssetPreparer
 	AINativeStoryboardScheduler         AINativeStoryboardScheduler
 	AINativeProductions                 AINativeProductionRepository
@@ -137,6 +141,9 @@ type Service struct {
 	AINativeVideoJobs                   AINativeVideoJobManager
 	AINativeSpeech                      provider.SpeechSynthesizer
 	AINativeTimelineRenderer            media.TimelineRenderer
+	EditTasks                           EditTaskRepository
+	EditingRenders                      EditingRenderRepository
+	EditingRenderScheduler              EditingRenderScheduler
 	AINativeMaxActiveUnits              int
 	AllowLegacyTaskStrategyIntakeWrites bool
 	NewID                               ids.Generator
@@ -204,7 +211,8 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		request.Prompt = brandVideoOutlineFromDirection(direction)
 	}
 	hasSourceVideo := strings.TrimSpace(string(request.SourceVideo.AssetID)) != "" || request.SourceVideo.Version != 0
-	needsSourceVideo := route.RouteType != PerformanceModeShortDramaPreroll &&
+	isShortDramaV2 := intake.Source == IntakeSourceManual && route.RouteID == ManualShortDramaPrerollV2RouteID
+	needsSourceVideo := (route.RouteType != PerformanceModeShortDramaPreroll || isShortDramaV2) &&
 		!isManualBrandFilm &&
 		(route.RouteType != CreativeRouteBrandVideo || hasSourceVideo)
 	if needsSourceVideo {
@@ -224,6 +232,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	}
 	var viralDraft *ViralRemakeDraft
 	var shortDramaDraft *ShortDramaPrerollDraft
+	var shortDramaDraftV2 *ShortDramaPrerollV2Workspace
 	var gamePrerollDraft *GamePrerollDraft
 	var brandFilmDraft *BrandFilmDraft
 	if isDirectViralRemake {
@@ -244,6 +253,12 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		if intake.Request.ManualGamePreroll == nil ||
 			intake.Request.ManualGamePreroll.SourceVideo != request.SourceVideo {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable game preroll intake snapshot")
+		}
+	}
+	if isShortDramaV2 {
+		if intake.Request.ManualShortDramaPrerollV2 == nil ||
+			intake.Request.ManualShortDramaPrerollV2.SourceVideo != request.SourceVideo {
+			return CreativeTask{}, fmt.Errorf("source_video must match the immutable short drama V2 intake snapshot")
 		}
 	}
 	id, err := s.idGenerator()("creativetask")
@@ -338,7 +353,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 		draft.ViralRemake = viralDraft
 	}
-	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeShortDramaPreroll {
+	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeShortDramaPreroll && !isShortDramaV2 {
 		manual := intake.Request.ManualShortDramaPreroll
 		if manual == nil {
 			return CreativeTask{}, fmt.Errorf("manual short drama preroll input is required")
@@ -388,6 +403,22 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 		draft.ShortDramaPreroll = shortDramaDraft
 		draft.Prompt = batch.Candidates[0].PromptPackage.CompiledPrompt
+	}
+	if isShortDramaV2 {
+		source, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, request.SourceVideo)
+		if readErr != nil {
+			return CreativeTask{}, readErr
+		}
+		shortDramaDraftV2 = &ShortDramaPrerollV2Workspace{
+			ContractVersion: ShortDramaPrerollV2ContractVersion, TaskID: task.ID, Revision: 1,
+			ActiveStage:    ShortDramaV2StageSourceReady,
+			SourceVideo:    contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: request.SourceVideo},
+			SourceMetadata: source,
+			Analysis:       ShortDramaV2Analysis{ShortDramaV2AsyncResource: ShortDramaV2AsyncResource{Status: ShortDramaV2ResourceIdle}},
+			CreatedAt:      now, UpdatedAt: now,
+		}
+		draft.ShortDramaPrerollV2 = shortDramaDraftV2
+		draft.Prompt = "等待视频理解"
 	}
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeGamePreroll {
 		manual := intake.Request.ManualGamePreroll
@@ -522,7 +553,10 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 	if request.Source == IntakeSourceTaskStrategy && !s.AllowLegacyTaskStrategyIntakeWrites {
 		return CreativeIntake{}, fmt.Errorf("legacy task_strategy intake creation is read-only; use a v3 strategy_package intake with an optional task_overlay_ref")
 	}
-	if request.Source == IntakeSourceManual && request.ContractVersion == CreativeIntakeCreateV3ContractVersion {
+	if request.Source == IntakeSourceManual && request.ContractVersion == CreativeIntakeCreateV3ContractVersion &&
+		request.ManualViralRemake == nil && request.ManualShortDramaPreroll == nil &&
+		request.ManualShortDramaPrerollV2 == nil && request.ManualGamePreroll == nil &&
+		request.ManualCommercePreroll == nil && request.ManualBrandFilm == nil {
 		request.Format = FormatImageText
 		request.SelectedRouteID = ManualImageTextRouteID
 		request.CreativeRoutes = []CreativeRouteSnapshot{{

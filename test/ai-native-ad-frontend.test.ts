@@ -4,6 +4,7 @@ import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RequirementMediaGallery } from '../src/features/ai-native-ad/RequirementStage'
 import { StoryboardStage } from '../src/features/ai-native-ad/StoryboardStage'
+import { VideoStage } from '../src/features/ai-native-ad/VideoStage'
 import { aiNativeReducer, initialAINativeState } from '../src/features/ai-native-ad/reducer'
 import type { AdScriptDraft, AINativeRequirement, AINativeRequirementWorkspace, StoryboardDraft } from '../src/features/ai-native-ad/types'
 import { aiNativeWorkspaceLocation, readAINativeWorkspaceLocation } from '../src/features/ai-native-ad/navigation'
@@ -318,7 +319,7 @@ test('重新编辑脚本会作废故事板和视频但保留需求', () => {
     workspace,
     script,
     storyboard,
-    video: { progress: 100, current_step: '完成', completed_shots: storyboard.shots.length, total_shots: storyboard.shots.length, eta_seconds: 0 },
+    video: { progress: 100, current_step: '完成', completed_shots: storyboard.shots.length, total_shots: storyboard.shots.length, completed_speech_units: 0, total_speech_units: 0, eta_seconds: 0 },
     stage_status: { requirement: 'confirmed', script: 'confirmed', storyboard: 'confirmed', video: 'confirmed' } as const,
   }
   const requested = aiNativeReducer(readyState, { type: 'reopen-requested', stage: 'script' })
@@ -408,6 +409,33 @@ test('视频 Unit 提交失败后恢复具体原因而不是继续显示生成�
   assert.equal(failed.stage_status.video, 'failed')
   assert.equal(failed.video?.status, 'failed')
   assert.match(failed.error, /来源 ID 过长/)
+})
+
+test('视频生产失败时分别展示视频和旁白进度以及具体失败分镜', () => {
+  const markup = renderToStaticMarkup(React.createElement(VideoStage, {
+    status: 'failed',
+    video: {
+      status: 'failed', progress: 66, current_step: '部分视频片段或旁白生成失败',
+      completed_shots: 5, total_shots: 5, completed_speech_units: 3, total_speech_units: 5,
+      failed_unit_id: 'speech-unit-02', failed_shot_id: 'shot_002',
+      failure_code: 'SPEECH_DURATION_EXCEEDED',
+      failure_reason: 'shot_002 旁白仍为 3.8 秒，超过 3.0 秒镜头容量', eta_seconds: 0,
+    },
+    referenceFailure: null,
+    onRetry: () => undefined,
+    onFitVoiceover: () => undefined,
+    voiceoverFitBusy: false,
+    onCancel: () => undefined,
+    onReviewReference: () => undefined,
+  }))
+
+  assert.match(markup, /视频片段/)
+  assert.match(markup, /5 \/ 5/)
+  assert.match(markup, /旁白/)
+  assert.match(markup, /3 \/ 5/)
+  assert.match(markup, /speech-unit-02/)
+  assert.match(markup, /shot_002/)
+  assert.match(markup, /智能压缩旁白/)
 })
 
 test('脚本后台任务失败后恢复具体原因而不是继续显示生成中', () => {

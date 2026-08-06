@@ -1846,6 +1846,12 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_RESPONSE_INVALID", "视觉分析模型未返回可用的五维拆解结果，请稍后重试。", true
 	case errors.Is(err, creative.ErrInvalidAINativeRequirement):
 		status, code, message, retryable = http.StatusBadRequest, "INVALID_AI_NATIVE_REQUIREMENT", "AI 原生广告需求参数不符合当前抖音 P0 规则。", false
+	case errors.Is(err, creative.ErrAINativeProductLinkIncomplete):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "AI_NATIVE_PRODUCT_LINK_INCOMPLETE", "复制内容不完整，商品参数在中途被截断。请从抖音商品页重新复制完整链接。", false
+	case errors.Is(err, creative.ErrAINativeProductLinkUnsupported):
+		status, code, message, retryable = http.StatusBadRequest, "AI_NATIVE_PRODUCT_LINK_UNSUPPORTED", "没有识别到受支持的抖音商城商品链接。", false
+	case errors.Is(err, creative.ErrAINativeProductDetailMissing):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "AI_NATIVE_PRODUCT_DETAIL_MISSING", "链接中没有完整商品信息，可能复制的是视频链接而不是商品详情链接。", false
 	case errors.Is(err, creative.ErrAINativeProductUnavailable):
 		status, code, message, retryable = http.StatusUnprocessableEntity, "AI_NATIVE_PRODUCT_UNAVAILABLE", "商品链接无法解析或未提供可用商品信息。", false
 	case errors.Is(err, project.ErrNotActive):

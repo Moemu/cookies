@@ -262,10 +262,11 @@ func (r MySQLRepository) ReopenAINativeStoryboard(ctx context.Context, organizat
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, organizationID, projectID, workspaceID, nextRevision, AINativeStoryboardDraftStatus, nextPayload, hex.EncodeToString(hash[:]), revision.Int64, storyboard.BasedOnRequirementRevision, storyboard.BasedOnRequirementHash, storyboard.BasedOnScriptRevision, storyboard.BasedOnScriptHash, storyboard.ChannelProfileID, storyboard.ChannelProfileHash, generation, actorID, now); err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE creative_ai_native_requirement_workspaces SET storyboard_status=?, current_storyboard_revision=?, confirmed_storyboard_revision=NULL,
+	if _, err = tx.ExecContext(ctx, `UPDATE creative_ai_native_requirement_workspaces SET current_stage=?, storyboard_status=?, current_storyboard_revision=?, confirmed_storyboard_revision=NULL,
+		storyboard_plan_payload=NULL, storyboard_error_code=NULL, storyboard_error_message=NULL,
 		production_status=NULL, current_production_revision=NULL, production_plan_payload=NULL, production_error_code=NULL, production_error_message=NULL,
 		active_operation_id=NULL, active_operation_version=NULL,
-		workspace_version=workspace_version+1, updated_at=? WHERE organization_id=? AND project_id=? AND workspace_id=?`, AINativeStoryboardDraftStatus, nextRevision, now, organizationID, projectID, workspaceID); err != nil {
+		workspace_version=workspace_version+1, updated_at=? WHERE organization_id=? AND project_id=? AND workspace_id=?`, AINativeStageStoryboard, AINativeStoryboardDraftStatus, nextRevision, now, organizationID, projectID, workspaceID); err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
 	if err = tx.Commit(); err != nil {

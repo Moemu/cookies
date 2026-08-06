@@ -54,8 +54,34 @@ const (
 // Provider resolves authorized content just before submission, so durable job
 // state never contains expiring URLs or object-storage credentials.
 type VideoConditioningAsset struct {
-	Role      VideoConditioningRole    `json:"role"`
-	Reference contract.ProjectAssetRef `json:"reference"`
+	Role            VideoConditioningRole          `json:"role"`
+	Reference       contract.ProjectAssetRef       `json:"reference"`
+	AuthorizedAsset *VideoAuthorizedAssetReference `json:"authorized_asset,omitempty"`
+}
+
+// VideoAuthorizedAssetReference points at a provider-managed, pre-authorized
+// asset. The local project asset remains the immutable Creative lineage, while
+// adapters may submit this reference instead of re-uploading its image bytes.
+type VideoAuthorizedAssetReference struct {
+	ProviderCode string `json:"provider_code"`
+	AssetID      string `json:"asset_id"`
+}
+
+func (r VideoAuthorizedAssetReference) Validate() error {
+	if strings.TrimSpace(r.ProviderCode) == "" {
+		return fmt.Errorf("authorized video asset provider code is required")
+	}
+	assetID := strings.TrimSpace(r.AssetID)
+	if !strings.HasPrefix(assetID, "asset-") || len(assetID) <= len("asset-") {
+		return fmt.Errorf("authorized video asset ID must use the asset- prefix")
+	}
+	for _, character := range assetID[len("asset-"):] {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '-' || character == '_') {
+			return fmt.Errorf("authorized video asset ID contains unsupported characters")
+		}
+	}
+	return nil
 }
 
 func (i VideoGenerationInput) Validate() error {
@@ -89,6 +115,11 @@ func (i VideoGenerationInput) Validate() error {
 	for index, asset := range i.ConditioningAssets {
 		if err := asset.Reference.Validate(); err != nil {
 			return fmt.Errorf("invalid video conditioning asset at index %d: %w", index, err)
+		}
+		if asset.AuthorizedAsset != nil {
+			if err := asset.AuthorizedAsset.Validate(); err != nil {
+				return fmt.Errorf("invalid authorized video conditioning asset at index %d: %w", index, err)
+			}
 		}
 		switch asset.Role {
 		case VideoConditioningReferenceImage, VideoConditioningFirstFrame, VideoConditioningLastFrame:

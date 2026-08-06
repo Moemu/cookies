@@ -15,6 +15,13 @@ export type RequirementMedia = {
   asset_ref?: { asset_id: string; version: number }
 }
 
+export type AINativeProductPreview = {
+  product_id: string
+  product_name: string
+  source: 'douyin_mall'
+  source_url: string
+}
+
 export type AINativeRequirement = {
   contract_version: 'creative.ai-native.requirement/v1'
   revision: number
@@ -218,8 +225,26 @@ export type VideoRenderState = {
   current_step: string
   completed_shots: number
   total_shots: number
+  completed_speech_units: number
+  total_speech_units: number
+  failed_unit_id?: string
+  failed_shot_id?: string
+  failure_code?: string
+  failure_reason?: string
   eta_seconds: number
   output_url?: string
+}
+
+export type VoiceoverFitSuggestion = {
+  shot_id: string
+  original_voiceover: string
+  suggested_voiceover: string
+  duration_ms: number
+  max_characters: number
+  prompt_version: string
+  model_alias: string
+  model_version: string
+  route_revision_id?: string
 }
 
 export type GenerationAttempt = {
@@ -240,8 +265,19 @@ export type ProductionVideoUnit = {
   start_ms: number
   end_ms: number
   duration_seconds: number
+  reference_asset?: { asset_id: string; version: number }
+  reference_role?: StoryboardAsset['role']
+  product_identity_required?: boolean
   attempts: GenerationAttempt[]
   selected_attempt_id?: string
+}
+
+export type ProductionReferenceFailure = {
+  unit_id: string
+  asset_id: string
+  asset_name: string
+  asset_source: StoryboardAsset['source']
+  reason: string
 }
 
 export type ProductionPlan = {
@@ -251,7 +287,7 @@ export type ProductionPlan = {
   total_duration_ms: number
   aspect_ratio: '9:16'
   units: ProductionVideoUnit[]
-  speech_units: Array<{ id: string; shot_id: string; attempts: GenerationAttempt[]; selected_attempt_id?: string }>
+  speech_units: Array<{ id: string; shot_id: string; start_ms?: number; end_ms?: number; text?: string; speaking_rate?: number; attempts: GenerationAttempt[]; selected_attempt_id?: string }>
   render?: {
     id: string
     status: 'rendering' | 'completed' | 'render_failed'
