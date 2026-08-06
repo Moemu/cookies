@@ -59,6 +59,17 @@ func TestBuildTimelineFilterIncludesDuckingMixAndSubtitleBurnIn(t *testing.T) {
 	}
 }
 
+func TestBuildTimelineFilterUsesAudioSourceInBeforeLooping(t *testing.T) {
+	request := TimelineRenderRequest{DurationMS: 15000, Width: 720, Height: 1280, FrameRate: 30, SampleRate: 48000,
+		Video: []TimelineVideoClip{{ID: "v1", Asset: contract.AssetVersionRef{AssetID: "video", Version: 1}, StartMS: 0, EndMS: 15000}},
+		Audio: []TimelineAudioClip{{ID: "music", Role: TimelineAudioMusic, Asset: contract.AssetVersionRef{AssetID: "music", Version: 1}, StartMS: 0, EndMS: 15000, SourceIn: 1200, Loop: true}},
+	}
+	graph, _, _ := BuildTimelineFilter(request, "subtitles.ass")
+	if !strings.Contains(graph, "atrim=start=1.2") {
+		t.Fatalf("looping music must honor source_in before loop: %s", graph)
+	}
+}
+
 func TestTimelineRenderProfileAcceptsFrozen15_20And30SecondDurations(t *testing.T) {
 	for _, duration := range []int{15000, 20000, 30000} {
 		request := TimelineRenderRequest{OrganizationID: "org_1", ProjectID: "project_1", DurationMS: duration, Width: 720, Height: 1280, FrameRate: 30, SampleRate: 48000,

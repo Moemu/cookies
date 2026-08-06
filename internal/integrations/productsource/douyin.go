@@ -19,6 +19,7 @@ const (
 	douyinSource       = "douyin_mall"
 	maxRedirects       = 5
 	maxResponseBody    = 1 << 20
+	maxProductLinkSize = 64 << 10
 	resolverUserAgent  = "cookies-product-resolver/1.0"
 	defaultHTTPTimeout = 12 * time.Second
 )
@@ -26,6 +27,7 @@ const (
 var (
 	httpsURLPattern    = regexp.MustCompile(`https://[^\s]+`)
 	ErrUnsupportedLink = errors.New("unsupported product link")
+	ErrIncompleteLink  = errors.New("incomplete product link")
 	ErrProductMissing  = errors.New("product information is missing")
 )
 
@@ -86,6 +88,11 @@ func (r DouyinResolver) Resolve(ctx context.Context, input string) (ProductSnaps
 	if r.Client == nil {
 		return ProductSnapshot{}, fmt.Errorf("douyin product resolver client is required")
 	}
+	if snapshot, snapshotErr := snapshotFromResolvedURL(productURL, productURL); snapshotErr == nil {
+		return snapshot, nil
+	} else if errors.Is(snapshotErr, ErrIncompleteLink) {
+		return ProductSnapshot{}, snapshotErr
+	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, productURL.String(), nil)
 	if err != nil {
@@ -119,7 +126,7 @@ func (r DouyinResolver) Resolve(ctx context.Context, input string) (ProductSnaps
 
 func extractProductURL(input string) (*url.URL, error) {
 	trimmed := strings.TrimSpace(input)
-	if len(trimmed) == 0 || len(trimmed) > 16*1024 {
+	if len(trimmed) == 0 || len(trimmed) > maxProductLinkSize {
 		return nil, fmt.Errorf("%w: product link is empty or too long", ErrUnsupportedLink)
 	}
 	match := httpsURLPattern.FindString(trimmed)
@@ -163,9 +170,12 @@ func snapshotFromResolvedURL(sourceURL, resolvedURL *url.URL) (ProductSnapshot, 
 	}
 	var detail douyinGoodsDetail
 	if err := json.Unmarshal([]byte(payload), &detail); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected end") {
+			return ProductSnapshot{}, fmt.Errorf("%w: goods_detail ended before the product data was complete", ErrIncompleteLink)
+		}
 		return ProductSnapshot{}, fmt.Errorf("%w: invalid goods_detail: %v", ErrProductMissing, err)
 	}
-	productID := firstNonEmpty(query.Get("id"), query.Get("product_id"), query.Get("promotion_id"))
+	productID := firstNonEmpty(query.Get("id"), query.Get("product_id"), query.Get("promotion_id"), productIDFromDetailSchema(query.Get("detail_schema")))
 	if strings.TrimSpace(detail.Title) == "" || strings.TrimSpace(productID) == "" {
 		return ProductSnapshot{}, fmt.Errorf("%w: product id and title are required", ErrProductMissing)
 	}
@@ -195,6 +205,28 @@ func snapshotFromResolvedURL(sourceURL, resolvedURL *url.URL) (ProductSnapshot, 
 		Sales:     detail.Sales,
 		SourceURL: canonicalSourceURL(sourceURL, productID),
 	}, nil
+}
+
+func productIDFromDetailSchema(raw string) string {
+	value := strings.TrimSpace(raw)
+	for range 3 {
+		if value == "" {
+			return ""
+		}
+		parsed, err := url.Parse(value)
+		if err == nil {
+			query := parsed.Query()
+			if productID := firstNonEmpty(query.Get("product_id"), query.Get("promotion_id"), query.Get("id")); productID != "" {
+				return productID
+			}
+		}
+		decoded, err := url.QueryUnescape(value)
+		if err != nil || decoded == value {
+			break
+		}
+		value = decoded
+	}
+	return ""
 }
 
 func validDouyinImageURL(raw string) bool {

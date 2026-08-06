@@ -712,7 +712,8 @@ func (s *Server) decodeBrandFilmCommand(w http.ResponseWriter, r *http.Request, 
 		s.notImplemented(w, r)
 		return false
 	}
-	if _, ok := idempotencyKey(w, r); !ok {
+	_, ok := idempotencyKey(w, r)
+	if !ok {
 		return false
 	}
 	if err := decodeJSON(w, r, target); err != nil {
@@ -1257,6 +1258,211 @@ func (s *Server) regenerateShortDramaCandidates(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, value)
 }
 
+type shortDramaV2CreativeCommands interface {
+	AnalyzeShortDramaV2Source(context.Context, contract.ActorContext, contract.ProjectID, string, creative.AnalyzeShortDramaV2SourceRequest) (creative.TaskDetail, error)
+	UpdateShortDramaV2Analysis(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateShortDramaV2AnalysisRequest) (creative.TaskDetail, error)
+	GenerateShortDramaV2Directions(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateShortDramaV2DirectionsRequest) (creative.TaskDetail, error)
+	SelectShortDramaV2Direction(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaV2DirectionRequest) (creative.TaskDetail, error)
+	UpdateShortDramaV2Prompts(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateShortDramaV2PromptsRequest) (creative.TaskDetail, error)
+	PrepareShortDramaV2OpeningFrame(context.Context, contract.RequestContext, contract.ProjectID, string, creative.PrepareShortDramaV2OpeningFrameRequest) (creative.TaskDetail, error)
+	GenerateShortDramaV2FirstFrames(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateShortDramaV2FirstFramesRequest) (creative.TaskDetail, error)
+	ReconcileShortDramaV2FirstFrame(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileShortDramaV2FirstFrameRequest) (creative.TaskDetail, error)
+	SelectShortDramaV2FirstFrame(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaV2FirstFrameRequest) (creative.TaskDetail, error)
+	BindShortDramaV2TrustedMaterials(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BindShortDramaV2TrustedMaterialsRequest) (creative.TaskDetail, error)
+	ReconcileShortDramaV2Video(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileShortDramaV2VideoRequest) (creative.TaskDetail, error)
+}
+
+func (s *Server) shortDramaV2Command(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(shortDramaV2CreativeCommands)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	taskID := r.PathValue("task_id")
+	path := r.URL.Path
+	var value creative.TaskDetail
+	var err error
+	switch {
+	case strings.HasSuffix(path, ":analyze-source"):
+		var body creative.AnalyzeShortDramaV2SourceRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.AnalyzeShortDramaV2Source(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":update-analysis"):
+		var body creative.UpdateShortDramaV2AnalysisRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.UpdateShortDramaV2Analysis(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":generate-directions"):
+		var body creative.GenerateShortDramaV2DirectionsRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.GenerateShortDramaV2Directions(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":select-direction"):
+		var body creative.SelectShortDramaV2DirectionRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.SelectShortDramaV2Direction(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":update-prompts"):
+		var body creative.UpdateShortDramaV2PromptsRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.UpdateShortDramaV2Prompts(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":prepare-opening-frame"):
+		var body creative.PrepareShortDramaV2OpeningFrameRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.PrepareShortDramaV2OpeningFrame(r.Context(), rc, projectID, taskID, body)
+	case strings.HasSuffix(path, ":generate-first-frames"):
+		var body creative.GenerateShortDramaV2FirstFramesRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.GenerateShortDramaV2FirstFrames(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":reconcile-first-frame"):
+		if s.providerJobs == nil {
+			s.notImplemented(w, r)
+			return
+		}
+		var body struct {
+			ExpectedRevision int64  `json:"expected_revision"`
+			CandidateID      string `json:"candidate_id"`
+			ProviderJobID    string `json:"provider_job_id"`
+		}
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		job, getErr := s.providerJobs.GetJob(r.Context(), rc.Actor.OrganizationID, projectID, body.ProviderJobID)
+		if getErr != nil {
+			s.writeServiceError(w, r, getErr)
+			return
+		}
+		value, err = manager.ReconcileShortDramaV2FirstFrame(r.Context(), rc.Actor, projectID, taskID, creative.ReconcileShortDramaV2FirstFrameRequest{ExpectedRevision: body.ExpectedRevision, CandidateID: body.CandidateID, Job: job})
+	case strings.HasSuffix(path, ":select-first-frame"):
+		var body creative.SelectShortDramaV2FirstFrameRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.SelectShortDramaV2FirstFrame(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":bind-trusted-materials"):
+		var body creative.BindShortDramaV2TrustedMaterialsRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.BindShortDramaV2TrustedMaterials(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":reconcile-video"):
+		if s.providerJobs == nil {
+			s.notImplemented(w, r)
+			return
+		}
+		var body struct {
+			ExpectedRevision int64  `json:"expected_revision"`
+			ProviderJobID    string `json:"provider_job_id"`
+		}
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		job, getErr := s.providerJobs.GetJob(r.Context(), rc.Actor.OrganizationID, projectID, body.ProviderJobID)
+		if getErr != nil {
+			s.writeServiceError(w, r, getErr)
+			return
+		}
+		value, err = manager.ReconcileShortDramaV2Video(r.Context(), rc.Actor, projectID, taskID, creative.ReconcileShortDramaV2VideoRequest{ExpectedRevision: body.ExpectedRevision, Job: job})
+	case strings.HasSuffix(path, ":generate-video"):
+		if s.providerJobs == nil || s.projects == nil {
+			s.notImplemented(w, r)
+			return
+		}
+		var body struct {
+			ExpectedRevision int64  `json:"expected_revision"`
+			ModelAlias       string `json:"model_alias,omitempty"`
+		}
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		detail, getErr := s.creative.GetTaskDetail(r.Context(), rc.Actor, projectID, taskID)
+		if getErr != nil {
+			s.writeServiceError(w, r, getErr)
+			return
+		}
+		if detail.VideoDraft == nil || detail.VideoDraft.Revision != body.ExpectedRevision {
+			s.writeServiceError(w, r, creative.ErrVersionConflict)
+			return
+		}
+		videoManager, managerOK := s.creative.(interface {
+			ShortDramaV2ProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, string, error)
+			RegisterShortDramaV2VideoJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.TaskDetail, error)
+		})
+		if !managerOK {
+			s.notImplemented(w, r)
+			return
+		}
+		input, promptHash, specHash, inputErr := videoManager.ShortDramaV2ProviderInput(r.Context(), rc.Actor, projectID, taskID)
+		if inputErr != nil {
+			s.writeServiceError(w, r, inputErr)
+			return
+		}
+		project, projectErr := s.projects.GetContext(r.Context(), rc.Actor, projectID)
+		if projectErr != nil {
+			s.writeServiceError(w, r, projectErr)
+			return
+		}
+		modelAlias := strings.TrimSpace(body.ModelAlias)
+		if modelAlias == "" {
+			modelAlias = "cookies.video.standard"
+		}
+		requestHash, hashErr := contract.CanonicalJSONHash(struct {
+			TaskID     string                        `json:"task_id"`
+			Revision   int64                         `json:"revision"`
+			PromptHash string                        `json:"prompt_hash"`
+			SpecHash   string                        `json:"spec_hash"`
+			Input      provider.VideoGenerationInput `json:"input"`
+		}{taskID, body.ExpectedRevision, promptHash, specHash, input})
+		if hashErr != nil {
+			s.writeServiceError(w, r, hashErr)
+			return
+		}
+		job, _, createErr := s.providerJobs.CreateVideoJob(r.Context(), provider.CreateVideoJobRequest{Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: requestHash, ModelAlias: modelAlias, SourceSystem: "creative.short_drama_preroll_v2", SourceTaskID: taskID, Input: input})
+		if createErr != nil {
+			s.writeServiceError(w, r, createErr)
+			return
+		}
+		value, err = videoManager.RegisterShortDramaV2VideoJob(r.Context(), rc.Actor, projectID, taskID, job.ID)
+	default:
+		s.notFound(w, r)
+		return
+	}
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) analyzeViralRemake(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)
@@ -1588,6 +1794,7 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 	}{TaskID: taskID, ModelAlias: modelAlias, Draft: *detail.VideoDraft, ProjectContextVersion: project.ProjectContextVersion}
 	isViral := detail.Task.PerformanceMode == creative.PerformanceModeViralRemake && detail.VideoDraft.ViralRemake != nil
 	isShortDrama := detail.Task.PerformanceMode == creative.PerformanceModeShortDramaPreroll && detail.VideoDraft.ShortDramaPreroll != nil
+	isShortDramaV2 := detail.Task.PerformanceMode == creative.PerformanceModeShortDramaPreroll && detail.VideoDraft.ShortDramaPrerollV2 != nil
 	isGamePreroll := detail.Task.PerformanceMode == creative.PerformanceModeGamePreroll && detail.VideoDraft.GamePreroll != nil
 	isCommercePreroll := detail.Task.PerformanceMode == creative.PerformanceModeCommercePreroll && detail.VideoDraft.CommercePreroll != nil
 	if isViral {
@@ -1618,6 +1825,28 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 			Input                 provider.VideoGenerationInput `json:"input"`
 			ProjectContextVersion int64                         `json:"project_context_version"`
 		}{TaskID: taskID, ModelAlias: modelAlias, PromptPackageHash: promptHash, Input: videoInput, ProjectContextVersion: project.ProjectContextVersion}
+	} else if isShortDramaV2 {
+		manager, ok := s.creative.(interface {
+			ShortDramaV2ProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, string, error)
+		})
+		if !ok {
+			s.notImplemented(w, r)
+			return
+		}
+		var promptHash, specHash string
+		videoInput, promptHash, specHash, err = manager.ShortDramaV2ProviderInput(r.Context(), rc.Actor, projectID, taskID)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+		requestBody = struct {
+			TaskID                string                        `json:"task_id"`
+			ModelAlias            string                        `json:"model_alias"`
+			PromptHash            string                        `json:"prompt_hash"`
+			SpecHash              string                        `json:"spec_hash"`
+			Input                 provider.VideoGenerationInput `json:"input"`
+			ProjectContextVersion int64                         `json:"project_context_version"`
+		}{taskID, modelAlias, promptHash, specHash, videoInput, project.ProjectContextVersion}
 	} else if isGamePreroll {
 		var promptHash string
 		videoInput, promptHash, err = s.creative.GamePrerollProviderInput(r.Context(), rc.Actor, projectID, taskID)
@@ -1681,6 +1910,18 @@ func (s *Server) createCreativeVideoJob(w http.ResponseWriter, r *http.Request, 
 	}
 	if isViral {
 		if _, err := s.creative.RegisterViralCandidateJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	} else if isShortDramaV2 {
+		manager, ok := s.creative.(interface {
+			RegisterShortDramaV2VideoJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.TaskDetail, error)
+		})
+		if !ok {
+			s.notImplemented(w, r)
+			return
+		}
+		if _, err := manager.RegisterShortDramaV2VideoJob(r.Context(), rc.Actor, projectID, taskID, job.ID); err != nil {
 			s.writeServiceError(w, r, err)
 			return
 		}

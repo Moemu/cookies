@@ -58,6 +58,26 @@ func TestVideoGenerationInputValidatesStableConditioningAssets(t *testing.T) {
 	}
 }
 
+func TestVideoGenerationInputAcceptsAuthorizedAssetAlongsideLocalLineage(t *testing.T) {
+	t.Parallel()
+	request := validVideoJobRequest(VideoGenerationInput{
+		Prompt: "authorized portrait preroll", DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+		InputMode: VideoInputReferenceImage,
+		ConditioningAssets: []VideoConditioningAsset{{
+			Role:            VideoConditioningReferenceImage,
+			Reference:       contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "frame_1", Version: 1}},
+			AuthorizedAsset: &VideoAuthorizedAssetReference{ProviderCode: arkVideoProviderCode, AssetID: "asset-20260222234430-mxpgh"},
+		}},
+	})
+	if err := request.Validate(); err != nil {
+		t.Fatalf("authorized video input: %v", err)
+	}
+	request.Input.ConditioningAssets[0].AuthorizedAsset.AssetID = "https://untrusted.example/image.png"
+	if err := request.Validate(); err == nil {
+		t.Fatal("arbitrary authorized asset URI was accepted")
+	}
+}
+
 func TestVideoSubmissionResolvesConditioningAssetsAtExecutionTime(t *testing.T) {
 	now := time.Date(2026, time.July, 28, 8, 0, 0, 0, time.UTC)
 	firstFrame := contract.ProjectAssetRef{

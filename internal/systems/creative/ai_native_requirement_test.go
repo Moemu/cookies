@@ -238,6 +238,20 @@ func TestAnalyzeAINativeRequirementAppliesP0Defaults(t *testing.T) {
 	}
 }
 
+func TestResolveAINativeProductPreviewDoesNotCreateWorkspace(t *testing.T) {
+	resolver := &aiNativeProductResolverStub{product: testAINativeProduct()}
+	service := Service{Projects: testProjects{}, AINativeProducts: resolver}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeRead}}
+
+	preview, err := service.ResolveAINativeProductPreview(context.Background(), actor, "project_1", ResolveAINativeProductPreviewRequest{ProductLink: "https://v.douyin.com/example/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolver.called || preview.ProductID == "" || preview.ProductName != testAINativeProduct().Name || preview.SourceURL != testAINativeProduct().SourceURL {
+		t.Fatalf("unexpected product preview: %#v", preview)
+	}
+}
+
 func TestAnalyzeAINativeRequirementRejectsDisabledChannelBeforeResolve(t *testing.T) {
 	resolver := &aiNativeProductResolverStub{product: testAINativeProduct()}
 	service := Service{Projects: testProjects{}, AINativeProducts: resolver, AINativeRequirementPlanner: DeterministicAINativeRequirementPlanner{}, AINativeRequirements: &memoryAINativeRequirementRepository{}}

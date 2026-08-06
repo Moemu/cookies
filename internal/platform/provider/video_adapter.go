@@ -42,8 +42,16 @@ func (r VideoGenerationRequest) Validate() error {
 	}
 	for index, source := range r.Sources {
 		expected := r.Input.ConditioningAssets[index]
-		if source.Role != expected.Role || source.Reference != expected.Reference ||
-			!strings.HasPrefix(strings.ToLower(strings.TrimSpace(source.MIMEType)), "image/") || source.Content == nil {
+		if source.Role != expected.Role || source.Reference != expected.Reference {
+			return fmt.Errorf("video request source at index %d is invalid", index)
+		}
+		if expected.AuthorizedAsset != nil {
+			if source.AuthorizedAsset == nil || *source.AuthorizedAsset != *expected.AuthorizedAsset || source.Content != nil {
+				return fmt.Errorf("authorized video request source at index %d is invalid", index)
+			}
+			continue
+		}
+		if source.AuthorizedAsset != nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(source.MIMEType)), "image/") || source.Content == nil {
 			return fmt.Errorf("video request source at index %d is invalid", index)
 		}
 	}
@@ -53,10 +61,11 @@ func (r VideoGenerationRequest) Validate() error {
 // VideoSource is an execution-scoped, authorized stream. Adapters may encode
 // it into a vendor request, but must not persist or log its contents.
 type VideoSource struct {
-	Role      VideoConditioningRole
-	Reference contract.ProjectAssetRef
-	MIMEType  string
-	Content   io.ReadCloser
+	Role            VideoConditioningRole
+	Reference       contract.ProjectAssetRef
+	AuthorizedAsset *VideoAuthorizedAssetReference
+	MIMEType        string
+	Content         io.ReadCloser
 }
 
 type VideoSubmissionStatus string

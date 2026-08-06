@@ -106,9 +106,9 @@ func (p ModelAINativeStoryboardPlanner) Plan(ctx context.Context, actor contract
 }
 
 func (p ModelAINativeStoryboardPlanner) generate(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, input string, repair bool) (provider.SynchronousResponse, error) {
-	system := "你是抖音效果广告故事板导演。只使用已确认需求、脚本和固定商品素材 ID。输出完整闭合时间线；每个镜头必须填写画面、人物商品动作、景别、运镜、参考素材、旁白、字幕、音效、BGM 和转场。商品出现时必须引用 fixed_product_assets 中的真实素材，绝不计划或生成替代商品图。assets 只能规划人物、场景和构图素材，ID 必须分别使用 person_、scene_、composition_ 前缀；严禁输出 product_ 前缀或复用 fixed_product_assets 的任何 ID。只输出符合 JSON Schema 的 JSON。"
+	system := "你是抖音效果广告故事板导演。只使用已确认需求、脚本和固定商品素材 ID。输出完整闭合时间线；每个镜头必须填写画面、人物商品动作、景别、运镜、参考素材、旁白、字幕、音效、BGM 和转场。旁白必须适配对应镜头时长，按每秒不超过 5 个中文字符（标点也计入）控制长度，优先保留核心卖点和行动引导。商品出现时必须引用 fixed_product_assets 中的真实素材，绝不计划或生成替代商品图。assets 只能规划人物、场景和构图素材，ID 必须分别使用 person_、scene_、composition_ 前缀；严禁输出 product_ 前缀或复用 fixed_product_assets 的任何 ID。只输出符合 JSON Schema 的 JSON。"
 	if repair {
-		system = "你是故事板结构修复器。只修复字段完整性、闭合时间线和素材引用。不得新增商品事实，不得用 AI 素材替代 fixed_product_assets。assets 只能使用 person_、scene_、composition_ 前缀，严禁复用 fixed_product_assets 的任何 ID。只输出符合 JSON Schema 的 JSON。"
+		system = "你是故事板结构修复器。只修复字段完整性、闭合时间线、素材引用和旁白容量；旁白按每秒不超过 5 个中文字符（标点也计入）控制长度。不得新增商品事实，不得用 AI 素材替代 fixed_product_assets。assets 只能使用 person_、scene_、composition_ 前缀，严禁复用 fixed_product_assets 的任何 ID。只输出符合 JSON Schema 的 JSON。"
 	}
 	return p.Text.GenerateText(ctx, provider.TextGenerateRequest{Actor: actor, Project: project, ModelAlias: p.ModelAlias,
 		Messages: []provider.TextMessage{{Role: provider.TextRoleSystem, Content: system}, {Role: provider.TextRoleUser, Content: input}}, OutputJSONSchema: aiNativeStoryboardSchema})

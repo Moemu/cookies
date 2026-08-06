@@ -51,7 +51,9 @@ func (s Service) submitVideoJob(ctx context.Context, record JobRecord) (contract
 		return record.Job, nil, err
 	}
 	for _, source := range sources {
-		defer source.Content.Close()
+		if source.Content != nil {
+			defer source.Content.Close()
+		}
 	}
 	submission, err := s.VideoAdapter.Submit(ctx, VideoGenerationRequest{
 		OrganizationID: record.Job.OrganizationID,
@@ -88,12 +90,15 @@ func (s Service) resolveVideoSources(ctx context.Context, record JobRecord) ([]V
 	if len(record.VideoInput.ConditioningAssets) == 0 {
 		return nil, nil
 	}
-	if s.VisionSources == nil {
-		return nil, fmt.Errorf("video source resolver is required")
-	}
-	requested := make([]contract.ProjectAssetRef, 0, len(record.VideoInput.ConditioningAssets))
+	needsLocalResolution := false
 	for _, asset := range record.VideoInput.ConditioningAssets {
-		requested = append(requested, asset.Reference)
+		if asset.AuthorizedAsset == nil {
+			needsLocalResolution = true
+			break
+		}
+	}
+	if needsLocalResolution && s.VisionSources == nil {
+		return nil, fmt.Errorf("video source resolver is required")
 	}
 	projectContext := contract.ProjectContext{
 		OrganizationID:        record.Job.OrganizationID,
@@ -105,36 +110,50 @@ func (s Service) resolveVideoSources(ctx context.Context, record JobRecord) ([]V
 		Principal:      record.Principal,
 		Scopes:         []contract.Scope{},
 	}
-	resolved, err := s.VisionSources.ResolveVisionSources(ctx, actor, projectContext, requested)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateVisionSources(requested, resolved); err != nil {
-		for _, source := range resolved {
-			if source.Content != nil {
-				source.Content.Close()
-			}
+	sources := make([]VideoSource, 0, len(record.VideoInput.ConditioningAssets))
+	for index, asset := range record.VideoInput.ConditioningAssets {
+		if asset.AuthorizedAsset != nil {
+			reference := *asset.AuthorizedAsset
+			sources = append(sources, VideoSource{Role: asset.Role, Reference: asset.Reference, AuthorizedAsset: &reference})
+			continue
 		}
-		return nil, err
-	}
-	sources := make([]VideoSource, 0, len(resolved))
-	for index, source := range resolved {
-		if !isImageMIMEType(source.MIMEType) {
-			for _, item := range resolved {
-				if item.Content != nil {
-					item.Content.Close()
+		requested := []contract.ProjectAssetRef{asset.Reference}
+		resolved, err := s.VisionSources.ResolveVisionSources(ctx, actor, projectContext, requested)
+		if err != nil {
+			closeVideoSources(sources)
+			return nil, err
+		}
+		if err := validateVisionSources(requested, resolved); err != nil {
+			closeVideoSources(sources)
+			for _, source := range resolved {
+				if source.Content != nil {
+					_ = source.Content.Close()
 				}
 			}
+			return nil, err
+		}
+		source := resolved[0]
+		if !isImageMIMEType(source.MIMEType) {
+			closeVideoSources(sources)
+			_ = source.Content.Close()
 			return nil, fmt.Errorf("video conditioning source at index %d is not an image", index)
 		}
 		sources = append(sources, VideoSource{
-			Role:      record.VideoInput.ConditioningAssets[index].Role,
+			Role:      asset.Role,
 			Reference: source.Reference,
 			MIMEType:  source.MIMEType,
 			Content:   source.Content,
 		})
 	}
 	return sources, nil
+}
+
+func closeVideoSources(sources []VideoSource) {
+	for _, source := range sources {
+		if source.Content != nil {
+			_ = source.Content.Close()
+		}
+	}
 }
 
 func isImageMIMEType(value string) bool {

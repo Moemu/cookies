@@ -1,4 +1,4 @@
-import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeReopenImpact, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
+import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeProductPreview, AINativeReopenImpact, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft, VoiceoverFitSuggestion } from './types'
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
 const backendOrigin = viteEnv?.VITE_API_BASE_URL ?? ''
@@ -55,6 +55,15 @@ export function analyzeRequirement(projectId: string, productLink: string, suppl
       duration_seconds: 20,
       language: 'zh-CN',
     },
+  )
+}
+
+export function resolveProductPreview(projectId: string, productLink: string) {
+  return request<AINativeProductPreview>(
+    `/projects/${encodeURIComponent(projectId)}/ai-native-ads/products:resolve`,
+    'POST',
+    { product_link: productLink },
+    15000,
   )
 }
 
@@ -183,6 +192,14 @@ export function generateStoryboard(projectId: string, workspaceId: string, expec
   )
 }
 
+export function regenerateStoryboardAsset(projectId: string, workspaceId: string, assetId: string, expectedWorkspaceVersion: number) {
+  return request<AINativeRequirementWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/storyboard/assets/${encodeURIComponent(assetId)}/regenerate`,
+    'POST',
+    { expected_workspace_version: expectedWorkspaceVersion },
+  )
+}
+
 export function updateStoryboard(projectId: string, workspaceId: string, storyboard: StoryboardDraft) {
   return request<AINativeRequirementWorkspace>(
     `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/storyboard`,
@@ -209,6 +226,15 @@ export function retryProductionUnit(projectId: string, workspaceId: string, unit
 
 export function cancelProduction(projectId: string, workspaceId: string, expectedWorkspaceVersion: number) {
   return request<AINativeRequirementWorkspace>(`/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/production:cancel`, 'POST', { expected_workspace_version: expectedWorkspaceVersion })
+}
+
+export function fitStoryboardVoiceover(projectId: string, workspaceId: string, speechUnitId: string, expectedWorkspaceVersion: number) {
+  return request<VoiceoverFitSuggestion>(
+    `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/storyboard/voiceover:fit`,
+    'POST',
+    { expected_workspace_version: expectedWorkspaceVersion, speech_unit_id: speechUnitId },
+    45_000,
+  )
 }
 
 export async function getAssetPreview(projectId: string, ref: { asset_id: string; version: number }) {

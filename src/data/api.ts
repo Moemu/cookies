@@ -1312,6 +1312,97 @@ export type ApiCreateManualShortDramaPrerollInput = {
   callToAction: string
 }
 
+export type ApiShortDramaV2ProjectAssetRef = {
+  project_id: string
+  asset_version: ApiAssetVersionRef
+}
+
+export type ApiShortDramaV2AnalysisContent = {
+  title: string
+  episode?: string
+  synopsis: string
+  opening_beat: string
+  core_conflict: string
+  unresolved_hook: string
+  tone: string
+  characters: Array<{ name: string; description: string; relationship?: string }>
+  visual_keywords: string[]
+  evidence: Array<{ id: string; timestamp_ms: number; transcript?: string; frame_asset_id?: string }>
+}
+
+export type ApiShortDramaV2Direction = {
+  id: string
+  category: 'curiosity' | 'summary'
+  title: string
+  hook_copy: string
+  description: string
+  rationale: string
+  visual_intent: string
+  grounding_evidence_ids: string[]
+}
+
+export type ApiShortDramaV2Workspace = {
+  contract_version: 'creative-short-drama-preroll-workspace/v2'
+  task_id: string
+  revision: number
+  active_stage: 'source_ready' | 'analyzing' | 'analysis_ready' | 'directions_ready' | 'prompts_ready' | 'first_frames_ready' | 'first_frame_selected' | 'video_generating' | 'completed'
+  source_video: ApiShortDramaV2ProjectAssetRef
+  analysis: {
+    status: string
+    revision: number
+    input_hash?: string
+    prompt_version?: string
+    content: ApiShortDramaV2AnalysisContent
+  }
+  direction_batch?: {
+    status: string
+    id: string
+    revision: number
+    analysis_revision: number
+    planner_version?: string
+    items: ApiShortDramaV2Direction[]
+    selected_direction_id?: string
+  }
+  prompt_draft?: {
+    revision: number
+    direction_id: string
+    duration_seconds: 5 | 6 | 10 | 12 | 15
+    image_prompt: string
+    video_description: string
+    video_prompt: string
+    compiler_version: string
+    content_hash: string
+  }
+  first_frame_batch?: {
+    status: string
+    id: string
+    revision: number
+    prompt_revision: number
+    candidates: Array<{
+      id: string
+      variant_index: number
+      provider_job_id?: string
+      status: string
+      asset?: ApiShortDramaV2ProjectAssetRef
+      error_message?: string
+    }>
+    selected_asset?: ApiShortDramaV2ProjectAssetRef
+  }
+  source_opening_frame?: { status: string; asset?: ApiShortDramaV2ProjectAssetRef; timestamp_ms: number }
+  trusted_materials?: {
+    provider_code: 'ark-video'
+    first_frame_asset_id: string
+    last_frame_asset_id: string
+  }
+  latest_video_attempt_id?: string
+  output_asset?: ApiShortDramaV2ProjectAssetRef
+}
+
+export type ApiShortDramaV2TaskDetail = {
+  task: { id: string; performance_mode: 'short_drama_preroll'; status: string }
+  video_draft: { revision: number; short_drama_preroll_v2: ApiShortDramaV2Workspace }
+}
+
 export type ApiShortDramaPrerollSnapshot = {
   planVersion: ApiShortDramaPrerollPlan['version']
   storyContext: Omit<ApiShortDramaStoryContext, 'openingLine'>
@@ -3779,6 +3870,150 @@ async function uploadProjectAsset(projectId: string, file: File): Promise<ApiAss
   return result
 }
 
+async function createManualShortDramaPrerollV2Workspace(
+  projectId: string,
+  sourceVideo: ApiAssetVersionRef,
+): Promise<ApiShortDramaV2TaskDetail> {
+  const intake = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      source: 'manual',
+      format: 'video',
+      performance_mode: 'short_drama_preroll',
+      channel: 'douyin',
+      objective: '通过独立前贴钩子吸引用户观看短剧正片',
+      audience: '竖屏短剧观众',
+      core_message: '基于上传短剧的真实剧情生成前贴方向',
+      call_to_action: '点击观看正片',
+      concept: '短剧前贴 V2',
+      tone: ['紧凑', '悬念'],
+      visual_keywords: ['剧情连续', '信息缺口'],
+      mandatory_elements: [],
+      prohibited_claims: ['不得虚构上传视频中不存在的剧情事实'],
+      creative_routes: [{
+        route_id: 'route_manual_short_drama_preroll_v2',
+        route_type: 'short_drama_preroll',
+        video_purpose: 'performance',
+        channels: ['douyin'],
+        reason: '用户在短剧前贴工作区选择项目视频并确认生成',
+        target_duration_seconds: 6,
+        aspect_ratio: '9:16',
+        resolution: '720p',
+        source_asset_refs: [sourceVideo],
+        evidence_refs: [],
+        requires_human_confirmation: true,
+      }],
+      manual_short_drama_preroll_v2: {
+        source_video: sourceVideo,
+        source_video_rights: 'confirmed',
+      },
+    },
+    { 'Idempotency-Key': `manual-short-drama-v2-${sourceVideo.asset_id}-${sourceVideo.version}-${Date.now()}` },
+  )
+  const task = await creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_manual_short_drama_preroll_v2',
+      channel: 'douyin',
+      source_video: sourceVideo,
+      concept: '短剧前贴 V2',
+      prompt: '等待理解上传短剧内容并生成前贴方向',
+      call_to_action: '点击观看正片',
+      mandatory_elements: [],
+      prohibited_claims: ['不得虚构上传视频中不存在的剧情事实'],
+      confirm_route: true,
+    },
+    { 'Idempotency-Key': `manual-short-drama-v2-task-${intake.id}` },
+  )
+  return getShortDramaPrerollV2Workspace(projectId, task.id)
+}
+
+function getShortDramaPrerollV2Workspace(projectId: string, taskId: string) {
+  return creativeRequest<ApiShortDramaV2TaskDetail>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}`,
+  )
+}
+
+function shortDramaV2Command(
+  projectId: string,
+  taskId: string,
+  action: string,
+  body: unknown,
+) {
+  return creativeRequest<ApiShortDramaV2TaskDetail>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll-v2:${action}`,
+    'POST',
+    body,
+    { 'Idempotency-Key': `short-drama-v2-${action}-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+}
+
+const analyzeShortDramaV2Source = (projectId: string, taskId: string, expectedRevision: number) =>
+  shortDramaV2Command(projectId, taskId, 'analyze-source', { expected_revision: expectedRevision })
+
+const updateShortDramaV2Analysis = (projectId: string, taskId: string, expectedRevision: number, content: ApiShortDramaV2AnalysisContent) =>
+  shortDramaV2Command(projectId, taskId, 'update-analysis', { expected_revision: expectedRevision, content })
+
+const generateShortDramaV2Directions = (projectId: string, taskId: string, expectedRevision: number) =>
+  shortDramaV2Command(projectId, taskId, 'generate-directions', { expected_revision: expectedRevision })
+
+const selectShortDramaV2Direction = (projectId: string, taskId: string, expectedRevision: number, directionBatchId: string, directionId: string, durationSeconds: number) =>
+  shortDramaV2Command(projectId, taskId, 'select-direction', {
+    expected_revision: expectedRevision,
+    direction_batch_id: directionBatchId,
+    direction_id: directionId,
+    duration_seconds: durationSeconds,
+  })
+
+const updateShortDramaV2Prompts = (projectId: string, taskId: string, expectedRevision: number, imagePrompt: string, videoDescription: string, videoPrompt: string) =>
+  shortDramaV2Command(projectId, taskId, 'update-prompts', {
+    expected_revision: expectedRevision,
+    image_prompt: imagePrompt,
+    video_description: videoDescription,
+    video_prompt: videoPrompt,
+  })
+
+const prepareShortDramaV2OpeningFrame = (projectId: string, taskId: string, expectedRevision: number) =>
+  shortDramaV2Command(projectId, taskId, 'prepare-opening-frame', { expected_revision: expectedRevision })
+
+const generateShortDramaV2FirstFrames = (projectId: string, taskId: string, expectedRevision: number) =>
+  shortDramaV2Command(projectId, taskId, 'generate-first-frames', { expected_revision: expectedRevision })
+
+const reconcileShortDramaV2FirstFrame = (projectId: string, taskId: string, expectedRevision: number, candidateId: string, providerJobId: string) =>
+  shortDramaV2Command(projectId, taskId, 'reconcile-first-frame', {
+    expected_revision: expectedRevision,
+    candidate_id: candidateId,
+    provider_job_id: providerJobId,
+  })
+
+const selectShortDramaV2FirstFrame = (projectId: string, taskId: string, expectedRevision: number, batchId: string, candidateId: string) =>
+  shortDramaV2Command(projectId, taskId, 'select-first-frame', {
+    expected_revision: expectedRevision,
+    batch_id: batchId,
+    candidate_id: candidateId,
+  })
+
+const bindShortDramaV2TrustedMaterials = (projectId: string, taskId: string, expectedRevision: number, firstFrameAssetId: string, lastFrameAssetId: string) =>
+  shortDramaV2Command(projectId, taskId, 'bind-trusted-materials', {
+    expected_revision: expectedRevision,
+    first_frame_asset_id: firstFrameAssetId,
+    last_frame_asset_id: lastFrameAssetId,
+  })
+
+const generateShortDramaV2Video = (projectId: string, taskId: string, expectedRevision: number) =>
+  shortDramaV2Command(projectId, taskId, 'generate-video', { expected_revision: expectedRevision, model_alias: 'cookies.video.standard' })
+
+const reconcileShortDramaV2Video = (projectId: string, taskId: string, expectedRevision: number, providerJobId: string) =>
+  shortDramaV2Command(projectId, taskId, 'reconcile-video', { expected_revision: expectedRevision, provider_job_id: providerJobId })
+
+function getShortDramaV2ProviderJob(projectId: string, jobId: string): Promise<ApiGenerationJob> {
+  return platformRequest<ApiProviderJobWire>(
+    `/projects/${encodeURIComponent(projectId)}/model/jobs/${encodeURIComponent(jobId)}`,
+  ).then(mapViralProviderJob)
+}
+
 async function createManualViralRemakeWorkspace(
   projectId: string,
   input: ApiCreateManualViralRemakeInput,
@@ -5068,6 +5303,21 @@ export const api = {
   createHitAnalysis: (projectId: string, input: ApiCreateHitAnalysisInput) =>
     platformRequest<ApiHitAnalysis>(`/projects/${encodeURIComponent(projectId)}/remix-hit-analyses`, 'POST', input),
   uploadProjectAsset,
+  createManualShortDramaPrerollV2Workspace,
+  getShortDramaPrerollV2Workspace,
+  analyzeShortDramaV2Source,
+  updateShortDramaV2Analysis,
+  generateShortDramaV2Directions,
+  selectShortDramaV2Direction,
+  updateShortDramaV2Prompts,
+  prepareShortDramaV2OpeningFrame,
+  generateShortDramaV2FirstFrames,
+  reconcileShortDramaV2FirstFrame,
+  selectShortDramaV2FirstFrame,
+  bindShortDramaV2TrustedMaterials,
+  generateShortDramaV2Video,
+  reconcileShortDramaV2Video,
+  getShortDramaV2ProviderJob,
   createManualViralRemakeWorkspace,
   createManualShortDramaPrerollWorkspace,
   getTaskStrategyCreativeIntake,

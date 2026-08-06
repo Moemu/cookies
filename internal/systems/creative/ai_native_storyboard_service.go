@@ -101,6 +101,73 @@ func (s Service) GenerateAINativeStoryboard(ctx context.Context, actor contract.
 	return updated, nil
 }
 
+func (s Service) RegenerateAINativeStoryboardAsset(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, workspaceID, assetID string, request RegenerateAINativeStoryboardAssetRequest) (AINativeRequirementWorkspace, error) {
+	if s.Projects == nil || s.AINativeStoryboards == nil || s.AINativeStoryboardScheduler == nil || s.AINativeStoryboardAssetPreparer == nil {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("AI native storyboard dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if request.ExpectedWorkspaceVersion < 1 || strings.TrimSpace(assetID) == "" {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: asset regeneration request is invalid", ErrInvalidAINativeRequirement)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	workspace, err := s.AINativeStoryboards.GetAINativeStoryboardWorkspace(ctx, actor.OrganizationID, projectID, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	if workspace.WorkspaceVersion != request.ExpectedWorkspaceVersion || workspace.StoryboardStatus != AINativeStoryboardDraftStatus || workspace.Storyboard == nil ||
+		workspace.ScriptStatus != AINativeScriptConfirmedStatus || workspace.Script == nil || workspace.ConfirmedScriptRevision == nil || strings.TrimSpace(workspace.ActiveOperationID) != "" {
+		return AINativeRequirementWorkspace{}, ErrInvalidState
+	}
+	plan := *workspace.Storyboard
+	plan.Assets = append([]AINativeStoryboardAsset{}, workspace.Storyboard.Assets...)
+	found := false
+	for index := range plan.Assets {
+		asset := &plan.Assets[index]
+		if asset.ID != strings.TrimSpace(assetID) {
+			continue
+		}
+		if asset.Source != AINativeStoryboardAssetSourceAIGenerated || strings.TrimSpace(asset.GenerationBrief) == "" {
+			return AINativeRequirementWorkspace{}, fmt.Errorf("%w: only AI-generated storyboard assets can be regenerated", ErrInvalidAINativeRequirement)
+		}
+		asset.AssetRef = nil
+		asset.Status = AINativeStoryboardAssetPlanned
+		asset.GenerationAttempt++
+		if asset.GenerationAttempt < 1 {
+			asset.GenerationAttempt = 1
+		}
+		asset.ErrorCode, asset.ErrorMessage = "", ""
+		found = true
+		break
+	}
+	if !found {
+		return AINativeRequirementWorkspace{}, ErrNotFound
+	}
+	id, err := s.idGenerator()("ainativestoryboardop")
+	if err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	operation := AINativeStoryboardOperation{ID: id, Version: 1, WorkspaceID: workspace.WorkspaceID, ProjectID: projectID, ExpectedWorkspaceVersion: request.ExpectedWorkspaceVersion,
+		RequirementRevision: workspace.CurrentRevision, RequirementHash: plan.BasedOnRequirementHash, ScriptRevision: *workspace.ConfirmedScriptRevision, ScriptHash: plan.BasedOnScriptHash,
+		Actor: actor, ActorID: actor.Principal.ID, CreatedAt: s.now()}
+	if _, err = s.AINativeStoryboards.BeginAINativeStoryboardGeneration(ctx, actor.OrganizationID, projectID, workspace.WorkspaceID, operation, s.now()); err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	updated, err := s.AINativeStoryboards.SaveAINativeStoryboardPlan(ctx, actor.OrganizationID, projectID, workspace.WorkspaceID, operation, plan, s.now())
+	if err != nil {
+		_ = s.AINativeStoryboards.FailAINativeStoryboardGeneration(context.WithoutCancel(ctx), actor.OrganizationID, projectID, workspace.WorkspaceID, operation.ID, operation.Version, "STORYBOARD_ASSET_REGENERATION_START_FAILED", boundedError(err), s.now())
+		return AINativeRequirementWorkspace{}, err
+	}
+	if err := s.AINativeStoryboardScheduler.ScheduleAINativeStoryboard(ctx, operation); err != nil {
+		_ = s.AINativeStoryboards.FailAINativeStoryboardGeneration(context.WithoutCancel(ctx), actor.OrganizationID, projectID, workspace.WorkspaceID, operation.ID, operation.Version, "STORYBOARD_ASSET_REGENERATION_SCHEDULE_FAILED", boundedError(err), s.now())
+		return AINativeRequirementWorkspace{}, err
+	}
+	return updated, nil
+}
+
 func (s Service) UpdateAINativeStoryboard(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, workspaceID string, request UpdateAINativeStoryboardRequest) (AINativeRequirementWorkspace, error) {
 	if s.Projects == nil || s.AINativeStoryboards == nil || request.ExpectedRevision < 1 {
 		return AINativeRequirementWorkspace{}, fmt.Errorf("AI native storyboard persistence is unavailable")
