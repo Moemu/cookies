@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "oceanengine-bidding-schema/v0.1",
+  "title": "OceanEngine Bidding Readonly Calibration Contract v0.1",
+  "description": "Delivery-owned readonly platform schema. It does not authorize or execute platform writes.",
+  "oneOf": [
+    { "$ref": "#/$defs/PlatformProjectDraft" },
+    { "$ref": "#/$defs/PlatformPromotionDraft" },
+    { "$ref": "#/$defs/SelectorContract" }
+  ],
+  "$defs": {
+    "EvidenceState": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "sample_only",
+        "operator_reviewed",
+        "platform_pending",
+        "owner_pending",
+        "blocked_by_event_asset",
+        "write_validation_pending"
+      ]
+    },
+    "PlatformReference": {
+      "type": "object",
+      "required": ["object_kind", "scope", "reference_state"],
+      "properties": {
+        "object_kind": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "minLength": 1 },
+        "platform_id": { "type": ["string", "null"] },
+        "display_name_snapshot": { "type": ["string", "null"] },
+        "evidence_version": { "type": ["string", "null"] },
+        "reference_state": {
+          "type": "string",
+          "enum": ["resolved", "unresolved", "blocked", "redacted"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ActionBoundary": {
+      "type": "object",
+      "required": ["event", "remote_write", "validation_state"],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "save_project_and_continue_to_promotion",
+            "save_project_and_close",
+            "save_promotion_and_close",
+            "cancel_without_change",
+            "enable_project",
+            "pause_project",
+            "restart_project",
+            "enable_promotion",
+            "pause_promotion",
+            "restart_promotion"
+          ]
+        },
+        "remote_write": { "type": "boolean" },
+        "validation_state": {
+          "type": "string",
+          "enum": ["readonly_located", "write_validation_pending", "validated"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeliveryIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["mode"],
+          "properties": { "mode": { "const": "account_info" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["mode", "authorized_douyin_identity_ref"],
+          "properties": {
+            "mode": { "const": "douyin_account" },
+            "authorized_douyin_identity_ref": { "$ref": "#/$defs/PlatformReference" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PlatformProjectDraft": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "account_ref",
+        "marketing_purpose",
+        "marketing_scenario",
+        "carrier",
+        "delivery_mode",
+        "targeting",
+        "schedule",
+        "budget_and_bidding",
+        "project_name",
+        "evidence_states",
+        "action_boundaries"
+      ],
+      "properties": {
+        "schema_version": { "const": "oceanengine-bidding-schema/v0.1" },
+        "account_ref": { "$ref": "#/$defs/PlatformReference" },
+        "marketing_purpose": { "type": "string", "minLength": 1 },
+        "marketing_scenario": { "type": "string", "minLength": 1 },
+        "marketing_product_ref": { "oneOf": [{ "$ref": "#/$defs/PlatformReference" }, { "type": "null" }] },
+        "application_ref": { "oneOf": [{ "$ref": "#/$defs/PlatformReference" }, { "type": "null" }] },
+        "carrier": { "type": "string", "minLength": 1 },
+        "optimization_target_ref": { "oneOf": [{ "$ref": "#/$defs/PlatformReference" }, { "type": "null" }] },
+        "deep_optimization_mode": { "type": ["string", "null"] },
+        "delivery_mode": { "type": ["string", "null"] },
+        "targeting": { "type": "object" },
+        "schedule": { "type": "object" },
+        "budget_and_bidding": { "type": "object" },
+        "monitoring": { "type": "object" },
+        "project_name": { "type": "string", "minLength": 1 },
+        "blocking_reason": { "type": ["string", "null"] },
+        "evidence_states": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceState" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "action_boundaries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ActionBoundary" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PlatformPromotionDraft": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "parent_project_ref",
+        "delivery_identity",
+        "base_material_refs",
+        "copy_items",
+        "promotion_name",
+        "evidence_states",
+        "action_boundaries"
+      ],
+      "properties": {
+        "schema_version": { "const": "oceanengine-bidding-schema/v0.1" },
+        "parent_project_ref": { "$ref": "#/$defs/PlatformReference" },
+        "delivery_identity": { "$ref": "#/$defs/DeliveryIdentity" },
+        "base_material_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PlatformReference" }
+        },
+        "copy_items": { "type": "array", "items": { "type": "object" } },
+        "native_anchor_ref": { "oneOf": [{ "$ref": "#/$defs/PlatformReference" }, { "type": "null" }] },
+        "landing_page_ref": { "oneOf": [{ "$ref": "#/$defs/PlatformReference" }, { "type": "null" }] },
+        "direct_link_ref": { "oneOf": [{ "$ref": "#/$defs/PlatformReference" }, { "type": "null" }] },
+        "product_information": { "type": "object" },
+        "creative_components": { "type": "array", "items": { "type": "object" } },
+        "promotion_settings": { "type": "object" },
+        "promotion_name": { "type": "string", "minLength": 1 },
+        "evidence_states": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceState" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "action_boundaries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ActionBoundary" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SelectorContract": {
+      "type": "object",
+      "required": ["schema_version", "selector_kind", "field_key", "cancel_policy", "write_adjacent_actions", "evidence_states"],
+      "properties": {
+        "schema_version": { "const": "oceanengine-bidding-schema/v0.1" },
+        "selector_kind": { "type": "string", "minLength": 1 },
+        "field_key": { "type": "string", "minLength": 1 },
+        "search_keys": { "type": "array", "items": { "type": "string" } },
+        "filters": { "type": "array", "items": { "type": "string" } },
+        "capacity_label": { "type": ["integer", "null"], "minimum": 0 },
+        "empty_state": { "type": ["string", "null"] },
+        "confirm_policy": { "type": ["string", "null"] },
+        "cancel_policy": { "type": "string", "minLength": 1 },
+        "write_adjacent_actions": { "type": "array", "items": { "type": "string" } },
+        "evidence_states": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceState" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

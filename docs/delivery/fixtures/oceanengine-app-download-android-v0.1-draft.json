@@ -1,0 +1,89 @@
+{
+  "schema": "oceanengine-bidding-schema/v0.1-draft",
+  "fixture_id": "app-download-android-project-redacted-sample",
+  "source": "platform_observation",
+  "evidence_date": "2026-08-06",
+  "account_ref": "redacted:6391",
+  "validation_status": "blocked_by_event_asset",
+  "executable": false,
+  "submit_allowed": false,
+  "path": {
+    "marketing_purpose": "应用",
+    "application_goal": "应用下载",
+    "marketing_scenario": "短视频+图文",
+    "platform": "Android",
+    "application_ref": "redacted_existing_application_reference"
+  },
+  "application_selector": {
+    "search_keys": ["application_name", "application_id"],
+    "filters": ["source", "edited_at"],
+    "current_published_sample_count": 2,
+    "actions": ["使用该应用包", "选择分包"],
+    "subpackage_availability": "conditional_per_application",
+    "write_adjacent_actions": ["管理自定义应用"],
+    "evidence_state": "observed"
+  },
+  "download_configuration": {
+    "methods": ["直接下载", "落地页下载"],
+    "prefer_app_store_download": ["不启用", "启用"],
+    "evidence_state": "observed"
+  },
+  "optimization_target": {
+    "value": null,
+    "required_state": "observed_required",
+    "availability": "none_for_selected_application_and_current_path",
+    "blocking_reason": "missing_eligible_event_asset",
+    "continuation": "blocked_by_event_asset",
+    "evidence_state": "observed"
+  },
+  "delivery_modes": {
+    "visible_options": ["自动投放(UBMax)", "手动投放"],
+    "compatibility_after_target": "platform_pending",
+    "automatic_project_quota": {
+      "current_count": 0,
+      "remaining_count": 30,
+      "evidence_state": "sample_only"
+    }
+  },
+  "targeting": {
+    "dimensions": [
+      "地域",
+      "性别",
+      "年龄",
+      "自定义人群",
+      "已安装用户",
+      "过滤已转化用户",
+      "过滤时间",
+      "Android版本"
+    ],
+    "converted_user_scopes": ["不限", "单元", "项目", "投放账户", "公司账户", "组织账户", "应用"],
+    "converted_user_windows": ["当天", "7天", "1个月", "3个月", "6个月", "12个月"],
+    "evidence_state": "observed"
+  },
+  "budget_and_bidding": {
+    "strategies_visible_without_target": ["稳定成本", "最大转化"],
+    "charging_mode_visible_without_target": "按展示付费(oCPM)",
+    "charging_mode_is_final_mapping": false,
+    "fields": ["schedule", "time_window", "daily_budget", "bid"],
+    "evidence_state": "sample_only"
+  },
+  "monitoring": {
+    "modes": ["已有链接", "自定义"],
+    "existing_link_selector_state": "disabled_until_optimization_target_selected",
+    "event_manager_inheritance_notice": true,
+    "evidence_state": "observed"
+  },
+  "platform_pending": [
+    "eligible_optimization_targets",
+    "target_to_mode_and_charging_compatibility",
+    "promotion_fields_after_target_selection",
+    "server_validation_and_writeback"
+  ],
+  "write_guard": {
+    "save": false,
+    "submit": false,
+    "enable": false,
+    "manage_application": false,
+    "sign_service_agreement": false
+  }
+}

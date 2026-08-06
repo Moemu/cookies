@@ -58,7 +58,7 @@
 | 需求与策略 | 创建 Proposal、基于 Proposal 生成 Strategy、批准 Strategy | 只覆盖 proposal-to-strategy 路径；未覆盖对话、Brief、研究和通用评审 |
 | 创意创作 | 创建/读取 CreativePlan、基于计划创建图片 Job | 只覆盖已批准策略到图片任务；未覆盖完整 Draft、Version、视频、评审与交付 |
 | 素材洞察 | 无 `/api/insights/v1/*` 业务路由 | 只有共享 AssetFeature、Remix 分析 seam 和兼容服务公共样例 |
-| 智能投放 | 已有 Project-in-path 的 Plan/Version/Preflight/ChangeSet/Approval/持久化 mock Execution 路由 | A03/A04 是明确 `source=mock` 的受控闭环；尚无真实账户、Computer Use、监控和优化 |
+| 智能投放 | 已有 Project-in-path 的 Plan/Version/Preflight/ChangeSet/Approval/持久化 mock Execution 路由 | 版本绑定审批与持久化模拟执行是明确 `source=mock` 的受控闭环；尚无真实账户、Computer Use、监控和优化 |
 
 ### 2.3 TypeScript 兼容 API
 
@@ -95,7 +95,7 @@
 | 素材洞察 | 展示 + 局部数据 | 公共 CSV 洞察、Project 运营记录和 AssetFeature 可展示；没有指标接入与分析领域模型 |
 | 素材检查 | 样例驱动 | QualityCheckRun、MaterialConfirmation、版本指针来自前端 sample 过滤，不是服务端权威对象 |
 | 投放计划 | Mock 业务实现 | DeliveryPlan 与不可变版本已持久化；支持乐观并发、Project 隔离和服务端权威预检 |
-| 审批与执行 | 受控 Mock 实现 | Approval 绑定 Plan/ChangeSet 版本、canonical/action hash、24 小时有效期、execute_mock scope 和预算快照；A04 以 Idempotency-Key + canonical request hash 持久化 Execution/Step、证据和恢复决策，不会写真实广告平台 |
+| 审批与执行 | 受控 Mock 实现 | Approval 绑定 Plan/ChangeSet 版本、canonical/action hash、24 小时有效期、execute_mock scope 和预算快照；持久化模拟执行以 Idempotency-Key + canonical request hash 保存 Execution/Step、证据和恢复决策，不会写真实广告平台 |
 | 监控、优化、账户环境 | 展示实现 | 多数页面复用 Project 运营记录或 agency sample，无 Connector/平台实时数据 |
 
 ## 4. 未实现接口清单

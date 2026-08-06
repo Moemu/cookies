@@ -1,0 +1,432 @@
+{
+  "schema": "oceanengine-bidding-schema/v0.1-draft",
+  "fixture_id": "ecommerce-short-video-orange-ubmax",
+  "source": "platform_observation",
+  "evidence_date": "2026-08-06",
+  "account_ref": "redacted:6391",
+  "validation_status": "draft_observation_only",
+  "executable": false,
+  "submit_allowed": false,
+  "action_boundaries": [
+    {
+      "event": "save_project_and_continue_to_promotion",
+      "label": "保存并新建单元",
+      "element_role": "button",
+      "pre_disabled_in_incomplete_form": false,
+      "remote_write": true,
+      "clicked": false,
+      "evidence_state": "observed"
+    },
+    {
+      "event": "save_project_and_close",
+      "label": "保存并关闭",
+      "element_role": "button",
+      "pre_disabled_in_incomplete_form": false,
+      "remote_write": true,
+      "clicked": false,
+      "evidence_state": "observed"
+    },
+    {
+      "event": "cancel_project_form",
+      "label": "取消",
+      "element_role": "button",
+      "remote_write": false,
+      "clicked": false,
+      "evidence_state": "observed"
+    }
+  ],
+  "operator_review": {
+    "evidence_state": "operator_reviewed",
+    "business_language": ["投放账号", "项目", "单元"],
+    "preferred_current_scenario_mode": "手动投放",
+    "workflow_before_project": [
+      "prepare_product_landing_anchor_and_audience_assets",
+      "upload_materials",
+      "filter_by_review_quality_and_usage"
+    ],
+    "project_strategy": [
+      "create_multiple_projects_for_product_coupon_material_and_targeting_combinations",
+      "configure_placements_and_targeting",
+      "prefer_continuous_idle_time_windows",
+      "acquire_learning_volume_then_adjust_bid_from_data"
+    ],
+    "static_rules_forbidden": ["deep_optimization_choice", "bid_multiplier"],
+    "coverage_policy": "all_bidding_scenarios_incrementally_required"
+  },
+  "field_order": [
+    "marketing_product_and_target",
+    "delivery_mode",
+    "material_supplement",
+    "audience_and_filters",
+    "schedule_and_budget",
+    "monitoring_links",
+    "project_name"
+  ],
+  "project": {
+    "object_kind": "PlatformProject",
+    "fields": [
+      {
+        "key": "marketing_purpose",
+        "source_value": "电商",
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "marketing_scenario",
+        "source_value": "短视频+图文",
+        "observed_options": [
+          { "value": "短视频+图文", "selected": true, "disabled": false },
+          { "value": "直播", "selected": false, "disabled": true }
+        ],
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "marketing_product",
+        "source_value": "商品",
+        "value_type": "dynamic_reference",
+        "evidence_state": "observed",
+        "required_state": "observed_required",
+        "editable_state": "observed_editable",
+        "enum_state": "dynamic_reference",
+        "selected_reference": "redacted_reference",
+        "selector": {
+          "capacity_label": 1,
+          "upgrade_library": {
+            "search_keys": ["product_name", "product_id"],
+            "filters": ["source", "category"],
+            "sample_result_count": 5,
+            "sample_scope": "organization_shared_products"
+          },
+          "general_library": {
+            "search_keys": ["product_name", "product_id"],
+            "filters": ["source", "product_library"],
+            "sample_result_count": 1
+          },
+          "write_adjacent_actions": ["manage_product"]
+        }
+      },
+      {
+        "key": "carrier",
+        "source_value": "橙子落地页",
+        "observed_options": [
+          "橙子落地页",
+          "自研落地页",
+          "字节小程序",
+          "微信小程序"
+        ],
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "optimization_target_ref",
+        "source_value": null,
+        "observed_options": [
+          "按钮跳转",
+          "app内下单",
+          "点击量",
+          "展示量",
+          "调起店铺",
+          "店铺停留"
+        ],
+        "value_type": "dynamic_reference",
+        "evidence_state": "observed",
+        "required_state": "observed_required",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set",
+        "options_unchanged_after_sample_product_selection": true,
+        "selector": {
+          "search_keys": ["target_name"],
+          "write_adjacent_actions": ["manage_events", "manage_landing_pages"]
+        }
+      },
+      {
+        "key": "deep_optimization_mode",
+        "source_value": null,
+        "observed_options": [
+          "不启用",
+          "成交ROI",
+          "净成交下单",
+          "净成交ROI"
+        ],
+        "condition": "optimization_target_ref == app内下单",
+        "compatibility": {
+          "净成交ROI": { "automatic_delivery": true, "manual_delivery": false },
+          "不启用": { "automatic_delivery": true, "manual_delivery": true },
+          "成交ROI": { "automatic_delivery": true, "manual_delivery": true },
+          "净成交下单": { "automatic_delivery": "observed", "manual_delivery": "not_in_operator_reviewed_manual_set" }
+        },
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "conditional",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "delivery_mode",
+        "source_value": "自动投放(UBMax)",
+        "observed_options": [
+          "自动投放(UBMax)",
+          "手动投放"
+        ],
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "aigc_material_supplement",
+        "source_value": false,
+        "value_type": "boolean",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_closed_set"
+      },
+      {
+        "key": "audience",
+        "source_value": {
+          "region": "不限",
+          "gender": "不限",
+          "age": "不限",
+          "custom_audience": "不限"
+        },
+        "value_type": "object",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "installed_user_filter",
+        "source_value": "不限",
+        "observed_options": [
+          { "value": "不限", "selected": true, "disabled": false },
+          { "value": "过滤", "selected": false, "disabled": true },
+          { "value": "定向", "selected": false, "disabled": false }
+        ],
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "converted_user_filter",
+        "source_value": "单元",
+        "observed_options": [
+          "不限",
+          "单元",
+          "项目",
+          "投放账户",
+          "公司账户",
+          "组织账户"
+        ],
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "schedule",
+        "source_value": {
+          "date_mode": "从今天起长期投放",
+          "time_mode": "不限"
+        },
+        "conditional_fields": {
+          "设置开始和结束日期": ["start_date", "end_date"],
+          "指定时间段": ["weekly_7x24_grid"]
+        },
+        "value_type": "object",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "daily_budget",
+        "source_value": { "mode": "不限", "amount": null },
+        "conditional_fields": { "设置预算": ["amount"] },
+        "amount_constraint": { "minimum": 300, "maximum": 9999999.99, "currency": "CNY" },
+        "value_type": "money_or_unlimited",
+        "evidence_state": "observed",
+        "required_state": "observed_required",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "bidding_strategy",
+        "source_value": "稳定成本",
+        "value_type": "dynamic_enum",
+        "evidence_state": "observed",
+        "required_state": "observed_required",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "charging_mode",
+        "source_value": null,
+        "observed_examples": {
+          "app内下单": "oCPM",
+          "点击量+手动投放": "CPC"
+        },
+        "value_type": "dynamic_enum",
+        "evidence_state": "sample_only",
+        "required_state": "observed_required",
+        "editable_state": "conditional",
+        "enum_state": "sample_only"
+      },
+      {
+        "key": "bid_amount",
+        "source_value": null,
+        "amount_constraint": { "minimum": 0.01, "maximum": 10000, "currency": "CNY" },
+        "value_type": "money",
+        "evidence_state": "observed",
+        "required_state": "conditional",
+        "editable_state": "conditional",
+        "enum_state": "observed_open_set"
+      },
+      {
+        "key": "roi_coefficient",
+        "source_value": null,
+        "number_constraint": { "minimum": 0.01, "maximum": 100 },
+        "condition": "deep_optimization_mode in [成交ROI, 净成交ROI]",
+        "value_type": "number",
+        "evidence_state": "observed",
+        "required_state": "conditional",
+        "editable_state": "conditional",
+        "enum_state": "observed_open_set"
+      },
+      {
+        "key": "monitoring_links",
+        "source_value": null,
+        "observed_fields": [
+          "展示",
+          "有效触点",
+          "视频播放",
+          "视频播完",
+          "视频有效播放"
+        ],
+        "value_type": "sensitive_reference_map",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "project_name",
+        "source_value": "redacted_generated_default",
+        "source_pattern": "电商自动化项目_<timestamp>",
+        "value_type": "string",
+        "evidence_state": "observed",
+        "required_state": "observed_required",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_open_set",
+        "string_constraint": { "minimum_characters": 1, "maximum_characters": 50 }
+      }
+    ]
+  },
+  "manual_delivery_calibration": {
+    "evidence_state": "observed",
+    "placement": {
+      "modes": ["通投智选", "首选媒体"],
+      "preferred_media_current_set": ["今日头条", "西瓜视频", "抖音", "番茄系媒体", "穿山甲"],
+      "platform_may_expand_beyond_preferred_media": true
+    },
+    "targeting_modes": {
+      "options": ["新建定向", "选择已有定向包"],
+      "existing_package_search_supported": true,
+      "current_account_result_state": "empty"
+    },
+    "new_targeting": {
+      "region_modes": ["不限", "按行政区", "按商圈"],
+      "dimensions": ["gender", "age", "custom_audience", "platform", "device", "network", "installed_user", "converted_user", "phone_brand", "phone_price"],
+      "platforms": ["iOS", "Android", "HarmonyOS"],
+      "devices": ["手机", "平板"],
+      "networks": ["WiFi", "2G", "3G", "4G", "5G"],
+      "converted_user_scopes": ["不限", "单元", "项目", "投放账户", "公司账户", "组织账户"]
+    },
+    "behavior_interest": {
+      "modes": ["不限", "系统推荐", "自定义"],
+      "groups": ["行为", "兴趣"],
+      "behavior_window_initial_days": 30,
+      "inputs": ["类目词", "关键词", "批量添加", "搜索", "自动选词"],
+      "capacity_per_group": 300,
+      "coverage_counts_are_dynamic": true
+    },
+    "douyin_influencer_targeting": {
+      "modes": ["不限", "自定义"],
+      "audience_relationships": ["关注", "互动"],
+      "search_keys": ["达人", "昵称", "分类"],
+      "add_modes": ["达人分类", "具体达人"],
+      "capacity": 30
+    },
+    "smart_expansion": {
+      "initial_enabled": false,
+      "expandable_dimensions": ["地域", "性别", "年龄", "自定义人群"]
+    },
+    "bidding_strategies": ["稳定成本", "最优成本", "最大转化"],
+    "search_boost": {
+      "fields": ["关键词", "自动更新", "出价系数", "定向扩展"],
+      "current_keyword_state": "empty",
+      "platform_recommendations_are_dynamic": true
+    }
+  },
+  "dependency_paths": [
+    {
+      "carrier": "橙子落地页",
+      "optimization_target": "app内下单",
+      "supports_deep_optimization": true,
+      "manual_delivery_deep_modes": ["不启用", "成交ROI"],
+      "evidence_state": "operator_reviewed"
+    },
+    {
+      "carrier": "自研落地页",
+      "optimization_target": "app内下单",
+      "supports_deep_optimization": true,
+      "manual_delivery_deep_modes": ["不启用", "成交ROI"],
+      "evidence_state": "operator_reviewed"
+    }
+  ],
+  "coverage_matrix_policy": {
+    "required_dimensions": ["marketing_purpose", "marketing_scenario", "asset", "carrier", "optimization_target", "deep_optimization", "delivery_mode", "placement", "targeting", "budget_bidding", "project", "promotion", "identity", "material", "anchor_landing", "write_state"],
+    "unobserved_combinations_must_not_be_inferred": true,
+    "missing_paths_remain_tracked": true
+  },
+  "observed_required_fields": [
+    "marketing_product",
+    "optimization_target_ref",
+    "schedule.date_mode",
+    "schedule.time_mode",
+    "bidding_strategy",
+    "daily_budget",
+    "charging_mode",
+    "project_name"
+  ],
+  "platform_pending": [
+    "优化目标平台代码和跨载体完整目录",
+    "当前样本之外的商品库完整目录与跨营销目的差异",
+    "服务端提交校验、审核状态和错误文案",
+    "其他营销目的、载体和投放模式下的约束与默认值",
+    "其他营销目的下定向、智能放量与字段移动的逐路径页面校准",
+    "学习期策略与动态平台建议的真实数据校准"
+  ],
+  "write_guard": {
+    "save": false,
+    "submit": false,
+    "enable": false,
+    "pause": false,
+    "delete": false
+  }
+}
