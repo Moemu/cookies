@@ -113,11 +113,13 @@ export function aiNativeReducer(state: AINativeFrontendState, action: AINativeAc
           storyboard: action.workspace.storyboard_status ?? state.stage_status.storyboard,
           video: videoStatusFromWorkspace(action.workspace, state.stage_status.video),
         },
-        error: action.workspace.storyboard_status === 'failed'
-          ? action.workspace.storyboard_error_message || '故事板或参考图片生成失败，请重试。'
-          : action.workspace.production_status === 'failed' || action.workspace.production_status === 'render_failed'
-            ? productionFailureMessage(action.workspace)
-            : '',
+        error: action.workspace.script_status === 'failed'
+          ? action.workspace.script_error_message || '脚本生成失败，请重新生成。'
+          : action.workspace.storyboard_status === 'failed'
+            ? action.workspace.storyboard_error_message || '故事板或参考图片生成失败，请重试。'
+            : action.workspace.production_status === 'failed' || action.workspace.production_status === 'render_failed'
+              ? productionFailureMessage(action.workspace)
+              : '',
       }
     case 'requirement-confirmed':
       return {

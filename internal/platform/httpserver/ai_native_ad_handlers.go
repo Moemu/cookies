@@ -29,6 +29,46 @@ type aiNativeLatestRequirementManager interface {
 	GetLatestAINativeRequirementWorkspace(context.Context, contract.ActorContext, contract.ProjectID) (creative.AINativeRequirementWorkspace, error)
 }
 
+type aiNativeWorkspaceCatalogManager interface {
+	ListAINativeAdWorkspaces(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.AINativeAdWorkspaceSummary, error)
+	RenameAINativeAdWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RenameAINativeAdWorkspaceRequest) (creative.AINativeRequirementWorkspace, error)
+}
+
+func (s *Server) listAINativeAdWorkspaces(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeWorkspaceCatalogManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.ListAINativeAdWorkspaces(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) renameAINativeAdWorkspace(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeWorkspaceCatalogManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.RenameAINativeAdWorkspaceRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.RenameAINativeAdWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("workspace_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 type aiNativeProductionManager interface {
 	StartAINativeProduction(context.Context, contract.ActorContext, contract.ProjectID, string, creative.StartAINativeProductionRequest) (creative.AINativeRequirementWorkspace, error)
 	RetryAINativeProductionUnit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RetryAINativeProductionUnitRequest) (creative.AINativeRequirementWorkspace, error)

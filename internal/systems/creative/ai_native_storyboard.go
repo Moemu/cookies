@@ -37,13 +37,16 @@ const (
 )
 
 type AINativeStoryboardAsset struct {
-	ID              string                    `json:"id"`
-	Role            string                    `json:"role"`
-	Name            string                    `json:"name"`
-	Source          string                    `json:"source"`
-	AssetRef        *contract.AssetVersionRef `json:"asset_ref,omitempty"`
-	GenerationBrief string                    `json:"generation_brief,omitempty"`
-	Status          string                    `json:"status"`
+	ID                string                    `json:"id"`
+	Role              string                    `json:"role"`
+	Name              string                    `json:"name"`
+	Source            string                    `json:"source"`
+	AssetRef          *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+	GenerationBrief   string                    `json:"generation_brief,omitempty"`
+	Status            string                    `json:"status"`
+	GenerationAttempt int                       `json:"generation_attempt,omitempty"`
+	ErrorCode         string                    `json:"error_code,omitempty"`
+	ErrorMessage      string                    `json:"error_message,omitempty"`
 }
 
 type AINativeStoryboardShot struct {
@@ -181,7 +184,7 @@ func (s AINativeStoryboardRevision) ValidateReadyAgainst(requirement AINativeReq
 }
 
 func validateAINativeStoryboardAsset(asset AINativeStoryboardAsset) error {
-	if strings.TrimSpace(asset.ID) == "" || strings.TrimSpace(asset.Name) == "" {
+	if strings.TrimSpace(asset.ID) == "" || strings.TrimSpace(asset.Name) == "" || asset.GenerationAttempt < 0 {
 		return fmt.Errorf("identity and name are required")
 	}
 	switch asset.Role {
@@ -205,7 +208,7 @@ func validateAINativeStoryboardAsset(asset AINativeStoryboardAsset) error {
 			return fmt.Errorf("planned asset requires an AI generation brief without an AssetVersionRef")
 		}
 	case AINativeStoryboardAssetFailed:
-		if asset.Source != AINativeStoryboardAssetSourceAIGenerated || strings.TrimSpace(asset.GenerationBrief) == "" {
+		if asset.Source != AINativeStoryboardAssetSourceAIGenerated || strings.TrimSpace(asset.GenerationBrief) == "" || strings.TrimSpace(asset.ErrorMessage) == "" {
 			return fmt.Errorf("failed asset requires its generation brief")
 		}
 	default:

@@ -269,6 +269,27 @@ test('故事板启动失败后展示错误和重新生成入口', () => {
   assert.match(refreshedMarkup, /重新生成故事板/)
 })
 
+test('故事板部分素材失败时保留成功素材并提供仅重试失败素材入口', () => {
+  const partialStoryboard: StoryboardDraft = {
+    contract_version: 'creative.ai-native.storyboard/v1', revision: 1, status: 'draft', duration_seconds: 20,
+    assets: [
+      { id: 'person_1', role: 'person_identity', name: '通勤男士', source: 'ai_generated', status: 'ready', asset_ref: { asset_id: 'asset_person_1', version: 1 } },
+      { id: 'scene_1', role: 'scene_reference', name: '地铁通勤场景', source: 'ai_generated', status: 'failed', generation_brief: '明亮地铁站', generation_attempt: 1, error_code: 'AI_NATIVE_STORYBOARD_ASSET_FAILED', error_message: '图片服务暂时不可用' },
+    ],
+    shots: [], channel_profile_id: 'douyin.performance.v1', channel_profile_hash: 'a'.repeat(64),
+    based_on_requirement_revision: 1, based_on_requirement_hash: 'b'.repeat(64), based_on_script_revision: 1, based_on_script_hash: 'c'.repeat(64),
+    generation: { model_alias: 'cookies.text.standard', model_version: 'test', prompt_version: 'ai-ad-storyboard/douyin/v1', profile_hash: 'a'.repeat(64) },
+  }
+  const markup = renderToStaticMarkup(React.createElement(StoryboardStage, {
+    projectId: 'project-1', status: 'failed', storyboard: partialStoryboard, canGenerate: true, error: '部分图片生成失败',
+    onChange: () => undefined, onSave: () => undefined, onConfirm: () => undefined, onEdit: () => undefined, onRetry: () => undefined,
+  }))
+
+  assert.match(markup, /Asset asset_person_1/)
+  assert.match(markup, /图片服务暂时不可用/)
+  assert.match(markup, /仅重试失败素材/)
+})
+
 test('恢复失败的故事板工作区时展示服务端具体原因', () => {
   const restored = aiNativeReducer(initialAINativeState, {
     type: 'requirement-loaded',
@@ -387,4 +408,18 @@ test('视频 Unit 提交失败后恢复具体原因而不是继续显示生成�
   assert.equal(failed.stage_status.video, 'failed')
   assert.equal(failed.video?.status, 'failed')
   assert.match(failed.error, /来源 ID 过长/)
+})
+
+test('脚本后台任务失败后恢复具体原因而不是继续显示生成中', () => {
+  const failedWorkspace: AINativeRequirementWorkspace = {
+    ...workspace,
+    current_stage: 'script',
+    script_status: 'failed',
+    script_error_code: 'AI_NATIVE_SCRIPT_PERSIST_FAILED',
+    script_error_message: '脚本保存失败，请重新生成。',
+  }
+
+  const failed = aiNativeReducer(initialAINativeState, { type: 'requirement-loaded', workspace: failedWorkspace })
+  assert.equal(failed.stage_status.script, 'failed')
+  assert.match(failed.error, /脚本保存失败/)
 })

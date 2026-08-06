@@ -77,6 +77,26 @@ func (r *memoryAINativeRequirementRepository) GetLatestAINativeRequirementWorksp
 	}
 	return r.workspace, nil
 }
+func (r *memoryAINativeRequirementRepository) ListAINativeAdWorkspaces(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]AINativeAdWorkspaceSummary, error) {
+	if r.workspace.OrganizationID != organizationID || r.workspace.ProjectID != projectID || r.workspace.WorkspaceID == "" {
+		return []AINativeAdWorkspaceSummary{}, nil
+	}
+	return []AINativeAdWorkspaceSummary{{
+		WorkspaceID: r.workspace.WorkspaceID, DisplayName: r.workspace.DisplayName,
+		ProductName: r.workspace.Requirement.ProductName, CurrentStage: r.workspace.CurrentStage,
+		Status: r.workspace.Status, ScriptStatus: r.workspace.ScriptStatus,
+		StoryboardStatus: r.workspace.StoryboardStatus, ProductionStatus: r.workspace.ProductionStatus,
+		CreatedAt: r.workspace.CreatedAt, UpdatedAt: r.workspace.UpdatedAt,
+	}}, nil
+}
+func (r *memoryAINativeRequirementRepository) RenameAINativeAdWorkspace(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, workspaceID, displayName string, now time.Time) (AINativeRequirementWorkspace, error) {
+	if r.workspace.WorkspaceID != workspaceID || r.workspace.OrganizationID != organizationID || r.workspace.ProjectID != projectID {
+		return AINativeRequirementWorkspace{}, ErrNotFound
+	}
+	r.workspace.DisplayName = displayName
+	r.workspace.UpdatedAt = now
+	return r.workspace, nil
+}
 func (r *memoryAINativeRequirementRepository) AppendAINativeRequirementRevision(_ context.Context, next AINativeRequirementWorkspace, expectedRevision int64, _ string) (AINativeRequirementWorkspace, error) {
 	if r.workspace.CurrentRevision != expectedRevision {
 		return AINativeRequirementWorkspace{}, ErrVersionConflict
@@ -161,6 +181,31 @@ func TestGetLatestAINativeRequirementWorkspaceRestoresProjectWorkspace(t *testin
 	}
 	if restored.WorkspaceID != value.WorkspaceID || restored.CurrentStage != value.CurrentStage {
 		t.Fatalf("restored workspace = %+v", restored)
+	}
+}
+
+func TestAINativeWorkspaceCatalogListsAndRenamesSavedAds(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
+	value := AINativeRequirementWorkspace{
+		WorkspaceID: "ainativeworkspace_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Status: AINativeRequirementDraftStatus, CurrentStage: AINativeStageRequirement,
+		Requirement: AINativeRequirementDraft{ProductName: "施美乐钛杯"}, CreatedAt: now, UpdatedAt: now,
+	}
+	repository := &memoryAINativeRequirementRepository{workspace: value}
+	service := Service{Projects: testProjects{}, AINativeRequirements: repository, Now: func() time.Time { return now.Add(time.Minute) }}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeRead, ScopeWrite}}
+
+	items, err := service.ListAINativeAdWorkspaces(context.Background(), actor, value.ProjectID)
+	if err != nil || len(items) != 1 || items[0].ProductName != "施美乐钛杯" {
+		t.Fatalf("ListAINativeAdWorkspaces() = %#v, %v", items, err)
+	}
+	renamed, err := service.RenameAINativeAdWorkspace(context.Background(), actor, value.ProjectID, value.WorkspaceID, RenameAINativeAdWorkspaceRequest{DisplayName: "钛杯通勤版"})
+	if err != nil || renamed.DisplayName != "钛杯通勤版" {
+		t.Fatalf("RenameAINativeAdWorkspace() = %#v, %v", renamed, err)
+	}
+	if _, err := service.RenameAINativeAdWorkspace(context.Background(), actor, value.ProjectID, value.WorkspaceID, RenameAINativeAdWorkspaceRequest{DisplayName: "   "}); !errors.Is(err, ErrInvalidAINativeRequirement) {
+		t.Fatalf("blank display name should fail, got %v", err)
 	}
 }
 

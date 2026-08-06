@@ -5,10 +5,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 type staticGatewayCredential string
@@ -82,6 +87,38 @@ func TestAdapterGatewayImageAdapterTreatsServerErrorAsUnknown(t *testing.T) {
 	executionError, ok := err.(ExecutionError)
 	if !ok || executionError.JobError.Code != "MODEL_SUBMISSION_UNKNOWN" || executionError.JobError.Retryable {
 		t.Fatalf("Submit() error = %#v, want non-retryable unknown submission", err)
+	}
+}
+
+func TestAdapterGatewayImageAdapterSerializesSynchronousSubmissions(t *testing.T) {
+	var active atomic.Int32
+	var maximum atomic.Int32
+	adapter, _ := NewAdapterGatewayImageAdapter(staticGatewayCredential("service-token"), &memoryOutputHandles{})
+	adapter.client = &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		current := active.Add(1)
+		for observed := maximum.Load(); current > observed && !maximum.CompareAndSwap(observed, current); observed = maximum.Load() {
+		}
+		time.Sleep(40 * time.Millisecond)
+		active.Add(-1)
+		response := `{"model":"gpt-image-2","data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(fakeImagePNG) + `"}]}`
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(response))}, nil
+	})}
+
+	var group sync.WaitGroup
+	for index := 1; index <= 2; index++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			_, _ = adapter.Submit(context.Background(), ImageGenerationRequest{
+				OrganizationID: "org_1", ProjectID: "project_1", ProviderJobID: fmt.Sprintf("provider_job_%d", index),
+				ModelAlias: "cookies.image.standard", IdempotencyKey: contract.IdempotencyKey(fmt.Sprintf("gateway-image-%d", index)),
+				Input: ImageGenerationInput{Prompt: "launch poster", Width: 1024, Height: 1024}, Route: testGatewayRoute(),
+			})
+		}(index)
+	}
+	group.Wait()
+	if maximum.Load() != 1 {
+		t.Fatalf("synchronous gateway received %d concurrent image submissions, want 1", maximum.Load())
 	}
 }
 

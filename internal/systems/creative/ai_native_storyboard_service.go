@@ -226,15 +226,40 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 		plan = persisted.StoryboardPlan
 	}
 	ready := *plan
+	ready.Assets = append([]AINativeStoryboardAsset{}, plan.Assets...)
 	var deferUntil *time.Time
+	var assetFailure error
 	for index := range ready.Assets {
 		asset := ready.Assets[index]
 		if asset.Status == AINativeStoryboardAssetReady {
 			continue
 		}
+		if asset.Status == AINativeStoryboardAssetFailed {
+			ready.Assets[index].GenerationAttempt++
+		} else if ready.Assets[index].GenerationAttempt < 1 {
+			ready.Assets[index].GenerationAttempt = 1
+		}
+		if asset.Status != AINativeStoryboardAssetGenerating {
+			ready.Assets[index].Status = AINativeStoryboardAssetGenerating
+			ready.Assets[index].ErrorCode = ""
+			ready.Assets[index].ErrorMessage = ""
+			if _, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, s.now()); saveErr != nil {
+				return jobruntime.Result{}, saveErr
+			}
+		}
+		asset = ready.Assets[index]
 		ref, pending, prepareErr := s.AINativeStoryboardAssetPreparer.PrepareAINativeStoryboardAsset(ctx, op.Actor, project, op, asset)
 		if prepareErr != nil {
-			return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_ASSET_FAILED", prepareErr)
+			ready.Assets[index].Status = AINativeStoryboardAssetFailed
+			ready.Assets[index].ErrorCode = "AI_NATIVE_STORYBOARD_ASSET_FAILED"
+			ready.Assets[index].ErrorMessage = boundedError(prepareErr)
+			if _, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(context.WithoutCancel(ctx), claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, s.now()); saveErr != nil {
+				return jobruntime.Result{}, saveErr
+			}
+			if assetFailure == nil {
+				assetFailure = prepareErr
+			}
+			continue
 		}
 		if ref == nil {
 			if pending != nil && (deferUntil == nil || pending.Before(*deferUntil)) {
@@ -244,6 +269,14 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 		}
 		ready.Assets[index].AssetRef = ref
 		ready.Assets[index].Status = AINativeStoryboardAssetReady
+		ready.Assets[index].ErrorCode = ""
+		ready.Assets[index].ErrorMessage = ""
+		if _, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, s.now()); saveErr != nil {
+			return jobruntime.Result{}, saveErr
+		}
+	}
+	if assetFailure != nil {
+		return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_ASSET_FAILED", assetFailure)
 	}
 	if deferUntil != nil {
 		return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: *deferUntil}
@@ -260,7 +293,9 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 }
 
 func (s Service) failAINativeStoryboardJob(ctx context.Context, claim jobruntime.Claim, op AINativeStoryboardOperation, code string, cause error) (jobruntime.Result, error) {
-	_ = s.AINativeStoryboards.FailAINativeStoryboardGeneration(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op.ID, op.Version, code, boundedError(cause), s.now())
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = s.AINativeStoryboards.FailAINativeStoryboardGeneration(persistCtx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op.ID, op.Version, code, boundedError(cause), s.now())
 	return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: code, Message: "AI native storyboard generation failed", Retryable: false}}
 }
 

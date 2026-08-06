@@ -16,3 +16,11 @@ export function aiNativeWorkspaceLocation(search: string, workspaceId: string, s
   params.set('stage', stage)
   return `?${params.toString()}`
 }
+
+export function clearAINativeWorkspaceLocation(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('workspace')
+  params.delete('stage')
+  const value = params.toString()
+  return value ? `?${value}` : ''
+}

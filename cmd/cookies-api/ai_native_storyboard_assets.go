@@ -20,11 +20,19 @@ func (p creativeAINativeStoryboardAssetPreparer) PrepareAINativeStoryboardAsset(
 	if p.provider == nil || asset.Source != creative.AINativeStoryboardAssetSourceAIGenerated || strings.TrimSpace(asset.GenerationBrief) == "" {
 		return nil, nil, fmt.Errorf("storyboard asset preparation input is invalid")
 	}
+	attempt := asset.GenerationAttempt
+	if attempt < 1 {
+		attempt = 1
+	}
 	requestHash, err := contract.CanonicalJSONHash(struct {
-		OperationID string `json:"operation_id"`
-		AssetID     string `json:"asset_id"`
-		Brief       string `json:"brief"`
-	}{OperationID: operation.ID, AssetID: asset.ID, Brief: asset.GenerationBrief})
+		WorkspaceID         string `json:"workspace_id"`
+		RequirementRevision int64  `json:"requirement_revision"`
+		ScriptRevision      int64  `json:"script_revision"`
+		AssetID             string `json:"asset_id"`
+		Brief               string `json:"brief"`
+		Attempt             int    `json:"attempt"`
+	}{WorkspaceID: operation.WorkspaceID, RequirementRevision: operation.RequirementRevision, ScriptRevision: operation.ScriptRevision,
+		AssetID: asset.ID, Brief: asset.GenerationBrief, Attempt: attempt})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -34,8 +42,8 @@ func (p creativeAINativeStoryboardAssetPreparer) PrepareAINativeStoryboardAsset(
 		providerActor.Scopes = append(providerActor.Scopes, provider.ScopeJobCreate)
 	}
 	job, _, err := p.provider.CreateImageJob(ctx, provider.CreateImageJobRequest{
-		Actor: providerActor, Project: project, IdempotencyKey: contract.IdempotencyKey("ai-native-storyboard-" + operation.ID + "-" + asset.ID),
-		RequestHash: requestHash, ModelAlias: "cookies.image.standard", SourceSystem: "creative.ai_native.storyboard", SourceTaskID: operation.ID + "/" + asset.ID,
+		Actor: providerActor, Project: project, IdempotencyKey: contract.IdempotencyKey("ai-native-storyboard-asset-" + requestHash),
+		RequestHash: requestHash, ModelAlias: "cookies.image.standard", SourceSystem: "creative.ai_native.storyboard", SourceTaskID: "ainativeasset/" + requestHash[:16] + "/" + asset.ID,
 		Input: provider.ImageGenerationInput{Prompt: asset.GenerationBrief + "。竖版广告分镜参考图，不包含品牌 Logo、包装文字或虚构商品。", Width: 1024, Height: 1536},
 	})
 	if err != nil {

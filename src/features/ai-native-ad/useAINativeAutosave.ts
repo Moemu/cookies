@@ -100,7 +100,7 @@ export function useAINativeAutosave(projectId: string, state: AINativeFrontendSt
       storyboard.dispose()
       controllersRef.current = null
     }
-  }, [dispatch, projectId])
+  }, [dispatch, projectId, state.workspace?.workspace_id])
 
   const schedule = useCallback(<T extends AINativeRequirement | AdScriptDraft | StoryboardDraft>(stage: EditableStage, value: T) => {
     const controller = controllersRef.current?.[stage] as SerialAutosave<T> | undefined
@@ -112,5 +112,16 @@ export function useAINativeAutosave(projectId: string, state: AINativeFrontendSt
     return { succeeded: succeeded !== false, workspace: latestWorkspaceRef.current ?? stateRef.current.workspace }
   }, [])
 
-  return { status, savedAt, schedule, flush }
+  const flushAll = useCallback(async () => {
+    const controllers = controllersRef.current
+    if (!controllers) return { succeeded: true, workspace: latestWorkspaceRef.current ?? stateRef.current.workspace }
+    for (const stage of ['requirement', 'script', 'storyboard'] as const) {
+      if (!await controllers[stage].flush()) {
+        return { succeeded: false, workspace: latestWorkspaceRef.current ?? stateRef.current.workspace }
+      }
+    }
+    return { succeeded: true, workspace: latestWorkspaceRef.current ?? stateRef.current.workspace }
+  }, [])
+
+  return { status, savedAt, schedule, flush, flushAll }
 }

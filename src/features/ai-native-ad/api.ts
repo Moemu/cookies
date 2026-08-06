@@ -1,4 +1,4 @@
-import type { AdScriptDraft, AINativeReopenImpact, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
+import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeReopenImpact, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
 const backendOrigin = viteEnv?.VITE_API_BASE_URL ?? ''
@@ -73,6 +73,20 @@ export async function getLatestRequirementWorkspace(projectId: string) {
     if (cause instanceof AINativeApiError && cause.status === 404) return null
     throw cause
   }
+}
+
+export function listAINativeAdWorkspaces(projectId: string) {
+  return request<AINativeAdWorkspaceSummary[]>(
+    `/projects/${encodeURIComponent(projectId)}/ai-native-ads`,
+  )
+}
+
+export function renameAINativeAdWorkspace(projectId: string, workspaceId: string, displayName: string) {
+  return request<AINativeRequirementWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/metadata`,
+    'PATCH',
+    { display_name: displayName.trim() },
+  )
 }
 
 export function updateRequirement(projectId: string, workspaceId: string, requirement: AINativeRequirement) {

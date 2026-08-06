@@ -81,9 +81,15 @@ func (r MySQLRepository) CompleteAINativeScriptGeneration(ctx context.Context, o
 	if !activeID.Valid || activeID.String != operation.ID || !activeVersion.Valid || activeVersion.Int64 != operation.Version || currentRequirementRevision != operation.RequirementRevision {
 		return AINativeRequirementWorkspace{}, ErrVersionConflict
 	}
-	nextRevision := int64(1)
+	var latestHistoricalRevision int64
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0)
+		FROM creative_ai_native_script_revisions
+		WHERE organization_id=? AND project_id=? AND workspace_id=?`, organizationID, projectID, workspaceID).
+		Scan(&latestHistoricalRevision); err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	nextRevision := latestHistoricalRevision + 1
 	if currentScriptRevision.Valid {
-		nextRevision = currentScriptRevision.Int64 + 1
 		if _, err = tx.ExecContext(ctx, `UPDATE creative_ai_native_script_revisions SET status=?, superseded_at=?
 			WHERE organization_id=? AND project_id=? AND workspace_id=? AND revision=?`, AINativeScriptSupersededStatus, now,
 			organizationID, projectID, workspaceID, currentScriptRevision.Int64); err != nil {
