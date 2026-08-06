@@ -9,14 +9,15 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
 
   await page.goto(`/projects/${primaryProjectId}/delivery/plans`)
   await expect(page.getByRole('tablist', { name: '投放计划视图' })).toHaveCount(0)
-  await page.getByRole('button', { name: '新建 mock 投放计划' }).click()
+  await page.getByRole('button', { name: '新建投放计划' }).click()
   await page.getByLabel('计划名称').fill(planName)
   await page.getByLabel('业务目标').fill('验证内容哈希绑定、审批有效期和执行范围')
-  await page.getByLabel('Mock 广告主').selectOption('mock-advertiser-001')
+  await page.getByLabel('账户边界').selectOption('mock-advertiser-001')
+  await page.getByLabel('策略来源').selectOption('task_demo_precision_strategy')
   await page.getByRole('button', { name: '预算与排期', exact: true }).click()
   await page.getByLabel('总预算').fill('3000')
   await page.getByRole('button', { name: '素材引用', exact: true }).click()
-  await page.getByLabel('素材 Asset ID').fill(`asset-a03-${suffix}`)
+  await page.getByLabel('已确认素材').selectOption('asset_demo_investor_creative_video')
 
   const createPlanPromise = page.waitForResponse(response =>
     response.request().method() === 'POST' &&
@@ -44,20 +45,27 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
     scenario: 'golden_path',
   })
 
-  await page.goto(`/projects/${primaryProjectId}/delivery/approvals`)
+  await page.goto(`/projects/${primaryProjectId}/delivery/approvals/${v1ChangeSet.id}`)
   await expect(page.getByRole('tablist', { name: '审批中心视图' })).toHaveCount(0)
-  await page.getByRole('button', { name: new RegExp(`^${v1ChangeSet.id} `) }).click()
+  await expect(page.getByText('服务端对象详情', { exact: true })).toHaveCount(0)
+  await expect(page.locator('.approval-queue .surface-toolbar .section-label')).toHaveCount(0)
+  await expect(page.locator('.approval-queue')).toHaveCSS('overflow-y', 'auto')
+  expect(await page.locator('.approval-queue').evaluate(element => element.clientHeight)).toBeLessThanOrEqual(720)
   await expect(page.getByRole('heading', { name: planName, exact: true })).toBeVisible()
-  await expect(page.getByText('Plan V1 执行审批', { exact: false })).toBeVisible()
+  await expect(page.getByText('Plan V1 · 批准内容由计划快照', { exact: false })).toBeVisible()
   await expect(page.getByText(planV1.current_version.canonical_hash.slice(0, 12), { exact: true })).toBeVisible()
-  await expect(page.getByText('execute_mock', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('首次上线操作演练', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('批准后 24 小时', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '批准当前快照，或说明原因后打回' })).toBeVisible()
+  const rejectionReason = page.getByLabel('打回修改说明 打回时必填')
+  await expect(rejectionReason).toHaveCSS('min-height', '96px')
+  await expect(page.getByRole('button', { name: '打回修改' })).toBeDisabled()
 
   const approveV1Promise = page.waitForResponse(response =>
     response.request().method() === 'POST' &&
     new URL(response.url()).pathname.endsWith(`/change-sets/${v1ChangeSet.id}:approve`),
   )
-  await page.getByRole('button', { name: '批准当前内容快照' }).click()
+  await page.getByRole('button', { name: '批准平台操作演练' }).click()
   const approveV1Response = await approveV1Promise
   expect(approveV1Response.status()).toBe(200)
   const approvedV1 = await approveV1Response.json() as ChangeSetWire
@@ -77,7 +85,7 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
   await expect(page.locator('.gate-row.passed')).toHaveCount(3)
   await expect(page.locator('.gate-row.failed')).toHaveCount(0)
   await expect(page.locator('.gate-row.passed > svg').first()).toHaveCSS('color', 'oklch(0.57 0.14 155)')
-  await expect(page.getByRole('button', { name: '模拟执行' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '启动平台操作演练' })).toBeEnabled()
 
   await page.goto(`/projects/${primaryProjectId}/delivery/plans`)
   await page.getByRole('button').filter({ hasText: planName }).first().click()
@@ -115,7 +123,7 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
   await expect(page.locator('.gate-row.failed')).toHaveCount(1)
   await expect(page.locator('.gate-row.passed > svg').first()).toHaveCSS('color', 'oklch(0.57 0.14 155)')
   await expect(page.locator('.gate-row.failed > svg')).toHaveCSS('color', 'oklch(0.55 0.205 25)')
-  await expect(page.getByRole('button', { name: '模拟执行' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '启动平台操作演练' })).toBeDisabled()
 
   const staleExecute = await request.post(
     `/api/delivery/v1/projects/${primaryProjectId}/change-sets/${v1ChangeSet.id}:execute`,
@@ -150,12 +158,12 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
   await page.goto(`/projects/${primaryProjectId}/delivery/approvals`)
   await page.getByRole('button', { name: new RegExp(`^${v2ChangeSet.id} `) }).click()
   await expect(page.getByRole('heading', { name: planName, exact: true })).toBeVisible()
-  await expect(page.getByText('Plan V2 执行审批', { exact: false })).toBeVisible()
+  await expect(page.getByText('Plan V2 · 批准内容由计划快照', { exact: false })).toBeVisible()
   const approveV2Promise = page.waitForResponse(response =>
     response.request().method() === 'POST' &&
     new URL(response.url()).pathname.endsWith(`/change-sets/${v2ChangeSet.id}:approve`),
   )
-  await page.getByRole('button', { name: '批准当前内容快照' }).click()
+  await page.getByRole('button', { name: '批准平台操作演练' }).click()
   const approvedV2Response = await approveV2Promise
   expect(approvedV2Response.status()).toBe(200)
   const approvedV2 = await approvedV2Response.json() as ChangeSetWire
@@ -168,13 +176,13 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
       scenario: 'golden_path',
     },
   })
-  await expect(page.getByRole('button', { name: '模拟执行' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '启动平台操作演练' })).toBeEnabled()
 
   const executeV2Promise = page.waitForResponse(response =>
     response.request().method() === 'POST' &&
     new URL(response.url()).pathname.endsWith(`/change-sets/${v2ChangeSet.id}:execute`),
   )
-  await page.getByRole('button', { name: '模拟执行' }).click()
+  await page.getByRole('button', { name: '启动平台操作演练' }).click()
   const executeV2Response = await executeV2Promise
   expect(executeV2Response.status()).toBe(201)
   expect(await executeV2Response.json()).toMatchObject({
@@ -191,7 +199,7 @@ test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但�
   })
   await expect(page.getByText('旧审批已失效', { exact: true })).toHaveCount(0)
   await expect(page.locator('.gate-row.passed')).toHaveCount(3)
-  await expect(page.getByRole('button', { name: '模拟执行' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '启动平台操作演练' })).toBeDisabled()
 
   const executedAudit = await request.get(`/api/delivery/v1/projects/${primaryProjectId}/change-sets/${v2ChangeSet.id}`)
   expect(executedAudit.status()).toBe(200)
@@ -218,7 +226,7 @@ async function createAndPreflightChangeSet(page: Page, planId: string) {
     response.request().method() === 'POST' &&
     new URL(response.url()).pathname.endsWith(`/plans/${planId}/preflight`),
   )
-  await page.getByRole('button', { name: '运行服务端预检', exact: true }).click()
+  await page.getByRole('button', { name: '检查当前草稿', exact: true }).click()
   expect((await planPreflightPromise).status()).toBe(200)
 
   const createChangeSetPromise = page.waitForResponse(response =>
@@ -229,7 +237,7 @@ async function createAndPreflightChangeSet(page: Page, planId: string) {
     response.request().method() === 'POST' &&
     /\/change-sets\/[^/]+:preflight$/.test(new URL(response.url()).pathname),
   )
-  await page.getByRole('button', { name: '创建并预检 ChangeSet', exact: true }).click()
+  await page.getByRole('button', { name: '提交变更申请', exact: true }).click()
   expect((await createChangeSetPromise).status()).toBe(201)
   expect((await preflightChangeSetPromise).status()).toBe(200)
 }

@@ -34,6 +34,8 @@ var (
 	ErrApprovalScopeExceeded            = errors.New("delivery approval scope or budget was exceeded")
 	ErrIdempotencyConflict              = errors.New("delivery idempotency key was reused with a different request")
 	ErrUnsupportedConfigurationWorkflow = errors.New("delivery repository does not support the configuration workflow")
+	ErrUnsupportedTour                  = errors.New("delivery repository does not support delivery tours")
+	ErrTourOwnerMismatch                = errors.New("delivery tour belongs to another owner")
 )
 
 type DeliveryPlanStatus string
@@ -55,8 +57,8 @@ const (
 const ExecutionModeLocalSimulation = "local_simulation"
 
 const (
-	DemoMetricDatasetVersion = "preroll-demo/v1"
-	MetricSourceDemoFixture  = "demo_fixture"
+	DemoMetricDatasetVersion = "post-launch-simulator/v1"
+	MetricSourceDemoFixture  = "post_launch_simulator"
 )
 
 // CreatePlanRequest accepts the #21 package-oriented fields and the mock
@@ -114,6 +116,9 @@ type DeliveryPlan struct {
 	Platform             string                  `json:"platform"`
 	Source               Source                  `json:"source"`
 	Scenario             Scenario                `json:"scenario"`
+	TourRunID            string                  `json:"tour_run_id,omitempty"`
+	TourOwnerID          string                  `json:"tour_owner_id,omitempty"`
+	TourCase             string                  `json:"tour_case,omitempty"`
 	CurrentVersionNumber int                     `json:"current_version_number"`
 	CurrentVersion       DeliveryPlanVersion     `json:"current_version"`
 	Versions             []DeliveryPlanVersion   `json:"versions"`
@@ -139,6 +144,9 @@ type ChangeSet struct {
 	PreflightNotes     []string                `json:"preflight_notes"`
 	ApprovedBy         string                  `json:"approved_by,omitempty"`
 	ApprovedAt         *time.Time              `json:"approved_at,omitempty"`
+	RejectedBy         string                  `json:"rejected_by,omitempty"`
+	RejectedAt         *time.Time              `json:"rejected_at,omitempty"`
+	RejectionReason    string                  `json:"rejection_reason,omitempty"`
 	Approval           *ApprovalView           `json:"approval,omitempty"`
 	Source             Source                  `json:"source"`
 	Scenario           Scenario                `json:"scenario"`
@@ -146,6 +154,22 @@ type ChangeSet struct {
 	CreatedBy          string                  `json:"created_by"`
 	CreatedAt          time.Time               `json:"created_at"`
 	UpdatedAt          time.Time               `json:"updated_at"`
+}
+
+type RejectChangeSetRequest struct {
+	ExpectedVersion int64  `json:"expected_version"`
+	Reason          string `json:"reason"`
+}
+
+func (r RejectChangeSetRequest) Validate() error {
+	if r.ExpectedVersion < 1 || len(strings.TrimSpace(r.Reason)) < 3 || len(strings.TrimSpace(r.Reason)) > 1000 {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+type changeSetRejectionRepository interface {
+	RejectChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string, time.Time) (ChangeSet, error)
 }
 
 type Execution struct {
@@ -258,10 +282,11 @@ type ExecutionResult struct {
 }
 
 type RawMetrics struct {
-	Impressions int64 `json:"impressions"`
-	Clicks      int64 `json:"clicks"`
-	Conversions int64 `json:"conversions"`
-	SpendCents  int64 `json:"spend_cents"`
+	Impressions  int64 `json:"impressions"`
+	Clicks       int64 `json:"clicks"`
+	Conversions  int64 `json:"conversions"`
+	SpendCents   int64 `json:"spend_cents"`
+	RevenueCents int64 `json:"revenue_cents,omitempty"`
 }
 
 type DeliveryMetricSnapshot struct {
@@ -269,6 +294,7 @@ type DeliveryMetricSnapshot struct {
 	OrganizationID    contract.OrganizationID `json:"organization_id"`
 	ProjectID         contract.ProjectID      `json:"project_id"`
 	ExecutionID       string                  `json:"execution_id"`
+	SimulationRunID   string                  `json:"simulation_run_id,omitempty"`
 	PlanID            string                  `json:"plan_id"`
 	CreativePackageID string                  `json:"creative_package_id"`
 	Source            string                  `json:"source"`
@@ -281,6 +307,7 @@ type DeliveryMetricSnapshot struct {
 	WindowStart       time.Time               `json:"window_start"`
 	WindowEnd         time.Time               `json:"window_end"`
 	RawMetrics        RawMetrics              `json:"raw_metrics"`
+	CalculationBasis  MetricCalculationBasis  `json:"calculation_basis"`
 	CreatedBy         string                  `json:"created_by"`
 	CreatedAt         time.Time               `json:"created_at"`
 }
@@ -308,6 +335,10 @@ type ActiveProjectResolver interface {
 
 type CreativePackageReader interface {
 	ReadCreativePackage(context.Context, contract.ActorContext, contract.ProjectID, string) (CreativePackageSnapshot, error)
+}
+
+type PlanReferenceReader interface {
+	ResolvePlanReferences(context.Context, contract.ActorContext, contract.ProjectID, StrategyReference, []CreativeReference) (StrategyReference, []CreativeReference, error)
 }
 
 type Repository interface {
@@ -342,12 +373,17 @@ type Service struct {
 	Repository Repository
 	Projects   ActiveProjectResolver
 	Packages   CreativePackageReader
+	References PlanReferenceReader
 	Adapter    PlatformAdapter
 	NewID      ids.Generator
 	Now        func() time.Time
 }
 
 func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreatePlanRequest) (DeliveryPlan, error) {
+	return s.createPlan(ctx, actor, projectID, request, "", "")
+}
+
+func (s Service) createPlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreatePlanRequest, tourRunID, tourCase string) (DeliveryPlan, error) {
 	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
 		return DeliveryPlan{}, err
 	}
@@ -356,6 +392,13 @@ func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, pr
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return DeliveryPlan{}, err
+	}
+	tourOwnerID := ""
+	if tourRunID == "" && tourCase != "" || tourRunID != "" && tourCase == "" {
+		return DeliveryPlan{}, ErrInvalidRequest
+	}
+	if tourRunID != "" {
+		tourOwnerID = actor.Principal.ID
 	}
 	id, err := s.idGenerator()("deliveryplan")
 	if err != nil {
@@ -372,7 +415,7 @@ func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, pr
 		Name: draft.Name, Objective: draft.Objective, BudgetCents: draft.Budget.TotalMinor,
 		StartAt: draft.Schedule.StartAt, EndAt: draft.Schedule.EndAt,
 		Status: DeliveryPlanDraft, Version: 1, Platform: "ocean_engine_mock", Source: SourceMock,
-		Scenario: scenarioFor(draft), CurrentVersionNumber: 1,
+		Scenario: scenarioFor(draft), TourRunID: tourRunID, TourOwnerID: tourOwnerID, TourCase: tourCase, CurrentVersionNumber: 1,
 		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	}
 	version, err := versionFromDraft(plan, 1, draft, actor.Principal, now)
@@ -385,13 +428,18 @@ func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, pr
 func (s Service) createDraftAndPackage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreatePlanRequest) (PlanDraft, CreativePackageSnapshot, error) {
 	if request.usesLifecycleDraft() {
 		draft := normalizeDraft(request.PlanDraft, scenarioFor(request.PlanDraft))
+		var err error
+		draft, err = s.resolvePlanReferences(ctx, actor, projectID, draft)
+		if err != nil {
+			return PlanDraft{}, CreativePackageSnapshot{}, err
+		}
 		reference := CreativeReference{AssetID: "mock-unset", Version: 1}
 		if len(draft.CreativeReferences) > 0 {
 			reference = draft.CreativeReferences[0]
 		}
 		pkg := CreativePackageSnapshot{
 			ID: reference.AssetID, CreativeVersionID: strconv.Itoa(reference.Version),
-			ContentHash: fmt.Sprintf("mock:%s@%d", reference.AssetID, reference.Version),
+			ContentHash: reference.ContentHash,
 		}
 		return draft, pkg, nil
 	}
@@ -408,9 +456,48 @@ func (s Service) createDraftAndPackage(ctx context.Context, actor contract.Actor
 		Budget:             Budget{TotalMinor: request.BudgetCents, Currency: "CNY"},
 		Schedule:           Schedule{StartAt: request.StartAt, EndAt: request.EndAt, Timezone: "Asia/Shanghai"},
 		Tracking:           Tracking{LandingPage: "https://demo.cookies.local", PixelID: "PX-LOCAL", ConversionEvent: "conversion"},
-		CreativeReferences: []CreativeReference{{AssetID: pkg.ID, Version: 1, Confirmed: true}},
+		CreativeReferences: []CreativeReference{{AssetID: pkg.ID, Version: 1, ContentHash: pkg.ContentHash, Confirmed: true}},
 	}
+	// The package-oriented compatibility route has no authoritative upstream
+	// project strategy record. Keep it on the legacy validation path instead of
+	// inventing a reference that the production resolver cannot prove.
 	return normalizeDraft(draft, scenarioFor(draft)), pkg, nil
+}
+
+func (s Service) resolvePlanReferences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, draft PlanDraft) (PlanDraft, error) {
+	if s.References != nil {
+		strategy, creatives, err := s.References.ResolvePlanReferences(ctx, actor, projectID, draft.StrategyReference, draft.CreativeReferences)
+		if err != nil {
+			return PlanDraft{}, err
+		}
+		draft.StrategyReference, draft.CreativeReferences = strategy, creatives
+	} else {
+		// Tests and isolated in-memory adopters still receive immutable references;
+		// production wires the project-backed resolver below.
+		if draft.StrategyReference.ContentHash == "" {
+			draft.StrategyReference.ContentHash, _ = contract.CanonicalJSONHash(struct {
+				TaskID  string `json:"task_id"`
+				Version int64  `json:"version"`
+			}{draft.StrategyReference.TaskID, draft.StrategyReference.Version})
+		}
+		if draft.StrategyReference.Route == "" {
+			draft.StrategyReference.Route = fmt.Sprintf("/projects/%s/strategy/workspaces/%s", projectID, draft.StrategyReference.TaskID)
+		}
+		for index := range draft.CreativeReferences {
+			ref := &draft.CreativeReferences[index]
+			if ref.ContentHash == "" {
+				ref.ContentHash, _ = contract.CanonicalJSONHash(struct {
+					AssetID string `json:"asset_id"`
+					Version int    `json:"version"`
+				}{ref.AssetID, ref.Version})
+			}
+			if ref.Route == "" {
+				ref.Route = fmt.Sprintf("/projects/%s/creative/reviews/%s@v%d", projectID, ref.AssetID, ref.Version)
+			}
+		}
+	}
+	draft.SourceStrategyVersion = fmt.Sprintf("%s@v%d", draft.StrategyReference.TaskID, draft.StrategyReference.Version)
+	return normalizeDraft(draft, scenarioFor(draft)), nil
 }
 
 func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string, request UpdatePlanRequest) (DeliveryPlan, error) {
@@ -430,7 +517,11 @@ func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, pr
 	if plan.Status != DeliveryPlanDraft {
 		return DeliveryPlan{}, ErrInvalidState
 	}
-	version, err := versionFromDraft(plan, request.ExpectedVersion+1, request.PlanDraft, actor.Principal, s.now())
+	resolvedDraft, err := s.resolvePlanReferences(ctx, actor, projectID, request.PlanDraft)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
+	version, err := versionFromDraft(plan, request.ExpectedVersion+1, resolvedDraft, actor.Principal, s.now())
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
@@ -800,6 +891,41 @@ func (s Service) Approve(ctx context.Context, actor contract.ActorContext, proje
 	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, approved)
 }
 
+func (s Service) RejectChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, request RejectChangeSetRequest) (ChangeSet, error) {
+	if err := s.ready(actor, projectID, ScopeApprove); err != nil {
+		return ChangeSet{}, err
+	}
+	if err := request.Validate(); err != nil || strings.TrimSpace(changeSetID) == "" {
+		return ChangeSet{}, ErrInvalidRequest
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ChangeSet{}, err
+	}
+	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if value.Status != ChangeSetPreflightPassed {
+		return ChangeSet{}, ErrInvalidState
+	}
+	repository, ok := s.Repository.(changeSetRejectionRepository)
+	if !ok {
+		transitioned, transitionErr := s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, request.ExpectedVersion, ChangeSetRejected, actor.Principal.ID, s.now())
+		if transitionErr != nil {
+			return ChangeSet{}, transitionErr
+		}
+		transitioned.RejectedBy, transitioned.RejectionReason = actor.Principal.ID, strings.TrimSpace(request.Reason)
+		rejectedAt := s.now()
+		transitioned.RejectedAt = &rejectedAt
+		return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, transitioned)
+	}
+	transitioned, err := repository.RejectChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, request.ExpectedVersion, actor.Principal.ID, strings.TrimSpace(request.Reason), s.now())
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, transitioned)
+}
+
 func (s Service) Execute(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID, idempotencyKey string, request ExecuteRequest) (ExecutionResult, bool, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
 		return ExecutionResult{}, false, err
@@ -1117,25 +1243,18 @@ func (s Service) CreateDemoMetricSnapshot(ctx context.Context, actor contract.Ac
 	if execution.Execution.Mode != ExecutionModeLocalSimulation || execution.Execution.Status != "succeeded" {
 		return DeliveryMetricSnapshot{}, ErrInvalidState
 	}
-	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, execution.ChangeSet.PlanID)
+	result, err := s.CreateOutcomeSimulation(ctx, actor, projectID, execution.Execution.ID, CreateOutcomeSimulationRequest{Scenario: OutcomeScenarioCostPressure})
 	if err != nil {
 		return DeliveryMetricSnapshot{}, err
 	}
-	id, err := s.idGenerator()("deliverymetric")
-	if err != nil {
-		return DeliveryMetricSnapshot{}, err
+	return result.MetricSnapshots[len(result.MetricSnapshots)-1], nil
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
 	}
-	value := DeliveryMetricSnapshot{
-		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		ExecutionID: execution.Execution.ID, PlanID: plan.ID, CreativePackageID: plan.CreativePackageID,
-		Source: MetricSourceDemoFixture, IsSimulated: true, DatasetVersion: DemoMetricDatasetVersion,
-		FixtureVersion: "v1", WindowSequence: 1, DataThrough: plan.EndAt,
-		Currency: "CNY", WindowStart: plan.StartAt, WindowEnd: plan.EndAt,
-		RawMetrics: RawMetrics{Impressions: 10000, Clicks: 420, Conversions: 31, SpendCents: 50000},
-		CreatedBy:  actor.Principal.ID, CreatedAt: s.now(),
-	}
-	stored, _, err := s.Repository.CreateMetricSnapshot(ctx, value)
-	return stored, err
+	return right
 }
 
 func (s Service) ListMetricSnapshots(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, limit int) ([]DeliveryMetricSnapshot, error) {

@@ -42,11 +42,11 @@ func (r MySQLRepository) CreatePlan(ctx context.Context, value DeliveryPlan, ver
 	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_plans (
 		id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id,
 		name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario,
-		current_version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tour_run_id, tour_owner_id, tour_case, current_version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.CreativePackageID, value.CreativePackageHash,
 		value.CreativeVersionID, value.Name, value.Objective, value.BudgetCents, value.StartAt, value.EndAt,
-		value.Status, value.Version, value.Platform, value.Source, value.Scenario, value.CurrentVersionNumber,
+		value.Status, value.Version, value.Platform, value.Source, value.Scenario, nullableString(value.TourRunID), nullableString(value.TourOwnerID), nullableString(value.TourCase), value.CurrentVersionNumber,
 		value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if err != nil {
 		return DeliveryPlan{}, err
@@ -242,6 +242,9 @@ func firstCreativeVersion(version DeliveryPlanVersion) string {
 }
 
 func firstCreativeHash(version DeliveryPlanVersion) string {
+	if len(version.CreativeReferences) > 0 && version.CreativeReferences[0].ContentHash != "" {
+		return version.CreativeReferences[0].ContentHash
+	}
 	return fmt.Sprintf("mock:%s@%s", firstCreativeID(version), firstCreativeVersion(version))
 }
 
@@ -252,11 +255,30 @@ func (r MySQLRepository) CreateChangeSet(ctx context.Context, value ChangeSet) (
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_change_sets (
 		id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, target_snapshot, target_snapshot_hash, recommendation_id,
-		approved_by, approved_at, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+		approved_by, approved_at, rejected_by, rejected_at, rejection_reason, version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.PlanID, value.PlanVersion, value.Status,
 		value.RiskLevel, notes, nullableJSON(value.TargetSnapshot), nullableString(value.TargetSnapshotHash), nullableString(value.RecommendationID), value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	return value, err
+}
+
+func (r MySQLRepository) RejectChangeSet(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, actorID, reason string, now time.Time) (ChangeSet, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE delivery_change_sets SET status = ?, rejected_by = ?, rejected_at = ?, rejection_reason = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
+		ChangeSetRejected, actorID, now, reason, now, organizationID, projectID, id, expectedVersion, ChangeSetPreflightPassed)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if affected != 1 {
+		if _, getErr := r.GetChangeSet(ctx, organizationID, projectID, id); getErr != nil {
+			return ChangeSet{}, getErr
+		}
+		return ChangeSet{}, ErrVersionConflict
+	}
+	return r.GetChangeSet(ctx, organizationID, projectID, id)
 }
 
 func (r MySQLRepository) ListChangeSets(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]ChangeSet, error) {
@@ -700,15 +722,19 @@ func (r MySQLRepository) ListExecutions(ctx context.Context, organizationID cont
 }
 
 func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error) {
+	basis, err := json.Marshal(value.CalculationBasis)
+	if err != nil {
+		return DeliveryMetricSnapshot{}, false, err
+	}
 	result, err := r.DB.ExecContext(ctx, `INSERT IGNORE INTO delivery_metric_snapshots (
-		id, organization_id, project_id, execution_id, plan_id, creative_package_id,
+		id, organization_id, project_id, execution_id, simulation_run_id, plan_id, creative_package_id,
 		source, is_simulated, dataset_version, fixture_version, window_sequence, currency, window_start, window_end, data_through,
-		impressions, clicks, conversions, spend_cents, created_by, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, value.PlanID, value.CreativePackageID,
+		impressions, clicks, conversions, spend_cents, revenue_cents, calculation_basis, created_by, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ExecutionID, nullableString(value.SimulationRunID), value.PlanID, value.CreativePackageID,
 		value.Source, value.IsSimulated, value.DatasetVersion, value.FixtureVersion, value.WindowSequence, value.Currency, value.WindowStart, value.WindowEnd, value.DataThrough,
-		value.RawMetrics.Impressions, value.RawMetrics.Clicks, value.RawMetrics.Conversions, value.RawMetrics.SpendCents,
-		value.CreatedBy, value.CreatedAt)
+		value.RawMetrics.Impressions, value.RawMetrics.Clicks, value.RawMetrics.Conversions, value.RawMetrics.SpendCents, value.RawMetrics.RevenueCents,
+		basis, value.CreatedBy, value.CreatedAt)
 	if err != nil {
 		return DeliveryMetricSnapshot{}, false, err
 	}
@@ -732,11 +758,7 @@ func (r MySQLRepository) CreateMetricSnapshot(ctx context.Context, value Deliver
 }
 
 func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string, limit int) ([]DeliveryMetricSnapshot, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT
-		id, organization_id, project_id, execution_id, plan_id, creative_package_id,
-		source, is_simulated, dataset_version, fixture_version, window_sequence, currency, window_start, window_end, data_through,
-		impressions, clicks, conversions, spend_cents, created_by, created_at
-		FROM delivery_metric_snapshots
+	rows, err := r.DB.QueryContext(ctx, metricSnapshotSelect+`
 		WHERE organization_id = ? AND project_id = ? AND execution_id = ?
 		ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, executionID, limit)
 	if err != nil {
@@ -745,15 +767,9 @@ func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID
 	defer rows.Close()
 	values := make([]DeliveryMetricSnapshot, 0)
 	for rows.Next() {
-		var value DeliveryMetricSnapshot
-		if err := rows.Scan(
-			&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &value.PlanID,
-			&value.CreativePackageID, &value.Source, &value.IsSimulated, &value.DatasetVersion, &value.FixtureVersion, &value.WindowSequence,
-			&value.Currency, &value.WindowStart, &value.WindowEnd, &value.DataThrough, &value.RawMetrics.Impressions,
-			&value.RawMetrics.Clicks, &value.RawMetrics.Conversions, &value.RawMetrics.SpendCents,
-			&value.CreatedBy, &value.CreatedAt,
-		); err != nil {
-			return nil, err
+		value, scanErr := scanMetricSnapshot(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		values = append(values, value)
 	}
@@ -761,20 +777,43 @@ func (r MySQLRepository) ListMetricSnapshots(ctx context.Context, organizationID
 }
 
 func (r MySQLRepository) ListProjectMetricSnapshots(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]DeliveryMetricSnapshot, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, organization_id, project_id, execution_id, plan_id, creative_package_id, source, is_simulated, dataset_version, fixture_version, window_sequence, currency, window_start, window_end, data_through, impressions, clicks, conversions, spend_cents, created_by, created_at FROM delivery_metric_snapshots WHERE organization_id=? AND project_id=? ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
+	rows, err := r.DB.QueryContext(ctx, metricSnapshotSelect+` WHERE organization_id=? AND project_id=? ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	values := make([]DeliveryMetricSnapshot, 0)
 	for rows.Next() {
-		var v DeliveryMetricSnapshot
-		if err := rows.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.ExecutionID, &v.PlanID, &v.CreativePackageID, &v.Source, &v.IsSimulated, &v.DatasetVersion, &v.FixtureVersion, &v.WindowSequence, &v.Currency, &v.WindowStart, &v.WindowEnd, &v.DataThrough, &v.RawMetrics.Impressions, &v.RawMetrics.Clicks, &v.RawMetrics.Conversions, &v.RawMetrics.SpendCents, &v.CreatedBy, &v.CreatedAt); err != nil {
-			return nil, err
+		v, scanErr := scanMetricSnapshot(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		values = append(values, v)
 	}
 	return values, rows.Err()
+}
+
+const metricSnapshotSelect = `SELECT id,organization_id,project_id,execution_id,simulation_run_id,plan_id,creative_package_id,source,is_simulated,dataset_version,fixture_version,window_sequence,currency,window_start,window_end,data_through,impressions,clicks,conversions,spend_cents,revenue_cents,calculation_basis,created_by,created_at FROM delivery_metric_snapshots`
+
+func scanMetricSnapshot(row rowScanner) (DeliveryMetricSnapshot, error) {
+	var value DeliveryMetricSnapshot
+	var simulationRunID sql.NullString
+	var basis []byte
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ExecutionID, &simulationRunID, &value.PlanID,
+		&value.CreativePackageID, &value.Source, &value.IsSimulated, &value.DatasetVersion, &value.FixtureVersion, &value.WindowSequence,
+		&value.Currency, &value.WindowStart, &value.WindowEnd, &value.DataThrough, &value.RawMetrics.Impressions,
+		&value.RawMetrics.Clicks, &value.RawMetrics.Conversions, &value.RawMetrics.SpendCents, &value.RawMetrics.RevenueCents,
+		&basis, &value.CreatedBy, &value.CreatedAt)
+	if err != nil {
+		return value, err
+	}
+	value.SimulationRunID = simulationRunID.String
+	if len(basis) > 0 {
+		if err = json.Unmarshal(basis, &value.CalculationBasis); err != nil {
+			return value, err
+		}
+	}
+	return value, nil
 }
 
 func (r MySQLRepository) UpsertAlert(ctx context.Context, v DeliveryAlert) (DeliveryAlert, error) {
@@ -802,7 +841,7 @@ func (r MySQLRepository) UpsertAlert(ctx context.Context, v DeliveryAlert) (Deli
 	if err != nil {
 		return DeliveryAlert{}, err
 	}
-	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_alerts (id, organization_id, project_id, plan_id, execution_id, monitored_entity, alert_type, rule_id, rule_version, status, fingerprint, title, detail, severity, window_json, metric_definition, owner_json, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, version, created_by, created_at, updated_at, acknowledged_at, dismissed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)`, v.ID, v.OrganizationID, v.ProjectID, v.PlanID, v.ExecutionID, entity, v.Type, v.RuleID, v.RuleVersion, v.Status, v.Fingerprint, v.Title, v.Detail, v.Severity, window, metric, owner, evidence, v.Source, v.IsSimulated, v.Scenario, v.DatasetVersion, v.FixtureVersion, freshness, v.Version, v.CreatedBy, v.CreatedAt, v.UpdatedAt, v.AcknowledgedAt, v.DismissedAt)
+	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_alerts (id, organization_id, project_id, plan_id, execution_id, simulation_run_id, monitored_entity, alert_type, rule_id, rule_version, status, fingerprint, title, detail, severity, window_json, metric_definition, owner_json, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, version, created_by, created_at, updated_at, acknowledged_at, dismissed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)`, v.ID, v.OrganizationID, v.ProjectID, v.PlanID, v.ExecutionID, nullableString(v.SimulationRunID), entity, v.Type, v.RuleID, v.RuleVersion, v.Status, v.Fingerprint, v.Title, v.Detail, v.Severity, window, metric, owner, evidence, v.Source, v.IsSimulated, v.Scenario, v.DatasetVersion, v.FixtureVersion, freshness, v.Version, v.CreatedBy, v.CreatedAt, v.UpdatedAt, v.AcknowledgedAt, v.DismissedAt)
 	if err != nil {
 		return DeliveryAlert{}, err
 	}
@@ -814,6 +853,14 @@ func (r MySQLRepository) alertByFingerprint(ctx context.Context, org contract.Or
 func (r MySQLRepository) ListAlerts(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, f AlertFilter) ([]DeliveryAlert, error) {
 	q := alertSelect + ` WHERE organization_id=? AND project_id=?`
 	args := []any{org, project}
+	if f.PlanID != "" {
+		q += ` AND plan_id=?`
+		args = append(args, f.PlanID)
+	}
+	if f.ExecutionID != "" {
+		q += ` AND execution_id=?`
+		args = append(args, f.ExecutionID)
+	}
 	if f.Status != "" {
 		q += ` AND status=?`
 		args = append(args, f.Status)
@@ -883,15 +930,17 @@ func (r MySQLRepository) UpdateAlert(ctx context.Context, org contract.Organizat
 	return scanAlert(r.DB.QueryRowContext(ctx, alertSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
 
-const alertSelect = `SELECT id, organization_id, project_id, plan_id, execution_id, monitored_entity, alert_type, rule_id, rule_version, status, fingerprint, title, detail, severity, window_json, metric_definition, owner_json, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, version, created_by, created_at, updated_at, acknowledged_at, dismissed_at, resolved_by FROM delivery_alerts`
+const alertSelect = `SELECT id, organization_id, project_id, plan_id, execution_id, simulation_run_id, monitored_entity, alert_type, rule_id, rule_version, status, fingerprint, title, detail, severity, window_json, metric_definition, owner_json, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, version, created_by, created_at, updated_at, acknowledged_at, dismissed_at, resolved_by FROM delivery_alerts`
 
 func scanAlert(row rowScanner) (DeliveryAlert, error) {
 	var v DeliveryAlert
 	var entity, window, metric, owner, evidence, freshness []byte
-	err := row.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.PlanID, &v.ExecutionID, &entity, &v.Type, &v.RuleID, &v.RuleVersion, &v.Status, &v.Fingerprint, &v.Title, &v.Detail, &v.Severity, &window, &metric, &owner, &evidence, &v.Source, &v.IsSimulated, &v.Scenario, &v.DatasetVersion, &v.FixtureVersion, &freshness, &v.Version, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt, &v.AcknowledgedAt, &v.DismissedAt, &v.ResolvedBy)
+	var simulationRunID sql.NullString
+	err := row.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.PlanID, &v.ExecutionID, &simulationRunID, &entity, &v.Type, &v.RuleID, &v.RuleVersion, &v.Status, &v.Fingerprint, &v.Title, &v.Detail, &v.Severity, &window, &metric, &owner, &evidence, &v.Source, &v.IsSimulated, &v.Scenario, &v.DatasetVersion, &v.FixtureVersion, &freshness, &v.Version, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt, &v.AcknowledgedAt, &v.DismissedAt, &v.ResolvedBy)
 	if err != nil {
 		return v, err
 	}
+	v.SimulationRunID = simulationRunID.String
 	if err = json.Unmarshal(entity, &v.MonitoredEntity); err != nil {
 		return v, err
 	}
@@ -912,8 +961,8 @@ func scanAlert(row rowScanner) (DeliveryAlert, error) {
 	return v, err
 }
 
-const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario, current_version, created_by, created_at, updated_at FROM delivery_plans`
-const changeSetSelect = `SELECT id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, target_snapshot, target_snapshot_hash, recommendation_id, approved_by, approved_at, version, created_by, created_at, updated_at FROM delivery_change_sets`
+const deliveryPlanSelect = `SELECT id, organization_id, project_id, creative_package_id, creative_package_hash, creative_version_id, name, objective, budget_cents, start_at, end_at, status, version, platform, source, scenario, tour_run_id, tour_owner_id, tour_case, current_version, created_by, created_at, updated_at FROM delivery_plans`
+const changeSetSelect = `SELECT id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, target_snapshot, target_snapshot_hash, recommendation_id, approved_by, approved_at, rejected_by, rejected_at, rejection_reason, version, created_by, created_at, updated_at FROM delivery_change_sets`
 const approvalSelect = `SELECT approval_id, organization_id, project_id, plan_id, plan_version, change_set_id, change_set_version, plan_canonical_hash, target_snapshot_hash, action_hash, action, scope, budget_limit_minor, currency, approved_by, approved_at, expires_at, source, scenario FROM delivery_approvals`
 
 type rowScanner interface {
@@ -922,11 +971,13 @@ type rowScanner interface {
 
 func scanDeliveryPlan(row rowScanner) (DeliveryPlan, error) {
 	var value DeliveryPlan
+	var tourRunID, tourOwnerID, tourCase sql.NullString
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.CreativePackageID,
 		&value.CreativePackageHash, &value.CreativeVersionID, &value.Name, &value.Objective,
 		&value.BudgetCents, &value.StartAt, &value.EndAt, &value.Status, &value.Version,
-		&value.Platform, &value.Source, &value.Scenario, &value.CurrentVersionNumber,
+		&value.Platform, &value.Source, &value.Scenario, &tourRunID, &tourOwnerID, &tourCase, &value.CurrentVersionNumber,
 		&value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
+	value.TourRunID, value.TourOwnerID, value.TourCase = tourRunID.String, tourOwnerID.String, tourCase.String
 	return value, err
 }
 
@@ -937,14 +988,26 @@ func scanChangeSet(row rowScanner) (ChangeSet, error) {
 	var targetHash, recommendationID sql.NullString
 	var approvedBy sql.NullString
 	var approvedAt sql.NullTime
+	var rejectedBy, rejectionReason sql.NullString
+	var rejectedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.PlanID,
 		&value.PlanVersion, &value.Status, &value.RiskLevel, &notes, &target, &targetHash, &recommendationID, &approvedBy, &approvedAt,
+		&rejectedBy, &rejectedAt, &rejectionReason,
 		&value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return ChangeSet{}, err
 	}
 	if err := decodeChangeSetOptional(&value, notes, target, targetHash, recommendationID, approvedBy, approvedAt); err != nil {
 		return ChangeSet{}, err
+	}
+	if rejectedBy.Valid {
+		value.RejectedBy = rejectedBy.String
+	}
+	if rejectedAt.Valid {
+		value.RejectedAt = &rejectedAt.Time
+	}
+	if rejectionReason.Valid {
+		value.RejectionReason = rejectionReason.String
 	}
 	return value, nil
 }

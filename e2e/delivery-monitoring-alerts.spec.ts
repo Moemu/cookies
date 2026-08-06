@@ -2,31 +2,39 @@ import { expect, test, type APIRequestContext } from '@playwright/test'
 
 const projectId = 'project_investor_precision_evidence'
 const otherProjectId = 'project_local'
-const alertTypes = ['review_rejected', 'spend_spike', 'zero_conversion', 'cost_worsening'] as const
+const alertTypes = ['review_rejected', 'spend_spike', 'zero_conversion', 'cost_worsening', 'under_delivery', 'creative_fatigue', 'tracking_anomaly'] as const
 
 test('Delivery monitoring evaluates fixtures, preserves provenance, paginates, and resolves open alerts optimistically', async ({ request }) => {
-  await createMonitoringMetricSnapshot(request)
-  const normal = await evaluate(request, 'normal_day')
+  const executionId = await createMonitoringMetricSnapshot(request)
+  const normal = await evaluate(request, 'normal_day', executionId)
   expect(normal.status()).toBe(200)
-  expect(await normal.json()).toMatchObject({
-    items: [],
-    source: 'demo_fixture',
+  const normalBody = await normal.json() as AlertEvaluationResult
+  expect(normalBody).toMatchObject({
+    source: 'post_launch_simulator',
     is_simulated: true,
     scenario: 'normal_day',
   })
+  expect(normalBody.items.map(item => item.type)).toEqual(['cost_worsening'])
 
-  const anomalous = await evaluate(request, 'anomaly_day')
+  await runOutcomeSimulation(request, executionId, 'review_rejected', 'review-seed')
+  const anomalous = await evaluate(request, 'anomaly_day', executionId)
   expect(anomalous.status()).toBe(200)
   const anomaly = await anomalous.json() as AlertEvaluationResult
   expect(anomaly).toMatchObject({
-    source: 'demo_fixture',
+    source: 'post_launch_simulator',
     is_simulated: true,
     scenario: 'anomaly_day',
   })
   expect(anomaly.created_count + anomaly.reused_count).toBe(anomaly.items.length)
-  expect(anomaly.items.map(item => item.type).sort()).toEqual([...alertTypes].sort())
+  expect(anomaly.items.map(item => item.type)).toEqual(['review_rejected'])
 
-  for (const alert of anomaly.items) {
+  await runOutcomeSimulation(request, executionId, 'tracking_anomaly', 'tracking-seed')
+  const trackingEvaluation = await evaluate(request, 'normal_day', executionId)
+  expect(trackingEvaluation.status()).toBe(200)
+  const tracking = await trackingEvaluation.json() as AlertEvaluationResult
+  expect(tracking.items.map(item => item.type).sort()).toEqual(['cost_worsening', 'tracking_anomaly', 'zero_conversion'])
+
+  for (const alert of [...anomaly.items, ...tracking.items]) {
     expect(alert).toMatchObject({
       organization_id: expect.any(String),
       project_id: projectId,
@@ -34,44 +42,45 @@ test('Delivery monitoring evaluates fixtures, preserves provenance, paginates, a
       execution_id: expect.any(String),
       monitored_entity: { type: 'delivery_plan', id: alert.plan_id, advertiser_id: expect.any(String) },
       rule_id: expect.any(String),
-      rule_version: 'v1',
+      rule_version: 'v3',
       fingerprint: expect.any(String),
       status: 'open',
       version: expect.any(Number),
-      source: 'demo_fixture',
+      source: 'post_launch_simulator',
       is_simulated: true,
-      scenario: 'anomaly_day',
-      dataset_version: 'preroll-demo/v1',
+      simulation_run_id: expect.any(String),
+      scenario: alert.type === 'review_rejected' ? 'anomaly_day' : 'normal_day',
+      dataset_version: 'delivery-outcome-scenario/v1',
       fixture_version: expect.any(String),
-      owner: { id: expect.any(String), display_name: expect.any(String), source: expect.any(String) },
+      owner: { source: 'workflow_context' },
       evidence_refs: expect.arrayContaining([expect.any(String)]),
       freshness: { status: 'fresh', as_of: expect.any(String), evaluated_at: expect.any(String) },
     })
     expect(alert.window).toMatchObject({ start: expect.any(String), end: expect.any(String), timezone: expect.any(String), data_through: expect.any(String) })
     expect(alert.metric_definition).toMatchObject({ name: expect.any(String), unit: expect.any(String) })
   }
-  const byType = Object.fromEntries(anomaly.items.map(item => [item.type, item]))
-  expect(byType.spend_spike.metric_definition).toMatchObject({ observed_value: 60000, baseline_value: 20000, threshold: 30000 })
-  expect(byType.zero_conversion.metric_definition).toMatchObject({ observed_value: 0, numerator: 0, denominator: 400, threshold: 1 })
-  expect(byType.cost_worsening.metric_definition).toMatchObject({ observed_value: 60000, numerator: 60000, denominator: 1, baseline_value: 1000, threshold: 1500 })
+  const byType = Object.fromEntries(tracking.items.map(item => [item.type, item]))
+  expect(byType.zero_conversion.metric_definition).toMatchObject({ observed_value: 0, numerator: 0, threshold: 1 })
+  expect(byType.cost_worsening.metric_definition.observed_value).toBeGreaterThan(byType.cost_worsening.metric_definition.baseline_value!)
 
-  const firstPage = await request.get(alertsURL('?status=open&fixture=anomaly_day&limit=2'))
+  const firstPage = await request.get(alertsURL('?status=open&fixture=normal_day&limit=2'))
   expect(firstPage.status()).toBe(200)
   const pageOne = await firstPage.json() as AlertList
-  expect(pageOne).toMatchObject({ source: 'demo_fixture', is_simulated: true })
+  expect(pageOne).toMatchObject({ source: 'post_launch_simulator', is_simulated: true })
   expect(pageOne.items).toHaveLength(2)
   expect(pageOne.next_cursor).toEqual(expect.any(String))
-  const secondPage = await request.get(alertsURL(`?status=open&fixture=anomaly_day&limit=2&cursor=${encodeURIComponent(pageOne.next_cursor!)}`))
+  const secondPage = await request.get(alertsURL(`?status=open&fixture=normal_day&limit=2&cursor=${encodeURIComponent(pageOne.next_cursor!)}`))
   expect(secondPage.status()).toBe(200)
   const pageTwo = await secondPage.json() as AlertList
-  expect(pageTwo.items).toHaveLength(2)
-  expect(new Set([...pageOne.items, ...pageTwo.items].map(item => item.id)).size).toBe(4)
+  expect(pageTwo.items.length).toBeGreaterThan(0)
+  expect(pageTwo.items.length).toBeLessThanOrEqual(2)
+  expect(new Set([...pageOne.items, ...pageTwo.items].map(item => item.id)).size).toBe(pageOne.items.length + pageTwo.items.length)
 
-  const typed = await request.get(alertsURL('?type=spend_spike&severity=medium&limit=10'))
+  const typed = await request.get(alertsURL('?type=tracking_anomaly&severity=critical&limit=10'))
   expect(typed.status()).toBe(200)
   const typedBody = await typed.json() as AlertList
   expect(typedBody.items).toEqual(expect.arrayContaining([
-    expect.objectContaining({ type: 'spend_spike', severity: 'medium' }),
+    expect.objectContaining({ type: 'tracking_anomaly', severity: 'critical' }),
   ]))
 
   const toAcknowledge = anomaly.items[0]
@@ -93,24 +102,24 @@ test('Delivery monitoring evaluates fixtures, preserves provenance, paginates, a
   expect(staleUpdate.status()).toBe(409)
   expect(await staleUpdate.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } })
 
-  const toDismiss = anomaly.items[1]
+  const toDismiss = tracking.items[0]
   const dismissed = await update(request, toDismiss.id, 'dismiss', toDismiss.version)
   expect(dismissed.status()).toBe(200)
   expect(await dismissed.json()).toMatchObject({ id: toDismiss.id, status: 'dismissed' })
 
   for (const fixture of ['stale_data', 'insufficient_data'] as const) {
-    const response = await evaluate(request, fixture)
+    const response = await evaluate(request, fixture, executionId)
     expect(response.status()).toBe(200)
     const result = await response.json() as AlertEvaluationResult
-    expect(result).toMatchObject({ source: 'demo_fixture', is_simulated: true, scenario: fixture })
+    expect(result).toMatchObject({ source: 'post_launch_simulator', is_simulated: true, scenario: fixture })
     // Freshness-only fixtures never manufacture a fifth alert class. They leave
     // the four alert classifications reserved for actionable anomaly evidence.
     expect(result.items).toEqual([])
   }
 })
 
-function evaluate(request: APIRequestContext, fixture: MonitoringFixture) {
-  return request.post(`/api/delivery/v1/projects/${projectId}/alerts:evaluate`, { data: { fixture } })
+function evaluate(request: APIRequestContext, fixture: MonitoringFixture, executionId?: string) {
+  return request.post(`/api/delivery/v1/projects/${projectId}/alerts:evaluate`, { data: { fixture, execution_id: executionId } })
 }
 
 function update(request: APIRequestContext, alertId: string, action: 'acknowledge' | 'dismiss', expectedVersion: number) {
@@ -131,8 +140,9 @@ async function createMonitoringMetricSnapshot(request: APIRequestContext) {
       budget: { total_minor: 300000, currency: 'CNY' },
       schedule: { start_at: '2026-08-01T00:00:00Z', end_at: '2026-08-31T00:00:00Z', timezone: 'Asia/Shanghai' },
       tracking: { landing_page: 'https://demo.cookies.local', pixel_id: `PX-${suffix}`, conversion_event: 'lead_submit' },
-      creative_references: [{ asset_id: `asset-${suffix}`, version: 1, confirmed: true }],
-      source_strategy_version: 'strategy-v1',
+      creative_references: [{ asset_id: 'asset_demo_investor_creative_video', version: 1, confirmed: true }],
+      strategy_reference: { task_id: 'task_demo_precision_strategy', version: 1 },
+      source_strategy_version: 'task_demo_precision_strategy@v1',
     },
   })
   expect(planResponse.status()).toBe(201)
@@ -153,10 +163,16 @@ async function createMonitoringMetricSnapshot(request: APIRequestContext) {
   })
   expect(execution.status()).toBe(201)
   const executionBody = await execution.json() as { execution: { id: string } }
-  const metric = await request.post(`/api/delivery/v1/projects/${projectId}/executions/${executionBody.execution.id}/metric-snapshots`, {
-    data: { dataset_version: 'preroll-demo/v1' },
+  await runOutcomeSimulation(request, executionBody.execution.id, 'cost_pressure', suffix)
+  return executionBody.execution.id
+}
+
+async function runOutcomeSimulation(request: APIRequestContext, executionId: string, scenario: string, stableSeed: string) {
+  const response = await request.post(`/api/delivery/v1/projects/${projectId}/executions/${executionId}/simulation-runs`, {
+    data: { scenario, stable_seed: stableSeed },
   })
-  expect(metric.status()).toBe(201)
+  expect([200, 201]).toContain(response.status())
+  return response
 }
 
 type MonitoringFixture = 'normal_day' | 'anomaly_day' | 'stale_data' | 'insufficient_data'

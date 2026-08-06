@@ -165,7 +165,11 @@ func TestAlertsAreDeterministicAndUseCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := service.Repository.(*memoryRepository)
-	repo.metrics = append(repo.metrics, DeliveryMetricSnapshot{ID: "metric_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution_1", PlanID: plan.ID, DatasetVersion: DemoMetricDatasetVersion, FixtureVersion: "v1", WindowSequence: 1, WindowStart: plan.StartAt, WindowEnd: plan.EndAt, DataThrough: plan.EndAt})
+	repo.simulations = append(repo.simulations, OutcomeSimulationRun{ID: "simulation_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution_1", Scenario: OutcomeScenarioReviewRejected, Events: []OutcomeSimulationEvent{{Type: "review_rejected"}}})
+	repo.metrics = append(repo.metrics,
+		DeliveryMetricSnapshot{ID: "metric_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution_1", SimulationRunID: "simulation_1", PlanID: plan.ID, Source: MetricSourceDemoFixture, DatasetVersion: DemoMetricDatasetVersion, FixtureVersion: "deterministic-v1/test", WindowSequence: 1, WindowStart: plan.StartAt, WindowEnd: plan.StartAt.Add(24 * time.Hour), DataThrough: plan.StartAt.Add(24 * time.Hour), RawMetrics: RawMetrics{Impressions: 10000, Clicks: 500, Conversions: 20, SpendCents: 20000}},
+		DeliveryMetricSnapshot{ID: "metric_2", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution_1", SimulationRunID: "simulation_1", PlanID: plan.ID, Source: MetricSourceDemoFixture, DatasetVersion: DemoMetricDatasetVersion, FixtureVersion: "deterministic-v1/test", WindowSequence: 2, WindowStart: plan.StartAt.Add(24 * time.Hour), WindowEnd: plan.StartAt.Add(48 * time.Hour), DataThrough: plan.StartAt.Add(48 * time.Hour), RawMetrics: RawMetrics{Impressions: 10000, Clicks: 400, Conversions: 0, SpendCents: 60000}},
+	)
 	response, err := service.EvaluateAlerts(context.Background(), actor, "project_a", EvaluateAlertsRequest{Fixture: AlertScenarioAnomalyDay})
 	if err != nil || response.CreatedCount != 4 || len(response.Items) != 4 {
 		t.Fatalf("evaluate=%#v err=%v", response, err)
@@ -182,6 +186,11 @@ func TestAlertsAreDeterministicAndUseCAS(t *testing.T) {
 	}
 	if got := *byType[AlertCostWorsening].MetricDefinition.ObservedValue; got != 60000 {
 		t.Fatalf("cost worsening must use its safe zero-conversion denominator, got %v", got)
+	}
+	for _, alert := range response.Items {
+		if len(alert.EvidenceRefs) < 3 || alert.ExecutionID != "execution_1" {
+			t.Fatalf("alert must retain the exact execution and metric chain: %#v", alert)
+		}
 	}
 	replayed, err := service.EvaluateAlerts(context.Background(), actor, "project_a", EvaluateAlertsRequest{Fixture: AlertScenarioAnomalyDay})
 	if err != nil || replayed.ReusedCount != 4 {
@@ -458,6 +467,49 @@ func TestApprovalRequiresTrustedScopeAndProjectAndCannotBeOverwritten(t *testing
 	repository := service.Repository.(*memoryRepository)
 	if got := len(repository.approvals[repositoryKey(actor.OrganizationID, "project_a", changeSet.ID)]); got != 1 {
 		t.Fatalf("approval count = %d, want immutable singleton", got)
+	}
+}
+
+func TestRejectChangeSetPersistsReasonAndPreventsApproval(t *testing.T) {
+	service, actor, _ := newTestServiceClock()
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{PlanDraft: goldenDraft()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err := service.CreateChangeSet(context.Background(), actor, "project_a", plan.ID, plan.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err = service.Preflight(context.Background(), actor, "project_a", changeSet.ID, changeSet.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.RejectChangeSet(context.Background(), actor, "project_a", changeSet.ID, RejectChangeSetRequest{
+		ExpectedVersion: changeSet.Version - 1,
+		Reason:          "需要补充素材授权",
+	}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale rejection error = %v", err)
+	}
+	rejected, err := service.RejectChangeSet(context.Background(), actor, "project_a", changeSet.ID, RejectChangeSetRequest{
+		ExpectedVersion: changeSet.Version,
+		Reason:          "  需要补充素材授权  ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Status != ChangeSetRejected || rejected.RejectionReason != "需要补充素材授权" || rejected.RejectedBy != actor.Principal.ID || rejected.RejectedAt == nil {
+		t.Fatalf("unexpected rejected change request: %#v", rejected)
+	}
+	stored, err := service.GetChangeSet(context.Background(), actor, "project_a", changeSet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RejectionReason != rejected.RejectionReason || stored.RejectedAt == nil {
+		t.Fatalf("rejection was not durable: %#v", stored)
+	}
+	if _, err := service.Approve(context.Background(), actor, "project_a", changeSet.ID, rejected.Version); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("approval after rejection error = %v", err)
 	}
 }
 
@@ -821,12 +873,13 @@ func (a *observingAdapter) ExecuteStep(ctx context.Context, request PlatformStep
 }
 
 type memoryRepository struct {
-	plans      map[string]DeliveryPlan
-	changeSets map[string]ChangeSet
-	approvals  map[string][]DeliveryApproval
-	executions []ExecutionResult
-	metrics    []DeliveryMetricSnapshot
-	alerts     map[string]DeliveryAlert
+	plans       map[string]DeliveryPlan
+	changeSets  map[string]ChangeSet
+	approvals   map[string][]DeliveryApproval
+	executions  []ExecutionResult
+	metrics     []DeliveryMetricSnapshot
+	simulations []OutcomeSimulationRun
+	alerts      map[string]DeliveryAlert
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -971,6 +1024,25 @@ func (r *memoryRepository) ApproveChangeSet(ctx context.Context, changeSet Chang
 	approvedAt := approval.ApprovedAt
 	stored.ApprovedAt = &approvedAt
 	r.changeSets[key] = stored
+	return stored, nil
+}
+
+func (r *memoryRepository) RejectChangeSet(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, actorID, reason string, now time.Time) (ChangeSet, error) {
+	stored, err := r.GetChangeSet(ctx, organizationID, projectID, id)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if stored.Status != ChangeSetPreflightPassed {
+		return ChangeSet{}, ErrInvalidState
+	}
+	if stored.Version != expectedVersion {
+		return ChangeSet{}, ErrVersionConflict
+	}
+	stored.Status, stored.Version, stored.UpdatedAt = ChangeSetRejected, stored.Version+1, now
+	stored.RejectedBy, stored.RejectionReason = actorID, reason
+	rejectedAt := now
+	stored.RejectedAt = &rejectedAt
+	r.changeSets[repositoryKey(organizationID, projectID, id)] = stored
 	return stored, nil
 }
 
@@ -1131,6 +1203,37 @@ func (r *memoryRepository) ListProjectMetricSnapshots(_ context.Context, organiz
 	}
 	return values, nil
 }
+func (r *memoryRepository) CreateOrGetOutcomeSimulation(_ context.Context, run OutcomeSimulationRun, metrics []DeliveryMetricSnapshot) (OutcomeSimulationRun, []DeliveryMetricSnapshot, bool, error) {
+	for _, existing := range r.simulations {
+		if existing.OrganizationID == run.OrganizationID && existing.ProjectID == run.ProjectID && existing.Fingerprint == run.Fingerprint {
+			stored := make([]DeliveryMetricSnapshot, 0)
+			for _, metric := range r.metrics {
+				if metric.SimulationRunID == existing.ID {
+					stored = append(stored, metric)
+				}
+			}
+			return existing, stored, true, nil
+		}
+	}
+	r.simulations = append(r.simulations, run)
+	r.metrics = append(r.metrics, metrics...)
+	return run, metrics, false, nil
+}
+func (r *memoryRepository) GetLatestOutcomeSimulation(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string) (OutcomeSimulationRun, []DeliveryMetricSnapshot, error) {
+	for index := len(r.simulations) - 1; index >= 0; index-- {
+		run := r.simulations[index]
+		if run.OrganizationID == organizationID && run.ProjectID == projectID && run.ExecutionID == executionID {
+			metrics := make([]DeliveryMetricSnapshot, 0)
+			for _, metric := range r.metrics {
+				if metric.SimulationRunID == run.ID {
+					metrics = append(metrics, metric)
+				}
+			}
+			return run, metrics, nil
+		}
+	}
+	return OutcomeSimulationRun{}, nil, ErrNotFound
+}
 func (r *memoryRepository) UpsertAlert(_ context.Context, value DeliveryAlert) (DeliveryAlert, error) {
 	if r.alerts == nil {
 		r.alerts = map[string]DeliveryAlert{}
@@ -1146,7 +1249,7 @@ func (r *memoryRepository) UpsertAlert(_ context.Context, value DeliveryAlert) (
 func (r *memoryRepository) ListAlerts(_ context.Context, org contract.OrganizationID, project contract.ProjectID, f AlertFilter) ([]DeliveryAlert, error) {
 	values := make([]DeliveryAlert, 0)
 	for _, v := range r.alerts {
-		if v.OrganizationID == org && v.ProjectID == project && (f.Status == "" || v.Status == f.Status) && (f.Type == "" || v.Type == f.Type) && (f.Severity == "" || v.Severity == f.Severity) && (f.Fixture == "" || v.Scenario == f.Fixture) {
+		if v.OrganizationID == org && v.ProjectID == project && (f.PlanID == "" || v.PlanID == f.PlanID) && (f.ExecutionID == "" || v.ExecutionID == f.ExecutionID) && (f.Status == "" || v.Status == f.Status) && (f.Type == "" || v.Type == f.Type) && (f.Severity == "" || v.Severity == f.Severity) && (f.Fixture == "" || v.Scenario == f.Fixture) {
 			values = append(values, v)
 		}
 	}

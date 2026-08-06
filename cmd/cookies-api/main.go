@@ -23,6 +23,7 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
 	"github.com/shikanon/cookies/internal/integrations/productsource"
+	"github.com/shikanon/cookies/internal/integrations/projectdelivery"
 	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
@@ -355,6 +356,7 @@ func main() {
 		Repository: delivery.MySQLRepository{DB: db},
 		Projects:   projectService,
 		Packages:   creativedelivery.Reader{Service: creativeService},
+		References: projectdelivery.Reader{Service: projectService},
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})

@@ -49,6 +49,28 @@ test('delivery execution client reloads authoritative list and detail records wi
   assert.deepEqual(detail.evidence.references, [])
 })
 
+test('delivery execution client runs and reads the same deterministic outcome simulation', async t => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init })
+    return jsonResponse(sampleOutcomeSimulation())
+  }
+  t.after(() => { globalThis.fetch = originalFetch })
+
+  const created = await deliveryExecutionApi.runOutcomeSimulation('project_1', 'execution_1', 'cost_pressure', 'stable-1')
+  const restored = await deliveryExecutionApi.getLatestOutcomeSimulation('project_1', 'execution_1')
+
+  assert.equal(calls[0].url, '/api/delivery/v1/projects/project_1/executions/execution_1/simulation-runs')
+  assert.equal(calls[0].init?.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].init?.body as string), { scenario: 'cost_pressure', stable_seed: 'stable-1' })
+  assert.equal(calls[1].url, '/api/delivery/v1/projects/project_1/executions/execution_1/simulation-run')
+  assert.equal(created.run.modelVersion, 'delivery-outcome-scenario/v1')
+  assert.equal(created.run.parameters.factors[0].valueBP, 10000)
+  assert.equal(created.metricSnapshots[0].conversions, 12)
+  assert.equal(restored.run.id, created.run.id)
+})
+
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
 }
@@ -76,5 +98,30 @@ function sampleExecutionRecord() {
       id: 'evidence_1', execution_id: 'execution_1', summary: 'redacted mock evidence', source: 'mock', scenario: 'partial',
       references: ['mock://execution/partial'],
     },
+  }
+}
+
+function sampleOutcomeSimulation() {
+  return {
+    run: {
+      id: 'simulation_1', execution_id: 'execution_1', plan_id: 'plan_1', plan_version: 2,
+      model_version: 'delivery-outcome-scenario/v1', scenario: 'cost_pressure', stable_seed: 'stable-1', input_hash: 'input-hash', status: 'completed',
+      input: {
+        budget: { total_minor: 250000 }, schedule: { start_at: now, end_at: now }, optimization_goal: 'conversion', bid_minor: 2500,
+        audience: 'high-intent', strategy_reference: { version: 2 }, creative_features: [{ asset_id: 'asset_1' }],
+      },
+      parameters: {
+        base_cpm_minor: 2800, base_ctr_bp: 480, base_cvr_bp: 520, daily_budget_minor: 25000,
+        factors: [{ key: 'budget', value_bp: 10000, explanation: 'budget changes scale', evidence: ['plan://budget'] }],
+      },
+      events: [{ type: 'cost_worsening', severity: 'high', window_sequence: 3, explanation: 'CPA worsened', evidence: ['simulation://metric-window/1'] }],
+      evidence: ['simulation://execution/execution_1'], completed_at: now,
+    },
+    metric_snapshots: [{
+      id: 'metric_1', simulation_run_id: 'simulation_1', window_sequence: 1, window_start: now, window_end: now,
+      raw_metrics: { impressions: 1000, clicks: 50, conversions: 12, spend_cents: 12000, revenue_cents: 24000 },
+      calculation_basis: { formula: 'spend to outcomes', spend_multiplier_bp: 7000, reach_multiplier_bp: 10000, ctr_multiplier_bp: 10000, cvr_multiplier_bp: 10000, tracking_rate_bp: 10000 },
+    }],
+    replay: false,
   }
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"sort"
 	"strings"
 	"time"
 )
@@ -45,6 +46,7 @@ type DeliveryRecommendation struct {
 	ProjectID           contract.ProjectID      `json:"project_id"`
 	PlanID              string                  `json:"plan_id"`
 	PlanVersion         int                     `json:"plan_version"`
+	SimulationRunID     string                  `json:"simulation_run_id"`
 	Fingerprint         string                  `json:"fingerprint"`
 	BaseSnapshotHash    string                  `json:"base_snapshot_hash"`
 	BaseSnapshot        *ThreeTierConfiguration `json:"base_snapshot"`
@@ -71,19 +73,21 @@ type RecommendationAcceptance struct {
 	ChangeSet      ChangeSet              `json:"change_set"`
 }
 type ManualActionPackage struct {
-	ID                 string                    `json:"id"`
-	OrganizationID     contract.OrganizationID   `json:"organization_id"`
-	ProjectID          contract.ProjectID        `json:"project_id"`
-	ChangeSetID        string                    `json:"change_set_id"`
-	TargetSnapshotHash string                    `json:"target_snapshot_hash"`
-	ContentHash        string                    `json:"content_hash"`
-	Instructions       []ManualActionInstruction `json:"instructions"`
-	ForbiddenActions   []string                  `json:"forbidden_actions"`
-	Evidence           []string                  `json:"evidence"`
-	Provenance         string                    `json:"provenance"`
-	Source             Source                    `json:"source"`
-	Scenario           string                    `json:"scenario"`
-	CreatedAt          time.Time                 `json:"created_at"`
+	ID                   string                    `json:"id"`
+	OrganizationID       contract.OrganizationID   `json:"organization_id"`
+	ProjectID            contract.ProjectID        `json:"project_id"`
+	ChangeSetID          string                    `json:"change_set_id"`
+	TargetSnapshotHash   string                    `json:"target_snapshot_hash"`
+	ContentHash          string                    `json:"content_hash"`
+	Instructions         []ManualActionInstruction `json:"instructions"`
+	ForbiddenActions     []string                  `json:"forbidden_actions"`
+	Evidence             []string                  `json:"evidence"`
+	Provenance           string                    `json:"provenance"`
+	OptimizedPlanVersion int                       `json:"optimized_plan_version"`
+	OptimizedPlanHash    string                    `json:"optimized_plan_hash"`
+	Source               Source                    `json:"source"`
+	Scenario             string                    `json:"scenario"`
+	CreatedAt            time.Time                 `json:"created_at"`
 }
 type ManualActionInstruction struct {
 	Layer                string         `json:"layer"`
@@ -253,23 +257,83 @@ func (s Service) GenerateRecommendation(ctx context.Context, actor contract.Acto
 	if p.Version != int64(expectedVersion) || p.CurrentVersion.ThreeTierConfiguration == nil {
 		return DeliveryRecommendation{}, ErrVersionConflict
 	}
+	executions, err := s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, 100)
+	if err != nil {
+		return DeliveryRecommendation{}, err
+	}
+	var sourceExecution *ExecutionResult
+	for index := range executions {
+		candidate := &executions[index]
+		if candidate.ChangeSet.PlanID == p.ID && candidate.Execution.Status == ExecutionSucceeded {
+			sourceExecution = candidate
+			break
+		}
+	}
+	if sourceExecution == nil {
+		return DeliveryRecommendation{}, ErrInvalidState
+	}
+	simulationRepository, err := s.outcomeSimulations()
+	if err != nil {
+		return DeliveryRecommendation{}, err
+	}
+	simulationRun, _, err := simulationRepository.GetLatestOutcomeSimulation(ctx, actor.OrganizationID, projectID, sourceExecution.Execution.ID)
+	if err != nil {
+		return DeliveryRecommendation{}, ErrInvalidState
+	}
+	metrics, err := s.Repository.ListMetricSnapshots(ctx, actor.OrganizationID, projectID, sourceExecution.Execution.ID, 100)
+	if err != nil {
+		return DeliveryRecommendation{}, err
+	}
+	simulationMetrics := make([]DeliveryMetricSnapshot, 0, len(metrics))
+	for _, metric := range metrics {
+		if metric.SimulationRunID == simulationRun.ID {
+			simulationMetrics = append(simulationMetrics, metric)
+		}
+	}
+	metrics = simulationMetrics
+	if len(metrics) < 2 {
+		return DeliveryRecommendation{}, ErrInvalidState
+	}
+	sort.Slice(metrics, func(i, j int) bool { return metrics[i].WindowSequence < metrics[j].WindowSequence })
+	baseline, current := metrics[0], metrics[len(metrics)-1]
+	alerts, err := s.Repository.ListAlerts(ctx, actor.OrganizationID, projectID, AlertFilter{PlanID: p.ID, ExecutionID: sourceExecution.Execution.ID, Limit: 100})
+	if err != nil {
+		return DeliveryRecommendation{}, err
+	}
+	relevantAlerts := make([]DeliveryAlert, 0, len(alerts))
+	for _, alert := range alerts {
+		if alert.PlanID == p.ID && alert.ExecutionID == sourceExecution.Execution.ID && alert.SimulationRunID == simulationRun.ID {
+			relevantAlerts = append(relevantAlerts, alert)
+		}
+	}
+	if len(relevantAlerts) == 0 {
+		return DeliveryRecommendation{}, ErrInvalidState
+	}
 	target := cloneThreeTierConfiguration(p.CurrentVersion.ThreeTierConfiguration)
-	// Deterministic, bounded recommendation: reduce a mock-only editable budget;
-	// it never expands spend or triggers a platform operation.
+	baselineCPA := baseline.RawMetrics.SpendCents / maxInt64(1, baseline.RawMetrics.Conversions)
+	currentCPA := current.RawMetrics.SpendCents / maxInt64(1, current.RawMetrics.Conversions)
+	cpaRatioBP := currentCPA * 10000 / maxInt64(1, baselineCPA)
+	reductionPercent := clampInt64((cpaRatioBP-10000)/1000, 5, 20)
+	// Deterministic and bounded: the recommendation magnitude is derived from
+	// the same simulation run's measured CPA degradation.
 	budget := findThreeTierField(target, "budget")
 	if budget == nil {
 		return DeliveryRecommendation{}, ErrInvalidState
 	}
 	switch amount := budget.Effective.Value.(type) {
 	case int64:
-		budget.Effective.Value = amount * 9 / 10
+		budget.Effective.Value = amount * (100 - reductionPercent) / 100
 	case float64:
-		budget.Effective.Value = amount * 0.9
+		budget.Effective.Value = amount * float64(100-reductionPercent) / 100
 	case int:
-		budget.Effective.Value = amount * 9 / 10
+		budget.Effective.Value = int(int64(amount) * (100 - reductionPercent) / 100)
 	}
-	budget.EffectiveSource, budget.Risk = "recommendation", "mock_budget_reduction_only"
-	budget.RiskRefs = append(budget.RiskRefs, "risk://mock-budget-reduction-only")
+	budget.EffectiveSource, budget.Risk = "recommendation", "bounded_budget_reduction"
+	evidence := []string{"simulation://execution/" + sourceExecution.Execution.ID, "simulation://run/" + simulationRun.ID, "simulation://metric/" + baseline.ID, "simulation://metric/" + current.ID}
+	for _, alert := range relevantAlerts {
+		evidence = append(evidence, "simulation://alert/"+alert.ID)
+	}
+	budget.RiskRefs = append(budget.RiskRefs, evidence...)
 	baseHash, err := snapshotHash(p.CurrentVersion.ThreeTierConfiguration)
 	if err != nil {
 		return DeliveryRecommendation{}, err
@@ -279,10 +343,11 @@ func (s Service) GenerateRecommendation(ctx context.Context, actor contract.Acto
 		return DeliveryRecommendation{}, err
 	}
 	fp, err := contract.CanonicalJSONHash(struct {
-		Plan    string `json:"plan"`
-		Version int    `json:"version"`
-		Hash    string `json:"hash"`
-	}{p.ID, expectedVersion, h})
+		Plan     string   `json:"plan"`
+		Version  int      `json:"version"`
+		Hash     string   `json:"hash"`
+		Evidence []string `json:"evidence"`
+	}{p.ID, expectedVersion, h, evidence})
 	if err != nil {
 		return DeliveryRecommendation{}, err
 	}
@@ -292,7 +357,7 @@ func (s Service) GenerateRecommendation(ctx context.Context, actor contract.Acto
 	}
 	now := s.now()
 	cooldown := now.Add(24 * time.Hour)
-	return r.CreateRecommendation(ctx, DeliveryRecommendation{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, PlanID: p.ID, PlanVersion: expectedVersion, Fingerprint: fp, BaseSnapshotHash: baseHash, BaseSnapshot: cloneThreeTierConfiguration(p.CurrentVersion.ThreeTierConfiguration), TargetSnapshot: target, TargetSnapshotHash: h, Evidence: append([]string(nil), target.Evidence...), Action: "reduce_mock_budget", Impact: "reduces only the mock budget by 10%", Risks: []string{"mock_budget_reduction_only"}, Observation: "observe mock conversion cost for 24 hours after manual application", CooldownUntil: &cooldown, Provenance: "plan_version", Status: RecommendationProposed, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now})
+	return r.CreateRecommendation(ctx, DeliveryRecommendation{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, PlanID: p.ID, PlanVersion: expectedVersion, SimulationRunID: simulationRun.ID, Fingerprint: fp, BaseSnapshotHash: baseHash, BaseSnapshot: cloneThreeTierConfiguration(p.CurrentVersion.ThreeTierConfiguration), TargetSnapshot: target, TargetSnapshotHash: h, Evidence: evidence, Action: fmt.Sprintf("reduce_budget_%d_percent", reductionPercent), Impact: fmt.Sprintf("第二次人工批准后，将计划预算下调 %d%%", reductionPercent), Risks: []string{"需验证下调后转化量是否恢复", "不得自动应用"}, Observation: fmt.Sprintf("投后情景模拟的 CPA 从 %d 分上升到 %d 分；调整幅度由 %.2f 倍恶化程度推导，建议观察下一完整窗口", baselineCPA, currentCPA, float64(cpaRatioBP)/10000), CooldownUntil: &cooldown, Provenance: OutcomeSimulationModelVersion, Status: RecommendationProposed, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now})
 }
 func (s Service) ListRecommendations(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]DeliveryRecommendation, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
@@ -344,6 +409,15 @@ func (s Service) AcceptRecommendation(ctx context.Context, actor contract.ActorC
 	if rec.Status == RecommendationProposed && rec.Version != expected {
 		return RecommendationAcceptance{}, false, ErrVersionConflict
 	}
+	if rec.Status == RecommendationProposed {
+		plan, planErr := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, rec.PlanID)
+		if planErr != nil {
+			return RecommendationAcceptance{}, false, planErr
+		}
+		if !recommendationMatchesCurrentPlan(rec, plan) {
+			return RecommendationAcceptance{}, false, ErrVersionConflict
+		}
+	}
 	baseHash, err := snapshotHash(rec.BaseSnapshot)
 	if err != nil || baseHash != rec.BaseSnapshotHash {
 		return RecommendationAcceptance{}, false, ErrApprovalContentMismatch
@@ -374,6 +448,10 @@ func (s Service) AcceptRecommendation(ctx context.Context, actor contract.ActorC
 		return RecommendationAcceptance{}, false, err
 	}
 	return accepted, replay, nil
+}
+
+func recommendationMatchesCurrentPlan(recommendation DeliveryRecommendation, plan DeliveryPlan) bool {
+	return recommendation.PlanID == plan.ID && recommendation.PlanVersion == plan.CurrentVersionNumber
 }
 func (s Service) RejectRecommendation(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, expected int64) (DeliveryRecommendation, error) {
 	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
@@ -409,18 +487,28 @@ func (s Service) CompileManualActionPackage(ctx context.Context, actor contract.
 	if cs.Version != expectedVersion {
 		return ManualActionPackage{}, false, ErrVersionConflict
 	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, cs.PlanID)
+	if err != nil {
+		return ManualActionPackage{}, false, err
+	}
+	optimizedVersion, alreadyMaterialized, err := optimizedVersionFromChangeSet(plan, cs, actor.Principal, s.now())
+	if err != nil {
+		return ManualActionPackage{}, false, err
+	}
 	instructions := manualInstructions(cs.TargetSnapshot)
 	forbiddenActions := []string{"submit", "enable", "budget_expansion", "credentials", "unknown_pages", "platform_api_call", "automatic_execution"}
 	evidence := append([]string(nil), cs.TargetSnapshot.Evidence...)
 	payload := struct {
-		TargetSnapshotHash string                    `json:"target_snapshot_hash"`
-		Instructions       []ManualActionInstruction `json:"instructions"`
-		ForbiddenActions   []string                  `json:"forbidden_actions"`
-		Evidence           []string                  `json:"evidence"`
-		Provenance         string                    `json:"provenance"`
-		Source             Source                    `json:"source"`
-		Scenario           string                    `json:"scenario"`
-	}{cs.TargetSnapshotHash, instructions, forbiddenActions, evidence, "approved_change_set", SourceMock, "manual_action_package"}
+		TargetSnapshotHash   string                    `json:"target_snapshot_hash"`
+		Instructions         []ManualActionInstruction `json:"instructions"`
+		ForbiddenActions     []string                  `json:"forbidden_actions"`
+		Evidence             []string                  `json:"evidence"`
+		Provenance           string                    `json:"provenance"`
+		OptimizedPlanVersion int                       `json:"optimized_plan_version"`
+		OptimizedPlanHash    string                    `json:"optimized_plan_hash"`
+		Source               Source                    `json:"source"`
+		Scenario             string                    `json:"scenario"`
+	}{cs.TargetSnapshotHash, instructions, forbiddenActions, evidence, "approved_change_set", optimizedVersion.VersionNumber, optimizedVersion.CanonicalHash, SourceMock, "manual_action_package"}
 	hash, err := contract.CanonicalJSONHash(payload)
 	if err != nil {
 		return ManualActionPackage{}, false, err
@@ -429,7 +517,45 @@ func (s Service) CompileManualActionPackage(ctx context.Context, actor contract.
 	if err != nil {
 		return ManualActionPackage{}, false, err
 	}
-	return r.CreateOrGetManualActionPackage(ctx, ManualActionPackage{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, ChangeSetID: cs.ID, TargetSnapshotHash: cs.TargetSnapshotHash, ContentHash: hash, Instructions: instructions, ForbiddenActions: forbiddenActions, Evidence: evidence, Provenance: "approved_change_set", Source: SourceMock, Scenario: "manual_action_package", CreatedAt: s.now()})
+	packageValue, replay, err := r.CreateOrGetManualActionPackage(ctx, ManualActionPackage{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, ChangeSetID: cs.ID, TargetSnapshotHash: cs.TargetSnapshotHash, ContentHash: hash, Instructions: instructions, ForbiddenActions: forbiddenActions, Evidence: evidence, Provenance: "approved_change_set", OptimizedPlanVersion: optimizedVersion.VersionNumber, OptimizedPlanHash: optimizedVersion.CanonicalHash, Source: SourceMock, Scenario: "manual_action_package", CreatedAt: s.now()})
+	if err != nil {
+		return ManualActionPackage{}, false, err
+	}
+	if !alreadyMaterialized {
+		if _, err = s.Repository.UpdatePlan(ctx, actor.OrganizationID, projectID, plan.ID, plan.CurrentVersionNumber, optimizedVersion); err != nil {
+			return ManualActionPackage{}, false, err
+		}
+	}
+	packageValue.OptimizedPlanVersion = optimizedVersion.VersionNumber
+	packageValue.OptimizedPlanHash = optimizedVersion.CanonicalHash
+	return packageValue, replay, nil
+}
+
+func optimizedVersionFromChangeSet(plan DeliveryPlan, changeSet ChangeSet, actor contract.Principal, now time.Time) (DeliveryPlanVersion, bool, error) {
+	currentHash, err := snapshotHash(plan.CurrentVersion.ThreeTierConfiguration)
+	if err != nil {
+		return DeliveryPlanVersion{}, false, err
+	}
+	if currentHash == changeSet.TargetSnapshotHash {
+		return plan.CurrentVersion, true, nil
+	}
+	if int64(plan.CurrentVersionNumber) != changeSet.PlanVersion {
+		return DeliveryPlanVersion{}, false, ErrStalePlanVersion
+	}
+	version := cloneVersion(plan.CurrentVersion)
+	version.VersionNumber = plan.CurrentVersionNumber + 1
+	version.ThreeTierConfiguration = cloneThreeTierConfiguration(changeSet.TargetSnapshot)
+	version.Scenario = Scenario(changeSet.TargetSnapshot.Scenario)
+	version.CreatedBy = actor
+	version.CreatedAt = now
+	if budget := findThreeTierField(version.ThreeTierConfiguration, "budget"); budget != nil {
+		version.Budget.TotalMinor = numericMinor(budget.Effective.Value, version.Budget.TotalMinor)
+	}
+	version.CanonicalHash, err = PlanCanonicalHash(version)
+	if err != nil {
+		return DeliveryPlanVersion{}, false, err
+	}
+	return version, false, nil
 }
 func (s Service) GetManualActionPackage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string) (ManualActionPackage, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
@@ -442,7 +568,26 @@ func (s Service) GetManualActionPackage(ctx context.Context, actor contract.Acto
 	if err != nil {
 		return ManualActionPackage{}, err
 	}
-	return r.GetManualActionPackage(ctx, actor.OrganizationID, projectID, changeSetID)
+	value, err := r.GetManualActionPackage(ctx, actor.OrganizationID, projectID, changeSetID)
+	if err != nil || value.OptimizedPlanVersion > 0 {
+		return value, err
+	}
+	changeSet, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
+	if err != nil {
+		return ManualActionPackage{}, err
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, changeSet.PlanID)
+	if err != nil {
+		return ManualActionPackage{}, err
+	}
+	if currentHash, hashErr := snapshotHash(plan.CurrentVersion.ThreeTierConfiguration); hashErr == nil && currentHash == changeSet.TargetSnapshotHash {
+		value.OptimizedPlanVersion = plan.CurrentVersionNumber
+		value.OptimizedPlanHash = plan.CurrentVersion.CanonicalHash
+	} else if optimized, _, versionErr := optimizedVersionFromChangeSet(plan, changeSet, actor.Principal, s.now()); versionErr == nil {
+		value.OptimizedPlanVersion = optimized.VersionNumber
+		value.OptimizedPlanHash = optimized.CanonicalHash
+	}
+	return value, nil
 }
 func manualInstructions(c *ThreeTierConfiguration) []ManualActionInstruction {
 	out := []ManualActionInstruction{}
