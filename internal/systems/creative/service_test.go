@@ -146,6 +146,78 @@ func TestStrategyPackageWithoutCreativeReadinessNeedsClarification(t *testing.T)
 	}
 }
 
+func TestReadySelectedRouteCanProceedWhenPackageHasOptionalContextBlockers(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{
+		PackageID: "package_route_ready", PackageVersion: 1, ContentHash: "sha256:package", CreativeReady: false,
+		Objective: "建立品牌认知", Audience: "研发负责人", CoreMessage: "精度可以被验证",
+		Tone: []string{}, VisualKeywords: []string{}, Mandatory: []string{}, Prohibited: []string{},
+		CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteID: "route_xhs_ready", RouteType: CreativeRouteImageText,
+			Channels: []string{string(ChannelXiaohongshu)}, Reason: "小红书图文路线已确认",
+			AspectRatio: "3:4", ReadinessStatus: "ready",
+		}},
+	}}
+	request := CreateIntakeRequest{
+		ContractVersion: CreativeIntakeCreateV3ContractVersion,
+		Source:          IntakeSourceStrategyPackage,
+		StrategyPackage: &StrategyPackageReference{
+			PackageID: "package_route_ready", PackageVersion: 1, ExpectedContentHash: "sha256:package",
+			HandoffContractVersion: "strategy-creative-handoff/v1", ExpectedHandoffHash: "sha256:handoff",
+		},
+		SelectedRouteID: "route_xhs_ready",
+	}
+	intake, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "route-ready", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.Status != IntakeReady || len(intake.MissingFields) != 0 {
+		t.Fatalf("ready selected route should be sufficient for handoff: %#v", intake)
+	}
+}
+
+func TestReadySelectedRouteReconcilesAnEarlierBlockedIntake(t *testing.T) {
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{
+		PackageID: "package_route_reconcile", PackageVersion: 1, ContentHash: "sha256:package", CreativeReady: false,
+		Objective: "建立品牌认知", Audience: "研发负责人", CoreMessage: "精度可以被验证",
+		Tone: []string{}, VisualKeywords: []string{}, Mandatory: []string{}, Prohibited: []string{},
+		CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteID: "route_brand_ready", RouteType: CreativeRouteBrandVideo, VideoPurpose: "brand",
+			Channels: []string{string(ChannelDouyin)}, Reason: "品牌广告路线已确认",
+			TargetDurationSeconds: 30, AspectRatio: "16:9", ReadinessStatus: "ready", RequiresHumanConfirmation: true,
+		}},
+	}}
+	request := CreateIntakeRequest{
+		ContractVersion: CreativeIntakeCreateV3ContractVersion,
+		Source:          IntakeSourceStrategyPackage,
+		StrategyPackage: &StrategyPackageReference{
+			PackageID: "package_route_reconcile", PackageVersion: 1, ExpectedContentHash: "sha256:package",
+			HandoffContractVersion: "strategy-creative-handoff/v1", ExpectedHandoffHash: "sha256:handoff",
+		},
+		SelectedRouteID: "route_brand_ready",
+	}
+	first, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "route-reconcile-first", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	blocked := first
+	blocked.Status = IntakeNeedsClarification
+	blocked.MissingFields = []string{"strategy_package.creative_ready"}
+	blocked.ConfirmedBy = ""
+	repository.intakes[first.ID] = blocked
+
+	reconciled, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "route-reconcile-second", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconciled.ID != first.ID || reconciled.Status != IntakeReady || len(reconciled.MissingFields) != 0 || reconciled.Version != first.Version+1 {
+		t.Fatalf("existing intake was not safely reconciled: %#v", reconciled)
+	}
+}
+
 func TestTaskStrategyHandoffCreatesFrozenReadyIntake(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -188,7 +260,7 @@ func TestTaskStrategyHandoffCreatesFrozenReadyIntake(t *testing.T) {
 	}
 }
 
-func TestTaskStrategyHandoffRejectsUnavailableBusiness(t *testing.T) {
+func TestTaskStrategyHandoffCreatesReadyBrandIntake(t *testing.T) {
 	t.Parallel()
 	service := testService()
 	service.TaskStrategies = taskStrategyReader{snapshot: TaskStrategySnapshot{
@@ -197,14 +269,20 @@ func TestTaskStrategyHandoffRejectsUnavailableBusiness(t *testing.T) {
 		Audience: TaskStrategyAudience{Primary: "大众"}, CoreMessage: "品牌主张",
 		BusinessStrategy: map[string]any{}, Media: []TaskStrategyMediaItem{},
 	}}
-	_, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "brand-handoff", CreateIntakeRequest{
+	intake, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "brand-handoff", CreateIntakeRequest{
 		Source: IntakeSourceTaskStrategy,
 		TaskStrategy: &TaskStrategyReference{
 			PlanID: "plan_brand", StrategyVersion: 1, ExpectedContentHash: "sha256:brand",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "not available") {
-		t.Fatalf("error = %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.Status != IntakeReady ||
+		intake.InputIdentityHash == "" || intake.Request.SelectedRouteID == "" || len(intake.Request.CreativeRoutes) != 1 ||
+		intake.Request.CreativeRoutes[0].RouteType != CreativeRouteBrandVideo ||
+		intake.Request.CreativeRoutes[0].VideoPurpose != "brand" || intake.Request.Channel != ChannelXiaohongshu {
+		t.Fatalf("brand task-strategy intake = %#v", intake)
 	}
 }
 
@@ -233,13 +311,13 @@ func TestCreativeBusinessCapabilitiesExposeOnlyImplementedHandoffs(t *testing.T)
 	}
 	for _, code := range []string{
 		BusinessXiaohongshuImageText, BusinessShortDramaPreroll,
-		BusinessCommercePreroll, BusinessViralRemake,
+		BusinessCommercePreroll, BusinessViralRemake, BusinessBrandVideo,
 	} {
 		if !available[code] {
 			t.Fatalf("%s should be available: %#v", code, values)
 		}
 	}
-	if available[BusinessGamePreroll] || available[BusinessBrandVideo] || available[BusinessWechatArticle] {
+	if available[BusinessGamePreroll] || available[BusinessWechatArticle] {
 		t.Fatalf("preview-only businesses must not be available: %#v", available)
 	}
 }
@@ -448,6 +526,53 @@ func TestCreateVideoTaskConsumesApprovedRouteAndReadyProjectVideo(t *testing.T) 
 	}
 }
 
+func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	intake := CreativeIntake{
+		ContractVersion: CreativeIntakeV3ContractVersion,
+		ID:              "intake_brand", OrganizationID: "org_1", ProjectID: "project_1",
+		Source: IntakeSourceStrategyPackage, Status: IntakeReady,
+		InputIdentityHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Request: CreateIntakeRequest{
+			Source: IntakeSourceStrategyPackage, SelectedRouteID: "route_brand_video",
+			Audience: "研发与采购负责人", CoreMessage: "把不可见的风险变成可验证的工程判断",
+			CreativeRoutes: []CreativeRouteSnapshot{{
+				RouteID: "route_brand_video", RouteType: CreativeRouteBrandVideo, VideoPurpose: "brand",
+				Channels: []string{"xiaohongshu"}, Reason: "建立品牌认知", TargetDurationSeconds: 30,
+				AspectRatio: "9:16", Resolution: "1080x1920", RequiresHumanConfirmation: true, ReadinessStatus: "ready",
+			}},
+		},
+	}
+	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	direction := CreativeDirectionVersion{
+		ContractVersion: CreativeDirectionVersionV1, ID: "direction_brand", OrganizationID: "org_1", ProjectID: "project_1",
+		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, RouteID: "route_brand_video",
+		Concept: "毫米之间，有人回答", CreativeRationale: "用人物接力建立工程伙伴认知",
+		MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构结论"},
+		DirectionMode: "cinematic", EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "工业微距",
+		BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认", Status: DirectionStatusConfirmed,
+	}
+	service.Directions = &directionRepositoryStub{batch: CreativeDirectionBatch{Candidates: []CreativeDirectionVersion{direction}}}
+
+	task, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		SelectedRouteID: "route_brand_video", DirectionID: direction.ID, Channel: ChannelXiaohongshu,
+		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), testRequestContext().Actor, "project_1", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Channel != ChannelXiaohongshu || task.Direction.DirectionVersionID != direction.ID || task.Direction.InputIdentityHash != intake.InputIdentityHash ||
+		task.Direction.CallToAction != "" || detail.VideoDraft == nil || detail.VideoDraft.Resolution != "1080x1920" ||
+		!strings.Contains(detail.VideoDraft.Prompt, direction.BrandMemoryDevice) {
+		t.Fatalf("brand task did not preserve confirmed direction lineage and route spec: task=%+v detail=%+v", task, detail)
+	}
+}
+
 func TestCreateManualViralRemakeTaskUsesStableRouteAndRestorableSnapshot(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -608,12 +733,116 @@ func validManualRequest() CreateIntakeRequest {
 	}
 }
 
+func TestRequirementSnapshotV4CreatesReadyViralRemakeWithoutStrategyPackage(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	videoRef := contract.AssetVersionRef{AssetID: "asset_reference_video", Version: 2}
+	service.Requirements = requirementSnapshotReader{snapshot: RequirementSnapshot{
+		Objective: "将高停留结构原创映射到新品转化", DeliverableIntent: PerformanceModeViralRemake,
+		ProductOrSubject: "FlowKit", Audience: "效率工具用户", CoreMessage: "减少重复操作",
+		SellingPoints: []string{"自动整理任务", "减少重复操作"},
+		Constraints:   []string{"不得照搬人物、台词和音乐"}, AssetRefs: []contract.AssetVersionRef{videoRef},
+	}}
+	service.Assets = testAssetReader{snapshots: map[contract.AssetID]CreativeAssetSnapshot{
+		videoRef.AssetID: {Ref: videoRef, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true},
+	}}
+	hash := "sha256:" + strings.Repeat("a", 64)
+	capabilityHash := "sha256:" + strings.Repeat("b", 64)
+	request := CreateIntakeRequest{
+		ContractVersion:        CreativeIntakeCreateV4ContractVersion,
+		Source:                 IntakeSourceRequirement,
+		RequirementSnapshotRef: &RequirementSnapshotReference{BriefID: "brief_1", BriefVersion: 3, ContentHash: hash},
+		BusinessCapabilityRef:  &BusinessCapabilityReference{BusinessCode: BusinessViralRemake, Version: "1.1.0", ContentHash: capabilityHash},
+		SelectedRouteID:        ManualViralRemakeRouteID,
+	}
+	intake, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "requirement-v4-1", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.ContractVersion != CreativeIntakeV4ContractVersion || intake.Source != IntakeSourceRequirement || intake.Status != IntakeReady ||
+		intake.Request.ManualViralRemake == nil || intake.Request.ManualViralRemake.ReferenceVideo != videoRef || intake.InputIdentityHash == "" {
+		t.Fatalf("v4 intake was not resolved into a ready viral snapshot: %#v", intake)
+	}
+	if len(intake.Warnings) != 1 || !strings.Contains(intake.Warnings[0], "权利状态") {
+		t.Fatalf("rights warning is missing: %#v", intake.Warnings)
+	}
+
+	task, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		SelectedRouteID: ManualViralRemakeRouteID, Channel: ChannelDouyin, SourceVideo: videoRef,
+		Concept: "原创效率工具广告", Prompt: "等待参考视频分析", CallToAction: "立即体验", ConfirmRoute: true,
+		Mandatory: []string{}, Prohibited: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetTaskDetail(context.Background(), testRequestContext().Actor, "project_1", task.ID)
+	if err != nil || detail.VideoDraft == nil || detail.VideoDraft.ViralRemake == nil || detail.VideoDraft.ViralRemake.InputSnapshot.Source != IntakeSourceRequirement {
+		t.Fatalf("v4 intake did not reach the viral workspace: detail=%#v err=%v", detail, err)
+	}
+}
+
+func TestRequirementSnapshotV4CannotBypassFullBrandStrategy(t *testing.T) {
+	t.Parallel()
+	hash := "sha256:" + strings.Repeat("a", 64)
+	request := CreateIntakeRequest{
+		ContractVersion:        CreativeIntakeCreateV4ContractVersion,
+		Source:                 IntakeSourceRequirement,
+		RequirementSnapshotRef: &RequirementSnapshotReference{BriefID: "brief_1", BriefVersion: 1, ContentHash: hash},
+		BusinessCapabilityRef:  &BusinessCapabilityReference{BusinessCode: "brand_video", Version: "1.0.0", ContentHash: hash},
+		SelectedRouteID:        ManualViralRemakeRouteID,
+	}
+	if err := request.Validate(); !errors.Is(err, ErrFullStrategyRequired) {
+		t.Fatalf("brand path bypass error=%v", err)
+	}
+}
+
+func TestNonRequirementIntakeRejectsRequirementRefs(t *testing.T) {
+	t.Parallel()
+	request := validManualRequest()
+	request.RequirementSnapshotRef = &RequirementSnapshotReference{
+		BriefID: "brief_1", BriefVersion: 1, ContentHash: "sha256:" + strings.Repeat("a", 64),
+	}
+	if err := request.Validate(); err == nil {
+		t.Fatal("manual intake accepted a requirement snapshot ref")
+	}
+}
+
 func defaultTaskRequest() CreateTaskRequest {
 	return CreateTaskRequest{ContentType: ContentTypeLifestyle, Focus: "生活方式种草"}
 }
 
 func testRequestContext() contract.RequestContext {
 	return contract.RequestContext{RequestID: "req_1", TraceID: "trace_1", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"}, Scopes: []contract.Scope{ScopeRead, ScopeWrite}}}
+}
+
+func TestMandatoryElementSatisfiedUsesSemanticSignalsForStrategyRequirements(t *testing.T) {
+	t.Parallel()
+	copyText := strings.ToLower("新产品准备打样时，先确认判断依据与资质文件是否可核验；如需讨论具体需求，可私信沟通。")
+
+	for _, requirement := range []string{
+		"明确触发场景",
+		"可核验或待核验的证据位",
+		"低摩擦咨询动作",
+		"必须包含明确触发场景、可核验/待核验证据位、低摩擦咨询动作三个强制元素",
+		"不得虚构客户案例、设备数量或交付承诺",
+		"仅使用已绑定研究证据描述行业决策逻辑",
+	} {
+		if !mandatoryElementSatisfied(requirement, copyText) {
+			t.Fatalf("expected requirement %q to be satisfied", requirement)
+		}
+	}
+}
+
+func TestMandatoryElementSatisfiedStillWarnsForMissingVisibleRequirement(t *testing.T) {
+	t.Parallel()
+	copyText := strings.ToLower("新产品准备打样时，先核验判断依据。")
+
+	if mandatoryElementSatisfied("低摩擦咨询动作", copyText) {
+		t.Fatal("consultation requirement should be missing")
+	}
+	if mandatoryElementSatisfied("必须展示品牌授权标识", copyText) {
+		t.Fatal("unknown visible requirement should still require a literal match")
+	}
 }
 
 func testService() Service {
@@ -641,6 +870,11 @@ type strategyPackageReader struct {
 
 type taskStrategyReader struct {
 	snapshot TaskStrategySnapshot
+	err      error
+}
+
+type requirementSnapshotReader struct {
+	snapshot RequirementSnapshot
 	err      error
 }
 
@@ -713,6 +947,10 @@ func (r taskStrategyReader) ReadTaskStrategyForCreative(_ context.Context, _ con
 	return value, nil
 }
 
+func (r requirementSnapshotReader) ReadRequirementForCreative(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ RequirementSnapshotReference, _ BusinessCapabilityReference) (RequirementSnapshot, error) {
+	return r.snapshot, r.err
+}
+
 func (testProjects) RequireActiveContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
 	brand := contract.BrandID("brand_1")
 	return contract.ProjectContext{OrganizationID: actor.OrganizationID, ProjectID: projectID, BrandID: &brand, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 1}, nil
@@ -744,9 +982,40 @@ func (r *memoryRepository) CreateIntake(_ context.Context, intake CreativeIntake
 			sameTaskStrategy(existing.Request.TaskStrategy, intake.Request.TaskStrategy) {
 			return existing, true, nil
 		}
+		if intake.Source == IntakeSourceRequirement && existing.Source == IntakeSourceRequirement &&
+			intake.InputIdentityHash != "" && existing.InputIdentityHash == intake.InputIdentityHash {
+			return existing, true, nil
+		}
 	}
 	r.intakes[intake.ID] = intake
 	return intake, false, nil
+}
+
+func (r *memoryRepository) UpdateIntakeReadiness(
+	_ context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	intakeID string,
+	expectedVersion int64,
+	status IntakeStatus,
+	missingFields []string,
+	confirmedBy string,
+	updatedAt time.Time,
+) (CreativeIntake, error) {
+	intake, ok := r.intakes[intakeID]
+	if !ok || intake.OrganizationID != organizationID || intake.ProjectID != projectID {
+		return CreativeIntake{}, ErrNotFound
+	}
+	if intake.Version != expectedVersion {
+		return CreativeIntake{}, ErrVersionConflict
+	}
+	intake.Status = status
+	intake.MissingFields = append([]string{}, missingFields...)
+	intake.ConfirmedBy = confirmedBy
+	intake.Version++
+	intake.UpdatedAt = updatedAt
+	r.intakes[intakeID] = intake
+	return intake, nil
 }
 
 func sameTaskOverlay(left, right *TaskOverlayReference) bool {

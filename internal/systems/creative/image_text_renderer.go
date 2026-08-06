@@ -63,7 +63,8 @@ func (r ImageTextRenderer) Render(base io.Reader, spec ImageRenderSpec) (Rendere
 	if base == nil || spec.ContractVersion != ImageRenderSpecV1Contract ||
 		spec.SourceWidth != ImageTextSourceWidth || spec.SourceHeight != ImageTextSourceHeight ||
 		spec.FinalWidth != ImageTextFinalWidth || spec.FinalHeight != ImageTextFinalHeight ||
-		spec.OutputFormat != "png" || spec.RendererVersion != ImageRendererV1 ||
+		spec.OutputFormat != "png" ||
+		(spec.RendererVersion != ImageRendererV1 && spec.RendererVersion != ImageRendererV2) ||
 		spec.FontRef != r.FontRef || strings.TrimSpace(spec.OverlayCopy) == "" {
 		return RenderedImage{}, fmt.Errorf("image render spec is invalid")
 	}
@@ -84,6 +85,9 @@ func (r ImageTextRenderer) Render(base io.Reader, spec ImageRenderSpec) (Rendere
 		return RenderedImage{}, err
 	}
 	fontSize, maxLines, box := layoutMetrics(spec.LayoutPreset)
+	if spec.RendererVersion == ImageRendererV2 {
+		fontSize, maxLines, box = modernLayoutMetrics(spec.LayoutPreset)
+	}
 	face, err := opentype.NewFace(parsedFont, &opentype.FaceOptions{
 		Size: fontSize, DPI: 72, Hinting: font.HintingFull,
 	})
@@ -92,21 +96,29 @@ func (r ImageTextRenderer) Render(base io.Reader, spec ImageRenderSpec) (Rendere
 	}
 	defer face.Close()
 
-	lines, err := wrapText(face, spec.OverlayCopy, box.Dx()-96, maxLines)
+	textInset := 96
+	if spec.RendererVersion == ImageRendererV2 {
+		textInset = 56
+	}
+	lines, err := wrapText(face, spec.OverlayCopy, box.Dx()-textInset, maxLines)
 	if err != nil {
 		return RenderedImage{}, err
 	}
-	stdDraw.Draw(canvas, box, &image.Uniform{C: color.RGBA{R: 12, G: 17, B: 24, A: 190}}, image.Point{}, stdDraw.Over)
-	drawer := font.Drawer{Dst: canvas, Src: image.White, Face: face}
-	lineHeight := int(fontSize * 1.35)
-	totalHeight := len(lines) * lineHeight
-	y := box.Min.Y + (box.Dy()-totalHeight)/2 + int(fontSize)
-	for _, line := range lines {
-		width := drawer.MeasureString(line).Ceil()
-		x := box.Min.X + (box.Dx()-width)/2
-		drawer.Dot = fixed.P(x, y)
-		drawer.DrawString(line)
-		y += lineHeight
+	if spec.RendererVersion == ImageRendererV2 {
+		drawModernOverlay(canvas, face, fontSize, lines, box, spec.LayoutPreset)
+	} else {
+		stdDraw.Draw(canvas, box, &image.Uniform{C: color.RGBA{R: 12, G: 17, B: 24, A: 190}}, image.Point{}, stdDraw.Over)
+		drawer := font.Drawer{Dst: canvas, Src: image.White, Face: face}
+		lineHeight := int(fontSize * 1.35)
+		totalHeight := len(lines) * lineHeight
+		y := box.Min.Y + (box.Dy()-totalHeight)/2 + int(fontSize)
+		for _, line := range lines {
+			width := drawer.MeasureString(line).Ceil()
+			x := box.Min.X + (box.Dx()-width)/2
+			drawer.Dot = fixed.P(x, y)
+			drawer.DrawString(line)
+			y += lineHeight
+		}
 	}
 	var output bytes.Buffer
 	if err := png.Encode(&output, canvas); err != nil {
@@ -140,6 +152,63 @@ func layoutMetrics(preset string) (float64, int, image.Rectangle) {
 		return 58, 3, image.Rect(72, 1030, 1008, 1368)
 	default:
 		return 72, 2, image.Rect(72, 470, 1008, 930)
+	}
+}
+
+func modernLayoutMetrics(preset string) (float64, int, image.Rectangle) {
+	switch preset {
+	case "proof_lower_left_v1":
+		return 58, 4, image.Rect(82, 990, 950, 1328)
+	case "cta_bottom_v1":
+		return 62, 3, image.Rect(82, 1020, 998, 1338)
+	default:
+		return 74, 3, image.Rect(82, 875, 998, 1318)
+	}
+}
+
+func drawModernOverlay(canvas *image.RGBA, face font.Face, fontSize float64, lines []string, box image.Rectangle, preset string) {
+	gradientStart := 700
+	if preset == "proof_lower_left_v1" {
+		gradientStart = 820
+	} else if preset == "cta_bottom_v1" {
+		gradientStart = 880
+	}
+	drawVerticalScrim(canvas, gradientStart, canvas.Bounds().Max.Y, 8, 210)
+
+	lineHeight := int(fontSize * 1.3)
+	totalHeight := len(lines) * lineHeight
+	y := box.Min.Y + (box.Dy()-totalHeight)/2 + int(fontSize)
+	textX := box.Min.X + 28
+	accentTop := y - int(fontSize)
+	accentBottom := y + (len(lines)-1)*lineHeight + 8
+	stdDraw.Draw(canvas, image.Rect(box.Min.X, accentTop, box.Min.X+8, accentBottom),
+		&image.Uniform{C: color.RGBA{R: 54, G: 132, B: 246, A: 255}}, image.Point{}, stdDraw.Over)
+	shadow := font.Drawer{Dst: canvas, Src: &image.Uniform{C: color.RGBA{A: 185}}, Face: face}
+	drawer := font.Drawer{Dst: canvas, Src: image.White, Face: face}
+	for _, line := range lines {
+		shadow.Dot = fixed.P(textX+2, y+3)
+		shadow.DrawString(line)
+		drawer.Dot = fixed.P(textX, y)
+		drawer.DrawString(line)
+		y += lineHeight
+	}
+}
+
+func drawVerticalScrim(canvas *image.RGBA, startY, endY int, startAlpha, endAlpha uint8) {
+	if startY < canvas.Bounds().Min.Y {
+		startY = canvas.Bounds().Min.Y
+	}
+	if endY > canvas.Bounds().Max.Y {
+		endY = canvas.Bounds().Max.Y
+	}
+	if endY <= startY {
+		return
+	}
+	span := endY - startY
+	for y := startY; y < endY; y++ {
+		alpha := int(startAlpha) + (int(endAlpha)-int(startAlpha))*(y-startY)/span
+		stdDraw.Draw(canvas, image.Rect(canvas.Bounds().Min.X, y, canvas.Bounds().Max.X, y+1),
+			&image.Uniform{C: color.RGBA{R: 7, G: 12, B: 20, A: uint8(alpha)}}, image.Point{}, stdDraw.Over)
 	}
 }
 
@@ -200,7 +269,7 @@ func NewImageRenderSpec(slot ImagePlanItem, fontRef string) (ImageRenderSpec, er
 		ContractVersion: ImageRenderSpecV1Contract, LayoutPreset: slot.LayoutPreset,
 		OverlayCopy: slot.OverlayCopy, SourceWidth: ImageTextSourceWidth, SourceHeight: ImageTextSourceHeight,
 		FinalWidth: ImageTextFinalWidth, FinalHeight: ImageTextFinalHeight, OutputFormat: "png",
-		FontRef: fontRef, RendererVersion: ImageRendererV1,
+		FontRef: fontRef, RendererVersion: ImageRendererV2,
 	}
 	hash, err := contractHashWithoutRenderContent(value)
 	if err != nil {

@@ -193,3 +193,28 @@ func TestBriefPlatformScopeStaysVersioned(t *testing.T) {
 		t.Fatalf("Brief v2 platforms = %#v", updated.Document.PlatformBriefs)
 	}
 }
+
+func TestBriefV2ConfirmationOnlyBlocksCreativeCoreFacts(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		Status: "open", Version: 1, Document: EmptyBriefDocumentV2(),
+		FieldStates: map[string]FieldState{},
+	}
+	updated, err := ApplyBriefPatch(draft, BriefPatch{ExpectedVersion: 1, Operations: []BriefPatchOperation{
+		{Op: "set", FieldPath: "product.name", Value: json.RawMessage(`"青柠气泡水"`)},
+		{Op: "set", FieldPath: "campaign.objective", Value: json.RawMessage(`"提升新品认知"`)},
+		{Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`"22 至 35 岁城市女性"`)},
+	}}, PatchFromUser, "user_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Completeness.Ready || len(updated.Completeness.Blockers) != 0 {
+		t.Fatalf("creative core should be confirmable: %#v", updated.Completeness)
+	}
+	if len(updated.Completeness.Warnings) < 2 {
+		t.Fatalf("missing optional strategy context must remain visible: %#v", updated.Completeness)
+	}
+	if problems := fullStrategyReadinessProblems(updated.Document, updated.FieldStates); len(problems) != 2 {
+		t.Fatalf("full strategy should still require proposition and channels: %#v", problems)
+	}
+}

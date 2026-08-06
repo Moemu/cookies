@@ -14,8 +14,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -36,6 +36,8 @@ import (
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/media"
+	"github.com/shikanon/cookies/internal/platform/mediaunderstanding"
+	mediaunderstandinghttp "github.com/shikanon/cookies/internal/platform/mediaunderstanding/httpapi"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/platform/remix"
@@ -53,6 +55,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
+	ffmpegPath := localExecutablePath(cfg.Environment, cfg.Media.FFmpegPath, "ffmpeg")
+	ffprobePath := localExecutablePath(cfg.Environment, cfg.Media.FFprobePath, "ffprobe")
 
 	db, err := database.Open(context.Background(), cfg.MySQL)
 	if err != nil {
@@ -118,9 +122,9 @@ func main() {
 	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
 	assetRepository := assets.MySQLRepository{DB: db}
 	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
-	if cfg.Media.FFprobePath != "" {
-		uploadService.VideoProbe = assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
-		uploadService.AudioProbe = assets.FFprobeAudioProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
+	if ffprobePath != "" {
+		uploadService.VideoProbe = assets.FFprobeVideoProbe{Path: ffprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
+		uploadService.AudioProbe = assets.FFprobeAudioProbe{Path: ffprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 	}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 	creativeRepository := creative.MySQLRepository{DB: db}
@@ -149,16 +153,16 @@ func main() {
 			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
 		}
 		log.Printf(
-			"CreativeDirection planning configured: model_alias=%s routes=xiaohongshu_image_text",
+			"CreativeDirection planning configured: model_alias=%s routes=xiaohongshu_image_text,brand_video",
 			cfg.Creative.DirectionPlannerModelAlias,
 		)
 	}
-	if fontPath := os.Getenv("COOKIES_CREATIVE_IMAGE_FONT_PATH"); fontPath != "" {
+	if fontPath := cfg.Creative.ImageFontPath; fontPath != "" {
 		fontBytes, fontErr := os.ReadFile(fontPath)
 		if fontErr != nil {
 			log.Fatalf("read Creative image renderer font: %v", fontErr)
 		}
-		fontChecksum := strings.ToLower(strings.TrimSpace(os.Getenv("COOKIES_CREATIVE_IMAGE_FONT_SHA256")))
+		fontChecksum := cfg.Creative.ImageFontSHA256
 		renderer := &creative.ImageTextRenderer{
 			FontBytes: fontBytes, FontRef: fontPath + "@sha256:" + fontChecksum,
 			ExpectedSHA256: fontChecksum,
@@ -169,11 +173,11 @@ func main() {
 		creativeService.ImageRenderer = renderer
 		creativeService.ImageBaseAssets = creativeImageAssetIO{uploads: uploadService}
 		creativeService.RenderedImages = creativeRenderedImageWriter{uploads: uploadService}
-		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV1)
+		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV2)
 	}
-	if cfg.Media.FFmpegPath != "" {
+	if ffmpegPath != "" {
 		creativeService.GameEvidenceFrames = media.FFmpegFrameExtractor{
-			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs},
 		}
 		creativeService.DerivedAssets = uploadService
@@ -254,7 +258,7 @@ func main() {
 		}
 		analyzer, analyzerErr := creativeprovider.NewViralAnalyzer(creativeprovider.ViralAnalyzerConfig{
 			Assets: uploadService, Routes: gatewayConfig, Credentials: gatewayConfig,
-			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			ModelAlias: "cookies.text.standard", PromptVersion: "viral.analyze.v1",
 			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
 			ASR: creativeprovider.ASRConfig{
@@ -271,6 +275,7 @@ func main() {
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
 	runtimeStore := jobruntime.MySQLStore{DB: db}
+	creativeService.DirectionScheduler = creative.JobRuntimeDirectionGenerationScheduler{Store: runtimeStore}
 	creativeService.AINativeOperationCanceller = creativeAINativeOperationCanceller{store: runtimeStore}
 	var researchRunner knowledge.ExternalResearchRunner
 	if cfg.Research.SeedEnabled {
@@ -311,6 +316,27 @@ func main() {
 			Store: runtimeStore, NewID: func() (string, error) { return ids.New("researchjob") },
 		}
 	}
+	visionAdapter, err := buildVisionAdapter(cfg, db)
+	if err != nil {
+		log.Fatalf("configure Provider vision adapter: %v", err)
+	}
+	var visionProvider *provider.Service
+	if visionAdapter != nil {
+		visionProvider = &provider.Service{VisionAdapter: visionAdapter, VisionSources: assetVisionSourceResolver{uploads: uploadService}}
+	}
+	mediaUnderstandingService := &mediaunderstanding.Service{
+		Store: mediaunderstanding.MySQLStore{DB: db}, Projects: projectService, Assets: uploadService,
+		DerivedImages: uploadService, Vision: visionProvider, ModelAlias: "cookies.vision.standard",
+		Scheduler: mediaunderstanding.JobRuntimeScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("mediaunderstandingjob") },
+		},
+	}
+	if ffmpegPath != "" {
+		mediaUnderstandingService.Frames = media.FFmpegFrameExtractor{
+			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs},
+		}
+	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
 	dependencies := httpserver.Dependencies{
@@ -323,6 +349,8 @@ func main() {
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},
 	}
+	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
+		httpserver.DomainMount{Pattern: "/api/media/v1/", Handler: mediaunderstandinghttp.New(*mediaUnderstandingService)})
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},
 		Projects:   projectService,
@@ -368,10 +396,12 @@ func main() {
 	defer stopWorkers()
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	runtimeHandlers[creative.DirectionGenerationJobKind] = creativeService.HandleDirectionGenerationJob
 	creativeService.AINativeScriptScheduler = creative.JobRuntimeAINativeScriptScheduler{
 		Store: runtimeStore,
 	}
 	runtimeHandlers[creative.AINativeScriptJobKind] = creativeService.HandleAINativeScriptJob
+	runtimeHandlers[mediaunderstanding.JobKind] = mediaUnderstandingService.HandleJob
 	if researchRunner != nil {
 		runtimeHandlers[knowledge.ResearchJobKind] = knowledgeService.HandleResearchJob
 	}
@@ -384,22 +414,22 @@ func main() {
 	creativeService.AudioMixScheduler = creative.JobRuntimeAudioMixRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("audiomixrenderexec") },
 	}
-	if cfg.Media.FFmpegPath != "" && cfg.Media.FFprobePath != "" {
-		probe := assets.FFprobeVideoProbe{Path: cfg.Media.FFprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
+	if ffmpegPath != "" && ffprobePath != "" {
+		probe := assets.FFprobeVideoProbe{Path: ffprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 		composer := media.FFmpegComposer{
-			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
 		creativeService.Composer = composer
 		creativeService.BrandFilmComposer = composer
 		creativeService.RenderedAssets = creativeRenderedAssetWriter{uploads: uploadService}
 		creativeService.AudioMixRenderer = media.FFmpegAudioMixRenderer{
-			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Videos: creativeMediaSource{repository: assetRepository, blobs: blobs},
 			Audio:  creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
 		creativeService.AINativeTimelineRenderer = media.FFmpegTimelineRenderer{
-			FFmpegPath: cfg.Media.FFmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Videos: creativeMediaSource{repository: assetRepository, blobs: blobs},
 			Audio:  creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
@@ -410,8 +440,9 @@ func main() {
 	}
 	if cfg.Strategy.Enabled {
 		strategyService := strategysystem.Service{
-			DB: db, Projects: projectService, Knowledge: knowledgeService,
-			CreativeAssets: uploadService, Agents: agentStore, Text: textProvider,
+			DB: db, Projects: projectService, Knowledge: knowledgeService, ConversationKnowledge: knowledgeService,
+			ConversationMedia: mediaUnderstandingService,
+			CreativeAssets:    uploadService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
 			PromptVersion:             cfg.Strategy.PromptVersion,
 			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
@@ -420,15 +451,15 @@ func main() {
 			RepairPromptVersion:       cfg.Strategy.RepairPromptVersion,
 			CreativeTaskPromptVersion: cfg.Strategy.CreativeTaskPromptVersion,
 			CriticEnabled:             cfg.Strategy.CriticEnabled, V2Enabled: cfg.Strategy.V2Enabled,
-			CreativeTaskPlanningEnabled: cfg.Strategy.CreativeTaskPlanningEnabled,
-			ContextSelectionEnabled:     cfg.Strategy.ContextSelectionEnabled,
-			DisableApproval:             !cfg.Strategy.ApproveEnabled,
-			AllowedOrganizations:        strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
+			CreativeTaskPlanningEnabled:  cfg.Strategy.CreativeTaskPlanningEnabled,
+			QuickViralRemakeEnabled:      cfg.Strategy.QuickViralRemakeEnabled,
+			ConversationWebSearchEnabled: researchRunner != nil,
+			ContextSelectionEnabled:      cfg.Strategy.ContextSelectionEnabled,
+			DisableApproval:              !cfg.Strategy.ApproveEnabled,
+			AllowedOrganizations:         strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
 		}
-		if cfg.Strategy.CreativeTaskPlanningEnabled {
-			if err := strategyService.EnsureCreativeBusinessCatalog(context.Background()); err != nil {
-				log.Fatalf("seed Strategy creative business catalog: %v", err)
-			}
+		if err := strategyService.EnsureCreativeBusinessCatalog(context.Background()); err != nil {
+			log.Fatalf("seed Strategy creative business catalog: %v", err)
 		}
 		generationMode := "deterministic"
 		if cfg.Strategy.RealProviderEnabled {
@@ -444,6 +475,7 @@ func main() {
 		// its own Intake only after a user explicitly invokes the endpoint.
 		strategyCreativeReader := strategycreative.Reader{Service: strategyService}
 		creativeService.Sources = strategyCreativeReader
+		creativeService.Requirements = strategyCreativeReader
 		if cfg.Strategy.CreativeTaskPlanningEnabled {
 			creativeService.TaskStrategies = strategyCreativeReader
 			creativeService.TaskOverlays = strategyCreativeReader
@@ -664,6 +696,41 @@ func buildTextAdapter(cfg config.Config, db *sql.DB) (provider.TextProviderAdapt
 	default:
 		return nil, fmt.Errorf("unsupported Provider text adapter %q", cfg.Provider.TextAdapter)
 	}
+}
+
+func buildVisionAdapter(cfg config.Config, db *sql.DB) (provider.VisionProviderAdapter, error) {
+	switch cfg.Provider.TextAdapter {
+	case "fake":
+		return provider.FakeSyncAdapter{}, nil
+	case "adapter_gateway":
+		cipher, err := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if err != nil {
+			return nil, err
+		}
+		store := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
+		return provider.NewAdapterGatewayVisionAdapter(store, store, cfg.Provider.AllowInsecureHTTP)
+	case "ark_text":
+		// The direct Ark text adapter has no reviewed multimodal transport.
+		// Media artifacts still expose verified metadata and an explicit partial
+		// status instead of pretending that semantic vision ran.
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported Provider vision adapter derived from text adapter %q", cfg.Provider.TextAdapter)
+	}
+}
+
+func localExecutablePath(environment config.Environment, configured, name string) string {
+	if configured != "" {
+		return configured
+	}
+	if environment != config.EnvironmentLocal && environment != config.EnvironmentTest {
+		return ""
+	}
+	value, err := exec.LookPath(name)
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 func strategyOrganizationAllowlist(values []string) map[contract.OrganizationID]struct{} {

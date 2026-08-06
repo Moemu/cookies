@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS platform_media_understanding_artifacts;

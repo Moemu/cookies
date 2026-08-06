@@ -875,6 +875,79 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /platform/v1/projects/{project_id}/artifacts:
+    get:
+      operationId: listProjectArtifacts
+      summary: List versioned, project-scoped business artifacts.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Project artifact list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProjectArtifact'}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+    post:
+      operationId: createProjectArtifact
+      summary: Create a versioned business artifact.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateProjectArtifactRequest'}
+      responses:
+        '201':
+          description: Artifact created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectArtifact'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/artifacts/{artifact_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ArtifactID'
+    get:
+      operationId: getProjectArtifact
+      summary: Return one versioned project artifact.
+      responses:
+        '200':
+          description: Project artifact.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectArtifact'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateProjectArtifact
+      summary: Update artifact content or lifecycle status with optimistic concurrency.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateProjectArtifactRequest'}
+      responses:
+        '200':
+          description: Updated project artifact.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectArtifact'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/projects/{project_id}/tasks:
     get:
       operationId: listProjectTasks
@@ -2149,6 +2222,13 @@ components:
       schema:
         type: string
         minLength: 1
+    ArtifactID:
+      name: artifact_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
     AssetID:
       name: asset_id
       in: path
@@ -3226,6 +3306,41 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ProjectAssetRef'
           - type: 'null'
+      additionalProperties: false
+    ProjectArtifact:
+      type: object
+      required: [id, project_id, kind, status, content, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        kind: {type: string, enum: [brief, image, video, document]}
+        status: {type: string, enum: [draft, ready, archived]}
+        content: {type: string}
+        source_job_id: {type: string}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    CreateProjectArtifactRequest:
+      type: object
+      required: [kind, status, content]
+      properties:
+        kind: {type: string, enum: [brief, image, video, document]}
+        status: {type: string, enum: [draft, ready, archived]}
+        content: {type: string, minLength: 1, maxLength: 1048576}
+        source_job_id: {type: string, maxLength: 96}
+      additionalProperties: false
+    UpdateProjectArtifactRequest:
+      type: object
+      anyOf:
+      - required: [content]
+      - required: [status]
+      - required: [source_job_id]
+      properties:
+        status: {type: string, enum: [draft, ready, archived]}
+        content: {type: string, minLength: 1, maxLength: 1048576}
+        source_job_id: {type: string, maxLength: 96}
+        expected_version: {type: integer, minimum: 1}
       additionalProperties: false
     BusinessTask:
       type: object

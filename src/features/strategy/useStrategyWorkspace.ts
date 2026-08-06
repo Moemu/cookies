@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BackendApiError } from '../../backend/platform'
 import { strategyApi, createMutationKey } from './api'
+import { buildConversationMessageCreate, waitForConversationResearch } from './strategyConversationModel'
 import { useConversationStream } from './useConversationStream'
 import type {
   BriefDraft,
   BriefVersion,
+  ConversationCapabilities,
   ConversationMemory,
+  CreativeIntakeV4,
   DeepReviewAnalysis,
   DraftRevision,
   GenerationMetadata,
   GenerationProbe,
   GenerationReadiness,
   KnowledgeDocument,
+  MediaUnderstandingArtifact,
   Message,
+  MessageRequestedPolicy,
   PackageVersion,
   ResearchRun,
   Review,
   ReviewComment,
   SkillRun,
   StrategyDraft,
+  StrategyP0Metrics,
   Workspace,
   WorkspaceDetail,
 } from './types'
@@ -35,6 +41,7 @@ export type StrategyWorkspaceState = {
   review: Review | null
   comments: ReviewComment[]
   deepReview: DeepReviewAnalysis | null
+  deepReviewError: string
   published: PackageVersion | null
   packages: PackageVersion[]
   readiness: GenerationReadiness | null
@@ -42,11 +49,15 @@ export type StrategyWorkspaceState = {
   metadata: GenerationMetadata | null
   skillRuns: SkillRun[]
   documents: KnowledgeDocument[]
+  mediaArtifacts: MediaUnderstandingArtifact[]
+  conversationCapabilities: ConversationCapabilities | null
+  p0Metrics: StrategyP0Metrics | null
   researchRun: ResearchRun | null
   isLoading: boolean
   busy: string
   error: string
   pendingAgentTaskId: string
+  pendingAgentPurpose: 'deep_review' | 'general' | ''
 }
 
 function messageOf(error: unknown) {
@@ -112,6 +123,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     review: null,
     comments: [],
     deepReview: null,
+    deepReviewError: '',
     published: null,
     packages: [],
     readiness: null,
@@ -119,11 +131,15 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     metadata: null,
     skillRuns: [],
     documents: [],
+    mediaArtifacts: [],
+    conversationCapabilities: null,
+    p0Metrics: null,
     researchRun: null,
     isLoading: true,
     busy: '',
     error: '',
     pendingAgentTaskId: '',
+    pendingAgentPurpose: '',
   })
   const currentWorkspaceId = useRef('')
   const approvalMutationKey = useRef('')
@@ -145,11 +161,13 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       || ''
 
     if (!targetId) {
-      const [readiness, documents, packages, researchRuns] = await Promise.all([
+      const [readiness, documents, packages, researchRuns, conversationCapabilities, p0Metrics] = await Promise.all([
         strategyApi.getGenerationReadiness(projectId, signal).catch(() => null),
         strategyApi.listKnowledgeDocuments(projectId, signal).then(value => value.items).catch(() => []),
         strategyApi.listStrategyPackages(projectId, signal).then(value => value.items).catch(() => []),
         strategyApi.listResearchRuns(projectId, signal).then(value => value.items).catch(() => []),
+        strategyApi.getConversationCapabilities(signal).catch(() => null),
+        strategyApi.getP0Metrics(projectId, 30, signal).catch(() => null),
       ])
       setState(current => ({
         ...current,
@@ -157,6 +175,9 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         detail: null,
         readiness,
         documents,
+        mediaArtifacts: [],
+        conversationCapabilities,
+        p0Metrics,
         packages,
         researchRun: researchRuns[0] ?? null,
         published: packages.find(value => value.status === 'published') ?? null,
@@ -172,7 +193,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     const conversation = detail.current_conversation
     const task = detail.current_task
 
-    const [messageResult, brief, packages, readiness, documents, memory, skillRuns, researchRuns] = await Promise.all([
+    const [messageResult, brief, packages, readiness, documents, memory, skillRuns, researchRuns, conversationCapabilities, p0Metrics] = await Promise.all([
       conversation ? strategyApi.listMessages(conversation.id, signal).then(value => value.items) : Promise.resolve([]),
       task ? strategyApi.getBriefDraft(task.id, signal) : Promise.resolve(null),
       strategyApi.listStrategyPackages(projectId, signal).then(value => value.items).catch(() => []),
@@ -183,7 +204,10 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ? strategyApi.listSkillRuns(task.current_agent_task_id, signal).then(value => value.items).catch(() => [])
         : Promise.resolve([]),
       strategyApi.listResearchRuns(projectId, signal).then(value => value.items).catch(() => []),
+      strategyApi.getConversationCapabilities(signal).catch(() => null),
+      strategyApi.getP0Metrics(projectId, 30, signal).catch(() => null),
     ])
+    const mediaArtifacts = await loadConversationMedia(projectId, messageResult, signal)
 
     let briefVersion: BriefVersion | null = null
     if (task && brief?.status === 'confirmed') {
@@ -197,6 +221,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let review: Review | null = null
     let comments: ReviewComment[] = []
     let deepReview: DeepReviewAnalysis | null = null
+    let deepReviewFailure = ''
     let published: PackageVersion | null = null
     let agentFailure = ''
     if (task?.current_strategy_id) {
@@ -225,6 +250,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ])
         comments = commentResult.items
         deepReview = analysis
+        if (analysis?.status === 'failed' && analysis.agent_task_id) {
+          const inspection = await strategyApi.getAgentTask(analysis.agent_task_id, signal).catch(() => null)
+          const problem = inspection?.task.error ?? inspection?.job?.error
+          deepReviewFailure = agentFailureMessage(problem?.code, problem?.message)
+        }
       }
     }
 
@@ -241,12 +271,16 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       review,
       comments,
       deepReview,
+      deepReviewError: deepReviewFailure,
       packages,
       published,
       readiness,
       metadata,
       skillRuns,
       documents,
+      mediaArtifacts: mergeConversationMedia(current.mediaArtifacts, mediaArtifacts, projectId),
+      conversationCapabilities,
+      p0Metrics,
       researchRun: researchRuns.find(run =>
         run.artifacts.some(artifact => brief?.document.reference_ids?.includes(artifact.id)),
       ) ?? null,
@@ -279,6 +313,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
 
   useEffect(() => {
     const agentTaskId = state.pendingAgentTaskId
+    const agentPurpose = state.pendingAgentPurpose
     if (!agentTaskId) return
     const controller = new AbortController()
     let timer = 0
@@ -293,12 +328,19 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           setState(current => ({
             ...current,
             pendingAgentTaskId: '',
-            error: failureMessage,
+            pendingAgentPurpose: '',
+            error: agentPurpose === 'deep_review' ? '' : failureMessage,
+            deepReviewError: agentPurpose === 'deep_review' ? failureMessage : current.deepReviewError,
           }))
           return
         }
         if (task.status === 'succeeded') {
-          setState(current => ({ ...current, pendingAgentTaskId: '' }))
+          setState(current => ({
+            ...current,
+            pendingAgentTaskId: '',
+            pendingAgentPurpose: '',
+            deepReviewError: agentPurpose === 'deep_review' ? '' : current.deepReviewError,
+          }))
           await reload()
           return
         }
@@ -312,7 +354,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [reload, state.pendingAgentTaskId])
+  }, [reload, state.pendingAgentPurpose, state.pendingAgentTaskId])
 
   useEffect(() => {
     const researchRun = state.researchRun
@@ -363,8 +405,47 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     }
   }, [projectId, state.documents])
 
-  const perform = useCallback(async (name: string, action: () => Promise<void>, reloadAfter = true) => {
-    setState(current => ({ ...current, busy: name, error: '' }))
+  useEffect(() => {
+    if (!state.mediaArtifacts.some(artifact => artifact.status === 'running')) return
+    const controller = new AbortController()
+    let timer = 0
+    const inspect = async () => {
+      try {
+        const next = await Promise.all(state.mediaArtifacts.map(artifact =>
+          artifact.status === 'running'
+            ? strategyApi.getMediaUnderstanding(projectId, artifact.id, controller.signal)
+            : Promise.resolve(artifact),
+        ))
+        setState(current => ({
+          ...current,
+          mediaArtifacts: mergeConversationMedia(current.mediaArtifacts, next, projectId),
+        }))
+        if (next.some(artifact => artifact.status === 'running')) {
+          timer = window.setTimeout(inspect, 1800)
+        }
+      } catch {
+        if (!controller.signal.aborted) timer = window.setTimeout(inspect, 3000)
+      }
+    }
+    timer = window.setTimeout(inspect, 800)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [projectId, state.mediaArtifacts])
+
+  const perform = useCallback(async (
+    name: string,
+    action: () => Promise<void>,
+    reloadAfter = true,
+    errorTarget: 'global' | 'deep_review' = 'global',
+  ) => {
+    setState(current => ({
+      ...current,
+      busy: name,
+      error: '',
+      deepReviewError: errorTarget === 'deep_review' ? '' : current.deepReviewError,
+    }))
     try {
       await action()
       if (reloadAfter) await load()
@@ -373,12 +454,34 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       if (error instanceof BackendApiError && error.code === 'VERSION_CONFLICT') {
         await load().catch(() => undefined)
       }
-      setState(current => ({ ...current, error: messageOf(error) }))
+      setState(current => ({
+        ...current,
+        error: errorTarget === 'global' ? messageOf(error) : '',
+        deepReviewError: errorTarget === 'deep_review' ? messageOf(error) : current.deepReviewError,
+      }))
       return false
     } finally {
       setState(current => ({ ...current, busy: '' }))
     }
   }, [load])
+
+  const uploadAndReferenceDocument = async (file: File) => {
+    const document = await strategyApi.uploadKnowledgeDocument(projectId, file)
+    setState(current => ({ ...current, documents: [document, ...current.documents.filter(value => value.id !== document.id)] }))
+    const task = state.detail?.current_task
+    if (task && state.brief?.status === 'open') {
+      const references = Array.from(new Set([...(state.brief.document.reference_ids ?? []), document.id]))
+      const brief = await strategyApi.patchBriefField(
+        task.id,
+        state.brief,
+        'reference_ids',
+        references,
+        createMutationKey('strategy-brief-reference'),
+      )
+      setState(current => ({ ...current, brief }))
+    }
+    return document
+  }
 
   const actions = {
     reload,
@@ -414,12 +517,48 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         brief: bundle.brief_draft,
       }))
     }),
-    sendMessage: (content: string) => perform('message', async () => {
+    sendMessage: (
+      content: string,
+      documents: KnowledgeDocument[] = [],
+      media: MediaUnderstandingArtifact[] = [],
+      requestedPolicy?: MessageRequestedPolicy,
+    ) => perform(requestedPolicy?.web_search === 'allowed' ? 'web-search' : 'message', async () => {
       const conversationId = state.detail?.current_conversation?.id
       if (!conversationId) throw new Error('请先开始需求对话。')
+      if (documents.some(document => document.status !== 'ready')) {
+        throw new Error('请等待附件解析完成后再发送。')
+      }
+      if (media.some(artifact => artifact.status !== 'ready' && artifact.status !== 'partial')) {
+        throw new Error('请等待图片或视频理解完成后再发送。')
+      }
+      let researchArtifacts: ResearchRun['artifacts'] = []
+      if (requestedPolicy?.web_search === 'allowed') {
+        const query = content.trim()
+        if (!query) throw new Error('联网查证需要先输入一个明确问题。')
+        const initialRun = await strategyApi.runExternalResearch(projectId, {
+          category: 'general',
+          query,
+          document_ids: [],
+          disclosed_fields: ['query'],
+          confirmed: true,
+        })
+        setState(current => ({ ...current, researchRun: initialRun }))
+        const completedRun = await waitForConversationResearch(
+          initialRun,
+          researchRunId => strategyApi.getResearchRun(projectId, researchRunId),
+        )
+        setState(current => ({ ...current, researchRun: completedRun }))
+        if (completedRun.status !== 'succeeded') {
+          throw new Error(completedRun.error_message || '联网查证未完成；原消息没有发送，请关闭联网查证后重试。')
+        }
+        if (!completedRun.artifacts.length) {
+          throw new Error('联网查证没有返回可引用的证据；原消息没有发送。')
+        }
+        researchArtifacts = completedRun.artifacts
+      }
       const result = await strategyApi.sendMessage(
         conversationId,
-        content,
+        buildConversationMessageCreate(content, documents, media, researchArtifacts, requestedPolicy),
         createMutationKey('strategy-message'),
       )
       setState(current => ({
@@ -428,6 +567,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           ? current.messages
           : [...current.messages, result.message],
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     patchBriefField: (fieldPath: string, value: unknown) => perform(`brief:${fieldPath}`, async () => {
@@ -463,6 +603,63 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         createMutationKey('strategy-brief-confirm'),
       )
     }),
+    confirmRequirement: () => perform('confirm-requirement', async () => {
+      const task = state.detail?.current_task
+      let brief = state.brief
+      if (!task || !brief || brief.status !== 'open') throw new Error('当前需求不可确认。')
+      const corePaths = ['product.name', 'campaign.objective', 'audience.primary']
+      const operations = corePaths.flatMap(fieldPath => {
+        const value = fieldPath === 'product.name'
+          ? brief?.document.product?.name
+          : fieldPath === 'campaign.objective'
+            ? brief?.document.campaign.objective
+            : brief?.document.audience.primary
+        if (!value?.trim() || brief?.field_states[fieldPath]?.confirmation === 'confirmed') return []
+        return [{ fieldPath, value }]
+      })
+      if (operations.length) {
+        brief = await strategyApi.patchBriefFields(
+          task.id,
+          brief,
+          operations,
+          createMutationKey('strategy-requirement-confirm-fields'),
+        )
+      }
+      if (!brief.completeness.ready) {
+        throw new Error('还缺少产品、目标或核心受众，请继续用一句话补充。')
+      }
+      await strategyApi.confirmBrief(
+        task.id,
+        brief.version,
+        createMutationKey('strategy-requirement-confirm'),
+      )
+    }),
+    createRequirementViralRemake: async (): Promise<{ intake: CreativeIntakeV4; taskId?: string } | null> => {
+      setState(current => ({ ...current, busy: 'viral-remake', error: '' }))
+      try {
+        const brief = state.briefVersion
+        if (!brief) throw new Error('请先确认当前需求。')
+        const catalog = await strategyApi.listCreativeBusinesses(projectId)
+        const capability = catalog.items.find(item =>
+          item.business_code === 'viral_remake' && item.selectable && item.lifecycle === 'active',
+        )
+        if (!capability) throw new Error('爆款裂变能力当前不可用。')
+        const intake = await strategyApi.createRequirementViralIntake(
+          projectId,
+          brief,
+          capability,
+          createMutationKey('requirement-viral-intake'),
+        )
+        if (intake.status !== 'ready') return { intake }
+        const task = await strategyApi.createRequirementViralTask(projectId, intake)
+        return { intake, taskId: task.id }
+      } catch (error) {
+        setState(current => ({ ...current, error: messageOf(error) }))
+        return null
+      } finally {
+        setState(current => ({ ...current, busy: '' }))
+      }
+    },
     generateStrategy: () => perform('generate-strategy', async () => {
       const task = state.detail?.current_task
       if (!task || !state.briefVersion) throw new Error('请先确认 Brief。')
@@ -475,6 +672,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ...current,
         draft: result.strategy_draft,
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     retryStrategy: () => perform('retry-strategy', async () => {
@@ -487,6 +685,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ...current,
         draft: result.strategy_draft,
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     patchStrategySection: (section: string, value: unknown) => perform(`strategy:${section}`, async () => {
@@ -510,6 +709,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         ...current,
         draft: current.draft ? { ...current.draft, status: 'generating' } : current.draft,
         pendingAgentTaskId: agentTask.id,
+        pendingAgentPurpose: 'general',
       }))
     }, false),
     submitStrategy: () => perform('submit-review', async () => {
@@ -533,9 +733,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       setState(current => ({
         ...current,
         deepReview: result.analysis,
+        deepReviewError: '',
         pendingAgentTaskId: result.agent_task.id,
+        pendingAgentPurpose: 'deep_review',
       }))
-    }, false),
+    }, false, 'deep_review'),
     returnReview: (reason: string) => perform('return-review', async () => {
       if (!state.review) throw new Error('当前没有可退回的评审。')
       await strategyApi.returnReview(state.review.id, reason)
@@ -549,21 +751,35 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       approvalMutationKey.current = ''
     }),
     uploadDocument: (file: File) => perform('upload-document', async () => {
-      const document = await strategyApi.uploadKnowledgeDocument(projectId, file)
-      setState(current => ({ ...current, documents: [document, ...current.documents] }))
-      const task = state.detail?.current_task
-      if (task && state.brief?.status === 'open') {
-        const references = Array.from(new Set([...(state.brief.document.reference_ids ?? []), document.id]))
-        const brief = await strategyApi.patchBriefField(
-          task.id,
-          state.brief,
-          'reference_ids',
-          references,
-          createMutationKey('strategy-brief-reference'),
-        )
-        setState(current => ({ ...current, brief }))
-      }
+      await uploadAndReferenceDocument(file)
     }, false),
+    uploadConversationDocument: async (file: File): Promise<KnowledgeDocument | null> => {
+      setState(current => ({ ...current, busy: 'upload-document', error: '' }))
+      try {
+        return await uploadAndReferenceDocument(file)
+      } catch (error) {
+        setState(current => ({ ...current, error: messageOf(error) }))
+        return null
+      } finally {
+        setState(current => ({ ...current, busy: '' }))
+      }
+    },
+    uploadConversationMedia: async (file: File): Promise<MediaUnderstandingArtifact | null> => {
+      setState(current => ({ ...current, busy: 'upload-media', error: '' }))
+      try {
+        const artifact = await strategyApi.uploadMediaForUnderstanding(projectId, file)
+        setState(current => ({
+          ...current,
+          mediaArtifacts: [artifact, ...current.mediaArtifacts.filter(value => value.id !== artifact.id)],
+        }))
+        return artifact
+      } catch (error) {
+        setState(current => ({ ...current, error: messageOf(error) }))
+        return null
+      } finally {
+        setState(current => ({ ...current, busy: '' }))
+      }
+    },
     runResearch: (
       category: 'general' | 'audience' | 'competitor' | 'industry',
       query: string,
@@ -600,4 +816,32 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
   }
 
   return { state, actions }
+}
+
+async function loadConversationMedia(projectId: string, messages: Message[], signal?: AbortSignal) {
+  const refs = new Map<string, { assetId: string; version: number }>()
+  for (const message of messages) {
+    for (const block of message.content_blocks ?? []) {
+      if (block.type !== 'asset_ref') continue
+      refs.set(`${block.asset_id}:${block.asset_version}`, { assetId: block.asset_id, version: block.asset_version })
+    }
+  }
+  const values = await Promise.all([...refs.values()].map(ref =>
+    strategyApi.getLatestMediaUnderstanding(projectId, ref.assetId, ref.version, signal).catch(() => null),
+  ))
+  return values.filter((value): value is MediaUnderstandingArtifact => Boolean(value))
+}
+
+export function mergeConversationMedia(
+  current: MediaUnderstandingArtifact[],
+  restored: MediaUnderstandingArtifact[],
+  projectId: string,
+) {
+  const result = new Map(
+    current
+      .filter(value => value.project_id === projectId)
+      .map(value => [value.id, value]),
+  )
+  for (const artifact of restored) result.set(artifact.id, artifact)
+  return [...result.values()].sort((left, right) => right.created_at.localeCompare(left.created_at))
 }

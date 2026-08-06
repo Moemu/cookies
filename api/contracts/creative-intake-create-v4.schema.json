@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-intake-create-v4.schema.json",
+  "title": "creative-intake-create/v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "source", "requirement_snapshot_ref", "business_capability_ref", "selected_route_id"],
+  "properties": {
+    "contract_version": {"const": "creative-intake-create/v4"},
+    "source": {"const": "requirement_snapshot"},
+    "requirement_snapshot_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brief_id", "brief_version", "content_hash"],
+      "properties": {
+        "brief_id": {"type": "string", "minLength": 1},
+        "brief_version": {"type": "integer", "minimum": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "business_capability_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["business_code", "version", "content_hash"],
+      "properties": {
+        "business_code": {"const": "viral_remake"},
+        "version": {"type": "string", "minLength": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "selected_route_id": {"const": "route_manual_viral_remake_v1"}
+  }
+}

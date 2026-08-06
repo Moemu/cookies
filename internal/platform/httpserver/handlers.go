@@ -323,6 +323,68 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) listProjectArtifacts(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.ListProjectArtifacts(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) createProjectArtifact(w http.ResponseWriter, r *http.Request) {
+	if _, ok := idempotencyKey(w, r); !ok {
+		return
+	}
+	var body project.CreateProjectArtifactRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.CreateProjectArtifact(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/platform/v1/projects/%s/artifacts/%s", url.PathEscape(r.PathValue("project_id")), url.PathEscape(value.ID)))
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) getProjectArtifact(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.GetProjectArtifact(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("artifact_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateProjectArtifact(w http.ResponseWriter, r *http.Request) {
+	var body project.UpdateProjectArtifactRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	if err := body.Validate(); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpdateProjectArtifact(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("artifact_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) projectWorkbench(w http.ResponseWriter, r *http.Request) {
 	if s.projects == nil {
 		s.notImplemented(w, r)

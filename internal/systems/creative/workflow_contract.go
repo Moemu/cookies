@@ -7,12 +7,15 @@ const (
 	CreativeSharedWorkflowV1              = "creative-shared-workflow/v1"
 	CreativeIntakeCreateV3ContractVersion = "creative-intake-create/v3"
 	CreativeIntakeV3ContractVersion       = "creative-intake/v3"
+	CreativeIntakeCreateV4ContractVersion = "creative-intake-create/v4"
+	CreativeIntakeV4ContractVersion       = "creative-intake/v4"
 	CreativePlanningContextV1             = "creative-planning-context/v1"
 	CreativeDirectionBatchV1              = "creative-direction-candidate-batch/v1"
 	CreativeDirectionVersionV1            = "creative-direction/v1"
 
 	CreativeRouteImageText  = "image_text"
 	CreativeRouteBrandVideo = "brand_video"
+	ManualImageTextRouteID  = "route_manual_xiaohongshu_image_text_v1"
 )
 
 type CreativeDirectionBatchStatus string

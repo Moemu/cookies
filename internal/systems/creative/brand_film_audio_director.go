@@ -81,8 +81,8 @@ func directBrandAudioBlueprint(plan BrandFilmPlanVersion, blueprint AudioBluepri
 		blueprint.Decisions = append(blueprint.Decisions, AudioDirectorDecision{ID: fmt.Sprintf("decision_sfx_%02d", index+1), Kind: "beat_snap", TargetID: cue.ID, Summary: fmt.Sprintf("%s 吸附到镜头边界 %.1f 秒", cue.Label, float64(cue.StartMS)/1000), Reason: "用声音重音强化切镜和产品露出", Confidence: .84, Editable: false})
 	}
 	for index, shot := range plan.Shots {
-		spokenProduct := containsAny(shot.Voiceover, "娇兰", "蜂皇水", "25X", "二十五倍")
-		visibleProduct := containsAny(shot.Visual+shot.Purpose+shot.OnScreenText, "产品", "瓶", "娇兰", "蜂皇水", "25X", "Logo", "品牌")
+		spokenProduct := containsAnyAudioTerm(shot.Voiceover, "娇兰", "蜂皇水", "25X", "二十五倍")
+		visibleProduct := containsAnyAudioTerm(shot.Visual+shot.Purpose+shot.OnScreenText, "产品", "瓶", "娇兰", "蜂皇水", "25X", "Logo", "品牌")
 		status, summary, suggestion := "pass", "旁白与当前镜头语义一致", ""
 		if spokenProduct && !visibleProduct {
 			status, summary, suggestion = "warning", "口播提到品牌或产品，但画面证据不足", "在该镜头补充产品、瓶身或品牌标识露出"
@@ -121,7 +121,7 @@ func compactNarrationSuggestion(text string) string {
 	return strings.TrimSpace(result)
 }
 
-func containsAny(value string, terms ...string) bool {
+func containsAnyAudioTerm(value string, terms ...string) bool {
 	for _, term := range terms {
 		if strings.Contains(value, term) {
 			return true

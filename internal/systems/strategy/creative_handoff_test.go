@@ -130,6 +130,37 @@ func TestBuildCreativeHandoffDiagnosesMissingPlanningFields(t *testing.T) {
 	}
 }
 
+func TestPackageVersionWithHandoffReadinessDowngradesContradictoryPackage(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Readiness.CreativeReady = true
+	value := packageVersionForHandoffTest(t, snapshot)
+	originalHash := value.ContentHash
+
+	normalized, handoff, err := packageVersionWithHandoffReadiness(value, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Snapshot.Readiness.CreativeReady {
+		t.Fatal("creative_ready remained true for a blocked frozen handoff")
+	}
+	if handoff.UpstreamReadiness.Status != "blocked" {
+		t.Fatalf("readiness = %#v", handoff.UpstreamReadiness)
+	}
+	if normalized.ContentHash.Equal(originalHash) {
+		t.Fatalf("readiness mutation retained content hash %q", originalHash)
+	}
+	if !normalized.Snapshot.Approval.ContentHash.Equal(normalized.ContentHash) {
+		t.Fatalf("approval hash = %q, package hash = %q", normalized.Snapshot.Approval.ContentHash, normalized.ContentHash)
+	}
+	if !handoff.PackageRef.PackageContentHash.Equal(normalized.ContentHash) {
+		t.Fatalf("handoff package hash = %q, package hash = %q", handoff.PackageRef.PackageContentHash, normalized.ContentHash)
+	}
+	if err := VerifyPackageContentHash(normalized.Snapshot); err != nil {
+		t.Fatalf("normalized package hash invalid: %v", err)
+	}
+}
+
 func TestBuildCreativeHandoffRejectsFrozenSchemaLengthViolation(t *testing.T) {
 	t.Parallel()
 	snapshot := packageHashFixture()
@@ -169,7 +200,85 @@ func TestBuildCreativeHandoffDoesNotGuessLegacyPreRollMode(t *testing.T) {
 	}
 }
 
-func TestBuildCreativeHandoffBlocksPerformanceRouteWithoutCTA(t *testing.T) {
+func TestBuildCreativeHandoffKeepsStableImageTextRouteWhenLegacyVideoRouteExists(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.CreativeRoutes = []CreativeRoute{{
+		RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"},
+		Reason: "承接正片", TargetDurationSeconds: 5, AspectRatio: "9:16",
+		SourceAssetRefs: []contract.AssetVersionRef{}, EvidenceRefs: []string{},
+		RequiresHumanConfirmation: true,
+	}}
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "xiaohongshu", Role: "种草心智渗透", Formats: []string{"真实场景图文笔记"},
+	}, {
+		Platform: "douyin", Role: "泛兴趣触达", Formats: []string{"short_video"},
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handoff.UpstreamReadiness.Status != "ready" || len(handoff.Routes) != 2 ||
+		handoff.Routes[0].RouteID != "route_xiaohongshu_image_text" ||
+		handoff.Routes[1].RouteID != "route_brand_video" ||
+		!hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "creative_route_legacy_ignored") {
+		t.Fatalf("stable image-text route was blocked by unrelated legacy video route: %#v", handoff)
+	}
+}
+
+func TestBuildCreativeHandoffRecognizesConcreteImageFormats(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "xiaohongshu", Role: "种草心智渗透",
+		Formats: []string{"车间实拍数据三联图", "工艺前后对比图", "采购流程步骤图"},
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteID != "route_xiaohongshu_image_text" {
+		t.Fatalf("concrete image formats did not produce an image-text route: %#v", handoff.Routes)
+	}
+}
+
+func TestBuildCreativeHandoffFreezesBrandVideoRouteFromApprovedVideoPlan(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{
+		{Platform: "xiaohongshu", Role: "品牌种草", Formats: []string{"图文笔记"}},
+		{Platform: "douyin", Role: "品牌认知", Formats: []string{"竖屏短视频"}},
+	}
+	snapshot.Strategy.PlatformPlans = []PlatformPlan{{Platform: "douyin", Role: "工程品牌认知"}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(handoff.Routes) != 2 {
+		t.Fatalf("routes = %#v", handoff.Routes)
+	}
+	brandRoute := handoff.Routes[1]
+	if brandRoute.RouteID != "route_brand_video" || brandRoute.DeliverableType != "video" ||
+		brandRoute.Purpose != "brand" || brandRoute.PerformanceMode != "brand_video" ||
+		brandRoute.Spec.TargetDurationSeconds != 30 || brandRoute.Spec.AspectRatio != "9:16" ||
+		len(brandRoute.AssetRequirements) != 3 || brandRoute.RouteReadiness.Status != "ready" {
+		t.Fatalf("brand route = %#v", brandRoute)
+	}
+}
+
+func TestBuildCreativeHandoffKeepsPerformanceRouteReadyForTaskPlanningWithoutCTA(t *testing.T) {
 	t.Parallel()
 	snapshot := packageHashFixture()
 	snapshot.Brief.Snapshot.Region = "CN"
@@ -183,10 +292,34 @@ func TestBuildCreativeHandoffBlocksPerformanceRouteWithoutCTA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteReadiness.Status != "blocked" ||
-		!hasHandoffIssue(handoff.Routes[0].RouteReadiness.Blockers, "cta_missing") ||
-		!hasHandoffIssue(handoff.UpstreamReadiness.Blockers, "cta_missing") {
+	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteReadiness.Status != "ready" ||
+		!handoff.Routes[0].CTAPolicy.RequiredForGeneration ||
+		!hasHandoffIssue(handoff.Routes[0].RouteReadiness.Warnings, "cta_missing") ||
+		!hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "cta_missing") {
 		t.Fatalf("performance route readiness = %#v", handoff)
+	}
+}
+
+func TestBuildCreativeHandoffUsesExplicitLeadGoalForMixedXiaohongshuRole(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Strategy.Objective = "通过小红书获客并增加有效销售线索"
+	snapshot.Strategy.Measurement = []string{"有效线索留资率"}
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "xiaohongshu", Role: "搜索承接与种草获客，完成留资转化",
+		Formats: []string{"精度检测实拍三联图", "参数对比图"},
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(handoff.Routes) != 1 || handoff.Routes[0].Purpose != "performance" ||
+		handoff.Routes[0].RouteReadiness.Status != "ready" {
+		t.Fatalf("lead objective did not produce a plannable performance route: %#v", handoff.Routes)
 	}
 }
 

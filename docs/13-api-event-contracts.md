@@ -3,7 +3,7 @@
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 四个业务系统与共享基座共同遵循的接口和事件标准 |
-| 文档版本 | v0.3 |
+| 文档版本 | v0.5 |
 | 文档状态 | 草案 |
 
 ## 1. 命名空间
@@ -134,6 +134,7 @@ SSE：
 当前 `api/openapi/platform-v1.yaml` 覆盖已落地的共享平台接口，包括 Project/Identity、素材上传、素材预览、生成产物回流、模型作业，以及广告 AIGC/AI 混剪相关的核心 MVP 能力：
 
 - Project 的创建、读取与受 Project Scope 保护的更新；更新支持名称、展示品牌、目标、行业以及可选的 `expected_context_version` 乐观并发检查。
+- Project scoped Artifact 的创建、列表、详情与更新；Brief、图像、视频和文档产物持久化为独立版本化资源，创建要求 `Idempotency-Key`，更新可使用 `expected_version` 检测冲突，并写入 Project 审计事件。
 - 视频素材元数据与 `AssetFeature` 多模态标签读写，包含探测状态、poster 引用、hook 强度、商品露出、卖点、相似度风险和证据。
 - `RemixPlan` v1/v2 兼容契约，v2 使用 `segments[].shots[]` 表达 Shot List，同时保留旧 `clips[]` 兼容字段。
 - `RenderJob` 状态机、幂等创建、进度、质量报告引用、输出资产引用、预览入口和输入素材血缘摘要。
@@ -165,3 +166,4 @@ MVP 边界：
 | v0.2 | 2026-07-21 | 增加 Project Scope、跨项目复用、project_id 不可变和资源索引事件约束 |
 | v0.3 | 2026-07-26 | 补齐广告 AIGC/AI 混剪 Task1-12 已实现平台接口的 OpenAPI 范围和 MVP 边界 |
 | v0.4 | 2026-07-28 | 增加 Project 更新的 OpenAPI 契约、ProjectContextVersion 递增和前端 Go 权威源迁移 |
+| v0.5 | 2026-07-29 | 增加 Project scoped Artifact 的版本化读写契约与前端 Go 权威源迁移 |

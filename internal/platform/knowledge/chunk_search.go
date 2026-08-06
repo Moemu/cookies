@@ -12,10 +12,79 @@ import (
 )
 
 const maxResearchDisclosedChunks = 8
+const maxConversationContextChunks = 8
 
 type chunkCandidate struct {
 	document Document
 	chunk    Chunk
+}
+
+// SelectConversationChunks returns a bounded, project-authorized set of ready
+// chunks for an explicitly attached document list. It never searches across
+// the project's unselected knowledge base.
+func (s Service) SelectConversationChunks(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	documentIDs []string,
+	query string,
+) ([]SearchResult, error) {
+	if len(documentIDs) == 0 || len(documentIDs) > 8 {
+		return nil, ErrInvalidDocument
+	}
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(documentIDs))
+	for _, id := range documentIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, ErrInvalidDocument
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, ErrInvalidDocument
+		}
+		seen[id] = struct{}{}
+	}
+	terms := tokenize(query)
+	candidates, err := s.loadChunkCandidates(ctx, actor.OrganizationID, projectID, documentIDs, terms)
+	if err != nil {
+		return nil, err
+	}
+	// A relevant query may match only one of several attached documents. That
+	// does not mean the other documents are still parsing. Fall back to the
+	// complete attached set so readiness is checked independently from ranking.
+	if !candidateSetCoversDocuments(candidates, documentIDs) {
+		candidates, err = s.loadChunkCandidates(ctx, actor.OrganizationID, projectID, documentIDs, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !candidateSetCoversDocuments(candidates, documentIDs) {
+		return nil, fmt.Errorf("%w: every attached document must be parsed and ready", ErrInvalidDocument)
+	}
+	results := make([]SearchResult, 0, len(candidates))
+	for _, candidate := range candidates {
+		results = append(results, chunkSearchResult(candidate, scoreChunk(candidate.document, candidate.chunk, terms), terms))
+	}
+	sortSearchResults(results)
+	if len(results) > maxConversationContextChunks {
+		results = results[:maxConversationContextChunks]
+	}
+	return results, nil
+}
+
+func candidateSetCoversDocuments(candidates []chunkCandidate, documentIDs []string) bool {
+	documentsWithChunks := make(map[string]struct{}, len(documentIDs))
+	for _, candidate := range candidates {
+		documentsWithChunks[candidate.document.ID] = struct{}{}
+	}
+	for _, documentID := range documentIDs {
+		if _, ok := documentsWithChunks[documentID]; !ok {
+			return false
+		}
+	}
+	return len(documentIDs) > 0
 }
 
 func (s Service) searchChunks(

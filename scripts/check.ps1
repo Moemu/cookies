@@ -31,17 +31,22 @@ Get-ChildItem -Path .\api\events -File -Filter *.json | ForEach-Object {
     Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json | Out-Null
 }
 
-if (-not (Test-Path -LiteralPath '.\web\node_modules')) {
-    Write-Error 'Frontend dependencies are missing. Run npm ci --prefix web first.'
+if (-not (Test-Path -LiteralPath '.\node_modules')) {
+    Write-Error 'Frontend dependencies are missing. Run npm ci first.'
     exit 1
 }
 
-& npm run check --prefix web
+& npm run check:server
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-& npm run contract:check --prefix web
+& npm run test:server
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& npm run build
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

@@ -1306,6 +1306,7 @@ func TestCreativeImageTextSlotGenerationUsesFrozenPromptAndPortraitProfile(t *te
 	}
 	if jobs.request.Input.Width != creative.ImageTextSourceWidth ||
 		jobs.request.Input.Height != creative.ImageTextSourceHeight ||
+		jobs.request.Operation != "image.edit" ||
 		jobs.request.Input.Prompt != "frozen portrait prompt" ||
 		len(jobs.request.Input.SourceAssets) != 1 ||
 		jobs.request.Input.PromptRef == nil ||
@@ -2179,6 +2180,18 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
 	return project.ProjectDetail{}, nil
 }
+func (staticProjectManager) CreateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, project.CreateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) ListProjectArtifacts(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectArtifact, error) {
+	return nil, nil
+}
+func (staticProjectManager) GetProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) UpdateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
 func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
 	return project.Workbench{}, nil
 }
@@ -2295,6 +2308,7 @@ type creativeManagerStub struct {
 	imageAttempt                       creative.ImageGenerationAttempt
 	preparedImageOrder                 int
 	attachedImageProviderJobID         string
+	failedImageAttemptID               string
 }
 
 func (s *creativeManagerStub) GetLatestAINativeRequirementWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.AINativeRequirementWorkspace, error) {
@@ -2598,6 +2612,19 @@ func (s *creativeManagerStub) AttachImageProviderJob(
 ) (creative.ImageGenerationAttempt, error) {
 	s.attachedImageProviderJobID = providerJobID
 	s.imageAttempt.ProviderJobID = providerJobID
+	return s.imageAttempt, nil
+}
+
+func (s *creativeManagerStub) FailImageGenerationAttempt(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	attemptID string,
+	_ string,
+	_ string,
+) (creative.ImageGenerationAttempt, error) {
+	s.failedImageAttemptID = attemptID
+	s.imageAttempt.Status = creative.ImageAttemptFailed
 	return s.imageAttempt, nil
 }
 
