@@ -86,6 +86,45 @@ func TestDouyinResolverRejectsMissingProductPayload(t *testing.T) {
 	}
 }
 
+func TestDouyinResolverAcceptsLongShareTextAndNestedDetailSchemaProductID(t *testing.T) {
+	detail, _ := json.Marshal(map[string]any{
+		"title": "LED三面化妆镜",
+		"sales": 460,
+		"img": map[string]any{"url_list": []string{
+			"https://p26-item.ecombdimg.com/img/product.png",
+		}},
+	})
+	schema := "sslocal://ec_goods_detail?enter_from=copy&product_id=3755075523408167575"
+	productURL := "https://haohuo.jinritemai.com/ecommerce/trade/detail/index.html?detail_schema=" + url.QueryEscape(schema) +
+		"&goods_detail=" + url.QueryEscape(string(detail)) + "&tracking=" + strings.Repeat("x", 20*1024)
+	resolver := DouyinResolver{Client: doerFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("complete long links should be parsed without a network request")
+		return nil, nil
+	})}
+
+	snapshot, err := resolver.Resolve(context.Background(), "复制此消息 "+productURL+" 打开抖音")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ProductID != "3755075523408167575" || snapshot.Name != "LED三面化妆镜" {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+	if snapshot.SourceURL != "https://haohuo.jinritemai.com/ecommerce/trade/detail/index.html?id=3755075523408167575" {
+		t.Fatalf("tracking-free canonical URL expected, got %q", snapshot.SourceURL)
+	}
+}
+
+func TestDouyinResolverReportsTruncatedGoodsDetail(t *testing.T) {
+	resolver := DouyinResolver{Client: doerFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("a visibly truncated payload must not be requested")
+		return nil, nil
+	})}
+	_, err := resolver.Resolve(context.Background(), "https://haohuo.jinritemai.com/ecommerce/trade/detail/index.html?product_id=1&goods_detail=%7B%22title%22%3A%22broken")
+	if !errors.Is(err, ErrIncompleteLink) {
+		t.Fatalf("expected incomplete-link error, got %v", err)
+	}
+}
+
 func TestDouyinRedirectPolicyRejectsUntrustedHostAndExcessRedirects(t *testing.T) {
 	resolver := NewDouyinResolver()
 	client, ok := resolver.Client.(*http.Client)

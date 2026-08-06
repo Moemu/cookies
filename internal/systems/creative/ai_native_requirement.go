@@ -13,8 +13,11 @@ import (
 const aiNativeRequirementContract = "creative.ai-native.requirement/v1"
 
 var (
-	ErrInvalidAINativeRequirement = errors.New("invalid AI native requirement")
-	ErrAINativeProductUnavailable = errors.New("AI native product is unavailable")
+	ErrInvalidAINativeRequirement     = errors.New("invalid AI native requirement")
+	ErrAINativeProductUnavailable     = errors.New("AI native product is unavailable")
+	ErrAINativeProductLinkIncomplete  = errors.New("AI native product link is incomplete")
+	ErrAINativeProductLinkUnsupported = errors.New("AI native product link is unsupported")
+	ErrAINativeProductDetailMissing   = errors.New("AI native product detail is missing")
 )
 
 type AINativeProductImage struct {
@@ -47,6 +50,17 @@ type AINativeProductResolver interface {
 
 type AINativeProductMediaImporter interface {
 	ImportProductMedia(context.Context, contract.ActorContext, contract.ProjectID, string, []AINativeRequirementMedia) ([]AINativeRequirementMedia, error)
+}
+
+type ResolveAINativeProductPreviewRequest struct {
+	ProductLink string `json:"product_link"`
+}
+
+type AINativeProductPreview struct {
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+	Source      string `json:"source"`
+	SourceURL   string `json:"source_url"`
 }
 
 type AnalyzeAINativeRequirementRequest struct {
@@ -196,7 +210,7 @@ func (s Service) AnalyzeAINativeRequirement(ctx context.Context, actor contract.
 	}
 	product, err := s.AINativeProducts.Resolve(ctx, normalized.ProductLink)
 	if err != nil {
-		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: %v", ErrAINativeProductUnavailable, err)
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: %w", ErrAINativeProductUnavailable, err)
 	}
 	draft, err := s.AINativeRequirementPlanner.Analyze(ctx, actor, project, product, normalized)
 	if err != nil {
@@ -244,4 +258,29 @@ func (s Service) AnalyzeAINativeRequirement(ctx context.Context, actor contract.
 		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	}
 	return s.AINativeRequirements.CreateAINativeRequirementWorkspace(ctx, workspace)
+}
+
+func (s Service) ResolveAINativeProductPreview(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request ResolveAINativeProductPreviewRequest) (AINativeProductPreview, error) {
+	if s.Projects == nil || s.AINativeProducts == nil {
+		return AINativeProductPreview{}, fmt.Errorf("AI native product preview dependencies are incomplete")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return AINativeProductPreview{}, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AINativeProductPreview{}, err
+	}
+	product, err := s.AINativeProducts.Resolve(ctx, strings.TrimSpace(request.ProductLink))
+	if err != nil {
+		return AINativeProductPreview{}, fmt.Errorf("%w: %w", ErrAINativeProductUnavailable, err)
+	}
+	if strings.TrimSpace(product.ProductID) == "" || strings.TrimSpace(product.Name) == "" {
+		return AINativeProductPreview{}, fmt.Errorf("%w: product id and name are required", ErrAINativeProductUnavailable)
+	}
+	return AINativeProductPreview{
+		ProductID:   product.ProductID,
+		ProductName: product.Name,
+		Source:      product.Source,
+		SourceURL:   product.SourceURL,
+	}, nil
 }

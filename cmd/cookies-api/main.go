@@ -130,7 +130,7 @@ func main() {
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 	creativeRepository := creative.MySQLRepository{DB: db}
 	creativeService := &creative.Service{
-		Repository: creativeRepository, ViralRemakes: creativeRepository,
+		Repository: creativeRepository, ViralRemakes: creativeRepository, EditTasks: creativeRepository, EditingRenders: creativeRepository,
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
 		AudioAssets:        creativeAudioAssetWriter{uploads: uploadService},
 		CommerceWorkspaces: creativeRepository, Directions: creativeRepository,
@@ -198,12 +198,22 @@ func main() {
 				log.Printf("Creative short-drama model planning fell back to deterministic planning: %v", err)
 			},
 		}
+		creativeService.ShortDramaV2Planner = creative.FallbackShortDramaV2Planner{
+			Primary: creative.ModelShortDramaV2Planner{
+				Text: &provider.Service{TextAdapter: textAdapter}, ModelAlias: cfg.Creative.ShortDramaPlannerModelAlias,
+			},
+			Fallback: creative.DeterministicShortDramaV2Planner{},
+			OnPrimaryFailure: func(err error) {
+				log.Printf("Creative short-drama V2 model planning fell back to deterministic planning: %v", err)
+			},
+		}
 		log.Printf(
 			"Creative short-drama planning configured: model_alias=%s fallback=deterministic",
 			cfg.Creative.ShortDramaPlannerModelAlias,
 		)
 	} else {
 		creativeService.ShortDramaPrerollPlanner = creative.DeterministicShortDramaPrerollPlanner{}
+		creativeService.ShortDramaV2Planner = creative.DeterministicShortDramaV2Planner{}
 	}
 	if cfg.Creative.GamePrerollModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -257,7 +267,7 @@ func main() {
 		gatewayConfig := provider.MySQLGatewayConfigStore{
 			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
 		}
-		analyzer, analyzerErr := creativeprovider.NewViralAnalyzer(creativeprovider.ViralAnalyzerConfig{
+		analysisConfig := creativeprovider.ViralAnalyzerConfig{
 			Assets: uploadService, Routes: gatewayConfig, Credentials: gatewayConfig,
 			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			ModelAlias: "cookies.text.standard", PromptVersion: "viral.analyze.v1",
@@ -268,11 +278,17 @@ func main() {
 				APIKey: cfg.Provider.VolcengineASR.APIKey, ResourceID: cfg.Provider.VolcengineASR.ResourceID,
 				Model: cfg.Provider.VolcengineASR.Model,
 			},
-		})
+		}
+		analyzer, analyzerErr := creativeprovider.NewViralAnalyzer(analysisConfig)
 		if analyzerErr != nil {
 			log.Fatalf("configure viral reference analyzer: %v", analyzerErr)
 		}
 		creativeService.ViralAnalyzer = analyzer
+		shortDramaAnalyzer, shortDramaAnalyzerErr := creativeprovider.NewShortDramaV2Analyzer(analysisConfig)
+		if shortDramaAnalyzerErr != nil {
+			log.Fatalf("configure short drama V2 analyzer: %v", shortDramaAnalyzerErr)
+		}
+		creativeService.ShortDramaV2Analyzer = shortDramaAnalyzer
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
 	runtimeStore := jobruntime.MySQLStore{DB: db}
@@ -376,6 +392,7 @@ func main() {
 		creativeService.AINativeRequirementPlanner = creative.ModelAINativeRequirementPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 		creativeService.AINativeScriptPlanner = creative.ModelAINativeScriptPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 		creativeService.AINativeStoryboardPlanner = creative.ModelAINativeStoryboardPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
+		creativeService.AINativeVoiceoverFitter = creative.ModelAINativeVoiceoverFitter{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 	}
 	insightsService := &insights.Service{
 		Repository:  insights.MySQLRepository{DB: db},
@@ -413,6 +430,9 @@ func main() {
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
 	}
+	creativeService.EditingRenderScheduler = creative.JobRuntimeEditingRenderScheduler{
+		Store: runtimeStore, NewID: func() (string, error) { return ids.New("editingrenderexec") },
+	}
 	creativeService.AudioMixScheduler = creative.JobRuntimeAudioMixRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("audiomixrenderexec") },
 	}
@@ -439,6 +459,7 @@ func main() {
 		for kind, handler := range creative.NewRenderRuntimeWorker(runtimeStore, *creativeService).Handlers {
 			runtimeHandlers[kind] = handler
 		}
+		runtimeHandlers["creative.editing.render"] = creative.EditingRenderRuntimeHandler(*creativeService)
 	}
 	if cfg.Strategy.Enabled {
 		strategyService := strategysystem.Service{
@@ -533,6 +554,7 @@ func main() {
 			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher}
 		}
 		dependencies.ProviderJobs = providerService
+		creativeService.ShortDramaV2Images = creativeShortDramaV2ImageJobs{provider: &providerService}
 		creativeService.AINativeStoryboards = creativeRepository
 		creativeService.AINativeStoryboardAssetPreparer = creativeAINativeStoryboardAssetPreparer{provider: &providerService}
 		creativeService.AINativeStoryboardScheduler = creative.JobRuntimeAINativeStoryboardScheduler{Store: runtimeStore}
@@ -755,6 +777,14 @@ type creativeProductResolver struct{ resolver productsource.DouyinResolver }
 func (r creativeProductResolver) Resolve(ctx context.Context, input string) (creative.AINativeProductSnapshot, error) {
 	value, err := r.resolver.Resolve(ctx, input)
 	if err != nil {
+		switch {
+		case errors.Is(err, productsource.ErrIncompleteLink):
+			return creative.AINativeProductSnapshot{}, fmt.Errorf("%w: %v", creative.ErrAINativeProductLinkIncomplete, err)
+		case errors.Is(err, productsource.ErrUnsupportedLink):
+			return creative.AINativeProductSnapshot{}, fmt.Errorf("%w: %v", creative.ErrAINativeProductLinkUnsupported, err)
+		case errors.Is(err, productsource.ErrProductMissing):
+			return creative.AINativeProductSnapshot{}, fmt.Errorf("%w: %v", creative.ErrAINativeProductDetailMissing, err)
+		}
 		return creative.AINativeProductSnapshot{}, err
 	}
 	images := make([]creative.AINativeProductImage, 0, len(value.Images))

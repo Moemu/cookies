@@ -20,13 +20,22 @@ type aiNativeRequirementManager interface {
 	ConfirmAINativeScript(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmAINativeScriptRequest) (creative.AINativeRequirementWorkspace, error)
 	ReopenAINativeScript(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReopenAINativeRequirementRequest) (creative.AINativeRequirementWorkspace, error)
 	GenerateAINativeStoryboard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateAINativeStoryboardRequest) (creative.AINativeRequirementWorkspace, error)
+	RegenerateAINativeStoryboardAsset(context.Context, contract.ActorContext, contract.ProjectID, string, string, creative.RegenerateAINativeStoryboardAssetRequest) (creative.AINativeRequirementWorkspace, error)
 	UpdateAINativeStoryboard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateAINativeStoryboardRequest) (creative.AINativeRequirementWorkspace, error)
 	ConfirmAINativeStoryboard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmAINativeStoryboardRequest) (creative.AINativeRequirementWorkspace, error)
 	ReopenAINativeStoryboard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReopenAINativeRequirementRequest) (creative.AINativeRequirementWorkspace, error)
 }
 
+type aiNativeVoiceoverFitManager interface {
+	SuggestAINativeVoiceoverFit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SuggestAINativeVoiceoverFitRequest) (creative.AINativeVoiceoverFitSuggestion, error)
+}
+
 type aiNativeLatestRequirementManager interface {
 	GetLatestAINativeRequirementWorkspace(context.Context, contract.ActorContext, contract.ProjectID) (creative.AINativeRequirementWorkspace, error)
+}
+
+type aiNativeProductPreviewManager interface {
+	ResolveAINativeProductPreview(context.Context, contract.ActorContext, contract.ProjectID, creative.ResolveAINativeProductPreviewRequest) (creative.AINativeProductPreview, error)
 }
 
 type aiNativeWorkspaceCatalogManager interface {
@@ -173,6 +182,26 @@ func (s *Server) reopenAINativeStoryboard(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) suggestAINativeVoiceoverFit(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeVoiceoverFitManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.SuggestAINativeVoiceoverFitRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.SuggestAINativeVoiceoverFit(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("workspace_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) generateAINativeStoryboard(w http.ResponseWriter, r *http.Request) {
 	manager, ok := s.creative.(aiNativeRequirementManager)
 	if !ok || manager == nil {
@@ -186,6 +215,26 @@ func (s *Server) generateAINativeStoryboard(w http.ResponseWriter, r *http.Reque
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := manager.GenerateAINativeStoryboard(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("workspace_id"), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) regenerateAINativeStoryboardAsset(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeRequirementManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.RegenerateAINativeStoryboardAssetRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.RegenerateAINativeStoryboardAsset(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("workspace_id"), r.PathValue("asset_id"), body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -361,6 +410,26 @@ func (s *Server) analyzeAINativeRequirement(w http.ResponseWriter, r *http.Reque
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := manager.AnalyzeAINativeRequirement(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) resolveAINativeProductPreview(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeProductPreviewManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.ResolveAINativeProductPreviewRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.ResolveAINativeProductPreview(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), body)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return

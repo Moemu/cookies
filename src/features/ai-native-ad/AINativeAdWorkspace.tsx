@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { analyzeRequirement, cancelProduction, confirmRequirement, confirmScript, confirmStoryboard, generateScript, generateStoryboard, getAssetPreview, getLatestRequirementWorkspace, getRequirementReopenImpact, getRequirementWorkspace, listAINativeAdWorkspaces, regenerateScript as regenerateScriptRequest, renameAINativeAdWorkspace, reopenRequirement, reopenScript, reopenStoryboard, retryProductionUnit, startProduction } from './api'
-import { aiNativeReducer, initialAINativeState, productionFailureMessage } from './reducer'
+import { analyzeRequirement, cancelProduction, confirmRequirement, confirmScript, confirmStoryboard, fitStoryboardVoiceover, generateScript, generateStoryboard, getAssetPreview, getLatestRequirementWorkspace, getRequirementReopenImpact, getRequirementWorkspace, listAINativeAdWorkspaces, regenerateScript as regenerateScriptRequest, regenerateStoryboardAsset, renameAINativeAdWorkspace, reopenRequirement, reopenScript, reopenStoryboard, retryProductionUnit, startProduction, updateStoryboard } from './api'
+import { aiNativeReducer, initialAINativeState, productionFailureMessage, productionReferenceFailure } from './reducer'
 import { AINativeStageStepper } from './AINativeStageStepper'
 import { RequirementStage } from './RequirementStage'
 import { ScriptStage } from './ScriptStage'
@@ -30,6 +30,8 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [recordName, setRecordName] = useState('')
   const [newDialogError, setNewDialogError] = useState('')
+  const [pendingStoryboardAssetId, setPendingStoryboardAssetId] = useState('')
+  const [voiceoverFitBusy, setVoiceoverFitBusy] = useState(false)
   const autosave = useAINativeAutosave(projectId, state, dispatch)
 
   const refreshCatalog = useCallback(async () => {
@@ -399,6 +401,28 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     await startStoryboardGeneration(state.workspace)
   }
 
+  const startStoryboardAssetRegeneration = async (workspace: AINativeRequirementWorkspace, assetId: string) => {
+    dispatch({ type: 'operation-started', stage: 'storyboard' })
+    try {
+      const generating = await regenerateStoryboardAsset(projectId, workspace.workspace_id, assetId, workspace.workspace_version)
+      dispatch({ type: 'requirement-loaded', workspace: generating })
+      dispatch({ type: 'open-stage', stage: 'storyboard' })
+      onNotice(`故事板素材 ${assetId} 已开始重新生成，其他素材保持不变。`)
+    } catch (cause) {
+      dispatch({ type: 'operation-failed', stage: 'storyboard', message: cause instanceof Error ? cause.message : '故事板素材重新生成失败。' })
+    }
+  }
+
+  const requestStoryboardAssetRegeneration = async (assetId: string) => {
+    if (!state.workspace) return
+    if (state.workspace.storyboard_status === 'confirmed') {
+      setPendingStoryboardAssetId(assetId)
+      await requestEdit('storyboard')
+      return
+    }
+    await startStoryboardAssetRegeneration(state.workspace, assetId)
+  }
+
   const saveStoryboard = async () => {
     if (!state.storyboard || !state.workspace) return null
     autosave.schedule('storyboard', state.storyboard)
@@ -438,6 +462,32 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	}
   }
 
+  const fitFailedVoiceover = async () => {
+    const current = state.workspace
+    const speechUnitId = state.video?.failure_code === 'SPEECH_DURATION_EXCEEDED' ? state.video.failed_unit_id : ''
+    if (!current || !speechUnitId) return
+    setVoiceoverFitBusy(true)
+    try {
+      const suggestion = await fitStoryboardVoiceover(projectId, current.workspace_id, speechUnitId, current.workspace_version)
+      const reopened = await reopenStoryboard(projectId, current.workspace_id, current.workspace_version)
+      if (!reopened.storyboard) throw new Error('故事板重新打开后未返回可编辑版本。')
+      const adjusted: StoryboardDraft = {
+        ...reopened.storyboard,
+        shots: reopened.storyboard.shots.map(shot => shot.id === suggestion.shot_id ? { ...shot, voiceover: suggestion.suggested_voiceover } : shot),
+      }
+      if (!adjusted.shots.some(shot => shot.id === suggestion.shot_id)) throw new Error('未找到需要压缩旁白的对应分镜。')
+      const saved = await updateStoryboard(projectId, reopened.workspace_id, adjusted)
+      dispatch({ type: 'requirement-loaded', workspace: saved })
+      dispatch({ type: 'open-stage', stage: 'storyboard' })
+      window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, saved.workspace_id, 'storyboard')}${window.location.hash}`)
+      onNotice(`已将 ${suggestion.shot_id} 旁白压缩到 ${suggestion.max_characters} 字以内，请确认后重新一键成片。`)
+    } catch (cause) {
+      dispatch({ type: 'operation-failed', stage: 'video', message: cause instanceof Error ? cause.message : '智能压缩旁白失败。' })
+    } finally {
+      setVoiceoverFitBusy(false)
+    }
+  }
+
   const cancelVideo = async () => {
 	if (!state.workspace || (state.workspace.production_status !== 'running' && state.workspace.production_status !== 'rendering')) return
 	try {
@@ -473,7 +523,13 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	    const workspace = await reopenStoryboard(projectId, state.workspace.workspace_id, state.workspace.workspace_version)
 	    dispatch({ type: 'requirement-loaded', workspace })
 	    dispatch({ type: 'reopen-confirmed' })
-	    onNotice(`故事板已重新打开为 revision ${workspace.current_storyboard_revision}。`)
+	    if (pendingStoryboardAssetId) {
+	      const assetId = pendingStoryboardAssetId
+	      setPendingStoryboardAssetId('')
+	      await startStoryboardAssetRegeneration(workspace, assetId)
+	    } else {
+	      onNotice(`故事板已重新打开为 revision ${workspace.current_storyboard_revision}。`)
+	    }
 	  } else if (stage === 'script') {
 	    const workspace = await reopenScript(projectId, state.workspace.workspace_id, state.workspace.workspace_version)
 	    dispatch({ type: 'requirement-loaded', workspace })
@@ -487,6 +543,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	    onNotice(`需求已重新打开为 revision ${workspace.current_revision}，旧版本已保留并作废。`)
 	  }
 	} catch (cause) {
+	  setPendingStoryboardAssetId('')
 	  dispatch({ type: 'operation-failed', stage, message: cause instanceof Error ? cause.message : '重新编辑需求失败。' })
 	}
   }
@@ -495,6 +552,8 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     ? '正在自动保存…'
     : autosave.status === 'failed' ? '自动保存失败，本地草稿已保留'
     : autosave.savedAt ? `已自动保存 ${autosave.savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''
+
+  const referenceFailure = state.workspace ? productionReferenceFailure(state.workspace) : null
 
   return <section className="ai-native-workspace" aria-label="AI 效果广告生成工作区">
     <header className="ai-native-workspace-header"><div><h3>AI 效果广告生成</h3><p>从商品链接开始，依次完成需求、脚本、故事板和完整视频。</p></div><div className="ai-native-workspace-header-side"><AINativeAdCatalog records={records} currentId={state.workspace?.workspace_id ?? ''} busy={catalogBusy} onSelect={workspaceId => { void switchWorkspace(workspaceId) }} onNew={requestNewWorkspace}/><div className="ai-native-support-copy"><span>实际支持</span><b>抖音 · 9:16 · 15–30 秒</b>{autosaveCopy ? <small role="status">{autosaveCopy}</small> : null}</div></div></header>
@@ -545,13 +604,23 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       onConfirm={() => { void confirmStoryboardStage() }}
 	  onEdit={() => { void requestEdit('storyboard') }}
       onRetry={() => { void retryStoryboardGeneration() }}
+      onRegenerateAsset={assetId => { void requestStoryboardAssetRegeneration(assetId) }}
+      onReplaceSourceAsset={() => { void requestEdit('requirement') }}
     /> : <VideoStage
       status={state.stage_status.video}
       video={state.video}
+	  referenceFailure={referenceFailure}
 	  onRetry={() => { void retryVideo() }}
+	  onFitVoiceover={() => { void fitFailedVoiceover() }}
+	  voiceoverFitBusy={voiceoverFitBusy}
 	  onCancel={() => { void cancelVideo() }}
+	  onReviewReference={() => {
+	    const stage = referenceFailure?.asset_source === 'ai_generated' ? 'storyboard' : 'requirement'
+	    dispatch({ type: 'open-stage', stage })
+	    if (state.workspace) window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, state.workspace.workspace_id, stage)}${window.location.hash}`)
+	  }}
     />}
-	{state.pending_reopen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-native-reopen-title"><span><AlertTriangle size={18}/></span><h3 id="ai-native-reopen-title">确认重新编辑？</h3><p>{invalidationCopy[state.pending_reopen]}</p><div><button className="secondary-button" onClick={() => dispatch({ type: 'reopen-cancelled' })}>取消</button><button className="primary-button" onClick={() => { void confirmReopen() }}>继续编辑并作废下游</button></div></section></div> : null}
+	{state.pending_reopen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-native-reopen-title"><span><AlertTriangle size={18}/></span><h3 id="ai-native-reopen-title">确认重新编辑？</h3><p>{pendingStoryboardAssetId ? '重新生成这张参考图片需要先解冻故事板，当前视频结果会作废；确认后系统会自动开始重新生成所选图片，其他故事板素材保持不变。' : invalidationCopy[state.pending_reopen]}</p><div><button className="secondary-button" onClick={() => { setPendingStoryboardAssetId(''); dispatch({ type: 'reopen-cancelled' }) }}>取消</button><button className="primary-button" onClick={() => { void confirmReopen() }}>{pendingStoryboardAssetId ? '作废视频并重新生成图片' : '继续编辑并作废下游'}</button></div></section></div> : null}
 	{newDialogOpen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog ai-native-name-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-native-name-title"><h3 id="ai-native-name-title">保存当前广告并新建</h3><p>当前完整或未完成的生成进度都会保留。请先为它起一个方便查找的名称。</p><label>广告名称<input autoFocus maxLength={80} value={recordName} onChange={event => setRecordName(event.target.value)} placeholder="例如：施美乐钛杯通勤版"/></label>{newDialogError ? <div className="ai-native-error" role="alert">{newDialogError}</div> : null}<div><button className="secondary-button" disabled={catalogBusy} onClick={() => setNewDialogOpen(false)}>取消</button><button className="primary-button" disabled={catalogBusy || !recordName.trim()} onClick={() => { void confirmNewWorkspace() }}>{catalogBusy ? '正在保存…' : '保存并新建'}</button></div></section></div> : null}
   </section>
 }
