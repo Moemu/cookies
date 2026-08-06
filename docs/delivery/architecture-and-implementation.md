@@ -2,27 +2,27 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | A07 历史 mock 实现包含计划创建、草稿检查、两段审批、平台操作演练、指标/告警、建议和人工操作包；Phase B 已根据投手评审修正真实业务流、对象拆分、全场景覆盖和一次最终确认目标 |
+| 状态 | 历史 mock 闭环包含计划创建、草稿检查、两段审批、平台操作演练、指标/告警、建议和人工操作包；只读业务校准已根据投手评审修正真实业务流、对象拆分、全场景覆盖和一次最终确认目标 |
 | 记录日期 | 2026-07-29 |
 | 实现快照日期 | 2026-08-05 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
 
 本文记录智能投放系统的领域架构路线图，以及当前交付的 DeliveryPlan 生命周期、服务端权威检查、内容哈希绑定审批、持久化平台操作演练、上线后指标/告警和证据驱动建议与人工操作包。除“当前实现快照”和以下冻结契约明确列出的内容外，真实平台能力仍是后续设计草案，不属于当前实现的行为契约。
 
-### Phase B 业务校准覆盖说明
+### 只读业务校准覆盖说明
 
-A07 已结束，其两段审批和 `group → plan → creative` 三段结构是历史 mock 实现快照，不再被当作真实投手流程或巨量平台对象声明。Phase B 按 [B2 巨量业务 Schema 校准](./b2-oceanengine-schema-calibration.md)执行以下修正：
+历史 mock 闭环已结束，其两段审批和 `group → plan → creative` 三段结构是实现快照，不再被当作真实投手流程或巨量平台对象声明。只读业务校准按[巨量业务 Schema 校准](./oceanengine-schema-calibration.md)执行以下修正：
 
 - 投手与产品语言统一为“投放账号 → 项目 → 单元”；`PlatformAccount/PlatformProject/PlatformPromotion` 只用于代码和适配层；
 - 真实电商工作流覆盖商品/落地页/锚点/人群包准备、素材上传和质量过滤、多项目/多单元创建、开启及投后优化；
 - 内部 ThreeTier 由 Delivery 自主维护，按真实页面拆为项目字段和单元字段，不向其他模块 Owner 转交投放模型设计；
-- 产品目标覆盖完整竞价投放场景，当前电商路径只是第一条已校准路径，缺少分支持续进入 B2 覆盖矩阵；
+- 产品目标覆盖完整竞价投放场景，当前电商路径只是第一条已校准路径，缺少分支持续进入业务 Schema 覆盖矩阵；
 - 预检、模拟、影子分析和采纳建议不产生平台写入；目标流程默认只在最终真实创建/开启前进行一次确认，高风险动作按风险追加确认；
 - 素材来自前序板块不可变版本或用户上传，Delivery 只保存版本引用、平台素材映射和审核/质量/使用状态，不复制素材内容或修改素材/洞察模块。
 
-本节是 Phase B 产品目标，不反向篡改 A07 已落库的审批、哈希和审计语义。后续实现应通过兼容迁移收敛到该目标，而不是把历史 mock 流程继续暴露为投手标准操作。
+本节是只读业务校准后的产品目标，不反向篡改历史 mock 闭环已落库的审批、哈希和审计语义。后续实现应通过兼容迁移收敛到该目标，而不是把历史 mock 流程继续暴露为投手标准操作。
 
-## 当前实现快照（模块 1+2+A03+A04+模块 5+三段配置编排）
+## 当前实现快照
 
 当前交付严格限制在场景环境内的计划草稿、权威检查、版本绑定审批、持久化平台操作演练、同一 Execution 的指标/告警，以及三个内部配置区段的受控编译、证据驱动建议和人工操作包：
 
@@ -34,7 +34,7 @@ A07 已结束，其两段审批和 `group → plan → creative` 三段结构是
 - mock 透明度：API 和持久化记录继续显式携带 `source=mock` 与场景代码；前端每个 Delivery 页面统一使用一个低干扰 Mock 横幅，只在数据来源或证据诊断处重复显示来源。
 - 页面顺序：策略/素材来源 → 目标与账户 → 预算与排期 → 追踪 → 草稿检查；服务端检查结果是唯一事实源。计划保存不可变的策略任务版本、素材版本、内容 hash 与可导航路由，不能只保留自由文本版本名。
 
-A03 审批快照具有以下已实现语义：
+版本绑定审批具有以下已实现语义：
 
 - `DeliveryPlanVersion.canonical_hash` 使用共享 `contract.CanonicalJSONHash`，即 RFC 8785 JCS + SHA-256；内容范围只含投放业务字段和 source/platform 边界，不含创建人、创建时间等审计元数据。
 - `DeliveryApproval.action_hash` 绑定 Organization、Project、Plan/PlanVersion、ChangeSet/ChangeSetVersion、Plan canonical hash、`action=execute`、`scope=execute_mock`、预算上限与币种。
@@ -74,10 +74,10 @@ A03 审批快照具有以下已实现语义：
 
 ### 平台校准边界
 
-- Phase B 已冻结 [`oceanengine-bidding-schema/v0.1`](./schemas/oceanengine-bidding-schema-v0.1.json) 只读契约，覆盖 PlatformProject/PlatformPromotion、选择器、提交事件、电商与销售线索连续路径，以及应用下载 Android 的事件资产门禁；它不宣称是巨量永久全量表单，也不授权真实写入。
+- 只读业务校准已冻结 [`oceanengine-bidding-schema/v0.1`](./schemas/oceanengine-bidding-schema-v0.1.json) 契约，覆盖 PlatformProject/PlatformPromotion、选择器、提交事件、电商与销售线索连续路径，以及应用下载 Android 的事件资产门禁；它不宣称是巨量永久全量表单，也不授权真实写入。
 - 营销目的/模式会改变后续表单。营销场景、营销产品或商品 ID、投放载体、优化目标等字段的出现条件、枚举、必填性和可编辑性都必须来自可追溯页面或公开契约证据；未观察项保持 `platform_pending`，应用缺少事件资产时保持 `blocked_by_event_asset`，不由 fixture 猜测。
 - `1..N groups -> plans -> creatives` 只服务内部快照、依赖校验和审批绑定。平台对象使用 `PlatformProject`、`PlatformPromotion` 等显式名称，通过 `PlatformEntityMapping` 版本化关联，不能直接复用内部嵌套推断远端层级。
-- 当前闭环只负责把现有场景能力串成可重复验收的因果链，不负责补齐全量平台字段。平台 schema 校准归入 Phase B，行为流程编译与字段映射归入 Phase C。
+- 当前闭环只负责把现有场景能力串成可重复验收的因果链，不负责补齐全量平台字段。平台 schema 校准归入只读业务校准，行为流程编译与字段映射归入后续的行为编译与影子分析。
 
 ### 上线后优化闭环 Tour 冻结契约
 
@@ -99,14 +99,14 @@ Tour 是对既有 Delivery 权威链的编排和可恢复投影，不创建第�
 
 ---
 
-## A04：持久化模拟 Execution 场景
+## 持久化模拟 Execution 场景
 
-A04 将已有的即时本地模拟接缝替换为受控、可刷新读取的 `Execution` / `Step` 记录。它仍然**只**调用 deterministic `mock_ocean_engine` adapter：`source=mock`、`mode=local_simulation` 和 fixture `scenario` 在执行、步骤和证据中均会显式返回；它不代表 Computer Use、真实广告账户或任何真实平台写入。
+该实现将已有的即时本地模拟接缝替换为受控、可刷新读取的 `Execution` / `Step` 记录。它仍然**只**调用 deterministic `mock_ocean_engine` adapter：`source=mock`、`mode=local_simulation` 和 fixture `scenario` 在执行、步骤和证据中均会显式返回；它不代表 Computer Use、真实广告账户或任何真实平台写入。
 
 ### 对象边界与审批不变量
 
-- `ChangeSet` 是被批准的不可变动作内容与审批门禁；`Execution` 是对该 ChangeSet 的一次持久化执行尝试。Execution 的终态不会改写 Plan/ChangeSet 的内容哈希，也不会取代 A03 Approval 审计证据。
-- 创建执行前仍重新验证 A03 的 approval：不可变 approval、`execute_mock` scope、预算快照、24 小时有效期、Plan/ChangeSet version 与 canonical/action hash、Organization/Project 隔离均保持不变。
+- `ChangeSet` 是被批准的不可变动作内容与审批门禁；`Execution` 是对该 ChangeSet 的一次持久化执行尝试。Execution 的终态不会改写 Plan/ChangeSet 的内容哈希，也不会取代版本绑定的 Approval 审计证据。
+- 创建执行前仍重新验证版本绑定的 approval：不可变 approval、`execute_mock` scope、预算快照、24 小时有效期、Plan/ChangeSet version 与 canonical/action hash、Organization/Project 隔离均保持不变。
 - 成功 Step 不会被再次运行。状态推进以 `expected_version` 和持久化并发保护完成，避免多个 worker 或客户端重试创建重复效果。
 
 ### HTTP、幂等与读取
@@ -126,7 +126,7 @@ A04 将已有的即时本地模拟接缝替换为受控、可刷新读取的 `Ex
 
 `failed` 只表示已确认目标效果**未**产生；中断或无法验证的情况不能被写成 failed，而应为 `result_unknown`。所有 terminal fixture 都返回 `retry_allowed=false`：同一 key 的操作只能回放同一条 Execution，不能创建第二次尝试。`partial` 明确保留已完成和未完成的 Step，以及可选的补偿候选项；补偿是新的受控动作，绝不自动回滚。`result_unknown` 必须先查询/重新识别目标并形成恢复决策（`query_and_reconcile`），不能盲目重试。允许的恢复动作仅为 `none`、`create_new_change_set`、`review_and_compensate` 和 `query_and_reconcile`。
 
-为兼容 A03 保留的 `:rollback` 生命周期接口只接受已经完成且 `succeeded` 的 mock Execution。非终态、`failed`、`partial` 和 `result_unknown` 均返回 `INVALID_STATE`：它不能被用来宣称未知效果已经回滚，也不能绕过新的受控补偿或查询复核流程。
+为兼容既有版本绑定审批保留的 `:rollback` 生命周期接口只接受已经完成且 `succeeded` 的 mock Execution。非终态、`failed`、`partial` 和 `result_unknown` 均返回 `INVALID_STATE`：它不能被用来宣称未知效果已经回滚，也不能绕过新的受控补偿或查询复核流程。
 
 每个 Step 保存 sequence、action、attempt、effect、outcome summary、evidence reference、时间戳和 version；Execution 保存 recovery action/reason、compensation candidates 和全部 Step。Evidence 也携带 `source=mock`、fixture scenario 和非敏感 references。
 
@@ -258,17 +258,17 @@ type PlatformAdapter interface {
 }
 ```
 
-A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pending` 持久化为 `running`，随后才调用 `ExecuteStep`，并将返回结果推进为 `succeeded`、`failed` 或 `result_unknown`。`pending → skipped` 不调用 adapter。这样进程中断最多留下可查询的 `running`/`executing` 状态，不会在没有证据时写成 failed，也不会重新运行已成功的 Step。真实平台阶段可在同一端口后实现 action dispatch、查询复核和平台实体映射；暂停、读取与完整 `delivery_platform_entities` 仍是后续能力，不伪装成 A04 已实现行为。
+该端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pending` 持久化为 `running`，随后才调用 `ExecuteStep`，并将返回结果推进为 `succeeded`、`failed` 或 `result_unknown`。`pending → skipped` 不调用 adapter。这样进程中断最多留下可查询的 `running`/`executing` 状态，不会在没有证据时写成 failed，也不会重新运行已成功的 Step。真实平台阶段可在同一端口后实现 action dispatch、查询复核和平台实体映射；暂停、读取与完整 `delivery_platform_entities` 仍是后续能力，不伪装成当前已实现行为。
 
 ### 4.2 三个实现
 
 | 实现 | 阶段 | 行为 |
 | --- | --- | --- |
-| `DeterministicMockAdapter`（持久化标签 `mock_ocean_engine`） | Phase A（当前） | 返回固定 mock 账号与场景的逐 Step 结果；所有响应显式标记 `source=mock`；可切换 success/partial/failed/result_unknown 场景 |
-| `ComputerUseAdapter` | Phase B/D | 在已登录的受控会话中读取页面、核验对象并在写入范围获批后执行逐步 UI 操作；处理接管、页面证据和结果未知，不保存账号凭据 |
+| `DeterministicMockAdapter`（持久化标签 `mock_ocean_engine`） | 当前 mock 闭环 | 返回固定 mock 账号与场景的逐 Step 结果；所有响应显式标记 `source=mock`；可切换 success/partial/failed/result_unknown 场景 |
+| `ComputerUseAdapter` | 只读校准及受控写入 | 在已登录的受控会话中读取页面、核验对象并在写入范围获批后执行逐步 UI 操作；处理接管、页面证据和结果未知，不保存账号凭据 |
 | `OceanEngineAdapter` | 可选 API 分支 | 企业完成开发者、应用、scope、Secret 与授权准入后调用 Marketing API；实现限流、幂等、查询复核、错误分类和脱敏 |
 
-`delivery.Service` 只依赖上述逐 Step 端口。未来真实 Adapter 仍须遵守“先持久 running、再产生平台效果”的调用边界；Phase B 的 Computer Use 只读校准不依赖 OAuth，Phase D 的受控写入和可选 API 分支则分别受各自的授权、限流、实体映射与安全条件约束。它们都不属于 A04。
+`delivery.Service` 只依赖上述逐 Step 端口。未来真实 Adapter 仍须遵守“先持久 running、再产生平台效果”的调用边界；Computer Use 只读校准不依赖 OAuth，受控写入和可选 API 分支则分别受各自的授权、限流、实体映射与安全条件约束。它们都不属于当前持久化模拟执行能力。
 
 ---
 
@@ -329,18 +329,18 @@ A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pendi
 - 前端 preflight 结果展示 + repair 提示（点击预算超限 → 跳转计划编辑页）
 - 以服务端为唯一预检事实源；前端 helper 检查仅供参考
 
-### 模块 3：版本绑定审批（A03 已实现）
+### 模块 3：版本绑定审批（已实现）
 
 **做什么**：审批人只能批准当前看到的那一版计划。
 
 - `DeliveryPlanVersion.canonical_hash` 计算与现有版本确定性 Go backfill
 - `delivery_change_sets` + 不可变 `delivery_approvals` 表与迁移
-- `POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}:create-change-set`（冻结当前 PlanVersion；完整 base/target diff 编辑器仍不在 A03）
+- `POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}:create-change-set`（冻结当前 PlanVersion；完整 base/target diff 编辑器仍未实现）
 - `POST /api/delivery/v1/projects/{project_id}/change-sets/{id}:approve`（校验 ActorContext + content/action hash + 24 小时有效期）
 - 计划 V2 更新后 V1 的旧审批自动失效
 - 审批页 + 审计定位（审批人、审批时间、过期时间、Plan/ChangeSet 版本、hash、scope、预算）
 
-### 模块 4：场景化模拟执行（A04 已实现）
+### 模块 4：场景化模拟执行（已实现）
 
 **做什么**：投手能观察模拟执行的每一步及异常恢复。
 
@@ -363,7 +363,7 @@ A04 的端口刻意保持逐 Step：Service 先以 CAS 将对应 Step 从 `pendi
 - 每条告警显示并持久化 Project/Plan/Execution/受监控实体、规则 fingerprint/version、主窗口及可选基线窗口、指标口径、证据引用、负责人、fixture/dataset 版本、结构化 freshness、创建及处置审计字段
 - 不做定时任务或真实平台轮询；审核拒绝事件只在对应异常场景被显式触发后生成，不在计划创建时预置任何告警
 
-A07 后续已按[投放效果情景模拟器计划](./post-launch-scenario-simulator-plan.md)增加独立的 `OutcomeSimulationRun`，让预算、目标、出价、定向、创意和稳定 seed 形成可解释的确定性情景指标，并将投后效果情景与平台操作成功/失败演练分开。它仍是显式 mock，不是平台算法复现或真实效果预测；Phase B 只把它作为消费端口与流程测试输入。
+历史 mock 闭环后续已按[投放效果情景模拟器计划](./post-launch-scenario-simulator-plan.md)增加独立的 `OutcomeSimulationRun`，让预算、目标、出价、定向、创意和稳定 seed 形成可解释的确定性情景指标，并将投后效果情景与平台操作成功/失败演练分开。它仍是显式 mock，不是平台算法复现或真实效果预测；只读业务校准只把它作为消费端口与流程测试输入。
 
 #### API、状态和证据契约
 
@@ -423,27 +423,27 @@ A07 后续已按[投放效果情景模拟器计划](./post-launch-scenario-simul
 
 | 阶段 | 目标 | 启动前提 |
 | --- | --- | --- |
-| Phase B：只读校准与 Connector 依赖对齐 | 在专用竞价投放账户（受 Git 管理文档仅记录尾号 `6391`）下，以已登录 Computer Use 会话只读校准所有可访问项目、PlatformProject/PlatformPromotion、动态表单和页面语义；真实报表采集、标准化和发布由数据洞察 Connector Owner 负责 | **已完成**；[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结，[投放消费需求](./insights-connector-consumer-requirements.md)已记录并等待 Connector Owner 发布可消费输出 |
-| Phase C：行为流程编译与影子分析 | 将获批内部配置与已校准平台 schema 编译为 UI 行为、确认点、识别条件和恢复分支；仅消费数据洞察发布的真实只读指标运行影子告警/建议 | Phase B 对象与字段校准；Connector 指标口径/新鲜度、对象映射与消费契约可用；投手反馈 |
-| Phase D：受控写入 | 在测试项目内通过 Computer Use 填写草稿、读取回填值、人工确认提交并核验结果 | 明确写入范围、小额硬上限、人工负责人、Kill Switch、审批重验和防重演练 |
-| Phase E：生产化 | 限流、事件重放、可靠性指标、凭据轮换、第二平台适配器 | 真实闭环证明瓶颈后启动 |
+| 只读校准与 Connector 依赖对齐 | 在专用竞价投放账户（受 Git 管理文档仅记录尾号 `6391`）下，以已登录 Computer Use 会话只读校准所有可访问项目、PlatformProject/PlatformPromotion、动态表单和页面语义；真实报表采集、标准化和发布由数据洞察 Connector Owner 负责 | **已完成**；[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结，[投放消费需求](./insights-connector-consumer-requirements.md)已记录并等待 Connector Owner 发布可消费输出 |
+| 行为流程编译与影子分析 | 将获批内部配置与已校准平台 schema 编译为 UI 行为、确认点、识别条件和恢复分支；仅消费数据洞察发布的真实只读指标运行影子告警/建议 | 平台对象与字段校准；Connector 指标口径/新鲜度、对象映射与消费契约可用；投手反馈 |
+| 受控写入 | 在测试项目内通过 Computer Use 填写草稿、读取回填值、人工确认提交并核验结果 | 明确写入范围、小额硬上限、人工负责人、Kill Switch、审批重验和防重演练 |
+| 生产化 | 限流、事件重放、可靠性指标、凭据轮换、第二平台适配器 | 真实闭环证明瓶颈后启动 |
 
-### 7.3 Phase B：只读业务流校准任务分解
+### 7.3 只读业务流校准任务分解
 
-Phase B 的目标是让真实投手能审核一个有证据的只读业务流，而不是把 A07 mock Tour 误作真实业务验收。它不实施巨量数据采集器，也不产生任何平台写入；完整消费需求和模块边界见[投放对数据洞察 Connector 的消费需求](./insights-connector-consumer-requirements.md)。
+只读业务校准的目标是让真实投手能审核一个有证据的只读业务流，而不是把历史 mock Tour 误作真实业务验收。它不实施巨量数据采集器，也不产生任何平台写入；完整消费需求和模块边界见[投放对数据洞察 Connector 的消费需求](./insights-connector-consumer-requirements.md)。
 
 | 子阶段 | Delivery 交付物 | 依赖 | 阶段门 |
 | --- | --- | --- | --- |
-| B0：范围与证据协议 | 已冻结尾号 `6391` 的专用竞价投放账户、所有可访问项目、导航域名、表单观察方式、写操作停止条件和登录接管方式 | 当前浏览器保持已登录；登录/验证码由人工处理 | 已完成；当前配置足以启动 B1 |
-| B1：页面与对象走查 | 一个目标路径的页面状态、对象清单、审核状态与允许导出位置的连续证据 | 已登录受控会话；验证码、登录失效与未知页面由管理员接管 | **已完成**；脱敏证据见 [B1 巨量只读校准摘要](./b1-oceanengine-readonly-calibration.md)，所有未观察字段明确标记，不以经验补齐 |
-| B2：业务 schema 校准 | 版本化字段/依赖/枚举/默认值/错误状态与内部配置区段映射说明 | 真实投手只读评审 | **已完成**；[业务 Schema 校准](./b2-oceanengine-schema-calibration.md)与[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结；未知项保留 `platform_pending` 或 `blocked_by_event_asset`，真实写入保留 `write_validation_pending` |
-| B3：Connector 消费需求 | 对象 ID、指标、窗口、口径、延迟、质量和 evidence 的版本化需求与验收样例 | 数据洞察 Owner 确认或发布契约 | Delivery 不修改洞察模块、不直连其数据库、不自建采集器 |
-| B4：消费端口与 mock/replay | Delivery 内部只读消费端口；Mock 作为明确回退，未来 Connector 为另一实现 | B3 样例/接口；Connector 可异步开发 | 每个告警/建议输入显示来源、质量、窗口、口径与证据；不合格数据不产生确定性结论 |
-| B5：只读评审与结论 | 投手差异清单、回归样例、Phase C 进入或阻塞报告 | 投手评审与 Connector 可用性说明 | 首个真实路径已校准，剩余差异可追踪，未把 mock 当真实验收 |
+| 范围与证据协议 | 已冻结尾号 `6391` 的专用竞价投放账户、所有可访问项目、导航域名、表单观察方式、写操作停止条件和登录接管方式 | 当前浏览器保持已登录；登录/验证码由人工处理 | 已完成；当前配置足以启动页面与对象走查 |
+| 页面与对象走查 | 一个目标路径的页面状态、对象清单、审核状态与允许导出位置的连续证据 | 已登录受控会话；验证码、登录失效与未知页面由管理员接管 | **已完成**；脱敏证据见[巨量只读校准摘要](./oceanengine-readonly-calibration.md)，所有未观察字段明确标记，不以经验补齐 |
+| 业务 schema 校准 | 版本化字段/依赖/枚举/默认值/错误状态与内部配置区段映射说明 | 真实投手只读评审 | **已完成**；[业务 Schema 校准](./oceanengine-schema-calibration.md)与[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结；未知项保留 `platform_pending` 或 `blocked_by_event_asset`，真实写入保留 `write_validation_pending` |
+| Connector 消费需求 | 对象 ID、指标、窗口、口径、延迟、质量和 evidence 的版本化需求与验收样例 | 数据洞察 Owner 确认或发布契约 | Delivery 不修改洞察模块、不直连其数据库、不自建采集器 |
+| 消费端口与 mock/replay | Delivery 内部只读消费端口；Mock 作为明确回退，未来 Connector 为另一实现 | Connector 样例/接口；Connector 可异步开发 | 每个告警/建议输入显示来源、质量、窗口、口径与证据；不合格数据不产生确定性结论 |
+| 只读评审与结论 | 投手差异清单、回归样例、行为流程编译与影子分析的进入或阻塞报告 | 投手评审与 Connector 可用性说明 | 首个真实路径已校准，剩余差异可追踪，未把 mock 当真实验收 |
 
-顺序为 `B0 → B1 → B2 → B3 → B4 → B5`。B3/B4 可以与数据洞察 Owner 的真实采集实现并行，但真实指标的影子告警/建议只在 Connector 发布正式输出、且质量状态满足要求后开始。
+执行顺序为“范围与证据协议 → 页面与对象走查 → 业务 Schema 校准 → Connector 消费需求 → 消费端口与 mock/replay → 只读评审与结论”。Connector 消费需求和消费端口可以与数据洞察 Owner 的真实采集实现并行，但真实指标的影子告警/建议只在 Connector 发布正式输出、且质量状态满足要求后开始。
 
-#### B0 冻结配置
+#### 范围与证据冻结配置
 
 - 导航白名单：`https://business.oceanengine.com/*`、`https://ad.oceanengine.com/*`；`https://sso.oceanengine.com/*` 仅供会话过期后的人工接管。
 - 数据范围：尾号 `6391` 的专用竞价投放账户下所有可访问项目及其可见数据；该账户不承载敏感业务内容。
@@ -478,7 +478,7 @@ Phase B 的目标是让真实投手能审核一个有证据的只读业务流，
 
 ## 9. 验收标准
 
-Phase A 完成后应满足：
+当前 mock 闭环完成后应满足：
 
 1. 投手可在 20~30 分钟内完成“内部配置 → 预检 → 审批 → 模拟执行 → 监控 → 建议 → 新 ChangeSet → 再预检/审批 → 人工操作包”的完整闭环。
 2. 除黄金路径外至少覆盖五个异常场景，包括预检失败、审批过期或计划 stale、执行失败或部分成功、结果未知、审核拒绝。

@@ -5,7 +5,7 @@
 | 状态 | Delivery 消费需求草案已完成；等待 Connector 所在目录的所有者发布正式接口/事件契约，不等待其确认 Delivery 页面 Schema 或对象拆分 |
 | 日期 | 2026-08-06 |
 | 文档 Owner | 智能投放模块（仅维护消费需求，不定义或实现 Connector） |
-| 关联 | [广告数据 Connector](../10-ad-data-connectors.md)、[智能投放架构](./architecture-and-implementation.md)、[B1 脱敏走查证据](./b1-oceanengine-readonly-calibration.md) |
+| 关联 | [广告数据 Connector](../10-ad-data-connectors.md)、[智能投放架构](./architecture-and-implementation.md)、[脱敏走查证据](./oceanengine-readonly-calibration.md) |
 
 ## 1. 边界与决策
 
@@ -34,7 +34,7 @@ Connector 尚未具备巨量真实 API 或 Computer Use 读取实现时，智能
 Connector 发布的每个事实至少可按以下条件过滤或识别：
 
 - `organization_id`、`project_id`、`platform`、`account_ref`/广告主稳定标识；
-- 版本化的 `platform_object_kind` 与 `platform_object_id`；B1 已证明首期至少需要表达投放账户、项目、单元、基础素材四种粒度及项目到单元的父子关系，正式枚举名由 Connector 实现所在文件夹的所有者维护；
+- 版本化的 `platform_object_kind` 与 `platform_object_id`；只读走查已证明首期至少需要表达投放账户、项目、单元、基础素材四种粒度及项目到单元的父子关系，正式枚举名由 Connector 实现所在文件夹的所有者维护；
 - 指标发生窗口、平台账户时区、`data_through`、读取/同步时间；
 - `data_source_id`、`import_batch_id`、原始字段/导出证据引用、指标 schema/归因窗口/币种版本。
 
@@ -42,9 +42,9 @@ Connector 发布的每个事实至少可按以下条件过滤或识别：
 
 ### 3.2 指标与质量
 
-首期 P0 请求指标为消耗、展示、点击、转化；B1 报表还稳定暴露深度转化数，建议作为 P1 canonical 基础计数，是否首发由数据洞察 Owner 确认。视频播放、完播、收入等按数据源实际可用性可选提供。金额使用分与币种，派生指标（CPM、CTR、CPC、CVR、CPA、深度 CVR、深度 CPA、ROAS）必须带公式/口径版本，分母为零时返回不可用而不是零。
+首期 P0 请求指标为消耗、展示、点击、转化；只读走查报表还稳定暴露深度转化数，建议作为 P1 canonical 基础计数，是否首发由数据洞察 Owner 确认。视频播放、完播、收入等按数据源实际可用性可选提供。金额使用分与币种，派生指标（CPM、CTR、CPC、CVR、CPA、深度 CVR、深度 CPA、ROAS）必须带公式/口径版本，分母为零时返回不可用而不是零。
 
-### 3.2.1 B1 字段和别名输入
+### 3.2.1 只读走查字段和别名输入
 
 | 报表粒度 | 需要保留的对象/维度字段 | 关联要求 |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ Connector 发布的每个事实至少可按以下条件过滤或识别：
 
 四类报表共享的源指标为 `消耗`、`展示数`、`平均千次展现费用(元)`、`点击数`、`点击率%`、`平均点击单价(元)`、`转化数`、`平均转化成本`、`转化率%`、`深度转化数`、`深度转化成本`、`深度转化率%`。其中计数和消耗应作为 canonical 基础事实；平均值和比率优先由版本化公式计算，同时保留平台源值用于对账。
 
-字段映射不能只保存“当前中文标题 → canonical 名称”。每个 schema evidence 至少需要：`report_kind`、`source_field_name`、`canonical_field_name`、`source_unit`、`source_schema_version`、查询时间粒度、观察/抓取时间和原始文件/页面 evidence。字段名称差异详见[B1 证据摘要](./b1-oceanengine-readonly-calibration.md)。
+字段映射不能只保存“当前中文标题 → canonical 名称”。每个 schema evidence 至少需要：`report_kind`、`source_field_name`、`canonical_field_name`、`source_unit`、`source_schema_version`、查询时间粒度、观察/抓取时间和原始文件/页面 evidence。字段名称差异详见[只读走查证据摘要](./oceanengine-readonly-calibration.md)。
 
 每个读取结果必须携带 `healthy`、`delayed`、`partial`、`mapping_incomplete`、`tracking_broken`、`reconciling` 或 `blocked` 等质量状态及原因。除 `healthy` 外，投放可以展示观察提示和人工复核入口，但不得生成确定性告警、自动建议或写入动作。
 
@@ -68,7 +68,7 @@ Connector 发布的每个事实至少可按以下条件过滤或识别：
 
 正式契约须给出 JSON Schema/OpenAPI 或 AsyncAPI、示例、字段分级、文件所有者、消费者、兼容策略、最长延迟和 Consumer Contract 测试。Delivery 在此之前不假定路径、表名或事件名，也不修改 Connector 目录文件。
 
-### 3.4 B1 消费者验收样例
+### 3.4 消费者验收样例
 
 数据洞察 Owner 发布首个可消费版本时，至少提供以下脱敏 fixture 和 Consumer Contract 测试：
 
@@ -83,16 +83,16 @@ Connector 发布的每个事实至少可按以下条件过滤或识别：
 
 | 阶段 | 数据洞察 Owner | 智能投放 Owner |
 | --- | --- | --- |
-| Phase B | 在已允许的专用竞价投放账户所有可访问项目中验证只读采集路径、数据质量和可发布对象/指标；处理登录或验证码时请求管理员接管 | 只读校准广告组/计划/创意页面语义、字段依赖、动态表单与对象映射需求；持续使用 mock 监控 |
-| Phase C | 发布可供消费的指标快照/API/事件及样例 | 接入消费端口，在数据质量合格时运行影子告警/建议；把异常结论绑定到 Connector evidence |
-| Phase D | 保持只读数据回读、对账和新鲜度服务 | 经审批的 Computer Use 受控写入、回填核验和执行证据；不承担指标采集 |
+| 只读业务校准 | 在已允许的专用竞价投放账户所有可访问项目中验证只读采集路径、数据质量和可发布对象/指标；处理登录或验证码时请求管理员接管 | 只读校准广告组/计划/创意页面语义、字段依赖、动态表单与对象映射需求；持续使用 mock 监控 |
+| 行为流程编译与影子分析 | 发布可供消费的指标快照/API/事件及样例 | 接入消费端口，在数据质量合格时运行影子告警/建议；把异常结论绑定到 Connector evidence |
+| 受控写入 | 保持只读数据回读、对账和新鲜度服务 | 经审批的 Computer Use 受控写入、回填核验和执行证据；不承担指标采集 |
 
 ## 5. 与当前洞察实现的已知差距
 
 以下是消费侧审查结果，不授权智能投放修改 `internal/systems/insights`、`api/openapi/insights-v1.yaml` 或洞察数据库：
 
 1. 当前 `Platform` 使用 `douyin` 等枚举，尚不明确它是否同时代表巨量引擎广告平台；需确认沿用 `douyin` 还是增加独立平台代码。
-2. 当前 OpenAPI 的 `MetricRow.platform_object_kind` 和 AssetMapping 只允许 `creative`、`ad`，不足以无损表达 B1 已证明的账户、项目、单元、基础素材粒度及父子关系。
+2. 当前 OpenAPI 的 `MetricRow.platform_object_kind` 和 AssetMapping 只允许 `creative`、`ad`，不足以无损表达只读走查已证明的账户、项目、单元、基础素材粒度及父子关系。
 3. 当前 `MetricCounts` 覆盖展示、点击、转化、播放、消耗和收入，但没有深度转化基础计数；仅放进 `raw` 无法支持稳定的 canonical 深度 CPA/CVR 消费。
 4. 当前 `DataSource.FieldMapping` 是简单字符串映射，尚无明确位置保存报表种类、源单位、schema 版本、别名、查询时间粒度和 schema-only evidence。
 5. 当前导入请求要求至少一行 `MetricRow`；空报表不应被伪造成全零事实，需要明确独立 schema 登记方式或允许零事实的成功 ImportBatch。
