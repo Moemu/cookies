@@ -59,9 +59,20 @@ type Tracking struct {
 }
 
 type CreativeReference struct {
-	AssetID   string `json:"asset_id"`
-	Version   int    `json:"version"`
-	Confirmed bool   `json:"confirmed"`
+	AssetID     string `json:"asset_id"`
+	Version     int    `json:"version"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Route       string `json:"route,omitempty"`
+	Confirmed   bool   `json:"confirmed"`
+}
+
+// StrategyReference is a resolvable forward reference to the immutable
+// upstream task version used to author a delivery plan.
+type StrategyReference struct {
+	TaskID      string `json:"task_id"`
+	Version     int64  `json:"version"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Route       string `json:"route,omitempty"`
 }
 
 type PlanDraft struct {
@@ -72,6 +83,7 @@ type PlanDraft struct {
 	Schedule              Schedule            `json:"schedule"`
 	Tracking              Tracking            `json:"tracking"`
 	CreativeReferences    []CreativeReference `json:"creative_references"`
+	StrategyReference     StrategyReference   `json:"strategy_reference"`
 	SourceStrategyVersion string              `json:"source_strategy_version"`
 }
 
@@ -88,6 +100,7 @@ type DeliveryPlanVersion struct {
 	Schedule               Schedule                `json:"schedule"`
 	Tracking               Tracking                `json:"tracking"`
 	CreativeReferences     []CreativeReference     `json:"creative_references"`
+	StrategyReference      StrategyReference       `json:"strategy_reference"`
 	SourceStrategyVersion  string                  `json:"source_strategy_version"`
 	Platform               string                  `json:"platform"`
 	Source                 Source                  `json:"source"`
@@ -188,6 +201,7 @@ func versionFromDraft(plan DeliveryPlan, versionNumber int, draft PlanDraft, act
 		},
 		Budget: draft.Budget, Schedule: draft.Schedule,
 		Tracking: draft.Tracking, CreativeReferences: draft.CreativeReferences,
+		StrategyReference:     draft.StrategyReference,
 		SourceStrategyVersion: draft.SourceStrategyVersion, Platform: plan.Platform,
 		Source: SourceMock, Scenario: scenario,
 		CreatedBy: actor, CreatedAt: now,
@@ -211,6 +225,14 @@ func normalizeDraft(draft PlanDraft, scenario Scenario) PlanDraft {
 	draft.Tracking.PixelID = strings.TrimSpace(draft.Tracking.PixelID)
 	draft.Tracking.ConversionEvent = strings.TrimSpace(draft.Tracking.ConversionEvent)
 	draft.SourceStrategyVersion = strings.TrimSpace(draft.SourceStrategyVersion)
+	draft.StrategyReference.TaskID = strings.TrimSpace(draft.StrategyReference.TaskID)
+	draft.StrategyReference.ContentHash = strings.TrimSpace(draft.StrategyReference.ContentHash)
+	draft.StrategyReference.Route = strings.TrimSpace(draft.StrategyReference.Route)
+	for index := range draft.CreativeReferences {
+		draft.CreativeReferences[index].AssetID = strings.TrimSpace(draft.CreativeReferences[index].AssetID)
+		draft.CreativeReferences[index].ContentHash = strings.TrimSpace(draft.CreativeReferences[index].ContentHash)
+		draft.CreativeReferences[index].Route = strings.TrimSpace(draft.CreativeReferences[index].Route)
+	}
 	draft.CreativeReferences = append([]CreativeReference(nil), draft.CreativeReferences...)
 	return draft
 }
@@ -223,6 +245,7 @@ func draftFromVersion(version DeliveryPlanVersion) PlanDraft {
 		},
 		Budget: version.Budget, Schedule: version.Schedule, Tracking: version.Tracking,
 		CreativeReferences:    append([]CreativeReference(nil), version.CreativeReferences...),
+		StrategyReference:     version.StrategyReference,
 		SourceStrategyVersion: version.SourceStrategyVersion,
 	}
 }

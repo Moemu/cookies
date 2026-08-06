@@ -24,7 +24,7 @@ func (r MySQLRepository) CreateRecommendation(ctx context.Context, v DeliveryRec
 	}
 	evidence, _ := json.Marshal(v.Evidence)
 	risks, _ := json.Marshal(v.Risks)
-	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_recommendations (id,organization_id,project_id,plan_id,plan_version,fingerprint,base_snapshot_hash,base_snapshot,target_snapshot,target_snapshot_hash,evidence_json,action_text,impact_text,risks_json,observation_text,cooldown_until,provenance,status,version,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.ID, v.OrganizationID, v.ProjectID, v.PlanID, v.PlanVersion, v.Fingerprint, v.BaseSnapshotHash, base, target, v.TargetSnapshotHash, evidence, v.Action, v.Impact, risks, v.Observation, v.CooldownUntil, v.Provenance, v.Status, v.Version, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	_, err = r.DB.ExecContext(ctx, `INSERT INTO delivery_recommendations (id,organization_id,project_id,plan_id,plan_version,simulation_run_id,fingerprint,base_snapshot_hash,base_snapshot,target_snapshot,target_snapshot_hash,evidence_json,action_text,impact_text,risks_json,observation_text,cooldown_until,provenance,status,version,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.ID, v.OrganizationID, v.ProjectID, v.PlanID, v.PlanVersion, nullableString(v.SimulationRunID), v.Fingerprint, v.BaseSnapshotHash, base, target, v.TargetSnapshotHash, evidence, v.Action, v.Impact, risks, v.Observation, v.CooldownUntil, v.Provenance, v.Status, v.Version, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if err != nil {
 		var mysqlError *mysqlDriver.MySQLError
 		if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
@@ -187,17 +187,18 @@ func (r MySQLRepository) GetManualActionPackage(ctx context.Context, o contract.
 	return v, nil
 }
 
-const recommendationSelect = `SELECT id,organization_id,project_id,plan_id,plan_version,fingerprint,base_snapshot_hash,base_snapshot,target_snapshot,target_snapshot_hash,evidence_json,action_text,impact_text,risks_json,observation_text,cooldown_until,provenance,status,version,idempotency_key,request_hash,accepted_change_set_id,created_by,created_at,updated_at FROM delivery_recommendations`
+const recommendationSelect = `SELECT id,organization_id,project_id,plan_id,plan_version,simulation_run_id,fingerprint,base_snapshot_hash,base_snapshot,target_snapshot,target_snapshot_hash,evidence_json,action_text,impact_text,risks_json,observation_text,cooldown_until,provenance,status,version,idempotency_key,request_hash,accepted_change_set_id,created_by,created_at,updated_at FROM delivery_recommendations`
 
 func scanRecommendation(row rowScanner) (DeliveryRecommendation, error) {
 	var v DeliveryRecommendation
 	var base, target, evidence, risks []byte
 	var cooldown sql.NullTime
-	var key, hash, cs sql.NullString
-	err := row.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.PlanID, &v.PlanVersion, &v.Fingerprint, &v.BaseSnapshotHash, &base, &target, &v.TargetSnapshotHash, &evidence, &v.Action, &v.Impact, &risks, &v.Observation, &cooldown, &v.Provenance, &v.Status, &v.Version, &key, &hash, &cs, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt)
+	var simulationRunID, key, hash, cs sql.NullString
+	err := row.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.PlanID, &v.PlanVersion, &simulationRunID, &v.Fingerprint, &v.BaseSnapshotHash, &base, &target, &v.TargetSnapshotHash, &evidence, &v.Action, &v.Impact, &risks, &v.Observation, &cooldown, &v.Provenance, &v.Status, &v.Version, &key, &hash, &cs, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return v, err
 	}
+	v.SimulationRunID = simulationRunID.String
 	var t ThreeTierConfiguration
 	if len(base) > 0 {
 		var b ThreeTierConfiguration

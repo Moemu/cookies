@@ -9,6 +9,7 @@ import {
   type DeliveryPreflightResult,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
+import type { ApiAssetVersionPointer } from '../data/api'
 import type { DataState, ProjectRecord } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -27,6 +28,12 @@ const scenarioLabels: Record<DeliveryScenario | 'unsaved_draft', string> = {
   orphan_dependency: '三层配置依赖缺失',
   missing_confirmation: '三层配置待人工确认',
   platform_fields_pending: '平台字段待人工填写',
+  preflight_failure: '预检失败演示',
+  approval_expired: '审批过期演示',
+  plan_stale: '计划版本过期演示',
+  partial_execution: '执行部分成功演示',
+  result_unknown: '执行结果未知演示',
+  review_rejected_alert: '审核拒绝告警演示',
   unsaved_draft: '未保存草稿',
 }
 
@@ -42,6 +49,7 @@ const preflightCheckLabels: Record<DeliveryPreflightResult['checks'][number]['co
   three_tier_dependencies: '三层配置依赖可解析',
   three_tier_confirmation: '三层配置已人工确认',
   three_tier_platform_pending: '平台字段待人工填写',
+  upstream_references_resolved: '策略任务与素材版本可追溯',
 }
 
 function scenarioMetadata(scenario: DeliveryScenario | 'unsaved_draft') {
@@ -49,11 +57,12 @@ function scenarioMetadata(scenario: DeliveryScenario | 'unsaved_draft') {
 }
 
 export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
-  const { currentProject } = useProject()
+  const { currentProject, agencyWorkbench } = useProject()
   const projectId = currentProject.id
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
-  const [selectedId, setSelectedId] = useState('')
-  const [draft, setDraft] = useState<DeliveryPlanDraft>(() => newMockDraft(currentProject))
+  const requestedPlanId = useRef(new URLSearchParams(window.location.search).get('plan_id') ?? '')
+  const [selectedId, setSelectedId] = useState(requestedPlanId.current)
+  const [draft, setDraft] = useState<DeliveryPlanDraft>(() => newMockDraft(currentProject, agencyWorkbench))
   const [section, setSection] = useState<PlanSection>('目标与账户')
   const [isNew, setIsNew] = useState(true)
   const [dirty, setDirty] = useState(false)
@@ -69,6 +78,8 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     () => selectedPlan?.versions.find(version => version.versionNumber === inspectedVersionNumber),
     [inspectedVersionNumber, selectedPlan],
   )
+  const strategyTasks = useMemo(() => currentProject.tasks.filter(task => task.type === 'strategy' && (task.status === 'ready' || task.status === 'completed')), [currentProject.tasks])
+  const confirmedAssets = useMemo(() => (agencyWorkbench?.assetVersionPointers ?? []).filter(pointer => pointer.projectId === projectId && pointer.humanConfirmedVersion), [agencyWorkbench, projectId])
 
   useEffect(() => {
     let active = true
@@ -79,19 +90,19 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
       if (!active) return
       setPlans(records)
       if (preserveEditorState.current) return
-      const latest = records[0]
-      if (latest) {
-        setSelectedId(latest.id)
-        setDraft(draftFromVersion(latest.currentVersion))
+      const preferred = records.find(plan => plan.id === requestedPlanId.current) ?? records[0]
+      if (preferred) {
+        setSelectedId(preferred.id)
+        setDraft(draftFromVersion(preferred.currentVersion))
         setIsNew(false)
-        setInspectedVersionNumber(latest.currentVersionNumber)
+        setInspectedVersionNumber(preferred.currentVersionNumber)
         setNotice(`已从服务端恢复 ${records.length} 份计划草稿。`)
       } else {
         setSelectedId('')
-        setDraft(newMockDraft(currentProject))
+        setDraft(newMockDraft(currentProject, agencyWorkbench))
         setIsNew(true)
         setInspectedVersionNumber(undefined)
-        setNotice('当前 Project 尚无投放计划，可创建第一份 mock 草稿。')
+        setNotice('当前 Project 尚无投放计划，可创建第一份计划草稿。')
       }
       setDirty(false)
       setPreflight(undefined)
@@ -102,6 +113,13 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     })
     return () => { active = false }
   }, [projectId])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (selectedId) url.searchParams.set('plan_id', selectedId)
+    else url.searchParams.delete('plan_id')
+    window.history.replaceState(window.history.state, '', url)
+  }, [selectedId])
 
   useEffect(() => {
     if (!repairField) return
@@ -122,13 +140,13 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const beginNew = () => {
     preserveEditorState.current = true
     setSelectedId('')
-    setDraft(newMockDraft(currentProject))
+    setDraft(newMockDraft(currentProject, agencyWorkbench))
     setSection('目标与账户')
     setIsNew(true)
     setDirty(true)
     setPreflight(undefined)
     setInspectedVersionNumber(undefined)
-    setNotice('已创建未保存的 mock 计划，请填写后保存草稿。')
+    setNotice('已创建未保存的计划，请填写后保存草稿。')
   }
 
   const selectPlan = (plan: DeliveryPlan) => {
@@ -190,10 +208,10 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
       setNotice(
         checked.status === 'preflight_passed'
           ? `${checked.id} 已冻结 Plan V${checked.planVersion} 并通过服务端预检，可前往审批中心。`
-          : `${checked.id} 的服务端预检未通过，请修复计划后创建新 ChangeSet。`,
+          : `${checked.id} 的最终检查未通过，请修复计划后重新提交变更申请。`,
       )
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '创建 ChangeSet 失败')
+      setNotice(error instanceof Error ? error.message : '提交变更申请失败')
     } finally {
       setBusy(false)
     }
@@ -213,9 +231,8 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
       <aside className="delivery-plan-list" aria-label="Project 投放计划列表">
         <div className="surface-toolbar">
           <div><span className="section-label">DeliveryPlan</span><h3>计划草稿</h3></div>
-          <button aria-label="新建 mock 投放计划" onClick={beginNew}><Plus size={15}/></button>
+          <button aria-label="新建投放计划" onClick={beginNew}><Plus size={15}/></button>
         </div>
-        <div className="mock-contract-banner"><b>source=mock</b><span>无真实平台请求</span></div>
         <div className="delivery-plan-scroll">
           {plans.map(plan => <button
             key={plan.id}
@@ -228,7 +245,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           </button>)}
           {!plans.length ? <div className="panel-empty">当前 Project 还没有服务端计划。</div> : null}
         </div>
-        <button className="secondary-button full" onClick={beginNew}><Plus size={15}/>创建 mock 计划</button>
+        <button className="secondary-button full" onClick={beginNew}><Plus size={15}/>创建投放计划</button>
       </aside>
 
       <main className="delivery-plan-editor">
@@ -238,10 +255,6 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
             <h2>{draft.name || '未命名投放计划'}</h2>
             <p>草稿只写入 cookies Delivery 服务；投前检查结果仅采用服务端返回。</p>
           </div>
-          <div className="mock-source-stack">
-            <span className="source-chip">source=mock</span>
-            <span className="source-chip">{scenarioMetadata(selectedPlan?.scenario ?? 'unsaved_draft')}</span>
-          </div>
         </header>
 
         <nav className="plan-tabs" aria-label="投放计划编辑顺序">
@@ -249,10 +262,10 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         </nav>
 
         <section className="delivery-plan-form" aria-label={`${section}编辑区`}>
-          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft}/> : null}
+          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks}/> : null}
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '追踪' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
-          {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft}/> : null}
+          {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
           {section === '投前检查' ? <PreflightPanel result={preflight} onRepair={repair}/> : null}
         </section>
 
@@ -260,13 +273,13 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           <span>{dirty ? '有未保存修改' : selectedPlan ? `已保存 V${selectedPlan.currentVersionNumber}` : '等待创建'}</span>
           <button
             className="secondary-button"
-            title="创建空白 mock 草稿，不继承当前表单内容"
+            title="创建空白草稿，不继承当前表单内容"
             onClick={beginNew}
             disabled={busy}
           ><FilePlus size={15}/>新建空白草稿</button>
           <button className="secondary-button" onClick={() => void save()} disabled={busy || (!dirty && !isNew)}><Save size={15}/>{isNew ? '保存草稿' : '保存新版本'}</button>
-          <button className="primary-button" onClick={() => void runPreflight()} disabled={busy || !selectedPlan || dirty}><Send size={15}/>运行服务端预检</button>
-          <button className="primary-button" onClick={() => void createChangeSet()} disabled={busy || !selectedPlan || dirty || !preflight?.passed}><FilePlus size={15}/>创建并预检 ChangeSet</button>
+          <button className="primary-button" onClick={() => void runPreflight()} disabled={busy || !selectedPlan || dirty}><Send size={15}/>检查当前草稿</button>
+          <button className="primary-button" onClick={() => void createChangeSet()} disabled={busy || !selectedPlan || dirty || !preflight?.passed}><FilePlus size={15}/>提交变更申请</button>
         </footer>
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </main>
@@ -291,18 +304,23 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   </StateBoundary>
 }
 
-function TargetAccountFields({ draft, changeDraft }: FieldProps) {
+function TargetAccountFields({ draft, changeDraft, strategyTasks = [] }: FieldProps) {
+  const hasPlanAdvertiserOption = Boolean(draft.advertiser.id && draft.advertiser.id !== 'mock-advertiser-001')
   return <div className="delivery-field-grid">
     <label>计划名称<input id="plan_name" aria-label="计划名称" value={draft.name} onChange={event => changeDraft(current => ({ ...current, name: event.target.value }))}/></label>
     <label>业务目标<textarea id="plan_objective" aria-label="业务目标" value={draft.objective} onChange={event => changeDraft(current => ({ ...current, objective: event.target.value }))}/></label>
-    <label>Mock 广告主<select id="advertiser_id" aria-label="Mock 广告主" value={draft.advertiser.id} onChange={event => changeDraft(current => ({
+    <label><span className="delivery-field-label">投放平台</span><input aria-label="投放平台" readOnly value="巨量引擎"/></label>
+    <label><span className="delivery-field-label">账户边界{!draft.advertiser.id ? <em>必填</em> : null}</span><select id="advertiser_id" aria-label="账户边界" aria-required="true" required className={!draft.advertiser.id ? 'field-missing' : undefined} value={draft.advertiser.id} onChange={event => changeDraft(current => ({
       ...current,
       advertiser: event.target.value
-        ? { id: event.target.value, name: 'Cookies Mock 广告主', platform: 'ocean_engine' }
+        ? { id: event.target.value, name: '当前演示账户边界', platform: 'ocean_engine' }
         : { id: '', name: '', platform: 'ocean_engine' },
-    }))}><option value="">请选择 mock 广告主</option><option value="mock-advertiser-001">Cookies Mock 广告主 · 巨量引擎沙盒</option></select></label>
-    <label>策略来源版本<input id="source_strategy_version" aria-label="策略来源版本" value={draft.sourceStrategyVersion} onChange={event => changeDraft(current => ({ ...current, sourceStrategyVersion: event.target.value }))}/></label>
-    <div className="field-provenance"><b>source=mock</b><span>广告主、平台与响应均为可识别的 mock 数据。</span></div>
+    }))}><option value="">请选择账户边界</option>{hasPlanAdvertiserOption ? <option value={draft.advertiser.id}>{draft.advertiser.name || '当前计划账户边界'}</option> : null}<option value="mock-advertiser-001">当前演示账户边界</option></select></label>
+    <label><span className="delivery-field-label">策略来源{!draft.strategyReference.taskId ? <em>必填</em> : null}</span><select id="strategy_reference" aria-label="策略来源" aria-required="true" required className={!draft.strategyReference.taskId ? 'field-missing' : undefined} value={draft.strategyReference.taskId} onChange={event => {
+      const task = strategyTasks.find(candidate => candidate.id === event.target.value)
+      changeDraft(current => ({ ...current, strategyReference: { taskId: task?.id ?? '', version: task?.version ?? 0 }, sourceStrategyVersion: task ? `${task.id}@v${task.version}` : '' }))
+    }}><option value="">请选择已就绪策略任务</option>{strategyTasks.map(task => <option key={task.id} value={task.id}>{task.name} · V{task.version}</option>)}</select></label>
+    <div className="field-provenance"><b>可追溯来源</b><span>保存时由服务端解析策略任务版本并写入内容哈希与返回入口。</span></div>
   </div>
 }
 
@@ -342,16 +360,19 @@ function TrackingFields({ draft, changeDraft }: FieldProps) {
   </div>
 }
 
-function CreativeFields({ draft, changeDraft }: FieldProps) {
+function CreativeFields({ draft, changeDraft, confirmedAssets = [] }: FieldProps) {
   const reference = draft.creativeReferences[0] ?? { assetId: '', version: 1, confirmed: true }
   const updateReference = (patch: Partial<typeof reference>) => changeDraft(current => ({
     ...current,
     creativeReferences: [{ ...(current.creativeReferences[0] ?? reference), ...patch }],
   }))
   return <div className="delivery-field-grid">
-    <label>素材 Asset ID<input id="creative_asset_id" aria-label="素材 Asset ID" value={reference.assetId} onChange={event => updateReference({ assetId: event.target.value })}/></label>
-    <label>素材版本<input id="creative_version" aria-label="素材版本" type="number" min="1" value={reference.version} onChange={event => updateReference({ version: Math.max(1, Number(event.target.value)) })}/></label>
-    <label className="delivery-confirmation-field"><input id="creative_confirmed" aria-label="素材已人工确认" type="checkbox" checked={reference.confirmed} onChange={event => updateReference({ confirmed: event.target.checked })}/><span><b>素材已人工确认</b><small>取消确认会由服务端返回 warning 和 repair。</small></span></label>
+    <label><span className="delivery-field-label">已确认素材{!reference.assetId ? <em>必填</em> : null}</span><select id="creative_asset_id" aria-label="已确认素材" aria-required="true" required className={!reference.assetId ? 'field-missing' : undefined} value={reference.assetId} onChange={event => {
+      const pointer = confirmedAssets.find(candidate => candidate.assetId === event.target.value)
+      updateReference({ assetId: pointer?.assetId ?? '', version: pointer?.humanConfirmedVersion ?? 0, confirmed: Boolean(pointer) })
+    }}><option value="">请选择已人工确认素材</option>{confirmedAssets.map(pointer => <option key={pointer.id} value={pointer.assetId}>{pointer.assetId} · V{pointer.humanConfirmedVersion}</option>)}</select></label>
+    <label>引用版本<input id="creative_version" aria-label="素材版本" readOnly value={reference.version || '—'}/></label>
+    <div className="field-provenance"><b>{reference.confirmed ? '已人工确认' : '尚未选择'}</b><span>保存时由服务端校验 Workbench 指针并冻结内容哈希。</span></div>
   </div>
 }
 
@@ -361,7 +382,7 @@ function PreflightPanel({ result, onRepair }: { result?: DeliveryPreflightResult
   return <div className="server-preflight-panel">
     <header>
       <div>{result.blocked ? <CircleAlert size={22}/> : <CircleCheck size={22}/>}<span><b>{result.blocked ? '服务端预检阻断' : '服务端预检通过'}</b><small>V{result.planVersion} · {new Date(result.checkedAt).toLocaleString('zh-CN')}</small></span></div>
-      <div className="mock-source-stack"><span className="source-chip">source={result.source}</span><span className="source-chip">{scenarioMetadata(result.scenario)}</span></div>
+      <small>{scenarioMetadata(result.scenario)}</small>
     </header>
     <div className="preflight-checks" role="list" aria-label="服务端投前检查结果">
       {result.checks.map(check => <article key={check.code} className={`preflight-check ${check.passed ? 'passed' : check.severity}`}>
@@ -382,7 +403,9 @@ function VersionSnapshot({ version }: { version: DeliveryPlanVersion }) {
       <div><dt>广告主</dt><dd>{version.advertiser.name}</dd></div>
       <div><dt>预算</dt><dd>¥{formatMinor(version.budget.totalMinor)}</dd></div>
       <div><dt>排期</dt><dd>{new Date(version.schedule.startAt).toLocaleDateString('zh-CN')} → {new Date(version.schedule.endAt).toLocaleDateString('zh-CN')}</dd></div>
-      <div><dt>素材</dt><dd>{version.creativeReferences.map(reference => `${reference.assetId}@V${reference.version}`).join('、')}</dd></div>
+      <div><dt>策略来源</dt><dd>{version.strategyReference.route ? <a href={version.strategyReference.route}>{version.strategyReference.taskId}@V{version.strategyReference.version}</a> : version.sourceStrategyVersion}</dd></div>
+      <div><dt>素材</dt><dd>{version.creativeReferences.map(reference => reference.route ? <a key={`${reference.assetId}-${reference.version}`} href={reference.route}>{reference.assetId}@V{reference.version}</a> : `${reference.assetId}@V${reference.version}`)}</dd></div>
+      <div><dt>来源 Hash</dt><dd title={version.strategyReference.contentHash}>{version.strategyReference.contentHash?.slice(0, 12) ?? '—'}</dd></div>
       <div><dt>内容 Hash</dt><dd title={version.canonicalHash}>{version.canonicalHash.slice(0, 12)}</dd></div>
     </dl>
     <small>source={version.source} · scenario={version.scenario}</small>
@@ -392,14 +415,18 @@ function VersionSnapshot({ version }: { version: DeliveryPlanVersion }) {
 type FieldProps = {
   draft: DeliveryPlanDraft
   changeDraft: (update: (current: DeliveryPlanDraft) => DeliveryPlanDraft) => void
+  strategyTasks?: ProjectRecord['tasks']
+  confirmedAssets?: ApiAssetVersionPointer[]
 }
 
-function newMockDraft(project: ProjectRecord): DeliveryPlanDraft {
+function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof useProject>['agencyWorkbench']): DeliveryPlanDraft {
   const code = project.code && project.code !== '—' ? project.code : 'LOCAL'
+  const strategy = project.tasks.find(task => task.type === 'strategy' && (task.status === 'ready' || task.status === 'completed'))
+  const creative = workbench?.assetVersionPointers.find(pointer => pointer.projectId === project.id && pointer.humanConfirmedVersion)
   return {
     name: `${project.brand && project.brand !== '—' ? project.brand : 'Cookies'} 销售线索增长计划`,
     objective: project.goal && !project.goal.startsWith('请启动') ? project.goal : '获取高质量销售线索',
-    advertiser: { id: 'mock-advertiser-001', name: 'Cookies Mock 广告主', platform: 'ocean_engine' },
+    advertiser: { id: 'mock-advertiser-001', name: '当前演示账户边界', platform: 'ocean_engine' },
     budget: { totalMinor: Math.max(project.budget || 3000, 0) * 100, currency: 'CNY' },
     schedule: {
       startAt: '2026-08-01T00:00:00.000Z',
@@ -412,11 +439,12 @@ function newMockDraft(project: ProjectRecord): DeliveryPlanDraft {
       conversionEvent: 'lead_submit',
     },
     creativeReferences: [{
-      assetId: project.artifacts.creative.id || `asset-${code.toLowerCase()}-mock`,
-      version: 1,
-      confirmed: true,
+      assetId: creative?.assetId ?? '',
+      version: creative?.humanConfirmedVersion ?? 0,
+      confirmed: Boolean(creative),
     }],
-    sourceStrategyVersion: project.artifacts.strategy.version || 'strategy-v1',
+    strategyReference: { taskId: strategy?.id ?? '', version: strategy?.version ?? 0 },
+    sourceStrategyVersion: strategy ? `${strategy.id}@v${strategy.version}` : '',
   }
 }
 
@@ -429,6 +457,7 @@ function draftFromVersion(version: DeliveryPlanVersion): DeliveryPlanDraft {
     schedule: { ...version.schedule },
     tracking: { ...version.tracking },
     creativeReferences: version.creativeReferences.map(reference => ({ ...reference })),
+    strategyReference: { ...version.strategyReference },
     sourceStrategyVersion: version.sourceStrategyVersion,
   }
 }
