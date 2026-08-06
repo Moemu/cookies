@@ -1,0 +1,204 @@
+{
+  "schema": "oceanengine-bidding-schema/v0.1-draft",
+  "fixture_id": "promotion-edit-redacted-sample",
+  "source": "platform_observation",
+  "evidence_date": "2026-08-06",
+  "account_ref": "redacted:6391",
+  "validation_status": "draft_observation_only",
+  "executable": false,
+  "submit_allowed": false,
+  "observation_scope": "existing_promotion_edit_page",
+  "parent_project_requirement": {
+    "required_existing_project": true,
+    "standalone_promotion_creation_supported": false,
+    "evidence_state": "operator_reviewed"
+  },
+  "action_boundaries": [
+    {
+      "event": "save_promotion_and_close",
+      "label": "保存并关闭",
+      "element_role": "button",
+      "remote_write": true,
+      "clicked": false,
+      "evidence_state": "observed"
+    },
+    {
+      "event": "cancel_promotion_edit",
+      "label": "取消",
+      "element_role": "button",
+      "remote_write": false,
+      "clicked": false,
+      "evidence_state": "observed"
+    }
+  ],
+  "field_order": [
+    "delivery_identity",
+    "promotion_materials",
+    "native_anchor",
+    "landing_page",
+    "product_information",
+    "creative_components",
+    "promotion_settings",
+    "promotion_name"
+  ],
+  "promotion": {
+    "object_kind": "PlatformPromotion",
+    "parent_project_ref": {
+      "value": "redacted",
+      "evidence_state": "observed",
+      "required_state": "unknown",
+      "editable_state": "observed_readonly"
+    },
+    "fields": [
+      {
+        "key": "delivery_identity",
+        "value": { "mode": "douyin_account", "authorized_douyin_identity_ref": "redacted_authorized_reference" },
+        "value_type": "discriminated_object",
+        "modes": {
+          "account_info": { "required_fields": [] },
+          "douyin_account": { "required_fields": ["authorized_douyin_identity_ref"] }
+        },
+        "evidence_state": "operator_reviewed",
+        "evidence_inputs": ["observed", "operator_reviewed"],
+        "required_state": "observed_required",
+        "operator_finding": "账户信息无需附加字段；抖音号必须引用已授权账号",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "aigc_dynamic_creative",
+        "source_value": true,
+        "value_type": "boolean",
+        "evidence_state": "sample_only",
+        "required_state": "unknown",
+        "editable_state": "unknown",
+        "enum_state": "observed_closed_set"
+      },
+      {
+        "key": "base_material_refs",
+        "value_type": "reference[]",
+        "sample_counters": {
+          "video": { "current": 0, "capacity_label": 30 },
+          "image": { "current": 0, "capacity_label": 50 },
+          "image_text": { "current": 10, "capacity_label": 10 }
+        },
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "copy_items",
+        "value_type": "object[]",
+        "sample_counter": { "current": 10, "capacity_label": 10 },
+        "observed_ui_constraint": { "min_characters": 5, "max_characters": 55 },
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_open_set"
+      },
+      {
+        "key": "native_anchor_ref",
+        "value": "redacted_reference",
+        "value_type": "reference",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set",
+        "business_dependency": "independent_of_delivery_identity"
+      },
+      {
+        "key": "landing_page_ref",
+        "value": "redacted_reference",
+        "landing_page_type": "自研落地页",
+        "sample_counter": { "current": 1, "capacity_label": 10 },
+        "value_type": "reference",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "dynamic_reference"
+      },
+      {
+        "key": "direct_link",
+        "value": "redacted_sensitive_reference",
+        "generation_modes": ["自动生成", "手动填写"],
+        "value_type": "sensitive_reference",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "backup_link",
+        "value": "redacted_sensitive_reference",
+        "observed_types": ["Universal link", "Applink"],
+        "value_type": "sensitive_reference",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "product_information",
+        "value_type": "object",
+        "sample_shape": {
+          "primary_product_name": { "value": "redacted", "editable_state": "observed_readonly" },
+          "additional_product_name": { "value": "redacted", "editable_state": "observed_editable", "capacity_label": 1 },
+          "product_image_refs": { "current": 5, "capacity_label": 10 },
+          "selling_points": { "current": 8, "capacity_label": 10 }
+        },
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "dynamic_reference"
+      },
+      {
+        "key": "creative_components",
+        "value_type": "reference_or_object[]",
+        "observed_controls": ["素材库选择", "行动号召", "开启智能生成"],
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "platform_pending"
+      },
+      {
+        "key": "promotion_settings",
+        "value_type": "object",
+        "observed_fields": ["source_label", "comment_setting", "category_ref", "brand_ref"],
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "conditional",
+        "enum_state": "observed_current_set"
+      },
+      {
+        "key": "promotion_name",
+        "value": "redacted",
+        "value_type": "string",
+        "evidence_state": "observed",
+        "required_state": "unknown",
+        "editable_state": "observed_editable",
+        "enum_state": "observed_open_set"
+      }
+    ]
+  },
+  "platform_pending": [
+    "文案与素材的最小有效数量及跨路径必填差异",
+    "素材与文案容量是否跨营销目的、载体和投放模式通用",
+    "保存后的服务端校验、审核状态和错误文案",
+    "AIGC 的配置来源及锚点、评论、类别和品牌在其他路径的条件关系",
+    "创意组件的独立对象、资产引用或内嵌配置语义"
+  ],
+  "redaction_policy": {
+    "identity_values": "reference_only",
+    "platform_ids": "redacted",
+    "business_names": "redacted",
+    "landing_urls": "sensitive_reference_only"
+  },
+  "write_guard": {
+    "save": false,
+    "submit": false,
+    "enable": false,
+    "pause": false,
+    "delete": false
+  }
+}

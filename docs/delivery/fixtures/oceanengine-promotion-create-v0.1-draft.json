@@ -1,0 +1,212 @@
+{
+  "schema": "oceanengine-bidding-schema/v0.1-draft",
+  "fixture_id": "promotion-create-initial-redacted-sample",
+  "source": "platform_observation",
+  "evidence_date": "2026-08-06",
+  "account_ref": "redacted:6391",
+  "validation_status": "draft_observation_only",
+  "executable": false,
+  "submit_allowed": false,
+  "observation_scope": "promotion_create_initial_state",
+  "parent_project_ref": "redacted",
+  "parent_project_requirement": {
+    "required_existing_project": true,
+    "standalone_promotion_creation_supported": false,
+    "evidence_state": "operator_reviewed"
+  },
+  "creation_gate": {
+    "steps": ["select_existing_project", "next"],
+    "next_is_remote_create": false,
+    "observed_sample_result": "parent_project_promotion_capacity_full",
+    "final_create_element": "platform_pending",
+    "remote_write_triggered": false,
+    "evidence_state": "observed"
+  },
+  "field_order": [
+    "delivery_identity",
+    "promotion_materials",
+    "landing_page",
+    "product_information",
+    "creative_components",
+    "promotion_settings",
+    "promotion_name"
+  ],
+  "observed_initial_absence": [
+    {
+      "key": "native_anchor",
+      "observed_when": "delivery_identity.mode is unselected",
+      "evidence_state": "observed",
+      "causal_inference": "rejected_by_operator_review",
+      "business_dependency": "independent_of_delivery_identity",
+      "business_purpose": ["describe_product", "provide_landing_page_entry"],
+      "initial_mode": "不启用",
+      "observed_modes": ["不启用", "自动生成", "手动选择"]
+    }
+  ],
+  "initial_fields": [
+    {
+      "key": "delivery_identity",
+      "source_value": { "mode": null, "authorized_douyin_identity_ref": null },
+      "value_type": "discriminated_object",
+      "required_state": "observed_required",
+      "modes": {
+        "account_info": { "required_fields": [], "description": "use_current_delivery_account_information" },
+        "douyin_account": { "required_fields": ["authorized_douyin_identity_ref"] }
+      },
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "evidence_state": "operator_reviewed",
+      "evidence_inputs": ["observed", "operator_reviewed"]
+    },
+    {
+      "key": "aigc_dynamic_creative",
+      "source_value": true,
+      "value_type": "boolean",
+      "required_state": "unknown",
+      "editable_state": "unknown",
+      "default_state": "observed_current_path_initial",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "base_material_refs",
+      "source_value": [],
+      "value_type": "reference[]",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "sample_capacity_labels": {
+        "video": 30,
+        "image": 50,
+        "image_text": 10
+      },
+      "evidence_state": "observed"
+    },
+    {
+      "key": "copy_items",
+      "source_value": [],
+      "value_type": "object[]",
+      "initial_input_rows": 1,
+      "capacity_label": 10,
+      "observed_ui_constraint": { "min_characters": 5, "max_characters": 55 },
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "landing_page_ref",
+      "source_value": null,
+      "value_type": "reference",
+      "landing_page_type": "自研落地页",
+      "initial_input_rows": 1,
+      "capacity_label": 10,
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "direct_link",
+      "source_value": null,
+      "value_type": "sensitive_reference",
+      "generation_modes": ["自动生成", "手动填写"],
+      "initial_generation_mode": "手动填写",
+      "disabled_modes_in_current_empty_landing_path": ["自动生成"],
+      "generation_mode_required_state": "observed_required",
+      "content_required_state": "conditional",
+      "editable_state": "conditional",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "backup_link",
+      "source_value": null,
+      "value_type": "sensitive_reference",
+      "observed_types": ["Universal link", "Applink"],
+      "initial_type": "Universal link",
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "product_information",
+      "value_type": "object",
+      "source_value": {
+        "primary_product_name": "redacted_inherited_reference",
+        "additional_product_name": null,
+        "product_image_refs": [],
+        "selling_points": []
+      },
+      "required_fields": ["primary_product_name", "product_image_refs", "selling_points"],
+      "primary_product_editable_state": "observed_readonly",
+      "additional_product_name_capacity_label": 1,
+      "product_image_capacity_label": 10,
+      "selling_point_capacity_label": 10,
+      "selling_point_ui_constraint": { "min_characters": 6, "max_characters": 9 },
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "call_to_action",
+      "source_value": "redacted_initial_candidate",
+      "value_type": "dynamic_enum",
+      "observed_candidate_count": 5,
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "evidence_state": "sample_only"
+    },
+    {
+      "key": "creative_component_smart_generation",
+      "source_value": true,
+      "value_type": "boolean",
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "default_state": "observed_current_path_initial",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "promotion_settings",
+      "value_type": "object",
+      "source_value": {
+        "source_label": "redacted_current_path_default",
+        "comment_setting": "启用",
+        "category_ref": null,
+        "brand_ref": null
+      },
+      "required_fields": ["source_label", "comment_setting", "category_ref", "brand_ref"],
+      "selector_fields": ["category_ref", "brand_ref"],
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "evidence_state": "observed"
+    },
+    {
+      "key": "promotion_name",
+      "source_value": "redacted_generated_default",
+      "source_pattern": "<product>_<timestamp>",
+      "value_type": "string",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "evidence_state": "observed"
+    }
+  ],
+  "platform_pending": [
+    "文案素材的最小有效数量与服务端校验",
+    "存在可用落地页时直达链接自动生成模式及备用链接的服务端必填规则",
+    "类别完整层级与品牌候选完整范围",
+    "临时表单参数是否对应客户端会话或远端草稿",
+    "AIGC 动态创意的配置来源与其他业务路径继承规则"
+  ],
+  "redaction_policy": {
+    "identity_values": "reference_only",
+    "platform_ids": "redacted",
+    "business_names": "redacted",
+    "landing_urls": "sensitive_reference_only"
+  },
+  "write_guard": {
+    "save": false,
+    "submit": false,
+    "enable": false,
+    "pause": false,
+    "delete": false
+  }
+}

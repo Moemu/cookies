@@ -1,0 +1,82 @@
+{
+  "schema": "oceanengine-bidding-schema/v0.1-draft",
+  "fixture_id": "leads-short-video-project-redacted-sample",
+  "source": "platform_observation",
+  "evidence_date": "2026-08-06",
+  "account_ref": "redacted:6391",
+  "validation_status": "draft_observation_only",
+  "executable": false,
+  "submit_allowed": false,
+  "path": {
+    "marketing_purpose": "销售线索",
+    "marketing_scenario": "短视频+图文",
+    "selected_optimization_target": "表单提交"
+  },
+  "product_input": {
+    "modes": ["手动选择", "智能识别"],
+    "manual_product_capacity_label": 10,
+    "selected_count": 0,
+    "product_is_required_state": "unknown"
+  },
+  "lead_acquisition": {
+    "modes": {
+      "智能优选": {
+        "carriers": ["橙子落地页+抖音私信页", "橙子落地页"],
+        "lead_form_configuration_stage": "promotion_create"
+      },
+      "自定义": {
+        "carriers": ["橙子落地页", "自研落地页", "抖音私信页", "字节小程序"],
+        "system_optimization": false
+      }
+    },
+    "evidence_state": "observed"
+  },
+  "optimization_targets": {
+    "observed_current_set": ["表单提交", "多转化", "回访_信息确认", "回访_高潜成交", "私信留资"],
+    "enum_state": "observed_current_set",
+    "platform_codes": "platform_pending",
+    "evidence_state": "observed"
+  },
+  "targeting": {
+    "modes": ["新建定向", "选择已有定向包"],
+    "dimensions": [
+      "地域",
+      "性别",
+      "年龄",
+      "自定义人群",
+      "行为兴趣",
+      "过滤高活跃用户",
+      "过滤自己粉丝",
+      "过滤高关注用户",
+      "网络",
+      "过滤已转化用户",
+      "智能定向拓展",
+      "手机价格"
+    ],
+    "converted_user_scopes": ["不限", "项目", "投放账户", "公司账户", "组织账户"],
+    "network_options": ["不限", "Wi-Fi", "2G", "3G", "4G", "5G"],
+    "evidence_state": "observed"
+  },
+  "budget_and_bidding": {
+    "strategies": ["稳定成本", "最大转化"],
+    "fields": ["schedule", "time_window", "daily_budget", "bid"],
+    "evidence_state": "observed"
+  },
+  "action_boundaries": [
+    { "event": "save_project_and_continue_to_promotion", "remote_write": true, "clicked": false },
+    { "event": "save_project_and_close", "remote_write": true, "clicked": false },
+    { "event": "cancel_project_form", "remote_write": false, "clicked": false }
+  ],
+  "platform_pending": [
+    "optimization_target_platform_codes",
+    "independent_delivery_mode_selector_reason",
+    "promotion_fields_per_carrier_and_target",
+    "server_validation_and_writeback"
+  ],
+  "write_guard": {
+    "save": false,
+    "submit": false,
+    "enable": false,
+    "manage_assets": false
+  }
+}
