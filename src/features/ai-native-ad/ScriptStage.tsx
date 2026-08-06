@@ -1,16 +1,19 @@
-import { FileText, LoaderCircle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, FileText, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AdScriptDraft, AINativeStageStatus } from './types'
 
-export function ScriptStage({ status, script, onChange, onRegenerate, onConfirm, onEdit }: {
+export function ScriptStage({ status, script, error, onChange, onRegenerate, onRetry, onConfirm, onEdit }: {
   status: AINativeStageStatus
   script: AdScriptDraft | null
+  error: string
   onChange: (script: AdScriptDraft) => void
   onRegenerate: () => void
+  onRetry: () => void
   onConfirm: () => void
   onEdit: () => void
 }) {
   const locked = status === 'confirmed'
-  if (status === 'generating') return <StageLoading icon={<LoaderCircle className="spin" size={24}/>} title="正在生成完整营销脚本" detail="AI 正在组合痛点引入、卖点展示和转化收束，每次只返回一个完整脚本。"/>
+  if (status === 'generating') return <StageLoading icon={<LoaderCircle className="spin" size={24}/>} title="正在生成完整营销脚本" detail="AI 正在组合痛点引入、卖点展示和转化收束，通常需要 1–2 分钟。"/>
+  if (status === 'failed') return <StageEmpty icon={<AlertTriangle size={24}/>} title="脚本生成失败" detail={error || '后台任务未能完成，请重新生成脚本。'} action={<button className="secondary-button" onClick={onRetry}><RefreshCw size={14}/>重新生成脚本</button>}/>
   if (!script) return <StageEmpty icon={<FileText size={24}/>} title={status === 'invalidated' ? '脚本已因需求修改而作废' : '尚未生成脚本'} detail="确认需求分析后，系统将在这里生成一个完整脚本。你仍可先查看脚本字段结构。"/>
 
   return <section className="ai-native-stage-panel" role="tabpanel" id="ai-native-panel-script" aria-labelledby="ai-native-stage-script">

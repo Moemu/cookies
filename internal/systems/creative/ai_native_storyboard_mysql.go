@@ -19,7 +19,7 @@ func (r MySQLRepository) GetAINativeStoryboardWorkspace(ctx context.Context, org
 
 func (r MySQLRepository) BeginAINativeStoryboardGeneration(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, workspaceID string, operation AINativeStoryboardOperation, now time.Time) (AINativeRequirementWorkspace, error) {
 	result, err := r.DB.ExecContext(ctx, `UPDATE creative_ai_native_requirement_workspaces
-		SET current_stage=?, storyboard_status=?, storyboard_plan_payload=NULL, storyboard_error_code=NULL, storyboard_error_message=NULL,
+		SET current_stage=?, storyboard_status=?, storyboard_error_code=NULL, storyboard_error_message=NULL,
 		 active_operation_id=?, active_operation_version=?, workspace_version=workspace_version+1, updated_at=?
 		WHERE organization_id=? AND project_id=? AND workspace_id=? AND workspace_version=? AND script_status=? AND confirmed_script_revision=?
 		 AND active_operation_id IS NULL AND (storyboard_status IS NULL OR storyboard_status NOT IN ('generating','confirmed'))`,

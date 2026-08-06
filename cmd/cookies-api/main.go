@@ -587,11 +587,14 @@ func main() {
 		Store: runtimeStore, Handlers: runtimeHandlers, LeaseRenewer: runtimeStore,
 		Canceller: runtimeStore, HeartbeatInterval: 15 * time.Second,
 	}
-	runtimeRunner := &jobruntime.RecoveryRunner{
-		Worker: sharedWorker, Recoverer: runtimeStore, WorkerID: "shared-runtime",
-		LeaseDuration: time.Minute, RecoveryInterval: 30 * time.Second,
+	for index := 1; index <= 3; index++ {
+		workerID := fmt.Sprintf("shared-runtime-%d", index)
+		runtimeRunner := &jobruntime.RecoveryRunner{
+			Worker: sharedWorker, Recoverer: runtimeStore, WorkerID: workerID,
+			LeaseDuration: time.Minute, RecoveryInterval: 30 * time.Second,
+		}
+		startWorker(workerContext, workerID, runtimeRunner.RunOnce)
 	}
-	startWorker(workerContext, "shared-runtime", runtimeRunner.RunOnce)
 
 	server := newHTTPServer(cfg.HTTPAddr, httpserver.NewWithDependencies(dependencies))
 

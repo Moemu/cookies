@@ -229,14 +229,16 @@ func (s Service) HandleAINativeScriptJob(ctx context.Context, claim jobruntime.C
 	}
 	completed, err := s.AINativeScripts.CompleteAINativeScriptGeneration(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, operation.WorkspaceID, operation, script, operation.ActorID, s.now())
 	if err != nil {
-		return jobruntime.Result{}, err
+		return s.failAINativeScriptJob(ctx, claim, operation, "AI_NATIVE_SCRIPT_PERSIST_FAILED", err)
 	}
 	ref := contract.ResourceRef{Type: "creative_ai_native_script", ID: completed.WorkspaceID, Version: &completed.Script.Revision}
 	return jobruntime.Result{Ref: &ref}, nil
 }
 
 func (s Service) failAINativeScriptJob(ctx context.Context, claim jobruntime.Claim, operation AINativeScriptOperation, code string, cause error) (jobruntime.Result, error) {
-	_ = s.AINativeScripts.FailAINativeScriptGeneration(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, operation.WorkspaceID, operation.ID, operation.Version, code, boundedError(cause), s.now())
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = s.AINativeScripts.FailAINativeScriptGeneration(persistCtx, claim.Job.OrganizationID, claim.Job.ProjectID, operation.WorkspaceID, operation.ID, operation.Version, code, boundedError(cause), s.now())
 	return jobruntime.Result{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: code, Message: "AI native script generation failed", Retryable: false}}
 }
 

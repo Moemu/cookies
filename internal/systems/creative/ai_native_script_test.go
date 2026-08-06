@@ -14,8 +14,9 @@ import (
 )
 
 type memoryAINativeScriptRepository struct {
-	workspace AINativeRequirementWorkspace
-	scripts   map[int64]AINativeScriptRevision
+	workspace   AINativeRequirementWorkspace
+	scripts     map[int64]AINativeScriptRevision
+	completeErr error
 }
 
 func (r *memoryAINativeScriptRepository) GetAINativeScriptWorkspace(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, workspaceID string) (AINativeRequirementWorkspace, error) {
@@ -42,6 +43,9 @@ func (r *memoryAINativeScriptRepository) BeginAINativeScriptGeneration(_ context
 }
 
 func (r *memoryAINativeScriptRepository) CompleteAINativeScriptGeneration(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, workspaceID string, operation AINativeScriptOperation, script AINativeScriptRevision, actorID string, now time.Time) (AINativeRequirementWorkspace, error) {
+	if r.completeErr != nil {
+		return AINativeRequirementWorkspace{}, r.completeErr
+	}
 	if r.workspace.ActiveOperationID != operation.ID || r.workspace.ActiveOperationVersion == nil || *r.workspace.ActiveOperationVersion != operation.Version {
 		return AINativeRequirementWorkspace{}, ErrVersionConflict
 	}
@@ -49,8 +53,12 @@ func (r *memoryAINativeScriptRepository) CompleteAINativeScriptGeneration(_ cont
 		r.scripts = map[int64]AINativeScriptRevision{}
 	}
 	nextRevision := int64(1)
+	for revision := range r.scripts {
+		if revision >= nextRevision {
+			nextRevision = revision + 1
+		}
+	}
 	if r.workspace.CurrentScriptRevision != nil {
-		nextRevision = *r.workspace.CurrentScriptRevision + 1
 		previous := r.scripts[*r.workspace.CurrentScriptRevision]
 		previous.Status = AINativeScriptSupersededStatus
 		r.scripts[previous.Revision] = previous
@@ -274,6 +282,45 @@ func TestAINativeScriptGenerationRunsAsRecoverableWorkspaceOperation(t *testing.
 	}
 }
 
+func TestAINativeScriptGenerationContinuesRevisionHistoryAfterRequirementReopen(t *testing.T) {
+	requirement := validRequirementForScript()
+	requirement.Revision = 2
+	requirementHash, _ := contract.CanonicalJSONHash(requirement)
+	operationVersion := int64(1)
+	workspace := AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", CreativeIntakeID: "intake_1", CreativeTaskID: "task_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageScript, WorkspaceVersion: 4,
+		CurrentRevision: 2, Requirement: requirement, ScriptStatus: AINativeScriptGeneratingStatus,
+		ActiveOperationID: "operation_1", ActiveOperationVersion: &operationVersion,
+		CreatedBy: "user_1", ConfirmedBy: "user_1", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repository := &memoryAINativeScriptRepository{
+		workspace: workspace,
+		scripts: map[int64]AINativeScriptRevision{
+			1: {Revision: 1, Status: AINativeScriptSupersededStatus},
+			2: {Revision: 2, Status: AINativeScriptSupersededStatus},
+		},
+	}
+	service := Service{
+		Projects: testProjects{}, AINativeScripts: repository,
+		AINativeScriptPlanner:  staticAINativeScriptPlanner{script: validAINativeScript()},
+		AINativeScriptProfiles: NewChannelCreativeProfileRegistry(),
+	}
+	operation := AINativeScriptOperation{ID: "operation_1", Version: 1, WorkspaceID: "workspace_1", RequirementRevision: 2, RequirementHash: requirementHash, ActorID: "user_1"}
+	payload, _ := json.Marshal(AINativeScriptJobPayload{Operation: operation})
+
+	_, err := service.HandleAINativeScriptJob(context.Background(), jobruntime.Claim{Job: contract.Job{Kind: AINativeScriptJobKind, OrganizationID: "org_1", ProjectID: "project_1"}, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.workspace.CurrentScriptRevision == nil || *repository.workspace.CurrentScriptRevision != 3 {
+		t.Fatalf("script revision history restarted after requirement reopen: %#v", repository.workspace.CurrentScriptRevision)
+	}
+	if repository.scripts[1].Status != AINativeScriptSupersededStatus || repository.scripts[2].Status != AINativeScriptSupersededStatus {
+		t.Fatalf("historical script revisions were overwritten: %#v", repository.scripts)
+	}
+}
+
 func TestAINativeScriptJobPersistsTerminalPlannerFailure(t *testing.T) {
 	revision := int64(1)
 	operationVersion := int64(1)
@@ -292,6 +339,32 @@ func TestAINativeScriptJobPersistsTerminalPlannerFailure(t *testing.T) {
 	_, err := service.HandleAINativeScriptJob(context.Background(), jobruntime.Claim{Job: contract.Job{Kind: AINativeScriptJobKind, OrganizationID: "org_1", ProjectID: "project_1"}, Payload: payload})
 	if err == nil || repository.workspace.ScriptStatus != AINativeScriptFailedStatus || repository.workspace.ActiveOperationID != "" {
 		t.Fatalf("planner failure was not persisted: err=%v workspace=%#v", err, repository.workspace)
+	}
+}
+
+func TestAINativeScriptJobPersistsTerminalCompletionFailure(t *testing.T) {
+	requirement := validRequirementForScript()
+	requirementHash, _ := contract.CanonicalJSONHash(requirement)
+	operationVersion := int64(1)
+	workspace := AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", CreativeIntakeID: "intake_1", CreativeTaskID: "task_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageScript, WorkspaceVersion: 2,
+		CurrentRevision: 1, Requirement: requirement, ScriptStatus: AINativeScriptGeneratingStatus,
+		ActiveOperationID: "operation_1", ActiveOperationVersion: &operationVersion,
+		CreatedBy: "user_1", ConfirmedBy: "user_1", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repository := &memoryAINativeScriptRepository{workspace: workspace, completeErr: errors.New("duplicate script revision")}
+	service := Service{
+		Projects: testProjects{}, AINativeScripts: repository,
+		AINativeScriptPlanner:  staticAINativeScriptPlanner{script: validAINativeScript()},
+		AINativeScriptProfiles: NewChannelCreativeProfileRegistry(),
+	}
+	operation := AINativeScriptOperation{ID: "operation_1", Version: 1, WorkspaceID: "workspace_1", RequirementRevision: 1, RequirementHash: requirementHash, ActorID: "user_1"}
+	payload, _ := json.Marshal(AINativeScriptJobPayload{Operation: operation})
+
+	_, err := service.HandleAINativeScriptJob(context.Background(), jobruntime.Claim{Job: contract.Job{Kind: AINativeScriptJobKind, OrganizationID: "org_1", ProjectID: "project_1"}, Payload: payload})
+	if err == nil || repository.workspace.ScriptStatus != AINativeScriptFailedStatus || repository.workspace.ActiveOperationID != "" {
+		t.Fatalf("script completion failure was not persisted: err=%v workspace=%#v", err, repository.workspace)
 	}
 }
 

@@ -3,9 +3,12 @@ package creative
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/jobruntime"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -32,6 +35,92 @@ func TestAINativeStoryboardRejectsTimelineGapsAndSyntheticProductIdentity(t *tes
 	if err := storyboard.ValidatePlanAgainst(requirement, script); err == nil {
 		t.Fatal("storyboard must include a person identity reference")
 	}
+}
+
+func TestAINativeStoryboardPersistsSuccessfulAssetsBeforeAnotherAssetFails(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	storyboard := validAINativeStoryboard()
+	operationVersion := int64(1)
+	workspace := AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", CreativeIntakeID: "intake_1", CreativeTaskID: "task_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageStoryboard, WorkspaceVersion: 3,
+		ActiveOperationID: "storyboard_operation_1", ActiveOperationVersion: &operationVersion,
+		CurrentRevision: requirement.Revision, Requirement: requirement, ScriptStatus: AINativeScriptConfirmedStatus,
+		CurrentScriptRevision: &script.Revision, ConfirmedScriptRevision: &script.Revision, Script: &script,
+		StoryboardStatus: AINativeStoryboardGeneratingStatus, StoryboardPlan: &storyboard,
+		CreatedBy: "user_1", ConfirmedBy: "user_1", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repository := &storyboardProgressRepository{workspace: workspace}
+	preparer := &storyboardProgressAssetPreparer{
+		refs: map[string]*contract.AssetVersionRef{
+			"person_1": {AssetID: "asset_person", Version: 1},
+		},
+		errs: map[string]error{"scene_1": errors.New("image gateway unavailable")},
+	}
+	service := Service{Projects: testProjects{}, AINativeStoryboards: repository, AINativeStoryboardPlanner: &storyboardPlannerStub{}, AINativeStoryboardAssetPreparer: preparer}
+	operation := AINativeStoryboardOperation{ID: "storyboard_operation_1", Version: 1, WorkspaceID: "workspace_1", ProjectID: "project_1", RequirementRevision: 1, ScriptRevision: 1, ActorID: "user_1"}
+	payload, _ := json.Marshal(AINativeStoryboardJobPayload{Operation: operation})
+
+	_, err := service.HandleAINativeStoryboardJob(context.Background(), jobruntime.Claim{Job: contract.Job{Kind: AINativeStoryboardJobKind, OrganizationID: "org_1", ProjectID: "project_1"}, Payload: payload})
+	if err == nil {
+		t.Fatal("asset failure must keep the storyboard operation unsuccessful")
+	}
+	assets := repository.workspace.StoryboardPlan.Assets
+	if assets[1].Status != AINativeStoryboardAssetReady || assets[1].AssetRef == nil || assets[1].AssetRef.AssetID != "asset_person" {
+		t.Fatalf("successful asset was not durably retained: %#v", assets[1])
+	}
+	if assets[2].Status != AINativeStoryboardAssetFailed {
+		t.Fatalf("failed asset status was not retained: %#v", assets[2])
+	}
+}
+
+type storyboardProgressRepository struct{ workspace AINativeRequirementWorkspace }
+
+func (r *storyboardProgressRepository) GetAINativeStoryboardWorkspace(context.Context, contract.OrganizationID, contract.ProjectID, string) (AINativeRequirementWorkspace, error) {
+	return r.workspace, nil
+}
+func (r *storyboardProgressRepository) BeginAINativeStoryboardGeneration(context.Context, contract.OrganizationID, contract.ProjectID, string, AINativeStoryboardOperation, time.Time) (AINativeRequirementWorkspace, error) {
+	return r.workspace, nil
+}
+func (r *storyboardProgressRepository) SaveAINativeStoryboardPlan(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, _ string, _ AINativeStoryboardOperation, plan AINativeStoryboardRevision, _ time.Time) (AINativeRequirementWorkspace, error) {
+	r.workspace.StoryboardPlan = &plan
+	return r.workspace, nil
+}
+func (r *storyboardProgressRepository) CompleteAINativeStoryboardGeneration(context.Context, contract.OrganizationID, contract.ProjectID, string, AINativeStoryboardOperation, AINativeStoryboardRevision, string, time.Time) (AINativeRequirementWorkspace, error) {
+	return AINativeRequirementWorkspace{}, errors.New("unexpected completion")
+}
+func (r *storyboardProgressRepository) FailAINativeStoryboardGeneration(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, _ string, _ string, _ int64, code, message string, _ time.Time) error {
+	r.workspace.StoryboardStatus = AINativeStoryboardFailedStatus
+	r.workspace.StoryboardErrorCode = code
+	r.workspace.StoryboardErrorMessage = message
+	return nil
+}
+func (r *storyboardProgressRepository) AppendAINativeStoryboardRevision(context.Context, AINativeRequirementWorkspace, int64, string, time.Time) (AINativeRequirementWorkspace, error) {
+	return AINativeRequirementWorkspace{}, errors.New("unused")
+}
+func (r *storyboardProgressRepository) ConfirmAINativeStoryboard(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, int64, string, time.Time) (AINativeRequirementWorkspace, error) {
+	return AINativeRequirementWorkspace{}, errors.New("unused")
+}
+func (r *storyboardProgressRepository) GetAINativeStoryboardReopenImpact(context.Context, contract.OrganizationID, contract.ProjectID, string) (AINativeReopenImpact, error) {
+	return AINativeReopenImpact{}, errors.New("unused")
+}
+func (r *storyboardProgressRepository) ReopenAINativeStoryboard(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (AINativeRequirementWorkspace, error) {
+	return AINativeRequirementWorkspace{}, errors.New("unused")
+}
+
+type storyboardProgressAssetPreparer struct {
+	refs map[string]*contract.AssetVersionRef
+	errs map[string]error
+}
+
+func (p *storyboardProgressAssetPreparer) PrepareAINativeStoryboardAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, _ AINativeStoryboardOperation, asset AINativeStoryboardAsset) (*contract.AssetVersionRef, *time.Time, error) {
+	return p.refs[asset.ID], nil, p.errs[asset.ID]
+}
+
+type storyboardPlannerStub struct{}
+
+func (*storyboardPlannerStub) Plan(context.Context, contract.ActorContext, contract.ProjectContext, AINativeRequirementDraft, AINativeScriptRevision, ChannelCreativeProfile) (AINativeStoryboardRevision, error) {
+	return AINativeStoryboardRevision{}, errors.New("unused")
 }
 
 func TestModelAINativeStoryboardPlannerPreservesProductAssetsAndReturnsCompleteShots(t *testing.T) {

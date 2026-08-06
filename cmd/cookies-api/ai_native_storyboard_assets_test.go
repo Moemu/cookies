@@ -53,6 +53,50 @@ func TestStoryboardAssetPreparationAcceptsActorWithProviderCreateScope(t *testin
 	}
 }
 
+func TestStoryboardAssetPreparationUsesStableIdentityAcrossOperationRetries(t *testing.T) {
+	now := time.Date(2026, time.August, 5, 9, 0, 0, 0, time.UTC)
+	store := &storyboardProviderStore{}
+	service := &provider.Service{
+		Store: store, Scheduler: storyboardProviderScheduler{},
+		NewID: func() (string, error) { return "provider_job_storyboard_retry", nil },
+		Now:   func() time.Time { return now },
+	}
+	actor := contract.ActorContext{
+		OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes: []contract.Scope{creative.ScopeWrite, provider.ScopeJobCreate},
+	}
+	brandID := contract.BrandID("brand_1")
+	project := contract.ProjectContext{OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 1}
+	asset := creative.AINativeStoryboardAsset{
+		ID: "person_1", Role: creative.AINativeStoryboardAssetRolePersonIdentity, Name: "商务男士",
+		Source: creative.AINativeStoryboardAssetSourceAIGenerated, GenerationBrief: "一位商务男士，正面半身，写实商业摄影",
+		Status: creative.AINativeStoryboardAssetGenerating, GenerationAttempt: 1,
+	}
+	preparer := creativeAINativeStoryboardAssetPreparer{provider: service, now: func() time.Time { return now }}
+
+	for _, operationID := range []string{"operation_1", "operation_2"} {
+		operation := creative.AINativeStoryboardOperation{ID: operationID, WorkspaceID: "workspace_1", RequirementRevision: 2, ScriptRevision: 3}
+		if _, _, err := preparer.PrepareAINativeStoryboardAsset(context.Background(), actor, project, operation, asset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(store.records) != 2 {
+		t.Fatalf("expected two observed create calls, got %d", len(store.records))
+	}
+	if store.records[0].IdempotencyKey != store.records[1].IdempotencyKey || store.records[0].RequestHash != store.records[1].RequestHash {
+		t.Fatalf("operation retry changed stable asset identity: first=%q second=%q", store.records[0].IdempotencyKey, store.records[1].IdempotencyKey)
+	}
+
+	asset.GenerationAttempt = 2
+	operation := creative.AINativeStoryboardOperation{ID: "operation_3", WorkspaceID: "workspace_1", RequirementRevision: 2, ScriptRevision: 3}
+	if _, _, err := preparer.PrepareAINativeStoryboardAsset(context.Background(), actor, project, operation, asset); err != nil {
+		t.Fatal(err)
+	}
+	if store.records[2].IdempotencyKey == store.records[1].IdempotencyKey {
+		t.Fatal("an explicit failed-asset retry must receive a new provider identity")
+	}
+}
+
 type storyboardProviderStore struct {
 	records []provider.JobRecord
 }

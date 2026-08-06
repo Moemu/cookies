@@ -118,7 +118,7 @@ export function RequirementStage({
       <label>视频语言<select disabled={locked} value={requirement.language} onChange={() => undefined}><option value="zh-CN">简体中文</option></select></label>
       <label className="wide">补充生成需求<textarea disabled={locked} value={requirement.supplemental_requirement} onChange={event => onChange({ ...requirement, supplemental_requirement: event.target.value })}/></label>
     </div>
-    {requirement.needs_confirmation.length ? <div className="requirement-notes"><AlertTriangle size={15}/><div><b>请留意以下未确认信息</b>{requirement.needs_confirmation.map(item => <span key={item}>{item}</span>)}</div></div> : null}
+    <div className="requirement-notes requirement-confirmation-note"><AlertTriangle size={15}/><div><b>请确认 AI 提取的商品信息</b><span>商品名称、目标受众和核心卖点均可编辑</span><span>商品图片已从链接提取，可补充或替换</span><span>确认后将进入脚本生成；后续如返回修改，已生成的脚本、故事板和视频将失效</span></div></div>
     {error ? <div className="ai-native-error" role="alert"><AlertTriangle size={15}/>{error}</div> : null}
     <footer className="ai-native-actions">{locked ? <span className="confirmed-note">需求已确认并冻结</span> : <><button className="secondary-button" disabled={status === 'generating'} onClick={onSave}>保存修改</button><button className="primary-button" disabled={status === 'generating'} onClick={onConfirm}>{status === 'generating' ? <LoaderCircle className="spin" size={15}/> : null}确认并生成脚本</button></>}</footer>
   </section>

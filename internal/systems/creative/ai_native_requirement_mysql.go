@@ -57,9 +57,9 @@ func (r MySQLRepository) CreateAINativeRequirementWorkspace(ctx context.Context,
 		return AINativeRequirementWorkspace{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO creative_ai_native_requirement_workspaces
-		(organization_id, project_id, workspace_id, creative_intake_id, creative_task_id, status, current_stage,
+		(organization_id, project_id, workspace_id, display_name, creative_intake_id, creative_task_id, status, current_stage,
 		 workspace_version, current_revision, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.OrganizationID, value.ProjectID, value.WorkspaceID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.OrganizationID, value.ProjectID, value.WorkspaceID, value.DisplayName,
 		value.CreativeIntakeID, value.CreativeTaskID, value.Status, value.CurrentStage, value.WorkspaceVersion,
 		value.CurrentRevision, value.CreatedBy, value.CreatedAt, value.UpdatedAt); err != nil {
 		return AINativeRequirementWorkspace{}, err
@@ -81,9 +81,10 @@ func (r MySQLRepository) GetAINativeRequirementWorkspace(ctx context.Context, or
 		return AINativeRequirementWorkspace{}, fmt.Errorf("creative repository database is required")
 	}
 	return scanAINativeRequirementWorkspace(r.DB.QueryRowContext(ctx, `SELECT
-		w.workspace_id, w.creative_intake_id, w.creative_task_id, w.organization_id, w.project_id,
+		w.workspace_id, w.display_name, w.creative_intake_id, w.creative_task_id, w.organization_id, w.project_id,
 		w.status, w.current_stage, w.workspace_version, w.active_operation_id, w.active_operation_version, w.current_revision,
 		w.confirmed_revision, w.script_status, w.current_script_revision, w.confirmed_script_revision,
+		w.script_error_code, w.script_error_message,
 		w.storyboard_status, w.current_storyboard_revision, w.confirmed_storyboard_revision, w.storyboard_plan_payload,
 		w.storyboard_error_code, w.storyboard_error_message,
 		w.production_status, w.current_production_revision, w.production_plan_payload,
@@ -100,6 +101,66 @@ func (r MySQLRepository) GetAINativeRequirementWorkspace(ctx context.Context, or
 		  ON sb.organization_id=w.organization_id AND sb.project_id=w.project_id
 		 AND sb.workspace_id=w.workspace_id AND sb.revision=w.current_storyboard_revision
 		WHERE w.organization_id=? AND w.project_id=? AND w.workspace_id=?`, organizationID, projectID, workspaceID))
+}
+
+func (r MySQLRepository) ListAINativeAdWorkspaces(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]AINativeAdWorkspaceSummary, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("creative repository database is required")
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT
+		w.workspace_id, w.display_name,
+		COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(revision.content_payload, '$.product_name')), ''), '未命名广告'),
+		w.current_stage, w.status, w.script_status, w.storyboard_status, w.production_status,
+		w.created_at, w.updated_at
+		FROM creative_ai_native_requirement_workspaces w
+		JOIN creative_ai_native_requirement_revisions revision
+		  ON revision.organization_id=w.organization_id AND revision.project_id=w.project_id
+		 AND revision.workspace_id=w.workspace_id AND revision.revision=w.current_revision
+		WHERE w.organization_id=? AND w.project_id=?
+		ORDER BY w.updated_at DESC, w.workspace_id DESC
+		LIMIT 100`, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []AINativeAdWorkspaceSummary{}
+	for rows.Next() {
+		var item AINativeAdWorkspaceSummary
+		var scriptStatus, storyboardStatus, productionStatus sql.NullString
+		if err := rows.Scan(&item.WorkspaceID, &item.DisplayName, &item.ProductName, &item.CurrentStage, &item.Status,
+			&scriptStatus, &storyboardStatus, &productionStatus, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.ScriptStatus = scriptStatus.String
+		item.StoryboardStatus = storyboardStatus.String
+		item.ProductionStatus = productionStatus.String
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r MySQLRepository) RenameAINativeAdWorkspace(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, workspaceID, displayName string, now time.Time) (AINativeRequirementWorkspace, error) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" || len([]rune(displayName)) > 80 {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("AI native ad display name must contain 1 to 80 characters")
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_ai_native_requirement_workspaces
+		SET display_name=?, updated_at=?
+		WHERE organization_id=? AND project_id=? AND workspace_id=?`, displayName, now, organizationID, projectID, workspaceID)
+	if err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	if affected == 0 {
+		return AINativeRequirementWorkspace{}, ErrNotFound
+	}
+	return r.GetAINativeRequirementWorkspace(ctx, organizationID, projectID, workspaceID)
 }
 
 func (r MySQLRepository) GetLatestAINativeRequirementWorkspace(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (AINativeRequirementWorkspace, error) {
@@ -387,6 +448,7 @@ func scanAINativeRequirementWorkspace(row aiNativeRequirementRow) (AINativeRequi
 	var scriptStatus sql.NullString
 	var currentScriptRevision, confirmedScriptRevision sql.NullInt64
 	var scriptPayload []byte
+	var scriptErrorCode, scriptErrorMessage sql.NullString
 	var storyboardStatus sql.NullString
 	var currentStoryboardRevision, confirmedStoryboardRevision sql.NullInt64
 	var storyboardPlanPayload, storyboardPayload []byte
@@ -394,9 +456,10 @@ func scanAINativeRequirementWorkspace(row aiNativeRequirementRow) (AINativeRequi
 	var productionStatus sql.NullString
 	var currentProductionRevision sql.NullInt64
 	var productionPlanPayload []byte
-	if err := row.Scan(&value.WorkspaceID, &value.CreativeIntakeID, &value.CreativeTaskID, &value.OrganizationID, &value.ProjectID,
+	if err := row.Scan(&value.WorkspaceID, &value.DisplayName, &value.CreativeIntakeID, &value.CreativeTaskID, &value.OrganizationID, &value.ProjectID,
 		&value.Status, &value.CurrentStage, &value.WorkspaceVersion, &activeOperationID, &activeOperationVersion, &value.CurrentRevision,
 		&confirmedRevision, &scriptStatus, &currentScriptRevision, &confirmedScriptRevision,
+		&scriptErrorCode, &scriptErrorMessage,
 		&storyboardStatus, &currentStoryboardRevision, &confirmedStoryboardRevision, &storyboardPlanPayload,
 		&storyboardErrorCode, &storyboardErrorMessage,
 		&productionStatus, &currentProductionRevision, &productionPlanPayload,
@@ -424,6 +487,12 @@ func scanAINativeRequirementWorkspace(row aiNativeRequirementRow) (AINativeRequi
 	}
 	if confirmedScriptRevision.Valid {
 		value.ConfirmedScriptRevision = &confirmedScriptRevision.Int64
+	}
+	if scriptErrorCode.Valid {
+		value.ScriptErrorCode = scriptErrorCode.String
+	}
+	if scriptErrorMessage.Valid {
+		value.ScriptErrorMessage = scriptErrorMessage.String
 	}
 	if storyboardStatus.Valid {
 		value.StoryboardStatus = storyboardStatus.String

@@ -56,6 +56,7 @@ export type AINativeRequirement = {
 
 export type AINativeRequirementWorkspace = {
   workspace_id: string
+  display_name: string
   creative_intake_id: string
   creative_task_id: string
   organization_id: string
@@ -72,6 +73,8 @@ export type AINativeRequirementWorkspace = {
   current_script_revision?: number
   confirmed_script_revision?: number
   script?: AdScriptDraft
+  script_error_code?: string
+  script_error_message?: string
   storyboard_status?: 'generating' | 'draft' | 'confirmed' | 'failed'
   current_storyboard_revision?: number
   confirmed_storyboard_revision?: number
@@ -85,6 +88,19 @@ export type AINativeRequirementWorkspace = {
   production_progress?: ProductionProgress
   created_by: string
   confirmed_by?: string
+  created_at: string
+  updated_at: string
+}
+
+export type AINativeAdWorkspaceSummary = {
+  workspace_id: string
+  display_name: string
+  product_name: string
+  current_stage: 'requirement' | 'script' | 'storyboard' | 'production'
+  status: 'draft' | 'confirmed'
+  script_status?: 'generating' | 'draft' | 'confirmed' | 'failed'
+  storyboard_status?: 'generating' | 'draft' | 'confirmed' | 'failed'
+  production_status?: 'running' | 'assets_ready' | 'rendering' | 'completed' | 'render_failed' | 'failed' | 'cancelled'
   created_at: string
   updated_at: string
 }
@@ -151,6 +167,9 @@ export type StoryboardAsset = {
   asset_ref?: { asset_id: string; version: number }
   generation_brief?: string
   status: 'ready' | 'planned' | 'generating' | 'failed'
+  generation_attempt?: number
+  error_code?: string
+  error_message?: string
 }
 
 export type StoryboardShot = {

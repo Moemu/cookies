@@ -29,6 +29,7 @@ type AdapterGatewayImageAdapter struct {
 	client            *http.Client
 	now               func() time.Time
 	allowInsecureHTTP bool
+	submissions       chan struct{}
 }
 
 func NewAdapterGatewayImageAdapter(credentials GatewayCredentialResolver, handles OutputHandleStore) (*AdapterGatewayImageAdapter, error) {
@@ -45,6 +46,7 @@ func NewAdapterGatewayImageAdapterWithPolicy(credentials GatewayCredentialResolv
 		client:            &http.Client{},
 		now:               time.Now,
 		allowInsecureHTTP: allowInsecureHTTP,
+		submissions:       make(chan struct{}, 1),
 	}, nil
 }
 
@@ -85,6 +87,12 @@ func (a *AdapterGatewayImageAdapter) Submit(ctx context.Context, request ImageGe
 	})
 	if err != nil {
 		return ImageSubmission{}, err
+	}
+	select {
+	case a.submissions <- struct{}{}:
+		defer func() { <-a.submissions }()
+	case <-ctx.Done():
+		return ImageSubmission{}, ctx.Err()
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, time.Duration(request.Route.TimeoutSeconds)*time.Second)
 	defer cancel()

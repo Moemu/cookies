@@ -1,16 +1,17 @@
-import { useEffect, useReducer, useState } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { analyzeRequirement, cancelProduction, confirmRequirement, confirmScript, confirmStoryboard, generateScript, generateStoryboard, getAssetPreview, getLatestRequirementWorkspace, getRequirementReopenImpact, getRequirementWorkspace, regenerateScript as regenerateScriptRequest, reopenRequirement, reopenScript, reopenStoryboard, retryProductionUnit, startProduction } from './api'
+import { analyzeRequirement, cancelProduction, confirmRequirement, confirmScript, confirmStoryboard, generateScript, generateStoryboard, getAssetPreview, getLatestRequirementWorkspace, getRequirementReopenImpact, getRequirementWorkspace, listAINativeAdWorkspaces, regenerateScript as regenerateScriptRequest, renameAINativeAdWorkspace, reopenRequirement, reopenScript, reopenStoryboard, retryProductionUnit, startProduction } from './api'
 import { aiNativeReducer, initialAINativeState, productionFailureMessage } from './reducer'
 import { AINativeStageStepper } from './AINativeStageStepper'
 import { RequirementStage } from './RequirementStage'
 import { ScriptStage } from './ScriptStage'
 import { StoryboardStage } from './StoryboardStage'
 import { VideoStage } from './VideoStage'
-import type { AdScriptDraft, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
-import { aiNativeWorkspaceLocation, readAINativeWorkspaceLocation } from './navigation'
+import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
+import { aiNativeWorkspaceLocation, clearAINativeWorkspaceLocation, readAINativeWorkspaceLocation } from './navigation'
 import { forgetAINativeWorkspace, readAINativeStageDraft, readAINativeWorkspacePointer, rememberAINativeStageDraft, rememberAINativeWorkspace } from './storage'
 import { useAINativeAutosave } from './useAINativeAutosave'
+import { AINativeAdCatalog } from './AINativeAdCatalog'
 import './ai-native-ad.css'
 
 const invalidationCopy: Record<AINativeStageId, string> = {
@@ -24,7 +25,18 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
   const [state, dispatch] = useReducer(aiNativeReducer, initialAINativeState)
   const [productLink, setProductLink] = useState('')
   const [supplementalRequirement, setSupplementalRequirement] = useState('')
+  const [records, setRecords] = useState<AINativeAdWorkspaceSummary[]>([])
+  const [catalogBusy, setCatalogBusy] = useState(false)
+  const [newDialogOpen, setNewDialogOpen] = useState(false)
+  const [recordName, setRecordName] = useState('')
+  const [newDialogError, setNewDialogError] = useState('')
   const autosave = useAINativeAutosave(projectId, state, dispatch)
+
+  const refreshCatalog = useCallback(async () => {
+    const value = await listAINativeAdWorkspaces(projectId)
+    setRecords(value)
+    return value
+  }, [projectId])
 
   useEffect(() => {
 	let active = true
@@ -32,6 +44,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     setProductLink('')
     setSupplementalRequirement('')
 	const restore = async () => {
+	  const recordsPromise = listAINativeAdWorkspaces(projectId).catch(() => [] as AINativeAdWorkspaceSummary[])
 	  const urlLocation = readAINativeWorkspaceLocation(window.location.search)
 	  const savedLocation = readAINativeWorkspacePointer(projectId)
 	  const location = urlLocation ?? savedLocation
@@ -44,7 +57,10 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	    }
 	  }
 	  if (!workspace) workspace = await getLatestRequirementWorkspace(projectId)
-	  if (!active || !workspace) return
+	  const restoredRecords = await recordsPromise
+	  if (!active) return
+	  setRecords(restoredRecords)
+	  if (!workspace) return
 	  const requirementDraft = readAINativeStageDraft<AINativeRequirement>(projectId, workspace.workspace_id, 'requirement', workspace.requirement.revision)
 	  const scriptDraft = workspace.script ? readAINativeStageDraft<AdScriptDraft>(projectId, workspace.workspace_id, 'script', workspace.script.revision) : null
 	  const storyboardSource = workspace.storyboard ?? workspace.storyboard_plan
@@ -110,9 +126,16 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       }
     }
     const timer = window.setInterval(() => { void refresh() }, 1200)
+    const timeout = window.setTimeout(() => {
+      if (!active) return
+      active = false
+      window.clearInterval(timer)
+      dispatch({ type: 'operation-failed', stage: 'script', message: '脚本生成已超过 3 分钟，任务可能停滞。请重新生成脚本。' })
+    }, 180_000)
     return () => {
       active = false
       window.clearInterval(timer)
+      window.clearTimeout(timeout)
     }
   }, [projectId, state.workspace?.script_status, state.workspace?.workspace_id])
 
@@ -170,10 +193,92 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     try {
       const workspace = await analyzeRequirement(projectId, productLink.trim(), supplementalRequirement.trim())
       dispatch({ type: 'requirement-loaded', workspace })
+	  await refreshCatalog()
 	  window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, workspace.workspace_id, 'requirement')}${window.location.hash}`)
       onNotice('商品信息和生成需求已完成分析，请核对并编辑结果。')
     } catch (cause) {
       dispatch({ type: 'operation-failed', stage: 'requirement', message: cause instanceof Error ? cause.message : '商品链接分析失败，请稍后重试。' })
+    }
+  }
+
+  const switchWorkspace = async (workspaceId: string) => {
+    if (!workspaceId || workspaceId === state.workspace?.workspace_id) return
+    setCatalogBusy(true)
+    try {
+      const saved = await autosave.flushAll()
+      if (!saved.succeeded) throw new Error('当前广告自动保存失败，暂时不能切换记录。')
+      const workspace = await getRequirementWorkspace(projectId, workspaceId)
+      const stage: AINativeStageId = workspace.current_stage === 'production' ? 'video' : workspace.current_stage
+      dispatch({ type: 'reset' })
+      dispatch({ type: 'requirement-loaded', workspace })
+      dispatch({ type: 'open-stage', stage })
+      setProductLink(workspace.requirement.product.source_url)
+      setSupplementalRequirement(workspace.requirement.supplemental_requirement)
+      rememberAINativeWorkspace(projectId, { workspaceId, stage })
+      window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, workspaceId, stage)}${window.location.hash}`)
+      onNotice(`已切换到「${workspace.display_name || workspace.requirement.product_name}」。`)
+    } catch (cause) {
+      dispatch({ type: 'operation-failed', stage: state.active_stage, message: cause instanceof Error ? cause.message : '广告记录切换失败。' })
+    } finally {
+      setCatalogBusy(false)
+    }
+  }
+
+  const suggestedRecordName = () => {
+    const workspace = state.workspace
+    if (!workspace) return ''
+    if (workspace.display_name.trim()) return workspace.display_name
+    const date = new Date(workspace.created_at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }).replaceAll('/', '-')
+    return `${workspace.requirement.product_name || 'AI 效果广告'} ${date}`.slice(0, 80)
+  }
+
+  const beginNewWorkspace = () => {
+    dispatch({ type: 'reset' })
+    setProductLink('')
+    setSupplementalRequirement('')
+    forgetAINativeWorkspace(projectId)
+    window.history.replaceState(null, '', `${window.location.pathname}${clearAINativeWorkspaceLocation(window.location.search)}${window.location.hash}`)
+  }
+
+  const requestNewWorkspace = () => {
+    if (!state.workspace) {
+      beginNewWorkspace()
+      return
+    }
+    setRecordName(suggestedRecordName())
+    setNewDialogError('')
+    setNewDialogOpen(true)
+  }
+
+  const confirmNewWorkspace = async () => {
+    if (!state.workspace) {
+      setNewDialogOpen(false)
+      beginNewWorkspace()
+      return
+    }
+    const name = recordName.trim()
+    if (!name) {
+      setNewDialogError('请先为当前广告填写名称。')
+      return
+    }
+    if ([...name].length > 80) {
+      setNewDialogError('广告名称不能超过 80 个字符。')
+      return
+    }
+    setCatalogBusy(true)
+    setNewDialogError('')
+    try {
+      const saved = await autosave.flushAll()
+      if (!saved.succeeded) throw new Error('当前广告自动保存失败，请重试后再新建。')
+      await renameAINativeAdWorkspace(projectId, state.workspace.workspace_id, name)
+      await refreshCatalog()
+      setNewDialogOpen(false)
+      beginNewWorkspace()
+      onNotice(`「${name}」已保存，现在可以创建新的广告。`)
+    } catch (cause) {
+      setNewDialogError(cause instanceof Error ? cause.message : '当前广告保存失败。')
+    } finally {
+      setCatalogBusy(false)
     }
   }
 
@@ -233,6 +338,25 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       const workspace = await regenerateScriptRequest(projectId, state.workspace.workspace_id, state.workspace.workspace_version, state.script.regeneration_note ?? '')
       dispatch({ type: 'requirement-loaded', workspace })
       onNotice('整版脚本重新生成任务已启动，旧 revision 会保留。')
+    } catch (cause) {
+      dispatch({ type: 'operation-failed', stage: 'script', message: cause instanceof Error ? cause.message : '脚本重新生成失败。' })
+    }
+  }
+
+  const retryScriptGeneration = async () => {
+    if (!state.workspace) return
+    dispatch({ type: 'operation-started', stage: 'script' })
+    try {
+      const latest = await getRequirementWorkspace(projectId, state.workspace.workspace_id)
+      if (latest.script_status === 'generating') {
+        dispatch({ type: 'operation-failed', stage: 'script', message: '后台任务仍处于生成中，请稍后刷新状态；若持续超过 3 分钟，请联系管理员处理停滞任务。' })
+        return
+      }
+      if (latest.script_status === 'draft' || latest.script_status === 'confirmed') {
+        dispatch({ type: 'requirement-loaded', workspace: latest })
+        return
+      }
+      await startScriptGeneration(latest)
     } catch (cause) {
       dispatch({ type: 'operation-failed', stage: 'script', message: cause instanceof Error ? cause.message : '脚本重新生成失败。' })
     }
@@ -373,7 +497,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     : autosave.savedAt ? `已自动保存 ${autosave.savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''
 
   return <section className="ai-native-workspace" aria-label="AI 效果广告生成工作区">
-    <header className="ai-native-workspace-header"><div><h3>AI 效果广告生成</h3><p>从商品链接开始，依次完成需求、脚本、故事板和完整视频。</p></div><div><span>实际支持</span><b>抖音 · 9:16 · 15–30 秒</b>{autosaveCopy ? <small role="status">{autosaveCopy}</small> : null}</div></header>
+    <header className="ai-native-workspace-header"><div><h3>AI 效果广告生成</h3><p>从商品链接开始，依次完成需求、脚本、故事板和完整视频。</p></div><div className="ai-native-workspace-header-side"><AINativeAdCatalog records={records} currentId={state.workspace?.workspace_id ?? ''} busy={catalogBusy} onSelect={workspaceId => { void switchWorkspace(workspaceId) }} onNew={requestNewWorkspace}/><div className="ai-native-support-copy"><span>实际支持</span><b>抖音 · 9:16 · 15–30 秒</b>{autosaveCopy ? <small role="status">{autosaveCopy}</small> : null}</div></div></header>
     <AINativeStageStepper active={state.active_stage} status={state.stage_status} onSelect={stage => {
       dispatch({ type: 'open-stage', stage })
       if (state.workspace) window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, state.workspace.workspace_id, stage)}${window.location.hash}`)
@@ -396,12 +520,14 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     /> : state.active_stage === 'script' ? <ScriptStage
       status={state.stage_status.script}
       script={state.script}
+      error={state.workspace?.script_error_message || state.error}
       onChange={script => {
         if (state.workspace) rememberAINativeStageDraft(projectId, state.workspace.workspace_id, 'script', script.revision, script)
         autosave.schedule('script', script)
         dispatch({ type: 'script-edited', script })
       }}
       onRegenerate={() => { void regenerateScript() }}
+      onRetry={() => { void retryScriptGeneration() }}
       onConfirm={() => { void confirmScriptStage() }}
 	  onEdit={() => { void requestEdit('script') }}
     /> : state.active_stage === 'storyboard' ? <StoryboardStage
@@ -426,5 +552,6 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	  onCancel={() => { void cancelVideo() }}
     />}
 	{state.pending_reopen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-native-reopen-title"><span><AlertTriangle size={18}/></span><h3 id="ai-native-reopen-title">确认重新编辑？</h3><p>{invalidationCopy[state.pending_reopen]}</p><div><button className="secondary-button" onClick={() => dispatch({ type: 'reopen-cancelled' })}>取消</button><button className="primary-button" onClick={() => { void confirmReopen() }}>继续编辑并作废下游</button></div></section></div> : null}
+	{newDialogOpen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog ai-native-name-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-native-name-title"><h3 id="ai-native-name-title">保存当前广告并新建</h3><p>当前完整或未完成的生成进度都会保留。请先为它起一个方便查找的名称。</p><label>广告名称<input autoFocus maxLength={80} value={recordName} onChange={event => setRecordName(event.target.value)} placeholder="例如：施美乐钛杯通勤版"/></label>{newDialogError ? <div className="ai-native-error" role="alert">{newDialogError}</div> : null}<div><button className="secondary-button" disabled={catalogBusy} onClick={() => setNewDialogOpen(false)}>取消</button><button className="primary-button" disabled={catalogBusy || !recordName.trim()} onClick={() => { void confirmNewWorkspace() }}>{catalogBusy ? '正在保存…' : '保存并新建'}</button></div></section></div> : null}
   </section>
 }

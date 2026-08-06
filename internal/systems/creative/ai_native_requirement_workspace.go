@@ -19,6 +19,7 @@ const (
 
 type AINativeRequirementWorkspace struct {
 	WorkspaceID                 string                      `json:"workspace_id"`
+	DisplayName                 string                      `json:"display_name"`
 	CreativeIntakeID            string                      `json:"creative_intake_id"`
 	CreativeTaskID              string                      `json:"creative_task_id"`
 	OrganizationID              contract.OrganizationID     `json:"organization_id"`
@@ -35,6 +36,8 @@ type AINativeRequirementWorkspace struct {
 	CurrentScriptRevision       *int64                      `json:"current_script_revision,omitempty"`
 	ConfirmedScriptRevision     *int64                      `json:"confirmed_script_revision,omitempty"`
 	Script                      *AINativeScriptRevision     `json:"script,omitempty"`
+	ScriptErrorCode             string                      `json:"script_error_code,omitempty"`
+	ScriptErrorMessage          string                      `json:"script_error_message,omitempty"`
 	StoryboardStatus            string                      `json:"storyboard_status,omitempty"`
 	CurrentStoryboardRevision   *int64                      `json:"current_storyboard_revision,omitempty"`
 	ConfirmedStoryboardRevision *int64                      `json:"confirmed_storyboard_revision,omitempty"`
@@ -121,6 +124,28 @@ type AINativeRequirementRepository interface {
 	ReopenAINativeRequirement(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (AINativeRequirementWorkspace, error)
 }
 
+type AINativeAdWorkspaceSummary struct {
+	WorkspaceID      string    `json:"workspace_id"`
+	DisplayName      string    `json:"display_name"`
+	ProductName      string    `json:"product_name"`
+	CurrentStage     string    `json:"current_stage"`
+	Status           string    `json:"status"`
+	ScriptStatus     string    `json:"script_status,omitempty"`
+	StoryboardStatus string    `json:"storyboard_status,omitempty"`
+	ProductionStatus string    `json:"production_status,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type AINativeWorkspaceCatalogRepository interface {
+	ListAINativeAdWorkspaces(context.Context, contract.OrganizationID, contract.ProjectID) ([]AINativeAdWorkspaceSummary, error)
+	RenameAINativeAdWorkspace(context.Context, contract.OrganizationID, contract.ProjectID, string, string, time.Time) (AINativeRequirementWorkspace, error)
+}
+
+type RenameAINativeAdWorkspaceRequest struct {
+	DisplayName string `json:"display_name"`
+}
+
 type AINativeInvalidatedResource struct {
 	Type    string `json:"type"`
 	ID      string `json:"id"`
@@ -188,6 +213,44 @@ func (s Service) GetLatestAINativeRequirementWorkspace(ctx context.Context, acto
 		return AINativeRequirementWorkspace{}, err
 	}
 	return s.AINativeRequirements.GetLatestAINativeRequirementWorkspace(ctx, actor.OrganizationID, projectID)
+}
+
+func (s Service) ListAINativeAdWorkspaces(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) ([]AINativeAdWorkspaceSummary, error) {
+	if s.Projects == nil || s.AINativeRequirements == nil {
+		return nil, fmt.Errorf("AI native workspace persistence is unavailable")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return nil, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	catalog, ok := s.AINativeRequirements.(AINativeWorkspaceCatalogRepository)
+	if !ok {
+		return nil, fmt.Errorf("AI native workspace catalog is unavailable")
+	}
+	return catalog.ListAINativeAdWorkspaces(ctx, actor.OrganizationID, projectID)
+}
+
+func (s Service) RenameAINativeAdWorkspace(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, workspaceID string, request RenameAINativeAdWorkspaceRequest) (AINativeRequirementWorkspace, error) {
+	if s.Projects == nil || s.AINativeRequirements == nil {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("AI native workspace persistence is unavailable")
+	}
+	if !actor.HasScope(ScopeWrite) {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%s scope is required", ScopeWrite)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	displayName := strings.TrimSpace(request.DisplayName)
+	if displayName == "" || len([]rune(displayName)) > 80 {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: display_name must contain 1 to 80 characters", ErrInvalidAINativeRequirement)
+	}
+	catalog, ok := s.AINativeRequirements.(AINativeWorkspaceCatalogRepository)
+	if !ok {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("AI native workspace catalog is unavailable")
+	}
+	return catalog.RenameAINativeAdWorkspace(ctx, actor.OrganizationID, projectID, strings.TrimSpace(workspaceID), displayName, s.now())
 }
 
 func (s Service) UpdateAINativeRequirement(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, workspaceID string, request UpdateAINativeRequirementRequest) (AINativeRequirementWorkspace, error) {

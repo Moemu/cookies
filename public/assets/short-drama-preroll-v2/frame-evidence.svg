@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1280">
+  <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#102034"/><stop offset="1" stop-color="#03070d"/></linearGradient><radialGradient id="glow"><stop stop-color="#ff826f" stop-opacity=".9"/><stop offset="1" stop-color="#ff3d2e" stop-opacity="0"/></radialGradient></defs>
+  <rect width="720" height="1280" fill="url(#bg)"/><rect x="0" y="0" width="720" height="1280" fill="#06111e" opacity=".35"/>
+  <path d="M0 820L720 670V1280H0Z" fill="#08101a"/><rect x="102" y="770" width="516" height="292" rx="28" fill="#131b23" stroke="#546171" stroke-width="5"/>
+  <circle cx="250" cy="906" r="82" fill="#06090d" stroke="#8b97a3" stroke-width="8"/><circle cx="470" cy="906" r="82" fill="#06090d" stroke="#8b97a3" stroke-width="8"/>
+  <path d="M250 906C325 850 395 850 470 906" fill="none" stroke="#4f5a65" stroke-width="14"/><rect x="283" y="793" width="154" height="48" rx="6" fill="#d7ccb3"/><path d="M305 817h110" stroke="#4c4436" stroke-width="5"/>
+  <circle cx="565" cy="815" r="62" fill="url(#glow)"/><circle cx="565" cy="815" r="13" fill="#ff4b3e"/>
+  <path d="M70 180V70H180M540 70h110v110M70 1100v110h110M650 1100v110H540" fill="none" stroke="#78a7d8" stroke-width="3" opacity=".32"/>
+  <text x="72" y="112" fill="#9fb7ce" font-family="sans-serif" font-size="22" letter-spacing="5">EVIDENCE / 01</text>
+</svg>

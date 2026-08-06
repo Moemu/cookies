@@ -4,10 +4,18 @@
 .ai-native-workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .ai-native-workspace-header h3 { font-size: 17px; letter-spacing: -.02em; }
 .ai-native-workspace-header p { margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.55; }
-.ai-native-workspace-header > div:last-child { min-width: 210px; padding-left: 18px; border-left: 1px solid var(--line); }
-.ai-native-workspace-header > div:last-child span, .ai-native-workspace-header > div:last-child b { display: block; }
-.ai-native-workspace-header > div:last-child span { color: var(--muted); font-size: 9px; }
-.ai-native-workspace-header > div:last-child b { margin-top: 4px; color: var(--cobalt-dark); font-size: 11px; }
+.ai-native-workspace-header-side { display: flex; align-items: end; gap: 18px; min-width: 520px; padding-left: 18px; border-left: 1px solid var(--line); }
+.ai-native-record-toolbar { display: flex; align-items: end; gap: 8px; flex: 1; min-width: 0; }
+.ai-native-record-toolbar > label { display: grid; gap: 5px; flex: 1; min-width: 0; color: var(--muted); font-size: 9px; }
+.ai-native-record-select { position: relative; display: block; min-width: 0; }
+.ai-native-record-select select { width: 100%; height: 36px; padding: 0 34px 0 10px; overflow: hidden; border: 1px solid var(--line); outline: 0; color: var(--text); background: var(--surface); font: inherit; font-size: 10px; text-overflow: ellipsis; appearance: none; }
+.ai-native-record-select select:focus { border-color: var(--cobalt); box-shadow: 0 0 0 2px var(--cobalt-soft); }
+.ai-native-record-select svg { position: absolute; top: 50%; right: 10px; color: var(--muted); pointer-events: none; transform: translateY(-50%); }
+.ai-native-record-toolbar .secondary-button { flex: none; min-height: 36px; }
+.ai-native-support-copy { flex: none; min-width: 150px; }
+.ai-native-support-copy span, .ai-native-support-copy b, .ai-native-support-copy small { display: block; }
+.ai-native-support-copy span { color: var(--muted); font-size: 9px; }
+.ai-native-support-copy b { margin-top: 4px; color: var(--cobalt-dark); font-size: 11px; }
 
 .ai-native-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border-bottom: 1px solid var(--line); }
 .ai-native-steps button { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 9px; align-items: center; min-height: 62px; padding: 11px 15px; background: transparent; border-right: 1px solid var(--line); color: var(--muted); text-align: left; }
@@ -111,6 +119,10 @@
 .storyboard-assets figcaption b, .storyboard-assets figcaption small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .storyboard-assets figcaption b { font-size: 9px; }
 .storyboard-assets figcaption small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.storyboard-assets figcaption em { display: block; margin-top: 5px; color: oklch(.48 .16 25); font-size: 8px; font-style: normal; line-height: 1.35; white-space: normal; }
+.storyboard-assets figure.storyboard-asset-failed { border-color: oklch(.86 .08 25); background: oklch(.98 .02 25); }
+.storyboard-assets figure.storyboard-asset-failed > span { color: oklch(.48 .16 25); }
+.storyboard-generation-status { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 12px; color: var(--primary); background: color-mix(in oklch, var(--primary) 7%, white); border: 1px solid color-mix(in oklch, var(--primary) 24%, white); font-size: 9px; }
 .storyboard-shot-list article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--subtle); border-bottom: 1px solid var(--line); }
 .storyboard-shot-list article > header > div { display: flex; align-items: center; gap: 12px; }
 .storyboard-shot-list article > header span { color: var(--cobalt-dark); font-size: 10px; font-weight: 700; }
@@ -159,6 +171,10 @@
 .ai-native-dialog h3 { margin-top: 14px; font-size: 16px; }
 .ai-native-dialog p { margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.65; }
 .ai-native-dialog > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.ai-native-name-dialog > label { display: grid; gap: 7px; margin-top: 18px; color: var(--muted); font-size: 9px; font-weight: 650; }
+.ai-native-name-dialog input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); outline: 0; color: var(--text); background: var(--surface); font: inherit; font-size: 11px; }
+.ai-native-name-dialog input:focus { border-color: var(--cobalt); box-shadow: 0 0 0 2px var(--cobalt-soft); }
+.ai-native-name-dialog .ai-native-error { margin-top: 10px; }
 
 @media (max-width: 1180px) {
   .ai-native-stage-panel { margin: 12px; padding: 18px; }
@@ -172,7 +188,8 @@
   .performance-mode-tabs.level-one, .performance-mode-tabs.preroll-mode-tabs, .ai-native-steps { grid-template-columns: 1fr; }
   .performance-mode-tabs.level-one button, .performance-mode-tabs.preroll-mode-tabs button, .ai-native-steps button { border-right: 0; border-bottom: 1px solid var(--line); }
   .ai-native-workspace-header, .ai-native-stage-heading { align-items: flex-start; flex-direction: column; }
-  .ai-native-workspace-header > div:last-child { width: 100%; padding: 10px 0 0; border-top: 1px solid var(--line); border-left: 0; }
+  .ai-native-workspace-header-side { align-items: stretch; flex-direction: column; width: 100%; min-width: 0; padding: 10px 0 0; border-top: 1px solid var(--line); border-left: 0; }
+  .ai-native-record-toolbar { align-items: stretch; flex-direction: column; }
   .requirement-form-grid, .script-summary, .script-segment-fields, .storyboard-shot-fields, .stage-empty, .render-progress-layout, .video-result { grid-template-columns: 1fr; }
   .requirement-form-grid .wide, .script-summary .wide, .script-segment-fields .wide, .storyboard-shot-fields .wide { grid-column: auto; }
   .render-poster { width: min(220px, 100%); margin: 0 auto; }
