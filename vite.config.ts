@@ -14,7 +14,7 @@ export default defineConfig({
     // inputs. On Windows these files may be locked while in use; excluding them
     // prevents an EBUSY watcher error from terminating the development server.
     watch: {
-      ignored: ['**/.codex-runtime/**', '**/.data/**', '**/dist/**', '**/coverage/**'],
+      ignored: ['**/.codex-runtime/**', '**/.cache/**', '**/.data/**', '**/dist/**', '**/coverage/**'],
     },
     proxy: {
       '/api/strategy/v1': platformProxyTarget,

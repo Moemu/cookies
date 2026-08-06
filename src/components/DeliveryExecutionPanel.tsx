@@ -18,10 +18,11 @@ type Props = {
   projectId: string
   changeSet: DeliveryControlChangeSet
   canExecute: boolean
+  goldenPath?: boolean
   onExecutionCreated: (changeSet: DeliveryControlChangeSet) => void
 }
 
-export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, onExecutionCreated }: Props) {
+export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, goldenPath = false, onExecutionCreated }: Props) {
   const [records, setRecords] = useState<DeliveryExecutionRecord[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [selectedRecord, setSelectedRecord] = useState<DeliveryExecutionRecord>()
@@ -129,45 +130,41 @@ export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, onExe
       setSelectedId(value.execution.id)
       setSelectedRecord(value)
       onExecutionCreated(value.changeSet)
-      setNotice(`已创建或复用 Execution ${value.execution.id.slice(-12)}。所有结果来自 source=mock。`)
+      setNotice('平台操作演练已完成；操作步骤与证据已保存。请另行运行投放效果情景模拟，演练成功本身不会生成指标。')
     } catch (error) {
       if (request !== executionRequest.current || activeProjectId.current !== requestedProjectId || activeChangeSetId.current !== requestedChangeSetId) return
-      setNotice(error instanceof Error ? error.message : '启动模拟执行失败。')
+      setNotice(error instanceof Error ? error.message : '启动平台操作演练失败。')
     } finally {
       if (request === executionRequest.current && activeProjectId.current === requestedProjectId && activeChangeSetId.current === requestedChangeSetId) setBusy(false)
     }
   }
 
-  return <section className="delivery-execution-panel" aria-label="模拟执行记录">
+  return <section className="delivery-execution-panel" aria-label="平台操作演练记录">
     <header className="delivery-execution-header">
       <div>
-        <span className="section-label">Delivery A04 · Execution</span>
-        <h3>持久执行与恢复判断</h3>
-        <p>Execution 是一次模拟执行尝试，独立于不可变的 ChangeSet 审批证据；不会写入真实平台。</p>
+        <span className="section-label">平台操作演练</span>
+        <h3>持久步骤、证据与恢复判断</h3>
+        <p>这里验证审批绑定、操作步骤与异常恢复，不把操作成功解释为真实投放效果。</p>
       </div>
       <button className="secondary-button" onClick={() => void refresh()} disabled={busy}>
         <RefreshCw size={15}/>从 Go API 刷新
       </button>
     </header>
 
-    <div className="mock-contract-banner execution-provenance">
-      <b>source=mock</b><span>adapter=mock_ocean_engine</span><span>mode=local_simulation</span>
-    </div>
-
     {unresolvedExecution ? <div className="execution-recovery-alert" role="alert">
-      <ShieldAlert size={18}/><span><b>禁止盲目重试</b><small>Execution {unresolvedExecution.execution.id.slice(-12)} 的结果未知。请先查询并重新核验，再生成恢复决定；不得复用此 ChangeSet 直接重试。</small></span>
+      <ShieldAlert size={18}/><span><b>禁止盲目重试</b><small>Execution {unresolvedExecution.execution.id.slice(-12)} 的结果未知。请先查询并重新核验，再生成恢复决定；不得复用此变更申请直接重试。</small></span>
     </div> : null}
 
     <div className="execution-start-controls">
-      <label>模拟场景
-        <select value={scenario} onChange={event => setScenario(event.target.value as DeliveryExecutionScenario)} disabled={!canExecute || busy}>
+      <label>{goldenPath ? '演练路径' : '异常场景'}
+        <select value={scenario} onChange={event => setScenario(event.target.value as DeliveryExecutionScenario)} disabled={goldenPath || !canExecute || busy}>
           {scenarios.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
         </select>
       </label>
       <button className="secondary-button" onClick={() => void startExecution()} disabled={!canStart}>
-        <Play size={15}/>启动模拟执行
+        <Play size={15}/>启动平台操作演练
       </button>
-      {!canExecute ? <small>需要有效审批后才能开始模拟执行。</small> : null}
+      {!canExecute ? <small>先完成当前变更申请的批准，才能启动平台操作演练。</small> : goldenPath ? <small>黄金路径固定运行 success；异常结果只在独立场景中选择。</small> : null}
     </div>
 
     <div className="execution-records">

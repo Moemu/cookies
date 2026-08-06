@@ -75,6 +75,23 @@ func TestApprovalRequestRejectsInjectedIdentityAndScopeFields(t *testing.T) {
 	}
 }
 
+func TestRejectChangeSetHTTPRequiresReasonAndReturnsDurableDecision(t *testing.T) {
+	t.Parallel()
+	server := New(&applicationStub{changeSet: delivery.ChangeSet{ID: "deliverychangeset_1", Version: 2}})
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/change-sets/deliverychangeset_1:reject", `{"expected_version":2,"reason":""}`))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("empty reason status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/change-sets/deliverychangeset_1:reject", `{"expected_version":2,"reason":"needs revision"}`))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"rejected"`) || !strings.Contains(response.Body.String(), `"rejection_reason":"needs revision"`) {
+		t.Fatalf("reject status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestDeliveryHTTPMapsStableApprovalErrorsWithMockProvenance(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -120,6 +137,47 @@ func TestExecutionHTTPRequiresIdempotencyKeyAndCreates(t *testing.T) {
 	}
 }
 
+func TestDeliveryTourHTTPUsesStableActionRoutes(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{tourRun: delivery.DeliveryTourRun{ID: "investor-tour-01", Status: delivery.TourRunPrepared}}
+	server := New(app)
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/tour-runs/investor-tour-01:prepare", ""))
+	if response.Code != http.StatusCreated || app.tourRunID != "investor-tour-01" || !strings.Contains(response.Body.String(), `"status":"prepared"`) {
+		t.Fatalf("prepare status=%d run=%q body=%s", response.Code, app.tourRunID, response.Body.String())
+	}
+
+	app.tourReplay = true
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/tour-runs/investor-tour-01:prepare", ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("replay status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet, "/api/delivery/v1/projects/project_1/tour-runs/investor-tour-01", ""))
+	if response.Code != http.StatusOK || app.tourRunID != "investor-tour-01" {
+		t.Fatalf("get status=%d run=%q body=%s", response.Code, app.tourRunID, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/tour-runs/investor-tour-01:reset", ""))
+	if response.Code != http.StatusOK || app.tourRunID != "investor-tour-01" {
+		t.Fatalf("reset status=%d run=%q body=%s", response.Code, app.tourRunID, response.Body.String())
+	}
+}
+
+func TestDeliveryTourHTTPMapsOwnerMismatch(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/tour-runs/investor-tour-01:reset", "")
+	writeError(response, request, delivery.ErrTourOwnerMismatch)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "TOUR_OWNER_MISMATCH") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -137,6 +195,9 @@ type applicationStub struct {
 	plan          delivery.DeliveryPlan
 	changeSet     delivery.ChangeSet
 	createdPlanID string
+	tourRun       delivery.DeliveryTourRun
+	tourRunID     string
+	tourReplay    bool
 }
 
 func (s *applicationStub) CreatePlan(context.Context, contract.ActorContext, contract.ProjectID, delivery.CreatePlanRequest) (delivery.DeliveryPlan, error) {
@@ -179,6 +240,10 @@ func (s *applicationStub) Preflight(context.Context, contract.ActorContext, cont
 func (s *applicationStub) Approve(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error) {
 	return s.changeSet, nil
 }
+
+func (s *applicationStub) RejectChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.RejectChangeSetRequest) (delivery.ChangeSet, error) {
+	return delivery.ChangeSet{ID: "changeset-rejected", Status: delivery.ChangeSetRejected, Version: 2, RejectionReason: "needs revision"}, nil
+}
 func (s *applicationStub) Execute(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.ExecuteRequest) (delivery.ExecutionResult, bool, error) {
 	now := time.Now()
 	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: &now}}, false, nil
@@ -220,6 +285,12 @@ func (s *applicationStub) ListExecutions(context.Context, contract.ActorContext,
 func (s *applicationStub) GetExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ExecutionResult, error) {
 	return delivery.ExecutionResult{}, nil
 }
+func (s *applicationStub) CreateOutcomeSimulation(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateOutcomeSimulationRequest) (delivery.OutcomeSimulationResult, error) {
+	return delivery.OutcomeSimulationResult{Run: delivery.OutcomeSimulationRun{ID: "deliverysimulationrun_1"}}, nil
+}
+func (s *applicationStub) GetLatestOutcomeSimulation(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.OutcomeSimulationResult, error) {
+	return delivery.OutcomeSimulationResult{Run: delivery.OutcomeSimulationRun{ID: "deliverysimulationrun_1"}, Replay: true}, nil
+}
 func (s *applicationStub) CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error) {
 	return delivery.DeliveryMetricSnapshot{ID: "deliverymetric_1", IsSimulated: true}, nil
 }
@@ -234,4 +305,16 @@ func (s *applicationStub) ListAlerts(context.Context, contract.ActorContext, con
 }
 func (s *applicationStub) UpdateAlert(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdateAlertRequest) (delivery.DeliveryAlert, error) {
 	return delivery.DeliveryAlert{}, nil
+}
+func (s *applicationStub) PrepareTourRun(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, runID string) (delivery.DeliveryTourRun, bool, error) {
+	s.tourRunID = runID
+	return s.tourRun, s.tourReplay, nil
+}
+func (s *applicationStub) GetTourRun(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, runID string) (delivery.DeliveryTourRun, error) {
+	s.tourRunID = runID
+	return s.tourRun, nil
+}
+func (s *applicationStub) ResetTourRun(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, runID string) (delivery.DeliveryTourResetResult, error) {
+	s.tourRunID = runID
+	return delivery.DeliveryTourResetResult{Run: s.tourRun}, nil
 }

@@ -40,7 +40,7 @@ export const deliveryApi = {
 }
 
 export type DeliverySource = 'mock'
-export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue' | 'missing_required_field' | 'orphan_dependency' | 'missing_confirmation' | 'platform_fields_pending'
+export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue' | 'missing_required_field' | 'orphan_dependency' | 'missing_confirmation' | 'platform_fields_pending' | 'preflight_failure' | 'approval_expired' | 'plan_stale' | 'partial_execution' | 'result_unknown' | 'review_rejected_alert'
 
 export type DeliveryPlanDraft = {
   name: string
@@ -67,8 +67,16 @@ export type DeliveryPlanDraft = {
   creativeReferences: Array<{
     assetId: string
     version: number
+    contentHash?: string
+    route?: string
     confirmed: boolean
   }>
+  strategyReference: {
+    taskId: string
+    version: number
+    contentHash?: string
+    route?: string
+  }
   sourceStrategyVersion: string
 }
 
@@ -150,6 +158,8 @@ export type ManualActionPackage = {
   source: DeliverySource
   scenario: string
   generatedAt: string
+  optimizedPlanVersion: number
+  optimizedPlanHash: string
   instructions: Array<{ fieldKey: string; effectiveValue: DeliveryFieldValue; source: string; confirmationRequired: boolean; expectedResult: string; evidenceRefs: string[] }>
   forbiddenActions: string[]
   evidenceRefs: string[]
@@ -163,6 +173,9 @@ export type DeliveryPlan = {
   platform: 'ocean_engine_mock'
   source: DeliverySource
   scenario: DeliveryScenario
+  tourRunId?: string
+  tourOwnerId?: string
+  tourCase?: DeliveryTourCaseKey
   currentVersionNumber: number
   currentVersion: DeliveryPlanVersion
   versions: DeliveryPlanVersion[]
@@ -172,7 +185,7 @@ export type DeliveryPlan = {
 }
 
 export type DeliveryPreflightCheck = {
-  code: 'advertiser_available' | 'budget_positive' | 'schedule_valid' | 'creative_present' | 'creative_confirmed' | 'tracking_complete' | 'three_tier_structure' | 'three_tier_required_fields' | 'three_tier_dependencies' | 'three_tier_confirmation' | 'three_tier_platform_pending'
+  code: 'advertiser_available' | 'budget_positive' | 'schedule_valid' | 'creative_present' | 'creative_confirmed' | 'tracking_complete' | 'upstream_references_resolved' | 'three_tier_structure' | 'three_tier_required_fields' | 'three_tier_dependencies' | 'three_tier_confirmation' | 'three_tier_platform_pending'
   severity: 'error' | 'warning'
   passed: boolean
   message: string
@@ -223,12 +236,16 @@ export type DeliveryControlChangeSet = {
   planName: string
   planVersion: number
   planCanonicalHash: string
+  recommendationId?: string
   budgetLimit: { totalMinor: number; currency: 'CNY' }
   status: 'draft' | 'preflight_passed' | 'preflight_failed' | 'approved' | 'rejected' | 'executed' | 'rolled_back'
   riskLevel: string
   preflightNotes: string[]
   approvedBy?: string
   approvedAt?: string
+  rejectedBy?: string
+  rejectedAt?: string
+  rejectionReason?: string
   approval?: DeliveryApproval
   source: DeliverySource
   scenario: DeliveryScenario
@@ -313,7 +330,8 @@ type WireDeliveryPlanDraft = {
   budget: { total_minor: number; currency: 'CNY' }
   schedule: { start_at: string; end_at: string; timezone: string }
   tracking: { landing_page: string; pixel_id: string; conversion_event: string }
-  creative_references: Array<{ asset_id: string; version: number; confirmed: boolean }>
+  creative_references: Array<{ asset_id: string; version: number; content_hash?: string; route?: string; confirmed: boolean }>
+  strategy_reference?: { task_id: string; version: number; content_hash?: string; route?: string }
   source_strategy_version: string
 }
 
@@ -330,6 +348,106 @@ type WireDeliveryPlanVersion = WireDeliveryPlanDraft & {
   created_by: { kind: 'user' | 'service'; id: string }
   created_at: string
   three_tier_configuration?: WireDeliveryThreeTierConfiguration | null
+}
+
+export type DeliveryOutcomeScenario = 'steady' | 'cost_pressure' | 'under_delivery' | 'creative_fatigue' | 'tracking_anomaly' | 'review_rejected'
+
+export type DeliveryOutcomeSimulation = {
+  run: {
+    id: string
+    executionId: string
+    planId: string
+    planVersion: number
+    modelVersion: string
+    scenario: DeliveryOutcomeScenario
+    stableSeed: string
+    inputHash: string
+    status: 'completed'
+    input: {
+      budgetMinor: number
+      scheduleStart: string
+      scheduleEnd: string
+      optimizationGoal: string
+      bidMinor: number
+      audience: string
+      strategyVersion: number
+      creativeCount: number
+    }
+    parameters: {
+      baseCpmMinor: number
+      baseCtrBP: number
+      baseCvrBP: number
+      dailyBudgetMinor: number
+      factors: Array<{ key: string; valueBP: number; explanation: string; evidence: string[] }>
+    }
+    events: Array<{ type: string; severity: string; windowSequence: number; explanation: string; evidence: string[] }>
+    evidence: string[]
+    completedAt: string
+  }
+  metricSnapshots: Array<{
+    id: string
+    simulationRunId: string
+    windowSequence: number
+    windowStart: string
+    windowEnd: string
+    impressions: number
+    clicks: number
+    conversions: number
+    spendCents: number
+    revenueCents: number
+    calculationBasis: {
+      formula: string
+      spendMultiplierBP: number
+      reachMultiplierBP: number
+      ctrMultiplierBP: number
+      cvrMultiplierBP: number
+      trackingRateBP: number
+    }
+  }>
+  replay: boolean
+}
+
+type WireDeliveryOutcomeSimulation = {
+  run: {
+    id: string
+    execution_id: string
+    plan_id: string
+    plan_version: number
+    model_version: string
+    scenario: DeliveryOutcomeScenario
+    stable_seed: string
+    input_hash: string
+    status: 'completed'
+    input: {
+      budget: { total_minor: number }
+      schedule: { start_at: string; end_at: string }
+      optimization_goal: string
+      bid_minor: number
+      audience: string
+      strategy_reference: { version: number }
+      creative_features: unknown[]
+    }
+    parameters: {
+      base_cpm_minor: number
+      base_ctr_bp: number
+      base_cvr_bp: number
+      daily_budget_minor: number
+      factors: Array<{ key: string; value_bp: number; explanation: string; evidence: string[] }>
+    }
+    events: Array<{ type: string; severity: string; window_sequence: number; explanation: string; evidence: string[] }>
+    evidence: string[]
+    completed_at: string
+  }
+  metric_snapshots: Array<{
+    id: string
+    simulation_run_id: string
+    window_sequence: number
+    window_start: string
+    window_end: string
+    raw_metrics: { impressions: number; clicks: number; conversions: number; spend_cents: number; revenue_cents?: number }
+    calculation_basis: { formula: string; spend_multiplier_bp: number; reach_multiplier_bp: number; ctr_multiplier_bp: number; cvr_multiplier_bp: number; tracking_rate_bp: number }
+  }>
+  replay: boolean
 }
 
 type WireDeliveryThreeTierField = {
@@ -403,6 +521,8 @@ type WireManualActionPackage = {
   evidence_refs?: string[] | null
   forbidden_actions?: string[] | null
   created_at: string
+  optimized_plan_version: number
+  optimized_plan_hash: string
 }
 
 type WireDeliveryPlan = {
@@ -413,6 +533,9 @@ type WireDeliveryPlan = {
   platform: 'ocean_engine_mock'
   source: DeliverySource
   scenario: DeliveryScenario
+  tour_run_id?: string | null
+  tour_owner_id?: string | null
+  tour_case?: DeliveryTourCaseKey | null
   current_version_number: number
   current_version: WireDeliveryPlanVersion
   versions: WireDeliveryPlanVersion[]
@@ -467,12 +590,16 @@ type WireDeliveryControlChangeSet = {
   plan_name: string
   plan_version: number
   plan_canonical_hash: string
+  recommendation_id?: string
   budget_limit: { total_minor: number; currency: 'CNY' }
   status: DeliveryControlChangeSet['status']
   risk_level: string
   preflight_notes: string[]
   approved_by?: string
   approved_at?: string
+  rejected_by?: string
+  rejected_at?: string
+  rejection_reason?: string
   approval?: WireDeliveryApproval
   source: DeliverySource
   scenario: DeliveryScenario
@@ -593,6 +720,14 @@ export const deliveryPlanApi = {
   async approveChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
     return deliveryChangeSetAction(projectId, changeSetId, 'approve', expectedVersion)
   },
+  async rejectChangeSet(projectId: string, changeSetId: string, expectedVersion: number, reason: string): Promise<DeliveryControlChangeSet> {
+    const response = await deliveryPlanRequest<WireDeliveryControlChangeSet>(
+      projectId,
+      `/change-sets/${encodeURIComponent(changeSetId)}:reject`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion, reason }) },
+    )
+    return toDeliveryControlChangeSet(response)
+  },
 }
 
 /** Three-tier configuration compilation and recommendation lifecycle; all records remain mock-only. */
@@ -707,6 +842,86 @@ export const deliveryExecutionApi = {
       `/executions/${encodeURIComponent(executionId)}`,
     ))
   },
+  async runOutcomeSimulation(projectId: string, executionId: string, scenario: DeliveryOutcomeScenario, stableSeed: string): Promise<DeliveryOutcomeSimulation> {
+    return toDeliveryOutcomeSimulation(await deliveryPlanRequest<WireDeliveryOutcomeSimulation>(
+      projectId,
+      `/executions/${encodeURIComponent(executionId)}/simulation-runs`,
+      { method: 'POST', body: JSON.stringify({ scenario, stable_seed: stableSeed }) },
+    ))
+  },
+  async getLatestOutcomeSimulation(projectId: string, executionId: string): Promise<DeliveryOutcomeSimulation> {
+    return toDeliveryOutcomeSimulation(await deliveryPlanRequest<WireDeliveryOutcomeSimulation>(
+      projectId,
+      `/executions/${encodeURIComponent(executionId)}/simulation-run`,
+    ))
+  },
+  async createMetricSnapshot(projectId: string, executionId: string): Promise<void> {
+    await deliveryPlanRequest(
+      projectId,
+      `/executions/${encodeURIComponent(executionId)}/metric-snapshots`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dataset_version: 'preroll-demo/v1' }),
+      },
+    )
+  },
+}
+
+function toDeliveryOutcomeSimulation(value: WireDeliveryOutcomeSimulation): DeliveryOutcomeSimulation {
+  return {
+    run: {
+      id: value.run.id,
+      executionId: value.run.execution_id,
+      planId: value.run.plan_id,
+      planVersion: value.run.plan_version,
+      modelVersion: value.run.model_version,
+      scenario: value.run.scenario,
+      stableSeed: value.run.stable_seed,
+      inputHash: value.run.input_hash,
+      status: value.run.status,
+      input: {
+        budgetMinor: value.run.input.budget.total_minor,
+        scheduleStart: value.run.input.schedule.start_at,
+        scheduleEnd: value.run.input.schedule.end_at,
+        optimizationGoal: value.run.input.optimization_goal,
+        bidMinor: value.run.input.bid_minor,
+        audience: value.run.input.audience,
+        strategyVersion: value.run.input.strategy_reference.version,
+        creativeCount: value.run.input.creative_features.length,
+      },
+      parameters: {
+        baseCpmMinor: value.run.parameters.base_cpm_minor,
+        baseCtrBP: value.run.parameters.base_ctr_bp,
+        baseCvrBP: value.run.parameters.base_cvr_bp,
+        dailyBudgetMinor: value.run.parameters.daily_budget_minor,
+        factors: value.run.parameters.factors.map(factor => ({ key: factor.key, valueBP: factor.value_bp, explanation: factor.explanation, evidence: factor.evidence ?? [] })),
+      },
+      events: value.run.events.map(event => ({ type: event.type, severity: event.severity, windowSequence: event.window_sequence, explanation: event.explanation, evidence: event.evidence ?? [] })),
+      evidence: value.run.evidence ?? [],
+      completedAt: value.run.completed_at,
+    },
+    metricSnapshots: value.metric_snapshots.map(metric => ({
+      id: metric.id,
+      simulationRunId: metric.simulation_run_id,
+      windowSequence: metric.window_sequence,
+      windowStart: metric.window_start,
+      windowEnd: metric.window_end,
+      impressions: metric.raw_metrics.impressions,
+      clicks: metric.raw_metrics.clicks,
+      conversions: metric.raw_metrics.conversions,
+      spendCents: metric.raw_metrics.spend_cents,
+      revenueCents: metric.raw_metrics.revenue_cents ?? 0,
+      calculationBasis: {
+        formula: metric.calculation_basis.formula,
+        spendMultiplierBP: metric.calculation_basis.spend_multiplier_bp,
+        reachMultiplierBP: metric.calculation_basis.reach_multiplier_bp,
+        ctrMultiplierBP: metric.calculation_basis.ctr_multiplier_bp,
+        cvrMultiplierBP: metric.calculation_basis.cvr_multiplier_bp,
+        trackingRateBP: metric.calculation_basis.tracking_rate_bp,
+      },
+    })),
+    replay: value.replay,
+  }
 }
 
 /** Server-authoritative monitoring records. No client-side alert synthesis is permitted. */
@@ -720,8 +935,9 @@ export type DeliveryAlert = {
   projectId: string
   planId: string
   executionId: string
+  simulationRunId?: string
   monitoredEntity: { type: 'delivery_plan'; id: string; advertiserId: string }
-  type: 'review_rejected' | 'spend_spike' | 'zero_conversion' | 'cost_worsening'
+  type: 'review_rejected' | 'spend_spike' | 'zero_conversion' | 'cost_worsening' | 'under_delivery' | 'creative_fatigue' | 'tracking_anomaly'
   ruleId: string
   ruleVersion: string
   fingerprint: string
@@ -759,6 +975,7 @@ type WireDeliveryAlert = {
   project_id: string
   plan_id: string
   execution_id: string
+  simulation_run_id?: string
   monitored_entity: { type: 'delivery_plan'; id: string; advertiser_id: string }
   type: DeliveryAlert['type']
   rule_id: string
@@ -793,19 +1010,22 @@ type WireDeliveryAlertEvaluation = {
 }
 
 export const deliveryAlertApi = {
-  async evaluate(projectId: string, fixture: DeliveryAlertFixture): Promise<DeliveryAlertEvaluation> {
+  async evaluate(projectId: string, fixture: DeliveryAlertFixture, executionId?: string): Promise<DeliveryAlertEvaluation> {
     const response = await deliveryPlanRequest<WireDeliveryAlertEvaluation>(projectId, '/alerts:evaluate', {
       method: 'POST',
-      body: JSON.stringify({ fixture }),
+      body: JSON.stringify({ fixture, ...(executionId ? { execution_id: executionId } : {}) }),
     })
     return toDeliveryAlertEvaluation(response)
   },
-  async list(projectId: string): Promise<DeliveryAlert[]> {
+  async list(projectId: string, filter: { planId?: string; executionId?: string } = {}): Promise<DeliveryAlert[]> {
     const items: DeliveryAlert[] = []
     let cursor: string | null = null
     do {
-      const query: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
-      const response: { items: WireDeliveryAlert[]; next_cursor: string | null; source: 'demo_fixture'; is_simulated: true } = await deliveryPlanRequest(projectId, `/alerts${query}`)
+      const query = new URLSearchParams()
+      if (filter.planId) query.set('plan_id', filter.planId)
+      if (filter.executionId) query.set('execution_id', filter.executionId)
+      if (cursor) query.set('cursor', cursor)
+      const response: { items: WireDeliveryAlert[]; next_cursor: string | null; source: 'demo_fixture'; is_simulated: true } = await deliveryPlanRequest(projectId, `/alerts${query.size ? `?${query}` : ''}`)
       items.push(...response.items.map(toDeliveryAlert))
       cursor = response.next_cursor ?? null
     } while (cursor !== null)
@@ -852,6 +1072,7 @@ function toDeliveryAlert(value: WireDeliveryAlert): DeliveryAlert {
     projectId: value.project_id,
     planId: value.plan_id,
     executionId: value.execution_id,
+    simulationRunId: value.simulation_run_id,
     monitoredEntity: { type: value.monitored_entity.type, id: value.monitored_entity.id, advertiserId: value.monitored_entity.advertiser_id },
     type: value.type,
     ruleId: value.rule_id,
@@ -898,6 +1119,165 @@ function toDeliveryAlert(value: WireDeliveryAlert): DeliveryAlert {
   }
 }
 
+export type DeliveryTourCaseKey = 'golden_path' | 'preflight_failure' | 'approval_expired' | 'plan_stale' | 'partial_execution' | 'result_unknown' | 'review_rejected_alert'
+
+export type DeliveryTourCase = {
+  key: DeliveryTourCaseKey
+  title: string
+  planId: string
+  status: 'missing' | 'prepared' | 'ready' | 'observed'
+  expectedOutcome: string
+  startUrl: string
+  source: DeliverySource
+  scenario: DeliveryTourCaseKey
+  evidence: string[]
+  observedAt: string
+}
+
+export type DeliveryTourStep = {
+  key: string
+  title: string
+  completionCondition: string
+  complete: boolean
+  url: string
+  explanation: string
+  evidence: string[]
+}
+
+export type DeliveryTourRun = {
+  id: string
+  organizationId: string
+  projectId: string
+  ownerId: string
+  status: 'preparing' | 'prepared' | 'reset'
+  source: DeliverySource
+  scenario: 'delivery_tour'
+  preparedAt?: string
+  resetAt?: string
+  createdAt: string
+  updatedAt: string
+  cases: DeliveryTourCase[]
+  steps: DeliveryTourStep[]
+  currentStep: string
+  suggestedNextUrl: string
+}
+
+export type DeliveryTourResetResult = {
+  run: DeliveryTourRun
+  deleted: Record<string, number>
+  source: DeliverySource
+  scenario: 'delivery_tour_reset'
+  resetAt: string
+  isolationKey: string
+}
+
+type WireDeliveryTourCase = {
+  key: DeliveryTourCaseKey
+  title: string
+  plan_id: string
+  status: DeliveryTourCase['status']
+  expected_outcome: string
+  start_url: string
+  source: DeliverySource
+  scenario: DeliveryTourCaseKey
+  evidence?: string[] | null
+  observed_at: string
+}
+
+type WireDeliveryTourRun = {
+  id: string
+  organization_id: string
+  project_id: string
+  owner_id: string
+  status: DeliveryTourRun['status']
+  source: DeliverySource
+  scenario: 'delivery_tour'
+  prepared_at?: string | null
+  reset_at?: string | null
+  created_at: string
+  updated_at: string
+  cases?: WireDeliveryTourCase[] | null
+  steps?: Array<{
+    key: string
+    title: string
+    completion_condition: string
+    complete: boolean
+    url: string
+    explanation: string
+    evidence?: string[] | null
+  }> | null
+  current_step: string
+  suggested_next_url: string
+}
+
+type WireDeliveryTourResetResult = {
+  run: WireDeliveryTourRun
+  deleted?: Record<string, number> | null
+  source: DeliverySource
+  scenario: 'delivery_tour_reset'
+  reset_at: string
+  isolation_key: string
+}
+
+export const deliveryTourApi = {
+  async prepare(projectId: string, runId: string): Promise<DeliveryTourRun> {
+    return toDeliveryTourRun(await deliveryPlanRequest<WireDeliveryTourRun>(projectId, `/tour-runs/${encodeURIComponent(runId)}:prepare`, { method: 'POST' }))
+  },
+  async get(projectId: string, runId: string): Promise<DeliveryTourRun> {
+    return toDeliveryTourRun(await deliveryPlanRequest<WireDeliveryTourRun>(projectId, `/tour-runs/${encodeURIComponent(runId)}`))
+  },
+  async reset(projectId: string, runId: string): Promise<DeliveryTourResetResult> {
+    const value = await deliveryPlanRequest<WireDeliveryTourResetResult>(projectId, `/tour-runs/${encodeURIComponent(runId)}:reset`, { method: 'POST' })
+    return {
+      run: toDeliveryTourRun(value.run),
+      deleted: value.deleted ?? {},
+      source: value.source,
+      scenario: value.scenario,
+      resetAt: value.reset_at,
+      isolationKey: value.isolation_key,
+    }
+  },
+}
+
+function toDeliveryTourRun(value: WireDeliveryTourRun): DeliveryTourRun {
+  return {
+    id: value.id,
+    organizationId: value.organization_id,
+    projectId: value.project_id,
+    ownerId: value.owner_id,
+    status: value.status,
+    source: value.source,
+    scenario: value.scenario,
+    preparedAt: value.prepared_at ?? undefined,
+    resetAt: value.reset_at ?? undefined,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
+    cases: (value.cases ?? []).map(tourCase => ({
+      key: tourCase.key,
+      title: tourCase.title,
+      planId: tourCase.plan_id,
+      status: tourCase.status,
+      expectedOutcome: tourCase.expected_outcome,
+      startUrl: tourCase.start_url,
+      source: tourCase.source,
+      scenario: tourCase.scenario,
+      evidence: tourCase.evidence ?? [],
+      observedAt: tourCase.observed_at,
+    })),
+    steps: (value.steps ?? []).map(step => ({
+      key: step.key,
+      title: step.title,
+      completionCondition: step.completion_condition,
+      complete: step.complete,
+      url: step.url,
+      explanation: step.explanation,
+      evidence: step.evidence ?? [],
+    })),
+    currentStep: value.current_step,
+    suggestedNextUrl: value.suggested_next_url,
+  }
+}
+
 async function deliveryPlanRequest<T>(projectId: string, path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
@@ -927,8 +1307,16 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
     creative_references: draft.creativeReferences.map(reference => ({
       asset_id: reference.assetId,
       version: reference.version,
+      content_hash: reference.contentHash,
+      route: reference.route,
       confirmed: reference.confirmed,
     })),
+    strategy_reference: {
+      task_id: draft.strategyReference.taskId,
+      version: draft.strategyReference.version,
+      content_hash: draft.strategyReference.contentHash,
+      route: draft.strategyReference.route,
+    },
     source_strategy_version: draft.sourceStrategyVersion,
   }
 }
@@ -942,6 +1330,9 @@ function toDeliveryPlan(plan: WireDeliveryPlan): DeliveryPlan {
     platform: plan.platform,
     source: plan.source,
     scenario: plan.scenario,
+    tourRunId: plan.tour_run_id ?? undefined,
+    tourOwnerId: plan.tour_owner_id ?? undefined,
+    tourCase: plan.tour_case ?? undefined,
     currentVersionNumber: plan.current_version_number,
     currentVersion: toDeliveryPlanVersion(plan.current_version),
     versions: plan.versions.map(toDeliveryPlanVersion),
@@ -978,8 +1369,21 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     creativeReferences: version.creative_references.map(reference => ({
       assetId: reference.asset_id,
       version: reference.version,
+      contentHash: reference.content_hash,
+      route: reference.route,
       confirmed: reference.confirmed,
     })),
+    strategyReference: version.strategy_reference ? {
+      taskId: version.strategy_reference.task_id,
+      version: version.strategy_reference.version,
+      contentHash: version.strategy_reference.content_hash,
+      route: version.strategy_reference.route,
+    } : {
+      // Compatibility for plan versions created before structured upstream
+      // references were introduced. New writes always send strategy_reference.
+      taskId: version.source_strategy_version,
+      version: Number(version.source_strategy_version.match(/(\d+)$/)?.[1] ?? 1),
+    },
     sourceStrategyVersion: version.source_strategy_version,
     source: version.source,
     scenario: version.scenario,
@@ -1077,6 +1481,8 @@ function toManualActionPackage(value: WireManualActionPackage): ManualActionPack
     source: value.source ?? 'mock',
     scenario: value.scenario ?? 'manual_action_package',
     generatedAt: value.created_at,
+    optimizedPlanVersion: value.optimized_plan_version,
+    optimizedPlanHash: value.optimized_plan_hash,
     instructions: layerInstructions.length ? layerInstructions : (value.instructions ?? []).map(instruction => ({
       fieldKey: instruction.field_key,
       effectiveValue: instruction.effective.value,
@@ -1099,6 +1505,7 @@ function toDeliveryControlChangeSet(value: WireDeliveryControlChangeSet): Delive
     planName: value.plan_name,
     planVersion: value.plan_version,
     planCanonicalHash: value.plan_canonical_hash,
+    recommendationId: value.recommendation_id,
     budgetLimit: {
       totalMinor: value.budget_limit.total_minor,
       currency: value.budget_limit.currency,
@@ -1108,6 +1515,9 @@ function toDeliveryControlChangeSet(value: WireDeliveryControlChangeSet): Delive
     preflightNotes: value.preflight_notes ?? [],
     approvedBy: value.approved_by,
     approvedAt: value.approved_at,
+    rejectedBy: value.rejected_by,
+    rejectedAt: value.rejected_at,
+    rejectionReason: value.rejection_reason,
     approval: value.approval ? {
       approvalId: value.approval.approval_id,
       valid: value.approval.valid,

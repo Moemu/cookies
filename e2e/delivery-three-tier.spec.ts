@@ -79,6 +79,32 @@ test('three-tier mock configuration, recommendation decision, approval, and manu
     ]),
   })
 
+  // First approval authorizes only the platform-operation rehearsal. That
+  // successful execution creates the exact metric windows consumed by alerts.
+  const firstChangeSetResponse = await request.post(`${planURL(created.id)}:create-change-set`, { data: { expected_version: overriddenPlan.version } })
+  expect(firstChangeSetResponse.status()).toBe(201)
+  let firstChangeSet = await firstChangeSetResponse.json() as ChangeSet
+  const firstPreflight = await request.post(`/api/delivery/v1/projects/${projectId}/change-sets/${firstChangeSet.id}:preflight`, { data: { expected_version: firstChangeSet.version } })
+  expect(firstPreflight.status()).toBe(200)
+  firstChangeSet = await firstPreflight.json() as ChangeSet
+  const firstApproval = await request.post(`/api/delivery/v1/projects/${projectId}/change-sets/${firstChangeSet.id}:approve`, { data: { expected_version: firstChangeSet.version } })
+  expect(firstApproval.status()).toBe(200)
+  firstChangeSet = await firstApproval.json() as ChangeSet
+  const rehearsal = await request.post(`/api/delivery/v1/projects/${projectId}/change-sets/${firstChangeSet.id}:execute`, {
+    headers: { 'Idempotency-Key': `three-tier-rehearsal-${suffix}` },
+    data: { expected_version: firstChangeSet.version, scenario: 'success' },
+  })
+  expect(rehearsal.status()).toBe(201)
+  const rehearsalBody = await rehearsal.json() as { execution: { id: string } }
+  const simulation = await request.post(`/api/delivery/v1/projects/${projectId}/executions/${rehearsalBody.execution.id}/simulation-runs`, {
+    data: { scenario: 'cost_pressure', stable_seed: `three-tier-${suffix}` },
+  })
+  expect(simulation.status()).toBe(201)
+  const simulationBody = await simulation.json() as { run: { id: string } }
+  const alertEvaluation = await request.post(`/api/delivery/v1/projects/${projectId}/alerts:evaluate`, { data: { fixture: 'normal_day', execution_id: rehearsalBody.execution.id } })
+  expect(alertEvaluation.status()).toBe(200)
+  expect((await alertEvaluation.json() as { items: unknown[] }).items.length).toBeGreaterThan(0)
+
   const executionsBefore = await request.get(`/api/delivery/v1/projects/${projectId}/executions`)
   expect(executionsBefore.status()).toBe(200)
   const executionIDsBefore = (await executionsBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)
@@ -98,8 +124,14 @@ test('three-tier mock configuration, recommendation decision, approval, and manu
     base_snapshot: { schema: 'delivery-three-tier/v1', source: 'mock', scenario: 'golden_path' },
     target_snapshot_hash: expect.any(String),
     target_snapshot: { schema: 'delivery-three-tier/v1', source: 'mock', scenario: 'golden_path' },
-    evidence: expect.arrayContaining([expect.any(String)]),
-    provenance: 'plan_version',
+    evidence: expect.arrayContaining([
+      `simulation://execution/${rehearsalBody.execution.id}`,
+      `simulation://run/${simulationBody.run.id}`,
+      expect.stringMatching(/^simulation:\/\/metric\//),
+      expect.stringMatching(/^simulation:\/\/alert\//),
+    ]),
+    simulation_run_id: simulationBody.run.id,
+    provenance: 'delivery-outcome-scenario/v1',
   })
 
   const listed = await request.get(`/api/delivery/v1/projects/${projectId}/recommendations?limit=10`)
@@ -185,7 +217,20 @@ test('three-tier mock configuration, recommendation decision, approval, and manu
   expect(refreshedPackage.status()).toBe(200)
   expect(await refreshedPackage.json()).toMatchObject({ id: actionPackage.id, source: 'mock' })
 
-  await page.goto(`/projects/${projectId}/delivery/three-tier?view=${encodeURIComponent('建议与人工操作包')}&plan_id=${created.id}`)
+  await page.goto(`/projects/${projectId}/delivery/optimization?view=${encodeURIComponent('已采纳')}&plan_id=${created.id}`)
+  const recommendationCard = page.locator('.delivery-recommendation-card').first()
+  await expect(page.getByRole('heading', { name: '优化中心', exact: true, level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '建议决策与跟踪', exact: true })).toHaveCount(0)
+  await expect(recommendationCard).toContainText(/计划预算下调 (?:5|[6-9]|1\d|20)%/)
+  await expect(recommendationCard).toContainText('建议产生的变化')
+  await expect(recommendationCard).toContainText('风险与约束')
+  await expect(page.getByRole('region', { name: '建议因果证据' })).toContainText('投放效果情景模拟')
+  await expect(page.getByRole('link', { name: /检查优化草稿|查看优化配置/ })).toHaveAttribute('href', new RegExp(`/delivery/three-tier.*change_set_id=${decision.change_set.id}`))
+  await expect(page.locator('.delivery-config-package')).toHaveCount(0)
+  const recommendationTextSize = await recommendationCard.locator('.delivery-recommendation-summary dd').first().evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(recommendationTextSize).toBeGreaterThanOrEqual(12)
+
+  await page.goto(`/projects/${projectId}/delivery/three-tier?view=${encodeURIComponent('人工操作包')}&plan_id=${created.id}&change_set_id=${decision.change_set.id}`)
   const packagePanel = page.locator('.delivery-config-package')
   await expect(packagePanel.getByText('操作包已就绪', { exact: true })).toBeVisible()
   await expect(page.getByRole('region', { name: '人工执行安全边界' })).toContainText('以下操作不在授权范围内，请勿执行')
@@ -193,18 +238,22 @@ test('three-tier mock configuration, recommendation decision, approval, and manu
   await expect(packagePanel.getByText('source=mock', { exact: false })).toHaveCount(0)
   await expect(packagePanel.getByText('manual_action_package', { exact: false })).toHaveCount(0)
   await expect(page.locator('.delivery-config-config-card')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: '预检与审批' })).toHaveCount(0)
-  await expect(page.locator('.delivery-config-flow-grid--decision > article > header > span')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '检查与提交' })).toHaveCount(0)
+  await expect(page.locator('.delivery-config-recommendation-page')).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: '优化建议' })).toHaveCount(0)
 
-  await page.getByRole('tab', { name: '预检与审批' }).click()
-  await expect(page.getByRole('heading', { name: '预检与审批' })).toBeVisible()
+  await page.getByRole('tab', { name: '检查与提交' }).click()
+  await expect(page.getByRole('heading', { name: '检查草稿并提交变更申请' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '建议只待决策' })).toHaveCount(0)
   await expect(page.locator('.delivery-config-config-card')).toHaveCount(0)
   await expect(page.locator('.delivery-config-flow-grid--preflight > article > header').getByText('1', { exact: true })).toHaveCount(0)
-  await expect(page.locator('.delivery-config-preflight-actions > button')).toHaveCount(3)
+  await expect(page.locator('.delivery-config-preflight-actions > button')).toHaveCount(2)
+  await expect(page.getByRole('button', { name: '打回修改' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /批准/ })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '查看审批记录' })).toHaveAttribute('href', new RegExp(`/delivery/approvals/${decision.change_set.id}`))
   await expect.poll(() => new URL(page.url()).searchParams.get('plan_id')).toBe(created.id)
 
-  await page.getByRole('tab', { name: '模拟配置' }).click()
+  await page.getByRole('tab', { name: '配置映射' }).click()
   await expect(page.locator('.delivery-config-config-card')).toBeVisible()
   await expect(page.locator('.delivery-config-flow-grid')).toHaveCount(0)
   await expect.poll(() => new URL(page.url()).searchParams.get('plan_id')).toBe(created.id)
@@ -270,8 +319,9 @@ async function createPlan(request: APIRequestContext, name: string): Promise<Del
       budget: { total_minor: 300000, currency: 'CNY' },
       schedule: { start_at: '2026-08-04T00:00:00Z', end_at: '2026-08-11T00:00:00Z', timezone: 'Asia/Shanghai' },
       tracking: { landing_page: 'https://example.test/three-tier', pixel_id: 'PX-THREE-TIER', conversion_event: 'submit' },
-      creative_references: [{ asset_id: 'asset-three-tier', version: 1, confirmed: true }],
-      source_strategy_version: 'strategy-three-tier/v1',
+      creative_references: [{ asset_id: 'asset_demo_investor_creative_video', version: 1, confirmed: true }],
+      strategy_reference: { task_id: 'task_demo_precision_strategy', version: 1 },
+      source_strategy_version: 'task_demo_precision_strategy@v1',
     },
   })
   expect(response.status()).toBe(201)
