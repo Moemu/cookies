@@ -65,16 +65,44 @@ test("compilation metadata is outside the hash projection", () => {
   assert.equal(canonicalHash(changed.payload), canonicalHash(fixture.payload));
 });
 
-test("invalid fixtures fail schema validation", () => {
+test("invalid fixtures fail schema validation for the intended reason", () => {
   for (const fileName of [
     "delivery-platform-configuration-v1-invalid-hash.json",
     "delivery-platform-configuration-v1-invalid-metadata.json",
     "delivery-platform-configuration-v1-invalid-action-boundary.json",
-    "delivery-platform-configuration-v1-invalid-redundant-parent.json"
+    "delivery-platform-configuration-v1-invalid-redundant-parent.json",
+    "delivery-platform-configuration-v1-invalid-resolved-reference.json",
+    "delivery-platform-configuration-v1-invalid-condition-result.json"
   ]) {
+    const descriptor = readJSON(join(invalidDirectory, fileName));
+    const expectedError = descriptor.expected_error as string;
     const candidate = fixtureWithMutations(fileName);
     assert.equal(validate(candidate), false, fileName);
+    assert.ok(
+      validate.errors?.some((error) => error.message?.includes(expectedError)),
+      `${fileName} expected error "${expectedError}" but got ${JSON.stringify(validate.errors)}`
+    );
   }
+});
+
+test("blocked condition results are representable (result:false + blocked_reason)", () => {
+  const candidate = structuredClone(readJSON(fixturePath));
+  (candidate.compilation_metadata as Record<string, unknown>).conditions = [
+    {
+      condition: { field: "payload.platform_project.carrier", equals: "orange_landing_page" },
+      result: false,
+      evidence_states: ["observed"],
+      blocked_reason: "owner must confirm carrier matches page context"
+    }
+  ];
+  assert.equal(validate(candidate), true, JSON.stringify(validate.errors));
+});
+
+test("canonical hash is sensitive to payload field changes", () => {
+  const fixture = readJSON(fixturePath);
+  const changed = structuredClone(fixture);
+  setPath(changed.payload as Record<string, unknown>, "platform_project.project_name", "mutated-project-name");
+  assert.notEqual(canonicalHash(changed.payload), canonicalHash(fixture.payload as Record<string, unknown>));
 });
 
 test("canonical hash fixtures match production RFC8785 output", () => {

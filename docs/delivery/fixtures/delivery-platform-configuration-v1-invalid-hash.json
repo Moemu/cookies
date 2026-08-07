@@ -1,4 +1,5 @@
 {
   "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "expected_error": "must match pattern",
   "mutations": [{ "path": "canonical_hash", "value": "not-a-sha256" }]
 }

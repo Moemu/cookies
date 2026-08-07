@@ -1,5 +1,6 @@
 {
   "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "expected_error": "must NOT have additional properties",
   "mutations": [
     {
       "path": "payload.platform_promotions.0.parent_project_draft_id",

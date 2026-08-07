@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.cookies.local/delivery-platform-configuration/v1",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/delivery-platform-configuration-v1.json",
   "title": "Delivery platform configuration envelope v1",
   "description": "Delivery-owned immutable target configuration. canonical_hash is SHA-256 over RFC 8785 JCS(payload) only; compilation metadata is outside the hash projection.",
   "$ref": "#/$defs/DeliveryPlatformConfigurationEnvelope",
@@ -22,7 +22,18 @@
           "type": "string",
           "enum": ["resolved", "unresolved", "blocked", "redacted"]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "reference_state": { "const": "resolved" } },
+            "required": ["reference_state"]
+          },
+          "then": {
+            "properties": { "external_id": { "type": "string", "minLength": 1 } }
+          }
+        }
+      ]
     },
     "ReferenceState": {
       "type": "string",
@@ -139,7 +150,7 @@
           "minItems": 1,
           "uniqueItems": true
         },
-        "repair_target": { "$ref": "#/$defs/RepairTarget" },
+        "repair_target": { "oneOf": [{ "$ref": "#/$defs/RepairTarget" }, { "type": "null" }] },
         "blocked_reason": { "type": ["string", "null"], "minLength": 1 }
       },
       "oneOf": [

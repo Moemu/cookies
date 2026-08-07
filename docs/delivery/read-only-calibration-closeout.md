@@ -129,7 +129,9 @@ DeliveryPlanVersion (immutable, version + canonical_hash)
 
 机器契约版本为 `delivery-platform-configuration/v1`。`delivery-three-tier/v1` 是历史 mock 快照，不能通过改名或字段覆盖变成新模型。新模型在内存/文档契约中先实现，持久化字段和 API 迁移另行立项。
 
-Envelope 的 hash projection 是机器可执行的：`canonical_hash = SHA-256(RFC 8785 JCS(payload))`。`payload` 只包含平台业务字段、`source` 和 `platform`；`canonical_hash`、组织/Project/Plan 身份、版本号以及 `compilation_metadata`（evidence、条件、页面动作）都在 payload 外。机器契约中的 `hash_algorithm` 固定为 `RFC8785-JCS-SHA256(payload)`，因此不存在自引用，也不会因页面 evidence 或动作编译元数据变化而使业务审批 hash 失效。
+每个 payload 结构上只含**一个** `PlatformProjectDraft`，所有 `PlatformPromotionDraft[]` 都属于它：项目—单元父关系是结构隐式的，单元不携带 `parent_project_draft_id` 字段（父字段是冗余的，机器契约 `additionalProperties: false` 会拒绝），也不引用未提交的 `platform_id`。
+
+Envelope 的 hash projection 是机器可执行的：`canonical_hash = SHA-256(RFC 8785 JCS(payload))`。`payload` 包含平台业务字段、`source`、`platform` 以及自描述版本标记 `payload_schema_version`（项目/单元内另有 `draft_schema_version` 常量）；`canonical_hash`、组织/Project/Plan 身份、envelope `version_number` 以及 `compilation_metadata`（evidence、条件、页面动作）都在 payload 外。机器契约中的 `hash_algorithm` 固定为 `RFC8785-JCS-SHA256(payload)`，因此不存在自引用，也不会因页面 evidence 或动作编译元数据变化而使业务审批 hash 失效。
 
 ### 9.2 字段归属
 
@@ -140,12 +142,14 @@ Envelope 的 hash projection 是机器可执行的：`canonical_hash = SHA-256(R
 | `optimization_target_ref`, `deep_optimization_mode`, `delivery_mode` | 项目 | `carrier → target → optional deep mode → compatible mode`；事件资产不足为 `blocked_by_event_asset` |
 | `targeting`, `schedule`, `budget_and_bidding`, `monitoring`, `project_name` | 项目 | 可见不等于必填；分别记录 `required_state`、`editable_state`、`enum_state` |
 | `project_draft_id` | 项目 | Delivery-owned 稳定内部草稿 ID；创建平台项目前也存在，不依赖 `platform_id` |
-| `parent_project_draft_id` | 单元 | 必须等于同一 payload 中 `platform_project.project_draft_id`；这是项目—单元唯一父关系，不用未提交的 `platform_id` |
+| 项目—单元父关系 | 结构隐式 | payload 有且仅有一个 `platform_project`，`platform_promotions[]` 全部属于它；单元不携带 `parent_project_draft_id`（冗余且被机器契约拒绝），不用未提交的 `platform_id` |
 | `delivery_identity` | 单元 | `account_info` 或已授权 `douyin_account` 二选一；授权动作不属于 Delivery |
 | `base_material_refs`, `copy_items`, `native_anchor_ref`, `landing_page_ref`, `direct_link_ref`, `product_information`, `creative_components`, `promotion_settings`, `promotion_name` | 单元 | 引用/内嵌配置分开；敏感链接只保存受控引用或密文句柄 |
-| `evidence_states`, `condition`, `action_boundaries` | 编译元数据 | 不下发为平台业务实体；任何未知分支保持 `platform_pending` 或 `write_validation_pending` |
+| `evidence_states`, `conditions[]`, `action_boundaries` | 编译元数据 | 不下发为平台业务实体；任何未知分支保持 `platform_pending` 或 `write_validation_pending` |
 
 条件字段使用机器契约中的可组合表达而不是隐式 Go `if`：`all`、`any`、`not`、`equals`、`exists`、`reference_state_is`。表达式结果必须带 evidence、状态和 repair/blocked reason；这些内容位于 `compilation_metadata`，不进入 `payload` hash projection。
+
+`targeting`、`schedule`、`budget_and_bidding`、`monitoring`、`product_information`、`creative_components`、`promotion_settings`、`copy_items` 等业务段在 v1 机器契约中**有意**保持 `{type: object}` 不透明：字段归属与条件语义由第 12 节切片另行收紧，不属本契约冻结范围。后续收紧只改变子 schema 的校验语义、不改变 hash projection（canonical hash 覆盖不透明内容本身），因此不会使已冻结 hash 失效。
 
 ### 9.3 稳定外部引用规则
 

@@ -86,6 +86,25 @@
         ]
       },
       "expected_canonical_hash": "b0606cbb6a2be0dc6757be38bf11a819c624b60841081d1cb439a64533e80ae7"
+    },
+    {
+      "name": "rfc-8785-appendix-object",
+      "payload": {
+        "numbers": [
+          333333333.3333333,
+          1e+30,
+          4.5,
+          0.002,
+          1e-27
+        ],
+        "string": "€$\u000f\nA'B\"\\\\\"/",
+        "literals": [
+          null,
+          true,
+          false
+        ]
+      },
+      "expected_canonical_hash": "2d5e01a318d0f0879ab568c4be289c8b1f64ef8921a53c6277d5e069978baacb"
     }
   ]
 }
