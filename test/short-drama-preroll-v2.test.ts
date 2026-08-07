@@ -61,13 +61,45 @@ test('selecting a hook stores editable prompts returned by the server', () => {
   assert.equal(state.activeStep, 'first-frame')
 })
 
-test('trusted material edits remain unbound until the server confirms both assets', () => {
-  let state = readyState()
-  state = shortDramaPrerollReducer(state, { type: 'trusted-material-changed', role: 'first', value: 'asset-first' })
-  state = shortDramaPrerollReducer(state, { type: 'trusted-material-changed', role: 'last', value: 'asset-last' })
-  assert.equal(state.trustedMaterialsBound, false)
-  state = shortDramaPrerollReducer(state, { type: 'trusted-materials-bound', firstFrameAssetId: 'asset-first', lastFrameAssetId: 'asset-last' })
-  assert.equal(state.trustedMaterialsBound, true)
-  assert.equal(state.trustedFirstFrameAssetId, 'asset-first')
-  assert.equal(state.trustedLastFrameAssetId, 'asset-last')
+test('selecting a hook navigates immediately while prompt compilation is pending', () => {
+  let state = shortDramaPrerollReducer(initialShortDramaPrerollState, { type: 'analysis-ready', analysis })
+  state = shortDramaPrerollReducer(state, { type: 'hooks-ready', hooks })
+  state = shortDramaPrerollReducer(state, { type: 'hook-selection-started', id: hooks[0].id })
+  assert.equal(state.activeStep, 'first-frame')
+  assert.equal(state.selectingHookId, hooks[0].id)
+  assert.equal(state.error, '')
+
+  state = shortDramaPrerollReducer(state, { type: 'hook-selection-failed', message: '草稿已更新' })
+  assert.equal(state.activeStep, 'direction')
+  assert.equal(state.selectedHookId, '')
+  assert.equal(state.error, '草稿已更新')
+})
+
+test('selecting a first frame stores the candidate-specific compiled video prompt', () => {
+  const selected = shortDramaPrerollReducer(readyState(), {
+    type: 'image-selected',
+    id: images[0].id,
+    videoPrompt: '基础提示词；使用国漫半写实首帧与环境悬念机制。',
+  })
+  assert.equal(selected.selectedImageId, images[0].id)
+  assert.match(selected.videoPrompt, /国漫半写实/)
+  assert.equal(selected.activeStep, 'video')
+})
+
+test('starting a new first-frame batch removes stale candidates and their selection', () => {
+  const state = readyState()
+  const generating = shortDramaPrerollReducer(state, { type: 'images-started' })
+  assert.equal(generating.imagesStatus, 'loading')
+  assert.deepEqual(generating.images, [])
+  assert.equal(generating.selectedImageId, '')
+  assert.equal(generating.selectingImageId, '')
+  assert.equal(generating.output, null)
+})
+
+test('first-frame selection exposes its pending state and clears it on failure', () => {
+  let state = shortDramaPrerollReducer(readyState(), { type: 'image-selection-started', id: images[0].id })
+  assert.equal(state.selectingImageId, images[0].id)
+  state = shortDramaPrerollReducer(state, { type: 'image-selection-failed', message: '候选批次已更新' })
+  assert.equal(state.selectingImageId, '')
+  assert.equal(state.error, '候选批次已更新')
 })

@@ -100,7 +100,10 @@ func TestRegenerateAINativeStoryboardAssetReplacesOnlySelectedAIAsset(t *testing
 		NewID: func(prefix string) (string, error) { return prefix + "_regenerate", nil }, Now: func() time.Time { return now }}
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
 
-	updated, err := service.RegenerateAINativeStoryboardAsset(context.Background(), actor, "project_1", "workspace_1", "person_1", RegenerateAINativeStoryboardAssetRequest{ExpectedWorkspaceVersion: 7})
+	updated, err := service.RegenerateAINativeStoryboardAsset(context.Background(), actor, "project_1", "workspace_1", "person_1", RegenerateAINativeStoryboardAssetRequest{
+		ExpectedWorkspaceVersion: 7,
+		Feedback:                 "  保留通勤场景，人物改为成年女性背影  ",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +111,34 @@ func TestRegenerateAINativeStoryboardAssetReplacesOnlySelectedAIAsset(t *testing
 		t.Fatalf("asset regeneration was not scheduled: workspace=%#v operations=%#v", updated, scheduler.operations)
 	}
 	assets := updated.StoryboardPlan.Assets
-	if assets[1].AssetRef != nil || assets[1].Status != AINativeStoryboardAssetPlanned || assets[1].GenerationAttempt != 2 {
+	if assets[1].AssetRef != nil || assets[1].Status != AINativeStoryboardAssetPlanned || assets[1].GenerationAttempt != 2 || assets[1].RegenerationFeedback != "保留通勤场景，人物改为成年女性背影" {
 		t.Fatalf("selected asset was not reset for regeneration: %#v", assets[1])
 	}
 	if assets[0].AssetRef == nil || assets[2].AssetRef == nil || assets[0].GenerationAttempt != 1 || assets[2].GenerationAttempt != 1 {
 		t.Fatalf("unselected assets were changed: %#v", assets)
+	}
+}
+
+func TestRegenerateAINativeStoryboardAssetRejectsOverlongFeedback(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	storyboard.Status = AINativeStoryboardDraftStatus
+	workspace := AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", OrganizationID: "org_1", ProjectID: "project_1", Status: AINativeRequirementConfirmedStatus,
+		CurrentStage: AINativeStageStoryboard, WorkspaceVersion: 7, CurrentRevision: requirement.Revision, Requirement: requirement,
+		ScriptStatus: AINativeScriptConfirmedStatus, CurrentScriptRevision: &script.Revision, ConfirmedScriptRevision: &script.Revision, Script: &script,
+		StoryboardStatus: AINativeStoryboardDraftStatus, CurrentStoryboardRevision: &storyboard.Revision, Storyboard: &storyboard,
+		CreatedBy: "user_1", ConfirmedBy: "user_1", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	service := Service{Projects: testProjects{}, AINativeStoryboards: &storyboardProgressRepository{workspace: workspace}, AINativeStoryboardAssetPreparer: &storyboardProgressAssetPreparer{}, AINativeStoryboardScheduler: &storyboardRecordingScheduler{}}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	_, err := service.RegenerateAINativeStoryboardAsset(context.Background(), actor, "project_1", "workspace_1", "person_1", RegenerateAINativeStoryboardAssetRequest{
+		ExpectedWorkspaceVersion: 7,
+		Feedback:                 strings.Repeat("改", 501),
+	})
+	if !errors.Is(err, ErrInvalidAINativeRequirement) {
+		t.Fatalf("overlong feedback error = %v, want ErrInvalidAINativeRequirement", err)
 	}
 }
 

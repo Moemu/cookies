@@ -29,6 +29,9 @@ export type FirstFrameCandidate = {
   label: string
   imageUrl: string
   composition: string
+  variantKey?: string
+  visualMechanism?: string
+  styleProfile?: string
 }
 
 export type GeneratedPreroll = {
@@ -47,6 +50,7 @@ export type ShortDramaPrerollState = {
   hooksStatus: AsyncStatus
   hooks: HookDirection[]
   selectedHookId: string
+  selectingHookId: string
   duration: PrerollDuration
   imagePrompt: string
   videoDescription: string
@@ -54,9 +58,7 @@ export type ShortDramaPrerollState = {
   imagesStatus: AsyncStatus
   images: FirstFrameCandidate[]
   selectedImageId: string
-  trustedFirstFrameAssetId: string
-  trustedLastFrameAssetId: string
-  trustedMaterialsBound: boolean
+  selectingImageId: string
   videoStatus: AsyncStatus
   output: GeneratedPreroll | null
   error: string

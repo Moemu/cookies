@@ -81,7 +81,13 @@ func (s Service) StartAINativeProduction(ctx context.Context, actor contract.Act
 	if err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
+	if workspace.ProductionPlan != nil {
+		plan = ReuseCompatibleProductionOutputs(*workspace.ProductionPlan, plan)
+	}
 	for index := range plan.Units {
+		if selectedAttemptSucceeded(plan.Units[index].Attempts, plan.Units[index].SelectedAttemptID) {
+			continue
+		}
 		attemptID, idErr := s.idGenerator()("ainativeattempt")
 		if idErr != nil {
 			return AINativeRequirementWorkspace{}, idErr
@@ -89,6 +95,9 @@ func (s Service) StartAINativeProduction(ctx context.Context, actor contract.Act
 		plan.Units[index].Attempts = []AINativeGenerationAttempt{{ID: attemptID, Ordinal: 1, Status: AINativeAttemptPlannedStatus, CreatedAt: s.now(), UpdatedAt: s.now()}}
 	}
 	for index := range plan.SpeechUnits {
+		if selectedAttemptSucceeded(plan.SpeechUnits[index].Attempts, plan.SpeechUnits[index].SelectedAttemptID) {
+			continue
+		}
 		attemptID, idErr := s.idGenerator()("ainativespeechattempt")
 		if idErr != nil {
 			return AINativeRequirementWorkspace{}, idErr

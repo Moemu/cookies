@@ -370,7 +370,7 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
     post:
       operationId: createKnowledgeDocument
-      summary: Scan, store, and parse one Markdown or DOCX document.
+      summary: Scan, store, and parse one Markdown, DOCX, or PDF document.
       parameters:
       - $ref: '#/components/parameters/ProjectID'
       requestBody:
@@ -390,7 +390,7 @@ paths:
               $ref: '#/components/schemas/ImportKnowledgeDocumentRequest'
       responses:
         '201':
-          description: Document parsed and stored.
+          description: Document stored and parsing scheduled or completed.
           content:
             application/json:
               schema:
@@ -399,6 +399,27 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/ProjectAccessDenied'
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}:
+    get:
+      operationId: getKnowledgeDocument
+      summary: Get one Project document, including parse status and extracted text when ready.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Project document detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeDocument'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /platform/v1/projects/{project_id}/workbench:
     get:
       operationId: getProjectWorkbench
@@ -5788,6 +5809,9 @@ components:
           type: string
         text_sha256:
           type: string
+        extracted_text:
+          type: string
+          description: Present on the detail endpoint after parsing succeeds; omitted from list responses.
         status:
           type: string
           enum:

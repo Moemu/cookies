@@ -1,12 +1,20 @@
 package creative
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/media"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -60,7 +68,7 @@ func TestCreateShortDramaPrerollV2WorkspaceFreezesSourceVideo(t *testing.T) {
 	if workspace == nil {
 		t.Fatal("short drama V2 workspace is nil")
 	}
-	if workspace.ContractVersion != ShortDramaPrerollV2ContractVersion ||
+	if workspace.ContractVersion != ShortDramaPrerollV3ContractVersion || workspace.SourceCanvas == nil || workspace.ModelCanvas == nil || workspace.OutputCanvas == nil ||
 		workspace.ActiveStage != ShortDramaV2StageSourceReady ||
 		workspace.SourceVideo.ProjectID != "project_1" ||
 		workspace.SourceVideo.AssetVersion != source ||
@@ -113,31 +121,19 @@ func TestCreateShortDramaPrerollV2WorkspaceDoesNotRewriteLegacyV3ManualRoute(t *
 	}
 }
 
-func TestShortDramaPrerollV2BuildsThreeFirstFramesAndFirstLastFrameVideoInput(t *testing.T) {
+func TestShortDramaPrerollV3BuildsThreeFirstFramesAndSingleReferenceVideoInput(t *testing.T) {
 	t.Parallel()
 
 	service, taskID, rc := createShortDramaV2TestWorkspace(t)
 	prompts := advanceShortDramaV2ToPrompts(t, &service, taskID, rc)
-	service.GameEvidenceFrames = gameFrameExtractor{}
-	derived := &gameDerivedWriter{}
-	service.DerivedAssets = derived
 	service.ShortDramaV2Images = &shortDramaV2ImageJobsStub{}
 
-	withOpeningFrame, err := service.PrepareShortDramaV2OpeningFrame(context.Background(), rc, "project_1", taskID, PrepareShortDramaV2OpeningFrameRequest{ExpectedRevision: prompts.VideoDraft.Revision})
-	if err != nil {
-		t.Fatalf("prepare source opening frame: %v", err)
-	}
-	opening := withOpeningFrame.VideoDraft.ShortDramaPrerollV2.SourceOpeningFrame
-	if opening == nil || opening.Status != ShortDramaV2ResourceReady || opening.Asset == nil || opening.TimestampMS != 0 {
-		t.Fatalf("source opening frame = %#v", opening)
-	}
-
-	generated, err := service.GenerateShortDramaV2FirstFrames(context.Background(), rc.Actor, "project_1", taskID, GenerateShortDramaV2FirstFramesRequest{ExpectedRevision: withOpeningFrame.VideoDraft.Revision})
+	generated, err := service.GenerateShortDramaV2FirstFrames(context.Background(), rc.Actor, "project_1", taskID, GenerateShortDramaV2FirstFramesRequest{ExpectedRevision: prompts.VideoDraft.Revision})
 	if err != nil {
 		t.Fatalf("generate first frames: %v", err)
 	}
 	batch := generated.VideoDraft.ShortDramaPrerollV2.FirstFrameBatch
-	if batch == nil || len(batch.Candidates) != 3 || batch.Status != ShortDramaV2ResourceQueued {
+	if batch == nil || len(batch.Candidates) != 3 || batch.Status != ShortDramaV2ResourceQueued || batch.Candidates[0].VariantKey == batch.Candidates[1].VariantKey {
 		t.Fatalf("first frame batch = %#v", batch)
 	}
 
@@ -173,23 +169,13 @@ func TestShortDramaPrerollV2BuildsThreeFirstFramesAndFirstLastFrameVideoInput(t 
 		selected.VideoDraft.ShortDramaPrerollV2.FirstFrameBatch == nil || selected.VideoDraft.ShortDramaPrerollV2.GenerationSpec == nil {
 		t.Fatalf("video-only prompt edit discarded selected first frame: %#v", selected.VideoDraft.ShortDramaPrerollV2)
 	}
-	selected, err = service.BindShortDramaV2TrustedMaterials(context.Background(), rc.Actor, "project_1", taskID, BindShortDramaV2TrustedMaterialsRequest{
-		ExpectedRevision:  selected.VideoDraft.Revision,
-		FirstFrameAssetID: "asset-20260222234430-first",
-		LastFrameAssetID:  "asset-20260222234430-last",
-	})
-	if err != nil {
-		t.Fatalf("bind trusted materials: %v", err)
-	}
 	input, promptHash, specHash, err := service.ShortDramaV2ProviderInput(context.Background(), rc.Actor, "project_1", taskID)
 	if err != nil {
 		t.Fatalf("compile provider input: %v", err)
 	}
-	if input.InputMode != provider.VideoInputFirstLastFrame || input.DurationSeconds != 6 ||
-		len(input.ConditioningAssets) != 2 || input.ConditioningAssets[0].Role != provider.VideoConditioningFirstFrame ||
-		input.ConditioningAssets[1].Role != provider.VideoConditioningLastFrame || promptHash == "" || specHash == "" ||
-		input.ConditioningAssets[0].AuthorizedAsset == nil || input.ConditioningAssets[0].AuthorizedAsset.AssetID != "asset-20260222234430-first" ||
-		input.ConditioningAssets[1].AuthorizedAsset == nil || input.ConditioningAssets[1].AuthorizedAsset.AssetID != "asset-20260222234430-last" ||
+	if input.InputMode != provider.VideoInputReferenceImage || input.DurationSeconds != 6 || input.AspectRatio != "16:9" ||
+		len(input.ConditioningAssets) != 1 || input.ConditioningAssets[0].Role != provider.VideoConditioningReferenceImage ||
+		input.ConditioningAssets[0].AuthorizedAsset != nil || promptHash == "" || specHash == "" ||
 		selected.VideoDraft.ShortDramaPrerollV2.GenerationSpec == nil {
 		t.Fatalf("provider input=%#v promptHash=%q specHash=%q", input, promptHash, specHash)
 	}
@@ -206,9 +192,22 @@ func TestShortDramaPrerollV2BuildsThreeFirstFramesAndFirstLastFrameVideoInput(t 
 	if err != nil {
 		t.Fatalf("reconcile video: %v", err)
 	}
-	if completed.VideoDraft.ShortDramaPrerollV2.ActiveStage != ShortDramaV2StageCompleted ||
-		completed.VideoDraft.ShortDramaPrerollV2.OutputAsset == nil || completed.Task.Status != TaskGenerated {
+	completedWorkspace := completed.VideoDraft.ShortDramaPrerollV2
+	if completedWorkspace.ActiveStage != ShortDramaV2StageCompleted || completedWorkspace.RawOutputAsset == nil ||
+		completedWorkspace.RawOutputAsset.AssetVersion.AssetID != "generated_preroll" || completedWorkspace.OutputAsset == nil ||
+		completedWorkspace.OutputAsset.AssetVersion.AssetID != "generated_preroll_normalized" || completedWorkspace.SourceOpeningFrame != nil ||
+		completed.Task.Status != TaskGenerated {
 		t.Fatalf("completed workspace = %#v task status=%q", completed.VideoDraft.ShortDramaPrerollV2, completed.Task.Status)
+	}
+	regenerated, err := service.GenerateShortDramaV2FirstFrames(context.Background(), rc.Actor, "project_1", taskID, GenerateShortDramaV2FirstFramesRequest{ExpectedRevision: completed.VideoDraft.Revision})
+	if err != nil {
+		t.Fatalf("regenerate first frames after completed video: %v", err)
+	}
+	regeneratedWorkspace := regenerated.VideoDraft.ShortDramaPrerollV2
+	if regeneratedWorkspace.FirstFrameBatch == nil || regeneratedWorkspace.FirstFrameBatch.ID == readyBatch.ID ||
+		len(regeneratedWorkspace.FirstFrameBatch.Candidates) != 3 || regeneratedWorkspace.OutputAsset != nil ||
+		regeneratedWorkspace.RawOutputAsset != nil || regeneratedWorkspace.ActiveStage != ShortDramaV2StageFramesGenerating {
+		t.Fatalf("regenerated workspace = %#v", regeneratedWorkspace)
 	}
 }
 
@@ -350,6 +349,38 @@ type shortDramaV2PlannerStub struct {
 
 type shortDramaV2ImageJobsStub struct{ calls int }
 
+type shortDramaV2ImageReaderStub struct{}
+
+func (shortDramaV2ImageReaderStub) OpenImage(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (io.ReadCloser, error) {
+	canvas := image.NewRGBA(image.Rect(0, 0, 1536, 1024))
+	for y := 0; y < 1024; y++ {
+		for x := 0; x < 1536; x++ {
+			canvas.SetRGBA(x, y, color.RGBA{R: 90, G: uint8(x % 255), B: uint8(y % 255), A: 255})
+		}
+	}
+	var output bytes.Buffer
+	if err := png.Encode(&output, canvas); err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(output.Bytes())), nil
+}
+
+type shortDramaV2RenderedImageWriterStub struct{}
+
+func (shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+	return contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID("asset_" + renderJobID), Version: 1}}, nil
+}
+
+type shortDramaV2VideoNormalizerStub struct{}
+
+func (shortDramaV2VideoNormalizerStub) NormalizeVideo(_ context.Context, request media.VideoNormalizationRequest) (media.CompositionOutput, error) {
+	content := "normalized-video"
+	return media.CompositionOutput{
+		Content: io.NopCloser(strings.NewReader(content)), SizeBytes: int64(len(content)),
+		Metadata: assets.VideoMetadata{DurationMS: 6000, WidthPixels: request.Width, HeightPixels: request.Height, FrameRate: "25/1", VideoCodec: "h264", AudioCodec: "aac"},
+	}, nil
+}
+
 func (s *shortDramaV2ImageJobsStub) CreateFirstFrameJob(_ context.Context, _ contract.ActorContext, project contract.ProjectContext, request ShortDramaV2FirstFrameJobRequest) (contract.ProviderJob, error) {
 	s.calls++
 	return contract.ProviderJob{ID: fmt.Sprintf("image_job_%d", s.calls), ProjectID: project.ProjectID, ProviderStatus: contract.ProviderJobSubmitted}, nil
@@ -393,6 +424,10 @@ func createShortDramaV2TestWorkspace(t *testing.T) (Service, string, contract.Re
 	service.Now = func() time.Time { return time.Date(2026, time.August, 6, 8, 0, 0, 0, time.UTC) }
 	source := contract.AssetVersionRef{AssetID: "asset_wuzetian", Version: 1}
 	service.Assets = testAssetReader{snapshot: CreativeAssetSnapshot{Ref: source, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true, WidthPixels: 1920, HeightPixels: 818, DurationMS: 182417, FrameRate: "30/1", VideoCodec: "h264", AudioCodec: "aac"}}
+	service.ImageBaseAssets = shortDramaV2ImageReaderStub{}
+	service.RenderedImages = shortDramaV2RenderedImageWriterStub{}
+	service.ShortDramaV2OutputNormalizer = shortDramaV2VideoNormalizerStub{}
+	service.RenderedAssets = &testRenderedAssetWriter{ref: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "generated_preroll_normalized", Version: 1}}}
 	rc := testRequestContext()
 	intake, err := service.CreateIntake(context.Background(), rc, "project_1", "short-drama-v2-intake-helper", CreateIntakeRequest{
 		Source: IntakeSourceManual, Format: FormatVideo, PerformanceMode: PerformanceModeShortDramaPreroll,

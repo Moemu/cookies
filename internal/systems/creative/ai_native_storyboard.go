@@ -37,16 +37,17 @@ const (
 )
 
 type AINativeStoryboardAsset struct {
-	ID                string                    `json:"id"`
-	Role              string                    `json:"role"`
-	Name              string                    `json:"name"`
-	Source            string                    `json:"source"`
-	AssetRef          *contract.AssetVersionRef `json:"asset_ref,omitempty"`
-	GenerationBrief   string                    `json:"generation_brief,omitempty"`
-	Status            string                    `json:"status"`
-	GenerationAttempt int                       `json:"generation_attempt,omitempty"`
-	ErrorCode         string                    `json:"error_code,omitempty"`
-	ErrorMessage      string                    `json:"error_message,omitempty"`
+	ID                   string                    `json:"id"`
+	Role                 string                    `json:"role"`
+	Name                 string                    `json:"name"`
+	Source               string                    `json:"source"`
+	AssetRef             *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+	GenerationBrief      string                    `json:"generation_brief,omitempty"`
+	RegenerationFeedback string                    `json:"regeneration_feedback,omitempty"`
+	Status               string                    `json:"status"`
+	GenerationAttempt    int                       `json:"generation_attempt,omitempty"`
+	ErrorCode            string                    `json:"error_code,omitempty"`
+	ErrorMessage         string                    `json:"error_message,omitempty"`
 }
 
 type AINativeStoryboardShot struct {
@@ -104,7 +105,8 @@ type GenerateAINativeStoryboardRequest struct {
 }
 
 type RegenerateAINativeStoryboardAssetRequest struct {
-	ExpectedWorkspaceVersion int64 `json:"expected_workspace_version"`
+	ExpectedWorkspaceVersion int64  `json:"expected_workspace_version"`
+	Feedback                 string `json:"feedback,omitempty"`
 }
 
 type UpdateAINativeStoryboardRequest struct {

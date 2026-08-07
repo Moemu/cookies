@@ -95,7 +95,9 @@ func (s Service) AnalyzeShortDramaV2Source(
 	workspace.TrustedMaterials = nil
 	workspace.GenerationSpec = nil
 	workspace.LatestVideoAttemptID = ""
+	workspace.RawOutputAsset = nil
 	workspace.OutputAsset = nil
+	workspace.OutputNormalization = nil
 	workspace.UpdatedAt = now
 	next.ShortDramaPrerollV2 = &workspace
 	next.Prompt = "视频理解已完成，等待生成前贴方向"
@@ -155,7 +157,9 @@ func (s Service) GenerateShortDramaV2Directions(
 	updated.TrustedMaterials = nil
 	updated.GenerationSpec = nil
 	updated.LatestVideoAttemptID = ""
+	updated.RawOutputAsset = nil
 	updated.OutputAsset = nil
+	updated.OutputNormalization = nil
 	updated.UpdatedAt = now
 	next.ShortDramaPrerollV2 = &updated
 	next.Prompt = "已生成 4 个前贴方向，等待人工选择"
@@ -211,21 +215,15 @@ func (s Service) SelectShortDramaV2Direction(
 	prompt.DirectionID = selected.ID
 	prompt.DurationSeconds = request.DurationSeconds
 	prompt.Revision = 1
+	prompt.BaseVideoPrompt = prompt.VideoPrompt
 	if err := validateShortDramaV2PromptDraft(prompt); err != nil {
 		return TaskDetail{}, err
 	}
-	hash, err := contract.CanonicalJSONHash(struct {
-		DirectionID      string `json:"direction_id"`
-		DurationSeconds  int    `json:"duration_seconds"`
-		ImagePrompt      string `json:"image_prompt"`
-		VideoDescription string `json:"video_description"`
-		VideoPrompt      string `json:"video_prompt"`
-		CompilerVersion  string `json:"compiler_version"`
-	}{prompt.DirectionID, prompt.DurationSeconds, prompt.ImagePrompt, prompt.VideoDescription, prompt.VideoPrompt, prompt.CompilerVersion})
+	hash, err := shortDramaV2PromptHash(prompt)
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	prompt.ContentHash = "sha256:" + hash
+	prompt.ContentHash = hash
 	now := s.now()
 	next := *detail.VideoDraft
 	next.Revision++
@@ -241,7 +239,9 @@ func (s Service) SelectShortDramaV2Direction(
 	updated.TrustedMaterials = nil
 	updated.GenerationSpec = nil
 	updated.LatestVideoAttemptID = ""
+	updated.RawOutputAsset = nil
 	updated.OutputAsset = nil
+	updated.OutputNormalization = nil
 	updated.UpdatedAt = now
 	next.ShortDramaPrerollV2 = &updated
 	next.Prompt = prompt.VideoPrompt
@@ -289,7 +289,9 @@ func (s Service) UpdateShortDramaV2Analysis(
 	updated.TrustedMaterials = nil
 	updated.GenerationSpec = nil
 	updated.LatestVideoAttemptID = ""
+	updated.RawOutputAsset = nil
 	updated.OutputAsset = nil
+	updated.OutputNormalization = nil
 	updated.UpdatedAt = now
 	next.ShortDramaPrerollV2 = &updated
 	next.Prompt = "视频理解已人工修订，等待重新生成前贴方向"
@@ -323,6 +325,9 @@ func (s Service) UpdateShortDramaV2Prompts(
 	prompt.ImagePrompt = strings.TrimSpace(request.ImagePrompt)
 	prompt.VideoDescription = strings.TrimSpace(request.VideoDescription)
 	prompt.VideoPrompt = strings.TrimSpace(request.VideoPrompt)
+	if strings.TrimSpace(prompt.SelectedVariantKey) == "" {
+		prompt.BaseVideoPrompt = prompt.VideoPrompt
+	}
 	if err := validateShortDramaV2PromptDraft(prompt); err != nil {
 		return TaskDetail{}, err
 	}
@@ -343,8 +348,7 @@ func (s Service) UpdateShortDramaV2Prompts(
 		updated.FirstFrameBatch = nil
 		updated.TrustedMaterials = nil
 		updated.GenerationSpec = nil
-	} else if updated.FirstFrameBatch != nil && updated.FirstFrameBatch.SelectedAsset != nil &&
-		updated.SourceOpeningFrame != nil && updated.SourceOpeningFrame.Status == ShortDramaV2ResourceReady {
+	} else if updated.FirstFrameBatch != nil && updated.FirstFrameBatch.SelectedAsset != nil {
 		updated.ActiveStage = ShortDramaV2StageFrameSelected
 		spec, compileErr := compileShortDramaV2GenerationSpec(updated, projectID, next.Revision)
 		if compileErr != nil {
@@ -358,7 +362,9 @@ func (s Service) UpdateShortDramaV2Prompts(
 		updated.GenerationSpec = nil
 	}
 	updated.LatestVideoAttemptID = ""
+	updated.RawOutputAsset = nil
 	updated.OutputAsset = nil
+	updated.OutputNormalization = nil
 	updated.UpdatedAt = now
 	next.ShortDramaPrerollV2 = &updated
 	next.Prompt = prompt.VideoPrompt
@@ -370,13 +376,15 @@ func (s Service) UpdateShortDramaV2Prompts(
 
 func shortDramaV2PromptHash(prompt ShortDramaV2PromptDraft) (string, error) {
 	hash, err := contract.CanonicalJSONHash(struct {
-		DirectionID      string `json:"direction_id"`
-		DurationSeconds  int    `json:"duration_seconds"`
-		ImagePrompt      string `json:"image_prompt"`
-		VideoDescription string `json:"video_description"`
-		VideoPrompt      string `json:"video_prompt"`
-		CompilerVersion  string `json:"compiler_version"`
-	}{prompt.DirectionID, prompt.DurationSeconds, prompt.ImagePrompt, prompt.VideoDescription, prompt.VideoPrompt, prompt.CompilerVersion})
+		DirectionID        string `json:"direction_id"`
+		DurationSeconds    int    `json:"duration_seconds"`
+		ImagePrompt        string `json:"image_prompt"`
+		VideoDescription   string `json:"video_description"`
+		VideoPrompt        string `json:"video_prompt"`
+		BaseVideoPrompt    string `json:"base_video_prompt,omitempty"`
+		SelectedVariantKey string `json:"selected_variant_key,omitempty"`
+		CompilerVersion    string `json:"compiler_version"`
+	}{prompt.DirectionID, prompt.DurationSeconds, prompt.ImagePrompt, prompt.VideoDescription, prompt.VideoPrompt, prompt.BaseVideoPrompt, prompt.SelectedVariantKey, prompt.CompilerVersion})
 	if err != nil {
 		return "", err
 	}

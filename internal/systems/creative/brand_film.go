@@ -1,6 +1,7 @@
 package creative
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ const (
 )
 
 type ManualBrandFilmInput struct {
+	DocumentID     string `json:"document_id,omitempty"`
 	FixtureID      string `json:"fixture_id"`
 	FixtureVersion int64  `json:"fixture_version"`
 	FixtureHash    string `json:"fixture_hash"`
@@ -45,6 +47,13 @@ type ManualBrandFilmInput struct {
 }
 
 func (i ManualBrandFilmInput) Validate() error {
+	if strings.TrimSpace(i.DocumentID) != "" {
+		if !validSHA256Ref(i.FixtureHash) || strings.TrimSpace(i.BriefName) == "" ||
+			strings.TrimSpace(i.BriefText) == "" || strings.TrimSpace(i.ProductName) == "" {
+			return fmt.Errorf("manual brand film document input is incomplete")
+		}
+		return nil
+	}
 	if i.FixtureID != GuerlainBrandFixtureID || i.FixtureVersion != 1 ||
 		!validSHA256Ref(i.FixtureHash) || strings.TrimSpace(i.BriefName) == "" ||
 		strings.TrimSpace(i.BriefText) == "" || strings.TrimSpace(i.ProductName) == "" {
@@ -54,16 +63,111 @@ func (i ManualBrandFilmInput) Validate() error {
 }
 
 type BrandFilmSourceSnapshot struct {
-	FixtureID      string   `json:"fixture_id"`
-	FixtureVersion int64    `json:"fixture_version"`
-	FixtureHash    string   `json:"fixture_hash"`
-	BriefName      string   `json:"brief_name"`
-	BriefText      string   `json:"brief_text"`
-	ProductName    string   `json:"product_name"`
-	Channel        string   `json:"channel"`
-	Duration       int      `json:"duration_seconds"`
-	AspectRatio    string   `json:"aspect_ratio"`
-	EvidenceRefs   []string `json:"evidence_refs"`
+	SourceKind             string                     `json:"source_kind,omitempty"`
+	IntakeID               string                     `json:"intake_id,omitempty"`
+	InputIdentityHash      string                     `json:"input_identity_hash,omitempty"`
+	StrategyPackageID      string                     `json:"strategy_package_id,omitempty"`
+	StrategyPackageVersion int64                      `json:"strategy_package_version,omitempty"`
+	HandoffContentHash     string                     `json:"handoff_content_hash,omitempty"`
+	FixtureID              string                     `json:"fixture_id,omitempty"`
+	FixtureVersion         int64                      `json:"fixture_version,omitempty"`
+	FixtureHash            string                     `json:"fixture_hash,omitempty"`
+	BriefName              string                     `json:"brief_name"`
+	BriefText              string                     `json:"brief_text"`
+	ProductName            string                     `json:"product_name"`
+	Objective              string                     `json:"objective,omitempty"`
+	Audience               string                     `json:"audience,omitempty"`
+	CoreMessage            string                     `json:"core_message,omitempty"`
+	Tone                   []string                   `json:"tone,omitempty"`
+	VisualKeywords         []string                   `json:"visual_keywords,omitempty"`
+	Mandatory              []string                   `json:"mandatory_elements,omitempty"`
+	Prohibited             []string                   `json:"prohibited_claims,omitempty"`
+	AssetCandidates        []BrandBriefAssetCandidate `json:"asset_candidates,omitempty"`
+	Channel                string                     `json:"channel"`
+	Duration               int                        `json:"duration_seconds"`
+	AspectRatio            string                     `json:"aspect_ratio"`
+	EvidenceRefs           []string                   `json:"evidence_refs"`
+}
+
+func newBrandFilmDraft(task CreativeTask, intake CreativeIntake, route CreativeRouteSnapshot, now time.Time) (*BrandFilmDraft, error) {
+	briefName := "已确认品牌策略"
+	briefText := strings.TrimSpace(string(intake.Request.StrategyHandoffInput))
+	productName := strings.TrimSpace(intake.Request.CoreMessage)
+	if productName == "" {
+		productName = strings.TrimSpace(intake.Request.Concept)
+	}
+	if productName == "" {
+		productName = "未命名品牌项目"
+	}
+	snapshot := BrandFilmSourceSnapshot{
+		SourceKind: string(intake.Source), IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash,
+		BriefName: briefName, BriefText: briefText, ProductName: productName,
+		Objective: intake.Request.Objective, Audience: intake.Request.Audience, CoreMessage: intake.Request.CoreMessage,
+		Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...),
+		Mandatory: append([]string{}, intake.Request.Mandatory...), Prohibited: append([]string{}, intake.Request.Prohibited...),
+		Channel: string(task.Channel), Duration: route.TargetDurationSeconds, AspectRatio: route.AspectRatio,
+		EvidenceRefs: append([]string{}, route.EvidenceRefs...),
+	}
+	if manual := intake.Request.ManualBrandFilm; manual != nil {
+		snapshot.SourceKind = "fixture"
+		if manual.DocumentID != "" {
+			snapshot.SourceKind = "manual_document"
+			snapshot.IntakeID = intake.ID
+			snapshot.EvidenceRefs = []string{"knowledge://documents/" + manual.DocumentID}
+			snapshot.AssetCandidates = []BrandBriefAssetCandidate{
+				{ID: "asset_product_front", Role: "product_front", Label: "商品正面图", SourceLocator: "knowledge://documents/" + manual.DocumentID + "#product-image", RightsStatus: "needs_confirmation"},
+				{ID: "asset_brand_logo", Role: "logo", Label: "品牌 Logo", SourceLocator: "knowledge://documents/" + manual.DocumentID + "#brand-logo", RightsStatus: "needs_confirmation"},
+			}
+		}
+		snapshot.FixtureID, snapshot.FixtureVersion, snapshot.FixtureHash = manual.FixtureID, manual.FixtureVersion, manual.FixtureHash
+		snapshot.BriefName, snapshot.BriefText, snapshot.ProductName = manual.BriefName, manual.BriefText, manual.ProductName
+	}
+	if reference := intake.Request.StrategyPackage; reference != nil {
+		snapshot.SourceKind = string(IntakeSourceStrategyPackage)
+		snapshot.StrategyPackageID, snapshot.StrategyPackageVersion = reference.PackageID, reference.PackageVersion
+		snapshot.HandoffContentHash = reference.ExpectedHandoffHash
+		snapshot.AssetCandidates = []BrandBriefAssetCandidate{
+			{ID: "asset_product_front", Role: "product_front", Label: "商品正面图", SourceLocator: "strategy://handoff/assets#product_image", RightsStatus: "needs_confirmation"},
+			{ID: "asset_brand_logo", Role: "logo", Label: "品牌 Logo", SourceLocator: "strategy://handoff/assets#logo", RightsStatus: "needs_confirmation"},
+		}
+		for index := range snapshot.AssetCandidates {
+			if index >= len(route.SourceAssetRefs) {
+				break
+			}
+			assetRef := route.SourceAssetRefs[index]
+			snapshot.AssetCandidates[index].AssetRef = &assetRef
+		}
+	}
+	if snapshot.BriefText == "" {
+		raw, err := json.Marshal(struct {
+			Objective      string   `json:"objective"`
+			Audience       string   `json:"audience"`
+			CoreMessage    string   `json:"core_message"`
+			Tone           []string `json:"tone"`
+			VisualKeywords []string `json:"visual_keywords"`
+			Mandatory      []string `json:"mandatory_elements"`
+			Prohibited     []string `json:"prohibited_claims"`
+		}{intake.Request.Objective, intake.Request.Audience, intake.Request.CoreMessage, intake.Request.Tone, intake.Request.VisualKeywords, intake.Request.Mandatory, intake.Request.Prohibited})
+		if err != nil {
+			return nil, fmt.Errorf("encode brand film source: %w", err)
+		}
+		snapshot.BriefText = string(raw)
+	}
+	sourceHash, err := contract.CanonicalJSONHash(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize brand film input: %w", err)
+	}
+	return &BrandFilmDraft{
+		ContractVersion: "creative-brand-film-draft/v1", TaskID: task.ID, Revision: 1,
+		Stage: BrandFilmWaitingBrief, SourceSnapshot: snapshot, SourceHash: "sha256:" + sourceHash,
+		BriefAnalyses: []BrandBriefAnalysisVersion{}, ConceptSets: []BrandCreativeConceptSet{}, FilmPlans: []BrandFilmPlanVersion{}, QualityRuns: []BrandFilmQualityRun{},
+		Readiness: CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"brief_analysis_confirmation"}},
+		PromptSeam: BrandFilmReservedGenerationSeam{
+			ContractVersion: "creative-brand-generation-seam/v1", UnitPolicy: "one_generation_unit_per_shot",
+			PromptContract: "brand-shot-prompt-package/v1", AttemptPolicy: "single_default_regenerate_on_feedback",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}, nil
 }
 
 type BrandBriefFact struct {

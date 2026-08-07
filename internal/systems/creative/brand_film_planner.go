@@ -29,7 +29,33 @@ type BrandFilmPlanner interface {
 
 type DeterministicBrandFilmPlanner struct{}
 
-func (DeterministicBrandFilmPlanner) AnalyzeBrief(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, _ BrandFilmSourceSnapshot, revision int64, now time.Time) (BrandBriefAnalysisVersion, error) {
+func (DeterministicBrandFilmPlanner) AnalyzeBrief(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, source BrandFilmSourceSnapshot, revision int64, now time.Time) (BrandBriefAnalysisVersion, error) {
+	if source.SourceKind != "" && source.SourceKind != "fixture" {
+		mandatory := append([]string{}, source.Mandatory...)
+		if len(mandatory) == 0 {
+			mandatory = []string{"商品与品牌识别必须与已确认素材一致"}
+		}
+		prohibited := append([]string{}, source.Prohibited...)
+		if len(prohibited) == 0 {
+			prohibited = []string{"不得编造 Brief 未支持的功效、价格或促销信息"}
+		}
+		message := strings.TrimSpace(source.CoreMessage)
+		if message == "" {
+			message = strings.TrimSpace(source.ProductName)
+		}
+		return BrandBriefAnalysisVersion{
+			Revision: revision, Summary: fmt.Sprintf("围绕%s建立可追溯的品牌影片表达，所有事实和资产仍需人工确认。", source.ProductName),
+			Audience: source.Audience, CoreMessage: message,
+			SellingPoints: []BrandBriefFact{{Text: message, Locator: "creative-intake://" + source.IntakeID + "#core_message", Confidence: 1, Status: "brief_fact"}},
+			Mandatory:     mandatory, Prohibited: prohibited,
+			ImageRequirements: []string{"使用已确认的商品正面图与品牌 Logo", "保持商品包装、文字和比例真实"},
+			VideoRequirements: []string{fmt.Sprintf("%s · %d 秒 · %s", source.Channel, source.Duration, source.AspectRatio), "品牌定格需保留清晰识别时间"},
+			VoiceDirection:    "克制、可信、清晰，品牌名与产品名按确认读法口播。",
+			AssetCandidates:   append([]BrandBriefAssetCandidate{}, source.AssetCandidates...),
+			Uncertainties:     []string{"商品正面图、Logo 与声音权利需在生成前确认"},
+			ModelAlias:        "fixture.deterministic", ModelVersion: "generic-brand-film-v1", PromptVersion: brandBriefPromptVersion, CreatedAt: now,
+		}, nil
+	}
 	return BrandBriefAnalysisVersion{
 		Revision:    revision,
 		Summary:     "娇兰 25X 蜂皇水面向关注补水修护与轻盈肤感的人群，以水感、蜂巢与暖金光影建立高端品牌记忆。",
@@ -55,7 +81,19 @@ func (DeterministicBrandFilmPlanner) AnalyzeBrief(_ context.Context, _ contract.
 	}, nil
 }
 
-func (DeterministicBrandFilmPlanner) GenerateConcepts(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, _ BrandFilmSourceSnapshot, analysis BrandBriefAnalysisVersion, revision int64, now time.Time) (BrandCreativeConceptSet, error) {
+func (DeterministicBrandFilmPlanner) GenerateConcepts(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, source BrandFilmSourceSnapshot, analysis BrandBriefAnalysisVersion, revision int64, now time.Time) (BrandCreativeConceptSet, error) {
+	if source.SourceKind != "" && source.SourceKind != "fixture" {
+		product := source.ProductName
+		return BrandCreativeConceptSet{
+			Revision: revision, AnalysisRevision: analysis.Revision,
+			Candidates: []BrandCreativeConcept{
+				{ID: "concept_truth_in_detail", Title: "真实细节", OneLiner: "让真实细节成为品牌价值最有力的证明。", StoryMechanism: "从一个可验证细节逐步展开到完整品牌主张。", BrandEntrance: "产品作为证据主体自然进入画面。", VisualLanguage: []string{"真实材质", "克制微距", "精确构图"}, SoundIdea: "低饱和环境声与简洁节拍", BriefRationale: analysis.CoreMessage, Risk: "不得把视觉演绎误写成未经证实的产品事实。"},
+				{ID: "concept_human_resonance", Title: "人的感受", OneLiner: "从真实人物感受出发，让品牌主张被看见和相信。", StoryMechanism: "人物情绪转变承接产品价值，不使用夸张前后对比。", BrandEntrance: product + "进入人物真实使用场景。", VisualLanguage: []string{"自然人物", "柔和光线", "留白叙事"}, SoundIdea: "呼吸感音乐与克制旁白", BriefRationale: analysis.CoreMessage, Risk: "人物表达不能替代事实证据。"},
+				{ID: "concept_symbolic_world", Title: "品牌意象", OneLiner: "将核心主张转译为一个可持续记忆的视觉意象。", StoryMechanism: "视觉意象贯穿开场、产品进入与品牌定格。", BrandEntrance: "产品由意象变化自然显形。", VisualLanguage: []string{"抽象意象", "品牌色控制", "英雄定格"}, SoundIdea: "标志性声音动机逐步建立", BriefRationale: analysis.CoreMessage, Risk: "意象不能遮挡商品与 Logo 识别。"},
+			},
+			ModelAlias: "fixture.deterministic", ModelVersion: "generic-brand-film-v1", PromptVersion: brandConceptPromptVersion, CreatedAt: now,
+		}, nil
+	}
 	return BrandCreativeConceptSet{
 		Revision: revision, AnalysisRevision: analysis.Revision,
 		Candidates: []BrandCreativeConcept{
@@ -67,7 +105,43 @@ func (DeterministicBrandFilmPlanner) GenerateConcepts(_ context.Context, _ contr
 	}, nil
 }
 
-func (DeterministicBrandFilmPlanner) GenerateFilmPlan(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, _ BrandFilmSourceSnapshot, _ BrandBriefAnalysisVersion, concept BrandCreativeConcept, revision int64, now time.Time) (BrandFilmPlanVersion, error) {
+func (DeterministicBrandFilmPlanner) GenerateFilmPlan(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, source BrandFilmSourceSnapshot, analysis BrandBriefAnalysisVersion, concept BrandCreativeConcept, revision int64, now time.Time) (BrandFilmPlanVersion, error) {
+	if source.SourceKind != "" && source.SourceKind != "fixture" {
+		profile, err := ResolveBrandFilmDurationProfile(source.Duration)
+		if err != nil {
+			return BrandFilmPlanVersion{}, err
+		}
+		shots := make([]BrandFilmShot, 0, profile.ShotCount)
+		base, remainder, start := source.Duration/profile.ShotCount, source.Duration%profile.ShotCount, 0
+		for index := 0; index < profile.ShotCount; index++ {
+			duration := base
+			if index < remainder {
+				duration++
+			}
+			end := start + duration
+			purpose := "展开品牌主张"
+			referenceRole := "composition"
+			if index == 0 {
+				purpose, referenceRole = "建立品牌世界与注意力", "style"
+			}
+			if index == profile.ShotCount-1 {
+				purpose, referenceRole = "商品与品牌定格", "required_identity"
+			}
+			shots = append(shots, BrandFilmShot{
+				ID: fmt.Sprintf("shot_%02d", index+1), Order: index + 1, StartSecond: start, EndSecond: end,
+				Purpose: purpose, Visual: fmt.Sprintf("以%s的视觉语言呈现%s，第 %d 段保持商品与品牌事实准确。", concept.Title, source.ProductName, index+1),
+				Action: "使用克制且连续的主体动作推进叙事。", Camera: "稳定构图配合缓慢推进", Lighting: "遵循品牌色与真实材质的受控光线",
+				Voiceover: analysis.CoreMessage, OnScreenText: source.ProductName, ReferenceRole: referenceRole,
+				ContinuityNotes: "商品、Logo、人物与场景连续性必须遵循已确认 Brief。",
+			})
+			start = end
+		}
+		return BrandFilmPlanVersion{
+			Revision: revision, MasterDurationMS: source.Duration * 1000, ConceptID: concept.ID, Title: "《" + concept.Title + "》", StorySummary: concept.OneLiner,
+			VoiceDirection: analysis.VoiceDirection, MusicDirection: concept.SoundIdea, Shots: shots,
+			ModelAlias: "fixture.deterministic", ModelVersion: "generic-brand-film-v1", PromptVersion: brandFilmPromptVersion, CreatedAt: now,
+		}, nil
+	}
 	shots := []BrandFilmShot{
 		{ID: "shot_01", Order: 1, StartSecond: 0, EndSecond: 5, Purpose: "建立品牌世界并完成产品进入", Visual: "暗金背景中一滴清水落入蜂巢纹理，光线沿六边形苏醒并汇聚出娇兰 25X 蜂皇水正面瓶身。", Action: "水滴扩散为金色波纹，瓶身从水雾中稳定显形。", Camera: "微距推进后转为中近景轻微环绕", Lighting: "低照度暖金轮廓光与瓶身侧光", Voiceover: "当自然的修护能量被轻盈唤醒，娇兰二十五倍蜂皇水。", OnScreenText: "娇兰 25X蜂皇水", ReferenceRole: "required_identity", ContinuityNotes: "瓶型、黑色瓶盖、标签比例必须保持真实。"},
 		{ID: "shot_02", Order: 2, StartSecond: 5, EndSecond: 10, Purpose: "展示质地与湿敷体验", Visual: "轻盈水感掠过肌肤，人物将浸润化妆棉贴于面颊，金色波纹在肌肤边缘自然呼应。", Action: "完成一次自然湿敷并轻微转头，不做前后对比。", Camera: "水感微距切至稳定面部近景", Lighting: "柔和晨光与克制金色反射", Voiceover: "轻盈不黏腻，温柔补水修护，让护理回到柔润与从容。", ReferenceRole: "composition", ContinuityNotes: "人物、肤色与产品方向连续，不表现夸张即时功效。"},
@@ -128,6 +202,14 @@ func brandPlannerActor(actor contract.ActorContext) contract.ActorContext {
 	return contract.ActorContext{OrganizationID: actor.OrganizationID, Principal: actor.Principal, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
 }
 
+func brandPlannerSourceKey(source BrandFilmSourceSnapshot) string {
+	hash, err := contract.CanonicalJSONHash(source)
+	if err != nil || len(hash) < 12 {
+		return "brand-source"
+	}
+	return hash[:12]
+}
+
 func (p ModelBrandFilmPlanner) AnalyzeBrief(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, source BrandFilmSourceSnapshot, revision int64, now time.Time) (BrandBriefAnalysisVersion, error) {
 	if p.Text == nil || strings.TrimSpace(p.ModelAlias) == "" {
 		return BrandBriefAnalysisVersion{}, fmt.Errorf("brand film model planner is not configured")
@@ -138,9 +220,9 @@ func (p ModelBrandFilmPlanner) AnalyzeBrief(ctx context.Context, actor contract.
 	}
 	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-brief-%s-%d", source.FixtureHash[7:19], revision)),
+		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-brief-%s-%d", brandPlannerSourceKey(source), revision)),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "你是品牌广告 Brief 分析师。只分析输入中的娇兰 25X 蜂皇水，不混入其他产品。只输出 JSON。事实必须保留 locator；不确定功效标记 needs_confirmation。"},
+			{Role: provider.TextRoleSystem, Content: "你是品牌广告 Brief 分析师。只分析输入中明确出现的品牌与产品，不混入其他项目。只输出 JSON。事实必须保留 locator；不确定功效标记 needs_confirmation。"},
 			{Role: provider.TextRoleUser, Content: "请提炼摘要、受众、核心信息、卖点、必须项、禁用项、图片/视频要求、统一口播方向和不确定项。INPUT=" + string(raw)},
 		}, OutputJSONSchema: brandBriefAnalysisSchema,
 	})
@@ -154,7 +236,9 @@ func (p ModelBrandFilmPlanner) AnalyzeBrief(ctx context.Context, actor contract.
 	value.Revision, value.Confirmed, value.ConfirmedAt = revision, false, nil
 	value.ModelAlias, value.ModelVersion, value.RouteRevisionID = p.ModelAlias, response.ModelVersion, response.RouteRevisionID
 	value.PromptVersion, value.CreatedAt = brandBriefPromptVersion, now
-	if len(value.AssetCandidates) == 0 {
+	if len(value.AssetCandidates) == 0 && len(source.AssetCandidates) > 0 {
+		value.AssetCandidates = append([]BrandBriefAssetCandidate{}, source.AssetCandidates...)
+	} else if len(value.AssetCandidates) == 0 {
 		fallback, _ := (DeterministicBrandFilmPlanner{}).AnalyzeBrief(ctx, actor, project, source, revision, now)
 		value.AssetCandidates = fallback.AssetCandidates
 	}
@@ -168,9 +252,9 @@ func (p ModelBrandFilmPlanner) GenerateConcepts(ctx context.Context, actor contr
 	}{source, analysis})
 	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-concepts-%s-%d", source.FixtureHash[7:19], revision)),
+		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-concepts-%s-%d", brandPlannerSourceKey(source), revision)),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "你是高端美妆品牌广告创意总监。输出 3 个叙事机制明显不同的 15 秒竖屏方向，不生成镜头表，不编造 Brief 事实，只输出 JSON。"},
+			{Role: provider.TextRoleSystem, Content: fmt.Sprintf("你是品牌广告创意总监。输出 3 个叙事机制明显不同的 %d 秒 %s 方向，不生成镜头表，不编造 Brief 事实，只输出 JSON。", source.Duration, source.AspectRatio)},
 			{Role: provider.TextRoleUser, Content: "根据已确认 Brief 生成创意方向。INPUT=" + string(input)},
 		}, OutputJSONSchema: brandConceptSetSchema,
 	})
@@ -199,7 +283,7 @@ func (p ModelBrandFilmPlanner) GenerateFilmPlan(ctx context.Context, actor contr
 	}{source, analysis, concept})
 	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-film-plan-%s-%d", source.FixtureHash[7:19], revision)),
+		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-film-plan-%s-%d", brandPlannerSourceKey(source), revision)),
 		Messages: []provider.TextMessage{
 			{Role: provider.TextRoleSystem, Content: fmt.Sprintf("你是品牌广告导演。输出可编辑的 %d 秒、9:16 剧本分镜。镜头必须从 0 秒连续覆盖到 %d 秒且固定为 %d 个，每个镜头 4～15 秒；用户编辑镜头表而不是模型 Prompt。只输出 JSON。", source.Duration, source.Duration, (source.Duration+4)/5)},
 			{Role: provider.TextRoleUser, Content: "基于已确认 Brief 与创意方向生成剧本、旁白和镜头表。INPUT=" + string(input)},

@@ -173,6 +173,7 @@ export type StoryboardAsset = {
   source: 'product_import' | 'project_asset' | 'ai_generated'
   asset_ref?: { asset_id: string; version: number }
   generation_brief?: string
+  regeneration_feedback?: string
   status: 'ready' | 'planned' | 'generating' | 'failed'
   generation_attempt?: number
   error_code?: string
@@ -277,7 +278,10 @@ export type ProductionReferenceFailure = {
   asset_id: string
   asset_name: string
   asset_source: StoryboardAsset['source']
+  error_code: string
   reason: string
+  recommended_feedback: string
+  alternatives: string[]
 }
 
 export type ProductionPlan = {

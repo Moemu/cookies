@@ -526,7 +526,7 @@ func TestCreateVideoTaskConsumesApprovedRouteAndReadyProjectVideo(t *testing.T) 
 	}
 }
 
-func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *testing.T) {
+func TestCreateBrandVideoTaskMaterializesBrandFilmWithoutPreTaskDirection(t *testing.T) {
 	t.Parallel()
 	service := testService()
 	intake := CreativeIntake{
@@ -545,18 +545,8 @@ func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *
 		},
 	}
 	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
-	direction := CreativeDirectionVersion{
-		ContractVersion: CreativeDirectionVersionV1, ID: "direction_brand", OrganizationID: "org_1", ProjectID: "project_1",
-		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, RouteID: "route_brand_video",
-		Concept: "毫米之间，有人回答", CreativeRationale: "用人物接力建立工程伙伴认知",
-		MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构结论"},
-		DirectionMode: "cinematic", EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "工业微距",
-		BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认", Status: DirectionStatusConfirmed,
-	}
-	service.Directions = &directionRepositoryStub{batch: CreativeDirectionBatch{Candidates: []CreativeDirectionVersion{direction}}}
-
 	task, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
-		SelectedRouteID: "route_brand_video", DirectionID: direction.ID, Channel: ChannelXiaohongshu,
+		SelectedRouteID: "route_brand_video", Channel: ChannelXiaohongshu,
 		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
 	})
 	if err != nil {
@@ -566,10 +556,19 @@ func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.Channel != ChannelXiaohongshu || task.Direction.DirectionVersionID != direction.ID || task.Direction.InputIdentityHash != intake.InputIdentityHash ||
+	if task.Channel != ChannelXiaohongshu || task.Direction.DirectionVersionID != "" || task.Direction.InputIdentityHash != intake.InputIdentityHash ||
 		task.Direction.CallToAction != "" || detail.VideoDraft == nil || detail.VideoDraft.Resolution != "1080x1920" ||
-		!strings.Contains(detail.VideoDraft.Prompt, direction.BrandMemoryDevice) {
-		t.Fatalf("brand task did not preserve confirmed direction lineage and route spec: task=%+v detail=%+v", task, detail)
+		detail.VideoDraft.BrandFilm == nil || detail.VideoDraft.BrandFilm.Stage != BrandFilmWaitingBrief ||
+		detail.VideoDraft.BrandFilm.SourceSnapshot.SourceKind != string(IntakeSourceStrategyPackage) ||
+		detail.VideoDraft.BrandFilm.SourceSnapshot.IntakeID != intake.ID {
+		t.Fatalf("brand task did not materialize the shared BrandFilm workspace: task=%+v detail=%+v", task, detail)
+	}
+	replayed, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		SelectedRouteID: "route_brand_video", Channel: ChannelXiaohongshu,
+		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
+	})
+	if err != nil || replayed.ID != task.ID {
+		t.Fatalf("brand task replay should return the existing task: task=%+v err=%v", replayed, err)
 	}
 }
 
