@@ -113,7 +113,7 @@ try {
         "COOKIES_STRATEGY_ENABLED" = "true"
         "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" = "true"
         "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" = "cookies.text.standard"
-        "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" = "cookies.text.standard"
+        "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" = "cookies.text.deep_review"
         "COOKIES_STRATEGY_CRITIC_ENABLED" = "true"
         "COOKIES_STRATEGY_APPROVE_ENABLED" = "true"
         "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED" = "true"
@@ -169,6 +169,7 @@ UPDATE provider_model_routes SET current_revision_id=NULL
     'route_clawex_remove_background',
     'route_cookies_image_standard',
     'route_cookies_text_standard',
+    'route_cookies_text_deep_review',
     'route_cookies_video_standard',
     'route_cookies_vision_standard',
     'route_cookies_image_enhance',
@@ -187,6 +188,7 @@ DELETE FROM provider_model_route_revisions
     'route_clawex_remove_background',
     'route_cookies_image_standard',
     'route_cookies_text_standard',
+    'route_cookies_text_deep_review',
     'route_cookies_video_standard',
     'route_cookies_vision_standard',
     'route_cookies_image_enhance',
@@ -205,6 +207,7 @@ DELETE FROM provider_model_routes
     'route_clawex_remove_background',
     'route_cookies_image_standard',
     'route_cookies_text_standard',
+    'route_cookies_text_deep_review',
     'route_cookies_video_standard',
     'route_cookies_vision_standard',
     'route_cookies_image_enhance',
@@ -340,6 +343,18 @@ INSERT INTO provider_credentials
             MaxOutputTokens = 4096
             Temperature = 0.3
             ThinkingMode = "disabled"
+        },
+        @{
+            ID = "route_cookies_text_deep_review"
+            Capability = "text.generate"
+            Alias = "cookies.text.deep_review"
+            Model = "doubao-seed-2-0-pro-260215"
+            Endpoint = "/v1/chat/completions"
+            SourceProvider = "ark"
+            TextResponseMode = "prompt_json"
+            MaxOutputTokens = 16384
+            Temperature = 0.2
+            ThinkingMode = "enabled"
         },
         @{
             ID = "route_cookies_video_standard"
