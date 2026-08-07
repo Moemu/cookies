@@ -19,14 +19,14 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 | 能力 | 已验证事实 | 当前含义 |
 | --- | --- | --- |
 | Delivery Insights consumer port | `internal/systems/delivery/insights_consumer.go` 已提供 `InsightsConsumer.Read(InsightsQuery)`、`DeliveryInsightsSnapshot`、对象父子关系、窗口、质量、来源和 evidence 校验 | 告警只消费版本化事实，不直接读取洞察仓储 |
-| Mock | `MockInsightsReader` 嵌入六类 fixture：usable、empty、stale、incomplete、schema mismatch、unavailable | 仍是当前唯一不依赖外部 Connector 的默认来源 |
-| Replay | `ReplayInsightsReader` 按 Organization + Project 校验范围，并将来源标记为 `replay` | 可重放脱敏快照；不代表实时平台数据 |
-| Simulation bridge | `SimulationInsightsReader` 将同一 Execution/SimulationRun 的指标窗口归一化为消费端口事实 | 现有 mock 效果模拟可复用，规则不读取原始指标表 |
+| Mock | `MockInsightsReader` 嵌入六类 fixture：usable、empty、stale、incomplete、schema mismatch、unavailable | 仅在 `Service.Insights` 未注入且没有 Repository 时作为 fallback |
+| Replay | `ReplayInsightsReader` 按 Organization + Project 校验范围，并将来源标记为 `replay` | 显式构造/测试使用，可重放脱敏快照；不代表实时平台数据 |
+| Simulation bridge | `SimulationInsightsReader` 将同一 Execution/SimulationRun 的指标窗口归一化为消费端口事实 | 当前主程序启动时注入的单一 Consumer；规则不读取原始指标表 |
 | 质量门 | 只有 `quality=usable`、新鲜窗口、完整基础指标和合法对象层级才允许确定性告警/建议 | 空、滞后、不完整、schema 不匹配和不可用只产生观察提示 |
 | PR #38 | `feat(delivery): consume execution-scoped insights facts`，head `25fc8cf`，merge `f3ee8a9`，状态 `MERGED` | 已进入 `upstream/main`，不再是本地待合并需求 |
 | CI | `verify`、`migrations`、`Repository quality`、`Secret scan` 均为 `SUCCESS` | 以 `f3ee8a9` 作为本轮文档和模型审查基线 |
 
-因此，本地规划中的“消费需求、消费端口、mock/replay 待实现”应更新为：消费需求已发布并等待 Connector 正式输出；消费端口、mock 和 replay 已在 Delivery 完成；真实 Connector adapter 和真实数据影子分析仍未开始。
+因此，本地规划中的“消费需求、消费端口、mock/replay 待实现”应更新为：消费需求已发布并等待 Connector 正式输出；消费端口、mock、simulation bridge 和 replay 已在 Delivery 完成；当前运行时由启动装配选择单一 Consumer，请求级 source 路由是后续能力；真实 Connector adapter 和真实数据影子分析仍未开始。
 
 ## 3. 已验证事实
 
@@ -129,6 +129,8 @@ DeliveryPlanVersion (immutable, version + canonical_hash)
 
 机器契约版本为 `delivery-platform-configuration/v1`。`delivery-three-tier/v1` 是历史 mock 快照，不能通过改名或字段覆盖变成新模型。新模型在内存/文档契约中先实现，持久化字段和 API 迁移另行立项。
 
+Envelope 的 hash projection 是机器可执行的：`canonical_hash = SHA-256(RFC 8785 JCS(payload))`。`payload` 只包含平台业务字段、`source` 和 `platform`；`canonical_hash`、组织/Project/Plan 身份、版本号以及 `compilation_metadata`（evidence、条件、页面动作）都在 payload 外。机器契约中的 `hash_algorithm` 固定为 `RFC8785-JCS-SHA256(payload)`，因此不存在自引用，也不会因页面 evidence 或动作编译元数据变化而使业务审批 hash 失效。
+
 ### 9.2 字段归属
 
 | 目标字段 | 归属 | 条件/状态表达 |
@@ -137,12 +139,13 @@ DeliveryPlanVersion (immutable, version + canonical_hash)
 | `marketing_purpose`, `marketing_scenario`, `marketing_product_ref`, `application_ref`, `carrier` | 项目 | 按路径条件出现，未知值 `platform_pending` |
 | `optimization_target_ref`, `deep_optimization_mode`, `delivery_mode` | 项目 | `carrier → target → optional deep mode → compatible mode`；事件资产不足为 `blocked_by_event_asset` |
 | `targeting`, `schedule`, `budget_and_bidding`, `monitoring`, `project_name` | 项目 | 可见不等于必填；分别记录 `required_state`、`editable_state`、`enum_state` |
-| `parent_project_ref` | 单元 | 必须指向同一目标配置中的项目；不允许孤立单元 |
+| `project_draft_id` | 项目 | Delivery-owned 稳定内部草稿 ID；创建平台项目前也存在，不依赖 `platform_id` |
+| `parent_project_draft_id` | 单元 | 必须等于同一 payload 中 `platform_project.project_draft_id`；这是项目—单元唯一父关系，不用未提交的 `platform_id` |
 | `delivery_identity` | 单元 | `account_info` 或已授权 `douyin_account` 二选一；授权动作不属于 Delivery |
 | `base_material_refs`, `copy_items`, `native_anchor_ref`, `landing_page_ref`, `direct_link_ref`, `product_information`, `creative_components`, `promotion_settings`, `promotion_name` | 单元 | 引用/内嵌配置分开；敏感链接只保存受控引用或密文句柄 |
 | `evidence_states`, `condition`, `action_boundaries` | 编译元数据 | 不下发为平台业务实体；任何未知分支保持 `platform_pending` 或 `write_validation_pending` |
 
-条件字段使用可组合表达而不是隐式 Go `if`：`all`、`any`、`not`、`equals`、`in`、`exists`、`reference_state_is`。表达式结果必须带 evidence、状态和 repair/blocked reason。
+条件字段使用机器契约中的可组合表达而不是隐式 Go `if`：`all`、`any`、`not`、`equals`、`exists`、`reference_state_is`。表达式结果必须带 evidence、状态和 repair/blocked reason；这些内容位于 `compilation_metadata`，不进入 `payload` hash projection。
 
 ### 9.3 稳定外部引用规则
 
@@ -162,7 +165,7 @@ namespace + object_kind + scope(account/project) + external_id
 - 投放身份：`account_info` 为账户上下文引用；`douyin_account` 必须引用已授权身份版本，不创建授权记录。
 - 策略来源：内部 Strategy/Task 的 `task_id + version + content_hash + route`；Delivery 保存来源快照引用，不复制策略实体。
 
-没有稳定 ID 时只能使用 `unresolved`/`blocked` 引用；显示名快照用于审计和 UI，不得作为稳定主键。引用状态、来源版本和 hash 参与新模型 canonical payload；审计人、创建时间和显示文案不参与。
+没有稳定 ID 时只能使用 `unresolved`/`blocked` 引用；显示名快照用于审计和 UI，不得作为稳定主键。引用状态、来源版本和 hash 参与新模型 canonical payload；审计人、创建时间、页面 evidence、条件和动作元数据不参与。新契约自包含 `StableReference` 定义，不再复用旧 `PlatformReference`。
 
 ## 10. ThreeTier 迁移边界
 

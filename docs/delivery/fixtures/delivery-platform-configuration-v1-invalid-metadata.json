@@ -1,0 +1,4 @@
+{
+  "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "mutations": [{ "path": "payload.platform_project.evidence_states", "value": ["observed"] }]
+}

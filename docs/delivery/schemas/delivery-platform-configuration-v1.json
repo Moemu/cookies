@@ -1,43 +1,207 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "delivery-platform-configuration/v1",
-  "title": "Delivery platform configuration contract v1",
-  "description": "Delivery-owned, immutable target configuration. It is a readonly/compile contract and does not authorize platform writes.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "organization_id",
-    "project_id",
-    "plan_id",
-    "version_number",
-    "canonical_hash",
-    "platform_project",
-    "platform_promotions"
-  ],
-  "properties": {
-    "schema_version": { "const": "delivery-platform-configuration/v1" },
-    "organization_id": { "type": "string", "minLength": 1 },
-    "project_id": { "type": "string", "minLength": 1 },
-    "plan_id": { "type": "string", "minLength": 1 },
-    "version_number": { "type": "integer", "minimum": 1 },
-    "canonical_hash": {
-      "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
+  "$id": "https://schemas.cookies.local/delivery-platform-configuration/v1",
+  "title": "Delivery platform configuration envelope v1",
+  "description": "Delivery-owned immutable target configuration. canonical_hash is SHA-256 over RFC 8785 JCS(payload) only; compilation metadata is outside the hash projection.",
+  "$ref": "#/$defs/DeliveryPlatformConfigurationEnvelope",
+  "$defs": {
+    "StableReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "object_kind", "scope", "external_id", "reference_state"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "object_kind": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "minLength": 1 },
+        "external_id": { "type": ["string", "null"] },
+        "source_version": { "type": ["string", "null"] },
+        "content_hash": { "type": ["string", "null"] },
+        "display_name_snapshot": { "type": ["string", "null"] },
+        "evidence_version": { "type": ["string", "null"] },
+        "reference_state": {
+          "type": "string",
+          "enum": ["resolved", "unresolved", "blocked", "redacted"]
+        }
+      }
     },
-    "source": {
-      "type": "string",
-      "enum": ["readonly", "mock", "replay"]
+    "Condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": { "all": { "type": "array", "items": { "$ref": "#/$defs/Condition" } } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": { "any": { "type": "array", "items": { "$ref": "#/$defs/Condition" } } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not"],
+          "properties": { "not": { "$ref": "#/$defs/Condition" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "equals"],
+          "properties": {
+            "field": { "type": "string", "minLength": 1 },
+            "equals": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "exists"],
+          "properties": {
+            "field": { "type": "string", "minLength": 1 },
+            "exists": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "reference_state_is"],
+          "properties": {
+            "field": { "type": "string", "minLength": 1 },
+            "reference_state_is": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
     },
-    "platform_project": { "$ref": "oceanengine-bidding-schema-v0.1.json#/$defs/PlatformProjectDraft" },
-    "platform_promotions": {
-      "type": "array",
-      "items": { "$ref": "oceanengine-bidding-schema-v0.1.json#/$defs/PlatformPromotionDraft" }
+    "DeliveryIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "account_info" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "authorized_identity_ref"],
+          "properties": {
+            "mode": { "const": "douyin_account" },
+            "authorized_identity_ref": { "$ref": "#/$defs/StableReference" }
+          }
+        }
+      ]
     },
-    "evidence_refs": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
+    "PlatformProjectDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draft_schema_version",
+        "project_draft_id",
+        "account_ref",
+        "marketing_purpose",
+        "marketing_scenario",
+        "carrier",
+        "targeting",
+        "schedule",
+        "budget_and_bidding",
+        "project_name"
+      ],
+      "properties": {
+        "draft_schema_version": { "const": "delivery-platform-configuration/v1" },
+        "project_draft_id": { "type": "string", "minLength": 1 },
+        "account_ref": { "$ref": "#/$defs/StableReference" },
+        "marketing_purpose": { "type": "string", "minLength": 1 },
+        "marketing_scenario": { "type": "string", "minLength": 1 },
+        "marketing_product_ref": { "oneOf": [{ "$ref": "#/$defs/StableReference" }, { "type": "null" }] },
+        "application_ref": { "oneOf": [{ "$ref": "#/$defs/StableReference" }, { "type": "null" }] },
+        "carrier": { "type": "string", "minLength": 1 },
+        "optimization_target_ref": { "oneOf": [{ "$ref": "#/$defs/StableReference" }, { "type": "null" }] },
+        "deep_optimization_mode": { "type": ["string", "null"] },
+        "delivery_mode": { "type": ["string", "null"] },
+        "targeting": { "type": "object" },
+        "schedule": { "type": "object" },
+        "budget_and_bidding": { "type": "object" },
+        "monitoring": { "type": "object" },
+        "project_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "PlatformPromotionDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draft_schema_version",
+        "promotion_draft_id",
+        "parent_project_draft_id",
+        "delivery_identity",
+        "base_material_refs",
+        "copy_items",
+        "promotion_name"
+      ],
+      "properties": {
+        "draft_schema_version": { "const": "delivery-platform-configuration/v1" },
+        "promotion_draft_id": { "type": "string", "minLength": 1 },
+        "parent_project_draft_id": { "type": "string", "minLength": 1 },
+        "delivery_identity": { "$ref": "#/$defs/DeliveryIdentity" },
+        "base_material_refs": { "type": "array", "items": { "$ref": "#/$defs/StableReference" } },
+        "copy_items": { "type": "array", "items": { "type": "object" } },
+        "native_anchor_ref": { "oneOf": [{ "$ref": "#/$defs/StableReference" }, { "type": "null" }] },
+        "landing_page_ref": { "oneOf": [{ "$ref": "#/$defs/StableReference" }, { "type": "null" }] },
+        "direct_link_ref": { "oneOf": [{ "$ref": "#/$defs/StableReference" }, { "type": "null" }] },
+        "product_information": { "type": "object" },
+        "creative_components": { "type": "array", "items": { "type": "object" } },
+        "promotion_settings": { "type": "object" },
+        "promotion_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "DeliveryPlatformConfigurationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payload_schema_version", "source", "platform", "platform_project", "platform_promotions"],
+      "properties": {
+        "payload_schema_version": { "const": "delivery-platform-configuration/v1" },
+        "source": { "type": "string", "enum": ["readonly", "mock", "replay"] },
+        "platform": { "type": "string", "minLength": 1 },
+        "platform_project": { "$ref": "#/$defs/PlatformProjectDraft" },
+        "platform_promotions": { "type": "array", "items": { "$ref": "#/$defs/PlatformPromotionDraft" } }
+      }
+    },
+    "CompilationMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_states", "conditions", "action_boundaries"],
+      "properties": {
+        "evidence_states": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "conditions": { "type": "array", "items": { "$ref": "#/$defs/Condition" } },
+        "action_boundaries": { "type": "array", "items": { "type": "object" } },
+        "evidence_refs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "DeliveryPlatformConfigurationEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "organization_id",
+        "project_id",
+        "plan_id",
+        "version_number",
+        "hash_algorithm",
+        "canonical_hash",
+        "payload",
+        "compilation_metadata"
+      ],
+      "properties": {
+        "schema_version": { "const": "delivery-platform-configuration/v1" },
+        "organization_id": { "type": "string", "minLength": 1 },
+        "project_id": { "type": "string", "minLength": 1 },
+        "plan_id": { "type": "string", "minLength": 1 },
+        "version_number": { "type": "integer", "minimum": 1 },
+        "hash_algorithm": { "const": "RFC8785-JCS-SHA256(payload)" },
+        "canonical_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "payload": { "$ref": "#/$defs/DeliveryPlatformConfigurationPayload" },
+        "compilation_metadata": { "$ref": "#/$defs/CompilationMetadata" }
+      }
     }
   }
 }

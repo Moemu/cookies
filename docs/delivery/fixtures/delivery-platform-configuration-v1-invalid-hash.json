@@ -1,0 +1,4 @@
+{
+  "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "mutations": [{ "path": "canonical_hash", "value": "not-a-sha256" }]
+}

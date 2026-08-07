@@ -25,11 +25,11 @@ Delivery 已适配一个只读的 `InsightsConsumer` 消费端口（旧规划中
 - `ReplayInsightsReader`：按 Organization + Project 校验范围并回放不可变快照；
 - `SimulationInsightsReader`：把同一 Execution/SimulationRun 的指标窗口归一化为消费端口事实；
 - `InsightsConnectorReader`：尚未实现，仅在数据洞察 Owner 发布稳定接口、样例与消费者契约测试后接入；
-- 运行时按每个请求/快照的 `source` 选择，不设全局“真/假”开关，也不静默以 mock 覆盖数据质量故障。
+- 当前运行时不是请求级 source 路由：`Service.Insights` 是启动时注入的单一 `InsightsConsumer`。主程序当前固定注入 `SimulationInsightsReader`；若未注入 Consumer 且存在 Repository，Service fallback 到 Simulation；只有没有 Repository 时才 fallback 到 `MockInsightsReader`。`ReplayInsightsReader` 主要通过显式构造/测试使用。`InsightsQuery` 当前没有 `source` 字段，快照/指标的 `source` 是输出事实元数据；请求级 source 路由列为后续能力，不设全局“真/假”开关，也不静默以 mock 覆盖数据质量故障。
 
 该端口是投放模块内部的消费适配层，不是对洞察表、仓储或凭据的直接访问。PR #38（`25fc8cf`，合并提交 `f3ee8a9`）已进入 `upstream/main`，其 `verify`、`migrations`、`Repository quality`、`Secret scan` 均通过。
 
-当前状态因此明确为：Delivery 端口和 mock/replay 已完成；Connector 端实现、真实数据读取和影子分析尚未开始。没有 Connector 时继续使用 mock/replay 是显式来源选择，不是静默降级。
+当前状态因此明确为：Delivery 端口、Simulation bridge、mock/replay reader 已完成；主程序默认走 Simulation bridge；Connector 端实现、真实数据读取和影子分析尚未开始。没有 Connector 时使用 Simulation/mock 是启动装配结果，不是请求级 source 选择或静默降级。
 
 ## 3. 交付给数据洞察 Owner 的最小需求
 
