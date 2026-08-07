@@ -356,7 +356,7 @@ type PlatformAdapter interface {
 **做什么**：在平台操作演练成功后生成可重复的上线后指标窗口，再把同一证据链上的异常转成待办。
 
 - succeeded Execution 自动创建两个 Project-scoped、同 execution_id 的指标窗口；`delivery_alerts` 的 fingerprint 是规则版本、受监控实体、窗口、dataset 版本和精确证据引用的稳定组合身份，同一身份评估时复用已有告警而不是重复创建
-- `POST /api/delivery/v1/projects/{project_id}/alerts:evaluate`：只读取已持久化指标，不再制造独立快照；返回 items、created/reused count、scenario、评估时间及 `source=post_launch_simulator` / `is_simulated=true`
+- `POST /api/delivery/v1/projects/{project_id}/alerts:evaluate`：先通过 Delivery-owned `InsightsConsumer` 读取版本化对象/指标事实，再由统一告警规则计算；当前 `SimulationInsightsReader` 只负责把 OutcomeSimulation 窗口归一化为同一 `DeliveryMetricFact` 输入。仅 `quality=usable` 允许确定性告警；响应同时返回 `insights_source`、`insights_quality`、fixture 版本和 evidence，保留 `source=post_launch_simulator` / `is_simulated=true` 的历史兼容字段
 - `GET /api/delivery/v1/projects/{project_id}/alerts`：支持 `status`、`type`、`severity`、`fixture`、`limit` 与 opaque `cursor`；响应包含 `next_cursor`
 - `PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}`：请求为 `{action: acknowledge|dismiss, expected_version}`；仅允许 `open → acknowledged|dismissed`，过期版本返回 `409 VERSION_CONFLICT`
 - 四类告警：`review_rejected`（审核拒绝）、`spend_spike`（消耗突增）、`zero_conversion`（零转化）、`cost_worsening`（成本恶化）

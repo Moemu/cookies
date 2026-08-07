@@ -967,6 +967,11 @@ export type DeliveryAlertEvaluation = {
   isSimulated: true
   scenario: DeliveryAlertFixture
   evaluatedAt: string
+  insightsSource?: 'mock' | 'replay' | 'connector'
+  insightsQuality?: 'usable' | 'empty' | 'stale' | 'incomplete' | 'schema_mismatch' | 'unavailable'
+  insightsQualityReason?: string
+  insightsFixtureVersion?: string
+  insightsEvidenceRefs?: string[]
 }
 
 type WireDeliveryAlert = {
@@ -1007,6 +1012,11 @@ type WireDeliveryAlertEvaluation = {
   is_simulated: true
   scenario: DeliveryAlertFixture
   evaluated_at: string
+  insights_source?: 'mock' | 'replay' | 'connector'
+  insights_quality?: DeliveryAlertEvaluation['insightsQuality']
+  insights_quality_reason?: string
+  insights_fixture_version?: string
+  insights_evidence_refs?: string[]
 }
 
 export const deliveryAlertApi = {
@@ -1062,6 +1072,11 @@ function toDeliveryAlertEvaluation(value: WireDeliveryAlertEvaluation): Delivery
     isSimulated: value.is_simulated,
     scenario: value.scenario,
     evaluatedAt: value.evaluated_at,
+    insightsSource: value.insights_source,
+    insightsQuality: value.insights_quality,
+    insightsQualityReason: value.insights_quality_reason,
+    insightsFixtureVersion: value.insights_fixture_version,
+    insightsEvidenceRefs: value.insights_evidence_refs,
   }
 }
 

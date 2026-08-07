@@ -1,0 +1,12 @@
+{
+  "fixture_version": "delivery-insights/v1/empty",
+  "schema_version": "delivery-insights/v1",
+  "source": "mock",
+  "quality": "empty",
+  "quality_reason": "schema was observed but no fact rows were returned",
+  "observed_at": "2026-08-02T00:05:00Z",
+  "data_through": "2026-08-02T00:00:00Z",
+  "objects": [],
+  "metrics": [],
+  "evidence_refs": ["fixture://delivery-insights/empty/schema-only"]
+}
