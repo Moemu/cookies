@@ -2,11 +2,11 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 只读走查已完成；可进入业务 Schema 校准，并等待数据洞察 Connector Owner 确认消费契约 |
+| 状态 | 只读走查与业务 Schema 校准已收口；`oceanengine-bidding-schema/v0.1` 冻结；真实指标影子分析仍等待 Connector 正式消费契约 |
 | 观察日期 | 2026-08-06（Asia/Shanghai） |
 | 账户范围 | 专用竞价投放账户，受 Git 管理文档仅保留尾号 `6391` |
 | 证据形式 | 结构化脱敏摘要；原始页面会话和 4 份空 XLSX 保留在本地，不进入 Git |
-| 关联 | [智能投放架构](./architecture-and-implementation.md)、[Connector 消费需求](./insights-connector-consumer-requirements.md) |
+| 关联 | [智能投放架构](./architecture-and-implementation.md)、[Connector 消费需求](./insights-connector-consumer-requirements.md)、[收口与配置契约](./read-only-calibration-closeout.md) |
 
 ## 1. 边界和结论
 
@@ -15,6 +15,8 @@
 本次走查已取得以下连续证据链：
 
 `投放账户 → 项目列表/项目表单 → 单元列表/单元表单 → 数据中心 → 账户/项目/单元/基础素材报表`
+
+本摘要的收口结论见[只读校准收口与 Delivery 配置契约](./read-only-calibration-closeout.md)：消费端口、mock/replay 和历史兼容边界已按 `upstream/main` 的 PR #38 实现更新；Connector 仍是真实数据影子分析的外部依赖，不是 Delivery 模型实现的前置阻塞。
 
 巨量当前页面的稳定业务骨架应表达为：
 

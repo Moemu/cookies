@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delivery-platform-configuration/v1",
+  "title": "Delivery platform configuration contract v1",
+  "description": "Delivery-owned, immutable target configuration. It is a readonly/compile contract and does not authorize platform writes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "organization_id",
+    "project_id",
+    "plan_id",
+    "version_number",
+    "canonical_hash",
+    "platform_project",
+    "platform_promotions"
+  ],
+  "properties": {
+    "schema_version": { "const": "delivery-platform-configuration/v1" },
+    "organization_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "version_number": { "type": "integer", "minimum": 1 },
+    "canonical_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["readonly", "mock", "replay"]
+    },
+    "platform_project": { "$ref": "oceanengine-bidding-schema-v0.1.json#/$defs/PlatformProjectDraft" },
+    "platform_promotions": {
+      "type": "array",
+      "items": { "$ref": "oceanengine-bidding-schema-v0.1.json#/$defs/PlatformPromotionDraft" }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  }
+}
