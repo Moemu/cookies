@@ -1,5 +1,7 @@
 import type { ApiCreativeDirectionBatch, ApiCreativeTaskSummary } from '../../data/api'
 
+export const channelNeutralBrandDirectionPromptVersion = 'creative-direction/strategy-handoff-v4'
+
 export function brandDirectionFailureMessage(code?: string) {
   switch (code) {
     case 'DIRECTION_PROVIDER_FAILED':
@@ -20,6 +22,10 @@ export function availableBrandDirections(batch: ApiCreativeDirectionBatch) {
   const candidates = batch.candidates ?? []
   const confirmed = candidates.find(direction => direction.status === 'confirmed')
   return confirmed ? [confirmed] : candidates.filter(direction => direction.status === 'candidate')
+}
+
+export function isChannelNeutralBrandDirectionBatch(batch: ApiCreativeDirectionBatch) {
+  return batch.prompt_version === channelNeutralBrandDirectionPromptVersion
 }
 
 export function isBrandDirectionGenerating(batch: ApiCreativeDirectionBatch | null) {

@@ -394,6 +394,16 @@ paths:
       responses:
         '200': {description: Versioned Phase 0-2 brand-film workspace.}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:initialize-from-strategy:
+    post:
+      operationId: initializeStrategyBrandFilmWorkspace
+      summary: Idempotently upgrade a pre-workspace Strategy brand task using its confirmed Brief and direction lineage.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+      responses:
+        '200': {description: Existing or newly initialized Strategy brand-film workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:analyze-brief:
     post:
       operationId: analyzeBrandFilmBrief
@@ -931,6 +941,76 @@ paths:
         '200': {description: Frozen CreativeIntake snapshot.}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/brand-brief:prepare:
+    post:
+      operationId: prepareCreativeBrandBrief
+      summary: Idempotently project a frozen brand-video CreativeIntake into a Creative-owned Brief review.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200':
+          description: Existing or newly prepared Brand Brief review.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/brand-brief:
+    get:
+      operationId: getCreativeBrandBrief
+      summary: Restore the persisted Brand Brief review for one frozen CreativeIntake.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200':
+          description: Persisted Brand Brief review.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateCreativeBrandBrief
+      summary: Update Creative-owned interpretation fields while preserving frozen Strategy facts and lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, document]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                document: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json#/$defs/document'}
+      responses:
+        '200':
+          description: Updated draft and recalculated readiness.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/brand-brief:confirm:
+    post:
+      operationId: confirmCreativeBrandBrief
+      summary: Confirm a complete Brand Brief and freeze the exact revision/hash used by direction generation.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Confirmed Brand Brief review.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches:
     post:
       operationId: generateCreativeDirectionCandidates
@@ -939,7 +1019,8 @@ paths:
         This is the first LLM-authored creative step. The endpoint persists a
         generating batch and enqueues background work before returning, so the
         status can be restored after navigation or refresh. Strategy facts and
-        guardrails are immutable inputs; provider failures are persisted and
+        guardrails are immutable inputs. Brand-video routes additionally require
+        a confirmed Brand Brief revision/hash; provider failures are persisted and
         never replaced with a fabricated fallback concept.
       parameters:
         - {$ref: '#/components/parameters/ProjectID'}

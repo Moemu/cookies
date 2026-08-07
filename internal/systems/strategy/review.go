@@ -316,6 +316,9 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return PackageVersion{}, false, err
 	}
+	if problems := s.projectBriefCompatibilityProblems(ctx, actor, draft.ProjectID, brief.Snapshot); len(problems) > 0 {
+		return PackageVersion{}, false, StrategyPublishBlockedError{Problems: problems}
+	}
 	var compliancePassed bool
 	var complianceHash contract.ContentHash
 	err = tx.QueryRowContext(ctx, `SELECT passed, candidate_content_hash

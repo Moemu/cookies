@@ -24,6 +24,8 @@ type CreativePlanningContext struct {
 	Claims            []json.RawMessage        `json:"claims"`
 	Assets            []json.RawMessage        `json:"assets"`
 	Hypotheses        []json.RawMessage        `json:"hypotheses"`
+	BrandBrief        *BrandBriefDocument      `json:"brand_brief,omitempty"`
+	BrandBriefRef     *BrandBriefReference     `json:"brand_brief_ref,omitempty"`
 	TaskRefinements   *CreativeTaskRefinements `json:"task_refinements,omitempty"`
 }
 
@@ -77,6 +79,7 @@ type CreativeDirectionVersion struct {
 	BatchID           string                  `json:"batch_id"`
 	IntakeID          string                  `json:"intake_id"`
 	InputIdentityHash string                  `json:"input_identity_hash"`
+	BrandBriefRef     *BrandBriefReference    `json:"brand_brief_ref,omitempty"`
 	RouteID           string                  `json:"route_id"`
 	Concept           string                  `json:"concept"`
 	CreativeRationale string                  `json:"creative_rationale"`
@@ -103,6 +106,7 @@ type CreativeDirectionBatch struct {
 	ProjectID         contract.ProjectID           `json:"project_id"`
 	IntakeID          string                       `json:"intake_id"`
 	InputIdentityHash string                       `json:"input_identity_hash"`
+	BrandBriefRef     *BrandBriefReference         `json:"brand_brief_ref,omitempty"`
 	Status            CreativeDirectionBatchStatus `json:"status"`
 	Candidates        []CreativeDirectionVersion   `json:"candidates"`
 	Model             string                       `json:"model"`
@@ -193,6 +197,7 @@ type preparedDirectionPlanning struct {
 	Project         contract.ProjectContext
 	Intake          CreativeIntake
 	Route           CreativeRouteSnapshot
+	BrandBriefRef   *BrandBriefReference
 	PlanningContext CreativePlanningContext
 	CandidateCount  int
 }
@@ -229,7 +234,24 @@ func (s Service) prepareDirectionPlanning(
 	if request.CandidateCount < 2 || request.CandidateCount > 4 {
 		return preparedDirectionPlanning{}, fmt.Errorf("candidate_count must be between 2 and 4")
 	}
-	planningContext, err := planningContextFromIntake(intake, route)
+	var brandBriefRef *BrandBriefReference
+	var planningContext CreativePlanningContext
+	if route.RouteType == CreativeRouteBrandVideo {
+		if s.BrandBriefs == nil {
+			return preparedDirectionPlanning{}, fmt.Errorf("brand Brief confirmation is unavailable")
+		}
+		review, reviewErr := s.BrandBriefs.GetBrandBrief(ctx, actor.OrganizationID, projectID, intakeID)
+		if reviewErr != nil {
+			return preparedDirectionPlanning{}, fmt.Errorf("confirm the brand Brief before generating directions: %w", reviewErr)
+		}
+		if review.Status != BrandBriefConfirmed || review.InputIdentityHash != intake.InputIdentityHash {
+			return preparedDirectionPlanning{}, fmt.Errorf("confirm the current brand Brief before generating directions")
+		}
+		brandBriefRef = &BrandBriefReference{Revision: review.Revision, ContentHash: review.ContentHash}
+		planningContext, err = planningContextFromBrandBrief(intake, route, review)
+	} else {
+		planningContext, err = planningContextFromIntake(intake, route)
+	}
 	if err != nil {
 		return preparedDirectionPlanning{}, err
 	}
@@ -243,7 +265,7 @@ func (s Service) prepareDirectionPlanning(
 			OpenQuestions:      append([]string{}, overlay.OpenQuestions...),
 		}
 	}
-	return preparedDirectionPlanning{Project: project, Intake: intake, Route: route, PlanningContext: planningContext, CandidateCount: request.CandidateCount}, nil
+	return preparedDirectionPlanning{Project: project, Intake: intake, Route: route, BrandBriefRef: brandBriefRef, PlanningContext: planningContext, CandidateCount: request.CandidateCount}, nil
 }
 
 func (s Service) planDirectionBatch(
@@ -284,7 +306,7 @@ func (s Service) planDirectionBatch(
 		value := CreativeDirectionVersion{
 			ContractVersion: CreativeDirectionVersionV1, ID: directionID,
 			OrganizationID: actor.OrganizationID, ProjectID: prepared.Project.ProjectID, BatchID: batchID,
-			IntakeID: prepared.Intake.ID, InputIdentityHash: prepared.Intake.InputIdentityHash, RouteID: prepared.Route.RouteID,
+			IntakeID: prepared.Intake.ID, InputIdentityHash: prepared.Intake.InputIdentityHash, BrandBriefRef: prepared.BrandBriefRef, RouteID: prepared.Route.RouteID,
 			Concept: candidate.Concept, CreativeRationale: candidate.CreativeRationale,
 			MessagePlan:      append([]string{}, candidate.MessagePlan...),
 			ExecutionOutline: append([]string{}, candidate.ExecutionOutline...),
@@ -307,7 +329,7 @@ func (s Service) planDirectionBatch(
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1, ID: batchID,
 		OrganizationID: actor.OrganizationID, ProjectID: prepared.Project.ProjectID, IntakeID: prepared.Intake.ID,
-		InputIdentityHash: prepared.Intake.InputIdentityHash, Status: DirectionBatchReady, Candidates: directions,
+		InputIdentityHash: prepared.Intake.InputIdentityHash, BrandBriefRef: prepared.BrandBriefRef, Status: DirectionBatchReady, Candidates: directions,
 		Model: result.Model, PromptVersion: result.PromptVersion,
 		CreatedBy: actor.Principal.ID, CreatedAt: createdAt,
 	}
@@ -343,6 +365,9 @@ func validateDirectionBatchQuality(planningContext CreativePlanningContext, cand
 		if phrase := firstBrandPerformanceCue(candidate); phrase != "" {
 			return fmt.Errorf("brand-video direction contains performance CTA or unsupported production spec: %s", phrase)
 		}
+		if phrase := firstBrandChannelCue(candidate); phrase != "" {
+			return fmt.Errorf("brand-video master direction contains channel-specific language: %s", phrase)
+		}
 		if mode == "utility" || utilityLed {
 			utilityCount++
 		} else {
@@ -353,6 +378,29 @@ func validateDirectionBatchQuality(planningContext CreativePlanningContext, cand
 		return fmt.Errorf("brand-video batch must contain at least two emotional or cinematic directions and at most one utility-led direction")
 	}
 	return nil
+}
+
+func firstBrandChannelCue(candidate DirectionCandidate) string {
+	text := strings.ToLower(strings.Join(append(
+		[]string{
+			candidate.Concept,
+			candidate.CreativeRationale,
+			candidate.VisualGrammar,
+			candidate.HumanMoment,
+			candidate.EmotionalArc,
+			candidate.BrandMemoryDevice,
+		},
+		append(candidate.MessagePlan, candidate.ExecutionOutline...)...,
+	), "\n"))
+	for _, phrase := range []string{
+		"小红书", "抖音", "快手", "xiaohongshu", "douyin", "kuaishou",
+		"平台用户习惯", "平台观看习惯", "平台投放节奏", "渠道原生",
+	} {
+		if strings.Contains(text, phrase) {
+			return phrase
+		}
+	}
+	return ""
 }
 
 func firstBrandPerformanceCue(candidate DirectionCandidate) string {
@@ -571,4 +619,60 @@ func planningContextFromIntake(
 		Guardrails:       handoff.CreativeView.Guardrails, Claims: handoff.CreativeView.Claims,
 		Assets: handoff.CreativeView.Assets, Hypotheses: handoff.CreativeView.Hypotheses,
 	}, nil
+}
+
+func planningContextFromBrandBrief(
+	intake CreativeIntake,
+	route CreativeRouteSnapshot,
+	review BrandBriefReview,
+) (CreativePlanningContext, error) {
+	if review.Status != BrandBriefConfirmed || review.InputIdentityHash != intake.InputIdentityHash ||
+		review.ContentHash == "" || review.Revision < 1 {
+		return CreativePlanningContext{}, fmt.Errorf("a confirmed current brand Brief is required")
+	}
+	objective, err := json.Marshal(review.Document.Objective)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief objective: %w", err)
+	}
+	audiences, err := marshalBrandBriefItems(review.Document.AudienceSegments)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief audience: %w", err)
+	}
+	messages, err := marshalBrandBriefItems(review.Document.Communication.MessageHierarchy)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief message hierarchy: %w", err)
+	}
+	guardrails, err := marshalBrandBriefItems(review.Document.Guardrails)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief guardrails: %w", err)
+	}
+	claims, err := marshalBrandBriefItems(review.Document.Claims)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief claims: %w", err)
+	}
+	assets, err := marshalBrandBriefItems(review.Document.Assets)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief assets: %w", err)
+	}
+	document := review.Document
+	return CreativePlanningContext{
+		ContractVersion: CreativePlanningContextV1, InputIdentityHash: intake.InputIdentityHash,
+		SelectedRoute: route, Objective: objective, Audience: audiences,
+		Proposition: document.Communication.SingleMindedProposition, MessageHierarchy: messages,
+		Guardrails: guardrails, Claims: claims, Assets: assets, Hypotheses: []json.RawMessage{},
+		BrandBrief:    &document,
+		BrandBriefRef: &BrandBriefReference{Revision: review.Revision, ContentHash: review.ContentHash},
+	}, nil
+}
+
+func marshalBrandBriefItems[T any](values []T) ([]json.RawMessage, error) {
+	result := make([]json.RawMessage, 0, len(values))
+	for _, value := range values {
+		payload, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, payload)
+	}
+	return result, nil
 }

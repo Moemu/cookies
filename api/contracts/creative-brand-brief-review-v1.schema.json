@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-brand-brief-review-v1.schema.json",
+  "title": "creative-brand-brief-review/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "organization_id", "project_id", "intake_id", "input_identity_hash", "status", "revision", "document", "blockers", "warnings", "content_hash", "created_by", "created_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "creative-brand-brief-review/v1"},
+    "organization_id": {"$ref": "#/$defs/text"},
+    "project_id": {"$ref": "#/$defs/text"},
+    "intake_id": {"$ref": "#/$defs/text"},
+    "input_identity_hash": {"$ref": "#/$defs/hash"},
+    "status": {"enum": ["draft", "confirmed"]},
+    "revision": {"type": "integer", "minimum": 1},
+    "document": {"$ref": "#/$defs/document"},
+    "blockers": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+    "content_hash": {"$ref": "#/$defs/hash"},
+    "confirmed_by": {"$ref": "#/$defs/text"},
+    "confirmed_at": {"type": "string", "format": "date-time"},
+    "created_by": {"$ref": "#/$defs/text"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stringList": {"type": "array", "items": {"type": "string"}},
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "market", "language", "objective", "audience_segments", "product", "communication", "guardrails", "claims", "assets", "route", "audio_intent", "open_questions", "source_refs", "creative_notes"],
+      "properties": {
+        "summary": {"type": "string"},
+        "market": {"type": "string"},
+        "language": {"type": "string"},
+        "objective": {"type": "object", "additionalProperties": false, "required": ["objective_type", "statement", "success_signals"], "properties": {"objective_type": {"type": "string"}, "statement": {"type": "string"}, "success_signals": {"$ref": "#/$defs/stringList"}}},
+        "audience_segments": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["segment_id", "label", "priority", "insight", "tension", "evidence_ref_ids"], "properties": {"segment_id": {"type": "string"}, "label": {"type": "string"}, "priority": {"type": "integer"}, "insight": {"type": "string"}, "tension": {"type": "string"}, "evidence_ref_ids": {"$ref": "#/$defs/stringList"}}}},
+        "product": {"type": "object", "additionalProperties": false, "required": ["product_ref_ids", "brand_name", "product_name", "selling_points", "proof_points", "usage_scenarios", "campaign_mechanism", "offer_text", "landing_destination"], "properties": {"product_ref_ids": {"$ref": "#/$defs/stringList"}, "brand_name": {"type": "string"}, "product_name": {"type": "string"}, "selling_points": {"$ref": "#/$defs/stringList"}, "proof_points": {"$ref": "#/$defs/stringList"}, "usage_scenarios": {"$ref": "#/$defs/stringList"}, "campaign_mechanism": {"type": "string"}, "offer_text": {"type": "string"}, "landing_destination": {"type": "string"}}},
+        "communication": {"type": "object", "additionalProperties": false, "required": ["single_minded_proposition", "message_hierarchy", "cta_intent", "approved_ctas", "tone_constraints"], "properties": {"single_minded_proposition": {"type": "string"}, "message_hierarchy": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["priority", "message", "evidence_ref_ids"], "properties": {"priority": {"type": "integer"}, "message": {"type": "string"}, "evidence_ref_ids": {"$ref": "#/$defs/stringList"}}}}, "cta_intent": {"type": "string"}, "approved_ctas": {"$ref": "#/$defs/stringList"}, "tone_constraints": {"$ref": "#/$defs/stringList"}}},
+        "guardrails": {"type": "array", "items": {"type": "object"}},
+        "claims": {"type": "array", "items": {"type": "object"}},
+        "assets": {"type": "array", "items": {"type": "object"}},
+        "route": {"type": "object"},
+        "audio_intent": {"type": "object", "additionalProperties": false, "required": ["narration_required", "voice_direction", "overall_mood", "music_required", "sound_effects_required"], "properties": {"narration_required": {"type": ["boolean", "null"]}, "voice_direction": {"type": "string"}, "overall_mood": {"type": "string"}, "music_required": {"type": ["boolean", "null"]}, "sound_effects_required": {"type": ["boolean", "null"]}}},
+        "open_questions": {"type": "array", "items": {"type": "object"}},
+        "source_refs": {"type": "array", "items": {"type": "object"}},
+        "creative_notes": {"$ref": "#/$defs/stringList"}
+      }
+    }
+  }
+}

@@ -59,6 +59,14 @@ func sanitizeConversationDecisionWithGrounding(
 
 	operations := make([]BriefPatchOperation, 0, len(decision.Patch.Operations))
 	for _, operation := range decision.Patch.Operations {
+		if operation.FieldPath == "product.candidates" {
+			grounded, ok := sanitizeGroundedProductCandidates(message.Content, grounding, operation.Value)
+			if operation.Confidence == "high" && ok {
+				operation.Value = grounded
+				operations = append(operations, operation)
+			}
+			continue
+		}
 		// Only explicit, high-confidence facts are written into the Brief.
 		// Lower-confidence inferences remain questions instead of becoming data.
 		// Attached document chunks are explicit evidence, but only when the
@@ -93,7 +101,66 @@ func sanitizeConversationDecisionWithGrounding(
 	return decision
 }
 
+func sanitizeGroundedProductCandidates(messageContent string, grounding []conversationGrounding, raw json.RawMessage) (json.RawMessage, bool) {
+	var candidates []BriefProductCandidate
+	if json.Unmarshal(raw, &candidates) != nil || len(candidates) == 0 || len(candidates) > 12 {
+		return nil, false
+	}
+	contents := []string{messageContent}
+	for _, source := range grounding {
+		if source.Source.Type != "research_artifact" {
+			contents = append(contents, source.Content)
+		}
+	}
+	isGrounded := func(value string) bool {
+		for _, content := range contents {
+			if conversationValueIsGrounded(content, value) {
+				return true
+			}
+		}
+		return false
+	}
+	filter := func(values []string) []string {
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			if isGrounded(value) {
+				result = appendUnique(result, strings.TrimSpace(value))
+			}
+		}
+		return result
+	}
+	result := make([]BriefProductCandidate, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate.Name = strings.TrimSpace(candidate.Name)
+		key := strings.ToLower(candidate.Name)
+		if candidate.Name == "" || !isGrounded(candidate.Name) {
+			continue
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		if !isGrounded(candidate.Category) {
+			candidate.Category = ""
+		}
+		candidate.SellingPoints = filter(candidate.SellingPoints)
+		candidate.Evidence = filter(candidate.Evidence)
+		candidate.MandatoryElements = filter(candidate.MandatoryElements)
+		candidate.ProhibitedClaims = filter(candidate.ProhibitedClaims)
+		candidate.SourceRefs = nil
+		result = append(result, candidate)
+	}
+	if len(result) == 0 {
+		return nil, false
+	}
+	return mustJSON(result), true
+}
+
 func conversationOperationHasGrounding(messageContent string, grounding []conversationGrounding, operation BriefPatchOperation) bool {
+	if operation.FieldPath == "product.candidates" {
+		return productCandidatesAreGrounded(messageContent, grounding, operation.Value)
+	}
 	if conversationOperationIsGrounded(messageContent, operation) {
 		return true
 	}
@@ -111,6 +178,19 @@ func conversationOperationHasGrounding(messageContent string, grounding []conver
 }
 
 func conversationOperationSource(message Message, grounding []conversationGrounding, operation BriefPatchOperation) FieldSource {
+	if operation.FieldPath == "product.candidates" {
+		var candidates []BriefProductCandidate
+		if json.Unmarshal(operation.Value, &candidates) == nil && len(candidates) > 0 {
+			if conversationValueIsGrounded(message.Content, candidates[0].Name) {
+				return FieldSource{Type: "conversation_message", ID: message.ID}
+			}
+			for _, source := range grounding {
+				if source.Source.Type != "research_artifact" && conversationValueIsGrounded(source.Content, candidates[0].Name) {
+					return source.Source
+				}
+			}
+		}
+	}
 	if conversationOperationIsGrounded(message.Content, operation) {
 		return FieldSource{Type: "conversation_message", ID: message.ID}
 	}
@@ -120,6 +200,75 @@ func conversationOperationSource(message Message, grounding []conversationGround
 		}
 	}
 	return FieldSource{Type: "conversation_message", ID: message.ID}
+}
+
+func productCandidatesAreGrounded(messageContent string, grounding []conversationGrounding, raw json.RawMessage) bool {
+	var candidates []BriefProductCandidate
+	if json.Unmarshal(raw, &candidates) != nil || len(candidates) == 0 || len(candidates) > 12 {
+		return false
+	}
+	contents := []string{messageContent}
+	for _, source := range grounding {
+		if source.Source.Type != "research_artifact" {
+			contents = append(contents, source.Content)
+		}
+	}
+	for _, candidate := range candidates {
+		values := []string{candidate.Name}
+		if strings.TrimSpace(candidate.Category) != "" {
+			values = append(values, candidate.Category)
+		}
+		values = append(values, candidate.SellingPoints...)
+		values = append(values, candidate.Evidence...)
+		values = append(values, candidate.MandatoryElements...)
+		values = append(values, candidate.ProhibitedClaims...)
+		for _, value := range values {
+			grounded := false
+			for _, content := range contents {
+				if conversationValueIsGrounded(content, value) {
+					grounded = true
+					break
+				}
+			}
+			if !grounded {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func enrichProductCandidateSources(message Message, grounding []conversationGrounding, raw json.RawMessage) json.RawMessage {
+	var candidates []BriefProductCandidate
+	if json.Unmarshal(raw, &candidates) != nil {
+		return raw
+	}
+	for index := range candidates {
+		candidate := &candidates[index]
+		values := append([]string{candidate.Name, candidate.Category}, candidate.SellingPoints...)
+		values = append(values, candidate.Evidence...)
+		values = append(values, candidate.MandatoryElements...)
+		values = append(values, candidate.ProhibitedClaims...)
+		if candidateValuesMatchContent(values, message.Content) {
+			candidate.SourceRefs = append(candidate.SourceRefs, FieldSource{Type: "conversation_message", ID: message.ID})
+		}
+		for _, source := range grounding {
+			if source.Source.Type != "research_artifact" && candidateValuesMatchContent(values, source.Content) {
+				candidate.SourceRefs = append(candidate.SourceRefs, source.Source)
+			}
+		}
+		candidate.SourceRefs = uniqueFieldSources(candidate.SourceRefs)
+	}
+	return mustJSON(candidates)
+}
+
+func candidateValuesMatchContent(values []string, content string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" && conversationValueIsGrounded(content, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func conversationOperationIsGrounded(content string, operation BriefPatchOperation) bool {
@@ -181,6 +330,7 @@ func conversationChannelsAreGrounded(content string, raw json.RawMessage) bool {
 }
 
 func conversationValueIsGrounded(content, value string) bool {
+	content = strings.ToLower(strings.TrimSpace(content))
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return false
@@ -392,10 +542,17 @@ func conversationDecisionOutputSchema() json.RawMessage {
 	fieldPaths := `["brand.name","product.name","product.category","product.selling_points","product.evidence","industry","region","language","campaign.objective","audience.primary","proposition","channels","budget.total","schedule.window","constraints","measurement.primary_kpi","reference_ids","creative.tone","creative.mandatory_elements","creative.prohibited_claims"]`
 	return json.RawMessage(fmt.Sprintf(`{
 		"type":"object","additionalProperties":false,
-		"required":["intent","assistant_reply","operations","confirm_fields","follow_up_questions","warnings"],
+		"required":["intent","assistant_reply","product_candidates","operations","confirm_fields","follow_up_questions","warnings"],
 		"properties":{
 			"intent":{"type":"string","enum":["greeting","provide_requirements","answer_question","correct_information","confirm_information","ask_question","off_topic"]},
 			"assistant_reply":{"type":"string","minLength":1,"maxLength":800},
+			"product_candidates":{"type":"array","maxItems":12,"items":{"type":"object","additionalProperties":false,
+				"required":["name","category","selling_points","evidence","mandatory_elements","prohibited_claims"],
+				"properties":{"name":{"type":"string","minLength":1,"maxLength":160},"category":{"type":"string","maxLength":160},
+				"selling_points":{"type":"array","maxItems":20,"items":{"type":"string","minLength":1,"maxLength":500}},
+				"evidence":{"type":"array","maxItems":20,"items":{"type":"string","minLength":1,"maxLength":500}},
+				"mandatory_elements":{"type":"array","maxItems":20,"items":{"type":"string","minLength":1,"maxLength":500}},
+				"prohibited_claims":{"type":"array","maxItems":20,"items":{"type":"string","minLength":1,"maxLength":500}}}}},
 			"operations":{"type":"array","maxItems":32,"items":{"type":"object",
 				"additionalProperties":false,"required":["op","field_path","value","confidence"],
 				"properties":{"op":{"type":"string","const":"set"},"field_path":{"type":"string","enum":%s},

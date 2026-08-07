@@ -18,7 +18,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
 		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
 		value.Strategy.PromptVersion != "strategy.generate.v4" ||
-		value.Strategy.ConversationPromptVersion != "strategy.conversation.v5" ||
+		value.Strategy.ConversationPromptVersion != "strategy.conversation.v6" ||
 		value.Strategy.RevisePromptVersion != "strategy.revise.v3" ||
 		value.Strategy.ReviewPromptVersion != "strategy.review.deep.v2" ||
 		value.Strategy.RepairPromptVersion != "strategy.repair.v2" ||

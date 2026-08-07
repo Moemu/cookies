@@ -2349,6 +2349,9 @@ func (s *creativeManagerStub) GetLatestBrandFilmWorkspace(context.Context, contr
 func (s *creativeManagerStub) GetBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
+func (s *creativeManagerStub) InitializeStrategyBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
 func (s *creativeManagerStub) AnalyzeBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
 	return s.detail, nil
 }

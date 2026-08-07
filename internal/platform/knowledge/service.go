@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
+
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
@@ -77,12 +79,14 @@ type Document struct {
 }
 
 type ResearchRequest struct {
-	Mode            string   `json:"mode"`
-	Category        string   `json:"category,omitempty"`
-	Query           string   `json:"query"`
-	DocumentIDs     []string `json:"document_ids"`
-	DisclosedFields []string `json:"disclosed_fields"`
-	Confirmed       bool     `json:"confirmed"`
+	Mode            string                `json:"mode"`
+	Category        string                `json:"category,omitempty"`
+	Purpose         string                `json:"purpose,omitempty"`
+	SourceRef       *contract.ResourceRef `json:"source_ref,omitempty"`
+	Query           string                `json:"query"`
+	DocumentIDs     []string              `json:"document_ids"`
+	DisclosedFields []string              `json:"disclosed_fields"`
+	Confirmed       bool                  `json:"confirmed"`
 }
 
 type ExternalResearchInput struct {
@@ -90,6 +94,7 @@ type ExternalResearchInput struct {
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	Mode           string                  `json:"mode"`
 	Category       string                  `json:"category"`
+	Purpose        string                  `json:"purpose"`
 	Query          string                  `json:"query"`
 	Documents      []ExternalDocument      `json:"documents"`
 }
@@ -147,6 +152,8 @@ type ResearchRun struct {
 	ProjectID          contract.ProjectID      `json:"project_id"`
 	Mode               string                  `json:"mode"`
 	Category           string                  `json:"category"`
+	Purpose            string                  `json:"purpose"`
+	SourceRef          *contract.ResourceRef   `json:"source_ref,omitempty"`
 	Query              string                  `json:"query"`
 	DocumentIDs        []string                `json:"document_ids"`
 	DisclosedFields    []string                `json:"disclosed_fields"`
@@ -237,6 +244,21 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	}
 	mimeType := defaultDocumentMIME(extension)
 	asyncParse := extension != ".md" && s.DocumentParser != nil && s.DocumentScheduler != nil
+	contentSum := sha256.Sum256(content)
+	contentHash := hex.EncodeToString(contentSum[:])
+	if asyncParse {
+		existing, err := scanDocument(s.DB.QueryRowContext(ctx, documentSelect+`
+			WHERE organization_id = ? AND project_id = ? AND content_sha256 = ? AND status = 'ready'
+			ORDER BY parsed_at DESC, created_at DESC LIMIT 1`,
+			actor.OrganizationID, projectID, contentHash,
+		))
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Document{}, err
+		}
+	}
 	extracted := ""
 	if !asyncParse {
 		var err error
@@ -249,7 +271,6 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return Document{}, err
 	}
-	contentSum := sha256.Sum256(content)
 	textSum := sha256.Sum256([]byte(extracted))
 	now := s.now()
 	key := fmt.Sprintf("knowledge/%s/%s/%s/source%s", actor.OrganizationID, projectID, id, extension)
@@ -261,7 +282,7 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		Title: filename, SourceType: "docs",
 		Filename: filename, MIMEType: mimeType, SizeBytes: size,
-		ContentSHA256: hex.EncodeToString(contentSum[:]), TextSHA256: hex.EncodeToString(textSum[:]),
+		ContentSHA256: contentHash, TextSHA256: hex.EncodeToString(textSum[:]),
 		ExtractedText: extracted, Status: "parse_queued", CreatedBy: actor.Principal.ID,
 		CreatedAt: now, UpdatedAt: now, Blob: object.ObjectLocation,
 	}
@@ -455,6 +476,10 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 		return ResearchRun{}, ErrExternalConfirmationRequired
 	}
 	var err error
+	request.Purpose, request.SourceRef, err = validateResearchContext(request.Purpose, request.SourceRef)
+	if err != nil {
+		return ResearchRun{}, err
+	}
 	request.DocumentIDs, request.DisclosedFields, err = validateResearchRequest(request)
 	if err != nil {
 		return ResearchRun{}, err
@@ -475,17 +500,18 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	now := s.now()
 	run := ResearchRun{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		Mode: request.Mode, Category: request.Category, Query: request.Query,
+		Mode: request.Mode, Category: request.Category, Purpose: request.Purpose, SourceRef: request.SourceRef, Query: request.Query,
 		DocumentIDs:     append([]string(nil), request.DocumentIDs...),
 		DisclosedFields: append([]string(nil), request.DisclosedFields...), Status: "running",
 		ConfirmedBy: actor.Principal.ID, ConfirmedAt: now, Artifacts: []ResearchArtifact{},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO platform_research_runs
-		(id, organization_id, project_id, mode, category, query_text, document_ids, disclosed_fields,
+		(id, organization_id, project_id, mode, category, purpose, source_type, source_id, query_text, document_ids, disclosed_fields,
 		 disclosed_chunk_ids, status, confirmed_by, confirmed_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Category, run.Query, jsonBytes(run.DocumentIDs),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Category, run.Purpose,
+		nullableResourceType(run.SourceRef), nullableResourceID(run.SourceRef), run.Query, jsonBytes(run.DocumentIDs),
 		jsonBytes(run.DisclosedFields), jsonBytes(run.DisclosedChunkIDs),
 		run.Status, run.ConfirmedBy, run.ConfirmedAt, now, now); err != nil {
 		return ResearchRun{}, err
@@ -517,6 +543,144 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	return s.executeResearch(ctx, run, documents)
 }
 
+// RunConversationWebSearch executes the query before the owning conversation
+// agent generates its answer. Unlike external research, it deliberately skips
+// the standalone research scheduler: the durable AgentTask is already the
+// orchestration boundary and must not answer until this run is terminal.
+//
+// A completed run is reused on AgentTask retry so a model failure after search
+// does not issue the same paid web request again. A running run is either a
+// legacy scheduled search (wait for it) or an interrupted inline run (resume
+// it); the source-level unique key prevents concurrent duplicate creation.
+func (s Service) RunConversationWebSearch(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	messageID string,
+	query string,
+) (ResearchRun, error) {
+	messageID = strings.TrimSpace(messageID)
+	query = strings.TrimSpace(query)
+	if messageID == "" || query == "" {
+		return ResearchRun{}, ErrInvalidResearchRequest
+	}
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return ResearchRun{}, err
+	}
+	existing, found, err := s.conversationWebSearchRun(ctx, actor.OrganizationID, projectID, messageID)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	if found {
+		if strings.TrimSpace(existing.Query) != query {
+			return ResearchRun{}, ErrInvalidResearchRequest
+		}
+		if existing.Status == "running" {
+			scheduled, err := s.conversationWebSearchHasScheduledJob(ctx, existing)
+			if err != nil {
+				return ResearchRun{}, err
+			}
+			if !scheduled {
+				documents, err := s.selectResearchChunks(
+					ctx, existing.OrganizationID, existing.ProjectID, existing.DocumentIDs, existing.Query,
+				)
+				if err != nil {
+					return ResearchRun{}, err
+				}
+				resumed, err := s.executeResearch(ctx, existing, documents)
+				if err != nil {
+					return ResearchRun{}, err
+				}
+				return s.waitForConversationWebSearch(ctx, resumed)
+			}
+		}
+		return s.waitForConversationWebSearch(ctx, existing)
+	}
+
+	inline := s
+	inline.Scheduler = nil
+	run, err := inline.RunResearch(ctx, actor, projectID, ResearchRequest{
+		Mode: "web", Category: "general", Purpose: "conversation_web_search",
+		SourceRef: &contract.ResourceRef{Type: "strategy_message", ID: messageID},
+		Query:     query, DocumentIDs: []string{}, DisclosedFields: []string{"query"}, Confirmed: true,
+	})
+	if err != nil {
+		var mysqlError *mysqlDriver.MySQLError
+		if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
+			existing, found, loadErr := s.conversationWebSearchRun(ctx, actor.OrganizationID, projectID, messageID)
+			if loadErr != nil {
+				return ResearchRun{}, loadErr
+			}
+			if found {
+				return s.waitForConversationWebSearch(ctx, existing)
+			}
+		}
+		return ResearchRun{}, err
+	}
+	if run.Status != "succeeded" || len(run.Artifacts) == 0 {
+		return run, fmt.Errorf("conversation web search did not complete: %s", run.ErrorCode)
+	}
+	return run, nil
+}
+
+func (s Service) conversationWebSearchHasScheduledJob(ctx context.Context, run ResearchRun) (bool, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM platform_jobs
+		WHERE organization_id = ? AND idempotency_key = ?`,
+		run.OrganizationID, "knowledge_research_"+run.ID).Scan(&count)
+	return count > 0, err
+}
+
+func (s Service) conversationWebSearchRun(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	messageID string,
+) (ResearchRun, bool, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM platform_research_runs
+		WHERE organization_id = ? AND project_id = ? AND purpose = 'conversation_web_search'
+		  AND source_type = 'strategy_message' AND source_id = ?
+		ORDER BY created_at DESC LIMIT 1`, organizationID, projectID, messageID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ResearchRun{}, false, nil
+	}
+	if err != nil {
+		return ResearchRun{}, false, err
+	}
+	run, err := s.getResearchRun(ctx, organizationID, projectID, id)
+	return run, err == nil, err
+}
+
+func (s Service) waitForConversationWebSearch(ctx context.Context, run ResearchRun) (ResearchRun, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		switch run.Status {
+		case "succeeded":
+			if len(run.Artifacts) == 0 {
+				return run, fmt.Errorf("conversation web search returned no artifact")
+			}
+			return run, nil
+		case "failed", "unavailable":
+			return run, fmt.Errorf("conversation web search did not complete: %s", run.ErrorCode)
+		case "running":
+		default:
+			return run, fmt.Errorf("conversation web search has invalid status %q", run.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return ResearchRun{}, ctx.Err()
+		case <-ticker.C:
+			var err error
+			run, err = s.getResearchRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
+			if err != nil {
+				return ResearchRun{}, err
+			}
+		}
+	}
+}
+
 func (s Service) executeResearch(ctx context.Context, run ResearchRun, documents []ExternalDocument) (ResearchRun, error) {
 	run.DisclosedChunkIDs = make([]string, 0, len(documents))
 	for _, document := range documents {
@@ -535,6 +699,7 @@ func (s Service) executeResearch(ctx context.Context, run ResearchRun, documents
 		ProjectID:      run.ProjectID,
 		Mode:           run.Mode,
 		Category:       run.Category,
+		Purpose:        run.Purpose,
 		Query:          run.Query,
 		Documents:      documents,
 	})
@@ -622,7 +787,7 @@ func (s Service) ListResearchRuns(ctx context.Context, actor contract.ActorConte
 }
 
 const researchRunSelect = `SELECT id, organization_id, project_id, mode, query_text,
-	category, document_ids, disclosed_fields, disclosed_chunk_ids, status, confirmed_by, confirmed_at,
+	category, purpose, COALESCE(source_type, ''), COALESCE(source_id, ''), document_ids, disclosed_fields, disclosed_chunk_ids, status, confirmed_by, confirmed_at,
 	COALESCE(error_code, ''), COALESCE(error_message, ''),
 	COALESCE(provider_code, ''), COALESCE(model_version, ''),
 	COALESCE(provider_response_id, ''), usage_json, created_at, updated_at
@@ -636,15 +801,19 @@ func scanResearchRun(scanner researchRunScanner) (ResearchRun, error) {
 	var value ResearchRun
 	var documentIDs, disclosedFields, disclosedChunkIDs []byte
 	var usage []byte
+	var sourceType, sourceID string
 	err := scanner.Scan(
 		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Mode, &value.Query,
-		&value.Category, &documentIDs, &disclosedFields, &disclosedChunkIDs,
+		&value.Category, &value.Purpose, &sourceType, &sourceID, &documentIDs, &disclosedFields, &disclosedChunkIDs,
 		&value.Status, &value.ConfirmedBy, &value.ConfirmedAt,
 		&value.ErrorCode, &value.ErrorMessage, &value.ProviderCode, &value.ModelVersion,
 		&value.ProviderResponseID, &usage, &value.CreatedAt, &value.UpdatedAt,
 	)
 	if err != nil {
 		return ResearchRun{}, err
+	}
+	if sourceType != "" && sourceID != "" {
+		value.SourceRef = &contract.ResourceRef{Type: sourceType, ID: sourceID}
 	}
 	if err := json.Unmarshal(documentIDs, &value.DocumentIDs); err != nil {
 		return ResearchRun{}, err
@@ -848,6 +1017,41 @@ func validateResearchRequest(request ResearchRequest) ([]string, []string, error
 		fields = append(fields, "document_content")
 	}
 	return documentIDs, fields, nil
+}
+
+func validateResearchContext(purpose string, sourceRef *contract.ResourceRef) (string, *contract.ResourceRef, error) {
+	purpose = strings.TrimSpace(purpose)
+	if purpose == "" {
+		purpose = "deep_research"
+	}
+	switch purpose {
+	case "deep_research":
+		if sourceRef != nil {
+			return "", nil, ErrInvalidResearchRequest
+		}
+		return purpose, nil, nil
+	case "conversation_web_search":
+		if sourceRef == nil || sourceRef.Type != "strategy_message" || strings.TrimSpace(sourceRef.ID) == "" {
+			return "", nil, ErrInvalidResearchRequest
+		}
+		return purpose, &contract.ResourceRef{Type: sourceRef.Type, ID: strings.TrimSpace(sourceRef.ID)}, nil
+	default:
+		return "", nil, ErrInvalidResearchRequest
+	}
+}
+
+func nullableResourceType(ref *contract.ResourceRef) any {
+	if ref == nil || strings.TrimSpace(ref.Type) == "" {
+		return nil
+	}
+	return strings.TrimSpace(ref.Type)
+}
+
+func nullableResourceID(ref *contract.ResourceRef) any {
+	if ref == nil || strings.TrimSpace(ref.ID) == "" {
+		return nil
+	}
+	return strings.TrimSpace(ref.ID)
 }
 
 func (s Service) insertArtifact(ctx context.Context, tx *sql.Tx, run ResearchRun, result ExternalResearchResult) (ResearchArtifact, error) {

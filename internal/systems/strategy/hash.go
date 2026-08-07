@@ -9,6 +9,9 @@ import (
 
 func PackageContentHash(snapshot PackageSnapshot) (contract.ContentHash, error) {
 	snapshot.Approval.ContentHash = ""
+	// Readiness is derived when a BriefVersion is read. It is operational UI
+	// metadata, not part of the immutable Brief or Strategy package identity.
+	snapshot.Brief.FullStrategyReadiness = nil
 	return contract.NewContentHash(snapshot)
 }
 

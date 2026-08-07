@@ -163,6 +163,15 @@ export type BriefDocument = {
     category?: string
     selling_points?: string[]
     evidence?: string[]
+    candidates?: Array<{
+      name: string
+      category?: string
+      selling_points?: string[]
+      evidence?: string[]
+      mandatory_elements?: string[]
+      prohibited_claims?: string[]
+      source_refs?: Array<{ type: string; id: string; locator?: string }>
+    }>
     asset_refs?: Array<{ asset_id: string; version: number }>
   }
   industry?: string
@@ -191,6 +200,8 @@ export type BriefDocument = {
   }
   reference_ids?: string[]
 }
+
+export type BriefProductCandidate = NonNullable<NonNullable<BriefDocument['product']>['candidates']>[number]
 
 export type BriefDocumentV3 = {
   contract_version: 'strategy-brief-version/v3'
@@ -227,13 +238,16 @@ export type BriefDraft = {
   brief_id: string
   status: 'open' | 'confirmed' | 'superseded'
   version: number
+  base_brief_version?: number
   document: BriefDocument
   field_states: Record<string, FieldState>
-  completeness: {
-    ready: boolean
-    blockers: Array<{ field: string; reason: string }>
-    warnings: Array<{ field: string; reason: string }>
-  }
+  completeness: BriefReadiness
+}
+
+export type BriefReadiness = {
+  ready: boolean
+  blockers: Array<{ field: string; reason: string }>
+  warnings: Array<{ field: string; reason: string }>
 }
 
 export type BriefVersion = {
@@ -241,6 +255,7 @@ export type BriefVersion = {
   version: number
   content_hash: string
   snapshot: BriefDocument
+  full_strategy_readiness?: BriefReadiness
 }
 
 export type CreativeBusinessQuestion = {
@@ -969,6 +984,8 @@ export type ResearchRun = {
   id: string
   mode: 'web'
   category: ResearchArtifact['category']
+  purpose: 'deep_research' | 'conversation_web_search'
+  source_ref?: { type: 'strategy_message'; id: string }
   query: string
   document_ids: string[]
   disclosed_fields: string[]

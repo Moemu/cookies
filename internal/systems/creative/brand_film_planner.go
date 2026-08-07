@@ -2,6 +2,7 @@ package creative
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -202,12 +203,22 @@ func brandPlannerActor(actor contract.ActorContext) contract.ActorContext {
 	return contract.ActorContext{OrganizationID: actor.OrganizationID, Principal: actor.Principal, Scopes: []contract.Scope{provider.ScopeTextGenerate}}
 }
 
-func brandPlannerSourceKey(source BrandFilmSourceSnapshot) string {
-	hash, err := contract.CanonicalJSONHash(source)
-	if err != nil || len(hash) < 12 {
-		return "brand-source"
+func brandFilmSourceInvocationToken(source BrandFilmSourceSnapshot) string {
+	for _, value := range []string{
+		source.FixtureHash,
+		source.DirectionContentHash,
+		source.BrandBriefContentHash,
+		source.InputIdentityHash,
+		source.StrategyPackageHash,
+	} {
+		token := strings.TrimPrefix(strings.TrimSpace(value), "sha256:")
+		if len(token) >= 12 {
+			return token[:12]
+		}
 	}
-	return hash[:12]
+	payload, _ := json.Marshal(source)
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", digest[:6])
 }
 
 func (p ModelBrandFilmPlanner) AnalyzeBrief(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, source BrandFilmSourceSnapshot, revision int64, now time.Time) (BrandBriefAnalysisVersion, error) {
@@ -220,7 +231,7 @@ func (p ModelBrandFilmPlanner) AnalyzeBrief(ctx context.Context, actor contract.
 	}
 	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-brief-%s-%d", brandPlannerSourceKey(source), revision)),
+		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-brief-%s-%d", brandFilmSourceInvocationToken(source), revision)),
 		Messages: []provider.TextMessage{
 			{Role: provider.TextRoleSystem, Content: "你是品牌广告 Brief 分析师。只分析输入中明确出现的品牌与产品，不混入其他项目。只输出 JSON。事实必须保留 locator；不确定功效标记 needs_confirmation。"},
 			{Role: provider.TextRoleUser, Content: "请提炼摘要、受众、核心信息、卖点、必须项、禁用项、图片/视频要求、统一口播方向和不确定项。INPUT=" + string(raw)},
@@ -252,7 +263,7 @@ func (p ModelBrandFilmPlanner) GenerateConcepts(ctx context.Context, actor contr
 	}{source, analysis})
 	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-concepts-%s-%d", brandPlannerSourceKey(source), revision)),
+		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-concepts-%s-%d", brandFilmSourceInvocationToken(source), revision)),
 		Messages: []provider.TextMessage{
 			{Role: provider.TextRoleSystem, Content: fmt.Sprintf("你是品牌广告创意总监。输出 3 个叙事机制明显不同的 %d 秒 %s 方向，不生成镜头表，不编造 Brief 事实，只输出 JSON。", source.Duration, source.AspectRatio)},
 			{Role: provider.TextRoleUser, Content: "根据已确认 Brief 生成创意方向。INPUT=" + string(input)},
@@ -283,11 +294,11 @@ func (p ModelBrandFilmPlanner) GenerateFilmPlan(ctx context.Context, actor contr
 	}{source, analysis, concept})
 	response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: brandPlannerActor(actor), Project: project, ModelAlias: p.ModelAlias,
-		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-film-plan-%s-%d", brandPlannerSourceKey(source), revision)),
+		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("brand-film-plan-%s-%d", brandFilmSourceInvocationToken(source), revision)),
 		Messages: []provider.TextMessage{
 			{Role: provider.TextRoleSystem, Content: fmt.Sprintf("你是品牌广告导演。输出可编辑的 %d 秒、9:16 剧本分镜。镜头必须从 0 秒连续覆盖到 %d 秒且固定为 %d 个，每个镜头 4～15 秒；用户编辑镜头表而不是模型 Prompt。只输出 JSON。", source.Duration, source.Duration, (source.Duration+4)/5)},
 			{Role: provider.TextRoleUser, Content: "基于已确认 Brief 与创意方向生成剧本、旁白和镜头表。INPUT=" + string(input)},
-		}, OutputJSONSchema: brandFilmPlanSchema,
+		}, OutputJSONSchema: brandFilmPlanOutputSchema(source.Duration),
 	})
 	if err != nil {
 		return BrandFilmPlanVersion{}, err
@@ -336,3 +347,15 @@ var brandFilmPlanSchema = json.RawMessage(`{
   "type":"object","additionalProperties":false,"required":["title","story_summary","voice_direction","music_direction","shots"],
   "properties":{"title":{"type":"string"},"story_summary":{"type":"string"},"voice_direction":{"type":"string"},"music_direction":{"type":"string"},"shots":{"type":"array","minItems":3,"items":{"type":"object","additionalProperties":false,"required":["start_second","end_second","purpose","visual","action","camera","lighting","voiceover","on_screen_text","reference_role","continuity_notes"],"properties":{"start_second":{"type":"integer","minimum":0},"end_second":{"type":"integer","minimum":1,"maximum":15},"purpose":{"type":"string"},"visual":{"type":"string"},"action":{"type":"string"},"camera":{"type":"string"},"lighting":{"type":"string"},"voiceover":{"type":"string"},"on_screen_text":{"type":"string"},"reference_role":{"type":"string"},"continuity_notes":{"type":"string"}}}}}
 }`)
+
+func brandFilmPlanOutputSchema(durationSeconds int) json.RawMessage {
+	if durationSeconds < 1 {
+		durationSeconds = 15
+	}
+	return json.RawMessage(strings.Replace(
+		string(brandFilmPlanSchema),
+		`"end_second":{"type":"integer","minimum":1,"maximum":15}`,
+		fmt.Sprintf(`"end_second":{"type":"integer","minimum":1,"maximum":%d}`, durationSeconds),
+		1,
+	))
+}

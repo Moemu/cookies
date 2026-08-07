@@ -1,0 +1,2 @@
+ALTER TABLE platform_knowledge_documents
+  DROP INDEX idx_knowledge_document_content_ready;

@@ -66,11 +66,6 @@ func TestNormalizeMessageV2RejectsUnsupportedOrAmbiguousInput(t *testing.T) {
 			ContractVersion: MessageCreateContractV2,
 			Content:         []MessageContentBlock{{Type: "research_ref", ResearchArtifactID: "research_01", ExpectedContentHash: hash}},
 		},
-		"search policy without completed evidence": {
-			ContractVersion: MessageCreateContractV2,
-			Content:         []MessageContentBlock{{Type: "text", Text: "please verify"}},
-			RequestedPolicy: &MessageRequestedPolicy{WebSearch: "allowed"},
-		},
 		"mixed research payload": {
 			ContractVersion: MessageCreateContractV2,
 			Content:         []MessageContentBlock{{Type: "research_ref", ResearchArtifactID: "research_01", ExpectedContentHash: hash, Text: "hidden"}},
@@ -95,5 +90,20 @@ func TestNormalizeMessageV2RejectsUnsupportedOrAmbiguousInput(t *testing.T) {
 				t.Fatal("expected invalid request")
 			}
 		})
+	}
+}
+
+func TestNormalizeMessageV2AllowsBackgroundSearchIntentBeforeEvidence(t *testing.T) {
+	t.Parallel()
+	result, err := normalizeMessageV2(SendMessageV2Request{
+		ContractVersion: MessageCreateContractV2,
+		Content:         []MessageContentBlock{{Type: "text", Text: "please verify"}},
+		RequestedPolicy: &MessageRequestedPolicy{WebSearch: "allowed"},
+	})
+	if err != nil {
+		t.Fatalf("normalize background search message: %v", err)
+	}
+	if result.RequestedPolicy == nil || result.RequestedPolicy.WebSearch != "allowed" {
+		t.Fatalf("policy=%#v", result.RequestedPolicy)
 	}
 }

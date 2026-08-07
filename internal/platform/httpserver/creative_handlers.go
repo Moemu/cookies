@@ -21,6 +21,13 @@ type creativeDirectionReader interface {
 	GetLatestDirectionBatch(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionBatch, error)
 }
 
+type creativeBrandBriefManager interface {
+	PrepareBrandBriefReview(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.BrandBriefReview, error)
+	GetBrandBriefReview(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.BrandBriefReview, error)
+	UpdateBrandBriefReview(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandBriefReviewRequest) (creative.BrandBriefReview, error)
+	ConfirmBrandBriefReview(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmBrandBriefReviewRequest) (creative.BrandBriefReview, error)
+}
+
 type creativeImageTextManager interface {
 	GetImageTextWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.ImageTextWorkspace, error)
 	GenerateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateImageTextDraftRequest) (creative.ImageTextDraft, error)
@@ -330,6 +337,18 @@ func (s *Server) getBrandFilmWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	rc, _ := contract.RequestContextFrom(r.Context())
 	value, err := s.creative.GetBrandFilmWorkspace(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) initializeStrategyBrandFilmWorkspace(w http.ResponseWriter, r *http.Request) {
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.creative.InitializeStrategyBrandFilmWorkspace(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"),
+	)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
@@ -882,6 +901,84 @@ func (s *Server) getCreativeIntake(w http.ResponseWriter, r *http.Request) {
 	}
 	if view, viewErr := value.V3View(); viewErr == nil {
 		writeJSON(w, http.StatusOK, view)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) prepareCreativeBrandBrief(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(creativeBrandBriefManager)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.PrepareBrandBriefReview(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("intake_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getCreativeBrandBrief(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(creativeBrandBriefManager)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.GetBrandBriefReview(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("intake_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateCreativeBrandBrief(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(creativeBrandBriefManager)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.UpdateBrandBriefReviewRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.UpdateBrandBriefReview(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("intake_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) confirmCreativeBrandBrief(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(creativeBrandBriefManager)
+	if !ok {
+		s.notImplemented(w, r)
+		return
+	}
+	var body creative.ConfirmBrandBriefReviewRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.ConfirmBrandBriefReview(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("intake_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, value)

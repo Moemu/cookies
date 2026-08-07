@@ -141,10 +141,11 @@ func normalizeMessageV2(request SendMessageV2Request) (normalizedMessageV2, erro
 	if err != nil {
 		return normalizedMessageV2{}, err
 	}
-	if hasResearchReference != (policy != nil && policy.WebSearch == "allowed") {
-		// A search request is only truthful when the completed, immutable
-		// research result travels with the message. Likewise, research evidence
-		// cannot be smuggled in while the visible policy says search was off.
+	if hasResearchReference && (policy == nil || policy.WebSearch != "allowed") {
+		// Completed research evidence cannot be smuggled in while the visible
+		// policy says search was off. The inverse is deliberately allowed: a
+		// conversation records the user's search intent before the server-owned
+		// AgentTask has produced and consumed immutable evidence.
 		return normalizedMessageV2{}, ErrInvalidRequest
 	}
 	plainText := strings.Join(projection, "\n")

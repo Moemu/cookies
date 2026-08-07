@@ -157,7 +157,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 	patch := strategy.BriefPatch{ExpectedVersion: draft.Version, Operations: []strategy.BriefPatchOperation{
-		{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"集成测试品牌"`)},
+		{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"Local Brand"`)},
 		{Op: "set", FieldPath: "product.name", Value: json.RawMessage(`"集成测试产品"`)},
 		{Op: "set", FieldPath: "industry", Value: json.RawMessage(`"工业制造"`)},
 		{Op: "set", FieldPath: "region", Value: json.RawMessage(`"中国大陆"`)},

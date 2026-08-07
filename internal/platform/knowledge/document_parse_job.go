@@ -107,6 +107,7 @@ func (s Service) HandleDocumentParseJob(ctx context.Context, claim jobruntime.Cl
 		return jobruntime.Result{Ref: &ref}, nil
 	}
 	if err := s.persistParsedDocument(ctx, document, parsed, chunks); err != nil {
+		s.markDocumentParseFailed(ctx, document, "DOCUMENT_PERSIST_FAILED", "Parsed document could not be persisted")
 		return jobruntime.Result{}, err
 	}
 	return jobruntime.Result{Ref: &ref}, nil

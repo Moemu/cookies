@@ -64,11 +64,21 @@ func (i ManualBrandFilmInput) Validate() error {
 
 type BrandFilmSourceSnapshot struct {
 	SourceKind             string                     `json:"source_kind,omitempty"`
+	SourceType             string                     `json:"source_type,omitempty"`
 	IntakeID               string                     `json:"intake_id,omitempty"`
 	InputIdentityHash      string                     `json:"input_identity_hash,omitempty"`
 	StrategyPackageID      string                     `json:"strategy_package_id,omitempty"`
 	StrategyPackageVersion int64                      `json:"strategy_package_version,omitempty"`
+	StrategyPackageHash    string                     `json:"strategy_package_hash,omitempty"`
+	HandoffContractVersion string                     `json:"handoff_contract_version,omitempty"`
 	HandoffContentHash     string                     `json:"handoff_content_hash,omitempty"`
+	BrandBriefRevision     int64                      `json:"brand_brief_revision,omitempty"`
+	BrandBriefContentHash  string                     `json:"brand_brief_content_hash,omitempty"`
+	DirectionBatchID       string                     `json:"direction_batch_id,omitempty"`
+	DirectionID            string                     `json:"direction_id,omitempty"`
+	DirectionVersion       int64                      `json:"direction_version,omitempty"`
+	DirectionContentHash   string                     `json:"direction_content_hash,omitempty"`
+	RouteID                string                     `json:"route_id,omitempty"`
 	FixtureID              string                     `json:"fixture_id,omitempty"`
 	FixtureVersion         int64                      `json:"fixture_version,omitempty"`
 	FixtureHash            string                     `json:"fixture_hash,omitempty"`
@@ -86,6 +96,7 @@ type BrandFilmSourceSnapshot struct {
 	Channel                string                     `json:"channel"`
 	Duration               int                        `json:"duration_seconds"`
 	AspectRatio            string                     `json:"aspect_ratio"`
+	Resolution             string                     `json:"resolution,omitempty"`
 	EvidenceRefs           []string                   `json:"evidence_refs"`
 }
 
@@ -214,8 +225,8 @@ type BrandBriefAnalysisVersion struct {
 
 func (v BrandBriefAnalysisVersion) Validate() error {
 	if v.Revision < 1 || strings.TrimSpace(v.Summary) == "" || strings.TrimSpace(v.Audience) == "" ||
-		strings.TrimSpace(v.CoreMessage) == "" || len(v.SellingPoints) == 0 || len(v.Mandatory) == 0 ||
-		len(v.Prohibited) == 0 || strings.TrimSpace(v.VoiceDirection) == "" || v.CreatedAt.IsZero() {
+		strings.TrimSpace(v.CoreMessage) == "" || len(v.SellingPoints) == 0 ||
+		strings.TrimSpace(v.VoiceDirection) == "" || v.CreatedAt.IsZero() {
 		return fmt.Errorf("brand brief analysis is incomplete")
 	}
 	for _, fact := range v.SellingPoints {
@@ -463,9 +474,18 @@ type BrandFilmDeliveryLifecycle struct {
 
 func (d BrandFilmDraft) Validate() error {
 	if d.ContractVersion != "creative-brand-film-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
-		!validSHA256Ref(d.SourceHash) || d.SourceSnapshot.AspectRatio != "9:16" ||
+		!validSHA256Ref(d.SourceHash) || strings.TrimSpace(d.SourceSnapshot.AspectRatio) == "" ||
 		d.PromptSeam.ContractVersion != "creative-brand-generation-seam/v1" || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
 		return fmt.Errorf("brand film draft is incomplete")
+	}
+	if d.SourceSnapshot.SourceType == "strategy_handoff" {
+		if strings.TrimSpace(d.SourceSnapshot.IntakeID) == "" || !validSHA256Ref(d.SourceSnapshot.InputIdentityHash) ||
+			d.SourceSnapshot.BrandBriefRevision < 1 || !validSHA256Ref(d.SourceSnapshot.BrandBriefContentHash) ||
+			strings.TrimSpace(d.SourceSnapshot.DirectionBatchID) == "" || strings.TrimSpace(d.SourceSnapshot.DirectionID) == "" ||
+			d.SourceSnapshot.DirectionVersion < 1 || !validSHA256Ref(d.SourceSnapshot.DirectionContentHash) ||
+			strings.TrimSpace(d.SourceSnapshot.RouteID) == "" || strings.TrimSpace(d.SourceSnapshot.Resolution) == "" {
+			return fmt.Errorf("strategy brand film source lineage is incomplete")
+		}
 	}
 	if _, err := ResolveBrandFilmDurationProfile(d.SourceSnapshot.Duration); err != nil {
 		return err

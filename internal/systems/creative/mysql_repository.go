@@ -242,9 +242,9 @@ func (r MySQLRepository) CreateTask(ctx context.Context, task CreativeTask, draf
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO creative_tasks (
-		id, organization_id, project_id, intake_id, creative_format, channel, status, direction_payload, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
+		id, organization_id, project_id, intake_id, creative_format, channel, lineage_key, status, direction_payload, version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
+		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel, task.LineageKey, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return CreativeTask{}, err
 	}
@@ -281,11 +281,16 @@ func (r MySQLRepository) CreateVideoTask(ctx context.Context, task CreativeTask,
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO creative_tasks (
 		id, organization_id, project_id, intake_id, creative_format, channel, video_purpose, performance_mode,
-		status, direction_payload, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		lineage_key, status, direction_payload, version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
 		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel,
-		task.VideoPurpose, task.PerformanceMode, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
+		task.VideoPurpose, task.PerformanceMode, task.LineageKey, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
+		var mysqlError *mysqlDriver.MySQLError
+		if task.LineageKey != "" && errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
+			_ = tx.Rollback()
+			return scanTask(r.DB.QueryRowContext(ctx, creativeTaskSelect+` WHERE organization_id = ? AND project_id = ? AND lineage_key = ?`, task.OrganizationID, task.ProjectID, task.LineageKey))
+		}
 		return CreativeTask{}, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO creative_video_drafts
@@ -857,7 +862,7 @@ func (r MySQLRepository) ListPackages(ctx context.Context, organizationID contra
 const creativeIntakeSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 	request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash,
 	contract_version, COALESCE(input_identity_hash, ''), version, created_at, updated_at FROM creative_intakes`
-const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks`
+const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks`
 const creativeVersionSelect = `SELECT id, organization_id, project_id, task_id, version, draft_version, status,
 	creative_format, snapshot_payload, video_snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
 const creativePackageSelect = `SELECT id, organization_id, project_id, creative_version_id, creative_format, content_hash, snapshot_payload, video_snapshot_payload, created_by, created_at FROM creative_packages`
@@ -914,7 +919,7 @@ func scanCreativePackage(row rowScanner) (CreativePackage, error) {
 func scanTask(row rowScanner) (CreativeTask, error) {
 	var value CreativeTask
 	var direction []byte
-	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.IntakeID, &value.Format, &value.Channel, &value.VideoPurpose, &value.PerformanceMode, &value.Status, &direction, &value.Version, &value.CreatedAt, &value.UpdatedAt)
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.IntakeID, &value.Format, &value.Channel, &value.VideoPurpose, &value.PerformanceMode, &value.LineageKey, &value.Status, &direction, &value.Version, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return CreativeTask{}, err
 	}

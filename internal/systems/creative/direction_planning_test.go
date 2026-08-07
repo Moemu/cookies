@@ -23,6 +23,7 @@ func TestDirectionGenerationPersistsBeforeBackgroundExecutionAndRecovers(t *test
 		}}},
 	}
 	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	service.BrandBriefs = confirmedBrandBriefRepository(intake)
 	repository := &directionRepositoryStub{}
 	scheduler := &directionGenerationSchedulerStub{}
 	service.Directions = repository
@@ -319,6 +320,7 @@ func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) 
 		},
 	}
 	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	service.BrandBriefs = confirmedBrandBriefRepository(intake)
 	service.DirectionPlanner = &directionPlannerStub{result: DirectionPlannerResult{
 		Model: "test-model", PromptVersion: "creative-direction/brand-video-v1",
 		Candidates: []DirectionCandidate{
@@ -434,6 +436,54 @@ type directionPlannerStub struct {
 	context CreativePlanningContext
 	result  DirectionPlannerResult
 	err     error
+}
+
+type brandBriefRepositoryStub struct {
+	review BrandBriefReview
+}
+
+func confirmedBrandBriefRepository(intake CreativeIntake) *brandBriefRepositoryStub {
+	return &brandBriefRepositoryStub{review: BrandBriefReview{
+		ContractVersion: BrandBriefReviewV1, OrganizationID: intake.OrganizationID, ProjectID: intake.ProjectID,
+		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, Status: BrandBriefConfirmed,
+		Revision: 2, ContentHash: "sha256:confirmed-brand-brief",
+		Document: BrandBriefDocument{Communication: BrandBriefCommunication{SingleMindedProposition: intake.Request.CoreMessage}},
+	}}
+}
+
+func (r *brandBriefRepositoryStub) CreateBrandBrief(_ context.Context, value BrandBriefReview) (BrandBriefReview, bool, error) {
+	if r.review.IntakeID != "" {
+		return r.review, true, nil
+	}
+	r.review = value
+	return value, false, nil
+}
+
+func (r *brandBriefRepositoryStub) GetBrandBrief(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, intakeID string) (BrandBriefReview, error) {
+	if r.review.IntakeID != intakeID {
+		return BrandBriefReview{}, ErrNotFound
+	}
+	return r.review, nil
+}
+
+func (r *brandBriefRepositoryStub) UpdateBrandBrief(_ context.Context, value BrandBriefReview, expectedRevision int64) (BrandBriefReview, error) {
+	if r.review.Revision != expectedRevision {
+		return BrandBriefReview{}, ErrVersionConflict
+	}
+	value.Revision++
+	r.review = value
+	return value, nil
+}
+
+func (r *brandBriefRepositoryStub) ConfirmBrandBrief(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, intakeID string, expectedRevision int64, confirmedBy string, confirmedAt time.Time) (BrandBriefReview, error) {
+	if r.review.IntakeID != intakeID || r.review.Revision != expectedRevision {
+		return BrandBriefReview{}, ErrVersionConflict
+	}
+	r.review.Status = BrandBriefConfirmed
+	r.review.Revision++
+	r.review.ConfirmedBy = confirmedBy
+	r.review.ConfirmedAt = &confirmedAt
+	return r.review, nil
 }
 
 func (p *directionPlannerStub) Generate(_ context.Context, _ contract.ActorContext, _ contract.ProjectContext, value CreativePlanningContext, _ int) (DirectionPlannerResult, error) {

@@ -100,6 +100,16 @@ func TestDecodeSeedResponseRejectsUncitedReport(t *testing.T) {
 	}
 }
 
+func TestConversationWebSearchUsesAConciseAnswerPrompt(t *testing.T) {
+	prompt := buildResearchPrompt(knowledge.ExternalResearchInput{
+		Purpose: "conversation_web_search", Query: "最近有哪些新品变化？",
+	})
+	if !strings.Contains(prompt, "必须先搜索再回答") || !strings.Contains(prompt, "直接回答用户提出的确切问题") ||
+		!strings.Contains(prompt, "如果搜索结果不足以支持该主张") || !strings.Contains(prompt, "不要扩写成完整行业研究报告") {
+		t.Fatalf("prompt=%q", prompt)
+	}
+}
+
 type routeStub struct {
 	route provider.GatewayRouteSnapshot
 }

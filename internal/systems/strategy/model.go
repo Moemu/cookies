@@ -156,7 +156,21 @@ type BriefProduct struct {
 	Category      string                     `json:"category,omitempty"`
 	SellingPoints []string                   `json:"selling_points,omitempty"`
 	Evidence      []string                   `json:"evidence,omitempty"`
+	Candidates    []BriefProductCandidate    `json:"candidates,omitempty"`
 	AssetRefs     []contract.AssetVersionRef `json:"asset_refs,omitempty"`
+}
+
+// BriefProductCandidate preserves product-specific facts when one source Brief
+// contains several possible products. A candidate is not the selected product;
+// the user still chooses Product.Name before the Brief becomes creative-ready.
+type BriefProductCandidate struct {
+	Name              string        `json:"name"`
+	Category          string        `json:"category,omitempty"`
+	SellingPoints     []string      `json:"selling_points,omitempty"`
+	Evidence          []string      `json:"evidence,omitempty"`
+	MandatoryElements []string      `json:"mandatory_elements,omitempty"`
+	ProhibitedClaims  []string      `json:"prohibited_claims,omitempty"`
+	SourceRefs        []FieldSource `json:"source_refs,omitempty"`
 }
 type BriefCampaign struct {
 	Objective string `json:"objective"`
@@ -313,17 +327,18 @@ type BriefDraft struct {
 }
 
 type BriefVersion struct {
-	BriefID            string                  `json:"brief_id"`
-	Version            int64                   `json:"version"`
-	OrganizationID     contract.OrganizationID `json:"organization_id"`
-	ProjectID          contract.ProjectID      `json:"project_id"`
-	Snapshot           BriefDocument           `json:"snapshot"`
-	FieldStates        map[string]FieldState   `json:"field_states"`
-	ContentHash        contract.ContentHash    `json:"content_hash"`
-	SourceDraftID      string                  `json:"source_draft_id"`
-	SourceDraftVersion int64                   `json:"source_draft_version"`
-	ConfirmedBy        string                  `json:"confirmed_by"`
-	ConfirmedAt        time.Time               `json:"confirmed_at"`
+	BriefID               string                  `json:"brief_id"`
+	Version               int64                   `json:"version"`
+	OrganizationID        contract.OrganizationID `json:"organization_id"`
+	ProjectID             contract.ProjectID      `json:"project_id"`
+	Snapshot              BriefDocument           `json:"snapshot"`
+	FieldStates           map[string]FieldState   `json:"field_states"`
+	ContentHash           contract.ContentHash    `json:"content_hash"`
+	SourceDraftID         string                  `json:"source_draft_id"`
+	SourceDraftVersion    int64                   `json:"source_draft_version"`
+	ConfirmedBy           string                  `json:"confirmed_by"`
+	ConfirmedAt           time.Time               `json:"confirmed_at"`
+	FullStrategyReadiness *Completeness           `json:"full_strategy_readiness,omitempty"`
 }
 
 type BriefPatchOperation struct {

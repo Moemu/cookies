@@ -389,7 +389,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	repairPromptDefault := "strategy.repair.v1"
 	if environment == EnvironmentLocal || environment == EnvironmentTest {
 		generatePromptDefault = "strategy.generate.v4"
-		conversationPromptDefault = "strategy.conversation.v5"
+		conversationPromptDefault = "strategy.conversation.v6"
 		revisePromptDefault = "strategy.revise.v3"
 		reviewPromptDefault = "strategy.review.deep.v2"
 		repairPromptDefault = "strategy.repair.v2"
@@ -643,8 +643,8 @@ func (c Config) Validate() error {
 	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake, adapter_gateway, or ark_text")
 	}
-	if c.Provider.VideoAdapter != "fake" && c.Provider.VideoAdapter != "ark_video" {
-		return fmt.Errorf("COOKIES_PROVIDER_VIDEO_ADAPTER must be fake or ark_video")
+	if c.Provider.VideoAdapter != "fake" && c.Provider.VideoAdapter != "adapter_gateway" && c.Provider.VideoAdapter != "ark_video" {
+		return fmt.Errorf("COOKIES_PROVIDER_VIDEO_ADAPTER must be fake, adapter_gateway, or ark_video")
 	}
 	if c.Provider.AudioAdapter != "fake" && c.Provider.AudioAdapter != "volcengine_asr" {
 		return fmt.Errorf("COOKIES_PROVIDER_AUDIO_ADAPTER must be fake or volcengine_asr")
@@ -670,7 +670,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Strategy.ConversationPromptVersion) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION must not be empty")
 	}
-	if !oneOf(c.Strategy.ConversationPromptVersion, "strategy.conversation.v3", "strategy.conversation.v4", "strategy.conversation.v5") {
+	if !oneOf(c.Strategy.ConversationPromptVersion, "strategy.conversation.v3", "strategy.conversation.v4", "strategy.conversation.v5", "strategy.conversation.v6") {
 		return fmt.Errorf("COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION is unsupported")
 	}
 	if strings.TrimSpace(c.Strategy.RevisePromptVersion) == "" {
@@ -744,6 +744,7 @@ func (c Config) Validate() error {
 	}
 	usesGenerationBroker := c.Provider.ImageAdapter == "adapter_gateway" ||
 		c.Provider.TextAdapter == "adapter_gateway" ||
+		c.Provider.VideoAdapter == "adapter_gateway" ||
 		c.Provider.VideoAdapter == "ark_video" ||
 		c.Provider.SpeechAdapter == "minimax_speech"
 	usesCredentialBroker := usesGenerationBroker || c.Research.SeedEnabled

@@ -437,6 +437,27 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/tasks/{task_id}/brief-draft:revise':
+    post:
+      operationId: createStrategyBriefRevisionDraft
+      summary: Create an editable draft from an immutable confirmed Brief version.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base_brief_version]
+              properties:
+                base_brief_version: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   '/api/strategy/v1/tasks/{task_id}/brief:confirm':
     post:
       operationId: confirmStrategyBrief

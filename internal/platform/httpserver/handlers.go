@@ -1846,6 +1846,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusConflict, "PRODUCTION_JOB_CONFLICT", "A different cover production job already exists for this task.", false
 	case errors.Is(err, creative.ErrInvalidState):
 		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The Creative resource is not in a valid state for this operation.", false
+	case errors.Is(err, creative.ErrProviderInputInvalid):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "CREATIVE_PROVIDER_INPUT_INVALID", "视频生成参数与当前模型不兼容，请返回剧本分镜检查时长、画幅和清晰度。", false
 	case errors.Is(err, creative.ErrVersionConflict):
 		status, code, message, retryable = http.StatusPreconditionFailed, "CREATIVE_VERSION_CONFLICT", "The Creative draft changed. Refresh the task and try again.", false
 	case errors.Is(err, creative.ErrViralAnalysisSourceUnavailable):

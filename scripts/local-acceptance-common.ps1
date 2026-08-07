@@ -140,7 +140,8 @@ function Initialize-LocalAcceptanceEnvironment {
     Set-LocalAcceptanceProcessSetting "COOKIES_PROVIDER_IMAGE_ADAPTER" "adapter_gateway"
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" "true"
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" $script:SeedTextAlias
-    Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $script:SeedTextAlias
+    $deepReviewAlias = Get-LocalAcceptanceSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $script:SeedTextAlias
+    Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $deepReviewAlias
 }
 
 function Test-LocalHTTP {

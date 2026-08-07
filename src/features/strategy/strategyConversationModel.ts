@@ -63,6 +63,33 @@ export function buildConversationLens(
   }
 }
 
+export function conversationSourceDocuments(
+  brief: BriefDraft | null,
+  documents: KnowledgeDocument[],
+): KnowledgeDocument[] {
+  const referencedDocumentIds = new Set(brief?.document.reference_ids ?? [])
+  if (!referencedDocumentIds.size) return []
+  const uniqueDocuments = new Map<string, KnowledgeDocument>()
+  for (const document of documents) {
+    if (!referencedDocumentIds.has(document.id)) continue
+    const identity = document.content_sha256 || document.id
+    const existing = uniqueDocuments.get(identity)
+    if (!existing || (existing.status !== 'ready' && document.status === 'ready')) {
+      uniqueDocuments.set(identity, document)
+    }
+  }
+  return [...uniqueDocuments.values()]
+}
+
+export function conversationSearchRunsByMessage(runs: ResearchRun[]): Map<string, ResearchRun> {
+  const result = new Map<string, ResearchRun>()
+  for (const run of runs) {
+    if (run.purpose !== 'conversation_web_search' || run.source_ref?.type !== 'strategy_message') continue
+    if (!result.has(run.source_ref.id)) result.set(run.source_ref.id, run)
+  }
+  return result
+}
+
 export function conversationSourceLabel(state: FieldState | undefined): string | undefined {
   if (!state) return undefined
   if (state.source.type === 'knowledge_chunk') {
@@ -108,21 +135,6 @@ export function buildConversationMessageCreate(
     ],
     ...(requestedPolicy ? { requested_policy: requestedPolicy } : {}),
   }
-}
-
-export async function waitForConversationResearch(
-  initial: ResearchRun,
-  getRun: (researchRunId: string) => Promise<ResearchRun>,
-  pause: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
-  maxPolls = 30,
-): Promise<ResearchRun> {
-  let run = initial
-  for (let poll = 0; run.status === 'running' && poll < maxPolls; poll += 1) {
-    await pause(1500)
-    run = await getRun(run.id)
-  }
-  if (run.status === 'running') throw new Error('联网查证超时，请稍后重试或关闭联网查证。')
-  return run
 }
 
 export function intakeMissingLabel(value: string): string {

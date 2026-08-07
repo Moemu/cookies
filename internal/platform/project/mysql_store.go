@@ -1038,6 +1038,49 @@ func (s MySQLStore) GetContext(ctx context.Context, organizationID contract.Orga
 	return result, nil
 }
 
+func (s MySQLStore) GetBusinessContext(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (contract.ProjectBusinessContext, error) {
+	if s.DB == nil {
+		return contract.ProjectBusinessContext{}, fmt.Errorf("project database is required")
+	}
+	var value contract.ProjectBusinessContext
+	var brandID, brandName sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT p.id, p.name, p.primary_brand_id, b.name
+		FROM projects p
+		LEFT JOIN brands b ON b.organization_id = p.organization_id AND b.id = p.primary_brand_id
+		WHERE p.organization_id = ? AND p.id = ?`, organizationID, projectID).Scan(
+		&value.ProjectID, &value.ProjectName, &brandID, &brandName,
+	)
+	if err == sql.ErrNoRows {
+		return contract.ProjectBusinessContext{}, ErrNotFound
+	}
+	if err != nil {
+		return contract.ProjectBusinessContext{}, err
+	}
+	if brandID.Valid {
+		id := contract.BrandID(brandID.String)
+		value.BrandID = &id
+	}
+	value.BrandName = brandName.String
+	rows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name
+		FROM project_products pp
+		JOIN products pr ON pr.organization_id = pp.organization_id AND pr.id = pp.product_id
+		WHERE pp.organization_id = ? AND pp.project_id = ?
+		ORDER BY pr.name, pr.id`, organizationID, projectID)
+	if err != nil {
+		return contract.ProjectBusinessContext{}, err
+	}
+	defer rows.Close()
+	value.Products = make([]contract.ProjectBusinessProduct, 0)
+	for rows.Next() {
+		var product contract.ProjectBusinessProduct
+		if err := rows.Scan(&product.ID, &product.Name); err != nil {
+			return contract.ProjectBusinessContext{}, err
+		}
+		value.Products = append(value.Products, product)
+	}
+	return value, rows.Err()
+}
+
 func (s MySQLStore) ListProjects(ctx context.Context, actor contract.ActorContext) ([]Project, error) {
 	if s.DB == nil {
 		return nil, fmt.Errorf("project database is required")

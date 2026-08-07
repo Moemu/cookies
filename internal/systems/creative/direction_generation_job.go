@@ -46,7 +46,8 @@ func (s Service) StartDirectionGeneration(
 	}
 	if reader, ok := s.Directions.(DirectionBatchReader); ok {
 		latest, latestErr := reader.GetLatestDirectionBatch(ctx, actor.OrganizationID, projectID, intakeID)
-		if latestErr == nil && latest.Status == DirectionBatchGenerating && latest.InputIdentityHash == prepared.Intake.InputIdentityHash {
+		if latestErr == nil && latest.Status == DirectionBatchGenerating && latest.InputIdentityHash == prepared.Intake.InputIdentityHash &&
+			brandBriefReferencesEqual(latest.BrandBriefRef, prepared.BrandBriefRef) {
 			return latest, nil
 		}
 		if latestErr != nil && !errors.Is(latestErr, ErrNotFound) {
@@ -60,7 +61,7 @@ func (s Service) StartDirectionGeneration(
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1,
 		ID:              batchID, OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intakeID,
-		InputIdentityHash: prepared.Intake.InputIdentityHash, Status: DirectionBatchGenerating,
+		InputIdentityHash: prepared.Intake.InputIdentityHash, BrandBriefRef: prepared.BrandBriefRef, Status: DirectionBatchGenerating,
 		Candidates: []CreativeDirectionVersion{}, Model: "pending", PromptVersion: "pending",
 		CreatedBy: actor.Principal.ID, CreatedAt: s.now(),
 	}
@@ -101,6 +102,9 @@ func (s Service) HandleDirectionGenerationJob(ctx context.Context, claim jobrunt
 	if prepared.Intake.InputIdentityHash != batch.InputIdentityHash {
 		return s.failDirectionGeneration(ctx, claim, operation.BatchID, "DIRECTION_INPUT_CHANGED", fmt.Errorf("creative intake identity changed"))
 	}
+	if !brandBriefReferencesEqual(prepared.BrandBriefRef, batch.BrandBriefRef) {
+		return s.failDirectionGeneration(ctx, claim, operation.BatchID, "DIRECTION_INPUT_CHANGED", fmt.Errorf("confirmed brand Brief changed"))
+	}
 	ready, err := s.planDirectionBatch(ctx, operation.Actor, prepared, operation.BatchID, batch.CreatedAt)
 	if err != nil {
 		return s.failDirectionGeneration(ctx, claim, operation.BatchID, directionFailureCode(err), err)
@@ -110,6 +114,13 @@ func (s Service) HandleDirectionGenerationJob(ctx context.Context, claim jobrunt
 		return jobruntime.Result{}, err
 	}
 	return jobruntime.Result{Ref: &contract.ResourceRef{Type: "creative_direction_batch", ID: ready.ID}}, nil
+}
+
+func brandBriefReferencesEqual(left, right *BrandBriefReference) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Revision == right.Revision && left.ContentHash == right.ContentHash
 }
 
 func (s Service) failDirectionGeneration(ctx context.Context, claim jobruntime.Claim, batchID, code string, cause error) (jobruntime.Result, error) {

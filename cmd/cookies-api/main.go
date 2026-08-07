@@ -133,7 +133,7 @@ func main() {
 		Repository: creativeRepository, ViralRemakes: creativeRepository, EditTasks: creativeRepository, EditingRenders: creativeRepository,
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
 		AudioAssets:        creativeAudioAssetWriter{uploads: uploadService},
-		CommerceWorkspaces: creativeRepository, Directions: creativeRepository,
+		CommerceWorkspaces: creativeRepository, BrandBriefs: creativeRepository, Directions: creativeRepository,
 		AINativeProducts:             creativeProductResolver{resolver: productsource.NewDouyinResolver()},
 		AINativeRequirements:         creativeRepository,
 		AINativeScripts:              creativeRepository,
@@ -469,8 +469,9 @@ func main() {
 	if cfg.Strategy.Enabled {
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, ConversationKnowledge: knowledgeService,
-			ConversationMedia: mediaUnderstandingService,
-			CreativeAssets:    uploadService, Agents: agentStore, Text: textProvider,
+			ConversationResearch: knowledgeService,
+			ConversationMedia:    mediaUnderstandingService,
+			CreativeAssets:       uploadService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
 			PromptVersion:             cfg.Strategy.PromptVersion,
 			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
@@ -551,12 +552,19 @@ func main() {
 			}
 			providerService.Routes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
 		}
-		if cfg.Provider.VideoAdapter == "ark_video" {
+		if cfg.Provider.VideoAdapter == "adapter_gateway" || cfg.Provider.VideoAdapter == "ark_video" {
 			cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
 			if cipherErr != nil {
 				log.Fatalf("configure Provider video credential encryption: %v", cipherErr)
 			}
-			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher}
+			connectionType := "ark"
+			if cfg.Provider.VideoAdapter == "adapter_gateway" {
+				connectionType = "adapter_gateway"
+			}
+			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{
+				DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+				VideoConnectionType: connectionType,
+			}
 		}
 		dependencies.ProviderJobs = providerService
 		creativeService.ShortDramaV2Images = creativeShortDramaV2ImageJobs{provider: &providerService}
@@ -666,6 +674,13 @@ func buildVideoAdapter(cfg config.Config, db *sql.DB, handles provider.OutputHan
 	switch cfg.Provider.VideoAdapter {
 	case "fake":
 		return provider.NewFakeVideoAdapter(nil), nil
+	case "adapter_gateway":
+		cipher, err := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if err != nil {
+			return nil, err
+		}
+		store := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP, VideoConnectionType: "adapter_gateway"}
+		return provider.NewAdapterGatewayVideoAdapter(store, handles, cfg.Provider.AllowInsecureHTTP)
 	case "ark_video":
 		cipher, err := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
 		if err != nil {

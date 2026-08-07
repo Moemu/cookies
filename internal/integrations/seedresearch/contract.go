@@ -120,6 +120,7 @@ func decodeSeedResponse(body []byte, input knowledge.ExternalResearchInput) (kno
 	case "industry":
 		title = "行业联网研究"
 	}
+	title = researchTitle(input.Category)
 	usage := &knowledge.ResearchUsage{
 		InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
 		TotalTokens: response.Usage.TotalTokens,
@@ -129,6 +130,19 @@ func decodeSeedResponse(body []byte, input knowledge.ExternalResearchInput) (kno
 		Sources: sources, ProviderCode: "ark", ModelVersion: strings.TrimSpace(response.Model),
 		ProviderResponse: strings.TrimSpace(response.ID), Usage: usage,
 	}, nil
+}
+
+func researchTitle(category string) string {
+	switch category {
+	case "audience":
+		return "受众联网研究"
+	case "competitor":
+		return "竞品联网研究"
+	case "industry":
+		return "行业联网研究"
+	default:
+		return "联网研究"
+	}
 }
 
 func decodeURLCitation(raw json.RawMessage) (knowledge.ExternalResearchSource, bool) {

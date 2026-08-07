@@ -13,6 +13,7 @@ func TestRegistryResolvesEverySupportedStage(t *testing.T) {
 	}{
 		{StageConversation, ConversationV4},
 		{StageConversation, ConversationV5},
+		{StageConversation, ConversationV6},
 		{StageGenerate, GenerateV3},
 		{StageGenerate, GenerateV4},
 		{StageRevise, ReviseV3},

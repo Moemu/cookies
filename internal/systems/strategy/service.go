@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 
@@ -32,12 +33,20 @@ type ProjectReader interface {
 	GetContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 }
 
+type ProjectBusinessReader interface {
+	GetBusinessContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectBusinessContext, error)
+}
+
 type KnowledgeReader interface {
 	GetReference(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.Reference, error)
 }
 
 type ConversationKnowledgeReader interface {
 	SelectConversationChunks(context.Context, contract.ActorContext, contract.ProjectID, []string, string) ([]knowledge.SearchResult, error)
+}
+
+type ConversationResearchRunner interface {
+	RunConversationWebSearch(context.Context, contract.ActorContext, contract.ProjectID, string, string) (knowledge.ResearchRun, error)
 }
 
 type ConversationMediaReader interface {
@@ -55,6 +64,7 @@ type Service struct {
 	Projects                     ProjectReader
 	Knowledge                    KnowledgeReader
 	ConversationKnowledge        ConversationKnowledgeReader
+	ConversationResearch         ConversationResearchRunner
 	ConversationMedia            ConversationMediaReader
 	CreativeAssets               CreativeAssetReader
 	MessageReferences            MessageReferenceValidator
@@ -119,6 +129,74 @@ func (s Service) project(ctx context.Context, actor contract.ActorContext, proje
 		return contract.ProjectContext{}, ErrInvalidState
 	}
 	return projectContext, nil
+}
+
+func (s Service) projectBriefCompatibilityProblems(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	document BriefDocument,
+) []ValidationError {
+	reader, ok := s.Projects.(ProjectBusinessReader)
+	if !ok {
+		return nil
+	}
+	business, err := reader.GetBusinessContext(ctx, actor, projectID)
+	if err != nil {
+		return []ValidationError{{Field: "project.context", Reason: "无法验证 Project 与 Brief 的业务归属"}}
+	}
+	document.SyncV3LegacyProjection()
+	problems := make([]ValidationError, 0, 2)
+	if briefBrand := strings.TrimSpace(document.Brand.Name); briefBrand != "" &&
+		strings.TrimSpace(business.BrandName) != "" &&
+		!businessNamesCompatible(briefBrand, business.BrandName) {
+		problems = append(problems, ValidationError{
+			Field:  "project.brand",
+			Reason: fmt.Sprintf("Brief 品牌“%s”与当前 Project 品牌“%s”不一致", briefBrand, business.BrandName),
+		})
+	}
+	if briefProduct := strings.TrimSpace(document.Product.Name); briefProduct != "" && len(business.Products) > 0 {
+		matched := false
+		projectProducts := make([]string, 0, len(business.Products))
+		for _, product := range business.Products {
+			projectProducts = append(projectProducts, product.Name)
+			matched = matched || businessNamesCompatible(briefProduct, product.Name)
+		}
+		if !matched {
+			problems = append(problems, ValidationError{
+				Field:  "project.product",
+				Reason: fmt.Sprintf("Brief 产品“%s”不属于当前 Project 产品（%s）", briefProduct, strings.Join(projectProducts, "、")),
+			})
+		}
+	}
+	return problems
+}
+
+func businessNamesCompatible(left, right string) bool {
+	normalize := func(value string) string {
+		return strings.Map(func(char rune) rune {
+			if unicode.IsLetter(char) || unicode.IsDigit(char) {
+				return unicode.ToLower(char)
+			}
+			return -1
+		}, strings.TrimSpace(value))
+	}
+	left, right = normalize(left), normalize(right)
+	return left != "" && right != "" &&
+		(left == right || strings.Contains(left, right) || strings.Contains(right, left))
+}
+
+func (s Service) decorateBriefReadiness(
+	ctx context.Context,
+	actor contract.ActorContext,
+	value BriefVersion,
+) BriefVersion {
+	readiness := computeFullStrategyReadiness(value.Snapshot, value.FieldStates)
+	readiness.Blockers = append(readiness.Blockers,
+		s.projectBriefCompatibilityProblems(ctx, actor, value.ProjectID, value.Snapshot)...)
+	readiness.Ready = len(readiness.Blockers) == 0
+	value.FullStrategyReadiness = &readiness
+	return value
 }
 
 func (s Service) AuthorizeProject(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, scope contract.Scope) error {
@@ -990,6 +1068,137 @@ func (s Service) PatchBriefDraft(ctx context.Context, actor contract.ActorContex
 	return updated, false, nil
 }
 
+func (s Service) CreateBriefRevisionDraft(
+	ctx context.Context,
+	actor contract.ActorContext,
+	key contract.IdempotencyKey,
+	taskID string,
+	baseBriefVersion int64,
+) (BriefDraft, bool, error) {
+	if err := requireScope(actor, ScopeWrite); err != nil {
+		return BriefDraft{}, false, err
+	}
+	if err := key.Validate(); err != nil || taskID == "" || baseBriefVersion < 1 {
+		return BriefDraft{}, false, ErrInvalidRequest
+	}
+	task, err := scanTask(s.DB.QueryRowContext(ctx, taskSelect+` WHERE organization_id = ? AND id = ?`, actor.OrganizationID, taskID))
+	if err != nil {
+		return BriefDraft{}, false, err
+	}
+	if task.DiscardedAt != nil {
+		return BriefDraft{}, false, ErrInvalidState
+	}
+	if _, err := s.project(ctx, actor, task.ProjectID); err != nil {
+		return BriefDraft{}, false, err
+	}
+	request := struct {
+		TaskID           string `json:"task_id"`
+		BaseBriefVersion int64  `json:"base_brief_version"`
+	}{TaskID: taskID, BaseBriefVersion: baseBriefVersion}
+	hash, _ := contract.CanonicalJSONHash(request)
+	var prior BriefDraft
+	found, err := s.loadReceipt(ctx, actor, task.ProjectID, "brief.revision.create", key, hash, &prior)
+	if found || err != nil {
+		return prior, found, err
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return BriefDraft{}, false, err
+	}
+	defer tx.Rollback()
+	var latestDraftID string
+	var latestVersion int64
+	if err := tx.QueryRowContext(ctx, `SELECT latest_draft_id, latest_version FROM strategy_briefs
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		actor.OrganizationID, task.ProjectID, task.BriefID).Scan(&latestDraftID, &latestVersion); err != nil {
+		return BriefDraft{}, false, mapNotFound(err)
+	}
+	if latestVersion != baseBriefVersion {
+		return BriefDraft{}, false, ErrVersionConflict
+	}
+	latestDraft, err := scanBriefDraft(tx.QueryRowContext(ctx, briefDraftSelect+` WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		actor.OrganizationID, task.ProjectID, latestDraftID))
+	if err != nil {
+		return BriefDraft{}, false, err
+	}
+	if latestDraft.Status == "open" {
+		if latestDraft.BaseBriefVersion != nil && *latestDraft.BaseBriefVersion == baseBriefVersion {
+			return latestDraft, true, nil
+		}
+		return BriefDraft{}, false, ErrInvalidState
+	}
+	if latestDraft.Status != "confirmed" {
+		return BriefDraft{}, false, ErrInvalidState
+	}
+	base, err := scanBriefVersion(tx.QueryRowContext(ctx, briefVersionSelect+` WHERE organization_id = ? AND project_id = ? AND brief_id = ? AND version = ?`,
+		actor.OrganizationID, task.ProjectID, task.BriefID, baseBriefVersion))
+	if err != nil {
+		return BriefDraft{}, false, err
+	}
+	draftID, err := s.newID("briefdraft")
+	if err != nil {
+		return BriefDraft{}, false, err
+	}
+	now := s.now()
+	draft := BriefDraft{
+		ID: draftID, OrganizationID: actor.OrganizationID, ProjectID: task.ProjectID,
+		BriefID: task.BriefID, Status: "open", Version: 1, BaseBriefVersion: &baseBriefVersion,
+		Document: base.Snapshot, FieldStates: base.FieldStates,
+		UpdatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	draft.Completeness = ComputeCompleteness(draft.Document, draft.FieldStates)
+	documentJSON, _ := snapshotJSON(draft.Document)
+	statesJSON, _ := snapshotJSON(draft.FieldStates)
+	completenessJSON, _ := snapshotJSON(draft.Completeness)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_brief_drafts
+		(id, organization_id, project_id, brief_id, status, version, base_brief_version,
+		 document, field_states, completeness, updated_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		draft.ID, draft.OrganizationID, draft.ProjectID, draft.BriefID, draft.Status, draft.Version,
+		baseBriefVersion, documentJSON, statesJSON, completenessJSON, draft.UpdatedBy, now, now); err != nil {
+		return BriefDraft{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_briefs SET latest_draft_id = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`, draft.ID, now,
+		actor.OrganizationID, task.ProjectID, task.BriefID); err != nil {
+		return BriefDraft{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET status = 'waiting_user',
+		current_agent_task_id = NULL, version = version + 1, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?`, now,
+		actor.OrganizationID, task.ProjectID, task.ID); err != nil {
+		return BriefDraft{}, false, err
+	}
+	if err := syncEvidenceReferences(
+		ctx, tx, actor.OrganizationID, task.ProjectID, "brief_draft", draft.ID,
+		draft.Version, "reference_ids", draft.Document.ReferenceIDs,
+		actor.Principal.ID, now, true,
+	); err != nil {
+		return BriefDraft{}, false, err
+	}
+	eventID, _ := s.newID("stratevent")
+	payload, _ := snapshotJSON(map[string]any{
+		"brief_id": task.BriefID, "base_brief_version": baseBriefVersion, "draft_id": draft.ID,
+	})
+	if err := insertConversationEvent(ctx, tx, eventID, actor.OrganizationID, task.ProjectID,
+		task.ConversationID, "brief.revision.started", payload, now); err != nil {
+		return BriefDraft{}, false, err
+	}
+	if err := insertReceipt(ctx, tx, actor, task.ProjectID, "brief.revision.create", key, hash, 201, draft, now); err != nil {
+		if isDuplicate(err) {
+			tx.Rollback()
+			found, readErr := s.loadReceipt(ctx, actor, task.ProjectID, "brief.revision.create", key, hash, &prior)
+			return prior, found, readErr
+		}
+		return BriefDraft{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return BriefDraft{}, false, err
+	}
+	return draft, false, nil
+}
+
 func (s Service) ConfirmBrief(ctx context.Context, actor contract.ActorContext, key contract.IdempotencyKey, taskID string, expectedVersion int64) (BriefVersion, bool, error) {
 	if err := requireScope(actor, ScopeConfirm); err != nil {
 		return BriefVersion{}, false, err
@@ -1033,10 +1242,10 @@ func (s Service) ConfirmBrief(ctx context.Context, actor contract.ActorContext, 
 	if draft.Status != "open" {
 		return BriefVersion{}, false, ErrInvalidState
 	}
-	completeness := ComputeCompleteness(draft.Document, draft.FieldStates)
-	if !completeness.Ready {
-		return BriefVersion{}, false, BlockedError{Problems: completeness.Blockers}
+	if problems := briefConfirmationProblems(draft); len(problems) > 0 {
+		return BriefVersion{}, false, BlockedError{Problems: problems}
 	}
+	completeness := ComputeCompleteness(draft.Document, draft.FieldStates)
 	var latest int64
 	if err := tx.QueryRowContext(ctx, `SELECT latest_version FROM strategy_briefs
 		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
@@ -1050,6 +1259,7 @@ func (s Service) ConfirmBrief(ctx context.Context, actor contract.ActorContext, 
 		SourceDraftID: draft.ID, SourceDraftVersion: draft.Version,
 		ConfirmedBy: actor.Principal.ID, ConfirmedAt: now,
 	}
+	version = s.decorateBriefReadiness(ctx, actor, version)
 	version.ContentHash, err = contract.NewContentHash(struct {
 		Snapshot    BriefDocument         `json:"snapshot"`
 		FieldStates map[string]FieldState `json:"field_states"`
@@ -1144,6 +1354,9 @@ func (s Service) ListBriefVersions(ctx context.Context, actor contract.ActorCont
 		}
 		authorized[version.ProjectID] = struct{}{}
 	}
+	for index := range versions {
+		versions[index] = s.decorateBriefReadiness(ctx, actor, versions[index])
+	}
 	if versions == nil {
 		versions = []BriefVersion{}
 	}
@@ -1179,6 +1392,9 @@ func (s Service) ListProjectBriefVersions(ctx context.Context, actor contract.Ac
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	for index := range versions {
+		versions[index] = s.decorateBriefReadiness(ctx, actor, versions[index])
+	}
 	return versions, nil
 }
 
@@ -1193,7 +1409,7 @@ func (s Service) GetBriefVersion(ctx context.Context, actor contract.ActorContex
 	if _, err := s.project(ctx, actor, value.ProjectID); err != nil {
 		return BriefVersion{}, err
 	}
-	return value, nil
+	return s.decorateBriefReadiness(ctx, actor, value), nil
 }
 
 func (s Service) loadReceipt(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, operation string, key contract.IdempotencyKey, requestHash string, target any) (bool, error) {

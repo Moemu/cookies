@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BackendApiError } from '../../backend/platform'
 import { strategyApi, createMutationKey } from './api'
-import { buildConversationMessageCreate, waitForConversationResearch } from './strategyConversationModel'
+import { buildConversationMessageCreate } from './strategyConversationModel'
 import { useConversationStream } from './useConversationStream'
 import type {
   BriefDraft,
@@ -28,6 +28,8 @@ import type {
   Workspace,
   WorkspaceDetail,
 } from './types'
+import type { BriefProductCandidate } from './types'
+import { briefProductCandidateOperations } from './briefProductCandidate'
 
 export type StrategyWorkspaceState = {
   workspaces: Workspace[]
@@ -53,9 +55,11 @@ export type StrategyWorkspaceState = {
   conversationCapabilities: ConversationCapabilities | null
   p0Metrics: StrategyP0Metrics | null
   researchRun: ResearchRun | null
+  researchRuns: ResearchRun[]
   isLoading: boolean
   busy: string
   error: string
+  conversationNotice: string
   pendingAgentTaskId: string
   pendingAgentPurpose: 'deep_review' | 'general' | ''
 }
@@ -68,6 +72,9 @@ function messageOf(error: unknown) {
 }
 
 export function agentFailureMessage(code?: string, message?: string, kind?: string) {
+  if (code === 'CONVERSATION_WEB_SEARCH_FAILED') {
+    return '联网搜索未完成，因此本轮没有生成无来源回答。可以重新发送，或关闭联网搜索后改用普通回答。'
+  }
   if (code === 'MODEL_RATE_LIMITED') {
     return kind === 'strategy.brief.extract'
       ? '文本模型请求暂时受限，请稍后重新发送需求消息。'
@@ -135,9 +142,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     conversationCapabilities: null,
     p0Metrics: null,
     researchRun: null,
+    researchRuns: [],
     isLoading: true,
     busy: '',
     error: '',
+    conversationNotice: '',
     pendingAgentTaskId: '',
     pendingAgentPurpose: '',
   })
@@ -180,6 +189,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         p0Metrics,
         packages,
         researchRun: researchRuns[0] ?? null,
+        researchRuns,
         published: packages.find(value => value.status === 'published') ?? null,
         isLoading: false,
       }))
@@ -224,6 +234,14 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let deepReviewFailure = ''
     let published: PackageVersion | null = null
     let agentFailure = ''
+    let recoveredAgentTaskId = ''
+    if (task?.current_agent_task_id) {
+      const inspection = await strategyApi.getAgentTask(task.current_agent_task_id, signal).catch(() => null)
+      if (inspection?.task.kind === 'strategy.brief.extract' &&
+        ['dispatch_pending', 'queued', 'running'].includes(inspection.task.status)) {
+        recoveredAgentTaskId = inspection.task.id
+      }
+    }
     if (task?.current_strategy_id) {
       draft = await strategyApi.getStrategy(task.current_strategy_id, signal)
       if (draft.status === 'failed' && task.current_agent_task_id) {
@@ -284,8 +302,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       researchRun: researchRuns.find(run =>
         run.artifacts.some(artifact => brief?.document.reference_ids?.includes(artifact.id)),
       ) ?? null,
+      researchRuns,
       isLoading: false,
       error: agentFailure,
+      pendingAgentTaskId: recoveredAgentTaskId || current.pendingAgentTaskId,
+      pendingAgentPurpose: recoveredAgentTaskId ? 'general' : current.pendingAgentPurpose,
     }))
   }, [preferredWorkspaceId, projectId])
 
@@ -331,6 +352,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
             pendingAgentPurpose: '',
             error: agentPurpose === 'deep_review' ? '' : failureMessage,
             deepReviewError: agentPurpose === 'deep_review' ? failureMessage : current.deepReviewError,
+            conversationNotice: agentPurpose === 'deep_review' ? current.conversationNotice : '',
           }))
           return
         }
@@ -340,6 +362,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
             pendingAgentTaskId: '',
             pendingAgentPurpose: '',
             deepReviewError: agentPurpose === 'deep_review' ? '' : current.deepReviewError,
+            conversationNotice: agentPurpose === 'deep_review' ? current.conversationNotice : '',
           }))
           await reload()
           return
@@ -364,7 +387,11 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     const inspect = async () => {
       try {
         const next = await strategyApi.getResearchRun(projectId, researchRun.id, controller.signal)
-        setState(current => ({ ...current, researchRun: next }))
+        setState(current => ({
+          ...current,
+          researchRun: next,
+          researchRuns: (current.researchRuns ?? []).map(run => run.id === next.id ? next : run),
+        }))
         if (next.status === 'running') {
           timer = window.setTimeout(inspect, 1800)
           return
@@ -382,6 +409,43 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       window.clearTimeout(timer)
     }
   }, [projectId, state.researchRun])
+
+  const conversationResearchPollingKey = (state.researchRuns ?? [])
+    .filter(run => run.purpose === 'conversation_web_search' && run.status === 'running')
+    .map(run => run.id)
+    .sort()
+    .join(',')
+
+  useEffect(() => {
+    const runIDs = conversationResearchPollingKey.split(',').filter(Boolean)
+    if (!runIDs.length) return
+    const controller = new AbortController()
+    let timer = 0
+    const inspect = async () => {
+      try {
+        const nextRuns = await Promise.all(runIDs.map(runID =>
+          strategyApi.getResearchRun(projectId, runID, controller.signal),
+        ))
+        setState(current => {
+          const updates = new Map(nextRuns.map(run => [run.id, run]))
+          return {
+            ...current,
+            researchRuns: (current.researchRuns ?? []).map(run => updates.get(run.id) ?? run),
+          }
+        })
+        if (nextRuns.some(run => run.status === 'running')) {
+          timer = window.setTimeout(inspect, 2500)
+        }
+      } catch {
+        if (!controller.signal.aborted) timer = window.setTimeout(inspect, 4000)
+      }
+    }
+    timer = window.setTimeout(inspect, 1000)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [conversationResearchPollingKey, projectId])
 
   useEffect(() => {
     if (!state.documents.some(document => document.status === 'parse_queued' || document.status === 'parsing')) return
@@ -444,6 +508,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       ...current,
       busy: name,
       error: '',
+      conversationNotice: name === 'message' || name === 'web-search' ? '' : current.conversationNotice,
       deepReviewError: errorTarget === 'deep_review' ? '' : current.deepReviewError,
     }))
     try {
@@ -522,7 +587,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       documents: KnowledgeDocument[] = [],
       media: MediaUnderstandingArtifact[] = [],
       requestedPolicy?: MessageRequestedPolicy,
-    ) => perform(requestedPolicy?.web_search === 'allowed' ? 'web-search' : 'message', async () => {
+    ) => perform('message', async () => {
       const conversationId = state.detail?.current_conversation?.id
       if (!conversationId) throw new Error('请先开始需求对话。')
       if (documents.some(document => document.status !== 'ready')) {
@@ -531,34 +596,13 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       if (media.some(artifact => artifact.status !== 'ready' && artifact.status !== 'partial')) {
         throw new Error('请等待图片或视频理解完成后再发送。')
       }
-      let researchArtifacts: ResearchRun['artifacts'] = []
-      if (requestedPolicy?.web_search === 'allowed') {
-        const query = content.trim()
-        if (!query) throw new Error('联网查证需要先输入一个明确问题。')
-        const initialRun = await strategyApi.runExternalResearch(projectId, {
-          category: 'general',
-          query,
-          document_ids: [],
-          disclosed_fields: ['query'],
-          confirmed: true,
-        })
-        setState(current => ({ ...current, researchRun: initialRun }))
-        const completedRun = await waitForConversationResearch(
-          initialRun,
-          researchRunId => strategyApi.getResearchRun(projectId, researchRunId),
-        )
-        setState(current => ({ ...current, researchRun: completedRun }))
-        if (completedRun.status !== 'succeeded') {
-          throw new Error(completedRun.error_message || '联网查证未完成；原消息没有发送，请关闭联网查证后重试。')
-        }
-        if (!completedRun.artifacts.length) {
-          throw new Error('联网查证没有返回可引用的证据；原消息没有发送。')
-        }
-        researchArtifacts = completedRun.artifacts
-      }
+      const query = content.trim()
+      const effectivePolicy = requestedPolicy?.web_search === 'allowed' && !query
+        ? requestedPolicy.reasoning_mode === 'deep' ? { reasoning_mode: 'deep' as const } : undefined
+        : requestedPolicy
       const result = await strategyApi.sendMessage(
         conversationId,
-        buildConversationMessageCreate(content, documents, media, researchArtifacts, requestedPolicy),
+        buildConversationMessageCreate(content, documents, media, [], effectivePolicy),
         createMutationKey('strategy-message'),
       )
       setState(current => ({
@@ -568,6 +612,9 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           : [...current.messages, result.message],
         pendingAgentTaskId: result.agent_task.id,
         pendingAgentPurpose: 'general',
+        conversationNotice: requestedPolicy?.web_search === 'allowed'
+          ? '正在联网搜索；搜索完成后会基于返回证据生成本轮回答。'
+          : '',
       }))
     }, false),
     patchBriefField: (fieldPath: string, value: unknown) => perform(`brief:${fieldPath}`, async () => {
@@ -579,6 +626,17 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         fieldPath,
         value,
         createMutationKey('strategy-brief-patch'),
+      )
+      setState(current => ({ ...current, brief }))
+    }, false),
+    selectBriefProductCandidate: (candidate: BriefProductCandidate) => perform('brief:select-product', async () => {
+      const task = state.detail?.current_task
+      if (!task || !state.brief) throw new Error('Brief 草稿尚未创建。')
+      const brief = await strategyApi.patchBriefFields(
+        task.id,
+        state.brief,
+        briefProductCandidateOperations(state.brief.document, candidate),
+        createMutationKey('strategy-brief-select-product'),
       )
       setState(current => ({ ...current, brief }))
     }, false),
@@ -601,6 +659,16 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
         task.id,
         state.brief.version,
         createMutationKey('strategy-brief-confirm'),
+      )
+    }),
+    createBriefRevision: () => perform('create-brief-revision', async () => {
+      const task = state.detail?.current_task
+      const version = state.briefVersion
+      if (!task || !version) throw new Error('没有可用于补充修订的冻结 Brief。')
+      await strategyApi.createBriefRevisionDraft(
+        task.id,
+        version.version,
+        createMutationKey('strategy-brief-revision'),
       )
     }),
     confirmRequirement: () => perform('confirm-requirement', async () => {
@@ -788,12 +856,17 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       perform('research', async () => {
         const researchRun = await strategyApi.runExternalResearch(projectId, {
           category,
+          purpose: 'deep_research',
           query,
           document_ids: documentIds,
           disclosed_fields: documentIds.length ? ['query', 'document_content'] : ['query'],
           confirmed: true,
         })
-        setState(current => ({ ...current, researchRun }))
+        setState(current => ({
+          ...current,
+          researchRun,
+          researchRuns: [researchRun, ...(current.researchRuns ?? []).filter(value => value.id !== researchRun.id)],
+        }))
       }, false),
     setResearchArtifactAdoption: (artifactId: string, adopted: boolean) =>
       perform(`research-adoption:${artifactId}`, async () => {

@@ -68,4 +68,10 @@ func TestChunksForParsedDocumentAreDeterministicAndBounded(t *testing.T) {
 			t.Fatalf("chunk %d has %d runes", index, len([]rune(first[index].Text)))
 		}
 	}
+	duplicate := document
+	duplicate.ID = "doc_2"
+	duplicateChunks := chunksForParsedDocument(duplicate, parsed)
+	if duplicateChunks[0].ID == first[0].ID {
+		t.Fatal("different document records must not share globally unique chunk IDs")
+	}
 }
