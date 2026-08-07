@@ -468,8 +468,9 @@ func main() {
 	if cfg.Strategy.Enabled {
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, ConversationKnowledge: knowledgeService,
-			ConversationMedia: mediaUnderstandingService,
-			CreativeAssets:    uploadService, Agents: agentStore, Text: textProvider,
+			ConversationResearch: knowledgeService,
+			ConversationMedia:    mediaUnderstandingService,
+			CreativeAssets:       uploadService, Agents: agentStore, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
 			PromptVersion:             cfg.Strategy.PromptVersion,
 			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,

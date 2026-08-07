@@ -45,6 +45,10 @@ type ConversationKnowledgeReader interface {
 	SelectConversationChunks(context.Context, contract.ActorContext, contract.ProjectID, []string, string) ([]knowledge.SearchResult, error)
 }
 
+type ConversationResearchRunner interface {
+	RunConversationWebSearch(context.Context, contract.ActorContext, contract.ProjectID, string, string) (knowledge.ResearchRun, error)
+}
+
 type ConversationMediaReader interface {
 	GetLatestForAsset(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (mediaunderstanding.Artifact, error)
 }
@@ -60,6 +64,7 @@ type Service struct {
 	Projects                     ProjectReader
 	Knowledge                    KnowledgeReader
 	ConversationKnowledge        ConversationKnowledgeReader
+	ConversationResearch         ConversationResearchRunner
 	ConversationMedia            ConversationMediaReader
 	CreativeAssets               CreativeAssetReader
 	MessageReferences            MessageReferenceValidator

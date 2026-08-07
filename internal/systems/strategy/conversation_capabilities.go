@@ -31,9 +31,9 @@ func (s Service) GetConversationCapabilities(ctx context.Context, actor contract
 		ContractVersion: ConversationCapabilitiesContractV1,
 		MultimodalInput: ConversationCapability{Available: s.V2Enabled},
 		WebSearch: ConversationCapability{
-			Available:            s.V2Enabled && s.ConversationWebSearchEnabled,
+			Available:            s.V2Enabled && s.ConversationWebSearchEnabled && s.ConversationResearch != nil,
 			EstimatedWaitSeconds: 180,
-			Disclosure:           "query_only_background",
+			Disclosure:           "query_only_grounded_answer",
 		},
 		QuickViralRemake: ConversationCapability{Available: s.V2Enabled && s.QuickViralRemakeEnabled},
 	}
@@ -71,7 +71,7 @@ func (s Service) ensureConversationPolicyReady(
 	organizationID contract.OrganizationID,
 	policy *MessageRequestedPolicy,
 ) error {
-	if policy != nil && policy.WebSearch == "allowed" && !s.ConversationWebSearchEnabled {
+	if policy != nil && policy.WebSearch == "allowed" && (!s.ConversationWebSearchEnabled || s.ConversationResearch == nil) {
 		return ErrFeatureDisabled
 	}
 	if policy != nil && policy.ReasoningMode == "deep" {

@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
+
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
@@ -92,6 +94,7 @@ type ExternalResearchInput struct {
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	Mode           string                  `json:"mode"`
 	Category       string                  `json:"category"`
+	Purpose        string                  `json:"purpose"`
 	Query          string                  `json:"query"`
 	Documents      []ExternalDocument      `json:"documents"`
 }
@@ -540,6 +543,144 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	return s.executeResearch(ctx, run, documents)
 }
 
+// RunConversationWebSearch executes the query before the owning conversation
+// agent generates its answer. Unlike external research, it deliberately skips
+// the standalone research scheduler: the durable AgentTask is already the
+// orchestration boundary and must not answer until this run is terminal.
+//
+// A completed run is reused on AgentTask retry so a model failure after search
+// does not issue the same paid web request again. A running run is either a
+// legacy scheduled search (wait for it) or an interrupted inline run (resume
+// it); the source-level unique key prevents concurrent duplicate creation.
+func (s Service) RunConversationWebSearch(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	messageID string,
+	query string,
+) (ResearchRun, error) {
+	messageID = strings.TrimSpace(messageID)
+	query = strings.TrimSpace(query)
+	if messageID == "" || query == "" {
+		return ResearchRun{}, ErrInvalidResearchRequest
+	}
+	if _, err := s.Projects.GetContext(ctx, actor, projectID); err != nil {
+		return ResearchRun{}, err
+	}
+	existing, found, err := s.conversationWebSearchRun(ctx, actor.OrganizationID, projectID, messageID)
+	if err != nil {
+		return ResearchRun{}, err
+	}
+	if found {
+		if strings.TrimSpace(existing.Query) != query {
+			return ResearchRun{}, ErrInvalidResearchRequest
+		}
+		if existing.Status == "running" {
+			scheduled, err := s.conversationWebSearchHasScheduledJob(ctx, existing)
+			if err != nil {
+				return ResearchRun{}, err
+			}
+			if !scheduled {
+				documents, err := s.selectResearchChunks(
+					ctx, existing.OrganizationID, existing.ProjectID, existing.DocumentIDs, existing.Query,
+				)
+				if err != nil {
+					return ResearchRun{}, err
+				}
+				resumed, err := s.executeResearch(ctx, existing, documents)
+				if err != nil {
+					return ResearchRun{}, err
+				}
+				return s.waitForConversationWebSearch(ctx, resumed)
+			}
+		}
+		return s.waitForConversationWebSearch(ctx, existing)
+	}
+
+	inline := s
+	inline.Scheduler = nil
+	run, err := inline.RunResearch(ctx, actor, projectID, ResearchRequest{
+		Mode: "web", Category: "general", Purpose: "conversation_web_search",
+		SourceRef: &contract.ResourceRef{Type: "strategy_message", ID: messageID},
+		Query:     query, DocumentIDs: []string{}, DisclosedFields: []string{"query"}, Confirmed: true,
+	})
+	if err != nil {
+		var mysqlError *mysqlDriver.MySQLError
+		if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
+			existing, found, loadErr := s.conversationWebSearchRun(ctx, actor.OrganizationID, projectID, messageID)
+			if loadErr != nil {
+				return ResearchRun{}, loadErr
+			}
+			if found {
+				return s.waitForConversationWebSearch(ctx, existing)
+			}
+		}
+		return ResearchRun{}, err
+	}
+	if run.Status != "succeeded" || len(run.Artifacts) == 0 {
+		return run, fmt.Errorf("conversation web search did not complete: %s", run.ErrorCode)
+	}
+	return run, nil
+}
+
+func (s Service) conversationWebSearchHasScheduledJob(ctx context.Context, run ResearchRun) (bool, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM platform_jobs
+		WHERE organization_id = ? AND idempotency_key = ?`,
+		run.OrganizationID, "knowledge_research_"+run.ID).Scan(&count)
+	return count > 0, err
+}
+
+func (s Service) conversationWebSearchRun(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	messageID string,
+) (ResearchRun, bool, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM platform_research_runs
+		WHERE organization_id = ? AND project_id = ? AND purpose = 'conversation_web_search'
+		  AND source_type = 'strategy_message' AND source_id = ?
+		ORDER BY created_at DESC LIMIT 1`, organizationID, projectID, messageID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ResearchRun{}, false, nil
+	}
+	if err != nil {
+		return ResearchRun{}, false, err
+	}
+	run, err := s.getResearchRun(ctx, organizationID, projectID, id)
+	return run, err == nil, err
+}
+
+func (s Service) waitForConversationWebSearch(ctx context.Context, run ResearchRun) (ResearchRun, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		switch run.Status {
+		case "succeeded":
+			if len(run.Artifacts) == 0 {
+				return run, fmt.Errorf("conversation web search returned no artifact")
+			}
+			return run, nil
+		case "failed", "unavailable":
+			return run, fmt.Errorf("conversation web search did not complete: %s", run.ErrorCode)
+		case "running":
+		default:
+			return run, fmt.Errorf("conversation web search has invalid status %q", run.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return ResearchRun{}, ctx.Err()
+		case <-ticker.C:
+			var err error
+			run, err = s.getResearchRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
+			if err != nil {
+				return ResearchRun{}, err
+			}
+		}
+	}
+}
+
 func (s Service) executeResearch(ctx context.Context, run ResearchRun, documents []ExternalDocument) (ResearchRun, error) {
 	run.DisclosedChunkIDs = make([]string, 0, len(documents))
 	for _, document := range documents {
@@ -558,6 +699,7 @@ func (s Service) executeResearch(ctx context.Context, run ResearchRun, documents
 		ProjectID:      run.ProjectID,
 		Mode:           run.Mode,
 		Category:       run.Category,
+		Purpose:        run.Purpose,
 		Query:          run.Query,
 		Documents:      documents,
 	})

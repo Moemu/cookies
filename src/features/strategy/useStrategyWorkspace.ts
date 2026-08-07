@@ -72,6 +72,9 @@ function messageOf(error: unknown) {
 }
 
 export function agentFailureMessage(code?: string, message?: string, kind?: string) {
+  if (code === 'CONVERSATION_WEB_SEARCH_FAILED') {
+    return '联网搜索未完成，因此本轮没有生成无来源回答。可以重新发送，或关闭联网搜索后改用普通回答。'
+  }
   if (code === 'MODEL_RATE_LIMITED') {
     return kind === 'strategy.brief.extract'
       ? '文本模型请求暂时受限，请稍后重新发送需求消息。'
@@ -231,6 +234,14 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
     let deepReviewFailure = ''
     let published: PackageVersion | null = null
     let agentFailure = ''
+    let recoveredAgentTaskId = ''
+    if (task?.current_agent_task_id) {
+      const inspection = await strategyApi.getAgentTask(task.current_agent_task_id, signal).catch(() => null)
+      if (inspection?.task.kind === 'strategy.brief.extract' &&
+        ['dispatch_pending', 'queued', 'running'].includes(inspection.task.status)) {
+        recoveredAgentTaskId = inspection.task.id
+      }
+    }
     if (task?.current_strategy_id) {
       draft = await strategyApi.getStrategy(task.current_strategy_id, signal)
       if (draft.status === 'failed' && task.current_agent_task_id) {
@@ -294,6 +305,8 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
       researchRuns,
       isLoading: false,
       error: agentFailure,
+      pendingAgentTaskId: recoveredAgentTaskId || current.pendingAgentTaskId,
+      pendingAgentPurpose: recoveredAgentTaskId ? 'general' : current.pendingAgentPurpose,
     }))
   }, [preferredWorkspaceId, projectId])
 
@@ -339,6 +352,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
             pendingAgentPurpose: '',
             error: agentPurpose === 'deep_review' ? '' : failureMessage,
             deepReviewError: agentPurpose === 'deep_review' ? failureMessage : current.deepReviewError,
+            conversationNotice: agentPurpose === 'deep_review' ? current.conversationNotice : '',
           }))
           return
         }
@@ -348,6 +362,7 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
             pendingAgentTaskId: '',
             pendingAgentPurpose: '',
             deepReviewError: agentPurpose === 'deep_review' ? '' : current.deepReviewError,
+            conversationNotice: agentPurpose === 'deep_review' ? current.conversationNotice : '',
           }))
           await reload()
           return
@@ -597,33 +612,10 @@ export function useStrategyWorkspace(projectId: string, preferredWorkspaceId = '
           : [...current.messages, result.message],
         pendingAgentTaskId: result.agent_task.id,
         pendingAgentPurpose: 'general',
+        conversationNotice: requestedPolicy?.web_search === 'allowed'
+          ? '正在联网搜索；搜索完成后会基于返回证据生成本轮回答。'
+          : '',
       }))
-      if (requestedPolicy?.web_search !== 'allowed') return
-      if (!query) {
-        setState(current => ({ ...current, conversationNotice: '附件消息已经发送；联网搜索需要一个明确问题，本轮没有启动后台搜索。' }))
-        return
-      }
-      try {
-        const run = await strategyApi.runExternalResearch(projectId, {
-          category: 'general',
-          purpose: 'conversation_web_search',
-          source_ref: { type: 'strategy_message', id: result.message.id },
-          query,
-          document_ids: [],
-          disclosed_fields: ['query'],
-          confirmed: true,
-        })
-        setState(current => ({
-          ...current,
-          researchRuns: [run, ...(current.researchRuns ?? []).filter(value => value.id !== run.id)],
-          conversationNotice: '消息已发送；联网搜索正在后台补充，不会阻塞当前对话。',
-        }))
-      } catch {
-        setState(current => ({
-          ...current,
-          conversationNotice: '消息已正常发送，但本轮后台联网搜索没有启动；当前对话不受影响。',
-        }))
-      }
     }, false),
     patchBriefField: (fieldPath: string, value: unknown) => perform(`brief:${fieldPath}`, async () => {
       const task = state.detail?.current_task

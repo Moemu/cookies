@@ -144,8 +144,8 @@ func normalizeMessageV2(request SendMessageV2Request) (normalizedMessageV2, erro
 	if hasResearchReference && (policy == nil || policy.WebSearch != "allowed") {
 		// Completed research evidence cannot be smuggled in while the visible
 		// policy says search was off. The inverse is deliberately allowed: a
-		// conversation may record the user's search intent before the linked
-		// background ResearchRun has produced immutable evidence.
+		// conversation records the user's search intent before the server-owned
+		// AgentTask has produced and consumed immutable evidence.
 		return normalizedMessageV2{}, ErrInvalidRequest
 	}
 	plainText := strings.Join(projection, "\n")

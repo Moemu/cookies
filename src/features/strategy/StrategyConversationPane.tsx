@@ -274,10 +274,12 @@ export function StrategyConversationPane({
             searchRun={conversationSearchByMessage.get(message.id)}
           />)}
           {pending ? <article className="kanon-message assistant thinking" aria-live="polite">
-            <span>AI</span><div><small>Strategy 助手</small><p><LoaderCircle className="spin" size={14}/>{pendingPolicy?.reasoning_mode === 'deep'
-              ? '正在进行本轮深度分析，联网证据与内部资料会分别标注…'
-              : pendingPolicy?.web_search === 'allowed'
-                ? '正在回答当前问题；联网搜索会在后台独立补充，不阻塞这轮对话…'
+            <span>AI</span><div><small>Strategy 助手</small><p><LoaderCircle className="spin" size={14}/>{pendingPolicy?.web_search === 'allowed'
+              ? pendingPolicy.reasoning_mode === 'deep'
+                ? '正在联网检索；完成后会基于来源进行本轮深度分析并回答…'
+                : '正在联网检索；完成后会基于返回来源生成本轮回答…'
+              : pendingPolicy?.reasoning_mode === 'deep'
+                ? '正在进行本轮深度分析，内部资料会单独标注…'
                 : '正在区分事实、假设和仍需确认的问题…'}</p></div>
           </article> : null}
         </div>
@@ -335,9 +337,9 @@ export function StrategyConversationPane({
                     className={webSearch ? 'active' : ''}
                     disabled={Boolean(busy) || pending}
                     onClick={() => setWebSearch(current => !current)}
-                    title="只向外部服务发送当前问题，不发送附件正文；消息先发送，搜索结果在后台补充"
+                    title="只向外部服务发送当前问题，不发送附件正文；搜索完成后再生成本轮回答"
                     type="button"
-                  ><Globe2 size={13}/><span>联网搜索</span><small>后台补充</small></button> : null}
+                  ><Globe2 size={13}/><span>联网搜索</span><small>搜索后回答</small></button> : null}
                 </div>
               : null}
             <footer>
@@ -506,17 +508,17 @@ function StreamingAssistantText({ text }: { text: string }) {
 function ConversationWebSearch({ run }: { run: ResearchRun }) {
   if (run.status === 'running') {
     return <div className="kanon-conversation-web-search running" role="status">
-      <LoaderCircle className="spin" size={13}/><span><b>联网搜索在后台进行</b><small>当前对话已经正常发送，结果返回后会显示在这里。</small></span>
+      <LoaderCircle className="spin" size={13}/><span><b>正在联网搜索</b><small>搜索完成后，Strategy 助手才会基于这些来源回答。</small></span>
     </div>
   }
   if (run.status !== 'succeeded' || !run.artifacts.length) {
     return <div className="kanon-conversation-web-search unavailable" role="status">
-      <Globe2 size={13}/><span><b>本轮联网补充未完成</b><small>正常对话不受影响，可以继续提供信息。</small></span>
+      <Globe2 size={13}/><span><b>本轮联网搜索未完成</b><small>没有生成无来源回答；可以重试，或关闭联网搜索后重新发送。</small></span>
     </div>
   }
   const artifact = run.artifacts[0]
   return <div className="kanon-conversation-web-search ready">
-    <div><Globe2 size={13}/><span><b>联网补充已返回</b><small>{artifact.title}</small></span></div>
+    <div><Globe2 size={13}/><span><b>本轮回答使用的联网证据</b><small>{artifact.title}</small></span></div>
     <p>{researchPreview(artifact.content)}</p>
     {artifact.sources.length ? <footer aria-label="联网搜索来源">
       {artifact.sources.slice(0, 3).map(source => <a href={source.url} key={source.id} rel="noreferrer" target="_blank">

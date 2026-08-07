@@ -678,6 +678,15 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if err := json.Unmarshal(agentTask.InputSnapshot, &input); err != nil {
 		return nil, err
 	}
+	preparedMessage, err := scanMessage(s.DB.QueryRowContext(ctx, messageSelect+` WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		agentTask.OrganizationID, agentTask.ProjectID, input.MessageID))
+	if err != nil {
+		return nil, err
+	}
+	preparedMessage, err = s.prepareConversationWebSearch(ctx, agentTask, preparedMessage)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -693,6 +702,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 	if err != nil {
 		return nil, err
 	}
+	message.ContentBlocks = preparedMessage.ContentBlocks
 	draft, err := scanBriefDraft(tx.QueryRowContext(ctx, briefDraftSelect+` WHERE organization_id = ? AND project_id = ?
 		AND brief_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, agentTask.OrganizationID, agentTask.ProjectID, task.BriefID))
 	if err != nil {
@@ -1169,6 +1179,12 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 只有能在 latest_message 或单个来源 chunk 中直接找到依据的事实才使用 high confidence；推断使用 low 或 medium。
 最多提出两个高价值问题，不询问已有值，区分业务目标和目标受众。只有用户明确确认已记录信息时才使用 confirm_fields。`,
 			draft.Version, mustJSON(draft.Document), mustJSON(draft.FieldStates), mustJSON(conversation), mustJSON(message.Content), groundingJSON)
+	}
+	if message.RequestedPolicy != nil && message.RequestedPolicy.WebSearch == "allowed" {
+		prompt += `
+
+This turn requested web search. The research_artifact entries in attached_sources are the search results for this exact question. Answer only after using those results, distinguish sourced facts from uncertainty, and include concise source titles or URLs in assistant_reply. Do not describe the search as pending or as a later background supplement.`
+		prompt += ` The first sentence of assistant_reply must directly answer the user's exact question. If the search evidence does not support the exact claim, explicitly say it cannot be confirmed; do not substitute a related fact or rely on model memory.`
 	}
 	callStarted := time.Now()
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
