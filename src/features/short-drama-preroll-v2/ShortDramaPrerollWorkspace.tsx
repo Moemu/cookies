@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Check, ChevronRight, CircleAlert, Clapperboard, Clock3, Film, Image as ImageIcon, LoaderCircle, Play, RefreshCw, Sparkles, Upload, WandSparkles } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, Clapperboard, Clock3, Film, Image as ImageIcon, LoaderCircle, Play, RefreshCw, Sparkles, Upload, WandSparkles, X, ZoomIn } from 'lucide-react'
 import { useProject } from '../../context/ProjectContext'
-import { api, type ApiProjectMediaAsset, type ApiShortDramaV2TaskDetail } from '../../data/api'
+import { api, CreativeApiError, type ApiProjectMediaAsset, type ApiShortDramaV2TaskDetail } from '../../data/api'
 import { editingApi } from '../video-editing/api'
 import { canOpenShortDramaStep, initialShortDramaPrerollState, shortDramaPrerollReducer } from './reducer'
-import type { PrerollDuration, ShortDramaPrerollState, ShortDramaStep } from './types'
+import { createAsyncActionGate } from './asyncActionGate'
+import type { FirstFrameCandidate, PrerollDuration, ShortDramaPrerollState, ShortDramaStep } from './types'
 import './short-drama-preroll-v2.css'
 
 const steps: Array<{ id: ShortDramaStep; index: string; label: string; detail: string }> = [
@@ -31,6 +32,7 @@ function formatDuration(seconds?: number) {
   return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
 }
 
+// Keep the historical key so in-progress V2 tasks survive the V3 UI migration.
 function storageKey(projectId: string) { return `cookies.short-drama-preroll-v2:${projectId}` }
 
 type ShortDramaSession = {
@@ -41,8 +43,6 @@ type ShortDramaSession = {
   videoDescription?: string
   videoPrompt?: string
   duration?: PrerollDuration
-  trustedFirstFrameAssetId?: string
-  trustedLastFrameAssetId?: string
 }
 
 function readSession(projectId: string): ShortDramaSession | null {
@@ -50,7 +50,7 @@ function readSession(projectId: string): ShortDramaSession | null {
     const raw = window.localStorage.getItem(storageKey(projectId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as ShortDramaSession & { version?: number }
-    return (parsed.version === 2 || parsed.version === 3) && parsed.taskId ? parsed : null
+    return (parsed.version === 2 || parsed.version === 3 || parsed.version === 4) && parsed.taskId ? parsed : null
   } catch { return null }
 }
 
@@ -64,21 +64,26 @@ async function restoreState(projectId: string, detail: ApiShortDramaV2TaskDetail
   const hooks = hookDirections(detail)
   const prompt = workspace.prompt_draft
   const selectedDirectionId = workspace.direction_batch?.selected_direction_id ?? ''
-  const readyCandidates = workspace.first_frame_batch?.candidates.filter(candidate => candidate.status === 'ready' && candidate.asset) ?? []
+  const readyCandidates = workspace.first_frame_batch?.candidates.filter(candidate => candidate.status === 'ready' && (candidate.output_canvas_asset || candidate.asset)) ?? []
   const images = await Promise.all(readyCandidates.map(async candidate => ({
     id: candidate.id,
-    label: `参考图 ${candidate.variant_index}`,
-    imageUrl: await api.getProjectAssetPreview(projectId, candidate.asset!.asset_version),
-    composition: `由当前剧情与已选方向生成的构图方案 ${candidate.variant_index}`,
+    label: candidate.style_profile || `参考图 ${candidate.variant_index}`,
+    imageUrl: await api.getProjectAssetPreview(projectId, (candidate.output_canvas_asset || candidate.asset)!.asset_version),
+    composition: candidate.visual_mechanism || `构图方案 ${candidate.variant_index}`,
+    variantKey: candidate.variant_key,
+    visualMechanism: candidate.visual_mechanism,
+    styleProfile: candidate.style_profile,
   })))
-  const selectedCandidate = workspace.first_frame_batch?.candidates.find(candidate => sameAsset(candidate.asset, workspace.first_frame_batch?.selected_asset))
+  const selectedCandidate = workspace.first_frame_batch?.candidates.find(candidate =>
+    sameAsset(candidate.output_canvas_asset, workspace.first_frame_batch?.selected_output_asset)
+      || sameAsset(candidate.model_canvas_asset || candidate.asset, workspace.first_frame_batch?.selected_asset),
+  )
   const output = workspace.output_asset ? {
     id: workspace.output_asset.asset_version.asset_id,
     videoUrl: await api.getProjectAssetPreview(projectId, workspace.output_asset.asset_version),
     duration: (prompt?.duration_seconds ?? 6) as PrerollDuration,
     createdAt: new Date().toISOString(),
   } : null
-  const trusted = workspace.trusted_materials
   let activeStep: ShortDramaStep = 'understanding'
   if (analysisReady) activeStep = 'direction'
   if (selectedDirectionId && prompt) activeStep = 'first-frame'
@@ -100,9 +105,6 @@ async function restoreState(projectId: string, detail: ApiShortDramaV2TaskDetail
     imagesStatus: images.length ? 'ready' : workspace.first_frame_batch && ['queued', 'running'].includes(workspace.first_frame_batch.status) ? 'loading' : workspace.first_frame_batch?.status === 'failed' ? 'error' : 'idle',
     images,
     selectedImageId: selectedCandidate?.id ?? '',
-    trustedFirstFrameAssetId: trusted?.first_frame_asset_id ?? '',
-    trustedLastFrameAssetId: trusted?.last_frame_asset_id ?? '',
-    trustedMaterialsBound: Boolean(trusted?.first_frame_asset_id && trusted?.last_frame_asset_id),
     videoStatus: output ? 'ready' : workspace.active_stage === 'video_generating' ? 'loading' : 'idle',
     output,
     error: '',
@@ -115,8 +117,6 @@ async function restoreState(projectId: string, detail: ApiShortDramaV2TaskDetail
       videoDescription: session.videoDescription ?? restored.videoDescription,
       videoPrompt: session.videoPrompt ?? restored.videoPrompt,
       duration: session.duration ?? restored.duration,
-      trustedFirstFrameAssetId: trusted?.first_frame_asset_id ?? session.trustedFirstFrameAssetId ?? '',
-      trustedLastFrameAssetId: trusted?.last_frame_asset_id ?? session.trustedLastFrameAssetId ?? '',
     }
     if (session.activeStep && canOpenShortDramaStep(restored, session.activeStep)) restored.activeStep = session.activeStep
   }
@@ -166,6 +166,14 @@ function hookDirections(detail: ApiShortDramaV2TaskDetail) {
   }))
 }
 
+function isRecoverableWorkspaceConflict(cause: unknown) {
+  return cause instanceof CreativeApiError && (
+    cause.status === 412
+    || cause.code === 'CREATIVE_VERSION_CONFLICT'
+    || (cause.status === 409 && cause.code === 'INVALID_STATE')
+  )
+}
+
 export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNotice: (message: string) => void; onOpenEditTask?: (editTaskId: string) => void }) {
   const { currentProject } = useProject()
   const [state, dispatch] = useReducer(shortDramaPrerollReducer, initialShortDramaPrerollState)
@@ -174,6 +182,9 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
   const [mediaLoading, setMediaLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [localPreviewUrl, setLocalPreviewUrl] = useState('')
+  const [directionSelectionGate] = useState(createAsyncActionGate)
+  const [firstFrameGenerationGate] = useState(createAsyncActionGate)
+  const [firstFrameSelectionGate] = useState(createAsyncActionGate)
   const hydratedProject = useRef('')
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -228,7 +239,7 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
   useEffect(() => {
     if (hydratedProject.current !== currentProject.id || !workspace) return
     window.localStorage.setItem(storageKey(currentProject.id), JSON.stringify({
-      version: 3,
+      version: 4,
       taskId: workspace.task.id,
       activeStep: state.activeStep,
       summaryDraft: state.summaryDraft,
@@ -236,14 +247,14 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
       videoDescription: state.videoDescription,
       videoPrompt: state.videoPrompt,
       duration: state.duration,
-      trustedFirstFrameAssetId: state.trustedFirstFrameAssetId,
-      trustedLastFrameAssetId: state.trustedLastFrameAssetId,
     }))
-  }, [currentProject.id, state.activeStep, state.duration, state.imagePrompt, state.summaryDraft, state.trustedFirstFrameAssetId, state.trustedLastFrameAssetId, state.videoDescription, state.videoPrompt, workspace])
+  }, [currentProject.id, state.activeStep, state.duration, state.imagePrompt, state.summaryDraft, state.videoDescription, state.videoPrompt, workspace])
 
   const selectedHook = useMemo(() => state.hooks.find(item => item.id === state.selectedHookId) ?? null, [state.hooks, state.selectedHookId])
   const selectedImage = useMemo(() => state.images.find(item => item.id === state.selectedImageId) ?? null, [state.images, state.selectedImageId])
   const sourceUrl = localPreviewUrl || state.source?.contentUrl || ''
+  const outputCanvas = workspace?.video_draft.short_drama_preroll_v2.output_canvas
+  const outputAspectLabel = outputCanvas ? `${outputCanvas.aspect_num}:${outputCanvas.aspect_den}` : (state.source?.width && state.source?.height ? `${state.source.width}:${state.source.height}` : '跟随源视频')
 
   const selectSource = (source: ApiProjectMediaAsset) => {
     if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl)
@@ -314,100 +325,137 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
   }
   const selectHook = async (id: string, duration = state.duration) => {
     const batch = workspace?.video_draft.short_drama_preroll_v2.direction_batch
-    if (!workspace || !batch) return
-    try {
-      const selected = await api.selectShortDramaV2Direction(currentProject.id, workspace.task.id, workspace.video_draft.revision, batch.id, id, duration)
-      const prompt = selected.video_draft.short_drama_preroll_v2.prompt_draft
-      if (!prompt) throw new Error('服务端没有返回前贴提示词。')
-      setWorkspace(selected)
-      dispatch({
-        type: 'hook-selected', id, duration: prompt.duration_seconds,
-        imagePrompt: prompt.image_prompt, videoDescription: prompt.video_description, videoPrompt: prompt.video_prompt,
-      })
-    } catch (cause) {
-      dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '选择前贴方向失败' })
-    }
+    if (!workspace || !batch || directionSelectionGate.isActive()) return
+    dispatch({ type: 'hook-selection-started', id })
+    await directionSelectionGate.run(async () => {
+      try {
+        const selected = await api.selectShortDramaV2Direction(currentProject.id, workspace.task.id, workspace.video_draft.revision, batch.id, id, duration)
+        const prompt = selected.video_draft.short_drama_preroll_v2.prompt_draft
+        if (!prompt) throw new Error('服务端没有返回前贴提示词。')
+        setWorkspace(selected)
+        dispatch({
+          type: 'hook-selected', id, duration: prompt.duration_seconds,
+          imagePrompt: prompt.image_prompt, videoDescription: prompt.video_description, videoPrompt: prompt.video_prompt,
+        })
+      } catch (cause) {
+        if (cause instanceof CreativeApiError && (cause.status === 412 || cause.code === 'CREATIVE_VERSION_CONFLICT')) {
+          try {
+            const latest = await api.getShortDramaPrerollV2Workspace(currentProject.id, workspace.task.id)
+            const latestWorkspace = latest.video_draft.short_drama_preroll_v2
+            const restored = await restoreState(currentProject.id, latest, state.source, readSession(currentProject.id))
+            setWorkspace(latest)
+            dispatch({ type: 'restore', state: restored })
+            if (latestWorkspace.direction_batch?.selected_direction_id === id && latestWorkspace.prompt_draft) {
+              onNotice('前贴方向已选择，页面已同步到最新草稿。')
+              return
+            }
+          } catch {
+            // Fall through to the actionable message below.
+          }
+          dispatch({ type: 'hook-selection-failed', message: '草稿刚刚发生了更新，已刷新到最新状态，请重新选择一次前贴方向。' })
+          return
+        }
+        dispatch({ type: 'hook-selection-failed', message: cause instanceof Error ? cause.message : '选择前贴方向失败' })
+      }
+    })
   }
   const changeDuration = (duration: PrerollDuration) => {
     dispatch({ type: 'duration-changed', duration })
     if (state.selectedHookId) void selectHook(state.selectedHookId, duration)
   }
+  const synchronizeWorkspace = async () => {
+    if (!workspace) throw new Error('当前创作任务不存在，请重新选择视频。')
+    const latest = await api.getShortDramaPrerollV2Workspace(currentProject.id, workspace.task.id)
+    const resumed = await resumeWorkspaceJobs(currentProject.id, latest)
+    const restored = await restoreState(currentProject.id, resumed.detail, state.source, readSession(currentProject.id))
+    setWorkspace(resumed.detail)
+    dispatch({ type: 'restore', state: restored })
+    if (resumed.error) throw new Error(resumed.error)
+    return resumed.detail
+  }
   const generateImages = async () => {
-    if (!workspace) return
+    if (!workspace || firstFrameGenerationGate.isActive()) return
     dispatch({ type: 'images-started' })
-    try {
-      let current = workspace
-      const prompt = current.video_draft.short_drama_preroll_v2.prompt_draft
-      if (!prompt) throw new Error('请先选择一个前贴方向。')
-      if (prompt.image_prompt !== state.imagePrompt || prompt.video_description !== state.videoDescription || prompt.video_prompt !== state.videoPrompt) {
-        current = await api.updateShortDramaV2Prompts(currentProject.id, current.task.id, current.video_draft.revision, state.imagePrompt, state.videoDescription, state.videoPrompt)
-        setWorkspace(current)
-      }
-      if (current.video_draft.short_drama_preroll_v2.source_opening_frame?.status !== 'ready') {
-        current = await api.prepareShortDramaV2OpeningFrame(currentProject.id, current.task.id, current.video_draft.revision)
-        setWorkspace(current)
-      }
-      let batch = current.video_draft.short_drama_preroll_v2.first_frame_batch
-      if (!batch || batch.prompt_revision !== current.video_draft.short_drama_preroll_v2.prompt_draft?.revision || batch.candidates.length !== 3) {
+    await firstFrameGenerationGate.run(async () => {
+      try {
+        let current = workspace
+        const prompt = current.video_draft.short_drama_preroll_v2.prompt_draft
+        if (!prompt) throw new Error('请先选择一个前贴方向。')
+        if (prompt.image_prompt !== state.imagePrompt || prompt.video_description !== state.videoDescription || prompt.video_prompt !== state.videoPrompt) {
+          current = await api.updateShortDramaV2Prompts(currentProject.id, current.task.id, current.video_draft.revision, state.imagePrompt, state.videoDescription, state.videoPrompt)
+          setWorkspace(current)
+        }
         current = await api.generateShortDramaV2FirstFrames(currentProject.id, current.task.id, current.video_draft.revision)
         setWorkspace(current)
-        batch = current.video_draft.short_drama_preroll_v2.first_frame_batch
+        const batch = current.video_draft.short_drama_preroll_v2.first_frame_batch
+        if (!batch) throw new Error('服务端没有创建首帧候选任务。')
+        await Promise.all(batch.candidates.map(candidate => candidate.provider_job_id ? waitForProviderJob(currentProject.id, candidate.provider_job_id) : Promise.resolve()))
+        for (const candidate of batch.candidates) {
+          if (!candidate.provider_job_id) continue
+          current = await api.reconcileShortDramaV2FirstFrame(currentProject.id, current.task.id, current.video_draft.revision, candidate.id, candidate.provider_job_id)
+        }
+        const reconciled = current.video_draft.short_drama_preroll_v2.first_frame_batch
+        const ready = reconciled?.candidates.filter(candidate => candidate.status === 'ready' && (candidate.output_canvas_asset || candidate.asset)) ?? []
+        const images = await Promise.all(ready.map(async candidate => ({
+          id: candidate.id,
+          label: candidate.style_profile || `参考图 ${candidate.variant_index}`,
+          imageUrl: await api.getProjectAssetPreview(currentProject.id, (candidate.output_canvas_asset || candidate.asset)!.asset_version),
+          composition: candidate.visual_mechanism || `构图方案 ${candidate.variant_index}`,
+          variantKey: candidate.variant_key,
+          visualMechanism: candidate.visual_mechanism,
+          styleProfile: candidate.style_profile,
+        })))
+        if (!images.length) throw new Error('3 张首帧参考图均未生成成功。')
+        setWorkspace(current)
+        dispatch({ type: 'images-ready', images })
+      } catch (cause) {
+        if (isRecoverableWorkspaceConflict(cause)) {
+          try {
+            await synchronizeWorkspace()
+            onNotice('检测到已有首帧任务，已自动同步最新生成结果。')
+            return
+          } catch {
+            dispatch({ type: 'operation-failed', message: '首帧任务状态刚刚发生变化，请稍后再点击“重新生成”。' })
+            return
+          }
+        }
+        dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '首帧参考图生成失败' })
       }
-      if (!batch) throw new Error('服务端没有创建首帧候选任务。')
-      await Promise.all(batch.candidates.map(candidate => candidate.provider_job_id ? waitForProviderJob(currentProject.id, candidate.provider_job_id) : Promise.resolve()))
-      for (const candidate of batch.candidates) {
-        if (!candidate.provider_job_id) continue
-        current = await api.reconcileShortDramaV2FirstFrame(currentProject.id, current.task.id, current.video_draft.revision, candidate.id, candidate.provider_job_id)
-      }
-      const reconciled = current.video_draft.short_drama_preroll_v2.first_frame_batch
-      const ready = reconciled?.candidates.filter(candidate => candidate.status === 'ready' && candidate.asset) ?? []
-      const images = await Promise.all(ready.map(async candidate => ({
-        id: candidate.id,
-        label: `参考图 ${candidate.variant_index}`,
-        imageUrl: await api.getProjectAssetPreview(currentProject.id, candidate.asset!.asset_version),
-        composition: `由当前剧情与已选方向生成的构图方案 ${candidate.variant_index}`,
-      })))
-      if (!images.length) throw new Error('3 张首帧参考图均未生成成功。')
-      setWorkspace(current)
-      dispatch({ type: 'images-ready', images })
-    } catch (cause) {
-      dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '首帧参考图生成失败' })
-    }
+    })
   }
   const selectImage = async (id: string) => {
     const batch = workspace?.video_draft.short_drama_preroll_v2.first_frame_batch
-    if (!workspace || !batch) return
-    try {
-      const selected = await api.selectShortDramaV2FirstFrame(currentProject.id, workspace.task.id, workspace.video_draft.revision, batch.id, id)
-      setWorkspace(selected)
-      dispatch({ type: 'image-selected', id })
-    } catch (cause) {
-      dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '选择首帧失败' })
-    }
-  }
-  const bindTrustedMaterials = async () => {
-    if (!workspace) return
-    const firstFrameAssetId = state.trustedFirstFrameAssetId.trim()
-    const lastFrameAssetId = state.trustedLastFrameAssetId.trim()
-    if (!firstFrameAssetId.startsWith('asset-') || !lastFrameAssetId.startsWith('asset-')) {
-      dispatch({ type: 'operation-failed', message: '请填写火山方舟可信素材库返回的两个 Asset ID（均以 asset- 开头）。' })
-      return
-    }
-    try {
-      const bound = await api.bindShortDramaV2TrustedMaterials(currentProject.id, workspace.task.id, workspace.video_draft.revision, firstFrameAssetId, lastFrameAssetId)
-      setWorkspace(bound)
-      dispatch({ type: 'trusted-materials-bound', firstFrameAssetId, lastFrameAssetId })
-      onNotice('可信首尾帧素材已绑定，生成时将使用方舟 asset:// 授权引用。')
-    } catch (cause) {
-      dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '可信素材绑定失败' })
-    }
+    if (!workspace || !batch || firstFrameSelectionGate.isActive()) return
+    dispatch({ type: 'image-selection-started', id })
+    await firstFrameSelectionGate.run(async () => {
+      try {
+        const selected = await api.selectShortDramaV2FirstFrame(currentProject.id, workspace.task.id, workspace.video_draft.revision, batch.id, id)
+        const prompt = selected.video_draft.short_drama_preroll_v2.prompt_draft
+        setWorkspace(selected)
+        dispatch({ type: 'image-selected', id, videoPrompt: prompt?.video_prompt })
+      } catch (cause) {
+        if (isRecoverableWorkspaceConflict(cause)) {
+          try {
+            const latest = await synchronizeWorkspace()
+            const latestBatch = latest.video_draft.short_drama_preroll_v2.first_frame_batch
+            const latestSelectedCandidate = latestBatch?.candidates.find(candidate =>
+              sameAsset(candidate.output_canvas_asset, latestBatch.selected_output_asset)
+                || sameAsset(candidate.model_canvas_asset || candidate.asset, latestBatch.selected_asset),
+            )
+            if (latestSelectedCandidate?.id === id) return
+            dispatch({ type: 'image-selection-failed', message: '候选批次已更新，页面已同步到最新结果，请重新选择一张首帧。' })
+            return
+          } catch {
+            dispatch({ type: 'image-selection-failed', message: '首帧任务状态刚刚发生变化，请刷新后重新选择。' })
+            return
+          }
+        }
+        dispatch({ type: 'image-selection-failed', message: cause instanceof Error ? cause.message : '选择首帧失败' })
+      }
+    })
   }
   const generateVideo = async () => {
     if (!workspace) return
-    if (!state.trustedMaterialsBound) {
-      dispatch({ type: 'operation-failed', message: '请先绑定已在火山方舟完成授权的首帧和尾帧 Asset ID。' })
-      return
-    }
     dispatch({ type: 'video-started' })
     try {
       let current = workspace
@@ -465,7 +513,7 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
           </button>
         </li>
       })}</ol></nav>
-      <div className="short-drama-v2-rail-note"><span>FLOW V2</span><small>当前仅生成独立前贴视频，不与短剧正片拼接。</small></div>
+      <div className="short-drama-v2-rail-note"><span>FLOW V3</span><small>单首帧参考生成，输出跟随源视频画幅，不执行拼接。</small></div>
     </aside>
 
     <main className="short-drama-v2-main">
@@ -473,17 +521,17 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
       {state.error ? <div className="short-drama-v2-error"><CircleAlert size={16}/>{state.error}</div> : null}
       {state.activeStep === 'understanding' ? <UnderstandingStage state={state} sourceUrl={sourceUrl} mediaLoading={mediaLoading} onAnalyze={() => void analyze()}/> : null}
       {state.activeStep === 'direction' ? <DirectionStage state={state} onSummary={value => dispatch({ type: 'summary-changed', value })} onSelect={id => { void selectHook(id) }}/> : null}
-      {state.activeStep === 'first-frame' ? <FirstFrameStage state={state} onPrompt={value => dispatch({ type: 'image-prompt-changed', value })} onGenerate={() => void generateImages()} onSelect={id => { void selectImage(id) }}/> : null}
-      {state.activeStep === 'video' ? <VideoStage state={state} sourceUrl={sourceUrl} selectedImageUrl={selectedImage?.imageUrl || ''} onDescription={value => dispatch({ type: 'video-description-changed', value })} onPrompt={value => dispatch({ type: 'video-prompt-changed', value })} onGenerate={() => void generateVideo()} onOpenEditor={() => void openEditor()}/> : null}
+      {state.activeStep === 'first-frame' ? <FirstFrameStage state={state} outputAspectLabel={outputAspectLabel} onPrompt={value => dispatch({ type: 'image-prompt-changed', value })} onGenerate={() => void generateImages()} onSelect={id => { void selectImage(id) }}/> : null}
+      {state.activeStep === 'video' ? <VideoStage state={state} outputAspectLabel={outputAspectLabel} selectedImageUrl={selectedImage?.imageUrl || ''} onDescription={value => dispatch({ type: 'video-description-changed', value })} onPrompt={value => dispatch({ type: 'video-prompt-changed', value })} onGenerate={() => void generateVideo()} onOpenEditor={() => void openEditor()}/> : null}
     </main>
 
     <aside className="short-drama-v2-inspector">
       <div className="short-drama-v2-inspector-head"><span>生成配置</span><b>{state.activeStep === 'understanding' ? '视频理解' : state.activeStep === 'direction' ? '方向选择' : state.activeStep === 'first-frame' ? '首帧生成' : '视频生成'}</b></div>
       {state.activeStep === 'understanding' ? <><InspectorBlock label="输入状态"><b>{state.source ? '素材已就绪' : '等待视频'}</b><small>{state.source ? `${state.source.mimeType} · ${(state.source.sizeBytes / 1024 / 1024).toFixed(1)} MB` : '请选择项目视频或本地文件'}</small></InspectorBlock><button className="short-drama-v2-primary" disabled={!state.source || state.analysisStatus === 'loading'} onClick={() => void analyze()}>{state.analysisStatus === 'loading' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}理解视频内容</button></> : null}
       {state.activeStep === 'direction' ? <><InspectorBlock label="方向构成"><b>猎奇吸睛 × 2</b><b>剧情总结 × 2</b><small>必须人工选定一个方向，才会进入首帧生成。</small></InspectorBlock><button className="short-drama-v2-primary" disabled={!state.summaryDraft.trim() || state.hooksStatus === 'loading'} onClick={() => void generateHooks()}>{state.hooksStatus === 'loading' ? <LoaderCircle className="spin" size={16}/> : <WandSparkles size={16}/>}生成 4 个前贴方向</button></> : null}
-      {state.activeStep === 'first-frame' ? <><InspectorBlock label="已选方向"><b>{selectedHook?.title || '尚未选择'}</b><small>{selectedHook?.hookCopy}</small></InspectorBlock><button className="short-drama-v2-primary" disabled={!state.imagePrompt.trim() || state.imagesStatus === 'loading'} onClick={() => void generateImages()}>{state.imagesStatus === 'loading' ? <LoaderCircle className="spin" size={16}/> : <ImageIcon size={16}/>}生成 3 张首帧图</button></> : null}
-      {state.activeStep === 'video' ? <><InspectorBlock label="视频时长"><div className="short-drama-v2-duration">{([5, 6, 10, 12, 15] as PrerollDuration[]).map(duration => <button type="button" className={state.duration === duration ? 'active' : ''} key={duration} onClick={() => changeDuration(duration)}>{duration}s</button>)}</div></InspectorBlock><InspectorBlock label="参考链路"><small>起始帧：已选 AI 首帧</small><small>目标尾帧：输入视频首帧</small><small>输出：独立前贴视频</small></InspectorBlock><InspectorBlock label="方舟可信素材"><label className="short-drama-v2-trusted-field"><span>首帧 Asset ID</span><input value={state.trustedFirstFrameAssetId} placeholder="asset-..." onChange={event => dispatch({ type: 'trusted-material-changed', role: 'first', value: event.target.value })}/></label><label className="short-drama-v2-trusted-field"><span>尾帧 Asset ID</span><input value={state.trustedLastFrameAssetId} placeholder="asset-..." onChange={event => dispatch({ type: 'trusted-material-changed', role: 'last', value: event.target.value })}/></label><button type="button" className="short-drama-v2-trusted-bind" onClick={() => void bindTrustedMaterials()}>{state.trustedMaterialsBound ? <Check size={14}/> : null}{state.trustedMaterialsBound ? '可信素材已绑定' : '保存并启用可信素材'}</button><small>须先在火山方舟完成肖像授权与素材入库；Cookies 仅保存 Asset ID。</small><a href="https://www.volcengine.com/docs/82379/2315856" target="_blank" rel="noreferrer">打开方舟可信素材说明</a></InspectorBlock><button className="short-drama-v2-primary" disabled={!state.selectedImageId || !state.videoPrompt.trim() || !state.trustedMaterialsBound || state.videoStatus === 'loading'} onClick={() => void generateVideo()}>{state.videoStatus === 'loading' ? <LoaderCircle className="spin" size={16}/> : <Clapperboard size={16}/>}生成前贴视频</button></> : null}
-      <div className="short-drama-v2-contract"><span>WORKSPACE V2</span><small>视频理解、方向、提示词、参考图和视频结果均来自服务端持久化任务。</small></div>
+      {state.activeStep === 'first-frame' ? <><InspectorBlock label="已选方向"><b>{selectedHook?.title || '尚未选择'}</b><small>{selectedHook?.hookCopy}</small></InspectorBlock><InspectorBlock label="视频时长"><div className="short-drama-v2-duration">{([5, 6, 10, 12, 15] as PrerollDuration[]).map(duration => <button type="button" disabled={Boolean(state.selectingHookId)} className={state.duration === duration ? 'active' : ''} key={duration} onClick={() => changeDuration(duration)}>{duration}s</button>)}</div><small>时长会写入视频提示词，并在生成首帧前锁定。</small></InspectorBlock><InspectorBlock label="输出画幅"><b>{outputAspectLabel}</b><small>参考图预览与最终视频都按源视频画幅呈现。</small></InspectorBlock><button className="short-drama-v2-primary" disabled={Boolean(state.selectingHookId) || !state.imagePrompt.trim() || state.imagesStatus === 'loading'} onClick={() => void generateImages()}>{state.selectingHookId || state.imagesStatus === 'loading' ? <LoaderCircle className="spin" size={16}/> : <ImageIcon size={16}/>} {state.selectingHookId ? '正在生成提示词' : '生成 3 张首帧图'}</button></> : null}
+      {state.activeStep === 'video' ? <><InspectorBlock label="参考链路"><small>模型输入：选中的一张 AI 首帧</small><small>生成方式：Prompt + 单张 reference_image</small><small>输出：独立前贴 · {outputAspectLabel}</small></InspectorBlock><button className="short-drama-v2-primary" disabled={!state.selectedImageId || !state.videoPrompt.trim() || state.videoStatus === 'loading'} onClick={() => void generateVideo()}>{state.videoStatus === 'loading' ? <LoaderCircle className="spin" size={16}/> : <Clapperboard size={16}/>}生成前贴视频</button></> : null}
+      <div className="short-drama-v2-contract"><span>WORKSPACE V3</span><small>任务、草稿、首帧选择、生成进度和源画幅视频结果均由服务端持久化。</small></div>
     </aside>
   </section>
 }
@@ -499,20 +547,31 @@ function UnderstandingStage({ state, sourceUrl, mediaLoading, onAnalyze }: { sta
 
 function DirectionStage({ state, onSummary, onSelect }: { state: ShortDramaPrerollState; onSummary: (value: string) => void; onSelect: (id: string) => void }) {
   return <div className="short-drama-v2-stage"><section className="short-drama-v2-editor-card"><div><span>EDITABLE STORY SUMMARY</span><b>视频梗概</b></div><textarea value={state.summaryDraft} onChange={event => onSummary(event.target.value)} rows={4}/><small>修改梗概会使已有方向、首帧与视频结果失效。</small></section>
-    {state.hooks.length ? <div className="short-drama-v2-hook-groups">{(['curiosity', 'summary'] as const).map(category => <section key={category}><header><span>{category === 'curiosity' ? 'CURIOUSITY HOOK' : 'STORY SUMMARY'}</span><b>{category === 'curiosity' ? '猎奇吸睛' : '剧情总结'}</b></header><div>{state.hooks.filter(item => item.category === category).map(hook => <button type="button" key={hook.id} className={state.selectedHookId === hook.id ? 'selected' : ''} onClick={() => onSelect(hook.id)}><span>{hook.eyebrow}</span><h4>{hook.title}</h4><p>{hook.hookCopy}</p><small>{hook.description}</small><i>{state.selectedHookId === hook.id ? <Check size={13}/> : null}</i></button>)}</div></section>)}</div> : <section className="short-drama-v2-empty-action"><WandSparkles size={20}/><div><b>生成两类、四个方向</b><small>请使用右侧唯一的“生成 4 个前贴方向”按钮；结果会按猎奇吸睛和剧情总结分组展示在这里。</small></div></section>}
+    {state.hooks.length ? <div className="short-drama-v2-hook-groups">{(['curiosity', 'summary'] as const).map(category => <section key={category}><header><span>{category === 'curiosity' ? 'CURIOUSITY HOOK' : 'STORY SUMMARY'}</span><b>{category === 'curiosity' ? '猎奇吸睛' : '剧情总结'}</b></header><div>{state.hooks.filter(item => item.category === category).map(hook => <button type="button" key={hook.id} className={state.selectedHookId === hook.id ? 'selected' : ''} onClick={() => onSelect(hook.id)}><span>{hook.eyebrow}</span><h4>{hook.title}</h4><p>{hook.hookCopy}</p><small>{hook.description}</small>{state.selectedHookId === hook.id ? <i><Check size={13}/></i> : null}</button>)}</div></section>)}</div> : <section className="short-drama-v2-empty-action"><WandSparkles size={20}/><div><b>生成两类、四个方向</b><small>请使用右侧唯一的“生成 4 个前贴方向”按钮；结果会按猎奇吸睛和剧情总结分组展示在这里。</small></div></section>}
   </div>
 }
 
-function FirstFrameStage({ state, onPrompt, onGenerate, onSelect }: { state: ShortDramaPrerollState; onPrompt: (value: string) => void; onGenerate: () => void; onSelect: (id: string) => void }) {
+function FirstFrameStage({ state, outputAspectLabel, onPrompt, onGenerate, onSelect }: { state: ShortDramaPrerollState; outputAspectLabel: string; onPrompt: (value: string) => void; onGenerate: () => void; onSelect: (id: string) => void }) {
+  const [previewImage, setPreviewImage] = useState<FirstFrameCandidate | null>(null)
+  useEffect(() => {
+    if (!previewImage) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [previewImage])
+  if (state.selectingHookId) return <div className="short-drama-v2-stage"><section className="short-drama-v2-empty-action short-drama-v2-selection-loading"><LoaderCircle className="spin" size={20}/><div><b>方向已选定，正在生成创作提示词</b><small>系统正在根据该方向编译首帧提示词、视频描述和视频提示词，完成后会停留在本步骤。</small></div></section></div>
   return <div className="short-drama-v2-stage"><section className="short-drama-v2-editor-card"><div><span>SEEDREAM IMAGE PROMPT</span><b>首帧图提示词</b></div><textarea value={state.imagePrompt} onChange={event => onPrompt(event.target.value)} rows={6}/><small>提示词包含主体、环境、构图、镜头、光影、风格与禁止项，可人工编辑。</small></section>
-    {state.images.length ? <section className="short-drama-v2-image-grid"><header><div><span>FIRST FRAME OPTIONS</span><b>选择一张作为视频起始帧</b></div><button type="button" onClick={onGenerate}><RefreshCw size={14}/>重新生成</button></header><div>{state.images.map(image => <button type="button" key={image.id} className={state.selectedImageId === image.id ? 'selected' : ''} onClick={() => onSelect(image.id)}><img src={image.imageUrl} alt={image.composition}/><span><b>{image.label}</b><small>{image.composition}</small></span><i>{state.selectedImageId === image.id ? <Check size={14}/> : null}</i></button>)}</div></section> : <section className="short-drama-v2-empty-action"><ImageIcon size={20}/><div><b>生成 3 张构图不同的首帧参考</b><small>保持人物、剧情事实与视觉风格一致，只改变画面组织方式。</small></div><button disabled={!state.imagePrompt || state.imagesStatus === 'loading'} onClick={onGenerate}>{state.imagesStatus === 'loading' ? '生成中…' : '生成首帧'}</button></section>}
+    {state.images.length ? <section className="short-drama-v2-image-grid"><header><div><span>FIRST FRAME OPTIONS · {outputAspectLabel}</span><b>点击图片放大查看，再选用一张作为视频唯一参考图</b></div><button type="button" disabled={state.imagesStatus === 'loading'} onClick={onGenerate}><RefreshCw size={14}/>重新生成 3 张</button></header><div>{state.images.map(image => <article key={image.id} className={state.selectedImageId === image.id ? 'selected' : ''}><button type="button" className="short-drama-v2-image-preview" aria-label={`放大查看 ${image.label}`} onClick={() => setPreviewImage(image)}><img src={image.imageUrl} alt={image.composition} style={{ aspectRatio: outputAspectLabel.replace(':', ' / ') }}/><span><ZoomIn size={16}/>放大查看</span></button><div><b>{image.label}</b><small>{image.composition}</small><button type="button" className="short-drama-v2-image-select" disabled={Boolean(state.selectingImageId)} onClick={() => onSelect(image.id)}>{state.selectingImageId === image.id ? <><LoaderCircle className="spin" size={14}/>正在选用…</> : state.selectedImageId === image.id ? <><Check size={14}/>已选用</> : '选用此图'}</button></div>{state.selectedImageId === image.id ? <i><Check size={14}/></i> : null}</article>)}</div></section> : <section className="short-drama-v2-empty-action"><ImageIcon size={20}/><div><b>生成 3 张机制与风格不同的首帧参考</b><small>动漫电影、国漫半写实、电影写实各一张，预览画幅跟随源视频。</small></div><button disabled={!state.imagePrompt || state.imagesStatus === 'loading'} onClick={onGenerate}>{state.imagesStatus === 'loading' ? '生成中…' : '生成首帧'}</button></section>}
+    {previewImage ? <div className="short-drama-v2-lightbox" role="dialog" aria-modal="true" aria-label={`${previewImage.label} 大图预览`} onClick={() => setPreviewImage(null)}><div onClick={event => event.stopPropagation()}><button type="button" className="short-drama-v2-lightbox-close" aria-label="关闭大图预览" onClick={() => setPreviewImage(null)}><X size={20}/></button><img src={previewImage.imageUrl} alt={previewImage.composition}/><footer><b>{previewImage.label}</b><span>{previewImage.composition}</span></footer></div></div> : null}
   </div>
 }
 
-function VideoStage({ state, sourceUrl, selectedImageUrl, onDescription, onPrompt, onGenerate, onOpenEditor }: { state: ShortDramaPrerollState; sourceUrl: string; selectedImageUrl: string; onDescription: (value: string) => void; onPrompt: (value: string) => void; onGenerate: () => void; onOpenEditor: () => void }) {
-  return <div className="short-drama-v2-stage"><section className="short-drama-v2-reference-flow"><div><span>START FRAME</span><img src={selectedImageUrl} alt="已选前贴首帧"/></div><ChevronRight/><div><span>TARGET END FRAME</span>{sourceUrl ? <video src={sourceUrl} muted preload="metadata"/> : <div/>}</div><div className="short-drama-v2-reference-meta"><Clock3 size={16}/><b>{state.duration}s</b><small>独立前贴 · 9:16</small></div></section>
+function VideoStage({ state, outputAspectLabel, selectedImageUrl, onDescription, onPrompt, onGenerate, onOpenEditor }: { state: ShortDramaPrerollState; outputAspectLabel: string; selectedImageUrl: string; onDescription: (value: string) => void; onPrompt: (value: string) => void; onGenerate: () => void; onOpenEditor: () => void }) {
+  return <div className="short-drama-v2-stage"><section className="short-drama-v2-reference-flow single-reference"><div><span>SELECTED REFERENCE IMAGE</span><img src={selectedImageUrl} alt="已选前贴首帧"/></div><ChevronRight/><div className="short-drama-v2-reference-method"><span>GENERATION INPUT</span><b>Prompt + 单张首帧参考</b><small>不使用短剧首帧作为尾帧，不要求可信素材 Asset ID。</small></div><div className="short-drama-v2-reference-meta"><Clock3 size={16}/><b>{state.duration}s</b><small>独立前贴 · {outputAspectLabel}</small></div></section>
     <section className="short-drama-v2-editor-card compact"><div><span>VIDEO DESCRIPTION</span><b>视频描述</b></div><textarea value={state.videoDescription} onChange={event => onDescription(event.target.value)} rows={2}/></section>
-    <section className="short-drama-v2-editor-card"><div><span>SEEDANCE VIDEO PROMPT</span><b>前贴视频提示词</b></div><textarea value={state.videoPrompt} onChange={event => onPrompt(event.target.value)} rows={7}/><small>提示词包含时间轴、镜头运动、情绪、字幕与 CTA；尾帧只作为过渡目标参考，不执行拼接。</small></section>
+    <section className="short-drama-v2-editor-card"><div><span>SEEDANCE VIDEO PROMPT</span><b>前贴视频提示词</b></div><textarea value={state.videoPrompt} onChange={event => onPrompt(event.target.value)} rows={7}/><small>提示词已写入所选首帧的风格与视觉机制；模型只接收这一张参考图，结果按源视频画幅归一化。</small></section>
     {state.output ? <section className="short-drama-v2-output"><header><div><span>GENERATED PREROLL</span><b>前贴视频已生成</b></div><small>已持久化为项目视频素材</small></header>{state.output.videoUrl ? <video src={state.output.videoUrl} controls/> : null}<button type="button" onClick={onOpenEditor}><Film size={15}/>进入素材剪辑</button></section> : <section className="short-drama-v2-empty-action"><Clapperboard size={20}/><div><b>参数已就绪</b><small>确认提示词、描述与时长后，生成一条独立前贴视频。</small></div><button disabled={state.videoStatus === 'loading'} onClick={onGenerate}>{state.videoStatus === 'loading' ? '生成中…' : '生成视频'}</button></section>}
   </div>
 }

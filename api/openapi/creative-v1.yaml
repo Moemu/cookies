@@ -308,6 +308,13 @@ paths:
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version, invalidate_downstream], properties: {expected_workspace_version: {type: integer, minimum: 1}, invalidate_downstream: {const: true}}}}}}
       responses: {'200': {description: Storyboard reopened as a new draft revision.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard/assets/{asset_id}/regenerate:
+    post:
+      operationId: regenerateAINativeAdStoryboardAsset
+      summary: Regenerate one AI-created storyboard asset with optional user feedback.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}, {name: asset_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version], properties: {expected_workspace_version: {type: integer, minimum: 1}, feedback: {type: string, maxLength: 500}}}}}}
+      responses: {'202': {description: Selected storyboard asset regeneration queued.}, '409': {$ref: '#/components/responses/Conflict'}}
   /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard/voiceover:fit:
     post:
       operationId: suggestAINativeAdVoiceoverFit

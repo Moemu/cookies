@@ -10,6 +10,8 @@ import type { AdScriptDraft, AINativeRequirement, AINativeRequirementWorkspace, 
 import { aiNativeWorkspaceLocation, readAINativeWorkspaceLocation } from '../src/features/ai-native-ad/navigation'
 import { readAINativeStageDraft, readAINativeWorkspacePointer, rememberAINativeStageDraft, rememberAINativeWorkspace } from '../src/features/ai-native-ad/storage'
 import { createSerialAutosave } from '../src/features/ai-native-ad/autosave'
+import { autosaveRevisionFor, syncAutosaveRevisionCursor } from '../src/features/ai-native-ad/workspaceAutosaveRevision'
+import { referenceRepairSuggestion } from '../src/features/ai-native-ad/referenceRepair'
 
 const requirement: AINativeRequirement = {
   contract_version: 'creative.ai-native.requirement/v1',
@@ -51,6 +53,23 @@ test('AI native ad remembers the latest workspace pointer per project', () => {
 
   assert.deepEqual(readAINativeWorkspacePointer('project-1', storage), { workspaceId: 'workspace-1', stage: 'storyboard' })
   assert.equal(readAINativeWorkspacePointer('project-2', storage), null)
+})
+
+test('problem reference can be addressed through a precise storyboard URL', () => {
+  const next = aiNativeWorkspaceLocation('?view=effect&section=ai-native', 'workspace-1', 'storyboard', 'scene_1')
+  assert.deepEqual(readAINativeWorkspaceLocation(next), { workspaceId: 'workspace-1', stage: 'storyboard', repairAssetId: 'scene_1' })
+  assert.equal(new URLSearchParams(next).get('repair_asset'), 'scene_1')
+})
+
+test('privacy rejection produces editable regeneration guidance', () => {
+  const suggestion = referenceRepairSuggestion(
+    'InputImageSensitiveContentDetected',
+    'input image may contain real person',
+    { name: '酒店女生宿舍桌面场景', role: 'scene_reference' },
+  )
+  assert.ok(suggestion)
+  assert.match(suggestion.recommendedFeedback, /保留.*场景功能和商品展示目的/)
+  assert.match(suggestion.recommendedFeedback, /不出现清晰正脸/)
 })
 
 test('AI native ad ignores corrupt or unsupported workspace pointers', () => {
@@ -120,6 +139,28 @@ test('AI native autosave skips content whose fingerprint is already saved', asyn
 
   assert.deepEqual(started, ['same'])
   autosave.dispose()
+})
+
+test('AI native autosave resets revisions when the active workspace changes', () => {
+  let cursor = syncAutosaveRevisionCursor(null, {
+    workspaceId: 'workspace-old',
+    requirementRevision: 3,
+    scriptRevision: 4,
+    storyboardRevision: 5,
+  })
+
+  cursor = syncAutosaveRevisionCursor(cursor, {
+    workspaceId: 'workspace-new',
+    requirementRevision: 1,
+    scriptRevision: 0,
+    storyboardRevision: 0,
+  })
+
+  assert.equal(autosaveRevisionFor(cursor, 'workspace-new', 'requirement'), 1)
+  assert.throws(
+    () => autosaveRevisionFor(cursor, 'workspace-old', 'requirement'),
+    /workspace changed/i,
+  )
 })
 
 Object.assign(globalThis, { React })

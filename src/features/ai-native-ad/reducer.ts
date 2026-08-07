@@ -8,6 +8,7 @@ import type {
   StoryboardDraft,
   VideoRenderState,
 } from './types'
+import { referenceRepairSuggestion } from './referenceRepair'
 
 export type AINativeAction =
   | { type: 'reset' }
@@ -103,19 +104,19 @@ export function productionReferenceFailure(workspace: AINativeRequirementWorkspa
   if (!unit?.reference_asset || !attempt) return null
   const errorCode = attempt.error_code ?? ''
   const errorMessage = attempt.error_message ?? ''
-  const privacyRejected = errorCode.startsWith('InputImageSensitiveContentDetected') || /input image.+real person/i.test(errorMessage)
-  const copyrightRejected = /copyright restrictions/i.test(errorMessage)
-  if (!privacyRejected && !copyrightRejected) return null
   const asset = (workspace.storyboard ?? workspace.storyboard_plan)?.assets.find(candidate => candidate.asset_ref?.asset_id === unit.reference_asset?.asset_id)
   if (!asset) return null
+  const suggestion = referenceRepairSuggestion(errorCode, errorMessage, asset)
+  if (!suggestion) return null
   return {
     unit_id: unit.id,
     asset_id: asset.id,
     asset_name: asset.name,
     asset_source: asset.source,
-    reason: privacyRejected
-      ? '参考图片可能包含写实人物，视频模型因隐私保护拒绝使用。'
-      : '参考图片包含受版权保护的品牌或角色形象，视频模型拒绝生成。',
+    error_code: errorCode,
+    reason: suggestion.reason,
+    recommended_feedback: suggestion.recommendedFeedback,
+    alternatives: suggestion.alternatives,
   }
 }
 

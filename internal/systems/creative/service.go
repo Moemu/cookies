@@ -112,6 +112,7 @@ type Service struct {
 	ShortDramaV2Analyzer                ShortDramaV2Analyzer
 	ShortDramaV2Planner                 ShortDramaV2Planner
 	ShortDramaV2Images                  ShortDramaV2ImageJobCreator
+	ShortDramaV2OutputNormalizer        media.VideoNormalizer
 	GamePrerollPlanner                  GamePrerollPlanner
 	CommerceWorkspaces                  CommerceWorkspaceRepository
 	BrandFilmPlanner                    BrandFilmPlanner
@@ -412,11 +413,18 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		if readErr != nil {
 			return CreativeTask{}, readErr
 		}
+		sourceCanvas, modelCanvas, outputCanvas, canvasErr := deriveShortDramaCanvases(source)
+		if canvasErr != nil {
+			return CreativeTask{}, canvasErr
+		}
 		shortDramaDraftV2 = &ShortDramaPrerollV2Workspace{
-			ContractVersion: ShortDramaPrerollV2ContractVersion, TaskID: task.ID, Revision: 1,
+			ContractVersion: ShortDramaPrerollV3ContractVersion, TaskID: task.ID, Revision: 1,
 			ActiveStage:    ShortDramaV2StageSourceReady,
 			SourceVideo:    contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: request.SourceVideo},
 			SourceMetadata: source,
+			SourceCanvas:   &sourceCanvas,
+			ModelCanvas:    &modelCanvas,
+			OutputCanvas:   &outputCanvas,
 			Analysis:       ShortDramaV2Analysis{ShortDramaV2AsyncResource: ShortDramaV2AsyncResource{Status: ShortDramaV2ResourceIdle}},
 			CreatedAt:      now, UpdatedAt: now,
 		}

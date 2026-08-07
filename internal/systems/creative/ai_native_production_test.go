@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -265,6 +266,78 @@ func TestStartAINativeProductionFreezesPlanAndCreatesRecoverableAttempts(t *test
 	}
 }
 
+func TestStartAINativeProductionReusesSuccessfulUnitsAfterOneStoryboardAssetChanges(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	storyboard.Shots[0].ProductIdentityRequired = false
+	storyboard.Shots[0].ReferenceAssetIDs = []string{"scene_1"}
+	previous, err := CompileAINativeProductionPlan(requirement, storyboard, "project_1", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range previous.Units {
+		output := contract.AssetVersionRef{AssetID: contract.AssetID(fmt.Sprintf("old-video-%d", index)), Version: 1}
+		attempt := AINativeGenerationAttempt{ID: fmt.Sprintf("old-video-attempt-%d", index), Status: AINativeAttemptSucceededStatus, OutputAssetRef: &output}
+		previous.Units[index].Attempts, previous.Units[index].SelectedAttemptID = []AINativeGenerationAttempt{attempt}, attempt.ID
+	}
+	for index := range previous.SpeechUnits {
+		output := contract.AssetVersionRef{AssetID: contract.AssetID(fmt.Sprintf("old-audio-%d", index)), Version: 1}
+		attempt := AINativeGenerationAttempt{ID: fmt.Sprintf("old-speech-attempt-%d", index), Status: AINativeAttemptSucceededStatus, OutputAssetRef: &output}
+		previous.SpeechUnits[index].Attempts, previous.SpeechUnits[index].SelectedAttemptID = []AINativeGenerationAttempt{attempt}, attempt.ID
+	}
+	changedReference := previous.Units[0].ReferenceAsset
+	if changedReference == nil {
+		t.Fatal("fixture first unit must use a storyboard reference")
+	}
+	for index := range storyboard.Assets {
+		if storyboard.Assets[index].AssetRef != nil && storyboard.Assets[index].AssetRef.AssetID == changedReference.AssetID {
+			replaced := *storyboard.Assets[index].AssetRef
+			replaced.Version++
+			storyboard.Assets[index].AssetRef = &replaced
+		}
+	}
+	revision := int64(1)
+	productionRevision := int64(1)
+	workspace := AINativeRequirementWorkspace{WorkspaceID: "workspace-1", OrganizationID: "org-1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageStoryboard, WorkspaceVersion: 7, CurrentRevision: 1, ConfirmedRevision: &revision,
+		Requirement: requirement, ScriptStatus: AINativeScriptConfirmedStatus, CurrentScriptRevision: &revision, ConfirmedScriptRevision: &revision, Script: &script,
+		StoryboardStatus: AINativeStoryboardConfirmedStatus, CurrentStoryboardRevision: &revision, ConfirmedStoryboardRevision: &revision, Storyboard: &storyboard,
+		ProductionStatus: AINativeProductionCancelledStatus, CurrentProductionRevision: &productionRevision, ProductionPlan: &previous,
+		CreatedBy: "user-1", ConfirmedBy: "user-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	repository := &memoryAINativeProductionRepository{workspace: workspace}
+	sequence := 0
+	service := Service{Projects: testProjects{}, AINativeProductions: repository, AINativeProductionScheduler: &productionSchedulerStub{},
+		NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s-%d", prefix, sequence), nil }, Now: func() time.Time { return time.Date(2026, 8, 7, 15, 0, 0, 0, time.UTC) }}
+	actor := contract.ActorContext{OrganizationID: "org-1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user-1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	updated, err := service.StartAINativeProduction(context.Background(), actor, "project_1", "workspace-1", StartAINativeProductionRequest{ExpectedWorkspaceVersion: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reusedVideo := 0
+	for _, unit := range updated.ProductionPlan.Units {
+		usesChangedReference := unit.ReferenceAsset != nil && unit.ReferenceAsset.AssetID == changedReference.AssetID
+		if usesChangedReference {
+			if unit.SelectedAttemptID != "" || len(unit.Attempts) != 1 || unit.Attempts[0].Status != AINativeAttemptPlannedStatus {
+				t.Fatalf("changed unit was not freshly planned: %#v", unit)
+			}
+			continue
+		}
+		if unit.SelectedAttemptID == "" {
+			t.Fatalf("unchanged unit was not reused: %#v", unit)
+		}
+		reusedVideo++
+	}
+	if reusedVideo == 0 {
+		t.Fatal("fixture must contain at least one video unit unaffected by the replaced asset")
+	}
+	for _, unit := range updated.ProductionPlan.SpeechUnits {
+		if unit.SelectedAttemptID == "" {
+			t.Fatalf("unchanged speech was not reused: %#v", unit)
+		}
+	}
+}
+
 func TestAINativeProductionJobResumesWithoutRepeatingSucceededSpeechOrVideoSubmissions(t *testing.T) {
 	requirement, script := validAINativeStoryboardInputs()
 	storyboard := readyConfirmedAINativeStoryboard()
@@ -476,6 +549,47 @@ func TestAINativeProductionRetryDropsPrivacyRejectedPersonReference(t *testing.T
 	}
 	if len(unit.Attempts) != 2 || unit.Attempts[1].Status != AINativeAttemptPlannedStatus || unit.Attempts[1].RetryOf != "attempt-1" {
 		t.Fatalf("retry attempt was not appended correctly: %#v", unit.Attempts)
+	}
+}
+
+func TestReuseCompatibleProductionOutputsKeepsOnlySemanticallyUnchangedSuccesses(t *testing.T) {
+	now := time.Date(2026, 8, 7, 15, 0, 0, 0, time.UTC)
+	oldScene := contract.AssetVersionRef{AssetID: "scene-asset", Version: 1}
+	newScene := contract.AssetVersionRef{AssetID: "scene-asset", Version: 2}
+	product := contract.AssetVersionRef{AssetID: "product-asset", Version: 1}
+	videoA := contract.AssetVersionRef{AssetID: "video-a", Version: 1}
+	videoB := contract.AssetVersionRef{AssetID: "video-b", Version: 1}
+	audio := contract.AssetVersionRef{AssetID: "audio-a", Version: 1}
+	previous := AINativeProductionPlan{
+		Status: AINativeProductionCompletedStatus,
+		Units: []AINativeGenerationUnit{
+			{ID: "video-unit-01", ShotIDs: []string{"shot-1"}, StartMS: 0, EndMS: 4000, DurationSeconds: 4, PromptHash: strings.Repeat("a", 64), AspectRatio: "9:16", Resolution: "720p", ReferenceAsset: &oldScene, ReferenceRole: AINativeStoryboardAssetRoleSceneReference, Attempts: []AINativeGenerationAttempt{{ID: "attempt-a", Status: AINativeAttemptSucceededStatus, OutputAssetRef: &videoA}}, SelectedAttemptID: "attempt-a"},
+			{ID: "video-unit-02", ShotIDs: []string{"shot-2"}, StartMS: 4000, EndMS: 8000, DurationSeconds: 4, PromptHash: strings.Repeat("b", 64), AspectRatio: "9:16", Resolution: "720p", ReferenceAsset: &product, ReferenceRole: AINativeStoryboardAssetRoleProductIdentity, Attempts: []AINativeGenerationAttempt{{ID: "attempt-b", Status: AINativeAttemptSucceededStatus, OutputAssetRef: &videoB}}, SelectedAttemptID: "attempt-b"},
+		},
+		SpeechUnits: []AINativeSpeechUnit{{ID: "speech-unit-01", ShotID: "shot-1", StartMS: 0, EndMS: 4000, Text: "旁白", Language: "zh-CN", VoiceAlias: "voice", Attempts: []AINativeGenerationAttempt{{ID: "speech-attempt", Status: AINativeAttemptSucceededStatus, OutputAssetRef: &audio}}, SelectedAttemptID: "speech-attempt"}},
+		Render:      &AINativeRenderState{ID: "render-1", Status: AINativeProductionCompletedStatus, OutputAssetRef: &videoA, UpdatedAt: now},
+	}
+	next := AINativeProductionPlan{
+		Status: AINativeProductionPreparedStatus,
+		Units: []AINativeGenerationUnit{
+			{ID: "video-unit-01", ShotIDs: []string{"shot-1"}, StartMS: 0, EndMS: 4000, DurationSeconds: 4, PromptHash: strings.Repeat("a", 64), AspectRatio: "9:16", Resolution: "720p", ReferenceAsset: &newScene, ReferenceRole: AINativeStoryboardAssetRoleSceneReference},
+			{ID: "video-unit-02", ShotIDs: []string{"shot-2"}, StartMS: 4000, EndMS: 8000, DurationSeconds: 4, PromptHash: strings.Repeat("b", 64), AspectRatio: "9:16", Resolution: "720p", ReferenceAsset: &product, ReferenceRole: AINativeStoryboardAssetRoleProductIdentity},
+		},
+		SpeechUnits: []AINativeSpeechUnit{{ID: "speech-unit-01", ShotID: "shot-1", StartMS: 0, EndMS: 4000, Text: "旁白", Language: "zh-CN", VoiceAlias: "voice"}},
+	}
+
+	reused := ReuseCompatibleProductionOutputs(previous, next)
+	if reused.Units[0].SelectedAttemptID != "" || len(reused.Units[0].Attempts) != 0 {
+		t.Fatalf("unit with a replaced reference was reused: %#v", reused.Units[0])
+	}
+	if reused.Units[1].SelectedAttemptID != "attempt-b" || len(reused.Units[1].Attempts) != 1 {
+		t.Fatalf("unchanged video unit was not reused: %#v", reused.Units[1])
+	}
+	if reused.SpeechUnits[0].SelectedAttemptID != "speech-attempt" || len(reused.SpeechUnits[0].Attempts) != 1 {
+		t.Fatalf("unchanged speech unit was not reused: %#v", reused.SpeechUnits[0])
+	}
+	if reused.Render != nil {
+		t.Fatalf("final render must never be reused: %#v", reused.Render)
 	}
 }
 

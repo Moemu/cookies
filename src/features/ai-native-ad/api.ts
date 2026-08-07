@@ -192,11 +192,11 @@ export function generateStoryboard(projectId: string, workspaceId: string, expec
   )
 }
 
-export function regenerateStoryboardAsset(projectId: string, workspaceId: string, assetId: string, expectedWorkspaceVersion: number) {
+export function regenerateStoryboardAsset(projectId: string, workspaceId: string, assetId: string, expectedWorkspaceVersion: number, feedback = '') {
   return request<AINativeRequirementWorkspace>(
     `/projects/${encodeURIComponent(projectId)}/ai-native-ads/${encodeURIComponent(workspaceId)}/storyboard/assets/${encodeURIComponent(assetId)}/regenerate`,
     'POST',
-    { expected_workspace_version: expectedWorkspaceVersion },
+    { expected_workspace_version: expectedWorkspaceVersion, ...(feedback.trim() ? { feedback: feedback.trim() } : {}) },
   )
 }
 

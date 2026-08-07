@@ -47,6 +47,13 @@ export type ApiEditingRenderJob = {
   error_message?: string
 }
 
+export class EditingApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'EditingApiError'
+  }
+}
+
 async function editingRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${backendOrigin}/api/creative/v1${path}`, {
     method,
@@ -56,8 +63,8 @@ async function editingRequest<T>(path: string, method = 'GET', body?: unknown): 
   })
   const text = await response.text()
   let payload: T | { error?: { message?: string } } = {}
-  try { payload = text ? JSON.parse(text) as T | { error?: { message?: string } } : {} } catch { throw new Error(`素材剪辑服务返回了无效响应（HTTP ${response.status}）`) }
-  if (!response.ok) throw new Error((payload as { error?: { message?: string } }).error?.message ?? `素材剪辑请求失败（HTTP ${response.status}）`)
+  try { payload = text ? JSON.parse(text) as T | { error?: { message?: string } } : {} } catch { throw new EditingApiError(`素材剪辑服务返回了无效响应（HTTP ${response.status}）`, response.status) }
+  if (!response.ok) throw new EditingApiError((payload as { error?: { message?: string } }).error?.message ?? `素材剪辑请求失败（HTTP ${response.status}）`, response.status)
   return payload as T
 }
 

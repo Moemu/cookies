@@ -114,10 +114,10 @@ func TestAINativeStoryboardMySQLReopenMovesProductionBackToEditableStoryboard(t 
 	if err != nil {
 		t.Fatalf("reopen storyboard: %v", err)
 	}
-	if reopened.CurrentStage != AINativeStageStoryboard || reopened.StoryboardStatus != AINativeStoryboardDraftStatus || reopened.ProductionStatus != "" {
+	if reopened.CurrentStage != AINativeStageStoryboard || reopened.StoryboardStatus != AINativeStoryboardDraftStatus || reopened.ProductionStatus != AINativeProductionCancelledStatus {
 		t.Fatalf("reopened workspace has inconsistent stage: stage=%q storyboard=%q production=%q", reopened.CurrentStage, reopened.StoryboardStatus, reopened.ProductionStatus)
 	}
-	if reopened.StoryboardErrorCode != "" || reopened.StoryboardErrorMessage != "" || reopened.CurrentProductionRevision != nil || reopened.ProductionPlan != nil {
+	if reopened.StoryboardErrorCode != "" || reopened.StoryboardErrorMessage != "" || reopened.CurrentProductionRevision == nil || reopened.ProductionPlan == nil {
 		t.Fatalf("reopened workspace retained stale downstream errors: %#v", reopened)
 	}
 }

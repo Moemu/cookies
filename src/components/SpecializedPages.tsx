@@ -44,6 +44,7 @@ import { GamePrerollWorkspace } from './GamePrerollWorkspace'
 import { BrandFilmWorkspace } from './BrandFilmWorkspace'
 import { ShortDramaPrerollWorkspace } from '../features/short-drama-preroll-v2/ShortDramaPrerollWorkspace'
 import { editingApi, type ApiEditTask, type ApiEditingRenderJob, type EditingTimeline } from '../features/video-editing/api'
+import { VideoEditingWorkspaceV2 } from '../features/video-editing/VideoEditingWorkspace'
 import {
   TaskStrategyHandoffBanner,
   taskStrategyPerformanceMode,
@@ -505,7 +506,7 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask,
           </section>
           : category === 'brand'
             ? <section className="image-text-v2-start" role="status"><Film size={24}/><div><h3>当前 Project 暂无可继续的品牌广告任务</h3><p>请先在策略工作台选择“品牌广告”并完成交接；创建任务后会显示在这里，由你明确选择进入。</p></div></section>
-      : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }} editTaskId={activeTaskId} onOpenEditTask={onOpenEditTask}/>}
+      : <VideoEditingWorkspaceV2 onNotice={setNotice} onCreate={() => { void create() }} editTaskId={activeTaskId} onOpenEditTask={onOpenEditTask}/>}
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </section></StateBoundary>
 }

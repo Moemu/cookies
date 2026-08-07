@@ -1347,12 +1347,41 @@ export type ApiShortDramaV2Direction = {
   grounding_evidence_ids: string[]
 }
 
+export type ApiShortDramaCanvas = {
+  width_pixels: number
+  height_pixels: number
+  aspect_ratio: number
+  duration_ms: number
+  frame_rate?: string
+}
+
+export type ApiShortDramaModelCanvas = {
+  ratio: string
+  resolution: string
+  width: number
+  height: number
+  image_width: number
+  image_height: number
+}
+
+export type ApiShortDramaOutputCanvas = {
+  width: number
+  height: number
+  aspect_num: number
+  aspect_den: number
+  frame_rate: number
+  normalize_mode: string
+}
+
 export type ApiShortDramaV2Workspace = {
-  contract_version: 'creative-short-drama-preroll-workspace/v2'
+  contract_version: 'creative-short-drama-preroll-workspace/v2' | 'creative-short-drama-preroll-workspace/v3'
   task_id: string
   revision: number
-  active_stage: 'source_ready' | 'analyzing' | 'analysis_ready' | 'directions_ready' | 'prompts_ready' | 'first_frames_ready' | 'first_frame_selected' | 'video_generating' | 'completed'
+  active_stage: 'source_ready' | 'analyzing' | 'analysis_ready' | 'directions_ready' | 'prompts_ready' | 'first_frames_generating' | 'first_frames_ready' | 'first_frame_selected' | 'video_generating' | 'normalizing_output' | 'completed'
   source_video: ApiShortDramaV2ProjectAssetRef
+  source_canvas?: ApiShortDramaCanvas
+  model_canvas?: ApiShortDramaModelCanvas
+  output_canvas?: ApiShortDramaOutputCanvas
   analysis: {
     status: string
     revision: number
@@ -1376,6 +1405,8 @@ export type ApiShortDramaV2Workspace = {
     image_prompt: string
     video_description: string
     video_prompt: string
+    base_video_prompt?: string
+    selected_variant_key?: string
     compiler_version: string
     content_hash: string
   }
@@ -1390,9 +1421,15 @@ export type ApiShortDramaV2Workspace = {
       provider_job_id?: string
       status: string
       asset?: ApiShortDramaV2ProjectAssetRef
+      model_canvas_asset?: ApiShortDramaV2ProjectAssetRef
+      output_canvas_asset?: ApiShortDramaV2ProjectAssetRef
+      variant_key?: string
+      visual_mechanism?: string
+      style_profile?: string
       error_message?: string
     }>
     selected_asset?: ApiShortDramaV2ProjectAssetRef
+    selected_output_asset?: ApiShortDramaV2ProjectAssetRef
   }
   source_opening_frame?: { status: string; asset?: ApiShortDramaV2ProjectAssetRef; timestamp_ms: number }
   trusted_materials?: {
@@ -1401,6 +1438,7 @@ export type ApiShortDramaV2Workspace = {
     last_frame_asset_id: string
   }
   latest_video_attempt_id?: string
+  raw_output_asset?: ApiShortDramaV2ProjectAssetRef
   output_asset?: ApiShortDramaV2ProjectAssetRef
 }
 
@@ -3580,8 +3618,8 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
   return payload as T
 }
 
-class CreativeApiError extends Error {
-  constructor(message: string, readonly status: number) {
+export class CreativeApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code = '') {
     super(message)
     this.name = 'CreativeApiError'
   }
@@ -3597,16 +3635,16 @@ async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, 
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const responseText = await response.text()
-  let payload: T | { error?: { message?: string; request_id?: string } }
+  let payload: T | { error?: { message?: string; request_id?: string; code?: string } }
   try {
-    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; request_id?: string } } : {}
+    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; request_id?: string; code?: string } } : {}
   } catch {
     throw new Error(`Creative API 返回了无法解析的响应（HTTP ${response.status}）`)
   }
   if (!response.ok) {
-    const error = payload as { error?: { message?: string; request_id?: string } }
+    const error = payload as { error?: { message?: string; request_id?: string; code?: string } }
     const requestId = error.error?.request_id ? `（request_id: ${error.error.request_id}）` : ''
-    throw new CreativeApiError(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`, response.status)
+    throw new CreativeApiError(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`, response.status, error.error?.code ?? '')
   }
   return payload as T
 }
@@ -4049,11 +4087,17 @@ function shortDramaV2Command(
   action: string,
   body: unknown,
 ) {
+  const serialized = JSON.stringify(body)
+  let hash = 2166136261
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
   return creativeRequest<ApiShortDramaV2TaskDetail>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll-v2:${action}`,
     'POST',
     body,
-    { 'Idempotency-Key': `short-drama-v2-${action}-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+    { 'Idempotency-Key': `short-drama-v3-${action}-${taskId}-${(hash >>> 0).toString(36)}` },
   )
 }
 

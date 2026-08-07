@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/jobruntime"
@@ -108,7 +109,8 @@ func (s Service) RegenerateAINativeStoryboardAsset(ctx context.Context, actor co
 	if !actor.HasScope(ScopeWrite) {
 		return AINativeRequirementWorkspace{}, fmt.Errorf("%s scope is required", ScopeWrite)
 	}
-	if request.ExpectedWorkspaceVersion < 1 || strings.TrimSpace(assetID) == "" {
+	feedback := strings.TrimSpace(request.Feedback)
+	if request.ExpectedWorkspaceVersion < 1 || strings.TrimSpace(assetID) == "" || utf8.RuneCountInString(feedback) > 500 {
 		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: asset regeneration request is invalid", ErrInvalidAINativeRequirement)
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
@@ -134,6 +136,7 @@ func (s Service) RegenerateAINativeStoryboardAsset(ctx context.Context, actor co
 			return AINativeRequirementWorkspace{}, fmt.Errorf("%w: only AI-generated storyboard assets can be regenerated", ErrInvalidAINativeRequirement)
 		}
 		asset.AssetRef = nil
+		asset.RegenerationFeedback = feedback
 		asset.Status = AINativeStoryboardAssetPlanned
 		asset.GenerationAttempt++
 		if asset.GenerationAttempt < 1 {
