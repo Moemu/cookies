@@ -7,12 +7,12 @@ import (
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
-func TestShortDramaV2FirstFrameInputUsesSupportedPortraitDimensions(t *testing.T) {
+func TestShortDramaV2FirstFrameInputUsesRequestedSupportedDimensions(t *testing.T) {
 	t.Parallel()
 
-	input := shortDramaV2FirstFrameInput("武则天站在无字碑前")
-	if input.Width != 1024 || input.Height != 1536 {
-		t.Fatalf("short drama V2 first-frame size = %dx%d, want adapter-supported 1024x1536", input.Width, input.Height)
+	input := shortDramaV2FirstFrameInput("武则天站在无字碑前", 1536, 1024)
+	if input.Width != 1536 || input.Height != 1024 {
+		t.Fatalf("short drama V2 first-frame size = %dx%d, want source-oriented 1536x1024", input.Width, input.Height)
 	}
 	if input.Prompt != "武则天站在无字碑前" {
 		t.Fatalf("short drama V2 first-frame prompt changed: %q", input.Prompt)

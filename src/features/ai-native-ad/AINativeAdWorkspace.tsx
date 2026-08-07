@@ -30,7 +30,8 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [recordName, setRecordName] = useState('')
   const [newDialogError, setNewDialogError] = useState('')
-  const [pendingStoryboardAssetId, setPendingStoryboardAssetId] = useState('')
+  const [pendingStoryboardRegeneration, setPendingStoryboardRegeneration] = useState<{ assetId: string; feedback: string } | null>(null)
+  const [focusedStoryboardAssetId, setFocusedStoryboardAssetId] = useState('')
   const [voiceoverFitBusy, setVoiceoverFitBusy] = useState(false)
   const autosave = useAINativeAutosave(projectId, state, dispatch)
 
@@ -80,6 +81,8 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	  const restoredStage: AINativeStageId = location?.workspaceId === workspace.workspace_id
 	    ? location.stage
 	    : workspace.current_stage === 'production' ? 'video' : workspace.current_stage
+	  const restoredRepairAssetId = restoredStage === 'storyboard' && urlLocation?.workspaceId === workspace.workspace_id ? urlLocation.repairAssetId ?? '' : ''
+	  setFocusedStoryboardAssetId(restoredRepairAssetId)
 	  dispatch({ type: 'requirement-loaded', workspace })
 	  dispatch({ type: 'open-stage', stage: restoredStage })
 	  if (workspace.storyboard_status === 'failed') {
@@ -95,7 +98,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	  setProductLink(workspace.requirement.product.source_url)
 	  setSupplementalRequirement(workspace.requirement.supplemental_requirement)
 	  rememberAINativeWorkspace(projectId, { workspaceId: workspace.workspace_id, stage: restoredStage })
-	  window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, workspace.workspace_id, restoredStage)}${window.location.hash}`)
+	  window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, workspace.workspace_id, restoredStage, restoredRepairAssetId)}${window.location.hash}`)
 	}
 	void restore().catch(cause => {
 	  if (!active) return
@@ -325,7 +328,9 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     try {
       autosave.schedule('requirement', state.workspace.requirement)
       const saved = await autosave.flush('requirement')
-      if (!saved.succeeded || !saved.workspace) throw new Error('需求自动保存失败，请重试后再进入下一步。')
+      if (!saved.succeeded || !saved.workspace) {
+        throw autosave.lastError() ?? new Error('需求自动保存失败，请重试后再进入下一步。')
+      }
       const workspace = await confirmRequirement(projectId, saved.workspace.workspace_id, saved.workspace.requirement.revision)
       await startScriptGeneration(workspace)
     } catch (cause) {
@@ -401,10 +406,10 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     await startStoryboardGeneration(state.workspace)
   }
 
-  const startStoryboardAssetRegeneration = async (workspace: AINativeRequirementWorkspace, assetId: string) => {
+  const startStoryboardAssetRegeneration = async (workspace: AINativeRequirementWorkspace, assetId: string, feedback: string) => {
     dispatch({ type: 'operation-started', stage: 'storyboard' })
     try {
-      const generating = await regenerateStoryboardAsset(projectId, workspace.workspace_id, assetId, workspace.workspace_version)
+      const generating = await regenerateStoryboardAsset(projectId, workspace.workspace_id, assetId, workspace.workspace_version, feedback)
       dispatch({ type: 'requirement-loaded', workspace: generating })
       dispatch({ type: 'open-stage', stage: 'storyboard' })
       onNotice(`故事板素材 ${assetId} 已开始重新生成，其他素材保持不变。`)
@@ -413,14 +418,26 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     }
   }
 
-  const requestStoryboardAssetRegeneration = async (assetId: string) => {
+  const requestStoryboardAssetRegeneration = async (assetId: string, feedback: string) => {
     if (!state.workspace) return
     if (state.workspace.storyboard_status === 'confirmed') {
-      setPendingStoryboardAssetId(assetId)
+      setPendingStoryboardRegeneration({ assetId, feedback })
       await requestEdit('storyboard')
       return
     }
-    await startStoryboardAssetRegeneration(state.workspace, assetId)
+    if (!state.storyboard) return
+    try {
+      autosave.schedule('storyboard', state.storyboard)
+      const saved = await autosave.flush('storyboard')
+      if (!saved.succeeded || !saved.workspace) {
+        dispatch({ type: 'operation-failed', stage: 'storyboard', message: autosave.lastError()?.message ?? '故事板自动保存失败，请重试后再重新生成图片。' })
+        return
+      }
+      const latestWorkspace = await getRequirementWorkspace(projectId, saved.workspace.workspace_id)
+      await startStoryboardAssetRegeneration(latestWorkspace, assetId, feedback)
+    } catch (cause) {
+      dispatch({ type: 'operation-failed', stage: 'storyboard', message: cause instanceof Error ? cause.message : '无法读取最新故事板版本，请重试。' })
+    }
   }
 
   const saveStoryboard = async () => {
@@ -523,10 +540,10 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	    const workspace = await reopenStoryboard(projectId, state.workspace.workspace_id, state.workspace.workspace_version)
 	    dispatch({ type: 'requirement-loaded', workspace })
 	    dispatch({ type: 'reopen-confirmed' })
-	    if (pendingStoryboardAssetId) {
-	      const assetId = pendingStoryboardAssetId
-	      setPendingStoryboardAssetId('')
-	      await startStoryboardAssetRegeneration(workspace, assetId)
+	    if (pendingStoryboardRegeneration) {
+	      const pending = pendingStoryboardRegeneration
+	      setPendingStoryboardRegeneration(null)
+	      await startStoryboardAssetRegeneration(workspace, pending.assetId, pending.feedback)
 	    } else {
 	      onNotice(`故事板已重新打开为 revision ${workspace.current_storyboard_revision}。`)
 	    }
@@ -543,14 +560,14 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	    onNotice(`需求已重新打开为 revision ${workspace.current_revision}，旧版本已保留并作废。`)
 	  }
 	} catch (cause) {
-	  setPendingStoryboardAssetId('')
+	  setPendingStoryboardRegeneration(null)
 	  dispatch({ type: 'operation-failed', stage, message: cause instanceof Error ? cause.message : '重新编辑需求失败。' })
 	}
   }
 
   const autosaveCopy = autosave.status === 'saving' || autosave.status === 'waiting'
     ? '正在自动保存…'
-    : autosave.status === 'failed' ? '自动保存失败，本地草稿已保留'
+    : autosave.status === 'failed' ? autosave.lastError()?.message ?? '自动保存失败，本地草稿已保留'
     : autosave.savedAt ? `已自动保存 ${autosave.savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''
 
   const referenceFailure = state.workspace ? productionReferenceFailure(state.workspace) : null
@@ -559,6 +576,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     <header className="ai-native-workspace-header"><div><h3>AI 效果广告生成</h3><p>从商品链接开始，依次完成需求、脚本、故事板和完整视频。</p></div><div className="ai-native-workspace-header-side"><AINativeAdCatalog records={records} currentId={state.workspace?.workspace_id ?? ''} busy={catalogBusy} onSelect={workspaceId => { void switchWorkspace(workspaceId) }} onNew={requestNewWorkspace}/><div className="ai-native-support-copy"><span>实际支持</span><b>抖音 · 9:16 · 15–30 秒</b>{autosaveCopy ? <small role="status">{autosaveCopy}</small> : null}</div></div></header>
     <AINativeStageStepper active={state.active_stage} status={state.stage_status} onSelect={stage => {
       dispatch({ type: 'open-stage', stage })
+      setFocusedStoryboardAssetId('')
       if (state.workspace) window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, state.workspace.workspace_id, stage)}${window.location.hash}`)
     }}/>
     {state.active_stage === 'requirement' ? <RequirementStage
@@ -604,7 +622,9 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       onConfirm={() => { void confirmStoryboardStage() }}
 	  onEdit={() => { void requestEdit('storyboard') }}
       onRetry={() => { void retryStoryboardGeneration() }}
-      onRegenerateAsset={assetId => { void requestStoryboardAssetRegeneration(assetId) }}
+      focusAssetId={focusedStoryboardAssetId}
+      suggestedFeedback={referenceFailure?.asset_id === focusedStoryboardAssetId ? referenceFailure.recommended_feedback : ''}
+      onRegenerateAsset={(assetId, feedback) => { void requestStoryboardAssetRegeneration(assetId, feedback) }}
       onReplaceSourceAsset={() => { void requestEdit('requirement') }}
     /> : <VideoStage
       status={state.stage_status.video}
@@ -614,13 +634,14 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	  onFitVoiceover={() => { void fitFailedVoiceover() }}
 	  voiceoverFitBusy={voiceoverFitBusy}
 	  onCancel={() => { void cancelVideo() }}
-	  onReviewReference={() => {
+	  onReviewReference={assetId => {
 	    const stage = referenceFailure?.asset_source === 'ai_generated' ? 'storyboard' : 'requirement'
+	    setFocusedStoryboardAssetId(stage === 'storyboard' ? assetId : '')
 	    dispatch({ type: 'open-stage', stage })
-	    if (state.workspace) window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, state.workspace.workspace_id, stage)}${window.location.hash}`)
+	    if (state.workspace) window.history.replaceState(null, '', `${window.location.pathname}${aiNativeWorkspaceLocation(window.location.search, state.workspace.workspace_id, stage, stage === 'storyboard' ? assetId : '')}${window.location.hash}`)
 	  }}
     />}
-	{state.pending_reopen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-native-reopen-title"><span><AlertTriangle size={18}/></span><h3 id="ai-native-reopen-title">确认重新编辑？</h3><p>{pendingStoryboardAssetId ? '重新生成这张参考图片需要先解冻故事板，当前视频结果会作废；确认后系统会自动开始重新生成所选图片，其他故事板素材保持不变。' : invalidationCopy[state.pending_reopen]}</p><div><button className="secondary-button" onClick={() => { setPendingStoryboardAssetId(''); dispatch({ type: 'reopen-cancelled' }) }}>取消</button><button className="primary-button" onClick={() => { void confirmReopen() }}>{pendingStoryboardAssetId ? '作废视频并重新生成图片' : '继续编辑并作废下游'}</button></div></section></div> : null}
+	{state.pending_reopen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-native-reopen-title"><span><AlertTriangle size={18}/></span><h3 id="ai-native-reopen-title">确认重新编辑？</h3><p>{pendingStoryboardRegeneration ? '重新生成这张参考图片需要先解冻故事板；最终成片会作废，但语义未变化且已成功的视频片段和旁白会保留并在下次生产时复用。' : invalidationCopy[state.pending_reopen]}</p><div><button className="secondary-button" onClick={() => { setPendingStoryboardRegeneration(null); dispatch({ type: 'reopen-cancelled' }) }}>取消</button><button className="primary-button" onClick={() => { void confirmReopen() }}>{pendingStoryboardRegeneration ? '解冻并重新生成图片' : '继续编辑并作废下游'}</button></div></section></div> : null}
 	{newDialogOpen ? <div className="ai-native-dialog-backdrop" role="presentation"><section className="ai-native-dialog ai-native-name-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-native-name-title"><h3 id="ai-native-name-title">保存当前广告并新建</h3><p>当前完整或未完成的生成进度都会保留。请先为它起一个方便查找的名称。</p><label>广告名称<input autoFocus maxLength={80} value={recordName} onChange={event => setRecordName(event.target.value)} placeholder="例如：施美乐钛杯通勤版"/></label>{newDialogError ? <div className="ai-native-error" role="alert">{newDialogError}</div> : null}<div><button className="secondary-button" disabled={catalogBusy} onClick={() => setNewDialogOpen(false)}>取消</button><button className="primary-button" disabled={catalogBusy || !recordName.trim()} onClick={() => { void confirmNewWorkspace() }}>{catalogBusy ? '正在保存…' : '保存并新建'}</button></div></section></div> : null}
   </section>
 }

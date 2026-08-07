@@ -24,15 +24,19 @@ type StoryboardStageProps = {
   onConfirm: () => void
   onEdit: () => void
   onRetry: () => void
-  onRegenerateAsset: (assetId: string) => void
+  focusAssetId?: string
+  suggestedFeedback?: string
+  onRegenerateAsset: (assetId: string, feedback: string) => void
   onReplaceSourceAsset: (assetId: string) => void
 }
 
-export function StoryboardStage({ projectId, status, storyboard, canGenerate, error, onChange, onSave, onConfirm, onEdit, onRetry, onRegenerateAsset, onReplaceSourceAsset }: StoryboardStageProps) {
+export function StoryboardStage({ projectId, status, storyboard, canGenerate, error, onChange, onSave, onConfirm, onEdit, onRetry, focusAssetId = '', suggestedFeedback = '', onRegenerateAsset, onReplaceSourceAsset }: StoryboardStageProps) {
   const locked = status === 'confirmed'
   const editable = status === 'draft'
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [selectedAssetId, setSelectedAssetId] = useState('')
+  const [feedbackAssetId, setFeedbackAssetId] = useState('')
+  const [regenerationFeedback, setRegenerationFeedback] = useState('')
   const previewKey = storyboard?.assets.map(asset => `${asset.id}:${asset.asset_ref?.asset_id ?? ''}:${asset.asset_ref?.version ?? 0}`).join('|') ?? ''
   const selectedAsset = useMemo(() => storyboard?.assets.find(asset => asset.id === selectedAssetId) ?? null, [selectedAssetId, storyboard])
 
@@ -59,6 +63,23 @@ export function StoryboardStage({ projectId, status, storyboard, canGenerate, er
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [selectedAsset])
+
+  useEffect(() => {
+    if (!focusAssetId || !storyboard?.assets.some(asset => asset.id === focusAssetId)) return
+    const element = document.getElementById(`storyboard-asset-${focusAssetId}`)
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    element?.focus({ preventScroll: true })
+  }, [focusAssetId, previewKey, storyboard])
+
+  const openFeedbackEditor = (assetId: string) => {
+    setFeedbackAssetId(assetId)
+    const asset = storyboard?.assets.find(candidate => candidate.id === assetId)
+    setRegenerationFeedback(assetId === focusAssetId ? suggestedFeedback : asset?.regeneration_feedback ?? '')
+  }
+
+  const submitRegeneration = (assetId: string) => {
+    onRegenerateAsset(assetId, regenerationFeedback)
+  }
 
   if (status === 'generating' && !storyboard) return <StageLoading icon={<LoaderCircle className="spin" size={24}/>} title="正在生成故事板" detail="AI 正在整理人物、商品和场景素材，并把脚本转换为完整分镜；生成图片会先进入项目 Assets。"/>
   if (!storyboard) {
@@ -89,9 +110,10 @@ export function StoryboardStage({ projectId, status, storyboard, canGenerate, er
     <div className="storyboard-assets">{groups.map(group => <section key={group.role}><header><b>{assetGroupLabels[group.role]}</b><small>{group.assets.length} 项</small></header><div>{group.assets.map(asset => {
       const preview = previews[asset.id]
       const canRegenerate = asset.source === 'ai_generated' && asset.status !== 'generating'
-      return <figure className={`storyboard-asset-${asset.status}`} key={asset.id}>
+      return <figure id={`storyboard-asset-${asset.id}`} tabIndex={-1} className={`storyboard-asset-${asset.status}${focusAssetId === asset.id ? ' storyboard-asset-focused' : ''}${feedbackAssetId === asset.id ? ' storyboard-asset-editing' : ''}`} key={asset.id}>
         {preview ? <button className="storyboard-preview-button" type="button" onClick={() => setSelectedAssetId(asset.id)} aria-label={`放大查看${asset.name}`}><img src={preview} alt={asset.name}/><span><Maximize2 size={13}/>点击放大</span></button> : <span>{asset.status === 'failed' ? <AlertTriangle size={19}/> : asset.status === 'generating' ? <LoaderCircle className="spin" size={19}/> : <Image size={19}/>} {asset.status === 'ready' ? `Asset ${asset.asset_ref?.asset_id ?? ''}` : asset.status === 'failed' ? '生成失败' : asset.status === 'generating' ? 'AI 素材生成中' : 'AI 素材待生成'}</span>}
-        <figcaption><b>{asset.name}</b><small>{asset.source === 'product_import' ? '商品链接导入' : asset.source === 'project_asset' ? '项目素材' : asset.status === 'ready' ? 'AI 生成 · 已入库' : asset.status === 'failed' ? `第 ${asset.generation_attempt ?? 1} 次生成失败` : asset.status === 'generating' ? 'AI 正在生成' : 'AI 生成计划'}</small>{asset.error_message ? <em title={asset.error_message}>{asset.error_message}</em> : null}{canRegenerate ? <button className="storyboard-regenerate-button" type="button" onClick={() => onRegenerateAsset(asset.id)}><RefreshCw size={12}/>重新生成</button> : asset.source !== 'ai_generated' ? <button className="storyboard-regenerate-button" type="button" onClick={() => onReplaceSourceAsset(asset.id)}><RefreshCw size={12}/>{asset.source === 'product_import' ? '更换商品图' : '更换素材'}</button> : null}</figcaption>
+        <figcaption><b>{asset.name}</b><small>{asset.source === 'product_import' ? '商品链接导入' : asset.source === 'project_asset' ? '项目素材' : asset.status === 'ready' ? 'AI 生成 · 已入库' : asset.status === 'failed' ? `第 ${asset.generation_attempt ?? 1} 次生成失败` : asset.status === 'generating' ? 'AI 正在生成' : 'AI 生成计划'}</small>{asset.error_message ? <em title={asset.error_message}>{asset.error_message}</em> : null}{canRegenerate ? <button className="storyboard-regenerate-button" type="button" onClick={() => openFeedbackEditor(asset.id)}><RefreshCw size={12}/>重新生成</button> : asset.source !== 'ai_generated' ? <button className="storyboard-regenerate-button" type="button" onClick={() => onReplaceSourceAsset(asset.id)}><RefreshCw size={12}/>{asset.source === 'product_import' ? '更换商品图' : '更换素材'}</button> : null}</figcaption>
+        {feedbackAssetId === asset.id ? <div className="storyboard-feedback-editor"><label htmlFor={`storyboard-feedback-${asset.id}`}>补充重生成要求（选填）</label><textarea id={`storyboard-feedback-${asset.id}`} autoFocus maxLength={500} value={regenerationFeedback} onChange={event => setRegenerationFeedback(event.target.value)} placeholder="例如：保留商品展示目的，人物改为背影，不出现清晰面部。"/><small>{regenerationFeedback.length}/500 · 新图生成成功后将直接覆盖当前素材</small><div><button className="secondary-button" type="button" onClick={() => setFeedbackAssetId('')}>取消</button><button className="primary-button" type="button" onClick={() => submitRegeneration(asset.id)}>按反馈重新生成</button></div></div> : null}
       </figure>
     })}</div></section>)}</div>
 
@@ -111,6 +133,6 @@ export function StoryboardStage({ projectId, status, storyboard, canGenerate, er
     </div></article>)}</div>
     <footer className="ai-native-actions">{locked ? <span className="confirmed-note">故事板已确认并冻结</span> : status === 'failed' ? <button className="primary-button" disabled={!canGenerate} onClick={onRetry}><RefreshCw size={14}/>仅重试失败素材</button> : status === 'generating' ? <span className="confirmed-note">素材生成中，完成后可编辑分镜</span> : <><button className="secondary-button" onClick={onSave}>保存故事板</button><button className="primary-button" onClick={onConfirm}>确认并一键成片</button></>}</footer>
 
-    {selectedAsset && previews[selectedAsset.id] ? <div className="storyboard-lightbox" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelectedAssetId('') }}><section role="dialog" aria-modal="true" aria-labelledby="storyboard-lightbox-title"><header><div><b id="storyboard-lightbox-title">{selectedAsset.name}</b><small>{assetGroupLabels[selectedAsset.role]} · {selectedAsset.source === 'ai_generated' ? 'AI 生成' : '商品/项目素材'}</small></div><button type="button" onClick={() => setSelectedAssetId('')} aria-label="关闭大图"><X size={18}/></button></header><div><img src={previews[selectedAsset.id]} alt={selectedAsset.name}/></div><footer><button className="secondary-button" type="button" onClick={() => { setSelectedAssetId(''); selectedAsset.source === 'ai_generated' ? onRegenerateAsset(selectedAsset.id) : onReplaceSourceAsset(selectedAsset.id) }}><RefreshCw size={13}/>{selectedAsset.source === 'ai_generated' ? '不满意，重新生成' : selectedAsset.source === 'product_import' ? '更换商品图' : '更换素材'}</button></footer></section></div> : null}
+    {selectedAsset && previews[selectedAsset.id] ? <div className="storyboard-lightbox" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelectedAssetId('') }}><section role="dialog" aria-modal="true" aria-labelledby="storyboard-lightbox-title"><header><div><b id="storyboard-lightbox-title">{selectedAsset.name}</b><small>{assetGroupLabels[selectedAsset.role]} · {selectedAsset.source === 'ai_generated' ? 'AI 生成' : '商品/项目素材'}</small></div><button type="button" onClick={() => setSelectedAssetId('')} aria-label="关闭大图"><X size={18}/></button></header><div><img src={previews[selectedAsset.id]} alt={selectedAsset.name}/></div><footer><button className="secondary-button" type="button" onClick={() => { setSelectedAssetId(''); selectedAsset.source === 'ai_generated' ? openFeedbackEditor(selectedAsset.id) : onReplaceSourceAsset(selectedAsset.id) }}><RefreshCw size={13}/>{selectedAsset.source === 'ai_generated' ? '不满意，重新生成' : selectedAsset.source === 'product_import' ? '更换商品图' : '更换素材'}</button></footer></section></div> : null}
   </section>
 }

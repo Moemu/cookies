@@ -189,6 +189,7 @@ type AgentRunManager interface {
 type KnowledgeManager interface {
 	ImportDocument(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ImportDocumentRequest) (knowledge.Document, error)
 	ListDocuments(context.Context, contract.ActorContext, contract.ProjectID, int) ([]knowledge.Document, error)
+	GetDocument(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.Document, error)
 	Search(context.Context, contract.ActorContext, contract.ProjectID, knowledge.SearchRequest) ([]knowledge.SearchResult, error)
 	CreateDocument(context.Context, contract.ActorContext, contract.ProjectID, string, string, io.Reader, int64) (knowledge.Document, error)
 	RunResearch(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ResearchRequest) (knowledge.ResearchRun, error)
@@ -380,6 +381,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/assets/generated-intakes/{intake_id}", server.requireProject(server.requireScope("assets.read", http.HandlerFunc(server.getGeneratedIntake))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope(knowledge.ScopeWrite, http.HandlerFunc(server.knowledgeDocumentEntry))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeDocuments))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeDocument))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/search", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.searchKnowledge))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchRuns))))

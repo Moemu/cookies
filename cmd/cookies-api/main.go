@@ -158,6 +158,8 @@ func main() {
 			cfg.Creative.DirectionPlannerModelAlias,
 		)
 	}
+	creativeService.ImageBaseAssets = creativeImageAssetIO{uploads: uploadService}
+	creativeService.RenderedImages = creativeRenderedImageWriter{uploads: uploadService}
 	if fontPath := cfg.Creative.ImageFontPath; fontPath != "" {
 		fontBytes, fontErr := os.ReadFile(fontPath)
 		if fontErr != nil {
@@ -172,8 +174,6 @@ func main() {
 			log.Fatalf("configure Creative image renderer: %v", readyErr)
 		}
 		creativeService.ImageRenderer = renderer
-		creativeService.ImageBaseAssets = creativeImageAssetIO{uploads: uploadService}
-		creativeService.RenderedImages = creativeRenderedImageWriter{uploads: uploadService}
 		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV2)
 	}
 	if ffmpegPath != "" {
@@ -446,6 +446,7 @@ func main() {
 			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
+		creativeService.ShortDramaV2OutputNormalizer = composer
 		creativeService.Composer = composer
 		creativeService.BrandFilmComposer = composer
 		creativeService.RenderedAssets = creativeRenderedAssetWriter{uploads: uploadService}

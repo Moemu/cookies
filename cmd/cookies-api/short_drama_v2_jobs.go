@@ -11,11 +11,8 @@ import (
 
 type creativeShortDramaV2ImageJobs struct{ provider *provider.Service }
 
-func shortDramaV2FirstFrameInput(prompt string) provider.ImageGenerationInput {
-	// cookies.image.standard currently accepts the adapter-gateway portrait
-	// profile at 1024x1536. The final Seedance video remains 9:16; this image is
-	// a portrait reference frame and must use a size supported by the image route.
-	return provider.ImageGenerationInput{Prompt: prompt, Width: 1024, Height: 1536}
+func shortDramaV2FirstFrameInput(prompt string, width, height int) provider.ImageGenerationInput {
+	return provider.ImageGenerationInput{Prompt: prompt, Width: width, Height: height}
 }
 
 func shortDramaV2FirstFrameSourceTaskID(request creative.ShortDramaV2FirstFrameJobRequest) string {
@@ -40,7 +37,9 @@ func (j creativeShortDramaV2ImageJobs) CreateFirstFrameJob(ctx context.Context, 
 		CandidateID  string `json:"candidate_id"`
 		VariantIndex int    `json:"variant_index"`
 		Prompt       string `json:"prompt"`
-	}{request.TaskID, request.BatchID, request.CandidateID, request.VariantIndex, request.Prompt})
+		Width        int    `json:"width"`
+		Height       int    `json:"height"`
+	}{request.TaskID, request.BatchID, request.CandidateID, request.VariantIndex, request.Prompt, request.Width, request.Height})
 	if err != nil {
 		return contract.ProviderJob{}, err
 	}
@@ -48,7 +47,7 @@ func (j creativeShortDramaV2ImageJobs) CreateFirstFrameJob(ctx context.Context, 
 		Actor: providerActor, Project: project,
 		IdempotencyKey: contract.IdempotencyKey("short-drama-v2-frame-" + hash), RequestHash: hash,
 		ModelAlias: "cookies.image.standard", SourceSystem: "creative.short_drama_preroll_v2", SourceTaskID: shortDramaV2FirstFrameSourceTaskID(request),
-		Input: shortDramaV2FirstFrameInput(request.Prompt),
+		Input: shortDramaV2FirstFrameInput(request.Prompt, request.Width, request.Height),
 	})
 	return job, err
 }

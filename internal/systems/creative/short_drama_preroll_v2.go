@@ -16,15 +16,17 @@ const (
 type ShortDramaV2Stage string
 
 const (
-	ShortDramaV2StageSourceReady     ShortDramaV2Stage = "source_ready"
-	ShortDramaV2StageAnalyzing       ShortDramaV2Stage = "analyzing"
-	ShortDramaV2StageAnalysisReady   ShortDramaV2Stage = "analysis_ready"
-	ShortDramaV2StageDirectionsReady ShortDramaV2Stage = "directions_ready"
-	ShortDramaV2StagePromptsReady    ShortDramaV2Stage = "prompts_ready"
-	ShortDramaV2StageFramesReady     ShortDramaV2Stage = "first_frames_ready"
-	ShortDramaV2StageFrameSelected   ShortDramaV2Stage = "first_frame_selected"
-	ShortDramaV2StageVideoGenerating ShortDramaV2Stage = "video_generating"
-	ShortDramaV2StageCompleted       ShortDramaV2Stage = "completed"
+	ShortDramaV2StageSourceReady      ShortDramaV2Stage = "source_ready"
+	ShortDramaV2StageAnalyzing        ShortDramaV2Stage = "analyzing"
+	ShortDramaV2StageAnalysisReady    ShortDramaV2Stage = "analysis_ready"
+	ShortDramaV2StageDirectionsReady  ShortDramaV2Stage = "directions_ready"
+	ShortDramaV2StagePromptsReady     ShortDramaV2Stage = "prompts_ready"
+	ShortDramaV2StageFramesGenerating ShortDramaV2Stage = "first_frames_generating"
+	ShortDramaV2StageFramesReady      ShortDramaV2Stage = "first_frames_ready"
+	ShortDramaV2StageFrameSelected    ShortDramaV2Stage = "first_frame_selected"
+	ShortDramaV2StageVideoGenerating  ShortDramaV2Stage = "video_generating"
+	ShortDramaV2StageNormalizing      ShortDramaV2Stage = "normalizing_output"
+	ShortDramaV2StageCompleted        ShortDramaV2Stage = "completed"
 )
 
 type ShortDramaV2ResourceStatus string
@@ -117,33 +119,41 @@ type ShortDramaV2DirectionBatch struct {
 }
 
 type ShortDramaV2PromptDraft struct {
-	Revision         int64  `json:"revision"`
-	DirectionID      string `json:"direction_id"`
-	DurationSeconds  int    `json:"duration_seconds"`
-	ImagePrompt      string `json:"image_prompt"`
-	VideoDescription string `json:"video_description"`
-	VideoPrompt      string `json:"video_prompt"`
-	CompilerVersion  string `json:"compiler_version"`
-	ContentHash      string `json:"content_hash"`
+	Revision           int64  `json:"revision"`
+	DirectionID        string `json:"direction_id"`
+	DurationSeconds    int    `json:"duration_seconds"`
+	ImagePrompt        string `json:"image_prompt"`
+	VideoDescription   string `json:"video_description"`
+	VideoPrompt        string `json:"video_prompt"`
+	BaseVideoPrompt    string `json:"base_video_prompt,omitempty"`
+	SelectedVariantKey string `json:"selected_variant_key,omitempty"`
+	CompilerVersion    string `json:"compiler_version"`
+	ContentHash        string `json:"content_hash"`
 }
 
 type ShortDramaV2FirstFrameCandidate struct {
-	ID            string                     `json:"id"`
-	VariantIndex  int                        `json:"variant_index"`
-	ProviderJobID string                     `json:"provider_job_id,omitempty"`
-	Status        ShortDramaV2ResourceStatus `json:"status"`
-	Asset         *contract.ProjectAssetRef  `json:"asset,omitempty"`
-	ErrorCode     string                     `json:"error_code,omitempty"`
-	ErrorMessage  string                     `json:"error_message,omitempty"`
+	ID                string                     `json:"id"`
+	VariantIndex      int                        `json:"variant_index"`
+	ProviderJobID     string                     `json:"provider_job_id,omitempty"`
+	Status            ShortDramaV2ResourceStatus `json:"status"`
+	Asset             *contract.ProjectAssetRef  `json:"asset,omitempty"`
+	ModelCanvasAsset  *contract.ProjectAssetRef  `json:"model_canvas_asset,omitempty"`
+	OutputCanvasAsset *contract.ProjectAssetRef  `json:"output_canvas_asset,omitempty"`
+	VariantKey        string                     `json:"variant_key,omitempty"`
+	VisualMechanism   string                     `json:"visual_mechanism,omitempty"`
+	StyleProfile      string                     `json:"style_profile,omitempty"`
+	ErrorCode         string                     `json:"error_code,omitempty"`
+	ErrorMessage      string                     `json:"error_message,omitempty"`
 }
 
 type ShortDramaV2FirstFrameBatch struct {
 	ShortDramaV2AsyncResource
-	ID             string                            `json:"id,omitempty"`
-	Revision       int64                             `json:"revision"`
-	PromptRevision int64                             `json:"prompt_revision"`
-	Candidates     []ShortDramaV2FirstFrameCandidate `json:"candidates"`
-	SelectedAsset  *contract.ProjectAssetRef         `json:"selected_asset,omitempty"`
+	ID                  string                            `json:"id,omitempty"`
+	Revision            int64                             `json:"revision"`
+	PromptRevision      int64                             `json:"prompt_revision"`
+	Candidates          []ShortDramaV2FirstFrameCandidate `json:"candidates"`
+	SelectedAsset       *contract.ProjectAssetRef         `json:"selected_asset,omitempty"`
+	SelectedOutputAsset *contract.ProjectAssetRef         `json:"selected_output_asset,omitempty"`
 }
 
 type ShortDramaV2SourceOpeningFrame struct {
@@ -174,8 +184,12 @@ type ShortDramaV2GenerationSpec struct {
 	AudioPolicy      string                              `json:"audio_policy"`
 	InputMode        string                              `json:"input_mode"`
 	FirstFrameAsset  contract.ProjectAssetRef            `json:"first_frame_asset"`
-	LastFrameAsset   contract.ProjectAssetRef            `json:"last_frame_asset"`
+	LastFrameAsset   *contract.ProjectAssetRef           `json:"last_frame_asset,omitempty"`
 	TrustedMaterials *ShortDramaV2TrustedMaterialBinding `json:"trusted_materials,omitempty"`
+	SourceCanvas     *ShortDramaSourceCanvas             `json:"source_canvas,omitempty"`
+	ModelCanvas      *ShortDramaModelCanvas              `json:"model_canvas,omitempty"`
+	OutputCanvas     *ShortDramaOutputCanvas             `json:"output_canvas,omitempty"`
+	CompiledPrompt   string                              `json:"compiled_prompt,omitempty"`
 	PromptHash       string                              `json:"prompt_hash"`
 	SpecHash         string                              `json:"spec_hash"`
 }
@@ -187,6 +201,9 @@ type ShortDramaPrerollV2Workspace struct {
 	ActiveStage          ShortDramaV2Stage                   `json:"active_stage"`
 	SourceVideo          contract.ProjectAssetRef            `json:"source_video"`
 	SourceMetadata       CreativeAssetSnapshot               `json:"source_metadata"`
+	SourceCanvas         *ShortDramaSourceCanvas             `json:"source_canvas,omitempty"`
+	ModelCanvas          *ShortDramaModelCanvas              `json:"model_canvas,omitempty"`
+	OutputCanvas         *ShortDramaOutputCanvas             `json:"output_canvas,omitempty"`
 	Analysis             ShortDramaV2Analysis                `json:"analysis"`
 	DirectionBatch       *ShortDramaV2DirectionBatch         `json:"direction_batch,omitempty"`
 	PromptDraft          *ShortDramaV2PromptDraft            `json:"prompt_draft,omitempty"`
@@ -195,13 +212,15 @@ type ShortDramaPrerollV2Workspace struct {
 	TrustedMaterials     *ShortDramaV2TrustedMaterialBinding `json:"trusted_materials,omitempty"`
 	GenerationSpec       *ShortDramaV2GenerationSpec         `json:"generation_spec,omitempty"`
 	LatestVideoAttemptID string                              `json:"latest_video_attempt_id,omitempty"`
+	RawOutputAsset       *contract.ProjectAssetRef           `json:"raw_output_asset,omitempty"`
+	OutputNormalization  *ShortDramaV2AsyncResource          `json:"output_normalization,omitempty"`
 	OutputAsset          *contract.ProjectAssetRef           `json:"output_asset,omitempty"`
 	CreatedAt            time.Time                           `json:"created_at"`
 	UpdatedAt            time.Time                           `json:"updated_at"`
 }
 
 func (w ShortDramaPrerollV2Workspace) Validate() error {
-	if w.ContractVersion != ShortDramaPrerollV2ContractVersion || strings.TrimSpace(w.TaskID) == "" ||
+	if (w.ContractVersion != ShortDramaPrerollV2ContractVersion && w.ContractVersion != ShortDramaPrerollV3ContractVersion) || strings.TrimSpace(w.TaskID) == "" ||
 		w.Revision < 1 || w.ActiveStage == "" || w.SourceVideo.Validate() != nil ||
 		w.CreatedAt.IsZero() || w.UpdatedAt.IsZero() {
 		return fmt.Errorf("creative short drama preroll V2 workspace is incomplete")

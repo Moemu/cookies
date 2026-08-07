@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,25 @@ import (
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/creative"
 )
+
+func TestBuildAINativeStoryboardAssetPromptIncludesFeedbackAndSafetyConstraints(t *testing.T) {
+	asset := creative.AINativeStoryboardAsset{
+		GenerationBrief:      "明亮的女生宿舍梳妆台场景",
+		RegenerationFeedback: "保留梳妆台，人物改为成年女性背影",
+		GenerationAttempt:    2,
+	}
+	prompt := buildAINativeStoryboardAssetPrompt(asset)
+	for _, want := range []string{"明亮的女生宿舍梳妆台场景", "保留梳妆台，人物改为成年女性背影", "不出现可识别的真实人物", "镜面"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt %q does not contain %q", prompt, want)
+		}
+	}
+	withoutFeedback := asset
+	withoutFeedback.RegenerationFeedback = ""
+	if buildAINativeStoryboardAssetPrompt(withoutFeedback) == buildAINativeStoryboardAssetPrompt(creative.AINativeStoryboardAsset{GenerationBrief: asset.GenerationBrief, GenerationAttempt: 1}) {
+		t.Fatal("a later empty-feedback attempt must still change the effective prompt")
+	}
+}
 
 func TestStoryboardAssetPreparationAcceptsActorWithProviderCreateScope(t *testing.T) {
 	t.Parallel()

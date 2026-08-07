@@ -46,8 +46,9 @@
       "required": ["brief_name", "brief_text", "product_name", "channel", "duration_seconds", "aspect_ratio", "evidence_refs"],
       "properties": {
         "source_type": {"enum": ["strategy_handoff"]},
+        "source_kind": {"enum": ["fixture", "strategy_package", "task_strategy", "manual_document", "manual"]},
         "fixture_id": {"const": "brand-video-guerlain/v1"},
-        "fixture_version": {"const": 1},
+        "fixture_version": {"type": "integer", "minimum": 0},
         "fixture_hash": {"$ref": "#/$defs/sha256"},
         "intake_id": {"type": "string", "minLength": 1},
         "input_identity_hash": {"$ref": "#/$defs/sha256"},
@@ -66,15 +67,24 @@
         "brief_name": {"type": "string", "minLength": 1},
         "brief_text": {"type": "string", "minLength": 1},
         "product_name": {"type": "string", "minLength": 1},
+        "objective": {"type": "string"},
+        "audience": {"type": "string"},
+        "core_message": {"type": "string"},
+        "tone": {"$ref": "#/$defs/stringList"},
+        "visual_keywords": {"$ref": "#/$defs/stringList"},
+        "mandatory_elements": {"$ref": "#/$defs/stringList"},
+        "prohibited_claims": {"$ref": "#/$defs/stringList"},
+        "asset_candidates": {"type": "array", "items": {"$ref": "#/$defs/assetCandidate"}},
         "channel": {"type": "string", "minLength": 1},
         "duration_seconds": {"type": "integer", "minimum": 12},
         "aspect_ratio": {"type": "string", "minLength": 1},
         "resolution": {"type": "string", "minLength": 1},
         "evidence_refs": {"$ref": "#/$defs/stringList"}
       },
-      "oneOf": [
+      "anyOf": [
         {"required": ["fixture_id", "fixture_version", "fixture_hash"]},
-        {"required": ["source_type", "intake_id", "input_identity_hash", "brand_brief_revision", "brand_brief_content_hash", "direction_batch_id", "direction_id", "direction_version", "direction_content_hash", "route_id", "resolution"]}
+        {"required": ["source_type", "intake_id", "input_identity_hash", "brand_brief_revision", "brand_brief_content_hash", "direction_batch_id", "direction_id", "direction_version", "direction_content_hash", "route_id", "resolution"]},
+        {"required": ["source_kind", "intake_id", "input_identity_hash"]}
       ]
     },
     "briefFact": {
@@ -230,7 +240,7 @@
       "required": ["contract_version", "unit_policy", "prompt_contract", "attempt_policy"],
       "properties": {
         "contract_version": {"const": "creative-brand-generation-seam/v1"},
-        "unit_policy": {"const": "4_to_15_seconds"},
+        "unit_policy": {"enum": ["4_to_15_seconds", "one_generation_unit_per_shot"]},
         "prompt_contract": {"const": "brand-shot-prompt-package/v1"},
         "attempt_policy": {"const": "single_default_regenerate_on_feedback"}
       }

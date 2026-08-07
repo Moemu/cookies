@@ -1164,15 +1164,16 @@ export type ApiBrandFilmWorkspace = {
       revision: number
       stage: 'waiting_for_input' | 'brief_analysis_draft' | 'brief_confirmed' | 'concept_selection' | 'concept_confirmed' | 'production_plan_draft' | 'production_plan_confirmed' | 'generation_ready' | 'generating' | 'generation_review' | 'generation_locked' | 'audio_draft' | 'quality_review' | 'ready_for_review' | 'approved' | 'delivered'
       source_snapshot: {
-        source_type?: 'strategy_handoff'
-        fixture_id?: string
-        fixture_version?: number
-        fixture_hash?: string
+		source_type?: 'strategy_handoff'
+		fixture_id?: string
+		fixture_version?: number
+		fixture_hash?: string
+		source_kind?: 'fixture' | 'strategy_package' | 'task_strategy' | 'manual_document' | 'manual'
         intake_id?: string
         input_identity_hash?: string
         strategy_package_id?: string
         strategy_package_version?: number
-        strategy_package_hash?: string
+		strategy_package_hash?: string
         handoff_contract_version?: string
         handoff_content_hash?: string
         brand_brief_revision?: number
@@ -1180,8 +1181,8 @@ export type ApiBrandFilmWorkspace = {
         direction_batch_id?: string
         direction_id?: string
         direction_version?: number
-        direction_content_hash?: string
-        route_id?: string
+		direction_content_hash?: string
+		route_id?: string
         brief_name: string
         brief_text: string
         product_name: string
@@ -1431,12 +1432,41 @@ export type ApiShortDramaV2Direction = {
   grounding_evidence_ids: string[]
 }
 
+export type ApiShortDramaCanvas = {
+  width_pixels: number
+  height_pixels: number
+  aspect_ratio: number
+  duration_ms: number
+  frame_rate?: string
+}
+
+export type ApiShortDramaModelCanvas = {
+  ratio: string
+  resolution: string
+  width: number
+  height: number
+  image_width: number
+  image_height: number
+}
+
+export type ApiShortDramaOutputCanvas = {
+  width: number
+  height: number
+  aspect_num: number
+  aspect_den: number
+  frame_rate: number
+  normalize_mode: string
+}
+
 export type ApiShortDramaV2Workspace = {
-  contract_version: 'creative-short-drama-preroll-workspace/v2'
+  contract_version: 'creative-short-drama-preroll-workspace/v2' | 'creative-short-drama-preroll-workspace/v3'
   task_id: string
   revision: number
-  active_stage: 'source_ready' | 'analyzing' | 'analysis_ready' | 'directions_ready' | 'prompts_ready' | 'first_frames_ready' | 'first_frame_selected' | 'video_generating' | 'completed'
+  active_stage: 'source_ready' | 'analyzing' | 'analysis_ready' | 'directions_ready' | 'prompts_ready' | 'first_frames_generating' | 'first_frames_ready' | 'first_frame_selected' | 'video_generating' | 'normalizing_output' | 'completed'
   source_video: ApiShortDramaV2ProjectAssetRef
+  source_canvas?: ApiShortDramaCanvas
+  model_canvas?: ApiShortDramaModelCanvas
+  output_canvas?: ApiShortDramaOutputCanvas
   analysis: {
     status: string
     revision: number
@@ -1460,6 +1490,8 @@ export type ApiShortDramaV2Workspace = {
     image_prompt: string
     video_description: string
     video_prompt: string
+    base_video_prompt?: string
+    selected_variant_key?: string
     compiler_version: string
     content_hash: string
   }
@@ -1474,9 +1506,15 @@ export type ApiShortDramaV2Workspace = {
       provider_job_id?: string
       status: string
       asset?: ApiShortDramaV2ProjectAssetRef
+      model_canvas_asset?: ApiShortDramaV2ProjectAssetRef
+      output_canvas_asset?: ApiShortDramaV2ProjectAssetRef
+      variant_key?: string
+      visual_mechanism?: string
+      style_profile?: string
       error_message?: string
     }>
     selected_asset?: ApiShortDramaV2ProjectAssetRef
+    selected_output_asset?: ApiShortDramaV2ProjectAssetRef
   }
   source_opening_frame?: { status: string; asset?: ApiShortDramaV2ProjectAssetRef; timestamp_ms: number }
   trusted_materials?: {
@@ -1485,6 +1523,7 @@ export type ApiShortDramaV2Workspace = {
     last_frame_asset_id: string
   }
   latest_video_attempt_id?: string
+  raw_output_asset?: ApiShortDramaV2ProjectAssetRef
   output_asset?: ApiShortDramaV2ProjectAssetRef
 }
 
@@ -1771,6 +1810,15 @@ export type ApiKnowledgeDocument = {
   source_uri: string
   source_type: string
   chunk_count: number
+  filename?: string
+  mime_type?: string
+  size_bytes?: number
+  content_sha256?: string
+  text_sha256?: string
+  extracted_text?: string
+  status?: 'parse_queued' | 'ready' | 'parse_failed'
+  parse_error_code?: string
+  parse_error_message?: string
   created_at: string
   updated_at: string
 }
@@ -3656,7 +3704,7 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
 }
 
 export class CreativeApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code = '') {
     super(message)
     this.name = 'CreativeApiError'
   }
@@ -3672,16 +3720,16 @@ async function creativeRequest<T>(path: string, method = 'GET', body?: unknown, 
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const responseText = await response.text()
-  let payload: T | { error?: { message?: string; request_id?: string } }
+  let payload: T | { error?: { message?: string; request_id?: string; code?: string } }
   try {
-    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; request_id?: string } } : {}
+    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; request_id?: string; code?: string } } : {}
   } catch {
     throw new Error(`Creative API 返回了无法解析的响应（HTTP ${response.status}）`)
   }
   if (!response.ok) {
-    const error = payload as { error?: { message?: string; request_id?: string } }
+    const error = payload as { error?: { message?: string; request_id?: string; code?: string } }
     const requestId = error.error?.request_id ? `（request_id: ${error.error.request_id}）` : ''
-    throw new CreativeApiError(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`, response.status)
+    throw new CreativeApiError(`${error.error?.message ?? `Creative API 请求失败（HTTP ${response.status}）`}${requestId}`, response.status, error.error?.code ?? '')
   }
   return payload as T
 }
@@ -3736,6 +3784,79 @@ function confirmBrandBriefReview(projectId: string, intakeId: string, expectedRe
 function listCreativeTasks(projectId: string, limit = 100) {
   return creativeRequest<{ items: ApiCreativeTaskSummary[] }>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=${limit}`,
+  )
+}
+
+function listCreativeIntakes(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativeIntakeBootstrap[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes?limit=${limit}`,
+  )
+}
+
+async function uploadKnowledgeDocument(projectId: string, file: File): Promise<ApiKnowledgeDocument> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch(`${platformBase}/projects/${encodeURIComponent(projectId)}/knowledge/documents`, {
+    method: 'POST',
+    credentials: 'include',
+    body: form,
+  })
+  const payload = await response.json() as ApiKnowledgeDocument | { error?: { message?: string } }
+  if (!response.ok) throw new Error('error' in payload ? payload.error?.message ?? 'Brief 上传失败' : 'Brief 上传失败')
+  return payload as ApiKnowledgeDocument
+}
+
+function getKnowledgeDocument(projectId: string, documentId: string) {
+  return platformRequest<ApiKnowledgeDocument>(
+    `/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}`,
+  )
+}
+
+function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDocument, durationSeconds = 15) {
+  const filename = document.filename || document.title || '品牌 Brief.pdf'
+  const productName = filename.replace(/\.(pdf|docx|md)$/i, '').trim() || '未命名品牌项目'
+  const briefText = document.extracted_text?.trim() || ''
+  if (!briefText || !document.content_sha256) throw new Error('Brief 尚未解析完成，暂时不能创建品牌广告任务。')
+  return creativeRequest<ApiCreativeIntakeBootstrap>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      contract_version: 'creative-intake-create/v3',
+      source: 'manual',
+      format: 'video',
+      performance_mode: 'brand_video',
+      channel: 'douyin',
+      objective: `基于《${productName}》Brief 制作 ${durationSeconds} 秒品牌广告`,
+      audience: '以 Brief 解析与人工确认为准',
+      core_message: productName,
+      call_to_action: '',
+      concept: '等待 Brief 确认后生成创意方向',
+      tone: [],
+      visual_keywords: [],
+      mandatory_elements: [],
+      prohibited_claims: [],
+      creative_routes: [{
+        route_id: 'route_fixture_brand_video_guerlain_v1',
+        route_type: 'brand_video',
+        video_purpose: 'brand',
+        channels: ['douyin'],
+        reason: '用户上传 PDF Brief 后创建的品牌广告制作路线',
+        target_duration_seconds: durationSeconds,
+        aspect_ratio: '9:16',
+        source_asset_refs: [],
+        evidence_refs: [`knowledge://documents/${document.id}`],
+        requires_human_confirmation: true,
+      }],
+      manual_brand_film: {
+        document_id: document.id,
+        fixture_id: '',
+        fixture_version: 0,
+        fixture_hash: `sha256:${document.content_sha256}`,
+        brief_name: filename,
+        brief_text: briefText,
+        product_name: productName,
+      },
+    },
   )
 }
 
@@ -3815,6 +3936,25 @@ function createBrandVideoTaskFromDirection(
     {
       selected_route_id: selectedRouteId,
       direction_id: directionId,
+      channel,
+      mandatory_elements: [],
+      prohibited_claims: [],
+      confirm_route: true,
+    },
+  )
+}
+
+function createBrandFilmTaskFromIntake(
+  projectId: string,
+  intakeId: string,
+  selectedRouteId: string,
+  channel: 'xiaohongshu' | 'douyin' | 'kuaishou',
+) {
+  return creativeRequest<ApiCreativeTaskSummary>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: selectedRouteId,
       channel,
       mandatory_elements: [],
       prohibited_claims: [],
@@ -4055,11 +4195,17 @@ function shortDramaV2Command(
   action: string,
   body: unknown,
 ) {
+  const serialized = JSON.stringify(body)
+  let hash = 2166136261
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
   return creativeRequest<ApiShortDramaV2TaskDetail>(
     `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/short-drama-preroll-v2:${action}`,
     'POST',
     body,
-    { 'Idempotency-Key': `short-drama-v2-${action}-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+    { 'Idempotency-Key': `short-drama-v3-${action}-${taskId}-${(hash >>> 0).toString(36)}` },
   )
 }
 
@@ -5466,6 +5612,10 @@ export const api = {
   getBrandFilmWorkspace,
   initializeStrategyBrandFilmWorkspace,
   restoreBrandFilmWorkspace,
+  listCreativeIntakes,
+  uploadKnowledgeDocument,
+  getKnowledgeDocument,
+  createManualBrandFilmIntake,
   ensureBrandFilmFixtureWorkspace,
   analyzeBrandFilmBrief,
   updateBrandFilmBrief,
@@ -5505,6 +5655,7 @@ export const api = {
   confirmCreativeDirection,
   createImageTextTaskFromDirection,
   createBrandVideoTaskFromDirection,
+  createBrandFilmTaskFromIntake,
   generateImageTextDraft,
   updateImageTextDraft,
   generateImageTextSlot,

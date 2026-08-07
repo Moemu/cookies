@@ -254,6 +254,80 @@ func compileAINativeVideoUnitPrompt(requirement AINativeRequirementDraft, shot A
 	}, "\n")
 }
 
+func productionVideoReuseKey(unit AINativeGenerationUnit) string {
+	assetID, assetVersion := "", int64(0)
+	if unit.ReferenceAsset != nil {
+		assetID, assetVersion = string(unit.ReferenceAsset.AssetID), unit.ReferenceAsset.Version
+	}
+	hash, _ := contract.CanonicalJSONHash(struct {
+		ShotIDs                 []string `json:"shot_ids"`
+		StartMS                 int      `json:"start_ms"`
+		EndMS                   int      `json:"end_ms"`
+		DurationSeconds         int      `json:"duration_seconds"`
+		PromptHash              string   `json:"prompt_hash"`
+		AspectRatio             string   `json:"aspect_ratio"`
+		Resolution              string   `json:"resolution"`
+		ReferenceAssetID        string   `json:"reference_asset_id"`
+		ReferenceAssetVersion   int64    `json:"reference_asset_version"`
+		ReferenceRole           string   `json:"reference_role"`
+		ProductIdentityRequired bool     `json:"product_identity_required"`
+	}{unit.ShotIDs, unit.StartMS, unit.EndMS, unit.DurationSeconds, unit.PromptHash, unit.AspectRatio, unit.Resolution, assetID, assetVersion, unit.ReferenceRole, unit.ProductIdentityRequired})
+	return hash
+}
+
+func productionSpeechReuseKey(unit AINativeSpeechUnit) string {
+	hash, _ := contract.CanonicalJSONHash(struct {
+		ShotID     string `json:"shot_id"`
+		StartMS    int    `json:"start_ms"`
+		EndMS      int    `json:"end_ms"`
+		Text       string `json:"text"`
+		Language   string `json:"language"`
+		VoiceAlias string `json:"voice_alias"`
+	}{unit.ShotID, unit.StartMS, unit.EndMS, unit.Text, unit.Language, unit.VoiceAlias})
+	return hash
+}
+
+// ReuseCompatibleProductionOutputs carries forward only immutable successful
+// unit outputs whose complete provider input is unchanged. Final renders are
+// intentionally excluded because the assembled timeline belongs to one plan.
+func ReuseCompatibleProductionOutputs(previous, next AINativeProductionPlan) AINativeProductionPlan {
+	video := make(map[string][]AINativeGenerationUnit)
+	for _, unit := range previous.Units {
+		if selectedAttemptSucceeded(unit.Attempts, unit.SelectedAttemptID) {
+			key := productionVideoReuseKey(unit)
+			video[key] = append(video[key], unit)
+		}
+	}
+	for index := range next.Units {
+		key := productionVideoReuseKey(next.Units[index])
+		if candidates := video[key]; len(candidates) > 0 {
+			previousUnit := candidates[0]
+			video[key] = candidates[1:]
+			next.Units[index].Attempts = append([]AINativeGenerationAttempt{}, previousUnit.Attempts...)
+			next.Units[index].SelectedAttemptID = previousUnit.SelectedAttemptID
+		}
+	}
+
+	speech := make(map[string][]AINativeSpeechUnit)
+	for _, unit := range previous.SpeechUnits {
+		if selectedAttemptSucceeded(unit.Attempts, unit.SelectedAttemptID) {
+			key := productionSpeechReuseKey(unit)
+			speech[key] = append(speech[key], unit)
+		}
+	}
+	for index := range next.SpeechUnits {
+		key := productionSpeechReuseKey(next.SpeechUnits[index])
+		if candidates := speech[key]; len(candidates) > 0 {
+			previousUnit := candidates[0]
+			speech[key] = candidates[1:]
+			next.SpeechUnits[index].Attempts = append([]AINativeGenerationAttempt{}, previousUnit.Attempts...)
+			next.SpeechUnits[index].SelectedAttemptID = previousUnit.SelectedAttemptID
+		}
+	}
+	next.Render = nil
+	return next
+}
+
 func (p AINativeProductionPlan) Progress(now time.Time) AINativeProductionProgress {
 	result := AINativeProductionProgress{Status: p.Status, TotalVideoUnits: len(p.Units), TotalSpeechUnits: len(p.SpeechUnits), AvailableActions: []string{"cancel_production"}}
 	for _, unit := range p.Units {

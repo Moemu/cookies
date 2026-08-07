@@ -555,9 +555,8 @@ func (r CreateVideoTaskRequest) Validate() error {
 		(r.Channel != ChannelXiaohongshu && r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if (strings.TrimSpace(r.DirectionID) == "" && (strings.TrimSpace(r.Concept) == "" || strings.TrimSpace(r.Prompt) == "")) ||
-		len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
-		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
+	if len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
+		return fmt.Errorf("video direction, concept, prompt, or call_to_action exceeds its maximum length")
 	}
 	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
 		return err

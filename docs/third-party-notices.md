@@ -8,6 +8,16 @@ Unless a file states otherwise, the cookies source code and documentation are di
 
 `third_party/orag` is a Git submodule pinned to a specific upstream revision. It is independently versioned and licensed under the [MIT License](../third_party/orag/LICENSE). Keep its license, copyright notice, and any upstream notices when redistributing it. Changes to ORAG itself should normally be contributed to its upstream repository; changes here should be limited to the integration or the pinned revision.
 
+## Included/adapted dependency: OpenCut Classic timeline
+
+- Project: [OpenCut Classic](https://github.com/OpenCut-app/opencut-classic)
+- Fixed source: `cf5e79e919144200294fb9fed22a222592a0aeea`
+- License: MIT
+- Copyright: 2025-2026 OpenCut
+- Local notice: [`third_party/opencut-timeline/NOTICE.md`](../third_party/opencut-timeline/NOTICE.md)
+
+The video-editing timeline command/history semantics are adapted from the fixed OpenCut Classic source snapshot. cookies does not embed the OpenCut application, project storage, database, or browser renderer.
+
 ## Concept images and project materials
 
 The concept images under `docs/assets/` were created for this project and are included as documentation assets. They describe a direction only, not a production product or a promise of functionality. If an asset is replaced with third-party material, the contributor must document its source, license, attribution requirements, and redistribution rights in the same pull request.
