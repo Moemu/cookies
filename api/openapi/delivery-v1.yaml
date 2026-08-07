@@ -1710,6 +1710,10 @@ components:
       type: string
       description: Deterministic fixture used only by the controlled monitoring evaluator.
       enum: [normal_day, anomaly_day, stale_data, insufficient_data]
+    InsightsQualityStatus:
+      type: string
+      description: Quality gate returned by the Delivery-owned insights consumer port.
+      enum: [usable, empty, stale, incomplete, schema_mismatch, unavailable]
     AlertType:
       type: string
       description: Monitoring classifications derived from the same persisted outcome SimulationRun.
@@ -1834,7 +1838,7 @@ components:
     AlertEvaluationResult:
       type: object
       additionalProperties: false
-      required: [items, created_count, reused_count, source, is_simulated, scenario, evaluated_at]
+      required: [items, created_count, reused_count, source, is_simulated, scenario, evaluated_at, insights_source, insights_quality, insights_fixture_version, insights_evidence_refs]
       properties:
         items:
           type: array
@@ -1845,6 +1849,13 @@ components:
         is_simulated: { type: boolean, const: true }
         scenario: { $ref: '#/components/schemas/MonitoringFixture' }
         evaluated_at: { type: string, format: date-time }
+        insights_source: { type: string, enum: [mock, replay, connector] }
+        insights_quality: { $ref: '#/components/schemas/InsightsQualityStatus' }
+        insights_quality_reason: { type: string }
+        insights_fixture_version: { type: string, minLength: 1 }
+        insights_evidence_refs:
+          type: array
+          items: { type: string, minLength: 1 }
     AlertList:
       type: object
       additionalProperties: false

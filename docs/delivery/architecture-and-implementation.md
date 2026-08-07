@@ -2,12 +2,12 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 历史 mock 闭环包含计划创建、草稿检查、两段审批、平台操作演练、指标/告警、建议和人工操作包；只读业务校准已根据投手评审修正真实业务流、对象拆分、全场景覆盖和一次最终确认目标 |
+| 状态 | 历史 mock 闭环包含计划创建、草稿检查、两段审批、平台操作演练、指标/告警、建议和人工操作包；只读业务校准已收口，Delivery 配置模型与行为编译进入下一阶段 |
 | 记录日期 | 2026-07-29 |
-| 实现快照日期 | 2026-08-05 |
+| 实现快照日期 | 2026-08-07 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
 
-本文记录智能投放系统的领域架构路线图，以及当前交付的 DeliveryPlan 生命周期、服务端权威检查、内容哈希绑定审批、持久化平台操作演练、上线后指标/告警和证据驱动建议与人工操作包。除“当前实现快照”和以下冻结契约明确列出的内容外，真实平台能力仍是后续设计草案，不属于当前实现的行为契约。
+本文记录智能投放系统的领域架构路线图，以及当前交付的 DeliveryPlan 生命周期、服务端权威检查、内容哈希绑定审批、持久化平台操作演练、上线后指标/告警和证据驱动建议与人工操作包。除“当前实现快照”和以下冻结契约明确列出的内容外，真实平台能力仍是后续设计草案，不属于当前实现的行为契约。只读校准收口、目标配置模型、Connector 阻塞边界和后续 PR 切片见[收口与配置契约](./read-only-calibration-closeout.md)。
 
 ### 只读业务校准覆盖说明
 
@@ -356,7 +356,7 @@ type PlatformAdapter interface {
 **做什么**：在平台操作演练成功后生成可重复的上线后指标窗口，再把同一证据链上的异常转成待办。
 
 - succeeded Execution 自动创建两个 Project-scoped、同 execution_id 的指标窗口；`delivery_alerts` 的 fingerprint 是规则版本、受监控实体、窗口、dataset 版本和精确证据引用的稳定组合身份，同一身份评估时复用已有告警而不是重复创建
-- `POST /api/delivery/v1/projects/{project_id}/alerts:evaluate`：只读取已持久化指标，不再制造独立快照；返回 items、created/reused count、scenario、评估时间及 `source=post_launch_simulator` / `is_simulated=true`
+- `POST /api/delivery/v1/projects/{project_id}/alerts:evaluate`：先通过 Delivery-owned `InsightsConsumer` 读取版本化对象/指标事实，再由统一告警规则计算；当前 `SimulationInsightsReader` 只负责把 OutcomeSimulation 窗口归一化为同一 `DeliveryMetricFact` 输入。仅 `quality=usable` 允许确定性告警；响应同时返回 `insights_source`、`insights_quality`、fixture 版本和 evidence，保留 `source=post_launch_simulator` / `is_simulated=true` 的历史兼容字段
 - `GET /api/delivery/v1/projects/{project_id}/alerts`：支持 `status`、`type`、`severity`、`fixture`、`limit` 与 opaque `cursor`；响应包含 `next_cursor`
 - `PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}`：请求为 `{action: acknowledge|dismiss, expected_version}`；仅允许 `open → acknowledged|dismissed`，过期版本返回 `409 VERSION_CONFLICT`
 - 四类告警：`review_rejected`（审核拒绝）、`spend_spike`（消耗突增）、`zero_conversion`（零转化）、`cost_worsening`（成本恶化）
@@ -423,8 +423,9 @@ type PlatformAdapter interface {
 
 | 阶段 | 目标 | 启动前提 |
 | --- | --- | --- |
-| 只读校准与 Connector 依赖对齐 | 在专用竞价投放账户（受 Git 管理文档仅记录尾号 `6391`）下，以已登录 Computer Use 会话只读校准所有可访问项目、PlatformProject/PlatformPromotion、动态表单和页面语义；真实报表采集、标准化和发布由数据洞察 Connector Owner 负责 | **已完成**；[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结，[投放消费需求](./insights-connector-consumer-requirements.md)已记录并等待 Connector Owner 发布可消费输出 |
-| 行为流程编译与影子分析 | 将获批内部配置与已校准平台 schema 编译为 UI 行为、确认点、识别条件和恢复分支；仅消费数据洞察发布的真实只读指标运行影子告警/建议 | 平台对象与字段校准；Connector 指标口径/新鲜度、对象映射与消费契约可用；投手反馈 |
+| 只读校准与 Connector 依赖对齐 | 在专用竞价投放账户（受 Git 管理文档仅记录尾号 `6391`）下，以已登录 Computer Use 会话只读校准所有可访问项目、PlatformProject/PlatformPromotion、动态表单和页面语义；真实报表采集、标准化和发布由数据洞察 Connector Owner 负责 | **已完成**；[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结；Delivery consumer port、mock/replay 已随 PR #38 进入 `upstream/main`；Connector 正式输出仍是外部依赖 |
+| Delivery 配置模型与行为流程编译 | 将获批内部配置与已校准平台 schema 编译为 `PlatformProjectDraft`、`PlatformPromotionDraft[]`、选择器、确认点、识别条件和恢复分支 | 只读 Schema、ThreeTier 兼容映射和本地 mock/replay；不需要 Connector 或平台写入 |
+| 影子分析 | 仅消费数据洞察发布的真实只读指标运行影子告警/建议 | Connector 指标口径/新鲜度、对象映射、正式消费契约、样例和 Consumer Contract 测试可用；当前 **No-Go** |
 | 受控写入 | 在测试项目内通过 Computer Use 填写草稿、读取回填值、人工确认提交并核验结果 | 明确写入范围、小额硬上限、人工负责人、Kill Switch、审批重验和防重演练 |
 | 生产化 | 限流、事件重放、可靠性指标、凭据轮换、第二平台适配器 | 真实闭环证明瓶颈后启动 |
 
@@ -438,8 +439,8 @@ type PlatformAdapter interface {
 | 页面与对象走查 | 一个目标路径的页面状态、对象清单、审核状态与允许导出位置的连续证据 | 已登录受控会话；验证码、登录失效与未知页面由管理员接管 | **已完成**；脱敏证据见[巨量只读校准摘要](./oceanengine-readonly-calibration.md)，所有未观察字段明确标记，不以经验补齐 |
 | 业务 schema 校准 | 版本化字段/依赖/枚举/默认值/错误状态与内部配置区段映射说明 | 真实投手只读评审 | **已完成**；[业务 Schema 校准](./oceanengine-schema-calibration.md)与[只读 Schema v0.1](./schemas/oceanengine-bidding-schema-v0.1.json)已冻结；未知项保留 `platform_pending` 或 `blocked_by_event_asset`，真实写入保留 `write_validation_pending` |
 | Connector 消费需求 | 对象 ID、指标、窗口、口径、延迟、质量和 evidence 的版本化需求与验收样例 | 数据洞察 Owner 确认或发布契约 | Delivery 不修改洞察模块、不直连其数据库、不自建采集器 |
-| 消费端口与 mock/replay | Delivery 内部只读消费端口；Mock 作为明确回退，未来 Connector 为另一实现 | Connector 样例/接口；Connector 可异步开发 | 每个告警/建议输入显示来源、质量、窗口、口径与证据；不合格数据不产生确定性结论 |
-| 只读评审与结论 | 投手差异清单、回归样例、行为流程编译与影子分析的进入或阻塞报告 | 投手评审与 Connector 可用性说明 | 首个真实路径已校准，剩余差异可追踪，未把 mock 当真实验收 |
+| 消费端口与 mock/replay | Delivery 内部 `InsightsConsumer`；Mock、Simulation bridge 和 Replay 已实现，未来 Connector 为另一实现 | Connector 样例/接口；Connector 可异步开发 | 每个告警/建议输入显示来源、质量、窗口、口径与证据；不合格数据不产生确定性结论 |
+| 只读评审与结论 | 投手差异清单、回归样例、行为流程编译与影子分析的进入或阻塞报告 | 投手评审与 Connector 可用性说明 | 首个电商手动路径已校准，剩余差异可追踪；真实影子分析等待 Connector，不阻塞模型编译 |
 
 执行顺序为“范围与证据协议 → 页面与对象走查 → 业务 Schema 校准 → Connector 消费需求 → 消费端口与 mock/replay → 只读评审与结论”。Connector 消费需求和消费端口可以与数据洞察 Owner 的真实采集实现并行，但真实指标的影子告警/建议只在 Connector 发布正式输出、且质量状态满足要求后开始。
 

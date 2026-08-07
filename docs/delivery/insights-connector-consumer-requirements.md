@@ -2,10 +2,10 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | Delivery 消费需求草案已完成；等待 Connector 所在目录的所有者发布正式接口/事件契约，不等待其确认 Delivery 页面 Schema 或对象拆分 |
-| 日期 | 2026-08-06 |
+| 状态 | 消费需求已发布；Delivery consumer port、mock/replay 已合并到 `upstream/main`；等待 Connector Owner 发布正式接口/事件契约 |
+| 日期 | 2026-08-07 |
 | 文档 Owner | 智能投放模块（仅维护消费需求，不定义或实现 Connector） |
-| 关联 | [广告数据 Connector](../10-ad-data-connectors.md)、[智能投放架构](./architecture-and-implementation.md)、[脱敏走查证据](./oceanengine-readonly-calibration.md) |
+| 关联 | [广告数据 Connector](../10-ad-data-connectors.md)、[智能投放架构](./architecture-and-implementation.md)、[脱敏走查证据](./oceanengine-readonly-calibration.md)、[收口与配置契约](./read-only-calibration-closeout.md) |
 
 ## 1. 边界与决策
 
@@ -19,13 +19,17 @@ Computer Use 的环境、登录会话、接管和截图治理由共享平台运�
 
 Connector 尚未具备巨量真实 API 或 Computer Use 读取实现时，智能投放继续使用确定性 mock fixture。所有投放侧指标、告警、建议、快照和页面必须显式标记 `source=mock`、`is_simulated=true` 与 fixture/dataset 版本；不得把它们描述为真实投放数据。
 
-投放可以预先适配一个只读的 `DeliveryMetricsReader` 消费端口：
+Delivery 已适配一个只读的 `InsightsConsumer` 消费端口（旧规划中的 `DeliveryMetricsReader` 需求名不再作为实现名）：
 
-- `MockDeliveryMetricsReader`：当前唯一可用实现，读取确定性 fixture；
-- `InsightsConnectorReader`：仅在数据洞察 Owner 发布稳定接口、样例与消费者契约测试后接入；
-- 运行时按每个请求/快照的 `source` 选择，不设全局“真/假”开关，也不静默以 mock 覆盖数据质量故障。
+- `MockInsightsReader`：读取确定性 fixture，覆盖 usable、empty、stale、incomplete、schema mismatch、unavailable；
+- `ReplayInsightsReader`：按 Organization + Project 校验范围并回放不可变快照；
+- `SimulationInsightsReader`：把同一 Execution/SimulationRun 的指标窗口归一化为消费端口事实；
+- `InsightsConnectorReader`：尚未实现，仅在数据洞察 Owner 发布稳定接口、样例与消费者契约测试后接入；
+- 当前运行时不是请求级 source 路由：`Service.Insights` 是启动时注入的单一 `InsightsConsumer`。主程序当前固定注入 `SimulationInsightsReader`；若未注入 Consumer 且存在 Repository，Service fallback 到 Simulation；只有没有 Repository 时才 fallback 到 `MockInsightsReader`。`ReplayInsightsReader` 主要通过显式构造/测试使用。`InsightsQuery` 当前没有 `source` 字段，快照/指标的 `source` 是输出事实元数据；请求级 source 路由列为后续能力，不设全局“真/假”开关，也不静默以 mock 覆盖数据质量故障。
 
-该端口是投放模块内部的消费适配层，不是对洞察表、仓储或凭据的直接访问。
+该端口是投放模块内部的消费适配层，不是对洞察表、仓储或凭据的直接访问。PR #38（`25fc8cf`，合并提交 `f3ee8a9`）已进入 `upstream/main`，其 `verify`、`migrations`、`Repository quality`、`Secret scan` 均通过。
+
+当前状态因此明确为：Delivery 端口、Simulation bridge、mock/replay reader 已完成；主程序默认走 Simulation bridge；Connector 端实现、真实数据读取和影子分析尚未开始。没有 Connector 时使用 Simulation/mock 是启动装配结果，不是请求级 source 选择或静默降级。
 
 ## 3. 交付给数据洞察 Owner 的最小需求
 
@@ -86,6 +90,12 @@ Connector 发布的每个事实至少可按以下条件过滤或识别：
 | 只读业务校准 | 在已允许的专用竞价投放账户所有可访问项目中验证只读采集路径、数据质量和可发布对象/指标；处理登录或验证码时请求管理员接管 | 只读校准广告组/计划/创意页面语义、字段依赖、动态表单与对象映射需求；持续使用 mock 监控 |
 | 行为流程编译与影子分析 | 发布可供消费的指标快照/API/事件及样例 | 接入消费端口，在数据质量合格时运行影子告警/建议；把异常结论绑定到 Connector evidence |
 | 受控写入 | 保持只读数据回读、对账和新鲜度服务 | 经审批的 Computer Use 受控写入、回填核验和执行证据；不承担指标采集 |
+
+### 4.1 当前 Go/No-Go
+
+- **Go**：Delivery 配置模型、ThreeTier 兼容映射、行为流程编译器以及 mock/replay 回归；这些工作不修改 Connector，也不需要真实指标。
+- **No-Go**：真实 Connector 数据影子告警/建议，直到正式对象/指标/质量契约、样例和 Consumer Contract 测试可消费。
+- **No-Go**：任何巨量平台创建、开启、暂停或优化写入；本轮只冻结只读契约和后续 PR 切片。
 
 ## 5. 与当前洞察实现的已知差距
 

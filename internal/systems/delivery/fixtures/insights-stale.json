@@ -1,0 +1,12 @@
+{
+  "fixture_version": "delivery-insights/v1/stale",
+  "schema_version": "delivery-insights/v1",
+  "source": "mock",
+  "quality": "stale",
+  "quality_reason": "data_through is older than the consumer freshness budget",
+  "observed_at": "2026-08-04T00:05:00Z",
+  "data_through": "2026-07-30T00:00:00Z",
+  "objects": [],
+  "metrics": [],
+  "evidence_refs": ["fixture://delivery-insights/stale"]
+}

@@ -1,0 +1,12 @@
+{
+  "fixture_version": "delivery-insights/v1/incomplete",
+  "schema_version": "delivery-insights/v1",
+  "source": "mock",
+  "quality": "incomplete",
+  "quality_reason": "the snapshot is missing one or more required base metrics",
+  "observed_at": "2026-08-02T00:05:00Z",
+  "data_through": "2026-08-02T00:00:00Z",
+  "objects": [],
+  "metrics": [],
+  "evidence_refs": ["fixture://delivery-insights/incomplete"]
+}

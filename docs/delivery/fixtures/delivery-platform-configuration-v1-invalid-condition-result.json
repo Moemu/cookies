@@ -1,0 +1,7 @@
+{
+  "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "expected_error": "must have required property 'blocked_reason'",
+  "mutations": [
+    { "path": "compilation_metadata.conditions.0.result", "value": false }
+  ]
+}
