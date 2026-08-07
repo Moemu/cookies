@@ -308,6 +308,17 @@ paths:
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version, invalidate_downstream], properties: {expected_workspace_version: {type: integer, minimum: 1}, invalidate_downstream: {const: true}}}}}}
       responses: {'200': {description: Storyboard reopened as a new draft revision.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard/voiceover:fit:
+    post:
+      operationId: suggestAINativeAdVoiceoverFit
+      summary: Generate a shorter voiceover suggestion for one failed speech Unit without mutating the storyboard.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version, speech_unit_id], properties: {expected_workspace_version: {type: integer, minimum: 1}, speech_unit_id: {type: string, minLength: 1}}}}}}
+      responses:
+        '200':
+          description: A duration-safe voiceover suggestion for explicit user review.
+          content: {application/json: {schema: {type: object, additionalProperties: false, required: [shot_id, original_voiceover, suggested_voiceover, duration_ms, max_characters, prompt_version, model_alias, model_version], properties: {shot_id: {type: string}, original_voiceover: {type: string}, suggested_voiceover: {type: string}, duration_ms: {type: integer}, max_characters: {type: integer}, prompt_version: {type: string}, model_alias: {type: string}, model_version: {type: string}, route_revision_id: {type: string}}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/production:start:
     post:
       operationId: startAINativeAdProduction

@@ -62,7 +62,7 @@ test('Delivery execution scenarios persist steps, enforce idempotency, and prese
     await route.fulfill({ response, json: body })
   })
   await page.goto(`/projects/${projectId}/delivery/approvals`)
-  const executionPanel = page.getByRole('region', { name: '模拟执行记录' })
+  const executionPanel = page.getByRole('region', { name: '平台操作演练记录' })
   await expect(executionPanel).toBeVisible()
   await expect(executionPanel.getByText(executionIdSuffix, { exact: true }).first()).toBeVisible()
   await expect(executionPanel.locator('.execution-detail-heading h4')).toHaveText('succeeded')
@@ -135,8 +135,9 @@ async function approvedChangeSet(request: APIRequestContext, suffix: string): Pr
       budget: { total_minor: 300000, currency: 'CNY' },
       schedule: { start_at: '2026-08-01T00:00:00Z', end_at: '2026-08-31T00:00:00Z', timezone: 'Asia/Shanghai' },
       tracking: { landing_page: 'https://demo.cookies.local', pixel_id: `PX-${suffix}`, conversion_event: 'lead_submit' },
-      creative_references: [{ asset_id: `asset-${suffix}`, version: 1, confirmed: true }],
-      source_strategy_version: 'strategy-v1',
+      creative_references: [{ asset_id: 'asset_demo_investor_creative_video', version: 1, confirmed: true }],
+      strategy_reference: { task_id: 'task_demo_precision_strategy', version: 1 },
+      source_strategy_version: 'task_demo_precision_strategy@v1',
     },
   })
   expect(planResponse.status()).toBe(201)

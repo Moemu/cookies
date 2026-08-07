@@ -121,6 +121,20 @@ func (s *productionSpeechStub) Synthesize(_ context.Context, input provider.Spee
 	return provider.SpeechSynthesisResult{Audio: []byte("mp3-audio"), Codec: "mp3", SampleRate: 24000, DurationMS: 500, OriginalText: input.Text, NormalizedText: input.Text, ProviderRequestID: "speech-request"}, nil
 }
 
+type durationFittingSpeechStub struct {
+	calls []provider.SpeechSynthesisInput
+}
+
+func (s *durationFittingSpeechStub) Synthesize(_ context.Context, input provider.SpeechSynthesisInput) (provider.SpeechSynthesisResult, error) {
+	s.calls = append(s.calls, input)
+	duration := 5000
+	if input.SpeakingRate > 1 {
+		duration = 4000
+	}
+	return provider.SpeechSynthesisResult{Audio: []byte("mp3-audio"), Codec: "mp3", SampleRate: 24000, DurationMS: duration,
+		OriginalText: input.Text, NormalizedText: input.Text, ProviderRequestID: "speech-request"}, nil
+}
+
 type productionAudioWriterStub struct{ calls int }
 
 func (s *productionAudioWriterStub) IngestDerivedAudio(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, derivationID string, content io.Reader, _ int64, _ string, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
@@ -181,6 +195,11 @@ func TestCompileAINativeProductionPlanMapsConfirmedStoryboardToProviderUnits(t *
 	}
 	if len(plan.SpeechUnits) != 3 || plan.TotalDurationMS != 20000 {
 		t.Fatalf("unexpected production plan totals: %#v", plan)
+	}
+	for _, speech := range plan.SpeechUnits {
+		if speech.VoiceAlias != "cookies.voice.douyin.default" {
+			t.Fatalf("speech unit %s exposed non-portable provider voice %q", speech.ID, speech.VoiceAlias)
+		}
 	}
 }
 
@@ -299,6 +318,41 @@ func TestAINativeProductionJobResumesWithoutRepeatingSucceededSpeechOrVideoSubmi
 	}
 	if retried.ProductionStatus != AINativeProductionRenderingStatus || retried.ProductionPlan.Render.ProgressPercent != 0 {
 		t.Fatalf("final render retry did not preserve successful units: %#v", retried)
+	}
+}
+
+func TestAINativeProductionJobAutomaticallyFitsSlightlyLongSpeechToItsShot(t *testing.T) {
+	requirement, script := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	revision := int64(1)
+	repository := &memoryAINativeProductionRepository{workspace: AINativeRequirementWorkspace{WorkspaceID: "workspace-1", CreativeIntakeID: "intake-1", CreativeTaskID: "task-1", OrganizationID: "org-1", ProjectID: "project_1",
+		Status: AINativeRequirementConfirmedStatus, CurrentStage: AINativeStageStoryboard, WorkspaceVersion: 7, CurrentRevision: 1, ConfirmedRevision: &revision, Requirement: requirement,
+		ScriptStatus: AINativeScriptConfirmedStatus, CurrentScriptRevision: &revision, ConfirmedScriptRevision: &revision, Script: &script,
+		StoryboardStatus: AINativeStoryboardConfirmedStatus, CurrentStoryboardRevision: &revision, ConfirmedStoryboardRevision: &revision, Storyboard: &storyboard,
+		CreatedBy: "user-1", ConfirmedBy: "user-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+	scheduler, videos := &productionSchedulerStub{}, &productionVideoJobsStub{}
+	speech, audio := &durationFittingSpeechStub{}, &productionAudioWriterStub{}
+	sequence := 0
+	service := Service{Projects: testProjects{}, AINativeProductions: repository, AINativeProductionScheduler: scheduler, AINativeVideoJobs: videos,
+		AINativeSpeech: speech, AudioAssets: audio,
+		NewID: func(prefix string) (string, error) { sequence++; return prefix + "-" + string(rune('a'+sequence)), nil }, Now: func() time.Time { return time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC) }}
+	actor := contract.ActorContext{OrganizationID: "org-1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user-1"}, Scopes: []contract.Scope{ScopeWrite, provider.ScopeJobCreate, "assets.write"}}
+	if _, err := service.StartAINativeProduction(context.Background(), actor, "project_1", "workspace-1", StartAINativeProductionRequest{ExpectedWorkspaceVersion: 7}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(AINativeProductionJobPayload{Operation: scheduler.operation})
+	claim := jobruntime.Claim{Job: contract.Job{Kind: AINativeProductionJobKind, OrganizationID: "org-1", ProjectID: "project_1"}, Payload: payload}
+	_, err := service.HandleAINativeProductionJob(context.Background(), claim)
+	var deferred jobruntime.DeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("first pass error = %T %v, want DeferredError while video jobs run", err, err)
+	}
+	if len(speech.calls) != 4 || speech.calls[0].SpeakingRate != 1 || speech.calls[1].SpeakingRate <= 1 {
+		t.Fatalf("speech fitting calls = %#v, want one normal-rate call followed by one faster retry", speech.calls)
+	}
+	first := repository.workspace.ProductionPlan.SpeechUnits[0]
+	if first.SelectedAttemptID == "" || first.Attempts[0].Status != AINativeAttemptSucceededStatus || first.DurationMS != 4000 {
+		t.Fatalf("slightly long speech was not fitted and retained as a successful unit: %#v", first)
 	}
 }
 

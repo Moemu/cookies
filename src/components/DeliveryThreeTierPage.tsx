@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CircleAlert, FilePlus, RefreshCw, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { ArrowRight, Check, CircleAlert, FilePlus, RefreshCw, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import {
   DeliveryApiError,
   deliveryConfigurationApi,
@@ -8,13 +8,12 @@ import {
   type DeliveryControlChangeSet,
   type DeliveryFieldValue,
   type DeliveryPlan,
-  type DeliveryPlanDraft,
-  type DeliveryRecommendation,
   type DeliveryThreeTierField,
   type ManualActionPackage,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
-import type { DataState, ProjectRecord } from '../types'
+import { projectPath } from '../lib/router'
+import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
 
 type TierObjectType = 'group' | 'plan' | 'creative'
@@ -73,33 +72,10 @@ function fieldLabel(key: string) {
   } as Record<string, string>)[key] ?? key
 }
 
-function recommendationLabel(value: string) {
-  return ({
-    reduce_mock_budget: '降低模拟计划预算',
-    'reduces only the mock budget by 10%': '仅将模拟计划预算下调 10%，不扩大花费。',
-    mock_budget_reduction_only: '仅限模拟预算下调',
-    'observe mock conversion cost for 24 hours after manual application': '人工应用后观察 24 小时模拟转化成本。',
-  } as Record<string, string>)[value] ?? value
-}
-
 function readOverrideValue(raw: string, exemplar: DeliveryFieldValue | undefined): DeliveryFieldValue {
   if (typeof exemplar === 'number') return Number(raw)
   if (typeof exemplar === 'boolean') return raw === 'true'
   return raw
-}
-
-function threeTierDraft(project: ProjectRecord): DeliveryPlanDraft {
-  const projectCode = project.code || 'LOCAL'
-  return {
-    name: `${project.brand || 'Cookies'} 三层投放配置`,
-    objective: project.goal || '获取高质量销售线索',
-    advertiser: { id: 'mock-advertiser-001', name: 'Cookies 模拟广告主', platform: 'ocean_engine' },
-    budget: { totalMinor: Math.max(project.budget || 3000, 0) * 100, currency: 'CNY' },
-    schedule: { startAt: '2026-08-01T00:00:00.000Z', endAt: '2026-08-31T00:00:00.000Z', timezone: project.timezone || 'Asia/Shanghai' },
-    tracking: { landingPage: `https://demo.cookies.local/lead/${projectCode.toLowerCase()}`, pixelId: `PX-${projectCode}-LEAD`, conversionEvent: 'lead_submit' },
-    creativeReferences: [{ assetId: project.artifacts.creative.id || `asset-${projectCode.toLowerCase()}-mock`, version: 1, confirmed: true }],
-    sourceStrategyVersion: project.artifacts.strategy.version || 'strategy-v1',
-  }
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -161,7 +137,7 @@ function OverrideDialog({
   >
     <section className="delivery-config-override" role="dialog" aria-modal="true" aria-label={`人工覆盖：${target.field.label}`}>
       <header>
-        <div><span>人工覆盖</span><h3>{target.field.label}</h3><p>只会生成新的模拟计划版本；不会向平台写入。</p></div>
+        <div><span>人工覆盖</span><h3>{target.field.label}</h3><p>保存后生成新的不可变计划版本。</p></div>
         <button type="button" onClick={onClose} disabled={busy}>关闭</button>
       </header>
       <form onSubmit={event => { event.preventDefault(); onSave() }}>
@@ -178,7 +154,7 @@ function ManualPackageDetails({ value }: { value: ManualActionPackage }) {
     <header className="delivery-config-package-heading">
       <div>
         <b>操作包已就绪</b>
-        <span title={`source=${value.source} · scenario=${value.scenario}`}>生成于 {formatTime(value.generatedAt)} · 模拟环境 · 人工执行包</span>
+        <span title={`source=${value.source} · scenario=${value.scenario} · hash=${value.optimizedPlanHash}`}>生成于 {formatTime(value.generatedAt)} · 已物化优化计划 V{value.optimizedPlanVersion}</span>
       </div>
       <strong>仅供人工执行</strong>
     </header>
@@ -214,8 +190,8 @@ function TierObject({
       {object.fields.map(field => <article key={field.key} className="delivery-config-field">
         <div><b>{field.label}</b><span>当前采用：{fieldValueText(field.key, field.effectiveValue)}</span></div>
         <div className="delivery-config-field-state">
-          <span className={field.platformRequired ? 'delivery-config-required' : ''}>{field.platformRequired ? '需在平台填写' : '模拟配置'}</span>
-          <span>{field.mockRequired ? '模拟必填' : '模拟可选'}</span>
+          <span className={field.platformRequired ? 'delivery-config-required' : ''}>{field.platformRequired ? '需在平台填写' : '内部配置'}</span>
+          <span>{field.mockRequired ? '当前必填' : '当前可选'}</span>
           <span className={field.confirmation?.required ? 'delivery-config-required' : ''}>{field.confirmation?.required ? '待人工确认' : '已确认'}</span>
           <span>{field.editable ? '可人工覆盖' : '已锁定'}</span>
           {field.editable && location ? <button onClick={() => onOverride({ ...location, field })}><SlidersHorizontal size={14}/>人工覆盖</button> : null}
@@ -235,11 +211,10 @@ function TierObject({
   </section>
 }
 
-export function DeliveryThreeTierPage({ state, activeView }: { state: DataState; activeView: string }) {
+export function DeliveryThreeTierPage({ state, activeView, tourRunId, tourCase }: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
   const { currentProject } = useProject()
   const projectId = currentProject.id
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
-  const [recommendations, setRecommendations] = useState<DeliveryRecommendation[]>([])
   const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('plan_id') ?? '')
   const [changeSet, setChangeSet] = useState<DeliveryControlChangeSet>()
   const [manualPackage, setManualPackage] = useState<ManualActionPackage>()
@@ -249,19 +224,27 @@ export function DeliveryThreeTierPage({ state, activeView }: { state: DataState;
   const [preflightMessage, setPreflightMessage] = useState('尚未运行计划预检。')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const refreshGenerationRef = useRef(0)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
   const configuration = selectedPlan?.currentVersion.threeTierConfiguration
-  const showConfiguration = activeView === '模拟配置'
-  const showPreflight = activeView === '预检与审批'
-  const showRecommendations = activeView === '建议与人工操作包'
-  const selectedRecommendations = useMemo(() => recommendations.filter(item => item.planId === selectedId), [recommendations, selectedId])
+  const showConfiguration = activeView === '配置映射'
+  const showPreflight = activeView === '检查与提交'
+  const showManualPackage = activeView === '人工操作包'
+  const approvalURL = changeSet ? projectPath(projectId, 'delivery', 'approvals', changeSet.id, '待我审批', undefined, tourRunId, tourCase) : undefined
+  const planEditorBaseURL = projectPath(projectId, 'delivery', 'plans', undefined, '计划列表', undefined, tourRunId, tourCase)
+  const selectedPlanEditorURL = selectedPlan
+    ? `${planEditorBaseURL}${planEditorBaseURL.includes('?') ? '&' : '?'}plan_id=${encodeURIComponent(selectedPlan.id)}`
+    : planEditorBaseURL
+  const canSubmitChangeSet = !changeSet || changeSet.status === 'draft' || changeSet.status === 'preflight_failed' || changeSet.status === 'rejected'
 
   const restoreWorkflow = async (planId: string) => {
     if (!planId) return
     try {
       const changeSets = await deliveryPlanApi.listChangeSets(projectId)
-      const restored = changeSets.find(item => item.planId === planId)
+      const requestedChangeSetId = new URLSearchParams(window.location.search).get('change_set_id')
+      const restored = changeSets.find(item => item.planId === planId && item.id === requestedChangeSetId)
+        ?? changeSets.filter(item => item.planId === planId).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
       setChangeSet(restored)
       setManualPackage(undefined)
       if (restored?.status === 'approved') {
@@ -272,26 +255,25 @@ export function DeliveryThreeTierPage({ state, activeView }: { state: DataState;
         }
       }
     } catch (error) {
-      setNotice(errorMessage(error, '恢复当前计划的 ChangeSet 与人工操作包失败。'))
+      setNotice(errorMessage(error, '恢复当前计划的变更申请与人工操作包失败。'))
     }
   }
 
   const refresh = async () => {
     if (!projectId) return
+    const generation = ++refreshGenerationRef.current
     setBusy(true)
     try {
-      const [nextPlans, nextRecommendations] = await Promise.all([
-        deliveryPlanApi.list(projectId),
-        deliveryConfigurationApi.listRecommendations(projectId),
-      ])
+      const nextPlans = await deliveryPlanApi.list(projectId)
+      if (generation !== refreshGenerationRef.current) return
       setPlans(nextPlans)
-      setRecommendations(nextRecommendations)
       setSelectedId(current => nextPlans.some(plan => plan.id === current) ? current : nextPlans[0]?.id ?? '')
-      setNotice(nextPlans.length ? '已刷新当前 Project 的模拟配置与建议。' : '当前 Project 暂无投放计划，可创建模拟配置。')
+      setNotice(nextPlans.length ? '已刷新当前 Project 的内部配置。' : '当前 Project 暂无投放计划，可创建计划。')
     } catch (error) {
+      if (generation !== refreshGenerationRef.current) return
       setNotice(errorMessage(error, '读取三层配置失败。'))
     } finally {
-      setBusy(false)
+      if (generation === refreshGenerationRef.current) setBusy(false)
     }
   }
 
@@ -311,24 +293,14 @@ export function DeliveryThreeTierPage({ state, activeView }: { state: DataState;
     setSelectedId(next.id)
   }
 
-  const createPlan = async () => {
-    setBusy(true)
-    try {
-      const created = await deliveryPlanApi.create(projectId, threeTierDraft(currentProject))
-      updatePlan(created)
-      setNotice('已创建模拟投放计划；下一步请由服务端编译三层配置。')
-    } catch (error) {
-      setNotice(errorMessage(error, '创建模拟计划失败。'))
-    } finally { setBusy(false) }
-  }
-
   const compile = async () => {
     if (!selectedPlan) return
+    refreshGenerationRef.current += 1
     setBusy(true)
     try {
       const compiled = await deliveryConfigurationApi.compile(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, 'golden_path')
       updatePlan(compiled)
-      setNotice('三层配置已由服务端编译为新不可变版本；仅含模拟数据，不会写入广告平台。')
+      setNotice('三层配置已由服务端编译为新的不可变版本。')
     } catch (error) {
       setNotice(errorMessage(error, '编译三层配置失败。'))
     } finally { setBusy(false) }
@@ -359,7 +331,7 @@ export function DeliveryThreeTierPage({ state, activeView }: { state: DataState;
       })
       updatePlan(overridden)
       setTarget(undefined)
-      setNotice('人工覆盖已生成新的模拟计划版本，尚未向平台写入任何内容。')
+      setNotice('人工覆盖已生成新的不可变计划版本。')
     } catch (error) {
       setNotice(errorMessage(error, '保存人工覆盖失败。'))
     } finally { setBusy(false) }
@@ -384,48 +356,9 @@ export function DeliveryThreeTierPage({ state, activeView }: { state: DataState;
       const checked = await deliveryPlanApi.preflightChangeSet(projectId, draft.id, draft.version)
       setChangeSet(checked)
       setNotice(checked.status === 'preflight_passed'
-        ? 'ChangeSet 预检通过，仍需人工审批；不会执行平台写入。'
-        : 'ChangeSet 预检未通过，请查看服务端门禁。')
-    } catch (error) { setNotice(errorMessage(error, '创建或预检 ChangeSet 失败。')) } finally { setBusy(false) }
-  }
-
-  const approveChangeSet = async () => {
-    if (!changeSet) return
-    setBusy(true)
-    try {
-      const approved = await deliveryPlanApi.approveChangeSet(projectId, changeSet.id, changeSet.version)
-      setChangeSet(approved)
-      setNotice('ChangeSet 已获人工审批。接下来只能编译人工操作包，页面不会发起平台写入。')
-    } catch (error) { setNotice(errorMessage(error, '审批 ChangeSet 失败。')) } finally { setBusy(false) }
-  }
-
-  const generateRecommendations = async () => {
-    if (!selectedPlan) return
-    setBusy(true)
-    try {
-      const generated = await deliveryConfigurationApi.generateRecommendations(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
-      setRecommendations(current => [...current.filter(item => item.id !== generated.id), generated])
-      setNotice('已生成 1 条建议；生成只记录建议，不会执行。')
-    } catch (error) { setNotice(errorMessage(error, '生成建议失败。')) } finally { setBusy(false) }
-  }
-
-  const acceptRecommendation = async (recommendation: DeliveryRecommendation) => {
-    setBusy(true)
-    try {
-      const accepted = await deliveryConfigurationApi.acceptRecommendation(projectId, recommendation.id, recommendation.version, `three-tier-${recommendation.id}-${recommendation.version}`)
-      setRecommendations(current => current.map(item => item.id === accepted.recommendation.id ? accepted.recommendation : item))
-      setChangeSet(accepted.changeSet)
-      setNotice('建议已采纳为一个新的草稿 ChangeSet；它尚未预检、审批或执行。')
-    } catch (error) { setNotice(errorMessage(error, '采纳建议失败。')) } finally { setBusy(false) }
-  }
-
-  const rejectRecommendation = async (recommendation: DeliveryRecommendation) => {
-    setBusy(true)
-    try {
-      const rejected = await deliveryConfigurationApi.rejectRecommendation(projectId, recommendation.id, recommendation.version)
-      setRecommendations(current => current.map(item => item.id === rejected.id ? rejected : item))
-      setNotice('建议已拒绝，未创建任何 ChangeSet。')
-    } catch (error) { setNotice(errorMessage(error, '拒绝建议失败。')) } finally { setBusy(false) }
+        ? '变更申请已提交审批中心，等待批准或打回。'
+        : '变更申请未通过最终检查，请查看服务端门禁。')
+    } catch (error) { setNotice(errorMessage(error, '提交变更申请失败。')) } finally { setBusy(false) }
   }
 
   const compileManualPackage = async () => {
@@ -438,55 +371,52 @@ export function DeliveryThreeTierPage({ state, activeView }: { state: DataState;
     } catch (error) { setNotice(errorMessage(error, '编译人工操作包失败。')) } finally { setBusy(false) }
   }
 
-  return <StateBoundary state={state} contextLabel="智能投放 / 三级配置编排" errorDetail="当前 Project 的三层投放配置无法读取，请确认 Delivery 服务可用后刷新。">
+  return <StateBoundary state={state} contextLabel="智能投放 / 内部配置编排" errorDetail="当前 Project 的内部投放配置无法读取，请确认 Delivery 服务可用后刷新。">
     <div className="delivery-config-workspace">
       <header className="delivery-config-heading">
-        <div><span className="section-label">模拟投放编排</span><h2>广告组 → 广告计划 → 广告创意</h2><p>所有结果都留在模拟环境、计划版本、ChangeSet 或人工操作包中；本页从不写入广告平台。</p></div>
-        <div className="delivery-config-source"><b>模拟环境</b><span>source=mock · scenario=golden_path</span><button onClick={() => void refresh()} disabled={busy}><RefreshCw size={14}/>刷新当前 Project</button></div>
+        <div><span className="section-label">投放配置</span><h2>广告组、广告计划与广告创意配置</h2><p>三个对象并列配置；通常按广告组、广告计划、广告创意的顺序填写。</p></div>
+        <div className="delivery-config-source"><button onClick={() => void refresh()} disabled={busy}><RefreshCw size={14}/>刷新当前 Project</button></div>
       </header>
 
       <section className="delivery-config-toolbar">
         <label>投放计划<select value={selectedId} onChange={event => setSelectedId(event.target.value)}>{plans.map(plan => <option value={plan.id} key={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label>
         {showConfiguration ? <>
-          <button className="secondary-button" onClick={() => void createPlan()} disabled={busy}><FilePlus size={15}/>创建模拟计划</button>
+          <a className="secondary-button" href={selectedPlanEditorURL}>在投放计划中查看</a>
           <button className="primary-button" onClick={() => void compile()} disabled={busy || !selectedPlan}><Send size={15}/>编译三层配置</button>
         </> : <span className="delivery-config-view-context">当前视图沿用所选计划，不会重复创建任务。</span>}
       </section>
 
-      {!selectedPlan ? <div className="panel-empty">{showConfiguration ? '尚无模拟计划。创建后可由服务端编译三级配置。' : '当前 Project 尚无模拟计划，请先切换到“模拟配置”视图创建计划。'}</div> : <>
+      <dl className="delivery-config-runtime" aria-label="投放平台与配置编译器">
+        <div><dt>投放平台</dt><dd>巨量引擎</dd></div>
+        <div><dt>配置编译器</dt><dd>巨量内部配置 v1 <small>当前固定；平台字段校准后再开放适配器选择</small></dd></div>
+      </dl>
+
+      {!selectedPlan ? <div className="panel-empty">当前 Project 尚无投放计划。<a href={planEditorBaseURL}>前往投放计划创建</a>，保存后再返回编译配置。</div> : <>
         {showConfiguration ? <section className="delivery-config-config-card">
-          <header><div><span>当前计划 V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>预算 {formatCny(selectedPlan.currentVersion.budget.totalMinor)} · 更新时间 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><b>{configuration ? '已编译' : '待编译'}</b><span>{configuration ? `模拟数据 · ${formatTime(configuration.generatedAt)}` : '请先服务端编译配置'}</span></div></header>
+          <header><div><span>当前计划 V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>预算 {formatCny(selectedPlan.currentVersion.budget.totalMinor)} · 更新时间 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><b>{configuration ? '已编译' : '待编译'}</b><span>{configuration ? `生成于 ${formatTime(configuration.generatedAt)}` : '请先服务端编译配置'}</span></div></header>
           {configuration ? <><div className="delivery-config-config-meta"><span>schema={configuration.schema}</span><span>source={configuration.source}</span><span>scenario={configuration.scenario}</span><span>证据 {configuration.evidenceRefs.length} 条</span></div>
             <div className="delivery-config-tier-tree">{configuration.groups.map(group => <div key={group.id}><TierObject type="group" object={group} onOverride={selectOverride}/>{group.plans.map(plan => <div className="delivery-config-tier-indent" key={plan.id}><TierObject type="plan" object={plan} onOverride={selectOverride}/>{plan.creatives.map(creative => <div className="delivery-config-tier-indent" key={creative.id}><TierObject type="creative" object={creative} location={{ groupId: group.id, planId: plan.id, creativeId: creative.id }} onOverride={selectOverride}/></div>)}</div>)}</div>)}</div>
-          </> : <div className="delivery-config-empty-inline"><CircleAlert size={18}/>服务端尚未生成配置。编译使用固定 mock fixture，客户端不上传配置内容。</div>}
+          </> : <div className="delivery-config-empty-inline"><CircleAlert size={18}/>服务端尚未生成配置。请先完成策略与素材引用，再编译内部配置。</div>}
         </section> : null}
 
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight">
           <article className="delivery-config-preflight-card">
-            <header><div><span className="section-label">当前计划门禁</span><h3>预检与审批</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `ChangeSet ${changeSet.status}` : '尚未创建 ChangeSet'}</strong></header>
-            <div className="delivery-config-preflight-summary"><b>校验结果</b><p>{preflightMessage}</p>{changeSet ? <small>版本 {changeSet.version}{changeSet.status === 'draft' ? ' · 采纳仅创建草稿，仍需预检与审批' : ''}</small> : <small>先运行计划预检，再创建需要审批的变更。</small>}</div>
-            <div className="delivery-config-actions delivery-config-preflight-actions"><button onClick={() => void preflightPlan()} disabled={busy}><ShieldCheck size={14}/>运行计划预检</button><button onClick={() => void createAndPreflightChangeSet()} disabled={busy}><Check size={14}/>{changeSet?.status === 'draft' ? '预检已采纳的草稿 ChangeSet' : '创建并预检 ChangeSet'}</button><button onClick={() => void approveChangeSet()} disabled={busy || changeSet?.status !== 'preflight_passed'}>人工审批 ChangeSet</button></div>
+            <header><div><span className="section-label">当前计划门禁</span><h3>检查草稿并提交变更申请</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `变更申请 ${changeSet.status}` : '尚未提交变更申请'}</strong></header>
+            <div className="delivery-config-preflight-summary"><b>校验结果</b><p>{preflightMessage}</p>{changeSet ? <small>申请版本 {changeSet.version}{changeSet.status === 'draft' ? ' · 当前仅为草稿，提交时服务端会重新校验同一内容快照' : ''}</small> : <small>先检查当前草稿，再提交需要审批的变更申请。</small>}</div>
+            <div className="delivery-config-actions delivery-config-preflight-actions">
+              <button onClick={() => void preflightPlan()} disabled={busy}><ShieldCheck size={14}/>检查当前草稿</button>
+              <button onClick={() => void createAndPreflightChangeSet()} disabled={busy || !canSubmitChangeSet}><Check size={14}/>{changeSet?.recommendationId ? '提交优化变更申请' : '提交变更申请'}</button>
+              {changeSet && changeSet.status !== 'draft' ? <div className={`delivery-config-approval-handoff ${changeSet.status}`}>
+                <span><b>{changeSet.status === 'preflight_passed' ? '等待审批' : changeSet.status === 'approved' ? '审批中心已批准' : changeSet.status === 'rejected' ? '审批中心已打回' : '变更申请状态已更新'}</b><small>{changeSet.status === 'preflight_passed' ? '当前投手只可查看审批进度，批准或打回由具备权限的审批角色完成。' : changeSet.status === 'rejected' ? '根据打回原因修改计划后，可重新检查并提交。' : '审批记录与当前内容快照已持久化。'}</small></span>
+                {approvalURL ? <a className="primary-button" href={approvalURL}>{changeSet.status === 'preflight_passed' ? '查看审批进度' : '查看审批记录'}<ArrowRight size={14}/></a> : null}
+              </div> : null}
+            </div>
+            {changeSet?.status === 'rejected' ? <div className="inline-notice danger"><CircleAlert size={16}/>已打回：{changeSet.rejectionReason}</div> : null}
           </article>
         </section> : null}
 
-        {showRecommendations ? <section className="delivery-config-flow-grid delivery-config-flow-grid--decision">
-          <article>
-            <header><h3>建议只待决策</h3></header>
-            <p>生成建议只保留证据、影响、风险、观察期与冷却期，不会执行投放。</p>
-            <button onClick={() => void generateRecommendations()} disabled={busy || !configuration}><Send size={14}/>生成建议</button>
-            <div className="delivery-config-recommendations">
-              {selectedRecommendations.map(item => <div key={item.id}>
-                <b>{recommendationLabel(item.action)}</b><span>{recommendationLabel(item.impact)}</span>
-                <small>风险：{item.risks.map(recommendationLabel).join('、') || '无'} · 观察：{recommendationLabel(item.observation)} · 冷却至：{formatTime(item.cooldown)}</small>
-                <footer><em>{item.status}</em>{item.status === 'proposed' ? <>
-                  <button onClick={() => void acceptRecommendation(item)} disabled={busy}>采纳为草稿</button>
-                  <button onClick={() => void rejectRecommendation(item)} disabled={busy}>拒绝</button>
-                </> : null}</footer>
-              </div>)}
-              {!selectedRecommendations.length ? <small>尚无建议。</small> : null}
-            </div>
-          </article>
-          <article><header><h3>人工操作包</h3></header><p>仅在 ChangeSet 审批后可编译。它是给人工投手的步骤包，不是平台执行指令。</p><button onClick={() => void compileManualPackage()} disabled={busy || changeSet?.status !== 'approved'}><FilePlus size={14}/>编译人工操作包</button>{manualPackage ? <ManualPackageDetails value={manualPackage}/> : <small>等待审批完成。</small>}</article>
+        {showManualPackage ? <section className="delivery-config-package-page">
+          <article><header><div><span className="section-label">获批后的交付物</span><h3>人工操作包</h3></div></header><p>仅在优化变更申请审批后可编译。它是供授权人员逐项核对的操作步骤，不是平台执行指令。</p><button className="primary-button" onClick={() => void compileManualPackage()} disabled={busy || changeSet?.status !== 'approved'}><FilePlus size={14}/>编译人工操作包</button>{manualPackage ? <ManualPackageDetails value={manualPackage}/> : <div className="panel-empty">等待优化变更申请在审批中心获批。</div>}</article>
         </section> : null}
       </>}
 

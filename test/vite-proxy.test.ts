@@ -32,6 +32,6 @@ test('runtime-generated files are excluded from the Vite watcher', () => {
   assert.ok(Array.isArray(ignored), 'vite watcher exclusions must be an array')
   assert.deepEqual(
     ignored,
-    ['**/.codex-runtime/**', '**/.data/**', '**/dist/**', '**/coverage/**'],
+    ['**/.codex-runtime/**', '**/.cache/**', '**/.data/**', '**/dist/**', '**/coverage/**'],
   )
 })

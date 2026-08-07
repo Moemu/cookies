@@ -1,0 +1,22 @@
+{
+  "fixture_version": "delivery-insights/v1/usable",
+  "schema_version": "delivery-insights/v1",
+  "source": "mock",
+  "quality": "usable",
+  "quality_reason": "fixture contains a complete, fresh daily snapshot",
+  "observed_at": "2026-08-02T00:05:00Z",
+  "data_through": "2026-08-02T00:00:00Z",
+  "objects": [
+    {"kind":"account","id":"account-1","parent_id":"","version":1,"name":"Fixture account","platform":"ocean_engine"},
+    {"kind":"project","id":"project-1","parent_id":"account-1","version":1,"name":"Fixture project","platform":"ocean_engine"},
+    {"kind":"unit","id":"unit-1","parent_id":"project-1","version":2,"name":"Fixture unit","platform":"ocean_engine"},
+    {"kind":"material","id":"material-1","parent_id":"unit-1","version":3,"name":"Fixture material","platform":"ocean_engine"}
+  ],
+  "metrics": [
+    {"metric":"spend","object_kind":"project","object_id":"project-1","value":12500,"unit":"CNY_minor","currency":"CNY","window_start":"2026-08-01T00:00:00Z","window_end":"2026-08-02T00:00:00Z","granularity":"day","timezone":"Asia/Shanghai","schema_version":"delivery-insights/v1","definition_version":"delivery-base-metrics/v1","freshness":"fresh","quality":"usable","evidence_refs":["fixture://delivery-insights/usable/project/spend"]},
+    {"metric":"impressions","object_kind":"project","object_id":"project-1","value":10000,"unit":"count","currency":"","window_start":"2026-08-01T00:00:00Z","window_end":"2026-08-02T00:00:00Z","granularity":"day","timezone":"Asia/Shanghai","schema_version":"delivery-insights/v1","definition_version":"delivery-base-metrics/v1","freshness":"fresh","quality":"usable","evidence_refs":["fixture://delivery-insights/usable/project/impressions"]},
+    {"metric":"clicks","object_kind":"project","object_id":"project-1","value":500,"unit":"count","currency":"","window_start":"2026-08-01T00:00:00Z","window_end":"2026-08-02T00:00:00Z","granularity":"day","timezone":"Asia/Shanghai","schema_version":"delivery-insights/v1","definition_version":"delivery-base-metrics/v1","freshness":"fresh","quality":"usable","evidence_refs":["fixture://delivery-insights/usable/project/clicks"]},
+    {"metric":"conversions","object_kind":"project","object_id":"project-1","value":20,"unit":"count","currency":"","window_start":"2026-08-01T00:00:00Z","window_end":"2026-08-02T00:00:00Z","granularity":"day","timezone":"Asia/Shanghai","schema_version":"delivery-insights/v1","definition_version":"delivery-base-metrics/v1","freshness":"fresh","quality":"usable","evidence_refs":["fixture://delivery-insights/usable/project/conversions"]}
+  ],
+  "evidence_refs": ["fixture://delivery-insights/usable"]
+}

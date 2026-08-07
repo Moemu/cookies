@@ -20,6 +20,13 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await page.getByLabel('计划名称').fill(`不应继承 ${suffix}`)
   await blankDraftButton.click()
   await expect(page.getByLabel('计划名称')).not.toHaveValue(`不应继承 ${suffix}`)
+  await expect(page.getByLabel('投放平台')).toHaveValue('巨量引擎')
+  await page.getByLabel('账户边界').selectOption('')
+  await expect(page.getByLabel('账户边界')).toHaveClass(/field-missing/)
+  await expect(page.getByLabel('账户边界').locator('xpath=..')).toContainText('必填')
+  await page.getByLabel('策略来源').selectOption('')
+  await expect(page.getByLabel('策略来源')).toHaveClass(/field-missing/)
+  await expect(page.getByLabel('策略来源').locator('xpath=..')).toContainText('必填')
   await startNewPlan(page, goldenName)
   const targetFieldControlOffsets = await page.locator('.delivery-field-grid > label').evaluateAll(labels =>
     labels.map(label => {
@@ -30,14 +37,17 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   )
   expect(Math.max(...targetFieldControlOffsets) - Math.min(...targetFieldControlOffsets)).toBeLessThanOrEqual(1)
   await expect(page.getByRole('button', { name: '保存草稿', exact: true })).toBeInViewport()
-  await expect(page.getByText('source=mock').first()).toBeVisible()
+  await expect(page.getByText('Mock 环境', { exact: true }).first()).toBeVisible()
 
   await page.getByRole('button', { name: '预算与排期', exact: true }).click()
   await page.getByLabel('总预算').fill('3000')
   await page.getByRole('button', { name: '追踪', exact: true }).click()
   await page.getByLabel('追踪像素 ID').fill(`PX-E2E-${suffix}`)
   await page.getByRole('button', { name: '素材引用', exact: true }).click()
-  await page.getByLabel('素材 Asset ID').fill(`asset-e2e-${suffix}`)
+  await page.getByLabel('已确认素材').selectOption('')
+  await expect(page.getByLabel('已确认素材')).toHaveClass(/field-missing/)
+  await expect(page.getByLabel('已确认素材').locator('xpath=..')).toContainText('必填')
+  await page.getByLabel('已确认素材').selectOption('asset_demo_investor_creative_video')
 
   const createResponsePromise = page.waitForResponse(response =>
     response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/delivery/v1/projects/${primaryProjectId}/plans`,
@@ -45,12 +55,18 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   const createResponse = await createResponsePromise
   expect(createResponse.status()).toBe(201)
-  const created = await createResponse.json() as { id: string; source: string; scenario: string; current_version_number: number }
+  const created = await createResponse.json() as { id: string; source: string; scenario: string; current_version_number: number; current_version: { strategy_reference: { content_hash: string; route: string }; creative_references: Array<{ content_hash: string; route: string }> } }
   expect(created).toMatchObject({ source: 'mock', scenario: 'golden_path', current_version_number: 1 })
+  expect(created.current_version.strategy_reference.content_hash).toMatch(/^[0-9a-f]{64}$/)
+  expect(created.current_version.strategy_reference.route).toContain('/strategy/workspaces/')
+  expect(created.current_version.creative_references[0].content_hash).toMatch(/^[0-9a-f]{64}$/)
+  expect(created.current_version.creative_references[0].route).toContain('/creative/reviews/')
   const planId = created.id
   await expect(page.getByText(/已保存为 V1/)).toBeVisible()
 
-  await page.reload()
+  await page.goto(`/projects/${primaryProjectId}/delivery/plans?plan_id=${planId}`)
+  await expect.poll(() => new URL(page.url()).searchParams.get('plan_id')).toBe(planId)
+  await expect(page.getByRole('heading', { name: goldenName })).toBeVisible()
   await expect(page.getByText(goldenName).first()).toBeVisible()
   await page.getByRole('button').filter({ hasText: goldenName }).first().click()
   await page.getByRole('button', { name: '预算与排期', exact: true }).click()
@@ -83,7 +99,7 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await expect(page.getByText(goldenName).first()).toBeVisible()
   await page.getByRole('button').filter({ hasText: goldenName }).first().click()
   const goldenPreflightPromise = waitForPreflight(page, planId)
-  await page.getByRole('button', { name: '运行服务端预检', exact: true }).click()
+  await page.getByRole('button', { name: '检查当前草稿', exact: true }).click()
   const goldenPreflight = await goldenPreflightPromise
   expect(goldenPreflight).toMatchObject({ source: 'mock', scenario: 'golden_path', passed: true, blocked: false })
   await expect(page.getByText('黄金场景全部通过，可继续后续受控流程。')).toBeVisible()
@@ -93,7 +109,7 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
     await page.getByLabel('总预算').fill('0')
   })
   const budgetPreflightPromise = waitForPreflight(page, budgetPlanId)
-  await page.getByRole('button', { name: '运行服务端预检', exact: true }).click()
+  await page.getByRole('button', { name: '检查当前草稿', exact: true }).click()
   const budgetPreflight = await budgetPreflightPromise
   expect(budgetPreflight).toMatchObject({ source: 'mock', scenario: 'budget_zero', blocked: true })
   await expect(page.getByText('服务端预检阻断', { exact: true })).toBeVisible()
@@ -101,24 +117,12 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
   await page.getByRole('button', { name: '修复 budget_positive' }).click()
   await expect(page.getByLabel('总预算')).toBeFocused()
 
-  const creativePlanId = await createScenarioPlan(page, `E2E 素材警告计划 ${suffix}`, async () => {
-    await page.getByRole('button', { name: '素材引用', exact: true }).click()
-    await page.getByLabel('素材已人工确认').uncheck()
-  })
-  const creativePreflightPromise = waitForPreflight(page, creativePlanId)
-  await page.getByRole('button', { name: '运行服务端预检', exact: true }).click()
-  const creativePreflight = await creativePreflightPromise
-  expect(creativePreflight).toMatchObject({ source: 'mock', scenario: 'creative_unconfirmed', passed: true, blocked: false })
-  await expect(page.getByText('warning', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '修复 creative_confirmed' }).click()
-  await expect(page.getByLabel('素材已人工确认')).toBeFocused()
-
   const trackingPlanId = await createScenarioPlan(page, `E2E 追踪缺失计划 ${suffix}`, async () => {
     await page.getByRole('button', { name: '追踪', exact: true }).click()
     await page.getByLabel('追踪像素 ID').fill('')
   })
   const trackingPreflightPromise = waitForPreflight(page, trackingPlanId)
-  await page.getByRole('button', { name: '运行服务端预检', exact: true }).click()
+  await page.getByRole('button', { name: '检查当前草稿', exact: true }).click()
   const trackingPreflight = await trackingPreflightPromise
   expect(trackingPreflight).toMatchObject({ source: 'mock', scenario: 'tracking_missing', blocked: true })
   await page.getByRole('button', { name: '修复 tracking_complete' }).click()
@@ -126,10 +130,11 @@ test('DeliveryPlan 草稿生命周期、Project 隔离与服务端权威预检',
 })
 
 async function startNewPlan(page: Page, name: string) {
-  await page.getByRole('button', { name: '新建 mock 投放计划' }).click()
+  await page.getByRole('button', { name: '新建投放计划' }).click()
   await page.getByLabel('计划名称').fill(name)
   await page.getByLabel('业务目标').fill('获取高质量销售线索并验证投前门禁')
-  await page.getByLabel('Mock 广告主').selectOption('mock-advertiser-001')
+  await page.getByLabel('账户边界').selectOption('mock-advertiser-001')
+  await page.getByLabel('策略来源').selectOption('task_demo_precision_strategy')
 }
 
 async function createScenarioPlan(page: Page, name: string, configure: () => Promise<void>) {

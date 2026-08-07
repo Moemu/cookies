@@ -80,6 +80,7 @@ type AINativeSpeechUnit struct {
 	Text              string                      `json:"text"`
 	Language          string                      `json:"language"`
 	VoiceAlias        string                      `json:"voice_alias"`
+	SpeakingRate      float64                     `json:"speaking_rate,omitempty"`
 	NormalizedText    string                      `json:"normalized_text,omitempty"`
 	AudioCodec        string                      `json:"audio_codec,omitempty"`
 	SampleRate        int                         `json:"sample_rate,omitempty"`
@@ -233,7 +234,7 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 		}
 		if strings.TrimSpace(shot.Voiceover) != "" {
 			plan.SpeechUnits = append(plan.SpeechUnits, AINativeSpeechUnit{ID: fmt.Sprintf("speech-unit-%02d", len(plan.SpeechUnits)+1), Order: len(plan.SpeechUnits) + 1,
-				ShotID: shot.ID, StartMS: shot.StartMS, EndMS: shot.EndMS, Text: strings.TrimSpace(shot.Voiceover), Language: requirement.Language, VoiceAlias: "douyin-female-01", WordTimings: []provider.SpeechWordTiming{}, Attempts: []AINativeGenerationAttempt{}})
+				ShotID: shot.ID, StartMS: shot.StartMS, EndMS: shot.EndMS, Text: strings.TrimSpace(shot.Voiceover), Language: requirement.Language, VoiceAlias: "cookies.voice.douyin.default", WordTimings: []provider.SpeechWordTiming{}, Attempts: []AINativeGenerationAttempt{}})
 		}
 		_ = shotIndex
 	}

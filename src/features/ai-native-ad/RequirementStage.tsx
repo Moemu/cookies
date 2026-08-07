@@ -1,7 +1,36 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Image, Link2, LoaderCircle, Plus, Send, Trash2 } from 'lucide-react'
-import { getAssetPreview } from './api'
-import type { AINativeRequirement, AINativeStageStatus, RequirementMedia } from './types'
+import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Image, Link2, LoaderCircle, Plus, RefreshCw, Send, Trash2 } from 'lucide-react'
+import { AINativeApiError, getAssetPreview, resolveProductPreview } from './api'
+import type { AINativeProductPreview, AINativeRequirement, AINativeStageStatus, RequirementMedia } from './types'
+
+type ProductRecognitionState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'success'; product: AINativeProductPreview }
+  | { status: 'failed'; message: string; retryable: boolean }
+
+function productRecognitionFailure(cause: unknown): { message: string; retryable: boolean } {
+  if (cause instanceof AINativeApiError) {
+    if (cause.code === 'AI_NATIVE_PRODUCT_LINK_INCOMPLETE') return { message: '复制内容不完整，商品参数在中途被截断。请回到抖音商品页重新复制并完整粘贴。', retryable: false }
+    if (cause.code === 'AI_NATIVE_PRODUCT_LINK_UNSUPPORTED') return { message: '没有识别到受支持的抖音商品链接，请粘贴抖音商城分享口令或商品链接。', retryable: false }
+    if (cause.code === 'AI_NATIVE_PRODUCT_DETAIL_MISSING') return { message: '这是抖音链接，但没有找到完整商品信息，可能复制的是视频链接而不是商品详情链接。', retryable: false }
+    if (cause.code === 'CLIENT_TIMEOUT') return { message: '商品信息获取超时，链接格式可能正常，可以重新识别。', retryable: true }
+  }
+  const detail = cause instanceof Error ? cause.message.toLowerCase() : ''
+  if (detail.includes('incomplete product link') || detail.includes('unexpected end')) {
+    return { message: '复制内容不完整，商品参数在中途被截断。请回到抖音商品页重新复制并完整粘贴。', retryable: false }
+  }
+  if (detail.includes('host') || detail.includes('unsupported product link') || detail.includes('https link is required')) {
+    return { message: '没有识别到受支持的抖音商品链接，请粘贴抖音商城分享口令或商品链接。', retryable: false }
+  }
+  if (detail.includes('goods_detail is absent') || detail.includes('product information is missing')) {
+    return { message: '这是抖音链接，但没有找到完整商品信息，可能复制的是视频链接而不是商品详情链接。', retryable: false }
+  }
+  if (detail.includes('timeout') || detail.includes('超时') || detail.includes('network')) {
+    return { message: '商品信息获取超时，链接格式可能正常，可以重新识别。', retryable: true }
+  }
+  return { message: '暂时无法获取商品信息，请确认链接完整后重新识别。', retryable: true }
+}
 
 export function RequirementMediaGallery({ media, previews, status, onReanalyze }: {
   media: RequirementMedia[]
@@ -58,7 +87,30 @@ export function RequirementStage({
   onEdit: () => void
 }) {
   const [mediaPreviews, setMediaPreviews] = useState<Record<string, string | null>>({})
+  const [recognition, setRecognition] = useState<ProductRecognitionState>({ status: 'idle' })
+  const [recognitionRetry, setRecognitionRetry] = useState(0)
+  const recognitionRequest = useRef(0)
+  const hasRequirement = Boolean(requirement)
   const mediaPreviewKey = requirement?.media.map(item => item.asset_ref ? `${item.id}:${item.asset_ref.asset_id}:${item.asset_ref.version}` : `${item.id}:legacy`).join('|') ?? ''
+
+  useEffect(() => {
+    const input = productLink.trim()
+    const requestID = ++recognitionRequest.current
+    if (hasRequirement || !input) {
+      setRecognition({ status: 'idle' })
+      return
+    }
+    setRecognition({ status: 'checking' })
+    const timer = window.setTimeout(() => {
+      void resolveProductPreview(projectId, input).then(product => {
+        if (recognitionRequest.current === requestID) setRecognition({ status: 'success', product })
+      }).catch(cause => {
+        if (recognitionRequest.current !== requestID) return
+        setRecognition({ status: 'failed', ...productRecognitionFailure(cause) })
+      })
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [hasRequirement, productLink, projectId, recognitionRetry])
 
   useEffect(() => {
     let active = true
@@ -83,9 +135,12 @@ export function RequirementStage({
       <div className="requirement-conversation">
         <div className="conversation-intro"><span>AI</span><p>请发送商品链接，并告诉我这条广告希望强调什么。其他渠道暂时只做入口展示，本阶段仅生成抖音 9:16 广告。</p></div>
         <div className="conversation-composer">
-          <label><Link2 size={15}/><input aria-label="商品链接" value={productLink} onChange={event => onProductLinkChange(event.target.value)} placeholder="粘贴抖音商城商品链接"/></label>
+          <label><Link2 size={15}/><input aria-label="商品链接" aria-describedby="product-link-recognition" value={productLink} onChange={event => onProductLinkChange(event.target.value)} placeholder="粘贴抖音商城商品链接或完整分享口令"/></label>
+          {recognition.status !== 'idle' ? <div id="product-link-recognition" className={`product-link-recognition ${recognition.status}`} role={recognition.status === 'failed' ? 'alert' : 'status'}>
+            {recognition.status === 'checking' ? <><LoaderCircle className="spin" size={15}/><span><b>正在识别商品链接</b><small>正在提取并清理抖音商品信息…</small></span></> : recognition.status === 'success' ? <><CheckCircle2 size={16}/><span><b>识别成功</b><small>{recognition.product.product_name}</small></span></> : <><AlertTriangle size={16}/><span><b>商品链接识别失败</b><small>{recognition.message}</small></span>{recognition.retryable ? <button type="button" onClick={() => setRecognitionRetry(value => value + 1)}><RefreshCw size={12}/>重新识别</button> : null}</>}
+          </div> : null}
           <textarea aria-label="补充生成需求" value={supplementalRequirement} onChange={event => onSupplementalRequirementChange(event.target.value)} placeholder="补充生成需求，例如：面向通勤人群，突出轻便和容量，整体节奏自然真实。" maxLength={2000}/>
-          <div><span>{supplementalRequirement.length} / 2000</span><button className="primary-button" disabled={!productLink.trim() || status === 'generating'} onClick={onAnalyze}>{status === 'generating' ? <LoaderCircle className="spin" size={15}/> : <Send size={15}/>}发送并分析</button></div>
+          <div className="conversation-composer-footer"><span>{supplementalRequirement.length} / 2000</span><button className="primary-button" disabled={recognition.status !== 'success' || status === 'generating'} onClick={onAnalyze}>{status === 'generating' ? <LoaderCircle className="spin" size={15}/> : <Send size={15}/>}发送并分析</button></div>
         </div>
         {error ? <div className="ai-native-error" role="alert"><AlertTriangle size={15}/>{error}</div> : null}
       </div>

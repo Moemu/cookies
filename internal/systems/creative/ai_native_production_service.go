@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -193,14 +194,27 @@ func (s Service) HandleAINativeProductionJob(ctx context.Context, claim jobrunti
 		if attempt.Status != AINativeAttemptPlannedStatus {
 			continue
 		}
-		result, synthErr := s.AINativeSpeech.Synthesize(ctx, provider.SpeechSynthesisInput{OrganizationID: claim.Job.OrganizationID, ModelAlias: plan.SpeechModelAlias, RequestID: attempt.ID, Text: unit.Text, VoiceAlias: unit.VoiceAlias, Language: unit.Language, Format: "mp3", SampleRate: 24000, SpeakingRate: 1, NeedTimestamps: true})
+		input := provider.SpeechSynthesisInput{OrganizationID: claim.Job.OrganizationID, ModelAlias: plan.SpeechModelAlias, RequestID: attempt.ID, Text: unit.Text, VoiceAlias: unit.VoiceAlias, Language: unit.Language, Format: "mp3", SampleRate: 24000, SpeakingRate: 1, NeedTimestamps: true}
+		result, synthErr := s.AINativeSpeech.Synthesize(ctx, input)
 		if synthErr != nil {
 			attempt.Status, attempt.ErrorCode, attempt.ErrorMessage, attempt.UpdatedAt = AINativeAttemptFailedStatus, speechErrorCode(synthErr), boundedError(synthErr), s.now()
 			changed = true
 			continue
 		}
-		if result.DurationMS > 0 && result.DurationMS > (unit.EndMS-unit.StartMS)*108/100 {
-			attempt.Status, attempt.ErrorCode, attempt.ErrorMessage, attempt.UpdatedAt = AINativeAttemptFailedStatus, "SPEECH_DURATION_EXCEEDED", "旁白时长超过分镜容量 8%", s.now()
+		capacityMS := unit.EndMS - unit.StartMS
+		if speechExceedsShot(result.DurationMS, capacityMS) {
+			input.RequestID += "-fit"
+			input.SpeakingRate = fittedSpeechRate(result.DurationMS, capacityMS)
+			result, synthErr = s.AINativeSpeech.Synthesize(ctx, input)
+			if synthErr != nil {
+				attempt.Status, attempt.ErrorCode, attempt.ErrorMessage, attempt.UpdatedAt = AINativeAttemptFailedStatus, speechErrorCode(synthErr), boundedError(synthErr), s.now()
+				changed = true
+				continue
+			}
+		}
+		if speechExceedsShot(result.DurationMS, capacityMS) {
+			attempt.Status, attempt.ErrorCode, attempt.ErrorMessage, attempt.UpdatedAt = AINativeAttemptFailedStatus, "SPEECH_DURATION_EXCEEDED",
+				fmt.Sprintf("%s 旁白仍为 %.1f 秒，超过 %.1f 秒镜头容量；请缩短旁白或延长分镜", unit.ShotID, float64(result.DurationMS)/1000, float64(capacityMS)/1000), s.now()
 			changed = true
 			continue
 		}
@@ -213,7 +227,7 @@ func (s Service) HandleAINativeProductionJob(ctx context.Context, claim jobrunti
 		assetRef := ref.AssetVersion
 		attempt.Status, attempt.ProviderJobID, attempt.OutputAssetRef, attempt.UpdatedAt = AINativeAttemptSucceededStatus, result.ProviderRequestID, &assetRef, s.now()
 		unit.SelectedAttemptID = attempt.ID
-		unit.NormalizedText, unit.AudioCodec, unit.SampleRate, unit.DurationMS = result.NormalizedText, result.Codec, result.SampleRate, result.DurationMS
+		unit.SpeakingRate, unit.NormalizedText, unit.AudioCodec, unit.SampleRate, unit.DurationMS = input.SpeakingRate, result.NormalizedText, result.Codec, result.SampleRate, result.DurationMS
 		unit.WordTimings, unit.ProviderSnapshot = append([]provider.SpeechWordTiming{}, result.WordTimings...), result.ModelAndVoiceSnapshot
 		changed = true
 	}
@@ -249,6 +263,27 @@ func (s Service) HandleAINativeProductionJob(ctx context.Context, claim jobrunti
 	}
 	revision := plan.Revision
 	return jobruntime.Result{Ref: &contract.ResourceRef{Type: "creative_ai_native_production_plan", ID: workspace.WorkspaceID, Version: &revision}}, nil
+}
+
+const maxAINativeSpeechRate = 1.5
+
+func speechExceedsShot(durationMS, capacityMS int) bool {
+	return durationMS > 0 && capacityMS > 0 && durationMS > capacityMS*108/100
+}
+
+func fittedSpeechRate(durationMS, capacityMS int) float64 {
+	if durationMS <= 0 || capacityMS <= 0 {
+		return 1
+	}
+	rate := math.Ceil(float64(durationMS)*100/float64(capacityMS*108)) / 100
+	rate = math.Ceil((rate+0.03)*100) / 100
+	if rate < 1.05 {
+		return 1.05
+	}
+	if rate > maxAINativeSpeechRate {
+		return maxAINativeSpeechRate
+	}
+	return rate
 }
 
 func (s Service) failAINativeProductionAttempt(ctx context.Context, claim jobruntime.Claim, op AINativeProductionOperation, plan *AINativeProductionPlan, attempt *AINativeGenerationAttempt, code string, cause error) (jobruntime.Result, error) {

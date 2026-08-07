@@ -103,6 +103,10 @@ type GenerateAINativeStoryboardRequest struct {
 	ExpectedWorkspaceVersion int64 `json:"expected_workspace_version"`
 }
 
+type RegenerateAINativeStoryboardAssetRequest struct {
+	ExpectedWorkspaceVersion int64 `json:"expected_workspace_version"`
+}
+
 type UpdateAINativeStoryboardRequest struct {
 	ExpectedRevision int64                      `json:"expected_revision"`
 	Storyboard       AINativeStoryboardRevision `json:"storyboard"`

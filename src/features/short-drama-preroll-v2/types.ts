@@ -54,6 +54,9 @@ export type ShortDramaPrerollState = {
   imagesStatus: AsyncStatus
   images: FirstFrameCandidate[]
   selectedImageId: string
+  trustedFirstFrameAssetId: string
+  trustedLastFrameAssetId: string
+  trustedMaterialsBound: boolean
   videoStatus: AsyncStatus
   output: GeneratedPreroll | null
   error: string

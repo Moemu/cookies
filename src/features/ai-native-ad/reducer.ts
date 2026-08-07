@@ -4,6 +4,7 @@ import type {
   AINativeRequirementWorkspace,
   AINativeStageId,
   AINativeStageStatus,
+  ProductionReferenceFailure,
   StoryboardDraft,
   VideoRenderState,
 } from './types'
@@ -54,7 +55,24 @@ const downstream: Record<AINativeStageId, AINativeStageId[]> = {
 function videoFromWorkspace(workspace: AINativeRequirementWorkspace): VideoRenderState | null {
   const progress = workspace.production_progress
   if (!workspace.production_status || !progress) return null
-  return { status: workspace.production_status, progress: progress.progress_percent, current_step: progress.current_step, completed_shots: progress.completed_video_units, total_shots: progress.total_video_units, eta_seconds: progress.eta_seconds }
+  const failedVideo = workspace.production_plan?.units?.find(unit => unit.attempts.at(-1)?.status === 'failed')
+  const failedSpeech = workspace.production_plan?.speech_units?.find(unit => unit.attempts.at(-1)?.status === 'failed')
+  const failedUnit = failedVideo ?? failedSpeech
+  const failedAttempt = failedUnit?.attempts.at(-1)
+  return {
+    status: workspace.production_status,
+    progress: progress.progress_percent,
+    current_step: progress.current_step,
+    completed_shots: progress.completed_video_units,
+    total_shots: progress.total_video_units,
+    completed_speech_units: progress.completed_speech_units,
+    total_speech_units: progress.total_speech_units,
+    failed_unit_id: failedUnit?.id,
+    failed_shot_id: failedVideo?.shot_ids[0] ?? failedSpeech?.shot_id,
+    failure_code: failedAttempt?.error_code,
+    failure_reason: failedAttempt?.error_message,
+    eta_seconds: progress.eta_seconds,
+  }
 }
 
 function videoStatusFromWorkspace(workspace: AINativeRequirementWorkspace, current: AINativeStageStatus): AINativeStageStatus {
@@ -77,6 +95,28 @@ export function productionFailureMessage(workspace: AINativeRequirementWorkspace
   if (attempt?.error_message) return attempt.error_message
   if (workspace.production_status === 'render_failed') return workspace.production_plan?.render?.error_message || '最终视频渲染失败，已生成的片段与旁白仍会保留。'
   return '部分视频片段或旁白生成失败，可只重试失败片段。'
+}
+
+export function productionReferenceFailure(workspace: AINativeRequirementWorkspace): ProductionReferenceFailure | null {
+  const unit = workspace.production_plan?.units.find(candidate => candidate.attempts.at(-1)?.status === 'failed' && candidate.reference_asset)
+  const attempt = unit?.attempts.at(-1)
+  if (!unit?.reference_asset || !attempt) return null
+  const errorCode = attempt.error_code ?? ''
+  const errorMessage = attempt.error_message ?? ''
+  const privacyRejected = errorCode.startsWith('InputImageSensitiveContentDetected') || /input image.+real person/i.test(errorMessage)
+  const copyrightRejected = /copyright restrictions/i.test(errorMessage)
+  if (!privacyRejected && !copyrightRejected) return null
+  const asset = (workspace.storyboard ?? workspace.storyboard_plan)?.assets.find(candidate => candidate.asset_ref?.asset_id === unit.reference_asset?.asset_id)
+  if (!asset) return null
+  return {
+    unit_id: unit.id,
+    asset_id: asset.id,
+    asset_name: asset.name,
+    asset_source: asset.source,
+    reason: privacyRejected
+      ? '参考图片可能包含写实人物，视频模型因隐私保护拒绝使用。'
+      : '参考图片包含受版权保护的品牌或角色形象，视频模型拒绝生成。',
+  }
 }
 
 export function aiNativeReducer(state: AINativeFrontendState, action: AINativeAction): AINativeFrontendState {

@@ -16,6 +16,8 @@ import (
 
 const defaultVolcengineSpeechEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 
+const volcengineSpeechTerminalCode = 20000000
+
 type VolcengineSpeechConfig struct {
 	Endpoint     string
 	APIKey       string
@@ -94,7 +96,7 @@ func (a *VolcengineSpeechAdapter) Synthesize(ctx context.Context, input SpeechSy
 	voice := a.config.DefaultVoice
 	if mapped := a.config.VoiceAliases[input.VoiceAlias]; strings.TrimSpace(mapped) != "" {
 		voice = mapped
-	} else if !strings.HasPrefix(input.VoiceAlias, "cookies.") {
+	} else if input.VoiceAlias != "douyin-female-01" && !strings.HasPrefix(input.VoiceAlias, "cookies.") {
 		voice = input.VoiceAlias
 	}
 	var payload volcengineSpeechRequest
@@ -132,6 +134,9 @@ func (a *VolcengineSpeechAdapter) Synthesize(ctx context.Context, input SpeechSy
 			break
 		} else if err != nil {
 			return SpeechSynthesisResult{}, SpeechProviderError{Code: "invalid_response", Message: err.Error(), Retryable: true}
+		}
+		if chunk.Code == volcengineSpeechTerminalCode && strings.EqualFold(strings.TrimSpace(chunk.Message), "OK") {
+			break
 		}
 		if chunk.Code != 0 {
 			return SpeechSynthesisResult{}, classifyVolcengineSpeechError(chunk.Code, chunk.Message)

@@ -31,7 +31,7 @@ func BuildTimelineFilter(request TimelineRenderRequest, subtitlePath string) (st
 		duration := clip.EndMS - clip.StartMS
 		filters := []string{fmt.Sprintf("atrim=start=%s:duration=%s", seconds(clip.SourceIn), seconds(duration)), "asetpts=PTS-STARTPTS"}
 		if clip.Loop {
-			filters = []string{fmt.Sprintf("aloop=loop=-1:size=2147483647,atrim=duration=%s", seconds(duration)), "asetpts=PTS-STARTPTS"}
+			filters = []string{fmt.Sprintf("atrim=start=%s,asetpts=PTS-STARTPTS,aloop=loop=-1:size=2147483647,atrim=duration=%s", seconds(clip.SourceIn), seconds(duration)), "asetpts=PTS-STARTPTS"}
 		}
 		if math.Abs(clip.GainDB) > 0.001 {
 			filters = append(filters, fmt.Sprintf("volume=%.2fdB", clip.GainDB))

@@ -12,12 +12,17 @@ func RunPreflight(version DeliveryPlanVersion) []PreflightCheck {
 		strings.TrimSpace(version.Advertiser.Name) != ""
 	creativePresent := len(version.CreativeReferences) > 0
 	creativeConfirmed := creativePresent
+	creativeResolvable := creativePresent
 	for _, reference := range version.CreativeReferences {
 		if !reference.Confirmed {
 			creativeConfirmed = false
-			break
+		}
+		if strings.TrimSpace(reference.ContentHash) == "" || strings.TrimSpace(reference.Route) == "" {
+			creativeResolvable = false
 		}
 	}
+	strategyResolvable := strings.TrimSpace(version.StrategyReference.TaskID) != "" && version.StrategyReference.Version > 0 &&
+		strings.TrimSpace(version.StrategyReference.ContentHash) != "" && strings.TrimSpace(version.StrategyReference.Route) != ""
 	checks := []PreflightCheck{
 		check(
 			"advertiser_available",
@@ -67,6 +72,18 @@ func RunPreflight(version DeliveryPlanVersion) []PreflightCheck {
 			"追踪缺失：请补齐落地页、像素和转化事件。",
 			RepairTarget{Field: "tracking_pixel_id", Section: "追踪", Label: "修复追踪配置"},
 		),
+	}
+	// Structured references are additive for legacy plans. Once a plan adopts
+	// them, both strategy and creative references become a hard execution gate.
+	if strings.TrimSpace(version.StrategyReference.TaskID) != "" {
+		checks = append(checks, check(
+			"upstream_references_resolved",
+			CheckSeverityError,
+			strategyResolvable && creativeResolvable,
+			"策略任务与素材版本均已解析到不可变来源。",
+			"策略任务或素材版本缺少可验证的内容哈希与返回入口。",
+			RepairTarget{Field: "strategy_reference", Section: "素材引用", Label: "重新选择上游策略与已确认素材"},
+		))
 	}
 	// Three-tier configuration is strictly additive: plans without a snapshot receive the
 	// exact legacy check set and therefore retain old behavior and hashes.

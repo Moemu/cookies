@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ const (
 	AlertSpendSpike               AlertType               = "spend_spike"
 	AlertZeroConversion           AlertType               = "zero_conversion"
 	AlertCostWorsening            AlertType               = "cost_worsening"
+	AlertUnderDelivery            AlertType               = "under_delivery"
+	AlertCreativeFatigue          AlertType               = "creative_fatigue"
+	AlertTrackingAnomaly          AlertType               = "tracking_anomaly"
 	AlertOpen                     AlertStatus             = "open"
 	AlertAcknowledged             AlertStatus             = "acknowledged"
 	AlertDismissed                AlertStatus             = "dismissed"
@@ -36,6 +40,7 @@ type DeliveryAlert struct {
 	ProjectID        contract.ProjectID      `json:"project_id"`
 	PlanID           string                  `json:"plan_id"`
 	ExecutionID      string                  `json:"execution_id"`
+	SimulationRunID  string                  `json:"simulation_run_id,omitempty"`
 	MonitoredEntity  AlertMonitoredEntity    `json:"monitored_entity"`
 	Type             AlertType               `json:"type"`
 	RuleID           string                  `json:"rule_id"`
@@ -99,13 +104,18 @@ type AlertOwner struct {
 	Source      string `json:"source"`
 }
 type EvaluateAlertsResponse struct {
-	Items        []DeliveryAlert         `json:"items"`
-	CreatedCount int                     `json:"created_count"`
-	ReusedCount  int                     `json:"reused_count"`
-	Source       string                  `json:"source"`
-	IsSimulated  bool                    `json:"is_simulated"`
-	Scenario     AlertEvaluationScenario `json:"scenario"`
-	EvaluatedAt  time.Time               `json:"evaluated_at"`
+	Items                  []DeliveryAlert         `json:"items"`
+	CreatedCount           int                     `json:"created_count"`
+	ReusedCount            int                     `json:"reused_count"`
+	Source                 string                  `json:"source"`
+	IsSimulated            bool                    `json:"is_simulated"`
+	Scenario               AlertEvaluationScenario `json:"scenario"`
+	EvaluatedAt            time.Time               `json:"evaluated_at"`
+	InsightsSource         InsightsSource          `json:"insights_source"`
+	InsightsQuality        InsightsQualityStatus   `json:"insights_quality"`
+	InsightsQualityReason  string                  `json:"insights_quality_reason,omitempty"`
+	InsightsFixtureVersion string                  `json:"insights_fixture_version"`
+	InsightsEvidenceRefs   []string                `json:"insights_evidence_refs"`
 }
 type AlertList struct {
 	Items       []DeliveryAlert `json:"items"`
@@ -114,15 +124,18 @@ type AlertList struct {
 	IsSimulated bool            `json:"is_simulated"`
 }
 type AlertFilter struct {
-	Status   AlertStatus
-	Type     AlertType
-	Severity string
-	Fixture  AlertEvaluationScenario
-	Cursor   string
-	Limit    int
+	PlanID      string
+	ExecutionID string
+	Status      AlertStatus
+	Type        AlertType
+	Severity    string
+	Fixture     AlertEvaluationScenario
+	Cursor      string
+	Limit       int
 }
 type EvaluateAlertsRequest struct {
-	Fixture AlertEvaluationScenario `json:"fixture"`
+	Fixture     AlertEvaluationScenario `json:"fixture"`
+	ExecutionID string                  `json:"execution_id,omitempty"`
 }
 type UpdateAlertRequest struct {
 	Action          AlertAction `json:"action"`
@@ -130,6 +143,9 @@ type UpdateAlertRequest struct {
 }
 
 func (r EvaluateAlertsRequest) Validate() error {
+	if r.ExecutionID != strings.TrimSpace(r.ExecutionID) {
+		return ErrInvalidRequest
+	}
 	switch r.Fixture {
 	case AlertScenarioNormalDay, AlertScenarioAnomalyDay, AlertScenarioStaleData, AlertScenarioInsufficientData:
 		return nil
@@ -154,55 +170,97 @@ func (s Service) EvaluateAlerts(ctx context.Context, actor contract.ActorContext
 		return EvaluateAlertsResponse{}, err
 	}
 	now := s.now()
-	empty := EvaluateAlertsResponse{Items: []DeliveryAlert{}, Source: MetricSourceDemoFixture, IsSimulated: true, Scenario: request.Fixture, EvaluatedAt: now}
-	metrics, err := s.Repository.ListProjectMetricSnapshots(ctx, actor.OrganizationID, projectID, 100)
+	insights, err := s.insightsConsumer().Read(ctx, InsightsQuery{OrganizationID: actor.OrganizationID, ProjectID: projectID, ExecutionID: request.ExecutionID, Platform: "ocean_engine", Fixture: string(request.Fixture), WindowStart: now.Add(-24 * time.Hour), WindowEnd: now, Granularity: "day"})
 	if err != nil {
 		return EvaluateAlertsResponse{}, err
 	}
-	if len(metrics) == 0 {
-		executions, executionErr := s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, 1)
-		if executionErr != nil {
-			return EvaluateAlertsResponse{}, executionErr
-		}
-		if len(executions) == 0 {
-			return empty, nil
-		} // No durable scope exists; never manufacture an FK target.
-		plan, planErr := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, executions[0].ChangeSet.PlanID)
-		if planErr != nil {
-			return EvaluateAlertsResponse{}, planErr
-		}
-		metrics = []DeliveryMetricSnapshot{{OrganizationID: actor.OrganizationID, ProjectID: projectID, ExecutionID: executions[0].Execution.ID, PlanID: plan.ID, CreativePackageID: plan.CreativePackageID, WindowStart: plan.StartAt, WindowEnd: plan.EndAt, DataThrough: plan.EndAt}}
-	}
-	seed := metrics[0]
-	fixtureMetrics, err := s.persistMonitoringFixture(ctx, actor, projectID, seed, request.Fixture, now)
-	if err != nil {
-		return EvaluateAlertsResponse{}, err
-	}
-	metrics = fixtureMetrics
-	// Stale and insufficient fixtures are retained as evidence but never manufacture alerts.
-	if request.Fixture != AlertScenarioAnomalyDay {
+	empty := EvaluateAlertsResponse{Items: []DeliveryAlert{}, Source: MetricSourceDemoFixture, IsSimulated: true, Scenario: request.Fixture, EvaluatedAt: now, InsightsSource: insights.Source, InsightsQuality: insights.Quality, InsightsQualityReason: insights.QualityReason, InsightsFixtureVersion: insights.FixtureVersion, InsightsEvidenceRefs: append([]string(nil), insights.EvidenceRefs...)}
+	if !insights.Usable() {
 		return empty, nil
 	}
-	result := make([]DeliveryAlert, 0, 4)
-	// The second immutable window is the current observation. The first is its
-	// fixed baseline, so the anomaly rules must never evaluate baseline values
-	// as if they were the triggering evidence.
-	m := metrics[len(metrics)-1]
-	plan, planErr := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, m.PlanID)
-	if planErr != nil {
-		return EvaluateAlertsResponse{}, planErr
+	windows := insights.metricWindows(request.ExecutionID)
+	if len(windows) < 2 || request.Fixture == AlertScenarioStaleData || request.Fixture == AlertScenarioInsufficientData {
+		return empty, nil
 	}
-	for _, kind := range []AlertType{AlertReviewRejected, AlertSpendSpike, AlertZeroConversion, AlertCostWorsening} {
+	baselineWindow, currentWindow := windows[0], windows[len(windows)-1]
+	empty.Source = MetricSourceDemoFixture
+	var simulationRun OutcomeSimulationRun
+	if currentWindow.SimulationRunID != "" {
+		if simulationRepository, ok := s.Repository.(outcomeSimulationRepository); ok {
+			run, _, runErr := simulationRepository.GetLatestOutcomeSimulation(ctx, actor.OrganizationID, projectID, currentWindow.ExecutionID)
+			if runErr != nil && !errors.Is(runErr, ErrNotFound) {
+				return EvaluateAlertsResponse{}, runErr
+			}
+			if runErr == nil {
+				simulationRun = run
+			}
+		}
+	}
+	planID := currentWindow.PlanID
+	if planID == "" {
+		planID = currentWindow.ObjectID
+	}
+	plan := DeliveryPlan{}
+	if currentWindow.PlanID != "" {
+		plan, err = s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, currentWindow.PlanID)
+		if err != nil {
+			return EvaluateAlertsResponse{}, err
+		}
+	}
+	timezone := currentWindow.Timezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	advertiserID := currentWindow.ObjectID
+	if plan.CurrentVersion.Advertiser.ID != "" {
+		advertiserID = plan.CurrentVersion.Advertiser.ID
+	}
+	kinds := make([]AlertType, 0, 4)
+	if windowValue(currentWindow, InsightsMetricSpend) >= windowValue(baselineWindow, InsightsMetricSpend)*2 {
+		kinds = append(kinds, AlertSpendSpike)
+	}
+	if windowValue(currentWindow, InsightsMetricClicks) >= 100 && windowValue(currentWindow, InsightsMetricConversions) == 0 {
+		kinds = append(kinds, AlertZeroConversion)
+	}
+	baselineCPA := windowValue(baselineWindow, InsightsMetricSpend) / maxInt64(1, windowValue(baselineWindow, InsightsMetricConversions))
+	currentCPA := windowValue(currentWindow, InsightsMetricSpend) / maxInt64(1, windowValue(currentWindow, InsightsMetricConversions))
+	if currentCPA >= baselineCPA*2 {
+		kinds = append(kinds, AlertCostWorsening)
+	}
+	for _, event := range simulationRun.Events {
+		switch event.Type {
+		case "review_rejected":
+			kinds = appendAlertKind(kinds, AlertReviewRejected)
+		case "under_delivery":
+			kinds = appendAlertKind(kinds, AlertUnderDelivery)
+		case "creative_fatigue":
+			kinds = appendAlertKind(kinds, AlertCreativeFatigue)
+		case "tracking_anomaly":
+			kinds = appendAlertKind(kinds, AlertTrackingAnomaly)
+		}
+	}
+	result := make([]DeliveryAlert, 0, len(kinds))
+	for _, kind := range kinds {
 		id, idErr := s.idGenerator()("deliveryalert")
 		if idErr != nil {
 			return EvaluateAlertsResponse{}, idErr
 		}
-		evidence := []string{"mock://metric/" + m.ID, "mock://fixture/anomaly_day/" + string(kind)}
-		fingerprint, hashErr := alertFingerprint(actor.OrganizationID, projectID, string(kind), "v1", AlertMonitoredEntity{Type: "delivery_plan", ID: m.PlanID, AdvertiserID: plan.CurrentVersion.Advertiser.ID}, m, evidence)
+		evidence := append([]string{}, currentWindow.EvidenceRefs...)
+		if currentWindow.ExecutionID != "" {
+			evidence = append(evidence, "simulation://execution/"+currentWindow.ExecutionID)
+		}
+		if simulationRun.ID != "" {
+			evidence = append(evidence, "simulation://run/"+simulationRun.ID)
+		}
+		evidence = append(evidence, "insights://window/"+currentWindow.WindowStart.UTC().Format(time.RFC3339), "insights://window/"+baselineWindow.WindowStart.UTC().Format(time.RFC3339))
+		if kind == AlertReviewRejected {
+			evidence = append(evidence, "simulation://platform-event/review-rejected")
+		}
+		fingerprint, hashErr := alertFingerprint(actor.OrganizationID, projectID, string(kind), "v3", AlertMonitoredEntity{Type: "delivery_plan", ID: planID, AdvertiserID: advertiserID}, currentWindow, evidence)
 		if hashErr != nil {
 			return EvaluateAlertsResponse{}, hashErr
 		}
-		alert, upsertErr := s.Repository.UpsertAlert(ctx, DeliveryAlert{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, PlanID: m.PlanID, ExecutionID: m.ExecutionID, MonitoredEntity: AlertMonitoredEntity{Type: "delivery_plan", ID: m.PlanID, AdvertiserID: plan.CurrentVersion.Advertiser.ID}, Type: kind, RuleID: string(kind), RuleVersion: "v1", Status: AlertOpen, Fingerprint: fingerprint, Title: string(kind), Detail: "mock anomaly fixture", Severity: alertSeverity(kind), Window: AlertWindow{Start: m.WindowStart, End: m.WindowEnd, Timezone: plan.CurrentVersion.Schedule.Timezone, DataThrough: m.DataThrough}, MetricDefinition: ruleMetric(kind, m), Owner: AlertOwner{ID: actor.Principal.ID, DisplayName: actor.Principal.ID, Source: "actor_context"}, EvidenceRefs: evidence, Source: MetricSourceDemoFixture, IsSimulated: true, Scenario: request.Fixture, DatasetVersion: m.DatasetVersion, FixtureVersion: m.FixtureVersion, Freshness: AlertFreshness{Status: "fresh", AsOf: m.DataThrough, EvaluatedAt: now, MaxAgeSeconds: 86400}, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now})
+		alert, upsertErr := s.Repository.UpsertAlert(ctx, DeliveryAlert{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, PlanID: planID, ExecutionID: currentWindow.ExecutionID, SimulationRunID: simulationRun.ID, MonitoredEntity: AlertMonitoredEntity{Type: "delivery_plan", ID: planID, AdvertiserID: advertiserID}, Type: kind, RuleID: string(kind), RuleVersion: "v3", Status: AlertOpen, Fingerprint: fingerprint, Title: alertTitle(kind), Detail: alertDetail(kind), Severity: alertSeverity(kind), Window: AlertWindow{Start: currentWindow.WindowStart, End: currentWindow.WindowEnd, Timezone: timezone, DataThrough: currentWindow.DataThrough, BaselineStart: &baselineWindow.WindowStart, BaselineEnd: &baselineWindow.WindowEnd}, MetricDefinition: ruleMetric(kind, baselineWindow, currentWindow), Owner: AlertOwner{Source: "workflow_context"}, EvidenceRefs: evidence, Source: MetricSourceDemoFixture, IsSimulated: true, Scenario: request.Fixture, DatasetVersion: currentWindow.FixtureVersion, FixtureVersion: currentWindow.FixtureVersion, Freshness: AlertFreshness{Status: "fresh", AsOf: currentWindow.DataThrough, EvaluatedAt: now, AgeSeconds: maxInt64(0, int64(now.Sub(currentWindow.DataThrough).Seconds())), MaxAgeSeconds: 86400}, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now})
 		if upsertErr != nil {
 			return EvaluateAlertsResponse{}, upsertErr
 		}
@@ -216,46 +274,7 @@ func (s Service) EvaluateAlerts(ctx context.Context, actor contract.ActorContext
 	empty.Items = result
 	return empty, nil
 }
-func (s Service) persistMonitoringFixture(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, seed DeliveryMetricSnapshot, fixture AlertEvaluationScenario, now time.Time) ([]DeliveryMetricSnapshot, error) {
-	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, seed.PlanID)
-	if err != nil {
-		return nil, err
-	}
-	baseStart := plan.StartAt
-	if baseStart.IsZero() {
-		baseStart = now.Add(-48 * time.Hour)
-	}
-	windows := []struct {
-		sequence   int
-		start, end time.Time
-		metrics    RawMetrics
-	}{{1, baseStart, baseStart.Add(24 * time.Hour), RawMetrics{Impressions: 10000, Clicks: 500, Conversions: 20, SpendCents: 20000}}, {2, baseStart.Add(24 * time.Hour), baseStart.Add(48 * time.Hour), RawMetrics{Impressions: 10000, Clicks: 500, Conversions: 20, SpendCents: 20000}}}
-	if fixture == AlertScenarioAnomalyDay {
-		windows[1].metrics = RawMetrics{Impressions: 10000, Clicks: 400, Conversions: 0, SpendCents: 60000}
-	}
-	if fixture == AlertScenarioInsufficientData {
-		windows[1].metrics = RawMetrics{Impressions: 10, Clicks: 1, Conversions: 0, SpendCents: 20}
-	}
-	values := make([]DeliveryMetricSnapshot, 0, 2)
-	for _, w := range windows {
-		id, err := s.idGenerator()("deliverymetric")
-		if err != nil {
-			return nil, err
-		}
-		through := w.end
-		if fixture == AlertScenarioStaleData {
-			through = w.end.Add(-72 * time.Hour)
-		}
-		v := DeliveryMetricSnapshot{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, ExecutionID: seed.ExecutionID, PlanID: seed.PlanID, CreativePackageID: seed.CreativePackageID, Source: MetricSourceDemoFixture, IsSimulated: true, DatasetVersion: DemoMetricDatasetVersion, FixtureVersion: string(fixture) + "/v1", WindowSequence: w.sequence, Currency: "CNY", WindowStart: w.start, WindowEnd: w.end, DataThrough: through, RawMetrics: w.metrics, CreatedBy: actor.Principal.ID, CreatedAt: now}
-		stored, _, err := s.Repository.CreateMetricSnapshot(ctx, v)
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, stored)
-	}
-	return values, nil
-}
-func alertFingerprint(org contract.OrganizationID, project contract.ProjectID, rule, version string, entity AlertMonitoredEntity, m DeliveryMetricSnapshot, evidence []string) (string, error) {
+func alertFingerprint(org contract.OrganizationID, project contract.ProjectID, rule, version string, entity AlertMonitoredEntity, m insightsMetricWindow, evidence []string) (string, error) {
 	return contract.CanonicalJSONHash(struct {
 		OrganizationID contract.OrganizationID        `json:"organization_id"`
 		ProjectID      contract.ProjectID             `json:"project_id"`
@@ -266,20 +285,48 @@ func alertFingerprint(org contract.OrganizationID, project contract.ProjectID, r
 		DatasetVersion string                         `json:"dataset_version"`
 		FixtureVersion string                         `json:"fixture_version"`
 		Evidence       []string                       `json:"evidence"`
-	}{org, project, rule, version, entity, struct{ Start, End time.Time }{m.WindowStart, m.WindowEnd}, m.DatasetVersion, m.FixtureVersion, evidence})
+	}{org, project, rule, version, entity, struct{ Start, End time.Time }{m.WindowStart, m.WindowEnd}, m.FixtureVersion, m.FixtureVersion, evidence})
 }
-func ruleMetric(kind AlertType, m DeliveryMetricSnapshot) AlertMetricDefinition {
+func ruleMetric(kind AlertType, baseline, current insightsMetricWindow) AlertMetricDefinition {
 	f := func(v int64) *float64 { x := float64(v); return &x }
 	switch kind {
 	case AlertReviewRejected:
 		return AlertMetricDefinition{Name: "review_rejection", Unit: "boolean", ObservedValue: f(1), Threshold: f(1)}
 	case AlertSpendSpike:
-		return AlertMetricDefinition{Name: "spend_cents", Unit: "CNY_cents", ObservedValue: f(m.RawMetrics.SpendCents), BaselineValue: f(20000), Threshold: f(30000)}
+		return AlertMetricDefinition{Name: "spend_cents", Unit: "CNY_cents", ObservedValue: f(windowValue(current, InsightsMetricSpend)), BaselineValue: f(windowValue(baseline, InsightsMetricSpend)), Threshold: f(windowValue(baseline, InsightsMetricSpend) * 2)}
 	case AlertZeroConversion:
-		return AlertMetricDefinition{Name: "conversions", Unit: "count", Numerator: f(m.RawMetrics.Conversions), Denominator: f(m.RawMetrics.Clicks), ObservedValue: f(m.RawMetrics.Conversions), Threshold: f(1)}
+		return AlertMetricDefinition{Name: "conversions", Unit: "count", Numerator: f(windowValue(current, InsightsMetricConversions)), Denominator: f(windowValue(current, InsightsMetricClicks)), ObservedValue: f(windowValue(current, InsightsMetricConversions)), Threshold: f(1)}
+	case AlertUnderDelivery:
+		return AlertMetricDefinition{Name: "spend_cents", Unit: "CNY_cents", ObservedValue: f(windowValue(current, InsightsMetricSpend)), BaselineValue: f(windowValue(baseline, InsightsMetricSpend)), Threshold: f(windowValue(baseline, InsightsMetricSpend) / 2)}
+	case AlertCreativeFatigue:
+		return AlertMetricDefinition{Name: "click_through_rate", Unit: "ratio", Numerator: f(windowValue(current, InsightsMetricClicks)), Denominator: f(maxInt64(1, windowValue(current, InsightsMetricImpressions)))}
+	case AlertTrackingAnomaly:
+		return AlertMetricDefinition{Name: "tracked_conversions", Unit: "count", Numerator: f(windowValue(current, InsightsMetricConversions)), Denominator: f(windowValue(current, InsightsMetricClicks)), ObservedValue: f(windowValue(current, InsightsMetricConversions)), Threshold: f(1)}
 	default:
-		return AlertMetricDefinition{Name: "cpa_cents", Unit: "CNY_cents", Numerator: f(m.RawMetrics.SpendCents), Denominator: f(maxInt64(1, m.RawMetrics.Conversions)), ObservedValue: f(m.RawMetrics.SpendCents / maxInt64(1, m.RawMetrics.Conversions)), BaselineValue: f(1000), Threshold: f(1500)}
+		baselineCPA := windowValue(baseline, InsightsMetricSpend) / maxInt64(1, windowValue(baseline, InsightsMetricConversions))
+		return AlertMetricDefinition{Name: "cpa_cents", Unit: "CNY_cents", Numerator: f(windowValue(current, InsightsMetricSpend)), Denominator: f(maxInt64(1, windowValue(current, InsightsMetricConversions))), ObservedValue: f(windowValue(current, InsightsMetricSpend) / maxInt64(1, windowValue(current, InsightsMetricConversions))), BaselineValue: f(baselineCPA), Threshold: f(baselineCPA * 2)}
 	}
+}
+
+func windowValue(window insightsMetricWindow, metric InsightsMetricName) int64 {
+	return int64(window.Values[metric])
+}
+
+func alertTitle(kind AlertType) string {
+	return map[AlertType]string{AlertReviewRejected: "平台审核被拒", AlertSpendSpike: "消耗较基准明显上升", AlertZeroConversion: "有点击但没有转化", AlertCostWorsening: "转化成本较基准恶化", AlertUnderDelivery: "跑量不足", AlertCreativeFatigue: "素材疲劳", AlertTrackingAnomaly: "追踪异常"}[kind]
+}
+
+func alertDetail(kind AlertType) string {
+	return map[AlertType]string{AlertReviewRejected: "情景模拟记录到平台审核拒绝。", AlertSpendSpike: "当前窗口消耗达到基准窗口的两倍。", AlertZeroConversion: "当前窗口有足量点击但未产生转化。", AlertCostWorsening: "当前窗口转化成本达到基准窗口的两倍。", AlertUnderDelivery: "当前窗口消耗和曝光显著低于基准。", AlertCreativeFatigue: "素材点击率与转化率在连续窗口中衰减。", AlertTrackingAnomaly: "存在点击但追踪到的转化为零。"}[kind]
+}
+
+func appendAlertKind(kinds []AlertType, kind AlertType) []AlertType {
+	for _, existing := range kinds {
+		if existing == kind {
+			return kinds
+		}
+	}
+	return append(kinds, kind)
 }
 func maxInt64(a, b int64) int64 {
 	if a > b {
@@ -289,9 +336,9 @@ func maxInt64(a, b int64) int64 {
 }
 func alertSeverity(kind AlertType) string {
 	switch kind {
-	case AlertReviewRejected:
+	case AlertReviewRejected, AlertTrackingAnomaly:
 		return "critical"
-	case AlertSpendSpike:
+	case AlertSpendSpike, AlertUnderDelivery:
 		return "medium"
 	default:
 		return "high"

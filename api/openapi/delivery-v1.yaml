@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Cookies Delivery API
-  version: 1.3.0
-  description: Versioned mock delivery plans, authoritative preflight, content-bound approvals, and durable controlled local-simulation execution evidence.
+  version: 1.4.0
+  description: Versioned mock delivery plans, authoritative preflight, content-bound approvals, durable controlled local-simulation execution evidence, and an owner-scoped repeatable mock tour.
 servers:
   - url: /
 security:
@@ -167,12 +167,15 @@ paths:
       - $ref: '#/components/parameters/PlanID'
     post:
       operationId: generateDeliveryRecommendation
-      summary: Deterministically generate one recommendation from the current immutable PlanVersion
-      description: This operation is derived only from the PlanVersion, never from a monitoring Alert, and never executes or writes a platform.
+      summary: Generate one deterministic optimization recommendation from post-launch simulation evidence
+      description: >-
+        Requires a succeeded platform-operation rehearsal, two persisted metric windows, and
+        monitoring alerts for the same execution. The recommendation freezes those exact evidence
+        references and never writes to a real platform.
       requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
         '201':
-          description: Proposed recommendation with frozen base and target snapshots.
+          description: Proposed recommendation with frozen evidence, base, and target snapshots.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRecommendation' }
@@ -388,6 +391,30 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:reject:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ChangeSetID'
+    post:
+      operationId: rejectDeliveryChangeSet
+      summary: Return the submitted change request with a durable revision reason
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version, reason]
+              properties:
+                expected_version: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        '200': { $ref: '#/components/responses/ChangeSet' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:execute:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -492,7 +519,7 @@ paths:
               additionalProperties: false
               required: [dataset_version]
               properties:
-                dataset_version: { type: string, const: preroll-demo/v1 }
+                dataset_version: { type: string, const: post-launch-simulator/v1 }
       responses:
         '201':
           description: Immutable simulated metric snapshot.
@@ -546,6 +573,8 @@ paths:
       operationId: listDeliveryMonitoringAlerts
       summary: List project-scoped monitoring alerts with cursor pagination
       parameters:
+        - $ref: '#/components/parameters/AlertPlanFilter'
+        - $ref: '#/components/parameters/AlertExecutionFilter'
         - $ref: '#/components/parameters/AlertStatusFilter'
         - $ref: '#/components/parameters/AlertTypeFilter'
         - $ref: '#/components/parameters/AlertSeverityFilter'
@@ -590,6 +619,106 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/tour-runs/{run_id}:prepare:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/TourRunID'
+    post:
+      operationId: prepareDeliveryTourRun
+      summary: Deterministically prepare an owner-scoped complete mock delivery tour
+      description: >-
+        Replaying a prepared run returns the same seven case plans without duplication.
+        A partially prepared run is first reset through its exact ownership boundary and
+        then rebuilt. This endpoint never writes to a real advertising platform.
+      responses:
+        '201':
+          description: A new run and its seven deterministic cases were prepared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryTourRun' }
+        '200':
+          description: The already prepared run was replayed without duplication.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryTourRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExecutionID'
+    post:
+      operationId: createDeliveryOutcomeSimulationRun
+      summary: Run a deterministic post-launch outcome scenario after a successful platform-operation rehearsal
+      description: >-
+        This rule-driven Mock simulation does not predict real advertising performance.
+        The exact PlanVersion, approved configuration, scenario and stable seed form
+        an idempotent input; matching inputs replay the same SimulationRun and metric windows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOutcomeSimulationRequest' }
+      responses:
+        '200':
+          description: Existing deterministic run replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutcomeSimulationResult' } } }
+        '201':
+          description: New deterministic run and metric windows created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutcomeSimulationResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-run:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExecutionID'
+    get:
+      operationId: getLatestDeliveryOutcomeSimulationRun
+      summary: Read the latest persisted outcome simulation for an execution
+      responses:
+        '200':
+          description: Latest run and its metric windows.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OutcomeSimulationResult' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/tour-runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/TourRunID'
+    get:
+      operationId: getDeliveryTourRun
+      summary: Read authoritative tour progress and resumable URLs
+      responses:
+        '200':
+          description: The run, seven cases, and progress derived from persisted delivery authority data.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryTourRun' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/tour-runs/{run_id}:reset:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/TourRunID'
+    post:
+      operationId: resetDeliveryTourRun
+      summary: Delete only the selected owner's exact tour-run causal closure
+      description: >-
+        Isolation is the authenticated organization, active project, stable run ID, and
+        authenticated owner. Ordinary plans and other owners or runs are not selected.
+      responses:
+        '200':
+          description: The run was marked reset and exact deletion counts are returned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryTourResetResult' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     sessionCookie:
@@ -632,6 +761,14 @@ components:
       in: path
       required: true
       schema: { type: string }
+    TourRunID:
+      name: run_id
+      in: path
+      required: true
+      description: Stable caller-chosen run ID, scoped by organization, project, and authenticated owner.
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9_-]{2,63}$'
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -651,6 +788,16 @@ components:
       name: status
       in: query
       schema: { $ref: '#/components/schemas/AlertStatus' }
+    AlertPlanFilter:
+      name: plan_id
+      in: query
+      description: Restrict results to one DeliveryPlan inside the current Project.
+      schema: { type: string, minLength: 1 }
+    AlertExecutionFilter:
+      name: execution_id
+      in: query
+      description: Restrict results to one Execution inside the current Project.
+      schema: { type: string, minLength: 1 }
     AlertTypeFilter:
       name: type
       in: query
@@ -723,6 +870,94 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RecommendationDecisionResult' }
+    DeliveryTourCaseKey:
+      type: string
+      enum: [golden_path, preflight_failure, approval_expired, plan_stale, partial_execution, result_unknown, review_rejected_alert]
+    DeliveryTourRunStatus:
+      type: string
+      enum: [preparing, prepared, reset]
+    DeliveryTourCase:
+      type: object
+      additionalProperties: false
+      required: [key, title, plan_id, status, expected_outcome, start_url, source, scenario, evidence, observed_at]
+      properties:
+        key: { $ref: '#/components/schemas/DeliveryTourCaseKey' }
+        title: { type: string }
+        plan_id: { type: string }
+        status: { type: string, enum: [missing, prepared, ready, observed] }
+        expected_outcome: { type: string }
+        start_url: { type: string }
+        source: { type: string, const: mock }
+        scenario: { $ref: '#/components/schemas/DeliveryTourCaseKey' }
+        evidence:
+          type: array
+          items: { type: string }
+        observed_at: { type: string, format: date-time }
+    DeliveryTourStep:
+      type: object
+      additionalProperties: false
+      required: [key, title, completion_condition, complete, url, explanation, evidence]
+      properties:
+        key:
+          type: string
+          enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval, manual_action_package]
+        title: { type: string }
+        completion_condition: { type: string }
+        complete: { type: boolean }
+        url: { type: string }
+        explanation: { type: string }
+        evidence:
+          type: array
+          items: { type: string }
+    DeliveryTourRun:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, owner_id, status, source, scenario, prepared_at, reset_at, created_at, updated_at, cases, steps, current_step, suggested_next_url]
+      properties:
+        id: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{2,63}$' }
+        organization_id: { type: string }
+        project_id: { type: string }
+        owner_id: { type: string }
+        status: { $ref: '#/components/schemas/DeliveryTourRunStatus' }
+        source: { type: string, const: mock }
+        scenario: { type: string, const: delivery_tour }
+        prepared_at:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+        reset_at:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        cases:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items: { $ref: '#/components/schemas/DeliveryTourCase' }
+        steps:
+          type: array
+          minItems: 9
+          maxItems: 9
+          items: { $ref: '#/components/schemas/DeliveryTourStep' }
+        current_step:
+          type: string
+          enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval, manual_action_package, complete]
+        suggested_next_url: { type: string }
+    DeliveryTourResetResult:
+      type: object
+      additionalProperties: false
+      required: [run, deleted, source, scenario, reset_at, isolation_key]
+      properties:
+        run: { $ref: '#/components/schemas/DeliveryTourRun' }
+        deleted:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        source: { type: string, const: mock }
+        scenario: { type: string, const: delivery_tour_reset }
+        reset_at: { type: string, format: date-time }
+        isolation_key: { type: string }
     Problem:
       description: Cookies problem response.
       content:
@@ -775,15 +1010,26 @@ components:
     CreativeReference:
       type: object
       additionalProperties: false
-      required: [asset_id, version, confirmed]
+      required: [asset_id, version, confirmed, content_hash, route]
       properties:
         asset_id: { type: string }
         version: { type: integer, minimum: 1 }
         confirmed: { type: boolean }
+        content_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        route: { type: string, minLength: 1 }
+    StrategyReference:
+      type: object
+      additionalProperties: false
+      required: [task_id, version, content_hash, route]
+      properties:
+        task_id: { type: string, minLength: 1 }
+        version: { type: integer, minimum: 1 }
+        content_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        route: { type: string, minLength: 1 }
     PlanDraft:
       type: object
       additionalProperties: false
-      required: [name, objective, advertiser, budget, schedule, tracking, creative_references, source_strategy_version]
+      required: [name, objective, advertiser, budget, schedule, tracking, creative_references, strategy_reference, source_strategy_version]
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
         objective: { type: string, minLength: 1, maxLength: 2000 }
@@ -795,11 +1041,12 @@ components:
           type: array
           maxItems: 50
           items: { $ref: '#/components/schemas/CreativeReference' }
+        strategy_reference: { $ref: '#/components/schemas/StrategyReference' }
         source_strategy_version: { type: string }
     UpdatePlan:
       type: object
       additionalProperties: false
-      required: [expected_version, name, objective, advertiser, budget, schedule, tracking, creative_references, source_strategy_version]
+      required: [expected_version, name, objective, advertiser, budget, schedule, tracking, creative_references, strategy_reference, source_strategy_version]
       properties:
         expected_version: { type: integer, minimum: 1 }
         name: { type: string, minLength: 1, maxLength: 255 }
@@ -812,6 +1059,7 @@ components:
           type: array
           maxItems: 50
           items: { $ref: '#/components/schemas/CreativeReference' }
+        strategy_reference: { $ref: '#/components/schemas/StrategyReference' }
         source_strategy_version: { type: string }
     DeliveryPlanVersion:
       allOf:
@@ -850,6 +1098,18 @@ components:
         platform: { type: string, const: ocean_engine_mock }
         source: { type: string, const: mock }
         scenario: { $ref: '#/components/schemas/Scenario' }
+        tour_run_id:
+          oneOf:
+            - { type: string, pattern: '^[a-z0-9][a-z0-9_-]{2,63}$' }
+            - { type: 'null' }
+        tour_owner_id:
+          oneOf:
+            - { type: string }
+            - { type: 'null' }
+        tour_case:
+          oneOf:
+            - { $ref: '#/components/schemas/DeliveryTourCaseKey' }
+            - { type: 'null' }
         current_version_number: { type: integer, minimum: 1 }
         current_version: { $ref: '#/components/schemas/DeliveryPlanVersion' }
         versions:
@@ -860,7 +1120,7 @@ components:
         updated_at: { type: string, format: date-time }
     Scenario:
       type: string
-      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list, approval_queue, missing_required_field, orphan_dependency, missing_confirmation, platform_fields_pending, recommendation_generated, recommendation_accepted, recommendation_rejected, manual_action_package]
+      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list, approval_queue, missing_required_field, orphan_dependency, missing_confirmation, platform_fields_pending, recommendation_generated, recommendation_accepted, recommendation_rejected, manual_action_package, preflight_failure, approval_expired, plan_stale, partial_execution, result_unknown, review_rejected_alert]
     PlanList:
       type: object
       required: [items, source, scenario]
@@ -1044,13 +1304,14 @@ components:
     DeliveryRecommendation:
       type: object
       additionalProperties: false
-      required: [id, organization_id, project_id, plan_id, plan_version, fingerprint, status, base_snapshot, base_snapshot_hash, target_snapshot, target_snapshot_hash, evidence, action, impact, risks, observation, provenance, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, plan_id, plan_version, simulation_run_id, fingerprint, status, base_snapshot, base_snapshot_hash, target_snapshot, target_snapshot_hash, evidence, action, impact, risks, observation, provenance, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
         plan_id: { type: string }
         plan_version: { type: integer, minimum: 1 }
+        simulation_run_id: { type: string }
         fingerprint: { type: string, minLength: 1 }
         status: { $ref: '#/components/schemas/RecommendationStatus' }
         base_snapshot: { $ref: '#/components/schemas/DeliveryConfigurationSnapshot' }
@@ -1113,6 +1374,12 @@ components:
           items: { type: string }
         approved_by: { type: string }
         approved_at: { type: string, format: date-time }
+        rejected_by: { type: string }
+        rejected_at:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+        rejection_reason: { type: string }
         approval: { $ref: '#/components/schemas/ApprovalView' }
         source: { type: string, const: mock }
         scenario: { $ref: '#/components/schemas/Scenario' }
@@ -1179,7 +1446,7 @@ components:
     ManualActionPackage:
       type: object
       additionalProperties: false
-      required: [id, organization_id, project_id, change_set_id, target_snapshot_hash, content_hash, instructions, forbidden_actions, evidence, provenance, source, scenario, created_at]
+      required: [id, organization_id, project_id, change_set_id, target_snapshot_hash, content_hash, instructions, forbidden_actions, evidence, provenance, optimized_plan_version, optimized_plan_hash, source, scenario, created_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -1198,6 +1465,8 @@ components:
           type: array
           items: { type: string }
         provenance: { $ref: '#/components/schemas/DeliveryFieldProvenance' }
+        optimized_plan_version: { type: integer, minimum: 1 }
+        optimized_plan_hash: { $ref: '#/components/schemas/CanonicalHash' }
         source: { type: string, const: mock }
         scenario: { type: string, const: manual_action_package }
         created_at: { type: string, format: date-time }
@@ -1321,19 +1590,95 @@ components:
           type: array
           items: { type: string }
         created_at: { type: string, format: date-time }
-    DeliveryMetricSnapshot:
+    OutcomeSimulationScenario:
+      type: string
+      enum: [steady, cost_pressure, under_delivery, creative_fatigue, tracking_anomaly, review_rejected]
+    CreateOutcomeSimulationRequest:
       type: object
-      required: [id, organization_id, project_id, execution_id, plan_id, creative_package_id, source, is_simulated, dataset_version, currency, window_start, window_end, raw_metrics, created_by, created_at]
+      additionalProperties: false
+      required: [scenario, stable_seed]
+      properties:
+        scenario: { $ref: '#/components/schemas/OutcomeSimulationScenario' }
+        stable_seed: { type: string, maxLength: 128 }
+    OutcomeSimulationFactor:
+      type: object
+      additionalProperties: false
+      required: [key, value_bp, explanation, evidence]
+      properties:
+        key: { type: string }
+        value_bp: { type: integer }
+        explanation: { type: string }
+        evidence: { type: array, items: { type: string } }
+    OutcomeSimulationEvent:
+      type: object
+      additionalProperties: false
+      required: [type, severity, window_sequence, explanation, evidence]
+      properties:
+        type: { type: string, enum: [review_rejected, under_delivery, cost_worsening, creative_fatigue, tracking_anomaly] }
+        severity: { type: string, enum: [critical, high, medium, low] }
+        window_sequence: { type: integer, minimum: 1 }
+        explanation: { type: string }
+        evidence: { type: array, items: { type: string } }
+    OutcomeSimulationRun:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, execution_id, plan_id, plan_version, plan_hash, model_version, scenario, stable_seed, input_hash, fingerprint, input, parameters, events, evidence, status, created_by, created_at, completed_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
         execution_id: { type: string }
         plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        plan_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        model_version: { type: string, const: delivery-outcome-scenario/v1 }
+        scenario: { $ref: '#/components/schemas/OutcomeSimulationScenario' }
+        stable_seed: { type: string }
+        input_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        fingerprint: { $ref: '#/components/schemas/CanonicalHash' }
+        input: { type: object, additionalProperties: true }
+        parameters:
+          type: object
+          additionalProperties: false
+          required: [base_cpm_minor, base_ctr_bp, base_cvr_bp, revenue_per_conversion_minor, daily_budget_minor, factors]
+          properties:
+            base_cpm_minor: { type: integer, minimum: 0 }
+            base_ctr_bp: { type: integer, minimum: 0 }
+            base_cvr_bp: { type: integer, minimum: 0 }
+            revenue_per_conversion_minor: { type: integer, minimum: 0 }
+            daily_budget_minor: { type: integer, minimum: 0 }
+            factors: { type: array, items: { $ref: '#/components/schemas/OutcomeSimulationFactor' } }
+        events: { type: array, items: { $ref: '#/components/schemas/OutcomeSimulationEvent' } }
+        evidence: { type: array, items: { type: string } }
+        status: { type: string, const: completed }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    OutcomeSimulationResult:
+      type: object
+      additionalProperties: false
+      required: [run, metric_snapshots, replay]
+      properties:
+        run: { $ref: '#/components/schemas/OutcomeSimulationRun' }
+        metric_snapshots: { type: array, minItems: 3, items: { $ref: '#/components/schemas/DeliveryMetricSnapshot' } }
+        replay: { type: boolean }
+    DeliveryMetricSnapshot:
+      type: object
+      required: [id, organization_id, project_id, execution_id, simulation_run_id, plan_id, creative_package_id, source, is_simulated, dataset_version, fixture_version, window_sequence, data_through, currency, window_start, window_end, raw_metrics, calculation_basis, created_by, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        execution_id: { type: string }
+        simulation_run_id: { type: string }
+        plan_id: { type: string }
         creative_package_id: { type: string }
-        source: { type: string, const: demo_fixture }
+        source: { type: string, const: post_launch_simulator }
         is_simulated: { type: boolean, const: true }
-        dataset_version: { type: string, const: preroll-demo/v1 }
+        dataset_version: { type: string, const: delivery-outcome-scenario/v1 }
+        fixture_version: { type: string }
+        window_sequence: { type: integer, minimum: 1 }
+        data_through: { type: string, format: date-time }
         currency: { type: string, const: CNY }
         window_start: { type: string, format: date-time }
         window_end: { type: string, format: date-time }
@@ -1345,16 +1690,34 @@ components:
             clicks: { type: integer, minimum: 0 }
             conversions: { type: integer, minimum: 0 }
             spend_cents: { type: integer, minimum: 0 }
+            revenue_cents: { type: integer, minimum: 0 }
+        calculation_basis:
+          type: object
+          additionalProperties: false
+          required: [formula, spend_multiplier_bp, reach_multiplier_bp, ctr_multiplier_bp, cvr_multiplier_bp, tracking_rate_bp, applied_factors, scenario_evidence]
+          properties:
+            formula: { type: string }
+            spend_multiplier_bp: { type: integer, minimum: 0 }
+            reach_multiplier_bp: { type: integer, minimum: 0 }
+            ctr_multiplier_bp: { type: integer, minimum: 0 }
+            cvr_multiplier_bp: { type: integer, minimum: 0 }
+            tracking_rate_bp: { type: integer, minimum: 0 }
+            applied_factors: { type: array, items: { $ref: '#/components/schemas/OutcomeSimulationFactor' } }
+            scenario_evidence: { type: array, items: { type: string } }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
     MonitoringFixture:
       type: string
       description: Deterministic fixture used only by the controlled monitoring evaluator.
       enum: [normal_day, anomaly_day, stale_data, insufficient_data]
+    InsightsQualityStatus:
+      type: string
+      description: Quality gate returned by the Delivery-owned insights consumer port.
+      enum: [usable, empty, stale, incomplete, schema_mismatch, unavailable]
     AlertType:
       type: string
-      description: The four supported delivery monitoring alert classifications.
-      enum: [review_rejected, spend_spike, zero_conversion, cost_worsening]
+      description: Monitoring classifications derived from the same persisted outcome SimulationRun.
+      enum: [review_rejected, spend_spike, zero_conversion, cost_worsening, under_delivery, creative_fatigue, tracking_anomaly]
     AlertStatus:
       type: string
       enum: [open, acknowledged, dismissed]
@@ -1408,13 +1771,14 @@ components:
     DeliveryMonitoringAlert:
       type: object
       additionalProperties: false
-      required: [id, organization_id, project_id, plan_id, execution_id, monitored_entity, type, rule_id, rule_version, fingerprint, severity, status, version, window, metric_definition, owner, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, plan_id, execution_id, simulation_run_id, monitored_entity, type, rule_id, rule_version, fingerprint, severity, status, version, window, metric_definition, owner, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
         plan_id: { type: string, minLength: 1 }
         execution_id: { type: string, minLength: 1 }
+        simulation_run_id: { type: string, minLength: 1 }
         monitored_entity:
           type: object
           additionalProperties: false
@@ -1425,7 +1789,7 @@ components:
             advertiser_id: { type: string }
         type: { $ref: '#/components/schemas/AlertType' }
         rule_id: { type: string }
-        rule_version: { type: string, const: v1 }
+        rule_version: { type: string, const: v3 }
         fingerprint: { type: string, minLength: 1 }
         severity: { $ref: '#/components/schemas/AlertSeverity' }
         status: { $ref: '#/components/schemas/AlertStatus' }
@@ -1436,10 +1800,10 @@ components:
           type: array
           minItems: 1
           items: { type: string }
-        source: { type: string, const: demo_fixture }
+        source: { type: string, const: post_launch_simulator }
         is_simulated: { type: boolean, const: true }
         scenario: { $ref: '#/components/schemas/MonitoringFixture' }
-        dataset_version: { type: string, const: preroll-demo/v1 }
+        dataset_version: { type: string, const: delivery-outcome-scenario/v1 }
         fixture_version: { type: string, minLength: 1 }
         acknowledged_at:
           oneOf:
@@ -1468,20 +1832,30 @@ components:
       required: [fixture]
       properties:
         fixture: { $ref: '#/components/schemas/MonitoringFixture' }
+        execution_id:
+          type: string
+          description: Optional project-scoped execution seed. Tour preparation uses it to avoid selecting unrelated project metrics.
     AlertEvaluationResult:
       type: object
       additionalProperties: false
-      required: [items, created_count, reused_count, source, is_simulated, scenario, evaluated_at]
+      required: [items, created_count, reused_count, source, is_simulated, scenario, evaluated_at, insights_source, insights_quality, insights_fixture_version, insights_evidence_refs]
       properties:
         items:
           type: array
           items: { $ref: '#/components/schemas/DeliveryMonitoringAlert' }
         created_count: { type: integer, minimum: 0 }
         reused_count: { type: integer, minimum: 0 }
-        source: { type: string, const: demo_fixture }
+        source: { type: string, const: post_launch_simulator }
         is_simulated: { type: boolean, const: true }
         scenario: { $ref: '#/components/schemas/MonitoringFixture' }
         evaluated_at: { type: string, format: date-time }
+        insights_source: { type: string, enum: [mock, replay, connector] }
+        insights_quality: { $ref: '#/components/schemas/InsightsQualityStatus' }
+        insights_quality_reason: { type: string }
+        insights_fixture_version: { type: string, minLength: 1 }
+        insights_evidence_refs:
+          type: array
+          items: { type: string, minLength: 1 }
     AlertList:
       type: object
       additionalProperties: false
@@ -1494,7 +1868,7 @@ components:
           oneOf:
             - { type: string, minLength: 1 }
             - { type: 'null' }
-        source: { type: string, const: demo_fixture }
+        source: { type: string, const: post_launch_simulator }
         is_simulated: { type: boolean, const: true }
     UpdateAlert:
       type: object
@@ -1524,7 +1898,7 @@ components:
           type: object
           required: [code, message, request_id, retryable, details]
           properties:
-            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, PROJECT_ACCESS_DENIED, INVALID_STATE, VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, STALE_PLAN_VERSION, APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, SCOPE_REQUIRED, INTERNAL] }
+            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, PROJECT_ACCESS_DENIED, INVALID_STATE, VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, STALE_PLAN_VERSION, APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, TOUR_OWNER_MISMATCH, SCOPE_REQUIRED, INTERNAL] }
             message: { type: string }
             request_id: { type: string }
             retryable: { type: boolean }

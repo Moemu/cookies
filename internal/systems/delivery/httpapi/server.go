@@ -30,10 +30,13 @@ type Application interface {
 	CreateChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	Preflight(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	Approve(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
+	RejectChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.RejectChangeSetRequest) (delivery.ChangeSet, error)
 	Execute(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.ExecuteRequest) (delivery.ExecutionResult, bool, error)
 	Rollback(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
 	ListExecutions(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.ExecutionResult, error)
 	GetExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ExecutionResult, error)
+	CreateOutcomeSimulation(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateOutcomeSimulationRequest) (delivery.OutcomeSimulationResult, error)
+	GetLatestOutcomeSimulation(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.OutcomeSimulationResult, error)
 	CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error)
 	ListMetricSnapshots(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryMetricSnapshot, error)
 	EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error)
@@ -48,6 +51,9 @@ type Application interface {
 	RejectRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.DeliveryRecommendation, error)
 	CompileManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ManualActionPackage, bool, error)
 	GetManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ManualActionPackage, error)
+	PrepareTourRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryTourRun, bool, error)
+	GetTourRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryTourRun, error)
+	ResetTourRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryTourResetResult, error)
 }
 
 type Server struct {
@@ -79,12 +85,51 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/recommendations/{recommendation_action}", server.recommendationAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-runs", server.createOutcomeSimulation)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-run", server.getLatestOutcomeSimulation)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.createMetricSnapshot)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.listMetricSnapshots)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/alerts:evaluate", server.evaluateAlerts)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/alerts", server.listAlerts)
 	server.mux.HandleFunc("PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}", server.updateAlert)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/tour-runs/{tour_action}", server.tourRunAction)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/tour-runs/{run_id}", server.getTourRun)
 	return server
+}
+
+func (s *Server) tourRunAction(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("tour_action")
+	switch {
+	case strings.HasSuffix(action, ":prepare"):
+		value, replay, err := s.app.PrepareTourRun(r.Context(), mustActor(r), projectID(r), strings.TrimSuffix(action, ":prepare"))
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		status := http.StatusCreated
+		if replay {
+			status = http.StatusOK
+		}
+		writeJSON(w, status, value)
+	case strings.HasSuffix(action, ":reset"):
+		value, err := s.app.ResetTourRun(r.Context(), mustActor(r), projectID(r), strings.TrimSuffix(action, ":reset"))
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, value)
+	default:
+		writeError(w, r, delivery.ErrNotFound)
+	}
+}
+
+func (s *Server) getTourRun(w http.ResponseWriter, r *http.Request) {
+	value, err := s.app.GetTourRun(r.Context(), mustActor(r), projectID(r), r.PathValue("run_id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) compileConfiguration(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +264,7 @@ func (s *Server) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	v, err := s.app.ListAlerts(r.Context(), mustActor(r), projectID(r), delivery.AlertFilter{Status: delivery.AlertStatus(q.Get("status")), Type: delivery.AlertType(q.Get("type")), Severity: q.Get("severity"), Fixture: delivery.AlertEvaluationScenario(q.Get("fixture")), Cursor: q.Get("cursor"), Limit: queryLimit(r)})
+	v, err := s.app.ListAlerts(r.Context(), mustActor(r), projectID(r), delivery.AlertFilter{PlanID: q.Get("plan_id"), ExecutionID: q.Get("execution_id"), Status: delivery.AlertStatus(q.Get("status")), Type: delivery.AlertType(q.Get("type")), Severity: q.Get("severity"), Fixture: delivery.AlertEvaluationScenario(q.Get("fixture")), Cursor: q.Get("cursor"), Limit: queryLimit(r)})
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -401,7 +446,11 @@ func (s *Server) getChangeSet(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) changeSetAction(writer http.ResponseWriter, request *http.Request) {
 	action := request.PathValue("change_set_action")
-	var body delivery.ExecuteRequest
+	var body struct {
+		ExpectedVersion int64                      `json:"expected_version"`
+		Scenario        delivery.ExecutionScenario `json:"scenario"`
+		Reason          string                     `json:"reason"`
+	}
 	if !decode(writer, request, &body) || body.ExpectedVersion < 1 {
 		if body.ExpectedVersion < 1 {
 			writeError(writer, request, delivery.ErrInvalidRequest)
@@ -417,13 +466,20 @@ func (s *Server) changeSetAction(writer http.ResponseWriter, request *http.Reque
 		value, err = s.app.Preflight(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":preflight"), body.ExpectedVersion)
 	case strings.HasSuffix(action, ":approve"):
 		value, err = s.app.Approve(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":approve"), body.ExpectedVersion)
+	case strings.HasSuffix(action, ":reject"):
+		rejection := delivery.RejectChangeSetRequest{ExpectedVersion: body.ExpectedVersion, Reason: body.Reason}
+		if rejection.Validate() != nil {
+			writeError(writer, request, delivery.ErrInvalidRequest)
+			return
+		}
+		value, err = s.app.RejectChangeSet(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":reject"), rejection)
 	case strings.HasSuffix(action, ":execute"):
 		key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 		if key == "" {
 			writeError(writer, request, delivery.ErrInvalidRequest)
 			return
 		}
-		result, replay, executeErr := s.app.Execute(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":execute"), key, body)
+		result, replay, executeErr := s.app.Execute(request.Context(), mustActor(request), projectID(request), strings.TrimSuffix(action, ":execute"), key, delivery.ExecuteRequest{ExpectedVersion: body.ExpectedVersion, Scenario: body.Scenario})
 		if executeErr != nil {
 			writeError(writer, request, executeErr)
 			return
@@ -478,6 +534,32 @@ func (s *Server) createMetricSnapshot(writer http.ResponseWriter, request *http.
 		return
 	}
 	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) createOutcomeSimulation(writer http.ResponseWriter, request *http.Request) {
+	var body delivery.CreateOutcomeSimulationRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.CreateOutcomeSimulation(request.Context(), mustActor(request), projectID(request), request.PathValue("execution_id"), body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	status := http.StatusCreated
+	if value.Replay {
+		status = http.StatusOK
+	}
+	writeJSON(writer, status, value)
+}
+
+func (s *Server) getLatestOutcomeSimulation(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.app.GetLatestOutcomeSimulation(request.Context(), mustActor(request), projectID(request), request.PathValue("execution_id"))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) listMetricSnapshots(writer http.ResponseWriter, request *http.Request) {
@@ -554,6 +636,8 @@ func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 		status, code, message, retryable = http.StatusForbidden, "APPROVAL_SCOPE_EXCEEDED", "执行范围或预算超出批准快照", false
 	case errors.Is(err, delivery.ErrIdempotencyConflict):
 		status, code, message, retryable = http.StatusConflict, "IDEMPOTENCY_CONFLICT", "idempotency key conflicts with a different request", false
+	case errors.Is(err, delivery.ErrTourOwnerMismatch):
+		status, code, message, retryable = http.StatusConflict, "TOUR_OWNER_MISMATCH", "该演示运行属于其他负责人，不能准备或复位", false
 	case errors.Is(err, delivery.ErrVersionConflict):
 		status, code, message, retryable = http.StatusPreconditionFailed, "VERSION_CONFLICT", "资源已被更新，请刷新后重试", false
 	case strings.Contains(err.Error(), "scope is required"):
