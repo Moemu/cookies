@@ -494,6 +494,8 @@ func (s UploadService) IngestRenderedImage(
 	renderJobID string,
 	content io.Reader,
 	sizeBytes int64,
+	expectedWidth int,
+	expectedHeight int,
 	sourceAssets []contract.AssetVersionRef,
 	sourceResources []contract.ResourceRef,
 ) (contract.ProjectAssetRef, error) {
@@ -506,7 +508,7 @@ func (s UploadService) IngestRenderedImage(
 	if !requestContext.Actor.HasScope("assets.write") {
 		return contract.ProjectAssetRef{}, fmt.Errorf("assets.write scope is required")
 	}
-	if strings.TrimSpace(renderJobID) == "" || len(renderJobID) > 96 ||
+	if strings.TrimSpace(renderJobID) == "" || len(renderJobID) > 96 || expectedWidth < 2 || expectedHeight < 2 ||
 		content == nil || sizeBytes < 1 || sizeBytes > MaxImageBytes {
 		return contract.ProjectAssetRef{}, fmt.Errorf("render_job_id and supported image content are required")
 	}
@@ -555,9 +557,9 @@ func (s UploadService) IngestRenderedImage(
 		return contract.ProjectAssetRef{}, err
 	}
 	if commit.Kind != contract.AssetImage || commit.MIMEType != "image/png" ||
-		commit.WidthPixels != 1080 || commit.HeightPixels != 1440 {
+		commit.WidthPixels != expectedWidth || commit.HeightPixels != expectedHeight {
 		_ = s.Blobs.Delete(ctx, commit.Location)
-		return contract.ProjectAssetRef{}, fmt.Errorf("%w: rendered image must be a 1080x1440 PNG", ErrOutputMetadataMismatch)
+		return contract.ProjectAssetRef{}, fmt.Errorf("%w: rendered image must be a %dx%d PNG", ErrOutputMetadataMismatch, expectedWidth, expectedHeight)
 	}
 	outputRef := contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version}
 	for _, ref := range sourceAssets {
