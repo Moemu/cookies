@@ -373,6 +373,10 @@ func main() {
 		Projects:   projectService,
 		Packages:   creativedelivery.Reader{Service: creativeService},
 		References: projectdelivery.Reader{Service: projectService},
+		// The Connector is not configured in this environment. Normalize the
+		// deterministic OutcomeSimulation records through the Delivery consumer
+		// port until its future adapter publishes a stable contract.
+		Insights: delivery.SimulationInsightsReader{Repository: delivery.MySQLRepository{DB: db}},
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})

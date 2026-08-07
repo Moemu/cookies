@@ -1,0 +1,12 @@
+{
+  "fixture_version": "delivery-insights/v1/unavailable",
+  "schema_version": "delivery-insights/v1",
+  "source": "mock",
+  "quality": "unavailable",
+  "quality_reason": "the data source is not configured for this request",
+  "observed_at": "2026-08-02T00:05:00Z",
+  "data_through": "2026-08-02T00:00:00Z",
+  "objects": [],
+  "metrics": [],
+  "evidence_refs": ["fixture://delivery-insights/unavailable"]
+}

@@ -375,6 +375,7 @@ type Service struct {
 	Packages   CreativePackageReader
 	References PlanReferenceReader
 	Adapter    PlatformAdapter
+	Insights   InsightsConsumer
 	NewID      ids.Generator
 	Now        func() time.Time
 }
