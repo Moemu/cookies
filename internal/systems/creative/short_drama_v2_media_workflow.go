@@ -300,10 +300,35 @@ func (s Service) SelectShortDramaV2FirstFrame(ctx context.Context, actor contrac
 	if batch == nil || batch.ID != request.BatchID || workspace.PromptDraft == nil {
 		return TaskDetail{}, ErrInvalidState
 	}
+	batchCopy := *batch
+	batchCopy.Candidates = append([]ShortDramaV2FirstFrameCandidate(nil), batch.Candidates...)
+	sourceCanvas, modelCanvas, outputCanvas := workspace.SourceCanvas, workspace.ModelCanvas, workspace.OutputCanvas
 	var selected, selectedOutput *contract.ProjectAssetRef
 	var selectedCandidate *ShortDramaV2FirstFrameCandidate
-	for _, candidate := range batch.Candidates {
-		if candidate.ID == request.CandidateID && candidate.Status == ShortDramaV2ResourceReady && candidate.ModelCanvasAsset != nil && candidate.OutputCanvasAsset != nil {
+	for index := range batchCopy.Candidates {
+		candidate := batchCopy.Candidates[index]
+		if candidate.ID == request.CandidateID && candidate.Status == ShortDramaV2ResourceReady {
+			if candidate.ModelCanvasAsset == nil || candidate.OutputCanvasAsset == nil {
+				if candidate.Asset == nil {
+					return TaskDetail{}, fmt.Errorf("short drama V2 ready first frame has no source asset")
+				}
+				if sourceCanvas == nil || modelCanvas == nil || outputCanvas == nil {
+					derivedSource, derivedModel, derivedOutput, err := deriveShortDramaCanvases(workspace.SourceMetadata)
+					if err != nil {
+						return TaskDetail{}, fmt.Errorf("derive canvases for legacy first frame: %w", err)
+					}
+					sourceCanvas, modelCanvas, outputCanvas = &derivedSource, &derivedModel, &derivedOutput
+				}
+				repaired, err := s.normalizeShortDramaFirstFrameCandidate(ctx, actor, projectID, taskID, candidate, *modelCanvas, *outputCanvas)
+				if err != nil {
+					return TaskDetail{}, fmt.Errorf("repair legacy short drama first frame: %w", err)
+				}
+				candidate = repaired
+				batchCopy.Candidates[index] = repaired
+			}
+			if candidate.ModelCanvasAsset == nil || candidate.OutputCanvasAsset == nil {
+				return TaskDetail{}, fmt.Errorf("short drama V2 first frame canvas assets are incomplete")
+			}
 			asset := *candidate.ModelCanvasAsset
 			preview := *candidate.OutputCanvasAsset
 			selected = &asset
@@ -322,10 +347,12 @@ func (s Service) SelectShortDramaV2FirstFrame(ctx context.Context, actor contrac
 	next.CreatedAt = now
 	updated := *workspace
 	updated.Revision = next.Revision
-	batchCopy := *batch
 	batchCopy.SelectedAsset = selected
 	batchCopy.SelectedOutputAsset = selectedOutput
 	updated.FirstFrameBatch = &batchCopy
+	updated.SourceCanvas = sourceCanvas
+	updated.ModelCanvas = modelCanvas
+	updated.OutputCanvas = outputCanvas
 	updated.TrustedMaterials = nil
 	updated.ActiveStage = ShortDramaV2StageFrameSelected
 	prompt := *updated.PromptDraft

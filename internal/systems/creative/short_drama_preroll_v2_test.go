@@ -150,10 +150,31 @@ func TestShortDramaPrerollV3BuildsThreeFirstFramesAndSingleReferenceVideoInput(t
 	if readyBatch.Status != ShortDramaV2ResourceReady {
 		t.Fatalf("reconciled first frame batch = %#v", readyBatch)
 	}
+	legacyDraft := *current.VideoDraft
+	legacyWorkspace := *legacyDraft.ShortDramaPrerollV2
+	legacyBatch := *legacyWorkspace.FirstFrameBatch
+	legacyBatch.Candidates = append([]ShortDramaV2FirstFrameCandidate(nil), legacyBatch.Candidates...)
+	legacyBatch.Candidates[0].ModelCanvasAsset = nil
+	legacyBatch.Candidates[0].OutputCanvasAsset = nil
+	legacyWorkspace.FirstFrameBatch = &legacyBatch
+	legacyDraft.Revision++
+	legacyWorkspace.Revision = legacyDraft.Revision
+	legacyDraft.ShortDramaPrerollV2 = &legacyWorkspace
+	if _, err := service.ViralRemakes.ReviseVideoDraft(context.Background(), rc.Actor.OrganizationID, "project_1", taskID, current.VideoDraft.Revision, legacyDraft, TaskInProgress); err != nil {
+		t.Fatalf("persist legacy first frame batch: %v", err)
+	}
+	current, err = service.Repository.GetTaskDetail(context.Background(), rc.Actor.OrganizationID, "project_1", taskID)
+	if err != nil {
+		t.Fatalf("restore legacy first frame batch: %v", err)
+	}
+	readyBatch = current.VideoDraft.ShortDramaPrerollV2.FirstFrameBatch
 
 	selected, err := service.SelectShortDramaV2FirstFrame(context.Background(), rc.Actor, "project_1", taskID, SelectShortDramaV2FirstFrameRequest{ExpectedRevision: current.VideoDraft.Revision, BatchID: readyBatch.ID, CandidateID: readyBatch.Candidates[0].ID})
 	if err != nil {
 		t.Fatalf("select first frame: %v", err)
+	}
+	if selected.VideoDraft.ShortDramaPrerollV2.FirstFrameBatch.Candidates[0].ModelCanvasAsset == nil || selected.VideoDraft.ShortDramaPrerollV2.FirstFrameBatch.Candidates[0].OutputCanvasAsset == nil {
+		t.Fatalf("legacy candidate canvas assets were not repaired: %#v", selected.VideoDraft.ShortDramaPrerollV2.FirstFrameBatch.Candidates[0])
 	}
 	prompt := selected.VideoDraft.ShortDramaPrerollV2.PromptDraft
 	selected, err = service.UpdateShortDramaV2Prompts(context.Background(), rc.Actor, "project_1", taskID, UpdateShortDramaV2PromptsRequest{
