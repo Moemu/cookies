@@ -1027,7 +1027,7 @@ paths:
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-video-task:
     post:
       operationId: createCreativePreRollVideoTask
-      summary: Confirm an approved Strategy route and create one pre-roll video CreativeTask.
+      summary: Confirm an approved video route and create or resume one CreativeTask, including a BrandFilm workspace for brand_video.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
       requestBody:
         required: true
@@ -1629,14 +1629,15 @@ components:
     CreateVideoTaskRequest:
       type: object
       additionalProperties: false
-      required: [channel, source_video, concept, prompt, call_to_action, mandatory_elements, prohibited_claims, confirm_route]
+      required: [channel, mandatory_elements, prohibited_claims, confirm_route]
       anyOf:
         - required: [selected_route_id]
         - required: [route_index]
       properties:
         selected_route_id: {type: string, minLength: 1, maxLength: 128}
+        direction_id: {type: string, minLength: 1, maxLength: 96}
         route_index: {type: integer, minimum: 0}
-        channel: {enum: [douyin, kuaishou]}
+        channel: {enum: [xiaohongshu, douyin, kuaishou]}
         source_video: {$ref: '#/components/schemas/AssetVersionRef'}
         concept: {type: string, minLength: 1, maxLength: 500}
         prompt: {type: string, minLength: 1, maxLength: 4000}

@@ -1091,9 +1091,15 @@ export type ApiBrandFilmWorkspace = {
       revision: number
       stage: 'waiting_for_input' | 'brief_analysis_draft' | 'brief_confirmed' | 'concept_selection' | 'concept_confirmed' | 'production_plan_draft' | 'production_plan_confirmed' | 'generation_ready' | 'generating' | 'generation_review' | 'generation_locked' | 'audio_draft' | 'quality_review' | 'ready_for_review' | 'approved' | 'delivered'
       source_snapshot: {
-        fixture_id: string
-        fixture_version: number
-        fixture_hash: string
+        source_kind?: 'fixture' | 'strategy_package' | 'task_strategy' | 'manual_document' | 'manual'
+        intake_id?: string
+        input_identity_hash?: string
+        strategy_package_id?: string
+        strategy_package_version?: number
+        handoff_content_hash?: string
+        fixture_id?: string
+        fixture_version?: number
+        fixture_hash?: string
         brief_name: string
         product_name: string
         channel: string
@@ -1681,6 +1687,15 @@ export type ApiKnowledgeDocument = {
   source_uri: string
   source_type: string
   chunk_count: number
+  filename?: string
+  mime_type?: string
+  size_bytes?: number
+  content_sha256?: string
+  text_sha256?: string
+  extracted_text?: string
+  status?: 'parse_queued' | 'ready' | 'parse_failed'
+  parse_error_code?: string
+  parse_error_message?: string
   created_at: string
   updated_at: string
 }
@@ -3626,6 +3641,79 @@ function listCreativeTasks(projectId: string, limit = 100) {
   )
 }
 
+function listCreativeIntakes(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativeIntakeBootstrap[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes?limit=${limit}`,
+  )
+}
+
+async function uploadKnowledgeDocument(projectId: string, file: File): Promise<ApiKnowledgeDocument> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch(`${platformBase}/projects/${encodeURIComponent(projectId)}/knowledge/documents`, {
+    method: 'POST',
+    credentials: 'include',
+    body: form,
+  })
+  const payload = await response.json() as ApiKnowledgeDocument | { error?: { message?: string } }
+  if (!response.ok) throw new Error('error' in payload ? payload.error?.message ?? 'Brief 上传失败' : 'Brief 上传失败')
+  return payload as ApiKnowledgeDocument
+}
+
+function getKnowledgeDocument(projectId: string, documentId: string) {
+  return platformRequest<ApiKnowledgeDocument>(
+    `/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}`,
+  )
+}
+
+function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDocument, durationSeconds = 15) {
+  const filename = document.filename || document.title || '品牌 Brief.pdf'
+  const productName = filename.replace(/\.(pdf|docx|md)$/i, '').trim() || '未命名品牌项目'
+  const briefText = document.extracted_text?.trim() || ''
+  if (!briefText || !document.content_sha256) throw new Error('Brief 尚未解析完成，暂时不能创建品牌广告任务。')
+  return creativeRequest<ApiCreativeIntakeBootstrap>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      contract_version: 'creative-intake-create/v3',
+      source: 'manual',
+      format: 'video',
+      performance_mode: 'brand_video',
+      channel: 'douyin',
+      objective: `基于《${productName}》Brief 制作 ${durationSeconds} 秒品牌广告`,
+      audience: '以 Brief 解析与人工确认为准',
+      core_message: productName,
+      call_to_action: '',
+      concept: '等待 Brief 确认后生成创意方向',
+      tone: [],
+      visual_keywords: [],
+      mandatory_elements: [],
+      prohibited_claims: [],
+      creative_routes: [{
+        route_id: 'route_fixture_brand_video_guerlain_v1',
+        route_type: 'brand_video',
+        video_purpose: 'brand',
+        channels: ['douyin'],
+        reason: '用户上传 PDF Brief 后创建的品牌广告制作路线',
+        target_duration_seconds: durationSeconds,
+        aspect_ratio: '9:16',
+        source_asset_refs: [],
+        evidence_refs: [`knowledge://documents/${document.id}`],
+        requires_human_confirmation: true,
+      }],
+      manual_brand_film: {
+        document_id: document.id,
+        fixture_id: '',
+        fixture_version: 0,
+        fixture_hash: `sha256:${document.content_sha256}`,
+        brief_name: filename,
+        brief_text: briefText,
+        product_name: productName,
+      },
+    },
+  )
+}
+
 function createManualImageTextIntake(
   projectId: string,
   input: ApiCreateManualImageTextInput,
@@ -3702,6 +3790,25 @@ function createBrandVideoTaskFromDirection(
     {
       selected_route_id: selectedRouteId,
       direction_id: directionId,
+      channel,
+      mandatory_elements: [],
+      prohibited_claims: [],
+      confirm_route: true,
+    },
+  )
+}
+
+function createBrandFilmTaskFromIntake(
+  projectId: string,
+  intakeId: string,
+  selectedRouteId: string,
+  channel: 'xiaohongshu' | 'douyin' | 'kuaishou',
+) {
+  return creativeRequest<ApiCreativeTaskSummary>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: selectedRouteId,
       channel,
       mandatory_elements: [],
       prohibited_claims: [],
@@ -4220,6 +4327,10 @@ async function ensureBrandFilmFixtureWorkspace(projectId: string): Promise<ApiBr
     undefined,
     { 'Idempotency-Key': `brand-film-fixture-${projectId}-guerlain-v1` },
   )
+}
+
+async function getBrandFilmWorkspace(projectId: string, taskId: string): Promise<ApiBrandFilmWorkspace> {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ''))
 }
 
 async function analyzeBrandFilmBrief(projectId: string, taskId: string, expectedRevision: number) {
@@ -5323,7 +5434,12 @@ export const api = {
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
   listCreativeTasks,
+  listCreativeIntakes,
+  uploadKnowledgeDocument,
+  getKnowledgeDocument,
+  createManualBrandFilmIntake,
   ensureBrandFilmFixtureWorkspace,
+  getBrandFilmWorkspace,
   analyzeBrandFilmBrief,
   updateBrandFilmBrief,
   confirmBrandFilmBrief,
@@ -5359,6 +5475,7 @@ export const api = {
   confirmCreativeDirection,
   createImageTextTaskFromDirection,
   createBrandVideoTaskFromDirection,
+  createBrandFilmTaskFromIntake,
   generateImageTextDraft,
   updateImageTextDraft,
   generateImageTextSlot,

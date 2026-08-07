@@ -20,6 +20,28 @@ test('brand film fixture creation is project-scoped and idempotent', async () =>
   assert.equal(calls[0].init.body, undefined)
 })
 
+test('manual PDF Brief creates a duration-aware brand intake and one task', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init })
+    return jsonResponse({ id: calls.length === 1 ? 'intake_pdf' : 'task_pdf' })
+  }
+  try {
+    const intake = await api.createManualBrandFilmIntake('project_demo', {
+      id: 'knowledgedoc_1', organization_id: 'org_1', project_id: 'project_demo',
+      title: '新品 Brief.pdf', filename: '新品 Brief.pdf', source_uri: '', source_type: 'docs', chunk_count: 4,
+      content_sha256: 'a'.repeat(64), extracted_text: '完整品牌目标、受众、核心信息与视觉要求。', status: 'ready', created_at: '', updated_at: '',
+    }, 30)
+    await api.createBrandFilmTaskFromIntake('project_demo', intake.id, 'route_fixture_brand_video_guerlain_v1', 'douyin')
+  } finally { globalThis.fetch = originalFetch }
+  const intakeBody = JSON.parse(String(calls[0].init.body))
+  assert.equal(intakeBody.manual_brand_film.document_id, 'knowledgedoc_1')
+  assert.equal(intakeBody.manual_brand_film.brief_text, '完整品牌目标、受众、核心信息与视觉要求。')
+  assert.equal(intakeBody.creative_routes[0].target_duration_seconds, 30)
+  assert.equal(calls[1].url, '/api/creative/v1/projects/project_demo/creative-intakes/intake_pdf:create-video-task')
+})
+
 test('brand Brief edits preserve confirmed uploaded asset lineage', async () => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ url: string; init: RequestInit }> = []

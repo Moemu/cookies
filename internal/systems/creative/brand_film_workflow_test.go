@@ -4,11 +4,26 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/media"
 )
+
+func TestManualBrandFilmDocumentInputValidation(t *testing.T) {
+	input := ManualBrandFilmInput{
+		DocumentID: "knowledgedoc_1", FixtureHash: "sha256:" + strings.Repeat("a", 64),
+		BriefName: "brand-brief.pdf", BriefText: "品牌目标与受众", ProductName: "新品品牌广告",
+	}
+	if err := input.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	input.BriefText = ""
+	if err := input.Validate(); err == nil {
+		t.Fatal("Validate() expected incomplete document error")
+	}
+}
 
 func TestBrandFilmFixtureCompletesPersistentPhaseZeroToTwo(t *testing.T) {
 	t.Parallel()
