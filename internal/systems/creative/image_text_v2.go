@@ -299,6 +299,8 @@ type RenderedImageWriter interface {
 		string,
 		io.Reader,
 		int64,
+		int,
+		int,
 		[]contract.AssetVersionRef,
 		[]contract.ResourceRef,
 	) (contract.ProjectAssetRef, error)
@@ -918,6 +920,7 @@ func (s Service) ReconcileImageGenerationAttempt(
 	}
 	finalRef, err := s.RenderedImages.IngestRenderedImage(
 		ctx, requestContext, projectID, renderJobID, rendered.Content, rendered.SizeBytes,
+		renderSpec.FinalWidth, renderSpec.FinalHeight,
 		[]contract.AssetVersionRef{base.AssetVersion}, resources,
 	)
 	if err != nil {

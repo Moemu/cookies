@@ -80,6 +80,7 @@ func (s Service) normalizeShortDramaFirstFrameCandidate(
 	}
 	modelAsset, err := s.RenderedImages.IngestRenderedImage(
 		ctx, requestContext, projectID, candidate.ID+"-model-canvas", bytes.NewReader(modelBytes), int64(len(modelBytes)),
+		model.Width, model.Height,
 		[]contract.AssetVersionRef{candidate.Asset.AssetVersion}, nil,
 	)
 	if err != nil {
@@ -96,6 +97,7 @@ func (s Service) normalizeShortDramaFirstFrameCandidate(
 	}
 	outputAsset, err := s.RenderedImages.IngestRenderedImage(
 		ctx, requestContext, projectID, candidate.ID+"-output-canvas", bytes.NewReader(outputBytes), int64(len(outputBytes)),
+		output.Width, output.Height,
 		[]contract.AssetVersionRef{modelAsset.AssetVersion}, nil,
 	)
 	if err != nil {

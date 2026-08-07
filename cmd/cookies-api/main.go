@@ -900,6 +900,8 @@ func (w creativeRenderedImageWriter) IngestRenderedImage(
 	renderJobID string,
 	content io.Reader,
 	sizeBytes int64,
+	expectedWidth int,
+	expectedHeight int,
 	sourceAssets []contract.AssetVersionRef,
 	sourceResources []contract.ResourceRef,
 ) (contract.ProjectAssetRef, error) {
@@ -908,6 +910,7 @@ func (w creativeRenderedImageWriter) IngestRenderedImage(
 	}
 	return w.uploads.IngestRenderedImage(
 		ctx, requestContext, projectID, renderJobID, content, sizeBytes,
+		expectedWidth, expectedHeight,
 		sourceAssets, sourceResources,
 	)
 }

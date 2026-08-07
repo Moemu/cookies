@@ -388,7 +388,7 @@ func (shortDramaV2ImageReaderStub) OpenImage(context.Context, contract.ActorCont
 
 type shortDramaV2RenderedImageWriterStub struct{}
 
-func (shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+func (shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _, _ int, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
 	return contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID("asset_" + renderJobID), Version: 1}}, nil
 }
 
