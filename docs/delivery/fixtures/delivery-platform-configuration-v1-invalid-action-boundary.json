@@ -1,0 +1,9 @@
+{
+  "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "mutations": [
+    {
+      "path": "compilation_metadata.action_boundaries.0.validation_state",
+      "value": "invalid_validation_state"
+    }
+  ]
+}

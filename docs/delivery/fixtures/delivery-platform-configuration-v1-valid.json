@@ -5,7 +5,7 @@
   "plan_id": "plan_1",
   "version_number": 1,
   "hash_algorithm": "RFC8785-JCS-SHA256(payload)",
-  "canonical_hash": "f6684f7ec9c9f1df9cf0f86729e4e8e6137f586a89cfbc1820da4d5b75f70f45",
+  "canonical_hash": "e0aab3af932f986d066f1457c7e0ca4a70392d353ee04ea7814be4b0a7a07880",
   "payload": {
     "payload_schema_version": "delivery-platform-configuration/v1",
     "source": "readonly",
@@ -46,24 +46,40 @@
         "external_id": null,
         "source_version": "readonly/v0.1",
         "content_hash": null,
-        "display_name_snapshot": "app内下单",
+        "display_name_snapshot": "read-only target",
         "evidence_version": "OE-TARGET-SAMPLE",
         "reference_state": "unresolved"
       },
       "deep_optimization_mode": null,
       "delivery_mode": "manual",
-      "targeting": { "audience_package_ref": null, "dimensions": ["gender", "age"] },
-      "schedule": { "timezone": "Asia/Shanghai", "start": "platform_pending", "end": "platform_pending" },
-      "budget_and_bidding": { "currency": "CNY", "daily_budget_minor": 30000, "charging_mode": "CPC", "bid_minor": 100 },
-      "monitoring": { "pixel_ref": null, "conversion_event": "app内下单" },
-      "project_name": "电商手动投放项目"
+      "targeting": {
+        "audience_package_ref": null,
+        "dimensions": ["gender", "age"]
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "start": "platform_pending",
+        "end": "platform_pending"
+      },
+      "budget_and_bidding": {
+        "currency": "CNY",
+        "daily_budget_minor": 30000,
+        "charging_mode": "CPC",
+        "bid_minor": 100
+      },
+      "monitoring": {
+        "pixel_ref": null,
+        "conversion_event": "app-conversion"
+      },
+      "project_name": "sample-ecommerce-project"
     },
     "platform_promotions": [
       {
         "draft_schema_version": "delivery-platform-configuration/v1",
         "promotion_draft_id": "promotion-draft-1",
-        "parent_project_draft_id": "project-draft-1",
-        "delivery_identity": { "mode": "account_info" },
+        "delivery_identity": {
+          "mode": "account_info"
+        },
         "base_material_refs": [
           {
             "namespace": "cookies",
@@ -94,16 +110,34 @@
         "product_information": { "product_ref": "product-1" },
         "creative_components": [],
         "promotion_settings": { "placement": "platform_pending" },
-        "promotion_name": "电商单元"
+        "promotion_name": "sample-promotion"
       }
     ]
   },
   "compilation_metadata": {
     "evidence_states": ["observed", "platform_pending", "write_validation_pending"],
     "conditions": [
-      { "field": "payload.platform_project.carrier", "equals": "orange_landing_page" }
+      {
+        "condition": {
+          "field": "payload.platform_project.carrier",
+          "equals": "orange_landing_page"
+        },
+        "result": true,
+        "evidence_states": ["observed", "platform_pending"],
+        "repair_target": {
+          "field": "payload.platform_project.carrier",
+          "section": "project",
+          "label": "confirm carrier matches page context"
+        }
+      }
     ],
-    "action_boundaries": [{ "event": "save_project_and_continue_to_promotion", "remote_write": true }],
+    "action_boundaries": [
+      {
+        "event": "save_project_and_continue_to_promotion",
+        "remote_write": true,
+        "validation_state": "readonly_located"
+      }
+    ],
     "evidence_refs": ["fixture://delivery-platform-configuration/v1"]
   }
 }

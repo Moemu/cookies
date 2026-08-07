@@ -24,6 +24,59 @@
         }
       }
     },
+    "ReferenceState": {
+      "type": "string",
+      "enum": ["resolved", "unresolved", "blocked", "redacted"]
+    },
+    "EvidenceState": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "sample_only",
+        "operator_reviewed",
+        "platform_pending",
+        "owner_pending",
+        "blocked_by_event_asset",
+        "write_validation_pending"
+      ]
+    },
+    "ActionBoundary": {
+      "type": "object",
+      "required": ["event", "remote_write", "validation_state"],
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "save_project_and_continue_to_promotion",
+            "save_project_and_close",
+            "save_promotion_and_close",
+            "cancel_without_change",
+            "enable_project",
+            "pause_project",
+            "restart_project",
+            "enable_promotion",
+            "pause_promotion",
+            "restart_promotion"
+          ]
+        },
+        "remote_write": { "type": "boolean" },
+        "validation_state": {
+          "type": "string",
+          "enum": ["readonly_located", "write_validation_pending", "validated"]
+        }
+      }
+    },
+    "RepairTarget": {
+      "type": "object",
+      "required": ["field", "section", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "type": "string", "minLength": 1 },
+        "section": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 }
+      }
+    },
     "Condition": {
       "oneOf": [
         {
@@ -68,7 +121,41 @@
           "required": ["field", "reference_state_is"],
           "properties": {
             "field": { "type": "string", "minLength": 1 },
-            "reference_state_is": { "type": "string", "minLength": 1 }
+            "reference_state_is": { "$ref": "#/$defs/ReferenceState" }
+          }
+        }
+      ]
+    },
+    "ConditionResult": {
+      "type": "object",
+      "required": ["condition", "result", "evidence_states"],
+      "additionalProperties": false,
+      "properties": {
+        "condition": { "$ref": "#/$defs/Condition" },
+        "result": { "type": "boolean" },
+        "evidence_states": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceState" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "repair_target": { "$ref": "#/$defs/RepairTarget" },
+        "blocked_reason": { "type": ["string", "null"], "minLength": 1 }
+      },
+      "oneOf": [
+        {
+          "required": ["result", "repair_target"],
+          "properties": {
+            "result": { "const": true },
+            "repair_target": { "$ref": "#/$defs/RepairTarget" }
+          }
+        },
+        {
+          "required": ["result", "blocked_reason"],
+          "properties": {
+            "result": { "const": false },
+            "blocked_reason": { "type": "string", "minLength": 1 },
+            "repair_target": { "type": "null" }
           }
         }
       ]
@@ -132,7 +219,6 @@
       "required": [
         "draft_schema_version",
         "promotion_draft_id",
-        "parent_project_draft_id",
         "delivery_identity",
         "base_material_refs",
         "copy_items",
@@ -141,7 +227,6 @@
       "properties": {
         "draft_schema_version": { "const": "delivery-platform-configuration/v1" },
         "promotion_draft_id": { "type": "string", "minLength": 1 },
-        "parent_project_draft_id": { "type": "string", "minLength": 1 },
         "delivery_identity": { "$ref": "#/$defs/DeliveryIdentity" },
         "base_material_refs": { "type": "array", "items": { "$ref": "#/$defs/StableReference" } },
         "copy_items": { "type": "array", "items": { "type": "object" } },
@@ -171,9 +256,14 @@
       "additionalProperties": false,
       "required": ["evidence_states", "conditions", "action_boundaries"],
       "properties": {
-        "evidence_states": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-        "conditions": { "type": "array", "items": { "$ref": "#/$defs/Condition" } },
-        "action_boundaries": { "type": "array", "items": { "type": "object" } },
+        "evidence_states": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceState" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "conditions": { "type": "array", "items": { "$ref": "#/$defs/ConditionResult" } },
+        "action_boundaries": { "type": "array", "items": { "$ref": "#/$defs/ActionBoundary" } },
         "evidence_refs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
       }
     },

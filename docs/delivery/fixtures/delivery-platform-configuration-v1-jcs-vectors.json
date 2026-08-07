@@ -1,0 +1,91 @@
+{
+  "vectors": [
+    {
+      "name": "unicode-escape-decimal",
+      "payload": {
+        "payload_schema_version": "delivery-platform-configuration/v1",
+        "source": "readonly",
+        "platform": "ocean_engine",
+        "platform_project": {
+          "draft_schema_version": "delivery-platform-configuration/v1",
+          "project_draft_id": "project-unicode",
+          "project_name": "unicode\\u4e2d\\u6587\\nproject",
+          "account_ref": {
+            "namespace": "oceanengine",
+            "object_kind": "account",
+            "scope": "account:6391",
+            "external_id": "acct-\\ud83d\\ude00",
+            "source_version": "readonly/v0.1",
+            "content_hash": null,
+            "display_name_snapshot": "title\\u2605",
+            "evidence_version": "OE-UNICODE",
+            "reference_state": "resolved"
+          },
+          "marketing_purpose": "ecommerce",
+          "marketing_scenario": "short_video_image_text",
+          "marketing_product_ref": null,
+          "application_ref": null,
+          "carrier": "orange_landing_page",
+          "optimization_target_ref": null,
+          "deep_optimization_mode": null,
+          "delivery_mode": "manual",
+          "targeting": {
+            "dimensions": [
+              "age",
+              "g\\u00earnero"
+            ]
+          },
+          "schedule": {
+            "timezone": "Asia/Shanghai",
+            "start": 1.23,
+            "end": 10.5
+          },
+          "budget_and_bidding": {
+            "currency": "CNY",
+            "daily_budget_minor": 30000,
+            "charging_mode": "CPC",
+            "bid_minor": 100
+          },
+          "monitoring": {
+            "pixel_ref": null,
+            "conversion_event": "app"
+          },
+          "project_name": "unicode\\u4e2d\\u6587\\nproject"
+        },
+        "platform_promotions": [
+          {
+            "draft_schema_version": "delivery-platform-configuration/v1",
+            "promotion_draft_id": "promotion-unicode",
+            "delivery_identity": {
+              "mode": "account_info"
+            },
+            "base_material_refs": [
+              {
+                "namespace": "cookies",
+                "object_kind": "asset_version",
+                "scope": "project:project_1",
+                "external_id": "asset-1:v1",
+                "source_version": "asset/v1",
+                "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "display_name_snapshot": "material",
+                "evidence_version": "asset-evidence/v1",
+                "reference_state": "resolved"
+              }
+            ],
+            "copy_items": [],
+            "native_anchor_ref": null,
+            "landing_page_ref": null,
+            "direct_link_ref": null,
+            "product_information": {
+              "product_ref": "product-unicode"
+            },
+            "creative_components": [],
+            "promotion_settings": {},
+            "promotion_name": "unicode-unit"
+          }
+        ]
+      },
+      "expected_canonical_hash": "b0606cbb6a2be0dc6757be38bf11a819c624b60841081d1cb439a64533e80ae7"
+    }
+  ]
+}

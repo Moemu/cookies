@@ -1,0 +1,9 @@
+{
+  "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "mutations": [
+    {
+      "path": "payload.platform_promotions.0.parent_project_draft_id",
+      "value": "missing-project-draft"
+    }
+  ]
+}
