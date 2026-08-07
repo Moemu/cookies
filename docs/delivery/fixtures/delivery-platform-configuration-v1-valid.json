@@ -1,0 +1,143 @@
+{
+  "schema_version": "delivery-platform-configuration/v1",
+  "organization_id": "org_1",
+  "project_id": "project_1",
+  "plan_id": "plan_1",
+  "version_number": 1,
+  "hash_algorithm": "RFC8785-JCS-SHA256(payload)",
+  "canonical_hash": "e0aab3af932f986d066f1457c7e0ca4a70392d353ee04ea7814be4b0a7a07880",
+  "payload": {
+    "payload_schema_version": "delivery-platform-configuration/v1",
+    "source": "readonly",
+    "platform": "ocean_engine",
+    "platform_project": {
+      "draft_schema_version": "delivery-platform-configuration/v1",
+      "project_draft_id": "project-draft-1",
+      "account_ref": {
+        "namespace": "oceanengine",
+        "object_kind": "account",
+        "scope": "account:6391",
+        "external_id": "account-6391",
+        "source_version": "readonly/v0.1",
+        "content_hash": null,
+        "display_name_snapshot": "redacted account",
+        "evidence_version": "OE-RPT-ACCOUNT",
+        "reference_state": "resolved"
+      },
+      "marketing_purpose": "ecommerce",
+      "marketing_scenario": "short_video_image_text",
+      "marketing_product_ref": {
+        "namespace": "oceanengine",
+        "object_kind": "product",
+        "scope": "account:6391",
+        "external_id": "product-1",
+        "source_version": "readonly/v0.1",
+        "content_hash": null,
+        "display_name_snapshot": "redacted product",
+        "evidence_version": "OE-PRODUCT-SAMPLE",
+        "reference_state": "resolved"
+      },
+      "application_ref": null,
+      "carrier": "orange_landing_page",
+      "optimization_target_ref": {
+        "namespace": "oceanengine",
+        "object_kind": "optimization_target",
+        "scope": "account:6391",
+        "external_id": null,
+        "source_version": "readonly/v0.1",
+        "content_hash": null,
+        "display_name_snapshot": "read-only target",
+        "evidence_version": "OE-TARGET-SAMPLE",
+        "reference_state": "unresolved"
+      },
+      "deep_optimization_mode": null,
+      "delivery_mode": "manual",
+      "targeting": {
+        "audience_package_ref": null,
+        "dimensions": ["gender", "age"]
+      },
+      "schedule": {
+        "timezone": "Asia/Shanghai",
+        "start": "platform_pending",
+        "end": "platform_pending"
+      },
+      "budget_and_bidding": {
+        "currency": "CNY",
+        "daily_budget_minor": 30000,
+        "charging_mode": "CPC",
+        "bid_minor": 100
+      },
+      "monitoring": {
+        "pixel_ref": null,
+        "conversion_event": "app-conversion"
+      },
+      "project_name": "sample-ecommerce-project"
+    },
+    "platform_promotions": [
+      {
+        "draft_schema_version": "delivery-platform-configuration/v1",
+        "promotion_draft_id": "promotion-draft-1",
+        "delivery_identity": {
+          "mode": "account_info"
+        },
+        "base_material_refs": [
+          {
+            "namespace": "cookies",
+            "object_kind": "asset_version",
+            "scope": "project:project_1",
+            "external_id": "asset-1:v1",
+            "source_version": "asset/v1",
+            "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "display_name_snapshot": "redacted material",
+            "evidence_version": "asset-evidence/v1",
+            "reference_state": "resolved"
+          }
+        ],
+        "copy_items": [{ "text_ref": "copy-1:v1" }],
+        "native_anchor_ref": null,
+        "landing_page_ref": {
+          "namespace": "oceanengine",
+          "object_kind": "landing_page",
+          "scope": "account:6391",
+          "external_id": null,
+          "source_version": "readonly/v0.1",
+          "content_hash": null,
+          "display_name_snapshot": "redacted landing page",
+          "evidence_version": "OE-LANDING-PAGE-SAMPLE",
+          "reference_state": "unresolved"
+        },
+        "direct_link_ref": null,
+        "product_information": { "product_ref": "product-1" },
+        "creative_components": [],
+        "promotion_settings": { "placement": "platform_pending" },
+        "promotion_name": "sample-promotion"
+      }
+    ]
+  },
+  "compilation_metadata": {
+    "evidence_states": ["observed", "platform_pending", "write_validation_pending"],
+    "conditions": [
+      {
+        "condition": {
+          "field": "payload.platform_project.carrier",
+          "equals": "orange_landing_page"
+        },
+        "result": true,
+        "evidence_states": ["observed", "platform_pending"],
+        "repair_target": {
+          "field": "payload.platform_project.carrier",
+          "section": "project",
+          "label": "confirm carrier matches page context"
+        }
+      }
+    ],
+    "action_boundaries": [
+      {
+        "event": "save_project_and_continue_to_promotion",
+        "remote_write": true,
+        "validation_state": "readonly_located"
+      }
+    ],
+    "evidence_refs": ["fixture://delivery-platform-configuration/v1"]
+  }
+}

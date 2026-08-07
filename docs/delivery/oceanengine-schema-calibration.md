@@ -2,9 +2,9 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 只读业务校准已达到 v0.1 冻结条件：电商与销售线索具有连续路径，应用下载 Android 记录到真实事件资产门禁，其余入口进入覆盖矩阵；真实写入统一留待受控写入阶段 |
+| 状态 | 只读业务校准已达到 v0.1 冻结条件并完成阶段收口：电商手动路径为首条业务路径，应用下载 Android 记录到真实事件资产门禁，其余入口进入覆盖矩阵；真实写入统一留待受控写入阶段 |
 | Schema 版本 | `oceanengine-bidding-schema/v0.1`（只读契约已冻结；观察 fixture 保留 `v0.1-draft`） |
-| 证据基线 | [巨量只读校准摘要](./oceanengine-readonly-calibration.md) |
+| 证据基线 | [巨量只读校准摘要](./oceanengine-readonly-calibration.md)；[收口与配置契约](./read-only-calibration-closeout.md) |
 | 范围 | 产品目标覆盖完整竞价投放场景；当前页面证据来自尾号 `6391` 专用测试账户，不记录完整账户、对象 ID、业务链接或身份信息 |
 | 本批不做 | 未授权平台写入、Connector 文件修改、用单条路径外推完整枚举 |
 
@@ -462,6 +462,8 @@ PlatformPromotionDraft
 | `disclosure` | 人工合规确认/平台披露字段候选 | `platform_pending` | 当前值仅为 mock 审核提示，没有页面字段证据 |
 
 这意味着不能通过简单改名把 `group → plan → creative` 变成 `project → promotion → creative`。Delivery 自主形成独立的 `PlatformProjectDraft`、`PlatformPromotionDraft` 与引用集合，再由后续行为编译消费；不需要把拆分问题提交给其他模块 Owner。
+
+新配置的根模型冻结为 `DeliveryPlanVersion → PlatformProjectDraft → PlatformPromotionDraft[]`，机器契约为 [`delivery-platform-configuration/v1`](./schemas/delivery-platform-configuration-v1.json)。`delivery-three-tier/v1` 仍是不可变历史 mock 快照；编辑历史配置必须创建新的 PlanVersion 和 canonical hash，不得原地迁移历史记录。字段归属、条件表达、稳定引用和 PR 切片以[收口文档](./read-only-calibration-closeout.md)为准。
 
 ## 7. 当前批次进度
 
