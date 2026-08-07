@@ -10,7 +10,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
-const creativeDirectionPromptVersion = "creative-direction/strategy-handoff-v3"
+const creativeDirectionPromptVersion = "creative-direction/strategy-handoff-v4"
 
 type ModelCreativeDirectionPlanner struct {
 	Text       ShortDramaPrerollTextGenerator
@@ -31,7 +31,8 @@ func (p ModelCreativeDirectionPlanner) Generate(
 	if p.Text == nil || strings.TrimSpace(p.ModelAlias) == "" {
 		return DirectionPlannerResult{}, fmt.Errorf("creative direction model planner is not configured")
 	}
-	payload, err := json.Marshal(planningContext)
+	modelContext := channelNeutralBrandPlanningContext(planningContext)
+	payload, err := json.Marshal(modelContext)
 	if err != nil {
 		return DirectionPlannerResult{}, fmt.Errorf("encode creative planning context: %w", err)
 	}
@@ -58,9 +59,10 @@ func (p ModelCreativeDirectionPlanner) Generate(
 		"所有概念、理由、信息计划和执行文案都按对外广告主张审核，禁止排名第一、最好、最优、首选、必买、必囤、神器、神仙、不踩雷、保证、绝对、永久、零风险、治愈等绝对化或无法证实的表达；guardrail_trace 的自我声明不能替代正文合规。"
 	if planningContext.SelectedRoute.RouteType == CreativeRouteBrandVideo {
 		systemPrompt += "当前路线是品牌视频。目标不是教程或转化清单，而是建立可复述的品牌认知与感受。" +
+			"当前阶段只生成渠道中立的品牌母版方向。不得在候选中出现小红书、抖音、快手等平台名称，也不得用平台用户习惯、投放节奏或渠道原生形式主导创意；这些差异只允许在母版确认后的渠道适配任务中处理。" +
 			"每个候选必须填写 direction_mode、emotional_arc、visual_grammar、brand_memory_device、human_moment；direction_mode 只能是 emotional、cinematic、utility。" +
 			"至少两个候选必须是 emotional 或 cinematic，最多一个候选可为 utility。禁止让“指南、清单、三步、避坑、工具、教程、科普、方法论”成为两个或更多候选的核心概念。" +
-			"三个候选应分别探索不同品牌领地，例如人物情绪弧、工程世界的视觉隐喻、品牌仪式或记忆符号；开场可以渠道原生，但不能以促销 CTA 或知识教学主导。品牌片结尾只允许回到品牌主张或品牌身份，不得使用点击了解、点击购买、评论区领取、私信、扣1、立即咨询等面向观众的效果 CTA；人物在工作场景中点击确认按钮属于叙事动作，不是 CTA。" +
+			"三个候选应分别探索不同品牌领地，例如人物情绪弧、工程世界的视觉隐喻、品牌仪式或记忆符号；不能以促销 CTA 或知识教学主导。品牌片结尾只允许回到品牌主张或品牌身份，不得使用点击了解、点击购买、评论区领取、私信、扣1、立即咨询等面向观众的效果 CTA；人物在工作场景中点击确认按钮属于叙事动作，不是 CTA。" +
 			"不得擅自增加 4K、8K 等输入未确认的制作规格。emotional 或 cinematic 候选不得以指南、清单、三步、避坑、教程、科普、方法论或判断/核验工具为内容机制；可以客观说明产品本身属于效率工具。" +
 			"emotional_arc 要写清从何种感受到何种感受；visual_grammar 要写镜头、光线、节奏或声音的统一法则；brand_memory_device 要落实为可重复的颜色、声音、动作、构图或文案装置；human_moment 要包含一个具体的人与工程判断瞬间。"
 	}
@@ -88,7 +90,7 @@ func (p ModelCreativeDirectionPlanner) Generate(
 		}
 		response, err := p.Text.GenerateText(ctx, provider.TextGenerateRequest{
 			Actor: plannerActor, Project: project, ModelAlias: p.ModelAlias,
-			InvocationKey:    contract.IdempotencyKey(fmt.Sprintf("direction_%s_%d_%s_v3_%d", hashToken, candidateCount, generationToken, attempt)),
+			InvocationKey:    contract.IdempotencyKey(fmt.Sprintf("direction_%s_%d_%s_v4_%d", hashToken, candidateCount, generationToken, attempt)),
 			Messages:         messages,
 			OutputJSONSchema: creativeDirectionPlannerOutputSchema,
 		})
@@ -134,6 +136,21 @@ func (p ModelCreativeDirectionPlanner) Generate(
 		}
 	}
 	return DirectionPlannerResult{}, fmt.Errorf("creative direction model output failed validation after repair: %w", lastValidationErr)
+}
+
+func channelNeutralBrandPlanningContext(value CreativePlanningContext) CreativePlanningContext {
+	if value.SelectedRoute.RouteType != CreativeRouteBrandVideo {
+		return value
+	}
+	result := value
+	result.SelectedRoute.Channels = []string{}
+	if value.BrandBrief != nil {
+		document := *value.BrandBrief
+		document.Route = value.BrandBrief.Route
+		document.Route.Channels = []string{}
+		result.BrandBrief = &document
+	}
+	return result
 }
 
 var creativeDirectionPlannerOutputSchema = json.RawMessage(`{

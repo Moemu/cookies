@@ -225,6 +225,9 @@ func (s Service) CreateCreativeTaskPlan(
 	if brief.ProjectID != projectID {
 		return CreativeTaskPlan{}, false, ErrProjectAccessDenied
 	}
+	if problems := s.projectBriefCompatibilityProblems(ctx, actor, projectID, brief.Snapshot); len(problems) > 0 {
+		return CreativeTaskPlan{}, false, BlockedError{Problems: problems}
+	}
 	recommendation, err := s.RecommendCreativeBusinesses(
 		ctx, actor, projectID, request.BriefID, request.BriefVersion, 3,
 	)

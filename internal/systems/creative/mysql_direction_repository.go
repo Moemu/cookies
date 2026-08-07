@@ -22,11 +22,18 @@ func (r MySQLRepository) CreateDirectionBatch(
 		return CreativeDirectionBatch{}, err
 	}
 	defer tx.Rollback()
+	var brandBriefRevision any
+	var brandBriefContentHash any
+	if batch.BrandBriefRef != nil {
+		brandBriefRevision = batch.BrandBriefRef.Revision
+		brandBriefContentHash = batch.BrandBriefRef.ContentHash
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO creative_direction_batches (
-		organization_id, project_id, batch_id, intake_id, input_identity_hash,
+		organization_id, project_id, batch_id, intake_id, input_identity_hash, brand_brief_revision, brand_brief_content_hash,
 		status, model, prompt_version, failure_code, created_by, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
 		batch.OrganizationID, batch.ProjectID, batch.ID, batch.IntakeID, batch.InputIdentityHash,
+		brandBriefRevision, brandBriefContentHash,
 		batch.Status, batch.Model, batch.PromptVersion, batch.FailureCode, batch.CreatedBy, batch.CreatedAt,
 	); err != nil {
 		return CreativeDirectionBatch{}, err
@@ -83,13 +90,17 @@ func (r MySQLRepository) getDirectionBatch(
 		return CreativeDirectionBatch{}, fmt.Errorf("creative MySQL database is required")
 	}
 	var batch CreativeDirectionBatch
+	var brandBriefRevision sql.NullInt64
+	var brandBriefContentHash sql.NullString
 	if err := r.DB.QueryRowContext(ctx, `SELECT batch_id, intake_id, input_identity_hash, status,
+		brand_brief_revision, brand_brief_content_hash,
 		model, prompt_version, COALESCE(failure_code, ''), created_by, created_at
 		FROM creative_direction_batches
 		WHERE organization_id = ? AND project_id = ? AND `+where,
 		organizationID, projectID, value,
 	).Scan(
-		&batch.ID, &batch.IntakeID, &batch.InputIdentityHash, &batch.Status, &batch.Model,
+		&batch.ID, &batch.IntakeID, &batch.InputIdentityHash, &batch.Status,
+		&brandBriefRevision, &brandBriefContentHash, &batch.Model,
 		&batch.PromptVersion, &batch.FailureCode, &batch.CreatedBy, &batch.CreatedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -100,6 +111,9 @@ func (r MySQLRepository) getDirectionBatch(
 	batch.ContractVersion = CreativeDirectionBatchV1
 	batch.OrganizationID = organizationID
 	batch.ProjectID = projectID
+	if brandBriefRevision.Valid && brandBriefContentHash.Valid {
+		batch.BrandBriefRef = &BrandBriefReference{Revision: brandBriefRevision.Int64, ContentHash: brandBriefContentHash.String}
+	}
 	batch.Candidates = []CreativeDirectionVersion{}
 	rows, err := r.DB.QueryContext(ctx, `SELECT snapshot, status
 		FROM creative_directions

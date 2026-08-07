@@ -77,12 +77,14 @@ type Document struct {
 }
 
 type ResearchRequest struct {
-	Mode            string   `json:"mode"`
-	Category        string   `json:"category,omitempty"`
-	Query           string   `json:"query"`
-	DocumentIDs     []string `json:"document_ids"`
-	DisclosedFields []string `json:"disclosed_fields"`
-	Confirmed       bool     `json:"confirmed"`
+	Mode            string                `json:"mode"`
+	Category        string                `json:"category,omitempty"`
+	Purpose         string                `json:"purpose,omitempty"`
+	SourceRef       *contract.ResourceRef `json:"source_ref,omitempty"`
+	Query           string                `json:"query"`
+	DocumentIDs     []string              `json:"document_ids"`
+	DisclosedFields []string              `json:"disclosed_fields"`
+	Confirmed       bool                  `json:"confirmed"`
 }
 
 type ExternalResearchInput struct {
@@ -147,6 +149,8 @@ type ResearchRun struct {
 	ProjectID          contract.ProjectID      `json:"project_id"`
 	Mode               string                  `json:"mode"`
 	Category           string                  `json:"category"`
+	Purpose            string                  `json:"purpose"`
+	SourceRef          *contract.ResourceRef   `json:"source_ref,omitempty"`
 	Query              string                  `json:"query"`
 	DocumentIDs        []string                `json:"document_ids"`
 	DisclosedFields    []string                `json:"disclosed_fields"`
@@ -237,6 +241,21 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	}
 	mimeType := defaultDocumentMIME(extension)
 	asyncParse := extension != ".md" && s.DocumentParser != nil && s.DocumentScheduler != nil
+	contentSum := sha256.Sum256(content)
+	contentHash := hex.EncodeToString(contentSum[:])
+	if asyncParse {
+		existing, err := scanDocument(s.DB.QueryRowContext(ctx, documentSelect+`
+			WHERE organization_id = ? AND project_id = ? AND content_sha256 = ? AND status = 'ready'
+			ORDER BY parsed_at DESC, created_at DESC LIMIT 1`,
+			actor.OrganizationID, projectID, contentHash,
+		))
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Document{}, err
+		}
+	}
 	extracted := ""
 	if !asyncParse {
 		var err error
@@ -249,7 +268,6 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return Document{}, err
 	}
-	contentSum := sha256.Sum256(content)
 	textSum := sha256.Sum256([]byte(extracted))
 	now := s.now()
 	key := fmt.Sprintf("knowledge/%s/%s/%s/source%s", actor.OrganizationID, projectID, id, extension)
@@ -261,7 +279,7 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		Title: filename, SourceType: "docs",
 		Filename: filename, MIMEType: mimeType, SizeBytes: size,
-		ContentSHA256: hex.EncodeToString(contentSum[:]), TextSHA256: hex.EncodeToString(textSum[:]),
+		ContentSHA256: contentHash, TextSHA256: hex.EncodeToString(textSum[:]),
 		ExtractedText: extracted, Status: "parse_queued", CreatedBy: actor.Principal.ID,
 		CreatedAt: now, UpdatedAt: now, Blob: object.ObjectLocation,
 	}
@@ -455,6 +473,10 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 		return ResearchRun{}, ErrExternalConfirmationRequired
 	}
 	var err error
+	request.Purpose, request.SourceRef, err = validateResearchContext(request.Purpose, request.SourceRef)
+	if err != nil {
+		return ResearchRun{}, err
+	}
 	request.DocumentIDs, request.DisclosedFields, err = validateResearchRequest(request)
 	if err != nil {
 		return ResearchRun{}, err
@@ -475,17 +497,18 @@ func (s Service) RunResearch(ctx context.Context, actor contract.ActorContext, p
 	now := s.now()
 	run := ResearchRun{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
-		Mode: request.Mode, Category: request.Category, Query: request.Query,
+		Mode: request.Mode, Category: request.Category, Purpose: request.Purpose, SourceRef: request.SourceRef, Query: request.Query,
 		DocumentIDs:     append([]string(nil), request.DocumentIDs...),
 		DisclosedFields: append([]string(nil), request.DisclosedFields...), Status: "running",
 		ConfirmedBy: actor.Principal.ID, ConfirmedAt: now, Artifacts: []ResearchArtifact{},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO platform_research_runs
-		(id, organization_id, project_id, mode, category, query_text, document_ids, disclosed_fields,
+		(id, organization_id, project_id, mode, category, purpose, source_type, source_id, query_text, document_ids, disclosed_fields,
 		 disclosed_chunk_ids, status, confirmed_by, confirmed_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Category, run.Query, jsonBytes(run.DocumentIDs),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.OrganizationID, run.ProjectID, run.Mode, run.Category, run.Purpose,
+		nullableResourceType(run.SourceRef), nullableResourceID(run.SourceRef), run.Query, jsonBytes(run.DocumentIDs),
 		jsonBytes(run.DisclosedFields), jsonBytes(run.DisclosedChunkIDs),
 		run.Status, run.ConfirmedBy, run.ConfirmedAt, now, now); err != nil {
 		return ResearchRun{}, err
@@ -622,7 +645,7 @@ func (s Service) ListResearchRuns(ctx context.Context, actor contract.ActorConte
 }
 
 const researchRunSelect = `SELECT id, organization_id, project_id, mode, query_text,
-	category, document_ids, disclosed_fields, disclosed_chunk_ids, status, confirmed_by, confirmed_at,
+	category, purpose, COALESCE(source_type, ''), COALESCE(source_id, ''), document_ids, disclosed_fields, disclosed_chunk_ids, status, confirmed_by, confirmed_at,
 	COALESCE(error_code, ''), COALESCE(error_message, ''),
 	COALESCE(provider_code, ''), COALESCE(model_version, ''),
 	COALESCE(provider_response_id, ''), usage_json, created_at, updated_at
@@ -636,15 +659,19 @@ func scanResearchRun(scanner researchRunScanner) (ResearchRun, error) {
 	var value ResearchRun
 	var documentIDs, disclosedFields, disclosedChunkIDs []byte
 	var usage []byte
+	var sourceType, sourceID string
 	err := scanner.Scan(
 		&value.ID, &value.OrganizationID, &value.ProjectID, &value.Mode, &value.Query,
-		&value.Category, &documentIDs, &disclosedFields, &disclosedChunkIDs,
+		&value.Category, &value.Purpose, &sourceType, &sourceID, &documentIDs, &disclosedFields, &disclosedChunkIDs,
 		&value.Status, &value.ConfirmedBy, &value.ConfirmedAt,
 		&value.ErrorCode, &value.ErrorMessage, &value.ProviderCode, &value.ModelVersion,
 		&value.ProviderResponseID, &usage, &value.CreatedAt, &value.UpdatedAt,
 	)
 	if err != nil {
 		return ResearchRun{}, err
+	}
+	if sourceType != "" && sourceID != "" {
+		value.SourceRef = &contract.ResourceRef{Type: sourceType, ID: sourceID}
 	}
 	if err := json.Unmarshal(documentIDs, &value.DocumentIDs); err != nil {
 		return ResearchRun{}, err
@@ -848,6 +875,41 @@ func validateResearchRequest(request ResearchRequest) ([]string, []string, error
 		fields = append(fields, "document_content")
 	}
 	return documentIDs, fields, nil
+}
+
+func validateResearchContext(purpose string, sourceRef *contract.ResourceRef) (string, *contract.ResourceRef, error) {
+	purpose = strings.TrimSpace(purpose)
+	if purpose == "" {
+		purpose = "deep_research"
+	}
+	switch purpose {
+	case "deep_research":
+		if sourceRef != nil {
+			return "", nil, ErrInvalidResearchRequest
+		}
+		return purpose, nil, nil
+	case "conversation_web_search":
+		if sourceRef == nil || sourceRef.Type != "strategy_message" || strings.TrimSpace(sourceRef.ID) == "" {
+			return "", nil, ErrInvalidResearchRequest
+		}
+		return purpose, &contract.ResourceRef{Type: sourceRef.Type, ID: strings.TrimSpace(sourceRef.ID)}, nil
+	default:
+		return "", nil, ErrInvalidResearchRequest
+	}
+}
+
+func nullableResourceType(ref *contract.ResourceRef) any {
+	if ref == nil || strings.TrimSpace(ref.Type) == "" {
+		return nil
+	}
+	return strings.TrimSpace(ref.Type)
+}
+
+func nullableResourceID(ref *contract.ResourceRef) any {
+	if ref == nil || strings.TrimSpace(ref.ID) == "" {
+		return nil
+	}
+	return strings.TrimSpace(ref.ID)
 }
 
 func (s Service) insertArtifact(ctx context.Context, tx *sql.Tx, run ResearchRun, result ExternalResearchResult) (ResearchArtifact, error) {

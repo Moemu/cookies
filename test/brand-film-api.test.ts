@@ -20,6 +20,39 @@ test('brand film fixture creation is project-scoped and idempotent', async () =>
   assert.equal(calls[0].init.body, undefined)
 })
 
+test('brand film workspace restores one explicit task without creating a fixture', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init })
+    return jsonResponse({})
+  }
+  try {
+    await api.getBrandFilmWorkspace('project_demo', 'task_strategy_brand_1')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/api/creative/v1/projects/project_demo/creative-tasks/task_strategy_brand_1/brand-film')
+  assert.equal(calls[0].init.method, 'GET')
+})
+
+test('legacy strategy brand task initializes its workspace through an explicit idempotent repair command', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init })
+    return jsonResponse({})
+  }
+  try {
+    await api.initializeStrategyBrandFilmWorkspace('project_demo', 'task_legacy_brand_1')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(calls[0].url, '/api/creative/v1/projects/project_demo/creative-tasks/task_legacy_brand_1/brand-film:initialize-from-strategy')
+  assert.equal(calls[0].init.method, 'POST')
+})
+
 test('brand Brief edits preserve confirmed uploaded asset lineage', async () => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ url: string; init: RequestInit }> = []
@@ -41,6 +74,7 @@ test('brand Brief edits preserve confirmed uploaded asset lineage', async () => 
   assert.equal(calls[0].url, '/api/creative/v1/projects/project_demo/creative-tasks/task_1/brand-film/brief')
   assert.equal(calls[0].init.method, 'PATCH')
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { expected_revision: 4, analysis })
+  assert.equal(new Headers(calls[0].init.headers).get('Idempotency-Key'), 'brand-film-brief-task_1-4')
 })
 
 test('brand-film commands bind selection and plan generation to the current revision', async () => {
@@ -97,6 +131,7 @@ test('brand audio preparation and mix edits stay revision-bound', async () => {
       { op: 'replace_clip_asset', clip_id: 'voice_clip_01', asset_ref: { asset_id: 'asset_voice', version: 1 } },
     ],
   })
+  assert.equal(new Headers(calls[2].init.headers).get('Idempotency-Key'), 'brand-film-audio-mix-task_1-20')
   assert.equal(calls[3].url, '/api/creative/v1/projects/project_demo/creative-tasks/task_1/brand-film:render-audio-preview')
   assert.deepEqual(JSON.parse(String(calls[3].init.body)), { expected_revision: 21 })
   assert.equal(new Headers(calls[3].init.headers).get('Idempotency-Key'), 'brand-film-audio-preview-task_1-21')
@@ -126,7 +161,7 @@ test('brand narration capability and per-clip generation use the A3 routes', asy
     clip_id: 'voice_clip_01',
     voice_alias: 'cookies.voice.brand.warm_female',
   })
-  assert.equal(new Headers(calls[1].init.headers).get('Idempotency-Key'), 'brand-film-voice-task_1-22-voice_clip_01-cookies.voice.brand.warm_female')
+  assert.equal(new Headers(calls[1].init.headers).get('Idempotency-Key'), 'brand-film-voice-task_1-22-voice_clip_01-cookies_voice_brand_warm_female')
 })
 
 function jsonResponse(value: unknown, status = 200): Response {

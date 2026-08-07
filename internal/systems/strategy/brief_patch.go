@@ -79,6 +79,12 @@ func normalizeModelBriefPatch(patch *BriefPatch) error {
 	for index := range patch.Operations {
 		operation := &patch.Operations[index]
 		switch operation.FieldPath {
+		case "product.candidates":
+			values, err := normalizeModelProductCandidates(operation.Value)
+			if err != nil {
+				return err
+			}
+			operation.Value = mustJSON(values)
 		case "product.selling_points", "product.evidence", "channels", "constraints",
 			"reference_ids", "creative.tone", "creative.mandatory_elements", "creative.prohibited_claims":
 			values, err := normalizeModelStringArray(operation.Value, operation.FieldPath)
@@ -198,7 +204,7 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 		if document.ContractVersion != "strategy-brief-version/v2" {
 			return fmt.Errorf("%w: product.category requires Brief v2", ErrInvalidRequest)
 		}
-		return decodeString(raw, &document.Product.Category, path)
+		return decodeOptionalString(raw, &document.Product.Category, path)
 	case "product.selling_points":
 		if document.ContractVersion != "strategy-brief-version/v2" {
 			return fmt.Errorf("%w: product.selling_points requires Brief v2", ErrInvalidRequest)
@@ -209,6 +215,16 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 			return fmt.Errorf("%w: product.evidence requires Brief v2", ErrInvalidRequest)
 		}
 		return decodeStringSlice(raw, &document.Product.Evidence, path)
+	case "product.candidates":
+		if document.ContractVersion != "strategy-brief-version/v2" {
+			return fmt.Errorf("%w: product.candidates requires Brief v2", ErrInvalidRequest)
+		}
+		values, err := normalizeModelProductCandidates(raw)
+		if err != nil {
+			return err
+		}
+		document.Product.Candidates = values
+		return nil
 	case "product.asset_refs":
 		if document.ContractVersion != "strategy-brief-version/v2" {
 			return fmt.Errorf("%w: product.asset_refs requires Brief v2", ErrInvalidRequest)
@@ -306,10 +322,80 @@ func setBriefField(document *BriefDocument, path string, raw json.RawMessage) er
 	}
 }
 
+func normalizeModelProductCandidates(raw json.RawMessage) ([]BriefProductCandidate, error) {
+	var values []BriefProductCandidate
+	if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 || len(values) > 12 {
+		return nil, fmt.Errorf("%w: product.candidates must contain 1 to 12 candidates", ErrInvalidRequest)
+	}
+	seen := make(map[string]struct{}, len(values))
+	for index := range values {
+		candidate := &values[index]
+		candidate.Name = strings.TrimSpace(candidate.Name)
+		candidate.Category = strings.TrimSpace(candidate.Category)
+		if candidate.Name == "" || len([]rune(candidate.Name)) > 160 {
+			return nil, fmt.Errorf("%w: product.candidates contains an invalid name", ErrInvalidRequest)
+		}
+		key := strings.ToLower(candidate.Name)
+		if _, duplicate := seen[key]; duplicate {
+			return nil, fmt.Errorf("%w: product.candidates contains duplicate names", ErrInvalidRequest)
+		}
+		seen[key] = struct{}{}
+		lists := []*[]string{
+			&candidate.SellingPoints, &candidate.Evidence,
+			&candidate.MandatoryElements, &candidate.ProhibitedClaims,
+		}
+		for _, list := range lists {
+			if len(*list) > 20 {
+				return nil, fmt.Errorf("%w: product.candidates contains too many facts", ErrInvalidRequest)
+			}
+			normalized := make([]string, 0, len(*list))
+			for _, item := range *list {
+				item = strings.TrimSpace(item)
+				if item == "" || len([]rune(item)) > 500 {
+					return nil, fmt.Errorf("%w: product.candidates contains an invalid fact", ErrInvalidRequest)
+				}
+				normalized = appendUnique(normalized, item)
+			}
+			*list = normalized
+		}
+		candidate.SourceRefs = uniqueFieldSources(candidate.SourceRefs)
+	}
+	return values, nil
+}
+
+func uniqueFieldSources(values []FieldSource) []FieldSource {
+	result := make([]FieldSource, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value.Type = strings.TrimSpace(value.Type)
+		value.ID = strings.TrimSpace(value.ID)
+		value.Locator = strings.TrimSpace(value.Locator)
+		if value.Type == "" || value.ID == "" {
+			continue
+		}
+		key := value.Type + "\x00" + value.ID + "\x00" + value.Locator
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func decodeString(raw json.RawMessage, target *string, path string) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil || strings.TrimSpace(value) == "" || len(value) > 4096 {
 		return fmt.Errorf("%w: %s must be a non-empty string", ErrInvalidRequest, path)
+	}
+	*target = strings.TrimSpace(value)
+	return nil
+}
+
+func decodeOptionalString(raw json.RawMessage, target *string, path string) error {
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil || len(value) > 4096 {
+		return fmt.Errorf("%w: %s must be a string", ErrInvalidRequest, path)
 	}
 	*target = strings.TrimSpace(value)
 	return nil

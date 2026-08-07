@@ -32,8 +32,8 @@ func (s Service) GetConversationCapabilities(ctx context.Context, actor contract
 		MultimodalInput: ConversationCapability{Available: s.V2Enabled},
 		WebSearch: ConversationCapability{
 			Available:            s.V2Enabled && s.ConversationWebSearchEnabled,
-			EstimatedWaitSeconds: 45,
-			Disclosure:           "query_only",
+			EstimatedWaitSeconds: 180,
+			Disclosure:           "query_only_background",
 		},
 		QuickViralRemake: ConversationCapability{Available: s.V2Enabled && s.QuickViralRemakeEnabled},
 	}

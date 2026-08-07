@@ -135,6 +135,8 @@ func scanBriefVersion(row rowScanner) (BriefVersion, error) {
 	}
 	value.Snapshot = stored.Document
 	value.FieldStates = stored.FieldStates
+	readiness := computeFullStrategyReadiness(value.Snapshot, value.FieldStates)
+	value.FullStrategyReadiness = &readiness
 	return value, nil
 }
 

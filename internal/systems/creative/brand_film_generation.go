@@ -50,7 +50,7 @@ func (s Service) PrepareBrandFilmGeneration(ctx context.Context, actor contract.
 		}
 	}
 	now := s.now()
-	units, err := compileBrandFilmGenerationUnits(*brand.CurrentAnalysis(), *plan, now)
+	units, err := compileBrandFilmGenerationUnits(*brand.CurrentAnalysis(), *plan, brand.SourceSnapshot, now)
 	if err != nil {
 		return TaskDetail{}, err
 	}
@@ -67,7 +67,7 @@ func (s Service) PrepareBrandFilmGeneration(ctx context.Context, actor contract.
 	return s.persistBrandFilmDraft(ctx, actor, projectID, taskID, *detail.VideoDraft, next)
 }
 
-func compileBrandFilmGenerationUnits(analysis BrandBriefAnalysisVersion, plan BrandFilmPlanVersion, now time.Time) ([]BrandFilmGenerationUnit, error) {
+func compileBrandFilmGenerationUnits(analysis BrandBriefAnalysisVersion, plan BrandFilmPlanVersion, source BrandFilmSourceSnapshot, now time.Time) ([]BrandFilmGenerationUnit, error) {
 	masterDurationMS := plan.MasterDurationMS
 	if masterDurationMS == 0 {
 		masterDurationMS = plan.Shots[len(plan.Shots)-1].EndSecond * 1000
@@ -77,13 +77,22 @@ func compileBrandFilmGenerationUnits(analysis BrandBriefAnalysisVersion, plan Br
 		return nil, err
 	}
 	units := make([]BrandFilmGenerationUnit, 0, len(planned))
-	for index, plannedUnit := range planned {
-		shots := []BrandFilmShot{plan.Shots[index]}
+	for _, plannedUnit := range planned {
+		wanted := make(map[string]bool, len(plannedUnit.ShotIDs))
+		for _, shotID := range plannedUnit.ShotIDs {
+			wanted[shotID] = true
+		}
+		shots := make([]BrandFilmShot, 0, len(plannedUnit.ShotIDs))
+		for _, shot := range plan.Shots {
+			if wanted[shot.ID] {
+				shots = append(shots, shot)
+			}
+		}
 		unit := BrandFilmGenerationUnit{
-			ID: fmt.Sprintf("generation_unit_%02d", index+1), Order: plannedUnit.Order,
+			ID: fmt.Sprintf("generation_unit_%02d", plannedUnit.Order), Order: plannedUnit.Order,
 			ShotIDs: append([]string{}, plannedUnit.ShotIDs...), StartSecond: plannedUnit.TimelineStartMS / 1000, EndSecond: plannedUnit.TimelineEndMS / 1000,
 		}
-		pkg, err := compileBrandFilmPromptPackage(analysis, plan, unit, shots, 1, "", now)
+		pkg, err := compileBrandFilmPromptPackage(analysis, plan, source, unit, shots, 1, "", now)
 		if err != nil {
 			return nil, err
 		}
@@ -94,9 +103,18 @@ func compileBrandFilmGenerationUnits(analysis BrandBriefAnalysisVersion, plan Br
 	return units, nil
 }
 
-func compileBrandFilmPromptPackage(analysis BrandBriefAnalysisVersion, plan BrandFilmPlanVersion, unit BrandFilmGenerationUnit, shots []BrandFilmShot, revision int64, feedback string, now time.Time) (BrandFilmPromptPackage, error) {
+func compileBrandFilmPromptPackage(analysis BrandBriefAnalysisVersion, plan BrandFilmPlanVersion, source BrandFilmSourceSnapshot, unit BrandFilmGenerationUnit, shots []BrandFilmShot, revision int64, feedback string, now time.Time) (BrandFilmPromptPackage, error) {
+	orientation := "brand film"
+	switch source.AspectRatio {
+	case "9:16", "3:4":
+		orientation = "vertical brand film"
+	case "16:9", "4:3":
+		orientation = "horizontal brand film"
+	case "1:1":
+		orientation = "square brand film"
+	}
 	parts := []string{
-		"Create a premium vertical brand film segment.",
+		"Create a premium " + orientation + " segment.",
 		fmt.Sprintf("Product and message: %s", analysis.CoreMessage),
 		fmt.Sprintf("Film: %s. Segment %d-%d seconds.", plan.StorySummary, unit.StartSecond, unit.EndSecond),
 		"Preserve the exact bottle silhouette, label layout, logo and proportions from the reference image.",
@@ -111,7 +129,7 @@ func compileBrandFilmPromptPackage(analysis BrandBriefAnalysisVersion, plan Bran
 	pkg := BrandFilmPromptPackage{
 		ContractVersion: "brand-shot-prompt-package/v1", Revision: revision, UnitID: unit.ID,
 		PlanRevision: plan.Revision, CompositePrompt: strings.Join(parts, "\n"), Feedback: strings.TrimSpace(feedback),
-		DurationSeconds: unit.EndSecond - unit.StartSecond, AspectRatio: "9:16", Resolution: "720p",
+		DurationSeconds: unit.EndSecond - unit.StartSecond, AspectRatio: source.AspectRatio, Resolution: normalizeBrandFilmProviderResolution(source.Resolution),
 		CompilerVersion: brandFilmPromptCompilerVersion, CreatedAt: now,
 	}
 	hash, err := contract.CanonicalJSONHash(struct {
@@ -131,6 +149,24 @@ func compileBrandFilmPromptPackage(analysis BrandBriefAnalysisVersion, plan Bran
 	return pkg, nil
 }
 
+func normalizeBrandFilmProviderResolution(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "480p", "720p":
+		return value
+	case "1080p", "1080x1920", "1920x1080", "1080×1920", "1920×1080":
+		// The standard route currently targets Seedance 2.0 Fast at 720p.
+		// Delivery-grade 1080 output is produced by the video-enhance stage.
+		return "720p"
+	case "720x1280", "1280x720", "720×1280", "1280×720":
+		return "720p"
+	case "480x854", "854x480", "480×854", "854×480":
+		return "480p"
+	default:
+		return "720p"
+	}
+}
+
 func (s Service) RegenerateBrandFilmUnit(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID string, request RegenerateBrandFilmUnitRequest) (TaskDetail, error) {
 	detail, _, err := s.requireBrandFilmWorkspaceWithProject(ctx, actor, projectID, taskID, true)
 	if err != nil {
@@ -146,7 +182,7 @@ func (s Service) RegenerateBrandFilmUnit(ctx context.Context, actor contract.Act
 		return TaskDetail{}, ErrInvalidState
 	}
 	now := s.now()
-	pkg, err := compileBrandFilmPromptPackage(*next.BrandFilm.CurrentAnalysis(), *plan, *unit, shots, int64(len(unit.PromptPackages)+1), request.Feedback, now)
+	pkg, err := compileBrandFilmPromptPackage(*next.BrandFilm.CurrentAnalysis(), *plan, next.BrandFilm.SourceSnapshot, *unit, shots, int64(len(unit.PromptPackages)+1), request.Feedback, now)
 	if err != nil {
 		return TaskDetail{}, err
 	}
@@ -193,10 +229,13 @@ func (s Service) BrandFilmProviderInput(ctx context.Context, actor contract.Acto
 	pkg := unit.PromptPackages[len(unit.PromptPackages)-1]
 	input := provider.VideoGenerationInput{
 		Prompt: pkg.CompositePrompt, DurationSeconds: pkg.DurationSeconds, AspectRatio: pkg.AspectRatio,
-		Resolution: pkg.Resolution, AudioPolicy: provider.VideoAudioGenerated, InputMode: provider.VideoInputReferenceImage,
+		Resolution: normalizeBrandFilmProviderResolution(pkg.Resolution), AudioPolicy: provider.VideoAudioSilent, InputMode: provider.VideoInputReferenceImage,
 		ConditioningAssets: []provider.VideoConditioningAsset{{Role: provider.VideoConditioningReferenceImage, Reference: contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: detail.VideoDraft.BrandFilm.Generation.ReferenceAsset}}},
 	}
-	return input, pkg.ContentHash, input.Validate()
+	if err := input.Validate(); err != nil {
+		return provider.VideoGenerationInput{}, "", fmt.Errorf("%w: %v", ErrProviderInputInvalid, err)
+	}
+	return input, pkg.ContentHash, nil
 }
 
 func (s Service) RegisterBrandFilmGenerationAttempt(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, taskID, unitID, providerJobID string) (TaskDetail, error) {

@@ -15,6 +15,7 @@ var (
 	ErrProviderJobConflict  = errors.New("production job already registered with a different provider job")
 	ErrVersionConflict      = errors.New("creative resource version conflict")
 	ErrInvalidState         = errors.New("creative resource is not in a state that allows this action")
+	ErrProviderInputInvalid = errors.New("creative provider input is invalid")
 	ErrFullStrategyRequired = errors.New("the selected creative business requires the full Strategy workflow")
 	// Viral analysis failures are intentionally classified at the domain seam so
 	// HTTP clients can distinguish a retryable model-gateway issue from an

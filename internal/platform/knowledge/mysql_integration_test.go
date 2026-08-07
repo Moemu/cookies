@@ -139,6 +139,13 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		parsedPDF.ChunkCount < 1 {
 		t.Fatalf("parsed PDF=%#v err=%v", parsedPDF, err)
 	}
+	duplicatePDF, err := service.CreateDocument(
+		ctx, actor, projectID, "market-report-copy.pdf", "application/pdf",
+		bytes.NewReader(pdfBytes), int64(len(pdfBytes)),
+	)
+	if err != nil || duplicatePDF.ID != parsedPDF.ID || duplicatePDF.Status != "ready" {
+		t.Fatalf("duplicate PDF did not reuse ready parse: duplicate=%#v parsed=%#v err=%v", duplicatePDF, parsedPDF, err)
+	}
 }
 
 type researchRunner struct{}

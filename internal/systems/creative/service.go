@@ -76,6 +76,11 @@ type StrategyPackageSnapshot struct {
 	Audience               string
 	CoreMessage            string
 	CallToAction           string
+	BrandName              string
+	ProductName            string
+	SellingPoints          []string
+	ProofPoints            []string
+	UsageScenarios         []string
 	// Deprecated compatibility fields. Strict Handoff readers leave these
 	// empty because concepts and visual choices belong to CreativeDirection.
 	Concept         string
@@ -115,6 +120,7 @@ type Service struct {
 	GamePrerollPlanner                  GamePrerollPlanner
 	CommerceWorkspaces                  CommerceWorkspaceRepository
 	BrandFilmPlanner                    BrandFilmPlanner
+	BrandBriefs                         BrandBriefRepository
 	DirectionPlanner                    CreativeDirectionPlanner
 	Directions                          DirectionRepository
 	DirectionScheduler                  DirectionGenerationScheduler
@@ -191,6 +197,8 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	isManualBrandFilm := intake.Source == IntakeSourceManual && route.RouteID == ManualBrandFilmRouteID
 	isDirectViralRemake := (intake.Source == IntakeSourceManual || intake.Source == IntakeSourceRequirement) && route.RouteType == PerformanceModeViralRemake
 	var confirmedDirection *CreativeDirectionVersion
+	var confirmedDirectionBatch *CreativeDirectionBatch
+	var confirmedBrief *BrandBriefReview
 	if route.RouteType == CreativeRouteBrandVideo && !isManualBrandFilm {
 		if s.Directions == nil || strings.TrimSpace(request.DirectionID) == "" {
 			return CreativeTask{}, fmt.Errorf("confirmed direction_id is required for a brand-video task")
@@ -203,10 +211,26 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			direction.InputIdentityHash != intake.InputIdentityHash || direction.RouteID != route.RouteID {
 			return CreativeTask{}, fmt.Errorf("brand-video direction does not match the confirmed intake lineage")
 		}
+		if s.BrandBriefs == nil {
+			return CreativeTask{}, fmt.Errorf("confirmed brand Brief lineage is required for a brand-video task")
+		}
+		brief, briefErr := s.BrandBriefs.GetBrandBrief(ctx, actor.OrganizationID, projectID, intake.ID)
+		if briefErr != nil || brief.Status != BrandBriefConfirmed || brief.InputIdentityHash != intake.InputIdentityHash ||
+			!brandBriefReferencesEqual(direction.BrandBriefRef, &BrandBriefReference{Revision: brief.Revision, ContentHash: brief.ContentHash}) {
+			return CreativeTask{}, fmt.Errorf("brand-video direction does not match the confirmed brand Brief lineage")
+		}
+		batch, batchErr := s.Directions.GetDirectionBatch(ctx, actor.OrganizationID, projectID, direction.BatchID)
+		if batchErr != nil || batch.Status != DirectionBatchReady || batch.IntakeID != intake.ID ||
+			batch.InputIdentityHash != intake.InputIdentityHash ||
+			!brandBriefReferencesEqual(batch.BrandBriefRef, &BrandBriefReference{Revision: brief.Revision, ContentHash: brief.ContentHash}) {
+			return CreativeTask{}, fmt.Errorf("brand-video direction batch does not match the confirmed brand Brief lineage")
+		}
 		if strings.TrimSpace(request.CallToAction) != "" {
 			return CreativeTask{}, fmt.Errorf("brand-video task cannot introduce a performance CTA")
 		}
 		confirmedDirection = &direction
+		confirmedDirectionBatch = &batch
+		confirmedBrief = &brief
 		request.Concept = direction.Concept
 		request.Prompt = brandVideoOutlineFromDirection(direction)
 	}
@@ -261,6 +285,22 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable short drama V2 intake snapshot")
 		}
 	}
+	lineageKey := ""
+	if confirmedDirection != nil {
+		lineageKey, err = creativeTaskLineageKey(intake, route, request.Channel, *confirmedDirection)
+		if err != nil {
+			return CreativeTask{}, err
+		}
+		existing, listErr := s.Repository.ListTasks(ctx, actor.OrganizationID, projectID, 100)
+		if listErr != nil {
+			return CreativeTask{}, listErr
+		}
+		for _, candidate := range existing {
+			if candidate.LineageKey == lineageKey {
+				return candidate, nil
+			}
+		}
+	}
 	id, err := s.idGenerator()("creativetask")
 	if err != nil {
 		return CreativeTask{}, err
@@ -269,7 +309,8 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	task := CreativeTask{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intake.ID,
 		Format: FormatVideo, Channel: request.Channel, VideoPurpose: route.VideoPurpose, PerformanceMode: route.RouteType,
-		Status: TaskDraft, Direction: CreativeDirection{
+		LineageKey: lineageKey,
+		Status:     TaskDraft, Direction: CreativeDirection{
 			Focus: request.Concept, Audience: intake.Request.Audience, CoreMessage: intake.Request.CoreMessage,
 			CallToAction: request.CallToAction, Concept: request.Concept,
 			Tone: append([]string{}, intake.Request.Tone...), VisualKeywords: append([]string{}, intake.Request.VisualKeywords...),
@@ -290,6 +331,16 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		AspectRatio: route.AspectRatio, Resolution: resolution, VideoPurpose: route.VideoPurpose, SourceVideo: request.SourceVideo,
 		Mandatory: append([]string{}, request.Mandatory...), Prohibited: append([]string{}, request.Prohibited...),
 		CallToAction: request.CallToAction, CreatedAt: now,
+	}
+	if confirmedDirection != nil {
+		if confirmedBrief == nil || confirmedDirectionBatch == nil {
+			return CreativeTask{}, fmt.Errorf("confirmed strategy brand film inputs are incomplete")
+		}
+		brandFilmDraft, err = buildStrategyBrandFilmDraft(task.ID, intake, route, *confirmedBrief, *confirmedDirectionBatch, *confirmedDirection, now)
+		if err != nil {
+			return CreativeTask{}, err
+		}
+		draft.BrandFilm = brandFilmDraft
 	}
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeBrandFilm {
 		manual := intake.Request.ManualBrandFilm
@@ -494,6 +545,27 @@ func brandVideoOutlineFromDirection(direction CreativeDirectionVersion) string {
 	return strings.Join(parts, "\n")
 }
 
+func creativeTaskLineageKey(intake CreativeIntake, route CreativeRouteSnapshot, channel CreativeChannel, direction CreativeDirectionVersion) (string, error) {
+	value := struct {
+		IntakeID             string          `json:"intake_id"`
+		InputIdentityHash    string          `json:"input_identity_hash"`
+		RouteID              string          `json:"route_id"`
+		Channel              CreativeChannel `json:"channel"`
+		DirectionID          string          `json:"direction_id"`
+		DirectionVersion     int64           `json:"direction_version"`
+		DirectionContentHash string          `json:"direction_content_hash"`
+	}{
+		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, RouteID: route.RouteID,
+		Channel: channel, DirectionID: direction.ID, DirectionVersion: direction.Version,
+		DirectionContentHash: direction.ContentHash,
+	}
+	hash, err := contract.CanonicalJSONHash(value)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize creative task lineage: %w", err)
+	}
+	return hash, nil
+}
+
 func selectedVideoRoute(intake CreativeIntake, request CreateVideoTaskRequest) (CreativeRouteSnapshot, error) {
 	if request.SelectedRouteID != "" {
 		for _, route := range intake.Request.CreativeRoutes {
@@ -615,9 +687,6 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 		request.ContractVersion = requestedContractVersion
 		request.SelectedRouteID = selectedRouteID
 		request.TaskOverlay = taskOverlayRef
-		request.CallToAction = snapshot.CallToAction
-		request.Concept = ""
-		request.VisualKeywords = []string{}
 		request.StrategyHandoffInput = append(json.RawMessage(nil), snapshot.HandoffSnapshot...)
 		if taskOverlayRef != nil {
 			if s.TaskOverlays == nil {
@@ -638,11 +707,9 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 			}
 			request.TaskOverlayInput = &overlay
 		}
-		if err := request.validateContent(); err != nil {
-			return CreativeIntake{}, err
-		}
 		selectedRouteFound := selectedRouteID == ""
 		selectedRouteReady := false
+		var selectedRoute CreativeRouteSnapshot
 		for _, route := range request.CreativeRoutes {
 			if selectedRouteID != "" && route.RouteID != selectedRouteID {
 				continue
@@ -652,11 +719,26 @@ func (s Service) CreateIntake(ctx context.Context, requestContext contract.Reque
 				return CreativeIntake{}, err
 			}
 			if selectedRouteID != "" {
+				selectedRoute = route
 				selectedRouteReady = route.ReadinessStatus == "ready"
 			}
 		}
 		if !selectedRouteFound {
 			return CreativeIntake{}, fmt.Errorf("selected_route_id is not present in the Strategy handoff")
+		}
+		if selectedRouteID != "" {
+			request, err = projectStrategyPackageIntake(request, selectedRoute)
+			if err != nil {
+				return CreativeIntake{}, err
+			}
+		} else {
+			// Legacy package intakes predate frozen route selection. Keep their
+			// image-text channel compatibility without restoring fabricated CTA,
+			// concept, or visual defaults.
+			request.Channel = ChannelXiaohongshu
+			if err := request.validateContent(); err != nil {
+				return CreativeIntake{}, err
+			}
 		}
 		// A frozen package can be blocked by optional market/language context while
 		// its explicitly selected route is already executable. Route readiness is
@@ -799,17 +881,78 @@ func taskStrategyParentSupports(businessCode, performanceMode string) bool {
 }
 
 func resolvedStrategyPackageRequest(reference *StrategyPackageReference, snapshot StrategyPackageSnapshot) CreateIntakeRequest {
-	concept := strings.TrimSpace(snapshot.Concept)
-	if concept == "" {
-		concept = strings.TrimSpace(snapshot.CoreMessage)
-	}
 	return CreateIntakeRequest{
-		Source: IntakeSourceStrategyPackage, StrategyPackage: reference, Channel: ChannelXiaohongshu,
+		Source: IntakeSourceStrategyPackage, StrategyPackage: reference,
 		Objective: snapshot.Objective, Audience: snapshot.Audience, CoreMessage: snapshot.CoreMessage,
-		CallToAction: "了解更多并收藏这份内容", Concept: concept,
-		Tone: append([]string{}, snapshot.Tone...), VisualKeywords: append([]string{}, snapshot.VisualKeywords...),
+		CallToAction: snapshot.CallToAction, Concept: "",
+		Tone: append([]string{}, snapshot.Tone...), VisualKeywords: []string{},
 		Mandatory: append([]string{}, snapshot.Mandatory...), Prohibited: append([]string{}, snapshot.Prohibited...),
 		CreativeRoutes: append([]CreativeRouteSnapshot{}, snapshot.CreativeRoutes...),
+	}
+}
+
+// projectStrategyPackageIntake derives only production routing fields from the
+// user-confirmed frozen route. Creative concepts, prompts, storyboards, and
+// visual language are intentionally absent until CreativeDirection.
+func projectStrategyPackageIntake(request CreateIntakeRequest, route CreativeRouteSnapshot) (CreateIntakeRequest, error) {
+	request.SelectedRouteID = route.RouteID
+	switch route.RouteType {
+	case CreativeRouteImageText:
+		request.Format = FormatImageText
+		request.Channel = ChannelXiaohongshu
+		if err := request.validateContent(); err != nil {
+			return CreateIntakeRequest{}, err
+		}
+		return request, nil
+	case CreativeRouteBrandVideo:
+		return projectBrandVideoIntake(request, route)
+	default:
+		request.Format = FormatVideo
+		request.PerformanceMode = route.RouteType
+		if len(route.Channels) == 1 {
+			request.Channel = supportedCreativeVideoChannel(route.Channels[0])
+		}
+		if err := request.validateVideoContent(); err != nil {
+			return CreateIntakeRequest{}, err
+		}
+		return request, nil
+	}
+}
+
+func projectBrandVideoIntake(request CreateIntakeRequest, route CreativeRouteSnapshot) (CreateIntakeRequest, error) {
+	request.Format = FormatVideo
+	request.PerformanceMode = CreativeRouteBrandVideo
+	request.CallToAction = ""
+	request.Concept = ""
+	request.VisualKeywords = []string{}
+	request.Channel = ""
+
+	producibleChannels := 0
+	for _, channel := range route.Channels {
+		if supportedCreativeVideoChannel(channel) != "" {
+			producibleChannels++
+		}
+	}
+	if producibleChannels == 0 {
+		return CreateIntakeRequest{}, fmt.Errorf("selected brand-video route has no Creative-supported production channel")
+	}
+	// A single frozen channel is deterministic. Multi-channel routes deliberately
+	// remain unselected so the Creative UI must ask the user before task creation.
+	if len(route.Channels) == 1 {
+		request.Channel = supportedCreativeVideoChannel(route.Channels[0])
+	}
+	if err := request.validateVideoContent(); err != nil {
+		return CreateIntakeRequest{}, err
+	}
+	return request, nil
+}
+
+func supportedCreativeVideoChannel(channel string) CreativeChannel {
+	switch CreativeChannel(channel) {
+	case ChannelXiaohongshu, ChannelDouyin, ChannelKuaishou:
+		return CreativeChannel(channel)
+	default:
+		return ""
 	}
 }
 
@@ -1135,6 +1278,18 @@ func (s Service) FreezeVersion(ctx context.Context, requestContext contract.Requ
 				ReferenceAsset: brand.Generation.ReferenceAsset, FinalVideo: *brand.Generation.PreviewAsset,
 				UnitCount: len(brand.Generation.Units), AttemptCount: metrics.AttemptCount,
 				ConfirmedBy: run.HumanConfirmedBy, ConfirmedAt: *run.HumanConfirmedAt,
+			}
+			if brand.SourceSnapshot.SourceType == strategyBrandFilmSourceType {
+				source := brand.SourceSnapshot
+				brandSnapshot.Lineage = &BrandFilmLineageSnapshot{
+					SourceType: source.SourceType, IntakeID: source.IntakeID, InputIdentityHash: source.InputIdentityHash,
+					StrategyPackageID: source.StrategyPackageID, StrategyPackageVersion: source.StrategyPackageVersion,
+					StrategyPackageHash: source.StrategyPackageHash, HandoffContractVersion: source.HandoffContractVersion,
+					HandoffContentHash: source.HandoffContentHash, BrandBriefRevision: source.BrandBriefRevision,
+					BrandBriefContentHash: source.BrandBriefContentHash, DirectionBatchID: source.DirectionBatchID,
+					DirectionID: source.DirectionID, DirectionVersion: source.DirectionVersion,
+					DirectionContentHash: source.DirectionContentHash, RouteID: source.RouteID,
+				}
 			}
 			videoSnapshot = &VideoVersionSnapshot{
 				ContractVersion: "creative-video-version/v1", Format: FormatVideo, Channel: detail.Task.Channel,

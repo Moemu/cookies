@@ -122,6 +122,44 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 	}
 }
 
+func TestResearchPurposeSeparatesConversationSearchFromDeepResearch(t *testing.T) {
+	t.Parallel()
+	messageRef := &contract.ResourceRef{Type: "strategy_message", ID: "message_1"}
+	tests := []struct {
+		name        string
+		purpose     string
+		sourceRef   *contract.ResourceRef
+		wantPurpose string
+		wantError   bool
+	}{
+		{name: "legacy defaults to deep research", wantPurpose: "deep_research"},
+		{name: "deep research has no conversation source", purpose: "deep_research", wantPurpose: "deep_research"},
+		{name: "conversation search binds one message", purpose: "conversation_web_search", sourceRef: messageRef, wantPurpose: "conversation_web_search"},
+		{name: "conversation search requires message", purpose: "conversation_web_search", wantError: true},
+		{name: "deep research rejects message source", purpose: "deep_research", sourceRef: messageRef, wantError: true},
+		{name: "unknown purpose is rejected", purpose: "chat_research", wantError: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			purpose, sourceRef, err := validateResearchContext(test.purpose, test.sourceRef)
+			if test.wantError != errors.Is(err, ErrInvalidResearchRequest) {
+				t.Fatalf("error = %v, want invalid=%t", err, test.wantError)
+			}
+			if test.wantError {
+				return
+			}
+			if purpose != test.wantPurpose {
+				t.Fatalf("purpose = %q, want %q", purpose, test.wantPurpose)
+			}
+			if test.sourceRef != nil && (sourceRef == nil || sourceRef.ID != test.sourceRef.ID) {
+				t.Fatalf("source ref = %#v", sourceRef)
+			}
+		})
+	}
+}
+
 func TestResearchCategoryIsExplicitAndBounded(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"", "general", "audience", "competitor", "industry", " Audience "} {

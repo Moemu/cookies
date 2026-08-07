@@ -186,6 +186,25 @@ func (s Service) GetContext(ctx context.Context, actor contract.ActorContext, pr
 	return s.Store.GetContext(ctx, actor.OrganizationID, projectID)
 }
 
+// GetBusinessContext returns names only for cross-artifact compatibility
+// checks. Authorization is identical to GetContext and the immutable IDs in
+// ProjectContext remain the source of lineage truth.
+func (s Service) GetBusinessContext(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectBusinessContext, error) {
+	if s.Store == nil || s.Authorizer == nil {
+		return contract.ProjectBusinessContext{}, identity.ErrProjectAccessDenied
+	}
+	if err := s.Authorizer.AuthorizeProject(ctx, actor, projectID); err != nil {
+		return contract.ProjectBusinessContext{}, err
+	}
+	reader, ok := s.Store.(interface {
+		GetBusinessContext(context.Context, contract.OrganizationID, contract.ProjectID) (contract.ProjectBusinessContext, error)
+	})
+	if !ok {
+		return contract.ProjectBusinessContext{}, fmt.Errorf("project business context reader is required")
+	}
+	return reader.GetBusinessContext(ctx, actor.OrganizationID, projectID)
+}
+
 func (s Service) RequireActiveContext(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
 	if s.Store == nil || s.Authorizer == nil {
 		return contract.ProjectContext{}, identity.ErrProjectAccessDenied

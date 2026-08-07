@@ -75,8 +75,8 @@ func (r SegmentCompositionRequest) Validate() error {
 		}
 		total += segment.DurationSeconds
 	}
-	if total != 15 {
-		return fmt.Errorf("segment composition must total 15 seconds")
+	if total < 4 || total > 120 {
+		return fmt.Errorf("segment composition must total between 4 and 120 seconds")
 	}
 	return nil
 }

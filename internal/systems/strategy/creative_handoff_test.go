@@ -278,6 +278,35 @@ func TestBuildCreativeHandoffFreezesBrandVideoRouteFromApprovedVideoPlan(t *test
 	}
 }
 
+func TestBuildCreativeHandoffKeepsBrandVideoForMixedBrandAndConversionGoal(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Brief.Snapshot.Campaign.Objective = "建立第三代黄金复原蜜产品认知并促进购买转化"
+	snapshot.Strategy.Objective = "通过内容种草强化产品认知，承接搜索和销售转化"
+	snapshot.Strategy.Measurement = []string{"品牌搜索提升", "购买转化率"}
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{
+		{Platform: "xiaohongshu", Role: "品牌种草与搜索转化", Formats: []string{"图文笔记", "竖屏短视频"}},
+		{Platform: "douyin", Role: "产品认知与销售转化", Formats: []string{"short_video"}},
+	}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_guerlain_abeille_royale"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handoff.UpstreamReadiness.Status != "ready" {
+		t.Fatalf("mixed goal blocked an executable brand route: %#v", handoff.UpstreamReadiness)
+	}
+	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteID != "route_brand_video" {
+		t.Fatalf("mixed brand and conversion goal lost brand video: %#v", handoff.Routes)
+	}
+	if !hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "route_purpose_missing") {
+		t.Fatalf("ambiguous image route diagnosis was lost: %#v", handoff.UpstreamReadiness)
+	}
+}
+
 func TestBuildCreativeHandoffKeepsPerformanceRouteReadyForTaskPlanningWithoutCTA(t *testing.T) {
 	t.Parallel()
 	snapshot := packageHashFixture()

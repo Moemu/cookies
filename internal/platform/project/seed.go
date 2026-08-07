@@ -79,6 +79,23 @@ func (s MySQLStore) EnsureCanonicalDemoProject(ctx context.Context, actor contra
 		actor.OrganizationID, seed.ProjectID, seed.BrandID, seed.ProductID, time.Now().UTC()); err != nil {
 		return Project{}, err
 	}
+	if err := upsertProjectRuntime(ctx, tx, actor.OrganizationID, seed.ProjectID, ProjectRuntime{
+		Code:           string(seed.ProjectID),
+		Brand:          seed.BrandName,
+		Product:        seed.ProductName,
+		Goal:           seed.Name,
+		Stage:          "需求与策略",
+		Progress:       0,
+		Status:         "active",
+		Owner:          string(actor.Principal.Kind) + ":" + actor.Principal.ID,
+		Budget:         0,
+		Currency:       "CNY",
+		Timezone:       "Asia/Shanghai",
+		KnowledgeCount: 0,
+		UpdatedAt:      time.Now().UTC(),
+	}); err != nil {
+		return Project{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Project{}, err
 	}

@@ -54,6 +54,7 @@ type GatewayRouteSnapshot struct {
 	RouteRevisionID      string                   `json:"route_revision_id"`
 	ConnectionID         string                   `json:"connection_id"`
 	ConnectionRevisionID string                   `json:"connection_revision_id"`
+	ConnectionType       string                   `json:"connection_type,omitempty"`
 	BaseURL              string                   `json:"base_url"`
 	UpstreamModel        string                   `json:"upstream_model"`
 	CredentialID         string                   `json:"credential_id"`
@@ -73,6 +74,8 @@ type GatewayRouteSnapshot struct {
 	PollIntervalMS       int                      `json:"poll_interval_ms,omitempty"`
 	VideoInputModes      []VideoInputMode         `json:"video_input_modes,omitempty"`
 	VideoAudioPolicies   []VideoAudioPolicy       `json:"video_audio_policies,omitempty"`
+	VideoSubmitPath      string                   `json:"video_submit_path,omitempty"`
+	VideoPollPath        string                   `json:"video_poll_path,omitempty"`
 	SpeechVoiceAliases   map[string]string        `json:"speech_voice_aliases,omitempty"`
 }
 
@@ -204,9 +207,10 @@ type GatewayCredentialResolver interface {
 // MySQLGatewayConfigStore resolves only enabled, immutable revisions. The
 // active credential version is captured in the returned job snapshot.
 type MySQLGatewayConfigStore struct {
-	DB                *sql.DB
-	Cipher            CredentialCipher
-	AllowInsecureHTTP bool
+	DB                  *sql.DB
+	Cipher              CredentialCipher
+	AllowInsecureHTTP   bool
+	VideoConnectionType string
 }
 
 type CapabilityStatus struct {
@@ -277,7 +281,11 @@ func (s MySQLGatewayConfigStore) ResolveResearchRoute(ctx context.Context, organ
 }
 
 func (s MySQLGatewayConfigStore) ResolveVideoRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (VideoRouteSnapshot, error) {
-	return s.resolveRoute(ctx, organizationID, "video.generate", modelAlias, "ark")
+	connectionType := strings.TrimSpace(s.VideoConnectionType)
+	if connectionType == "" {
+		connectionType = "ark"
+	}
+	return s.resolveRoute(ctx, organizationID, "video.generate", modelAlias, connectionType)
 }
 
 func (s MySQLGatewayConfigStore) ResolveSpeechRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
@@ -291,7 +299,7 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 	var snapshot ImageRouteSnapshot
 	var constraintsJSON []byte
 	err := s.DB.QueryRowContext(ctx, `SELECT
-			r.id, rr.id, c.id, cr.id, cr.base_url, rr.upstream_model,
+			r.id, rr.id, c.id, cr.id, c.connection_type, cr.base_url, rr.upstream_model,
 			pc.id, pc.credential_version, cr.timeout_seconds, cr.max_response_bytes,
 			COALESCE(rr.constraints_json, JSON_OBJECT())
 		FROM provider_model_routes r
@@ -307,7 +315,7 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		LIMIT 1`,
 		connectionType, capability, modelAlias, organizationID,
 	).Scan(
-		&snapshot.RouteID, &snapshot.RouteRevisionID, &snapshot.ConnectionID, &snapshot.ConnectionRevisionID,
+		&snapshot.RouteID, &snapshot.RouteRevisionID, &snapshot.ConnectionID, &snapshot.ConnectionRevisionID, &snapshot.ConnectionType,
 		&snapshot.BaseURL, &snapshot.UpstreamModel, &snapshot.CredentialID, &snapshot.CredentialVersion,
 		&snapshot.TimeoutSeconds, &snapshot.MaxResponseBytes, &constraintsJSON,
 	)
@@ -375,6 +383,8 @@ func applyVideoRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMess
 	var constraints struct {
 		InputModes    []VideoInputMode   `json:"video_input_modes"`
 		AudioPolicies []VideoAudioPolicy `json:"video_audio_policies"`
+		SubmitPath    string             `json:"endpoint"`
+		PollPath      string             `json:"poll_endpoint"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &constraints); err != nil {
@@ -389,7 +399,25 @@ func applyVideoRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMess
 	}
 	snapshot.VideoInputModes = append([]VideoInputMode(nil), constraints.InputModes...)
 	snapshot.VideoAudioPolicies = append([]VideoAudioPolicy(nil), constraints.AudioPolicies...)
+	snapshot.VideoSubmitPath = strings.TrimSpace(constraints.SubmitPath)
+	snapshot.VideoPollPath = strings.TrimSpace(constraints.PollPath)
+	if snapshot.VideoSubmitPath != "" && !validGatewayPath(snapshot.VideoSubmitPath, false) {
+		return fmt.Errorf("video endpoint path is invalid")
+	}
+	if snapshot.VideoPollPath != "" && !validGatewayPath(snapshot.VideoPollPath, true) {
+		return fmt.Errorf("video poll endpoint path is invalid")
+	}
 	return nil
+}
+
+func validGatewayPath(value string, taskTemplate bool) bool {
+	if !strings.HasPrefix(value, "/") || strings.Contains(value, "..") || strings.ContainsAny(value, "?#") {
+		return false
+	}
+	if taskTemplate {
+		return strings.Count(value, "{task_id}") == 1
+	}
+	return !strings.Contains(value, "{") && !strings.Contains(value, "}")
 }
 
 func validateVideoInputModes(values []VideoInputMode) error {

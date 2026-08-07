@@ -4,8 +4,9 @@ import {
   buildConversationLens,
   buildConversationMessageCreate,
   compactDocumentTitle,
+  conversationSearchRunsByMessage,
+  conversationSourceDocuments,
   intakeMissingLabel,
-  waitForConversationResearch,
 } from '../src/features/strategy/strategyConversationModel.js'
 import type { BriefDraft, KnowledgeDocument, MediaUnderstandingArtifact, ResearchArtifact, ResearchRun } from '../src/features/strategy/types.js'
 
@@ -100,24 +101,6 @@ test('web research becomes immutable evidence and a visible requested policy', (
   })
 })
 
-test('conversation research polling waits for a terminal run without silent fallback', async () => {
-  const initial = { id: 'run_1', status: 'running' } as ResearchRun
-  const succeeded = { id: 'run_1', status: 'succeeded', artifacts: [] } as unknown as ResearchRun
-  let reads = 0
-  let pauses = 0
-  const result = await waitForConversationResearch(
-    initial,
-    async () => {
-      reads += 1
-      return succeeded
-    },
-    async () => { pauses += 1 },
-  )
-  assert.equal(result.status, 'succeeded')
-  assert.equal(reads, 1)
-  assert.equal(pauses, 1)
-})
-
 test('intake blockers are translated into actionable Chinese', () => {
   assert.equal(intakeMissingLabel('requirement.reference_video'), '上传一条参考视频')
   assert.equal(intakeMissingLabel('requirement.reference_video.ready'), '等待参考视频处理完成')
@@ -130,4 +113,26 @@ test('document title prefers parsed title and falls back to filename', () => {
     filename: 'campaign-brief.pdf',
   } as KnowledgeDocument
   assert.equal(compactDocumentTitle(document), 'campaign-brief.pdf')
+})
+
+test('conversation source list only contains documents referenced by the current brief', () => {
+  const currentBrief = brief({})
+  currentBrief.document.reference_ids = ['document_current', 'document_duplicate', 'research_artifact_1']
+  const current = { id: 'document_current', content_sha256: 'same', status: 'ready' } as KnowledgeDocument
+  const duplicate = { id: 'document_duplicate', content_sha256: 'same', status: 'parsing' } as KnowledgeDocument
+  const previous = { id: 'document_previous', filename: 'strategy-conversation-brief.md' } as KnowledgeDocument
+
+  assert.deepEqual(conversationSourceDocuments(currentBrief, [duplicate, previous, current]), [current])
+  assert.deepEqual(conversationSourceDocuments(brief({}), [previous, current]), [])
+})
+
+test('conversation web searches stay linked to their originating message and exclude deep research', () => {
+  const running = {
+    id: 'run_chat',
+    purpose: 'conversation_web_search',
+    source_ref: { type: 'strategy_message', id: 'message_1' },
+  } as ResearchRun
+  const deep = { id: 'run_deep', purpose: 'deep_research' } as ResearchRun
+
+  assert.deepEqual([...conversationSearchRunsByMessage([running, deep]).entries()], [['message_1', running]])
 })

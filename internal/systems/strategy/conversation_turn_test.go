@@ -129,6 +129,56 @@ func TestConversationTurnAcceptsOnlyDocumentGroundedFactsAndKeepsChunkSource(t *
 	}
 }
 
+func TestConversationTurnAcceptsMultiProductCandidatesAcrossChunks(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{Status: "open", Version: 1, Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{}}
+	message := Message{ID: "msg_1", Content: "Please parse the attached Brief"}
+	grounding := []conversationGrounding{
+		{Source: FieldSource{Type: "knowledge_chunk", ID: "chunk_1", Locator: "lines:1-20"}, Content: "Product Alpha\nrepair and radiance\nAlpha must be shown"},
+		{Source: FieldSource{Type: "knowledge_chunk", ID: "chunk_2", Locator: "lines:21-40"}, Content: "Product Beta\nhydration and firmness\ndo not claim allergy treatment"},
+	}
+	operation := BriefPatchOperation{
+		Op: "set", FieldPath: "product.candidates", Confidence: "high",
+		Value: json.RawMessage(`[
+			{"name":"Product Alpha","category":"","selling_points":["repair and radiance"],"evidence":[],"mandatory_elements":["Alpha must be shown"],"prohibited_claims":[]},
+			{"name":"Product Beta","category":"","selling_points":["hydration and firmness"],"evidence":[],"mandatory_elements":[],"prohibited_claims":["do not claim allergy treatment"]}
+		]`),
+	}
+	if !productCandidatesAreGrounded(message.Content, grounding, operation.Value) {
+		t.Fatalf("test product candidates should be grounded: %s", operation.Value)
+	}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", AssistantReply: "Parsed", Patch: BriefPatch{Operations: []BriefPatchOperation{operation}},
+	}, grounding)
+	if len(decision.Patch.Operations) != 1 {
+		t.Fatalf("grounded product candidates were rejected: %#v", decision.Patch.Operations)
+	}
+	enriched := enrichProductCandidateSources(message, grounding, decision.Patch.Operations[0].Value)
+	var candidates []BriefProductCandidate
+	if err := json.Unmarshal(enriched, &candidates); err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || len(candidates[0].SourceRefs) != 1 || candidates[0].SourceRefs[0].ID != "chunk_1" ||
+		len(candidates[1].SourceRefs) != 1 || candidates[1].SourceRefs[0].ID != "chunk_2" {
+		t.Fatalf("candidate source refs = %#v", candidates)
+	}
+
+	operation.Value = json.RawMessage(`[{"name":"Product Alpha","category":"","selling_points":["invented claim"],"evidence":[],"mandatory_elements":[],"prohibited_claims":[]}]`)
+	decision = sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", AssistantReply: "Parsed", Patch: BriefPatch{Operations: []BriefPatchOperation{operation}},
+	}, grounding)
+	if len(decision.Patch.Operations) != 1 {
+		t.Fatalf("grounded candidate was discarded with its ungrounded fact: %#v", decision.Patch.Operations)
+	}
+	var sanitized []BriefProductCandidate
+	if err := json.Unmarshal(decision.Patch.Operations[0].Value, &sanitized); err != nil {
+		t.Fatal(err)
+	}
+	if len(sanitized) != 1 || len(sanitized[0].SellingPoints) != 0 {
+		t.Fatalf("ungrounded candidate fact was retained: %#v", sanitized)
+	}
+}
+
 func TestConversationGroundingReadsOnlyDirectMediaEvidence(t *testing.T) {
 	t.Parallel()
 	timestamp := int64(2400)

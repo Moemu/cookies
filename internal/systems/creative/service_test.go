@@ -218,6 +218,73 @@ func TestReadySelectedRouteReconcilesAnEarlierBlockedIntake(t *testing.T) {
 	}
 }
 
+func TestBrandStrategyHandoffNeedsNoOverlayAndDoesNotInventCreativeFields(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{
+		PackageID: "package_brand", PackageVersion: 3, ContentHash: "sha256:package", CreativeReady: true,
+		Objective: "build brand recognition", Audience: "operations leaders", CoreMessage: "automation returns judgment to people",
+		CallToAction: "learn more", Concept: "strategy-authored concept", Tone: []string{"credible"},
+		VisualKeywords: []string{"strategy-authored visual"}, Mandatory: []string{"show the product"}, Prohibited: []string{"no fabricated claims"},
+		CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteID: "route_brand_video", RouteType: CreativeRouteBrandVideo, VideoPurpose: "brand",
+			Channels: []string{"douyin", "xiaohongshu"}, Reason: "approved brand-video route",
+			TargetDurationSeconds: 30, AspectRatio: "9:16", ReadinessStatus: "ready", RequiresHumanConfirmation: true,
+		}},
+	}}
+	request := CreateIntakeRequest{
+		ContractVersion: CreativeIntakeCreateV3ContractVersion, Source: IntakeSourceStrategyPackage,
+		StrategyPackage: &StrategyPackageReference{
+			PackageID: "package_brand", PackageVersion: 3, ExpectedContentHash: "sha256:package",
+			HandoffContractVersion: "strategy-creative-handoff/v1", ExpectedHandoffHash: "sha256:handoff",
+		},
+		SelectedRouteID: "route_brand_video",
+	}
+
+	intake, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "brand-no-overlay", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.Status != IntakeReady || intake.Request.TaskOverlay != nil || intake.Request.TaskOverlayInput != nil {
+		t.Fatalf("optional overlay unexpectedly blocked brand handoff: %#v", intake)
+	}
+	if intake.Request.Format != FormatVideo || intake.Request.PerformanceMode != CreativeRouteBrandVideo || intake.Request.Channel != "" {
+		t.Fatalf("brand routing projection = %#v", intake.Request)
+	}
+	if intake.Request.CallToAction != "" || intake.Request.Concept != "" || len(intake.Request.VisualKeywords) != 0 {
+		t.Fatalf("Strategy invented Creative-owned fields: %#v", intake.Request)
+	}
+	if intake.Request.Objective == "" || intake.Request.Audience == "" || intake.Request.CoreMessage == "" ||
+		len(intake.Request.Tone) != 1 || len(intake.Request.Mandatory) != 1 || len(intake.Request.Prohibited) != 1 {
+		t.Fatalf("approved brand facts were not projected: %#v", intake.Request)
+	}
+}
+
+func TestBrandStrategyHandoffRejectsRouteWithoutProductionChannel(t *testing.T) {
+	t.Parallel()
+	service := testService()
+	service.StrategyPackages = strategyPackageReader{snapshot: StrategyPackageSnapshot{
+		PackageID: "package_brand_unsupported", PackageVersion: 1, ContentHash: "sha256:package", CreativeReady: true,
+		Objective: "brand", Audience: "audience", CoreMessage: "message",
+		CreativeRoutes: []CreativeRouteSnapshot{{
+			RouteID: "route_brand_video", RouteType: CreativeRouteBrandVideo, VideoPurpose: "brand",
+			Channels: []string{"wechat_official_account"}, Reason: "approved but not producible",
+			TargetDurationSeconds: 30, AspectRatio: "9:16", ReadinessStatus: "ready", RequiresHumanConfirmation: true,
+		}},
+	}}
+	_, err := service.CreateIntake(context.Background(), testRequestContext(), "project_1", "brand-unsupported", CreateIntakeRequest{
+		ContractVersion: CreativeIntakeCreateV3ContractVersion, Source: IntakeSourceStrategyPackage,
+		StrategyPackage: &StrategyPackageReference{
+			PackageID: "package_brand_unsupported", PackageVersion: 1, ExpectedContentHash: "sha256:package",
+			HandoffContractVersion: "strategy-creative-handoff/v1", ExpectedHandoffHash: "sha256:handoff",
+		},
+		SelectedRouteID: "route_brand_video",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no Creative-supported production channel") {
+		t.Fatalf("unsupported brand route error = %v", err)
+	}
+}
+
 func TestTaskStrategyHandoffCreatesFrozenReadyIntake(t *testing.T) {
 	t.Parallel()
 	service := testService()
@@ -545,15 +612,44 @@ func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *
 		},
 	}
 	service.Repository.(*memoryRepository).intakes[intake.ID] = intake
+	service.BrandBriefs = confirmedBrandBriefRepository(intake)
+	brandBriefRepository := service.BrandBriefs.(*brandBriefRepositoryStub)
+	brandBriefRepository.review.ContentHash = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	brandBriefRepository.review.Document = BrandBriefDocument{
+		Summary:          "面向研发与采购负责人的品牌认知广告",
+		AudienceSegments: []BrandBriefAudience{{SegmentID: "audience_1", Label: "研发与采购负责人", Insight: "需要可验证证据"}},
+		Product:          BrandBriefProduct{BrandName: "灵裁", ProductName: "智能创作平台", SellingPoints: []string{"把风险变成工程判断"}, ProofPoints: []string{"evidence_1"}},
+		Communication:    BrandBriefCommunication{SingleMindedProposition: intake.Request.CoreMessage, ToneConstraints: []string{"克制可信"}},
+		Guardrails:       []BrandBriefGuardrail{{GuardrailID: "guardrail_1", Text: "不虚构结论"}},
+		Route:            BrandBriefRoute{RouteID: "route_brand_video", Spec: BrandBriefRouteSpec{TargetDurationSeconds: 30, AspectRatio: "9:16", Resolution: "1080x1920"}},
+		AudioIntent:      BrandBriefAudioIntent{VoiceDirection: "冷静、可信"},
+	}
+	brandBrief := brandBriefRepository.review
+	createdAt := time.Now().UTC()
+	brandBriefRepository.review.CreatedAt = createdAt
+	brandBriefRepository.review.UpdatedAt = createdAt
 	direction := CreativeDirectionVersion{
 		ContractVersion: CreativeDirectionVersionV1, ID: "direction_brand", OrganizationID: "org_1", ProjectID: "project_1",
-		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, RouteID: "route_brand_video",
+		BatchID: "batch_brand", IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash, RouteID: "route_brand_video",
 		Concept: "毫米之间，有人回答", CreativeRationale: "用人物接力建立工程伙伴认知",
 		MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构结论"},
 		DirectionMode: "cinematic", EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "工业微距",
 		BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认", Status: DirectionStatusConfirmed,
+		Version: 1, ContentHash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", CreatedAt: createdAt,
+		BrandBriefRef: &BrandBriefReference{Revision: brandBrief.Revision, ContentHash: brandBrief.ContentHash},
 	}
-	service.Directions = &directionRepositoryStub{batch: CreativeDirectionBatch{Candidates: []CreativeDirectionVersion{direction}}}
+	alternate := direction
+	alternate.ID = "direction_brand_alternate"
+	alternate.Concept = "看得见的工程判断"
+	alternate.ContentHash = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	alternate.Status = DirectionStatusCandidate
+	service.Directions = &directionRepositoryStub{batch: CreativeDirectionBatch{
+		ContractVersion: CreativeDirectionBatchV1, ID: "batch_brand", OrganizationID: "org_1", ProjectID: "project_1",
+		IntakeID: intake.ID, InputIdentityHash: intake.InputIdentityHash,
+		BrandBriefRef: &BrandBriefReference{Revision: brandBrief.Revision, ContentHash: brandBrief.ContentHash},
+		Status:        DirectionBatchReady, Candidates: []CreativeDirectionVersion{direction, alternate},
+		Model: "test-model", PromptVersion: "creative-direction/brand-video-v1", CreatedAt: createdAt,
+	}}
 
 	task, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
 		SelectedRouteID: "route_brand_video", DirectionID: direction.ID, Channel: ChannelXiaohongshu,
@@ -568,8 +664,30 @@ func TestCreateBrandVideoTaskConsumesConfirmedDirectionWithoutReferenceVideo(t *
 	}
 	if task.Channel != ChannelXiaohongshu || task.Direction.DirectionVersionID != direction.ID || task.Direction.InputIdentityHash != intake.InputIdentityHash ||
 		task.Direction.CallToAction != "" || detail.VideoDraft == nil || detail.VideoDraft.Resolution != "1080x1920" ||
-		!strings.Contains(detail.VideoDraft.Prompt, direction.BrandMemoryDevice) {
+		detail.VideoDraft.BrandFilm == nil || detail.VideoDraft.BrandFilm.Stage != BrandFilmConceptConfirmed ||
+		detail.VideoDraft.BrandFilm.SelectedConceptID != direction.ID || !strings.Contains(detail.VideoDraft.Prompt, direction.BrandMemoryDevice) {
 		t.Fatalf("brand task did not preserve confirmed direction lineage and route spec: task=%+v detail=%+v", task, detail)
+	}
+	replayed, err := service.CreateVideoTask(context.Background(), testRequestContext().Actor, "project_1", intake.ID, CreateVideoTaskRequest{
+		SelectedRouteID: "route_brand_video", DirectionID: direction.ID, Channel: ChannelXiaohongshu,
+		Mandatory: []string{}, Prohibited: []string{}, ConfirmRoute: true,
+	})
+	if err != nil || replayed.ID != task.ID {
+		t.Fatalf("brand task lineage was not idempotent: first=%s replay=%s err=%v", task.ID, replayed.ID, err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	service.ViralRemakes = repository
+	legacy := repository.tasks[task.ID]
+	legacy.VideoDraft.BrandFilm = nil
+	repository.tasks[task.ID] = legacy
+	recovered, err := service.InitializeStrategyBrandFilmWorkspace(context.Background(), testRequestContext().Actor, "project_1", task.ID)
+	if err != nil || recovered.VideoDraft == nil || recovered.VideoDraft.BrandFilm == nil ||
+		recovered.VideoDraft.BrandFilm.SelectedConceptID != direction.ID || recovered.VideoDraft.Revision != 2 {
+		t.Fatalf("legacy strategy brand task was not upgraded in place: detail=%+v err=%v", recovered, err)
+	}
+	recoveredAgain, err := service.InitializeStrategyBrandFilmWorkspace(context.Background(), testRequestContext().Actor, "project_1", task.ID)
+	if err != nil || recoveredAgain.VideoDraft.Revision != recovered.VideoDraft.Revision {
+		t.Fatalf("legacy workspace repair was not idempotent: first=%d replay=%d err=%v", recovered.VideoDraft.Revision, recoveredAgain.VideoDraft.Revision, err)
 	}
 }
 

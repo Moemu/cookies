@@ -528,6 +528,7 @@ type CreativeTask struct {
 	Channel         CreativeChannel         `json:"channel"`
 	VideoPurpose    string                  `json:"video_purpose,omitempty"`
 	PerformanceMode string                  `json:"performance_mode,omitempty"`
+	LineageKey      string                  `json:"-"`
 	Status          TaskStatus              `json:"status"`
 	Direction       CreativeDirection       `json:"direction"`
 	Version         int64                   `json:"version"`
@@ -859,15 +860,51 @@ type VideoVersionSnapshot struct {
 }
 
 type BrandFilmVersionSnapshot struct {
-	ContractVersion string                   `json:"contract_version"`
-	PlanRevision    int64                    `json:"plan_revision"`
-	QualityRunID    string                   `json:"quality_run_id"`
-	ReferenceAsset  contract.AssetVersionRef `json:"reference_asset"`
-	FinalVideo      contract.AssetVersionRef `json:"final_video"`
-	UnitCount       int                      `json:"unit_count"`
-	AttemptCount    int                      `json:"attempt_count"`
-	ConfirmedBy     string                   `json:"confirmed_by"`
-	ConfirmedAt     time.Time                `json:"confirmed_at"`
+	ContractVersion string                    `json:"contract_version"`
+	PlanRevision    int64                     `json:"plan_revision"`
+	QualityRunID    string                    `json:"quality_run_id"`
+	Lineage         *BrandFilmLineageSnapshot `json:"lineage,omitempty"`
+	ReferenceAsset  contract.AssetVersionRef  `json:"reference_asset"`
+	FinalVideo      contract.AssetVersionRef  `json:"final_video"`
+	UnitCount       int                       `json:"unit_count"`
+	AttemptCount    int                       `json:"attempt_count"`
+	ConfirmedBy     string                    `json:"confirmed_by"`
+	ConfirmedAt     time.Time                 `json:"confirmed_at"`
+}
+
+// BrandFilmLineageSnapshot keeps the immutable cross-system proof required to
+// trace a delivered brand film back to the exact Strategy handoff, confirmed
+// Brand Brief, and CreativeDirection that authored it. It deliberately omits
+// the duplicated Brief body stored in the working draft.
+type BrandFilmLineageSnapshot struct {
+	SourceType             string `json:"source_type"`
+	IntakeID               string `json:"intake_id"`
+	InputIdentityHash      string `json:"input_identity_hash"`
+	StrategyPackageID      string `json:"strategy_package_id"`
+	StrategyPackageVersion int64  `json:"strategy_package_version"`
+	StrategyPackageHash    string `json:"strategy_package_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version"`
+	HandoffContentHash     string `json:"handoff_content_hash"`
+	BrandBriefRevision     int64  `json:"brand_brief_revision"`
+	BrandBriefContentHash  string `json:"brand_brief_content_hash"`
+	DirectionBatchID       string `json:"direction_batch_id"`
+	DirectionID            string `json:"direction_id"`
+	DirectionVersion       int64  `json:"direction_version"`
+	DirectionContentHash   string `json:"direction_content_hash"`
+	RouteID                string `json:"route_id"`
+}
+
+func (v BrandFilmLineageSnapshot) Validate() error {
+	if v.SourceType != strategyBrandFilmSourceType || strings.TrimSpace(v.IntakeID) == "" ||
+		!validSHA256Ref(v.InputIdentityHash) || strings.TrimSpace(v.StrategyPackageID) == "" ||
+		v.StrategyPackageVersion < 1 || !validSHA256Ref(v.StrategyPackageHash) ||
+		strings.TrimSpace(v.HandoffContractVersion) == "" || !validSHA256Ref(v.HandoffContentHash) ||
+		v.BrandBriefRevision < 1 || !validSHA256Ref(v.BrandBriefContentHash) ||
+		strings.TrimSpace(v.DirectionBatchID) == "" || strings.TrimSpace(v.DirectionID) == "" ||
+		v.DirectionVersion < 1 || !validSHA256Ref(v.DirectionContentHash) || strings.TrimSpace(v.RouteID) == "" {
+		return fmt.Errorf("creative brand film lineage snapshot is incomplete")
+	}
+	return nil
 }
 
 func (v BrandFilmVersionSnapshot) Validate() error {
@@ -875,6 +912,9 @@ func (v BrandFilmVersionSnapshot) Validate() error {
 		strings.TrimSpace(v.QualityRunID) == "" || v.ReferenceAsset.Validate() != nil || v.FinalVideo.Validate() != nil ||
 		v.UnitCount < 1 || v.AttemptCount < v.UnitCount || strings.TrimSpace(v.ConfirmedBy) == "" || v.ConfirmedAt.IsZero() {
 		return fmt.Errorf("creative brand film version snapshot is incomplete")
+	}
+	if v.Lineage != nil && v.Lineage.Validate() != nil {
+		return fmt.Errorf("creative brand film version lineage is incomplete")
 	}
 	return nil
 }

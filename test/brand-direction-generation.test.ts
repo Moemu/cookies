@@ -7,6 +7,7 @@ import {
   brandDirectionFailureMessage,
   brandVideoTaskStatusLabel,
   isBrandDirectionGenerating,
+  isChannelNeutralBrandDirectionBatch,
 } from '../src/features/creative/brandDirectionGeneration'
 
 function batch(status: ApiCreativeDirectionBatch['status']): ApiCreativeDirectionBatch {
@@ -45,6 +46,14 @@ test('confirmed brand direction takes precedence when restoring a batch', () => 
     },
   ]
   assert.deepEqual(availableBrandDirections(value).map(item => item.direction_id), ['confirmed_1'])
+})
+
+test('legacy channel-led direction batches require regeneration', () => {
+  const value = batch('ready')
+  value.prompt_version = 'creative-direction/strategy-handoff-v3'
+  assert.equal(isChannelNeutralBrandDirectionBatch(value), false)
+  value.prompt_version = 'creative-direction/strategy-handoff-v4'
+  assert.equal(isChannelNeutralBrandDirectionBatch(value), true)
 })
 
 test('brand route without context lists active brand-video tasks for explicit selection', () => {

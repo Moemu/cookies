@@ -555,8 +555,81 @@ export type ApiCreativeDirectionBatch = {
   intake_id: string
   status: 'generating' | 'ready' | 'failed'
   candidates: ApiCreativeDirection[]
+  prompt_version?: string
   failure_code?: string
+  brand_brief_ref?: { revision: number; content_hash: string }
   created_at: string
+}
+
+export type ApiBrandBriefReview = {
+  contract_version: 'creative-brand-brief-review/v1'
+  intake_id: string
+  input_identity_hash: string
+  status: 'draft' | 'confirmed'
+  revision: number
+  document: {
+    summary: string
+    market: string
+    language: string
+    objective: { objective_type: string; statement: string; success_signals: string[] }
+    audience_segments: Array<{
+      segment_id: string
+      label: string
+      priority: number
+      insight: string
+      tension: string
+      evidence_ref_ids: string[]
+    }>
+    product: {
+      product_ref_ids: string[]
+      brand_name: string
+      product_name: string
+      selling_points: string[]
+      proof_points: string[]
+      usage_scenarios: string[]
+      campaign_mechanism: string
+      offer_text: string
+      landing_destination: string
+    }
+    communication: {
+      single_minded_proposition: string
+      message_hierarchy: Array<{ priority: number; message: string; evidence_ref_ids: string[] }>
+      cta_intent: string
+      approved_ctas: string[]
+      tone_constraints: string[]
+    }
+    guardrails: Array<{ guardrail_id: string; kind: string; severity: string; scope: string; text: string; source_ref_ids: string[] }>
+    claims: Array<{ claim_id: string; approved_text: string; evidence_ref_ids: string[]; required_disclaimer: string }>
+    assets: Array<{
+      asset_ref: { asset_id: string; version: number }
+      role: string
+      rights: { status: string; generative_ai_allowed: boolean; derivative_work_allowed: boolean }
+    }>
+    route: {
+      route_id: string
+      channels: string[]
+      reason: string
+      spec: { target_duration_seconds: number; aspect_ratio: string; resolution: string }
+      cta_policy: { cta_intent: string; required_for_generation: boolean; required_for_delivery: boolean }
+      claim_refs: string[]
+      asset_requirements: Array<{ role: string; required_stage: string }>
+    }
+    audio_intent: {
+      narration_required: boolean | null
+      voice_direction: string
+      overall_mood: string
+      music_required: boolean | null
+      sound_effects_required: boolean | null
+    }
+    open_questions: Array<{ code: string; stage: string; message: string }>
+    source_refs: Array<{ ref_id: string; ref_type: string; producer: string; version: string; content_hash: string }>
+    creative_notes: string[]
+  }
+  blockers: string[]
+  warnings: string[]
+  content_hash: string
+  confirmed_by?: string
+  confirmed_at?: string
 }
 
 export type ApiCreativeIntakeBootstrap = {
@@ -1091,14 +1164,31 @@ export type ApiBrandFilmWorkspace = {
       revision: number
       stage: 'waiting_for_input' | 'brief_analysis_draft' | 'brief_confirmed' | 'concept_selection' | 'concept_confirmed' | 'production_plan_draft' | 'production_plan_confirmed' | 'generation_ready' | 'generating' | 'generation_review' | 'generation_locked' | 'audio_draft' | 'quality_review' | 'ready_for_review' | 'approved' | 'delivered'
       source_snapshot: {
-        fixture_id: string
-        fixture_version: number
-        fixture_hash: string
+        source_type?: 'strategy_handoff'
+        fixture_id?: string
+        fixture_version?: number
+        fixture_hash?: string
+        intake_id?: string
+        input_identity_hash?: string
+        strategy_package_id?: string
+        strategy_package_version?: number
+        strategy_package_hash?: string
+        handoff_contract_version?: string
+        handoff_content_hash?: string
+        brand_brief_revision?: number
+        brand_brief_content_hash?: string
+        direction_batch_id?: string
+        direction_id?: string
+        direction_version?: number
+        direction_content_hash?: string
+        route_id?: string
         brief_name: string
+        brief_text: string
         product_name: string
         channel: string
         duration_seconds: number
         aspect_ratio: string
+        resolution?: string
         evidence_refs: string[]
       }
       brief_analysis_versions: ApiBrandBriefAnalysis[] | null
@@ -3565,7 +3655,7 @@ async function platformRequest<T>(path: string, method = 'GET', body?: unknown, 
   return payload as T
 }
 
-class CreativeApiError extends Error {
+export class CreativeApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message)
     this.name = 'CreativeApiError'
@@ -3617,6 +3707,29 @@ function getImageTextWorkspace(projectId: string, taskId: string) {
 function getCreativeIntake(projectId: string, intakeId: string) {
   return creativeRequest<ApiCreativeIntakeBootstrap>(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}`,
+  )
+}
+
+function prepareBrandBriefReview(projectId: string, intakeId: string) {
+  return creativeRequest<ApiBrandBriefReview>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/brand-brief:prepare`,
+    'POST',
+  )
+}
+
+function updateBrandBriefReview(projectId: string, intakeId: string, review: ApiBrandBriefReview) {
+  return creativeRequest<ApiBrandBriefReview>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/brand-brief`,
+    'PATCH',
+    { expected_revision: review.revision, document: review.document },
+  )
+}
+
+function confirmBrandBriefReview(projectId: string, intakeId: string, expectedRevision: number) {
+  return creativeRequest<ApiBrandBriefReview>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/brand-brief:confirm`,
+    'POST',
+    { expected_revision: expectedRevision },
   )
 }
 
@@ -4213,6 +4326,30 @@ function brandFilmPath(projectId: string, taskId: string, suffix: string) {
   return `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/brand-film${suffix}`
 }
 
+function brandFilmIdempotencyKey(...parts: Array<string | number>) {
+  const raw = parts.map(String).join('-')
+  const safe = raw.replace(/[^A-Za-z0-9_-]+/g, '_')
+  if (safe.length <= 255) return safe
+  return `${safe.slice(0, 242)}-${commerceRequestFingerprint(raw)}`
+}
+
+async function getBrandFilmWorkspace(projectId: string, taskId: string): Promise<ApiBrandFilmWorkspace> {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ''))
+}
+
+async function initializeStrategyBrandFilmWorkspace(projectId: string, taskId: string): Promise<ApiBrandFilmWorkspace> {
+  return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, ':initialize-from-strategy'), 'POST')
+}
+
+async function restoreBrandFilmWorkspace(projectId: string, taskId: string): Promise<ApiBrandFilmWorkspace> {
+  try {
+    return await getBrandFilmWorkspace(projectId, taskId)
+  } catch (cause) {
+    if (!(cause instanceof CreativeApiError) || cause.status !== 409) throw cause
+    return initializeStrategyBrandFilmWorkspace(projectId, taskId)
+  }
+}
+
 async function ensureBrandFilmFixtureWorkspace(projectId: string): Promise<ApiBrandFilmWorkspace> {
   return creativeRequest<ApiBrandFilmWorkspace>(
     `/projects/${encodeURIComponent(projectId)}/creative-workspaces/brand-film:ensure-fixture`,
@@ -4236,6 +4373,7 @@ async function updateBrandFilmBrief(projectId: string, taskId: string, expectedR
     brandFilmPath(projectId, taskId, '/brief'),
     'PATCH',
     { expected_revision: expectedRevision, analysis },
+    { 'Idempotency-Key': brandFilmIdempotencyKey('brand-film-brief', taskId, expectedRevision) },
   )
 }
 
@@ -4262,6 +4400,7 @@ async function updateBrandFilmConcepts(projectId: string, taskId: string, expect
     brandFilmPath(projectId, taskId, '/concepts'),
     'PATCH',
     { expected_revision: expectedRevision, candidates },
+    { 'Idempotency-Key': brandFilmIdempotencyKey('brand-film-concepts-update', taskId, expectedRevision) },
   )
 }
 
@@ -4288,6 +4427,7 @@ async function updateBrandFilmPlan(projectId: string, taskId: string, expectedRe
     brandFilmPath(projectId, taskId, '/plan'),
     'PATCH',
     { expected_revision: expectedRevision, plan },
+    { 'Idempotency-Key': brandFilmIdempotencyKey('brand-film-plan-update', taskId, expectedRevision) },
   )
 }
 
@@ -4357,7 +4497,7 @@ async function updateBrandFilmAudioMix(projectId: string, taskId: string, expect
   return creativeRequest<ApiBrandFilmWorkspace>(brandFilmPath(projectId, taskId, '/audio/mix'), 'PATCH', {
     expected_revision: expectedRevision,
     operations,
-  })
+  }, { 'Idempotency-Key': brandFilmIdempotencyKey('brand-film-audio-mix', taskId, expectedRevision) })
 }
 
 async function selectBrandFilmAudioVariant(projectId: string, taskId: string, expectedRevision: number, variantId: string) {
@@ -4382,7 +4522,7 @@ async function generateBrandFilmVoiceClip(projectId: string, taskId: string, exp
     expected_revision: expectedRevision,
     clip_id: clipId,
     voice_alias: voiceAlias,
-  }, { 'Idempotency-Key': `brand-film-voice-${taskId}-${expectedRevision}-${clipId}-${voiceAlias}` })
+  }, { 'Idempotency-Key': brandFilmIdempotencyKey('brand-film-voice', taskId, expectedRevision, clipId, voiceAlias) })
 }
 
 async function runBrandFilmQuality(projectId: string, taskId: string, expectedRevision: number) {
@@ -5323,6 +5463,9 @@ export const api = {
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
   listCreativeTasks,
+  getBrandFilmWorkspace,
+  initializeStrategyBrandFilmWorkspace,
+  restoreBrandFilmWorkspace,
   ensureBrandFilmFixtureWorkspace,
   analyzeBrandFilmBrief,
   updateBrandFilmBrief,
@@ -5353,6 +5496,9 @@ export const api = {
   deliverBrandFilmVersion,
   getImageTextWorkspace,
   getCreativeIntake,
+  prepareBrandBriefReview,
+  updateBrandBriefReview,
+  confirmBrandBriefReview,
   createManualImageTextIntake,
   generateCreativeDirections,
   getLatestCreativeDirectionBatch,

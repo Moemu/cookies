@@ -51,6 +51,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_action}", server.taskAction)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}/brief-draft", server.getBriefDraft)
 	mux.HandleFunc("PATCH /api/strategy/v1/tasks/{task_id}/brief-draft", server.patchBriefDraft)
+	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief-draft:revise", server.createBriefRevisionDraft)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief:confirm", server.confirmBrief)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/brief-versions", server.listProjectBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/briefs", server.listProjectBriefs)
@@ -435,6 +436,28 @@ func (s *Server) patchBriefDraft(writer http.ResponseWriter, request *http.Reque
 	}
 	writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
 	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) createBriefRevisionDraft(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		BaseBriefVersion int64 `json:"base_brief_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.CreateBriefRevisionDraft(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("task_id"), body.BaseBriefVersion,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
+	writeJSON(writer, http.StatusCreated, value)
 }
 
 func (s *Server) confirmBrief(writer http.ResponseWriter, request *http.Request) {

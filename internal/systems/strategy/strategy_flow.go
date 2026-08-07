@@ -73,6 +73,9 @@ func (s Service) CreateStrategy(ctx context.Context, actor contract.ActorContext
 	if problems := fullStrategyReadinessProblems(brief.Snapshot, brief.FieldStates); len(problems) > 0 {
 		return CreateStrategyResult{}, false, BlockedError{Problems: problems}
 	}
+	if problems := s.projectBriefCompatibilityProblems(ctx, actor, task.ProjectID, brief.Snapshot); len(problems) > 0 {
+		return CreateStrategyResult{}, false, BlockedError{Problems: problems}
+	}
 	if err := s.ensureConcurrencyLimit(ctx, actor.OrganizationID, task.ProjectID, 4); err != nil {
 		return CreateStrategyResult{}, false, err
 	}
@@ -189,6 +192,24 @@ func fullStrategyReadinessProblems(document BriefDocument, states map[string]Fie
 		}
 	}
 	return problems
+}
+
+func computeFullStrategyReadiness(document BriefDocument, states map[string]FieldState) Completeness {
+	problems := fullStrategyReadinessProblems(document, states)
+	return Completeness{
+		Ready: len(problems) == 0, Blockers: problems, Warnings: []ValidationError{},
+	}
+}
+
+func briefConfirmationProblems(draft BriefDraft) []ValidationError {
+	completeness := ComputeCompleteness(draft.Document, draft.FieldStates)
+	if !completeness.Ready {
+		return completeness.Blockers
+	}
+	if draft.BaseBriefVersion != nil {
+		return fullStrategyReadinessProblems(draft.Document, draft.FieldStates)
+	}
+	return nil
 }
 
 func (s Service) RetryStrategy(
@@ -714,7 +735,7 @@ func (s Service) handleBriefExtract(ctx context.Context, agentTask agent.Task) (
 		}
 	}
 	decision = reconcileConversationTurn(updated, decision)
-	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.1.0", trace, decision)
+	skillRunID, err := s.insertSkillRun(ctx, tx, agentTask, "strategy.brief.extract", "v2.2.0", trace, decision)
 	if err != nil {
 		return nil, err
 	}
@@ -1104,7 +1125,7 @@ func (s Service) generateConversationTurn(ctx context.Context, task agent.Task, 
 		}
 		return decision, SkillExecutionTrace{
 			GenerationMode: "deterministic", ProviderCode: "deterministic", ModelVersion: "v1",
-			PromptVersion: promptVersion, SkillVersions: map[string]string{"strategy.brief.extract": "v2.1.0"},
+			PromptVersion: promptVersion, SkillVersions: map[string]string{"strategy.brief.extract": "v2.2.0"},
 			LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
 		}, nil
 	}
@@ -1166,7 +1187,7 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 		GenerationMode: "provider", ProviderCode: response.ProviderCode, ModelAlias: modelAlias,
 		ModelVersion: response.ModelVersion, RouteRevisionID: response.RouteRevisionID,
 		ResponseMode: response.ResponseMode, PromptVersion: promptVersion,
-		SkillVersions: map[string]string{"strategy.brief.extract": "v2.1.0"},
+		SkillVersions: map[string]string{"strategy.brief.extract": "v2.2.0"},
 		Usage:         response.Usage, LatencyMS: time.Since(started).Milliseconds(), ValidationAttempts: 1,
 	}
 	if len(response.StructuredOutput) == 0 && response.ProviderCode == "fake" {
@@ -1194,15 +1215,21 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 		candidate = normalizeJSONCandidate(response.Text)
 	}
 	var modelOutput struct {
-		Intent            string                 `json:"intent"`
-		AssistantReply    string                 `json:"assistant_reply"`
-		Operations        []BriefPatchOperation  `json:"operations"`
-		ConfirmFields     []string               `json:"confirm_fields"`
-		FollowUpQuestions []ConversationQuestion `json:"follow_up_questions"`
-		Warnings          []string               `json:"warnings"`
+		Intent            string                  `json:"intent"`
+		AssistantReply    string                  `json:"assistant_reply"`
+		ProductCandidates []BriefProductCandidate `json:"product_candidates"`
+		Operations        []BriefPatchOperation   `json:"operations"`
+		ConfirmFields     []string                `json:"confirm_fields"`
+		FollowUpQuestions []ConversationQuestion  `json:"follow_up_questions"`
+		Warnings          []string                `json:"warnings"`
 	}
 	if err := decodeStrictJSON(candidate, &modelOutput); err != nil {
 		return ConversationTurnDecision{}, SkillExecutionTrace{}, jobruntime.ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_INVALID", Message: "Conversation output is invalid"}}
+	}
+	if len(modelOutput.ProductCandidates) > 0 {
+		modelOutput.Operations = append(modelOutput.Operations, BriefPatchOperation{
+			Op: "set", FieldPath: "product.candidates", Value: mustJSON(modelOutput.ProductCandidates), Confidence: "high",
+		})
 	}
 	decision := ConversationTurnDecision{
 		Intent: modelOutput.Intent, AssistantReply: modelOutput.AssistantReply,
@@ -1226,6 +1253,9 @@ Return one conversational turn decision. assistant_reply must be a short, natura
 	}
 	patch.BaseVersion = draft.Version
 	for index := range patch.Operations {
+		if patch.Operations[index].FieldPath == "product.candidates" {
+			patch.Operations[index].Value = enrichProductCandidateSources(message, grounding, patch.Operations[index].Value)
+		}
 		patch.Operations[index].Source = conversationOperationSource(message, grounding, patch.Operations[index])
 		patch.Operations[index].Confirmation = "unconfirmed"
 	}
@@ -1268,6 +1298,12 @@ func (s Service) loadConversationGrounding(ctx context.Context, task agent.Task,
 		if s.ConversationKnowledge == nil {
 			return nil, fmt.Errorf("conversation document context is unavailable")
 		}
+		// An attachment is a Brief ingestion source, not merely supporting text
+		// for the literal wording of the latest message. Put the canonical Brief
+		// concepts first so chunk selection covers the whole business document.
+		queryParts = append([]string{
+			"品牌 产品 主推 沟通主题 受众 卖点 功效 成分 必提 避免 拍摄 平台",
+		}, queryParts...)
 		query := strings.Join(queryParts, " ")
 		if query == "" {
 			query = "产品 目标 受众 核心主张 品牌 约束"

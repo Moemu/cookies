@@ -241,6 +241,14 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		!strings.EqualFold(string(handoff.HandoffContentHash), expected) {
 		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy handoff content hash no longer matches the selected version")
 	}
+	packageVersion, err := r.Service.GetPackage(ctx, actor, projectID, reference.PackageID, reference.PackageVersion)
+	if err != nil {
+		return creative.StrategyPackageSnapshot{}, err
+	}
+	if !packageVersion.ContentHash.Equal(handoff.PackageRef.PackageContentHash) {
+		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy package no longer matches its frozen handoff")
+	}
+	brief := packageVersion.Snapshot.Brief.Snapshot
 
 	audience := ""
 	bestPriority := int(^uint(0) >> 1)
@@ -279,7 +287,11 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		Objective:     handoff.CreativeView.Objective.Statement, Audience: audience,
 		CoreMessage:  handoff.CreativeView.Communication.SingleMindedProposition,
 		CallToAction: cta, Tone: append([]string{}, handoff.CreativeView.Communication.ToneConstraints...),
-		Mandatory: appendUnique(mandatory), Prohibited: appendUnique(prohibited),
+		BrandName: brief.Brand.Name, ProductName: brief.Product.Name,
+		SellingPoints:  append([]string{}, brief.Product.SellingPoints...),
+		ProofPoints:    append([]string{}, brief.Product.Evidence...),
+		UsageScenarios: append([]string{}, brief.Audience.Scenarios...),
+		Mandatory:      appendUnique(mandatory), Prohibited: appendUnique(prohibited),
 		CreativeRoutes: routes, HandoffSnapshot: handoffSnapshot,
 	}, nil
 }

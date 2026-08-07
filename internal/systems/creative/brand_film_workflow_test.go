@@ -8,6 +8,7 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/media"
+	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
 func TestBrandFilmFixtureCompletesPersistentPhaseZeroToTwo(t *testing.T) {
@@ -217,7 +218,9 @@ func TestBrandFilmPhaseThreePersistsGenerationAttemptsFeedbackAndLocks(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.InputMode != "reference_image" || input.DurationSeconds != 5 || promptHash != generation.Units[0].PromptPackages[0].ContentHash {
+	if input.InputMode != "reference_image" || input.AudioPolicy != provider.VideoAudioSilent || input.DurationSeconds != 5 ||
+		input.AspectRatio != workspace.VideoDraft.BrandFilm.SourceSnapshot.AspectRatio || input.Resolution != "720p" ||
+		promptHash != generation.Units[0].PromptPackages[0].ContentHash {
 		t.Fatalf("provider input = %#v hash=%s", input, promptHash)
 	}
 	workspace, err = service.RegisterBrandFilmGenerationAttempt(ctx, rc.Actor, "project_1", workspace.Task.ID, unitID, "provider_job_1")
@@ -257,6 +260,24 @@ func TestBrandFilmPhaseThreePersistsGenerationAttemptsFeedbackAndLocks(t *testin
 	}
 	if _, err := service.RegenerateBrandFilmUnit(ctx, rc.Actor, "project_1", workspace.Task.ID, RegenerateBrandFilmUnitRequest{ExpectedRevision: workspace.VideoDraft.Revision, UnitID: unitID, Feedback: "should fail"}); err == nil {
 		t.Fatal("locked unit accepted regeneration")
+	}
+}
+
+func TestNormalizeBrandFilmProviderResolution(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"1080x1920": "720p",
+		"1920×1080": "720p",
+		"1080p":     "720p",
+		"720x1280":  "720p",
+		"480p":      "480p",
+		"":          "720p",
+		"original":  "720p",
+	}
+	for input, want := range tests {
+		if got := normalizeBrandFilmProviderResolution(input); got != want {
+			t.Errorf("normalizeBrandFilmProviderResolution(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

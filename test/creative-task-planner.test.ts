@@ -54,3 +54,17 @@ test('route repair makes a concrete Xiaohongshu image strategy explicit without 
   assert.deepEqual(result.value[0].formats, ['精度检测实拍三联图', '小红书图文笔记'])
   assert.deepEqual(result.value[1].formats, ['short_video'])
 })
+
+test('route repair follows the selected brand video business instead of always adding image text', () => {
+  const result = createRouteRevisionChannelStrategy([{
+    platform: 'xiaohongshu', role: '搜索承接与销售转化', formats: ['精华成分图文'],
+  }, {
+    platform: 'douyin', role: '产品卖点转化', formats: ['海报'],
+  }], 'brand_video')
+
+  assert.equal(result.changed, true)
+  assert.match(result.value[0].role, /品牌认知/)
+  assert.match(result.value[1].role, /品牌认知/)
+  assert.deepEqual(result.value[0].formats, ['精华成分图文', '品牌短视频'])
+  assert.deepEqual(result.value[1].formats, ['海报', '品牌短视频'])
+})

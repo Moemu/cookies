@@ -781,15 +781,20 @@ func creativeObjectiveType(snapshot PackageSnapshot) (string, bool) {
 		[]string{snapshot.Strategy.Objective, snapshot.Brief.Snapshot.Campaign.Objective},
 		snapshot.Strategy.Measurement...,
 	), " "))
-	if containsAny(objectiveText,
-		"performance", "conversion", "转化", "获客", "留资", "线索", "成交", "销售", "购买", "安装", "注册") {
-		return "performance", true
+	brand := containsAny(objectiveText,
+		"brand", "awareness", "品牌", "种草", "心智", "产品认知", "品牌资产")
+	performance := containsAny(objectiveText,
+		"performance", "conversion", "转化", "获客", "留资", "线索", "成交", "销售", "购买", "安装", "注册")
+	if brand || performance {
+		switch {
+		case brand && performance:
+			return "mixed", true
+		case performance:
+			return "performance", true
+		default:
+			return "brand", true
+		}
 	}
-	if containsAny(objectiveText, "brand awareness", "品牌认知", "品牌心智", "品牌资产") {
-		return "brand", true
-	}
-	brand := false
-	performance := false
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
 		role := strings.ToLower(strings.TrimSpace(channel.Role))
 		if containsAny(role, "brand", "awareness", "品牌", "认知", "种草", "心智") {
@@ -835,6 +840,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 	warnings := make([]HandoffIssue, 0)
 	seen := map[string]bool{}
 	brandVideoChannels := make([]string, 0)
+	ambiguousImageRoutes := make([]HandoffIssue, 0)
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
 		platform := strings.ToLower(strings.TrimSpace(channel.Platform))
 		if supportsBrandVideoPlatform(platform) && containsVideoFormat(channel.Formats) {
@@ -842,7 +848,8 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			if !known && objectiveTypeKnown && objectiveType != "mixed" {
 				purpose, known = objectiveType, true
 			}
-			if (known && purpose == "brand") || creativeHandoffHasBrandGoal(snapshot) {
+			roleHasBrand, _ := creativeRouteSignals(channel.Role)
+			if roleHasBrand || (known && purpose == "brand") || creativeHandoffHasBrandGoal(snapshot) {
 				brandVideoChannels = appendUnique(brandVideoChannels, platform)
 			}
 		}
@@ -856,7 +863,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			}
 		}
 		if !known {
-			blockers = append(blockers, HandoffIssue{
+			ambiguousImageRoutes = append(ambiguousImageRoutes, HandoffIssue{
 				Code: "route_purpose_missing", Stage: "planning", Path: "routes",
 				Message: "小红书图文 Route 缺少明确的品牌或效果目的。",
 				Source:  "strategy", SourceRefIDs: []string{},
@@ -925,6 +932,16 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 			},
 		})
 	}
+	// An ambiguous optional image route must not make an independently valid
+	// brand-video route unusable. Keep the diagnosis visible as a warning; it
+	// remains a blocker when no executable route can be frozen at all.
+	if len(ambiguousImageRoutes) > 0 {
+		if len(routes) > 0 {
+			warnings = append(warnings, ambiguousImageRoutes...)
+		} else {
+			blockers = append(blockers, ambiguousImageRoutes...)
+		}
+	}
 	if len(snapshot.CreativeRoutes) > 0 {
 		issue := HandoffIssue{
 			Code: "creative_route_mode_missing", Stage: "planning", Path: "routes",
@@ -943,9 +960,7 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 }
 
 func creativeRoutePurpose(role string) (string, bool) {
-	role = strings.ToLower(strings.TrimSpace(role))
-	brand := containsAny(role, "brand", "awareness", "品牌", "认知", "种草", "心智")
-	performance := containsAny(role, "performance", "conversion", "转化", "引流", "成交", "销售", "效果")
+	brand, performance := creativeRouteSignals(role)
 	switch {
 	case brand && !performance:
 		return "brand", true
@@ -954,6 +969,12 @@ func creativeRoutePurpose(role string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func creativeRouteSignals(role string) (brand bool, performance bool) {
+	role = strings.ToLower(strings.TrimSpace(role))
+	return containsAny(role, "brand", "awareness", "品牌", "认知", "种草", "心智", "产品认知"),
+		containsAny(role, "performance", "conversion", "转化", "引流", "获客", "留资", "成交", "销售", "效果")
 }
 
 func creativeRouteReason(document StrategyDocument, platform string) string {
@@ -1010,7 +1031,8 @@ func creativeHandoffHasBrandGoal(snapshot PackageSnapshot) bool {
 		snapshot.Strategy.Objective,
 		snapshot.Strategy.CrossPlatformRole,
 	}, " ")
-	return containsAny(strings.ToLower(objective), "品牌广告", "品牌认知", "品牌心智", "品牌资产", "brand", "awareness")
+	return containsAny(strings.ToLower(objective),
+		"品牌", "品牌广告", "品牌认知", "品牌心智", "品牌资产", "产品认知", "种草", "brand", "awareness")
 }
 
 func creativeBrandVideoReason(document StrategyDocument, channels []string) string {

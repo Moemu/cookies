@@ -37,7 +37,7 @@ func TestModelCreativeDirectionPlannerRepairsUnsafeProviderOutput(t *testing.T) 
 	if len(generator.requests) != 2 || generator.requests[0].InvocationKey == generator.requests[1].InvocationKey {
 		t.Fatalf("repair must use a distinct provider invocation: %+v", generator.requests)
 	}
-	if !strings.Contains(string(generator.requests[0].InvocationKey), "_v3_0") ||
+	if !strings.Contains(string(generator.requests[0].InvocationKey), "_v4_0") ||
 		!strings.Contains(generator.requests[1].Messages[len(generator.requests[1].Messages)-1].Content, "未通过质量校验") {
 		t.Fatalf("repair request did not carry the v3 identity and remediation instruction: %+v", generator.requests)
 	}
@@ -72,8 +72,38 @@ func TestModelCreativeDirectionPlannerRepairsUtilityHeavyBrandBatch(t *testing.T
 		t.Fatalf("unexpected repaired brand batch: %+v", result)
 	}
 	if !strings.Contains(generator.requests[0].Messages[0].Content, "品牌视频") ||
+		!strings.Contains(generator.requests[0].Messages[0].Content, "渠道中立") ||
 		!strings.Contains(generator.requests[1].Messages[len(generator.requests[1].Messages)-1].Content, "utility-led") {
 		t.Fatalf("brand quality contract was not carried into prompt and repair: %+v", generator.requests)
+	}
+}
+
+func TestChannelNeutralBrandPlanningContextHidesPlatformChoicesFromModel(t *testing.T) {
+	document := BrandBriefDocument{Route: BrandBriefRoute{Channels: []string{"douyin", "xiaohongshu"}}}
+	contextValue := CreativePlanningContext{
+		SelectedRoute: CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo, Channels: []string{"douyin", "xiaohongshu"}},
+		BrandBrief:    &document,
+	}
+
+	modelContext := channelNeutralBrandPlanningContext(contextValue)
+	if len(modelContext.SelectedRoute.Channels) != 0 || len(modelContext.BrandBrief.Route.Channels) != 0 {
+		t.Fatalf("brand master model context still contains channel choices: %+v", modelContext)
+	}
+	if len(contextValue.SelectedRoute.Channels) != 2 || len(contextValue.BrandBrief.Route.Channels) != 2 {
+		t.Fatalf("sanitizing model context mutated the persisted planning context: %+v", contextValue)
+	}
+}
+
+func TestBrandMasterQualityRejectsChannelSpecificLanguage(t *testing.T) {
+	candidate := DirectionCandidate{
+		Concept: "适配抖音的金色时刻", CreativeRationale: "以人物情绪建立品牌记忆", DirectionMode: "emotional",
+		MessagePlan: []string{"从人物困扰回到品牌主张"}, ExecutionOutline: []string{"用暖金色长镜头展开"}, GuardrailTrace: []string{"不扩写功效"},
+		EmotionalArc: "从不安到笃定", VisualGrammar: "暖金色长镜头", BrandMemoryDevice: "一滴金色微光", HumanMoment: "她在镜前停顿后露出微笑",
+	}
+
+	err := validateDirectionBatchQuality(CreativePlanningContext{SelectedRoute: CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo}}, []DirectionCandidate{candidate})
+	if err == nil || !strings.Contains(err.Error(), "channel-specific") {
+		t.Fatalf("expected channel-specific brand master rejection, got %v", err)
 	}
 }
 

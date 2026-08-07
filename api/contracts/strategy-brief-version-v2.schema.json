@@ -17,7 +17,14 @@
       "required": ["name"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
-        "evidence": {"type": "array", "items": {"type": "string"}}
+        "category": {"type": "string"},
+        "selling_points": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "candidates": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {"$ref": "#/$defs/productCandidate"}
+        }
       },
       "additionalProperties": false
     },
@@ -94,5 +101,31 @@
     },
     "reference_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "sourceRef": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "id": {"type": "string", "minLength": 1},
+        "locator": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "productCandidate": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "category": {"type": "string"},
+        "selling_points": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "mandatory_elements": {"type": "array", "items": {"type": "string"}},
+        "prohibited_claims": {"type": "array", "items": {"type": "string"}},
+        "source_refs": {"type": "array", "items": {"$ref": "#/$defs/sourceRef"}}
+      },
+      "additionalProperties": false
+    }
+  }
 }

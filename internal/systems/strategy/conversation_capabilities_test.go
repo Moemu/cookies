@@ -43,7 +43,7 @@ func TestConversationCapabilitiesExposeOnlyEffectiveServerFeatures(t *testing.T)
 	if capabilities.ContractVersion != ConversationCapabilitiesContractV1 ||
 		!capabilities.MultimodalInput.Available || !capabilities.DeepReasoning.Available ||
 		!capabilities.WebSearch.Available || !capabilities.QuickViralRemake.Available ||
-		capabilities.WebSearch.Disclosure != "query_only" {
+		capabilities.WebSearch.Disclosure != "query_only_background" || capabilities.WebSearch.EstimatedWaitSeconds != 180 {
 		t.Fatalf("capabilities=%#v", capabilities)
 	}
 	if err := service.ensureConversationPolicyReady(context.Background(), actor.OrganizationID, &MessageRequestedPolicy{ReasoningMode: "deep", WebSearch: "allowed"}); err != nil {

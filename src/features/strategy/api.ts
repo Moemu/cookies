@@ -211,9 +211,8 @@ export const strategyApi = {
     plan: CreativeTaskPlan,
     mutationKey?: string,
   ) => {
-    if (!plan.current_strategy) throw new Error('请先生成创意任务策略')
-    if (!plan.package_ref || !plan.selected_route_id || !plan.current_strategy.task_overlay_ref) {
-      throw new Error('任务策略缺少策略包、Handoff、Route 或 Overlay 血缘')
+    if (!plan.package_ref || !plan.selected_route_id) {
+      throw new Error('任务策略缺少策略包、Handoff 或 Route 血缘')
     }
     return apiRequest<CreativeIntakeV3>(
       `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes`,
@@ -225,7 +224,9 @@ export const strategyApi = {
           source: 'strategy_package',
           strategy_package_ref: plan.package_ref,
           selected_route_id: plan.selected_route_id,
-          task_overlay_ref: plan.current_strategy.task_overlay_ref,
+          ...(plan.current_strategy?.task_overlay_ref
+            ? { task_overlay_ref: plan.current_strategy.task_overlay_ref }
+            : {}),
         }),
       },
     )
@@ -414,6 +415,13 @@ export const strategyApi = {
       method: 'POST',
       headers: mutationHeaders(mutationKey),
       body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
+  createBriefRevisionDraft: (taskId: string, baseBriefVersion: number, mutationKey?: string) =>
+    apiRequest<BriefDraft>(`${root}/tasks/${encodeURIComponent(taskId)}/brief-draft:revise`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ base_brief_version: baseBriefVersion }),
     }),
 
   listBriefVersions: (briefId: string, signal?: AbortSignal) =>
@@ -662,6 +670,8 @@ export const strategyApi = {
     projectId: string,
     request: {
       category?: ResearchArtifact['category']
+      purpose?: ResearchRun['purpose']
+      source_ref?: ResearchRun['source_ref']
       query: string
       document_ids: string[]
       disclosed_fields: string[]

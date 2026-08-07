@@ -12,7 +12,7 @@ import (
 )
 
 const maxResearchDisclosedChunks = 8
-const maxConversationContextChunks = 8
+const maxConversationContextChunks = 12
 
 type chunkCandidate struct {
 	document Document
