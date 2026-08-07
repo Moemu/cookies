@@ -669,6 +669,7 @@ func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	first, err := service.IngestRenderedImage(
 		context.Background(), requestContext, "project_1", "image_render_1",
 		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()),
+		1080, 1440,
 		[]contract.AssetVersionRef{sourceAsset}, []contract.ResourceRef{sourceResource},
 	)
 	if err != nil {
@@ -677,6 +678,7 @@ func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	second, err := service.IngestRenderedImage(
 		context.Background(), requestContext, "project_1", "image_render_1",
 		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()),
+		1080, 1440,
 		[]contract.AssetVersionRef{sourceAsset}, []contract.ResourceRef{sourceResource},
 	)
 	if err != nil {
@@ -693,6 +695,36 @@ func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	}
 	if len(relations) != 2 {
 		t.Fatalf("relations = %+v, want base asset and Creative draft lineage", relations)
+	}
+}
+
+func TestRenderedImageIntakeAcceptsDeclaredCanvasDimensions(t *testing.T) {
+	t.Parallel()
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository,
+		Projects:   fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs:      NewMemoryBlobStore(), Scanner: NoopScanner{},
+		QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: time.Now, NewID: sequenceIDs(),
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 720, 1280))); err != nil {
+		t.Fatalf("encode canvas image: %v", err)
+	}
+	ref, err := service.IngestRenderedImage(
+		context.Background(), testRequestContext("org_1", "project_1"), "project_1", "short_drama_canvas_1",
+		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), 720, 1280, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("IngestRenderedImage() arbitrary canvas error = %v", err)
+	}
+	stored, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", ref.AssetVersion)
+	if err != nil {
+		t.Fatalf("GetProjectAsset() error = %v", err)
+	}
+	if stored.Asset.Kind != contract.AssetImage || stored.Version.WidthPixels != 720 || stored.Version.HeightPixels != 1280 {
+		t.Fatalf("canvas metadata = %+v", stored.Version)
 	}
 }
 
