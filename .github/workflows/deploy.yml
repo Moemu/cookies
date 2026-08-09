@@ -1,0 +1,77 @@
+name: Deploy
+
+# 只有 Platform CI 在 main 上跑绿了才部署。
+# 测试没过 -> 不部署，服务器保持原样。
+on:
+  workflow_run:
+    workflows: ["Platform CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:        # 也可以在 Actions 页面手动点一次
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ci
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_run 触发时要求 CI 是成功的；手动触发时直接放行。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 确定要部署的提交
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          submodules: recursive
+
+      # 服务器从 GitHub 下载只有约 26 KB/s，clone 必超时，
+      # 所以改为在这里打包、推给服务器。docs/ 占 22MB 且构建用不到，排除。
+      - name: 打包源码
+        run: |
+          tar -czf /tmp/src.tar.gz \
+            --exclude=.git \
+            --exclude=docs \
+            --exclude=node_modules \
+            --exclude=dist \
+            .
+          ls -lh /tmp/src.tar.gz
+
+      - name: 装载部署密钥
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 上传源码到服务器
+        run: |
+          SSH_OPTS="-i ~/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20"
+          HOST="root@${{ secrets.DEPLOY_HOST }}"
+          SHA="${{ steps.target.outputs.sha }}"
+          ssh $SSH_OPTS "$HOST" "mkdir -p /opt/cookies-ci/incoming"
+          scp $SSH_OPTS /tmp/src.tar.gz "$HOST:/opt/cookies-ci/incoming/$SHA.tar.gz"
+
+      - name: 触发服务器部署
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            "root@${{ secrets.DEPLOY_HOST }}" \
+            "/opt/cookies-ci/deploy.sh ${{ steps.target.outputs.sha }}"
+
+      - name: 清理密钥
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
