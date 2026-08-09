@@ -38,18 +38,6 @@ jobs:
           ref: ${{ steps.target.outputs.sha }}
           submodules: recursive
 
-      # 服务器从 GitHub 下载只有约 26 KB/s，clone 必超时，
-      # 所以改为在这里打包、推给服务器。docs/ 占 22MB 且构建用不到，排除。
-      - name: 打包源码
-        run: |
-          tar -czf /tmp/src.tar.gz \
-            --exclude=.git \
-            --exclude=docs \
-            --exclude=node_modules \
-            --exclude=dist \
-            .
-          ls -lh /tmp/src.tar.gz
-
       - name: 装载部署密钥
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -57,13 +45,19 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: 上传源码到服务器
+      # 与服务器之间的跨境链路只有 10~30 KB/s，全量传 7MB 要九分钟，
+      # 所以服务器上常驻一份 worktree，这里只增量同步改动过的文件。
+      # -c 按内容比对：checkout 出来的文件时间戳每次都是新的，
+      # 不用 -c 会把整棵树都当成"改过"。docs/ 占 22MB 且构建用不到，排除。
+      - name: 增量同步源码到服务器
         run: |
-          SSH_OPTS="-i ~/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20"
-          HOST="root@${{ secrets.DEPLOY_HOST }}"
-          SHA="${{ steps.target.outputs.sha }}"
-          ssh $SSH_OPTS "$HOST" "mkdir -p /opt/cookies-ci/incoming"
-          scp $SSH_OPTS /tmp/src.tar.gz "$HOST:/opt/cookies-ci/incoming/$SHA.tar.gz"
+          rsync -azc --delete --delete-excluded --stats \
+            -e "ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20" \
+            --exclude=.git \
+            --exclude=docs \
+            --exclude=node_modules \
+            --exclude=dist \
+            ./ "root@${{ secrets.DEPLOY_HOST }}:/opt/cookies-ci/worktree/"
 
       - name: 触发服务器部署
         run: |
