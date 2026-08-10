@@ -1,5 +1,11 @@
 # 智能投放只读校准收口与 Delivery 配置契约
 
+## 运行时执行状态（2026-08-10）
+
+此前冻结的切换规则现已在代码中执行。新的公共 Plan 写请求必须同时提交完整 DeliveryIntent 与 tagged PlatformConfiguration；旧 flat-plan 与 ThreeTier 写请求返回 `LEGACY_CONFIGURATION_UNSUPPORTED`。持久化旧版本在读取后标记为 `legacy_unsupported`/只读，保留原 canonical hash，不能进入新预检、提交、审批或执行链。
+
+旧 `/configuration:compile` 与 `/configuration:override` 仅保留为稳定的 deprecated 错误面。前端主路由为 `/delivery/configuration`；`/delivery/three-tier` 作为深链兼容别名重定向，旧数据只展示不编辑。
+
 | 属性 | 内容 |
 | --- | --- |
 | 状态 | 只读业务校准已收口；`oceanengine-bidding-schema/v0.1` 保持冻结；Delivery-owned 新配置模型进入实现准备 |

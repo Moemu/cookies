@@ -1,8 +1,20 @@
 # DeliveryIntent 与平台配置契约
 
+## 运行时切换（2026-08-10）
+
+当前 Delivery 写链已在每个 `delivery-plan-version/v2` 中同时持久化完整的 `delivery-intent/v1` 与 `delivery-platform-configuration/v2`。服务端重算两者的 RFC 8785 哈希并覆盖审计元数据；`DeliveryPlanVersion.canonical_hash` 必须与 PlatformConfiguration 哈希完全相同，DeliveryIntent 哈希保持为独立绑定。
+
+OceanEngine 配置恰好包含一个 Project，并允许零个或多个 Promotions。Magnetic Engine 保持稳定的 `CAPABILITY_PENDING` profile，在可执行预检中阻断，且不虚构平台字段。
+
+`ChangeSet.target_snapshot` 冻结完整的判别式 PlatformConfiguration。Approval 除 Plan 与 ChangeSet 身份外，还绑定配置的 schema/id/version/platform/profile/hash，以及 Intent 的 schema/id/version/hash。
+
+迁移保持增量：`delivery_intents` 与 `delivery_platform_configurations` 保存独立版本的不可变 envelope，同时为 PlanVersion、ChangeSet 和 Approval 增加判别器/绑定列。既有 ThreeTier JSON、canonical hash 与 action hash 均不改写。
+
+历史 `delivery-three-tier/v1` 与 `delivery-platform-configuration/v1` 使用冻结的旧哈希投影读取，返回 `runtime_status=legacy_unsupported`、`read_only=true`，不能进入新建、更新、预检、ChangeSet、审批或执行写链。旧 compile/override 端点稳定返回 `LEGACY_CONFIGURATION_UNSUPPORTED`。
+
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 领域契约已冻结；尚未接入现有 API、持久化、前端或平台写入 |
+| 状态 | 领域契约已冻结并接入本地运行时；真实平台写入仍不在范围内 |
 | 版本 | `delivery-intent/v1`、`delivery-platform-configuration/v2` |
 | 平台 profile | `oceanengine-configuration/v1`、`magnetic-engine-configuration/v1` |
 | 历史边界 | `delivery-three-tier/v1` 与 `delivery-platform-configuration/v1` 保持不可变、仅按原语义读取 |

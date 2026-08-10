@@ -1,8 +1,16 @@
 # 智能投放系统：架构路线图与当前实现
 
+## 当前运行时权威链
+
+权威边界为 `DeliveryIntent v1 -> tagged PlatformConfiguration v2 -> DeliveryPlanVersion v2 -> ChangeSet -> Approval`。五类记录均受 Organization/Project 隔离并绑定不可变版本。Repository 在同一事务中提交 Intent、PlatformConfiguration 与 PlanVersion。
+
+读取按持久化 schema 分派：v2 使用 PlatformConfiguration 规范投影；历史 ThreeTier 使用冻结旧投影并始终只读。预检直接消费类型化配置：OceanEngine 必须有一个 Project、可以有空 Promotions，并要求执行所需稳定引用均已解析；Magnetic Engine 确定性返回 `CAPABILITY_PENDING`。
+
+新运行时不会把 v2 机械投影回 ThreeTier，也不引入 Connector、平台 API、DecisionEngine、工作流编译器或 Computer Use 执行。
+
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | 历史 mock 闭环与只读业务校准已收口；平台无关 DeliveryIntent 与判别式平台配置领域契约已冻结，现有运行时尚未切换 |
+| 状态 | DeliveryIntent 与判别式平台配置已切换到本地运行时；真实平台写入仍保持关闭 |
 | 记录日期 | 2026-07-29 |
 | 实现快照日期 | 2026-08-10 |
 | 关联文档 | [广告智能投放 PRD](../04-intelligent-delivery-prd.md)、[当前实现盘点与未实现项计划](../plans/2026-07-28-implementation-gap-plan.md) |
