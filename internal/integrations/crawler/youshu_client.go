@@ -48,6 +48,15 @@ const leafletMaterialListSelection = `query %s(
   }
 }`
 
+const (
+	// YouShuConsoleOrigin is public request context required by the upstream
+	// console's GraphQL endpoint. It is not derived from, or tied to, a user's
+	// browser session.
+	YouShuConsoleOrigin  = "https://console.youshu.youcloud.com"
+	youShuConsoleReferer = YouShuConsoleOrigin + "/leaflet"
+	youShuUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"
+)
+
 type youShuRequest struct {
 	OperationName string      `json:"operationName"`
 	Query         string      `json:"query"`
@@ -129,8 +138,14 @@ func (c *YouShuClient) list(x context.Context, op string, q YouShuQuery) (YouShu
 		return YouShuPage{}, &YouShuError{Kind: YouShuInvalidRequest, Strategy: YouShuCorrectRequest, Source: "request"}
 	}
 	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json")
+	r.Header.Set("Accept", "application/json, text/plain, */*")
 	r.Header.Set("X-Operation-Name", op)
+	// The console validates the request context in addition to the authorized
+	// session. These fixed public values keep the server-side integration in the
+	// same application context without copying browser headers or state.
+	r.Header.Set("Origin", YouShuConsoleOrigin)
+	r.Header.Set("Referer", youShuConsoleReferer)
+	r.Header.Set("User-Agent", youShuUserAgent)
 	if c.sessionCookie != "" {
 		r.Header.Set("Cookie", c.sessionCookie)
 	}

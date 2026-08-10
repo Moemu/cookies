@@ -2,6 +2,7 @@ package insights
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -31,6 +32,16 @@ type MiyunProjectSource struct {
 	BrandName    string                  `json:"brand_name"`
 	CategoryName string                  `json:"category_name"`
 	Products     []MiyunProjectProduct   `json:"products"`
+}
+
+// MiyunProductSource is the safe Project identity projection used by the
+// product-analysis form. Product IDs stay server-authoritative; callers only
+// need human-readable names to select an existing Project product.
+type MiyunProductSource struct {
+	ProjectName  string                `json:"project_name"`
+	BrandName    string                `json:"brand_name"`
+	CategoryName string                `json:"category_name"`
+	Products     []MiyunProjectProduct `json:"products"`
 }
 
 type MiyunProjectSourceReader interface {
@@ -75,7 +86,9 @@ type MiyunMediaEvidenceReader interface {
 
 type AnalyzeMiyunProductProfileRequest struct {
 	ConnectionID         string                     `json:"connection_id"`
-	ProductID            contract.ProductID         `json:"product_id"`
+	ProductID            contract.ProductID         `json:"product_id,omitempty"`
+	ProductName          string                     `json:"product_name,omitempty"`
+	CategoryName         string                     `json:"category_name,omitempty"`
 	ProductAssetRefs     []contract.AssetVersionRef `json:"product_asset_refs"`
 	KnowledgeDocumentIDs []string                   `json:"knowledge_document_ids"`
 }
@@ -143,8 +156,11 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 		return MiyunProductProfile{}, fmt.Errorf("Miyun product analysis sources are incomplete")
 	}
 	request.ConnectionID = strings.TrimSpace(request.ConnectionID)
-	if request.ConnectionID == "" || len(request.ConnectionID) > 96 || strings.TrimSpace(string(request.ProductID)) == "" || len(request.ProductID) > 96 || request.ProductAssetRefs == nil || request.KnowledgeDocumentIDs == nil {
-		return MiyunProductProfile{}, fmt.Errorf("%w: connection_id, product_id, product_asset_refs, and knowledge_document_ids are required", ErrInvalidRequest)
+	request.ProductID = contract.ProductID(strings.TrimSpace(string(request.ProductID)))
+	request.ProductName = strings.TrimSpace(request.ProductName)
+	request.CategoryName = strings.TrimSpace(request.CategoryName)
+	if request.ConnectionID == "" || len(request.ConnectionID) > 96 || len(request.ProductID) > 96 || len([]rune(request.ProductName)) > 255 || len([]rune(request.CategoryName)) > 255 || request.ProductAssetRefs == nil || request.KnowledgeDocumentIDs == nil {
+		return MiyunProductProfile{}, fmt.Errorf("%w: connection_id, optional product identity, product_asset_refs, and knowledge_document_ids are required", ErrInvalidRequest)
 	}
 	connection, err := s.Miyun.GetMiyunConnection(ctx, actor.OrganizationID, projectID, request.ConnectionID)
 	if err != nil {
@@ -160,22 +176,38 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 	if projectSource.Context.ProjectID != projectID || projectSource.Context.OrganizationID != actor.OrganizationID || projectSource.Context.Validate() != nil {
 		return MiyunProductProfile{}, fmt.Errorf("%w: project source is inconsistent", ErrInvalidState)
 	}
-	productName := ""
-	productInContext := false
-	for _, productID := range projectSource.Context.ProductIDs {
-		if productID == request.ProductID {
-			productInContext = true
-			break
+	productName := request.ProductName
+	categoryName := request.CategoryName
+	pendingProductIdentity := false
+	if request.ProductID != "" {
+		productInContext := false
+		for _, productID := range projectSource.Context.ProductIDs {
+			if productID == request.ProductID {
+				productInContext = true
+				break
+			}
 		}
-	}
-	for _, product := range projectSource.Products {
-		if product.ID == request.ProductID {
-			productName = strings.TrimSpace(product.Name)
-			break
+		for _, product := range projectSource.Products {
+			if product.ID == request.ProductID {
+				productName = strings.TrimSpace(product.Name)
+				break
+			}
 		}
+		if productName == "" || !productInContext {
+			return MiyunProductProfile{}, fmt.Errorf("%w: selected product does not belong to this project", ErrNotFound)
+		}
+	} else {
+		pendingProductIdentity = true
+		if productName == "" {
+			productName = strings.TrimSpace(projectSource.ProjectName)
+		}
+		if productName == "" {
+			return MiyunProductProfile{}, fmt.Errorf("%w: product name could not be inferred from Project", ErrInvalidRequest)
+		}
+		request.ProductID = pendingMiyunProductID(projectID, productName)
 	}
-	if productName == "" || !productInContext {
-		return MiyunProductProfile{}, fmt.Errorf("%w: selected product does not belong to this project", ErrNotFound)
+	if categoryName == "" {
+		categoryName = strings.TrimSpace(projectSource.CategoryName)
 	}
 
 	assetRefs, err := normalizeMiyunAssetRefs(request.ProductAssetRefs)
@@ -191,7 +223,7 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 	}
 	assets := make([]MiyunAssetSource, 0, len(assetRefs))
 	mediaEvidence := make([]MiyunMediaEvidence, 0, len(assetRefs))
-	corpus := []string{productName, projectSource.BrandName, projectSource.CategoryName}
+	corpus := []string{productName, projectSource.BrandName, categoryName}
 	for _, ref := range assetRefs {
 		source, readErr := s.MiyunAssets.ReadMiyunAssetSource(ctx, actor, projectID, ref)
 		if readErr != nil {
@@ -244,7 +276,10 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 		return MiyunProductProfile{}, err
 	}
 	boundedCorpus, corpusTruncated := boundedMiyunCorpus(corpus)
-	query, sources, warnings := deriveMiyunProfileQuery(productName, projectSource.BrandName, projectSource.CategoryName, boundedCorpus, analysisTime)
+	query, sources, warnings := deriveMiyunProfileQuery(productName, projectSource.BrandName, categoryName, boundedCorpus, analysisTime)
+	if pendingProductIdentity {
+		warnings = append(warnings, "product_identity_pending_confirmation")
+	}
 	if corpusTruncated {
 		warnings = append(warnings, "analysis_corpus_truncated")
 	}
@@ -267,6 +302,33 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	}
 	return s.Miyun.CreateMiyunProductProfileDraft(ctx, profile)
+}
+
+// GetMiyunProductSource exposes only the Project-scoped identity facts the
+// analysis form needs. It is deliberately not a global product catalogue.
+func (s Service) GetMiyunProductSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (MiyunProductSource, error) {
+	if err := s.miyunReady(actor, projectID, ScopeRead); err != nil {
+		return MiyunProductSource{}, err
+	}
+	if s.MiyunProjects == nil {
+		return MiyunProductSource{}, fmt.Errorf("Miyun Project source is unavailable")
+	}
+	value, err := s.MiyunProjects.ReadMiyunProjectSource(ctx, actor, projectID)
+	if err != nil {
+		return MiyunProductSource{}, err
+	}
+	if value.Context.ProjectID != projectID || value.Context.OrganizationID != actor.OrganizationID || value.Context.Validate() != nil {
+		return MiyunProductSource{}, fmt.Errorf("%w: project source is inconsistent", ErrInvalidState)
+	}
+	return MiyunProductSource{
+		ProjectName: strings.TrimSpace(value.ProjectName), BrandName: strings.TrimSpace(value.BrandName),
+		CategoryName: strings.TrimSpace(value.CategoryName), Products: append([]MiyunProjectProduct(nil), value.Products...),
+	}, nil
+}
+
+func pendingMiyunProductID(projectID contract.ProjectID, productName string) contract.ProductID {
+	digest := sha256.Sum256([]byte(string(projectID) + "\n" + strings.TrimSpace(productName)))
+	return contract.ProductID(fmt.Sprintf("project_input:%x", digest[:12]))
 }
 
 func (s Service) ConfirmMiyunProductProfile(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, profileID string, request ConfirmMiyunProductProfileRequest) (MiyunProductProfile, error) {

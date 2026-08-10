@@ -403,6 +403,7 @@ func main() {
 	var miyunPages insights.MiyunPageClient
 	var miyunVerifier insights.MiyunConnectionVerifier
 	var miyunImports insights.MiyunAuthorizedImporter
+	var miyunPreviews insights.MiyunAuthorizedPreviewer
 	if cfg.Miyun.Enabled {
 		cipher, cipherErr := insights.NewAESGCMMiyunSecretCipher(cfg.Miyun.MasterKey, cfg.Miyun.MasterKeyVersion)
 		if cipherErr != nil {
@@ -425,6 +426,10 @@ func main() {
 			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
 			assets:     externalImports, ledger: assetRepository, workRoot: miyunWorkRoot(cfg.Media.VideoWorkRoot),
 		}
+		miyunPreviews = miyunAuthorizedPreviewAdapter{
+			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
+			workRoot:   miyunWorkRoot(cfg.Media.VideoWorkRoot),
+		}
 		log.Printf("Miyun collection configured: real_calls=true concurrency=%d rate=%d cooldown_seconds=%d download_hosts=%d",
 			cfg.Miyun.MaxConcurrent, cfg.Miyun.RequestsPerSecond, cfg.Miyun.CooldownSeconds, len(cfg.Miyun.DownloadAllowedHosts))
 	}
@@ -439,6 +444,7 @@ func main() {
 		MiyunJobs:      runtimeStore,
 		MiyunPages:     miyunPages,
 		MiyunImports:   miyunImports,
+		MiyunPreviews:  miyunPreviews,
 		MiyunSecrets:   miyunCipher,
 		MiyunVerifier:  miyunVerifier,
 		MiyunCooldown:  time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,

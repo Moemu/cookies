@@ -3660,15 +3660,20 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
     credentials: 'include',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(headers ?? {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const payloadText = await response.text()
-  const payload = payloadText ? JSON.parse(payloadText) as T | { error?: { message?: string; code?: string } } : undefined
+  let payload: T | { error?: { message?: string; code?: string } } | undefined
+  try {
+    payload = payloadText ? JSON.parse(payloadText) as T | { error?: { message?: string; code?: string } } : undefined
+  } catch {
+    payload = undefined
+  }
   if (!response.ok) {
     const error = (payload ?? {}) as { error?: { message?: string; code?: string } }
     throw new ApiRequestError(error.error?.message ?? 'API 请求失败', response.status, error.error?.code ?? '')
@@ -5306,6 +5311,43 @@ export function buildRemixPrerollInput(
 	}
 }
 
+export type ApiMiyunConnection = {
+  id: string; organization_id: string; project_id: string
+  status: 'unverified' | 'ready' | 'auth_required' | 'disabled'
+  session_expires_at?: string; last_verified_at?: string; last_successful_request_at?: string; cooldown_until?: string
+  last_error_kind?: string; last_error_code?: string; last_error_at?: string; version: number; created_by: string; created_at: string; updated_at: string
+}
+export type ApiMiyunAssetVersionRef = { asset_id: string; version: number }
+export type ApiMiyunProductSource = {
+  project_name: string
+  brand_name: string
+  category_name: string
+  products: Array<{ id: string; name: string }>
+}
+export type ApiMiyunProfileQuery = { product_name: string; category_id?: string; category_name?: string; keywords: string[]; material_content_types: string[]; window_start: string; window_end: string }
+export type ApiMiyunProfileFieldSource = { field: string; source_kind: string; source_refs: string[]; confidence: 'high' | 'medium' | 'low' | 'unknown'; review_state: 'suggested' | 'unknown' | 'human_confirmed'; explanation: string }
+export type ApiMiyunProductProfile = {
+  id: string; organization_id: string; project_id: string; connection_id: string; status: 'draft' | 'confirmed' | 'superseded'; product_id: string; product_name: string; brand_name?: string; category_id?: string; category_name?: string
+  keywords: string[]; material_content_types: string[]; window_start: string; window_end: string; project_context_version: number; product_asset_refs: ApiMiyunAssetVersionRef[]; knowledge_document_ids: string[]
+  rule_version: 'miyun-product-profile-rules/v1'; model_version?: string; analysis_method: 'rules'; input_hash: string; input_snapshot: Record<string, unknown>; field_sources: ApiMiyunProfileFieldSource[]; analysis_warnings: string[]
+  confirmed_by?: string; confirmed_at?: string; version: number; created_by: string; created_at: string; updated_at: string
+}
+export type ApiMiyunCrawlJob = {
+  id: string; organization_id: string; project_id: string; connection_id: string; product_profile_id: string
+  status: 'queued' | 'running' | 'cooling_down' | 'auth_required' | 'partial' | 'succeeded' | 'failed' | 'cancelled'; operation: 'product' | 'cid'; query_schema_version: 'miyun-query/v1'; query_snapshot: Record<string, unknown>
+  runtime_job_id: string; completed_pages: number; discovered_count: number; deduplicated_count: number; downloaded_count: number; failed_count: number; cooldown_until?: string; last_error_kind?: string; last_error_code?: string; version: number; created_by: string; created_at: string; updated_at: string
+}
+export type ApiMiyunMaterial = {
+  id: string; organization_id: string; project_id: string; miyun_material_id: string; first_seen_crawl_job_id?: string; import_method: 'crawler' | 'manual'; resource_id?: string; resource_expected_size?: number
+  source_ref?: string; source_ref_status: 'verified' | 'unknown'; title?: string; selection_status: 'discovered' | 'confirmed' | 'rejected'; import_status: 'pending' | 'downloading' | 'imported' | 'deduplicated' | 'failed' | 'skipped'
+  platform_asset_id?: string; platform_asset_version?: number; insight_asset_id?: string; external_import_id?: string; decision_by?: string; decision_at?: string; decision_note?: string; last_import_error_kind?: string; last_import_error_code?: string; version: number; created_by: string; created_at: string; updated_at: string
+}
+export type ApiMiyunMaterialSnapshot = {
+  id: string; organization_id: string; project_id: string; material_id: string; crawl_job_id?: string; source_page: number; import_method: 'crawler' | 'manual'; schema_version: string; captured_at: string; first_published_at?: string; last_published_at?: string
+  delivery_days: number; cumulative_impressions: number; cumulative_impressions_raw: string; related_ads: number; related_creators: number; related_creators_raw: string; related_creators_known: boolean; material_score: number; views: number; likes: number; comments: number; shares: number; saves: number; sanitized_raw?: Record<string, unknown>; created_at: string
+}
+export type ApiMiyunMaterialDetail = { material: ApiMiyunMaterial; snapshots: ApiMiyunMaterialSnapshot[] }
+
 export const api = {
   listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
     // Workbench data always follows the caller's accessible Project scope.
@@ -6031,6 +6073,26 @@ export const api = {
   // 每次请求现算——中间隔一层存储，就会有页面和代码对不上的那一天。
   getInsightSettings: (projectId: string) =>
     request<ApiInsightSettings>(`${insightProjectPath(projectId)}/settings`),
+  getMiyunConnection: (projectId: string) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`),
+  updateMiyunConnection: (projectId: string, body: { session: string; session_expires_at?: string; expected_version?: number }) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`, 'PUT', body),
+  verifyMiyunConnection: (projectId: string, expectedVersion: number) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection:verify`, 'POST', { expected_version: expectedVersion }),
+  listMiyunProductProfiles: (projectId: string, limit = 50) => request<{ items: ApiMiyunProductProfile[] }>(`${miyunProjectPath(projectId)}/product-profiles?limit=${limit}`),
+  getMiyunProductSource: (projectId: string) => request<ApiMiyunProductSource>(`${miyunProjectPath(projectId)}/product-source`),
+  analyzeMiyunProductProfile: (projectId: string, body: { connection_id: string; product_id?: string; product_name?: string; category_name?: string; product_asset_refs: ApiMiyunAssetVersionRef[]; knowledge_document_ids: string[] }) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles:analyze`, 'POST', body),
+  getMiyunProductProfile: (projectId: string, profileId: string) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles/${encodeURIComponent(profileId)}`),
+  confirmMiyunProductProfile: (projectId: string, profileId: string, expectedVersion: number, query: ApiMiyunProfileQuery) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles/${encodeURIComponent(profileId)}:confirm`, 'POST', { expected_version: expectedVersion, query }),
+  listMiyunCrawlJobs: (projectId: string, limit = 50) => request<{ items: ApiMiyunCrawlJob[] }>(`${miyunProjectPath(projectId)}/crawl-jobs?limit=${limit}`),
+  createMiyunCrawlJob: (projectId: string, body: { product_profile_id: string; operation: ApiMiyunCrawlJob['operation'] }, idempotencyKey: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
+  getMiyunCrawlJob: (projectId: string, jobId: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs/${encodeURIComponent(jobId)}`),
+  cancelMiyunCrawlJob: (projectId: string, jobId: string, expectedVersion: number) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs/${encodeURIComponent(jobId)}:cancel`, 'POST', { expected_version: expectedVersion }),
+  retryMiyunCrawlJob: (projectId: string, jobId: string, idempotencyKey: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs/${encodeURIComponent(jobId)}:retry`, 'POST', undefined, { 'Idempotency-Key': idempotencyKey }),
+  listMiyunMaterials: (projectId: string, limit = 50) => request<{ items: ApiMiyunMaterial[] }>(`${miyunProjectPath(projectId)}/materials?limit=${limit}`),
+  getMiyunMaterial: (projectId: string, materialId: string) => request<ApiMiyunMaterialDetail>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}`),
+  // This is deliberately a relative, same-origin URL. Never expose source_ref/resource URLs to the browser.
+  getMiyunMaterialPreviewUrl: (projectId: string, materialId: string) => `/api${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}/preview`,
+  confirmMiyunMaterial: (projectId: string, materialId: string, expectedVersion: number, note?: string) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:confirm`, 'POST', { expected_version: expectedVersion, ...(note === undefined ? {} : { note }) }),
+  rejectMiyunMaterial: (projectId: string, materialId: string, expectedVersion: number, note?: string) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:reject`, 'POST', { expected_version: expectedVersion, ...(note === undefined ? {} : { note }) }),
+  retryMiyunMaterialImport: (projectId: string, materialId: string, expectedVersion: number) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:retry-import`, 'POST', { expected_version: expectedVersion }),
   // observed_through 要回传界面上那条问题的 last_observed_at，不要用当前时间：
   // 「你处置的是你看到的那个版本」靠它成立，中间问题若又恶化不会被一并盖掉。
   resolveQualityIssue: (
@@ -6084,6 +6146,10 @@ export const api = {
 // Insights 走 /api/insights/v1；request() 已经带上 /api 前缀。
 function insightProjectPath(projectId: string): string {
   return `/insights/v1/projects/${encodeURIComponent(projectId)}`
+}
+
+function miyunProjectPath(projectId: string): string {
+  return `${insightProjectPath(projectId)}/miyun`
 }
 
 // 动作端点形如 .../experiences/{id}:confirm，冒号是路径的一部分，不参与编码。

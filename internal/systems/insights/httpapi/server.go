@@ -20,6 +20,7 @@ type Application interface {
 	GetMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunConnection, error)
 	UpdateMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateMiyunConnectionRequest) (insights.MiyunConnection, error)
 	VerifyMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyMiyunConnectionRequest) (insights.MiyunConnection, error)
+	GetMiyunProductSource(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunProductSource, error)
 	AnalyzeMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, insights.AnalyzeMiyunProductProfileRequest) (insights.MiyunProductProfile, error)
 	ConfirmMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ConfirmMiyunProductProfileRequest) (insights.MiyunProductProfile, error)
 	ListMiyunProductProfiles(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunProductProfile, error)
@@ -32,6 +33,7 @@ type Application interface {
 	RetryMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey) (insights.MiyunCrawlJob, error)
 	ListMiyunMaterials(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunMaterial, error)
 	GetMiyunMaterialDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialDetail, error)
+	OpenMiyunMaterialPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialPreview, error)
 	DecideMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, string, bool, insights.MiyunMaterialDecisionRequest) (insights.MiyunMaterial, error)
 	RetryMiyunMaterialImport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunMaterial, error)
 

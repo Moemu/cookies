@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ func (s *Server) registerMiyunRoutes() {
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/connection", s.getMiyunConnection)
 	s.mux.HandleFunc("PUT /api/insights/v1/projects/{project_id}/miyun/connection", s.updateMiyunConnection)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/connection:verify", s.verifyMiyunConnection)
+	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/product-source", s.getMiyunProductSource)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/product-profiles", s.listMiyunProductProfiles)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/product-profiles:analyze", s.analyzeMiyunProductProfile)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/product-profiles/{profile_id}", s.getMiyunProductProfile)
@@ -24,6 +27,7 @@ func (s *Server) registerMiyunRoutes() {
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}", s.getMiyunCrawlJob)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_action}", s.miyunCrawlJobAction)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/materials", s.listMiyunMaterials)
+	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}/preview", s.previewMiyunMaterial)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}", s.getMiyunMaterial)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/materials/{material_action}", s.miyunMaterialAction)
 }
@@ -56,6 +60,15 @@ func (s *Server) verifyMiyunConnection(writer http.ResponseWriter, request *http
 		return
 	}
 	value, err := s.app.VerifyMiyunConnection(request.Context(), mustActor(request), projectID(request), body)
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) getMiyunProductSource(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.app.GetMiyunProductSource(request.Context(), mustActor(request), projectID(request))
 	if err != nil {
 		writeMiyunError(writer, request, err)
 		return
@@ -242,6 +255,21 @@ func (s *Server) getMiyunMaterial(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) previewMiyunMaterial(writer http.ResponseWriter, request *http.Request) {
+	preview, err := s.app.OpenMiyunMaterialPreview(request.Context(), mustActor(request), projectID(request), request.PathValue("material_id"))
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	defer preview.Content.Close()
+	writer.Header().Set("Content-Type", preview.MIMEType)
+	writer.Header().Set("Content-Length", strconv.FormatInt(preview.SizeBytes, 10))
+	writer.Header().Set("Cache-Control", "private, no-store")
+	writer.Header().Set("X-Content-Type-Options", "nosniff")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(writer, preview.Content)
 }
 
 func (s *Server) miyunMaterialAction(writer http.ResponseWriter, request *http.Request) {

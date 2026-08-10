@@ -426,6 +426,7 @@ type Service struct {
 	MiyunJobs      MiyunRuntimeJobs
 	MiyunPages     MiyunPageClient
 	MiyunImports   MiyunAuthorizedImporter
+	MiyunPreviews  MiyunAuthorizedPreviewer
 	MiyunSecrets   MiyunSecretCipher
 	MiyunVerifier  MiyunConnectionVerifier
 	MiyunCooldown  time.Duration

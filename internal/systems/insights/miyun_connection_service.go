@@ -22,6 +22,11 @@ type UpdateMiyunConnectionRequest struct {
 	ExpectedVersion  int64      `json:"expected_version,omitempty"`
 }
 
+// AES-GCM adds a nonce and authentication tag to the stored value. Keep the
+// plaintext below the 16 KiB database envelope so a complete Cookie header is
+// not silently truncated before it can be verified.
+const maxMiyunSessionBytes = 16*1024 - 28
+
 type VerifyMiyunConnectionRequest struct {
 	ExpectedVersion int64 `json:"expected_version"`
 }
@@ -81,8 +86,14 @@ func (s Service) UpdateMiyunConnection(ctx context.Context, actor contract.Actor
 	if err := s.miyunReady(actor, projectID, ScopeWrite); err != nil {
 		return MiyunConnection{}, err
 	}
-	if s.MiyunSecrets == nil || len(request.Session) < 8 || len(request.Session) > 4096 {
-		return MiyunConnection{}, ErrInvalidRequest
+	if s.MiyunSecrets == nil {
+		return MiyunConnection{}, fmt.Errorf("%w: 米云会话加密尚未在服务端启用，请联系管理员配置 COOKIES_MIYUN_ENABLED 和会话加密密钥", ErrInvalidState)
+	}
+	if len(request.Session) < 8 {
+		return MiyunConnection{}, fmt.Errorf("%w: Cookie 值不完整，请从请求标头中复制完整的 Cookie 值", ErrInvalidRequest)
+	}
+	if len(request.Session) > maxMiyunSessionBytes {
+		return MiyunConnection{}, fmt.Errorf("%w: Cookie 值超过 16 KiB，无法安全保存；请确认只复制 Cookie 的值", ErrInvalidRequest)
 	}
 	if request.SessionExpiresAt != nil && !request.SessionExpiresAt.After(s.now()) {
 		return MiyunConnection{}, ErrInvalidRequest
@@ -164,11 +175,15 @@ func (s Service) VerifyMiyunConnection(ctx context.Context, actor contract.Actor
 			until := now.Add(s.miyunCooldown())
 			current.CooldownUntil = &until
 		}
-		updated, updateErr := s.Miyun.UpdateMiyunConnection(ctx, current, request.ExpectedVersion)
-		if updateErr != nil {
-			return MiyunConnection{}, updateErr
-		}
-		return updated, verifyErr
+	} else {
+		// Never expose an unclassified upstream error (it can include transport
+		// details). Persist a safe outcome so the API can still return the
+		// authoritative connection state instead of an opaque 500.
+		current.LastErrorKind, current.LastErrorCode, current.LastErrorAt = string(crawler.YouShuTransport), "UNCLASSIFIED", &now
 	}
-	return MiyunConnection{}, verifyErr
+	updated, updateErr := s.Miyun.UpdateMiyunConnection(ctx, current, request.ExpectedVersion)
+	if updateErr != nil {
+		return MiyunConnection{}, updateErr
+	}
+	return updated, nil
 }

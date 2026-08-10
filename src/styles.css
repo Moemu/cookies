@@ -925,6 +925,13 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .provider-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }.provider-actions.inline { grid-column: 1 / -1; margin-top: 2px; }.provider-actions .danger-text { margin-right: auto; }
 .model-settings-guide { padding: 25px 20px; }.model-settings-guide h3 { font-size: 14px; }.model-settings-guide ol { margin: 18px 0 0; padding: 0; list-style: none; }.model-settings-guide li { display: grid; grid-template-columns: 28px 1fr; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }.model-settings-guide li > span { color: var(--cobalt); font-size: 10px; }.model-settings-guide li p { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 10px; line-height: 1.5; }.model-settings-guide li b { color: var(--text); font-size: 11px; }.model-settings-audit { display: flex; flex-direction: column; gap: 6px; margin-top: 22px; padding: 13px; background: var(--subtle); }.model-settings-audit span { color: var(--muted); font-size: 9px; }.model-settings-audit b { font-size: 10px; line-height: 1.55; }
 .model-required { display: flex; gap: 7px; margin: 0 14px 12px; padding: 10px; color: var(--warning); background: oklch(0.965 0.04 82); font-size: 10px; line-height: 1.45; }.model-required svg { flex: none; }
+.miyun-connection-settings { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .75fr); margin-top: 24px; background: var(--surface); border: 1px solid var(--line); }
+.miyun-settings-main { min-width: 0; padding: 25px 30px; border-right: 1px solid var(--line); }.miyun-settings-main > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }.miyun-settings-main > header span:first-child { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .06em; }.miyun-settings-main h2 { margin-top: 4px; font-size: 19px; }.miyun-settings-main header p { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.miyun-connection-status { display: inline-flex; flex: none; align-items: center; gap: 5px; padding: 5px 8px; color: var(--warning); background: oklch(.965 .04 82); border-radius: 10px; font-size: 10px; white-space: nowrap; }.miyun-connection-status.ready { color: var(--success); background: oklch(.955 .035 155); }
+.miyun-settings-secret-policy { display: flex; gap: 12px; margin: 18px 0; padding: 13px 15px; color: var(--cobalt-dark); background: var(--cobalt-soft); }.miyun-settings-secret-policy svg { flex: none; }.miyun-settings-secret-policy p { color: var(--text); font-size: 10px; line-height: 1.6; }.miyun-settings-secret-policy b { display: block; margin-bottom: 3px; color: var(--cobalt-dark); font-size: 11px; }
+.miyun-session-form { display: grid; gap: 7px; }.miyun-session-form label { color: var(--text); font-size: 11px; font-weight: 700; }.miyun-session-form input { width: 100%; height: 38px; padding: 0 11px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; font-size: 12px; outline: 0; }.miyun-session-form input:focus { border-color: var(--cobalt); box-shadow: 0 0 0 2px var(--cobalt-soft); }.miyun-session-form small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.miyun-settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 10px; }.miyun-settings-actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 11px; font-size: 11px; }.miyun-settings-actions button:first-child { margin-right: auto; }.miyun-settings-notice { margin-top: 14px; padding: 10px 12px; color: var(--cobalt-dark); background: var(--cobalt-soft); border: 1px solid color-mix(in srgb, var(--cobalt) 28%, var(--line)); border-radius: 5px; font-size: 11px; }
+.miyun-cookie-guide { padding: 24px 20px; background: var(--subtle); }.miyun-cookie-guide h3 { font-size: 14px; }.miyun-cookie-guide ol { display: grid; gap: 0; margin: 14px 0 0; padding: 0; list-style: none; }.miyun-cookie-guide li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }.miyun-cookie-guide li > span { color: var(--cobalt); font-size: 10px; font-weight: 700; }.miyun-cookie-guide li p { color: var(--muted); font-size: 10px; line-height: 1.55; }.miyun-cookie-guide li b { color: var(--text); }.miyun-cookie-guide a { display: inline-flex; align-items: center; gap: 3px; color: var(--cobalt-dark); font-weight: 700; }
 
 /* Ecommerce pre-roll and hook strategy workspace */
 .performance-mode-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }.performance-mode-tabs button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 58px; padding: 12px 16px; background: var(--surface); border-right: 1px solid var(--line); text-align: left; }.performance-mode-tabs button:last-child { border-right: 0; }.performance-mode-tabs button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); box-shadow: inset 0 -2px var(--cobalt); }.performance-mode-tabs b { font-size: 11px; }.performance-mode-tabs small { color: var(--muted); font-size: 9px; }
@@ -6233,6 +6240,475 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   flex: 0 0 auto;
 }
 
+/* 米云素材：页面内只组织当前 Project 的产品资料、采集任务和人工候选判断。 */
+.miyun-materials-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.miyun-materials-page .inline-notice {
+  margin: 0;
+}
+
+.miyun-fission-notice {
+  align-items: center;
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.miyun-fission-notice b {
+  color: var(--text);
+}
+
+.miyun-connection-banner {
+  align-items: center;
+  background: linear-gradient(90deg, var(--cobalt-soft), var(--surface));
+  border: 1px solid color-mix(in srgb, var(--cobalt) 30%, var(--line));
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 13px 16px;
+}
+
+.miyun-connection-banner > div { display: grid; gap: 3px; min-width: 0; }
+.miyun-connection-banner span { color: var(--cobalt-dark); font-size: 10px; font-weight: 700; letter-spacing: .05em; }
+.miyun-connection-banner b { font-size: 13px; }.miyun-connection-banner small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.miyun-connection-banner .secondary-button { flex: none; padding: 8px 12px; font-size: 11px; }
+
+.miyun-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.miyun-materials-page .surface-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.miyun-materials-page .surface-card h3 {
+  font-size: 13px;
+}
+
+.miyun-materials-page .surface-card > small,
+.miyun-materials-page .surface-card label,
+.miyun-materials-page .surface-card fieldset {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.miyun-materials-page .surface-card label {
+  display: grid;
+  gap: 5px;
+}
+
+.miyun-materials-page .surface-card input,
+.miyun-materials-page .surface-card textarea,
+.miyun-materials-page .surface-card select {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.miyun-materials-page button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 13px;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.miyun-materials-page button:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 3px;
+}
+
+.miyun-materials-page button:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.miyun-materials-page .surface-card > button:disabled,
+.miyun-asset-picker > footer > .primary-button:disabled {
+  background: #e9eff5;
+  border-color: #cdd8e3;
+  box-shadow: none;
+  color: #718397;
+}
+
+.miyun-materials-page .surface-card > button:not(.secondary-button),
+.miyun-asset-picker > footer > .primary-button {
+  background: var(--cobalt);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--cobalt) 22%, transparent);
+  color: white;
+}
+
+.miyun-materials-page .surface-card > button:not(.secondary-button):not(:disabled):hover,
+.miyun-asset-picker > footer > .primary-button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--cobalt) 86%, #000);
+}
+
+.miyun-materials-page .secondary-button {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.miyun-materials-page .surface-card textarea {
+  min-height: 66px;
+  resize: vertical;
+}
+
+.miyun-materials-page .surface-card fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 9px;
+}
+
+.miyun-materials-page .surface-card fieldset label {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.miyun-materials-page .surface-card fieldset input {
+  min-height: auto;
+  padding: 0;
+}
+
+.miyun-materials-page .miyun-upload-zone {
+  align-content: center;
+  background: linear-gradient(135deg, #edf5ff 0%, #f8fbff 100%);
+  border: 2px dashed #72a7ef;
+  border-radius: 9px;
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  min-height: 230px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.miyun-materials-page .miyun-upload-zone:hover {
+  background: linear-gradient(135deg, #e2efff 0%, #f4f9ff 100%);
+  border-color: var(--cobalt);
+}
+
+.miyun-upload-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--cobalt) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--cobalt) 24%, var(--line));
+  border-radius: 50%;
+  color: var(--cobalt);
+  display: grid;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+
+.miyun-materials-page .miyun-upload-zone > b {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.miyun-materials-page .miyun-upload-zone > small {
+  max-width: 440px;
+}
+
+.miyun-upload-preview-list {
+  display: grid;
+  gap: 9px;
+  max-width: 620px;
+  width: 100%;
+}
+
+.miyun-upload-preview-card {
+  align-items: center;
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid #b8d3f5;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px;
+  position: relative;
+  text-align: left;
+}
+
+.miyun-upload-preview-media {
+  align-items: center;
+  background: #dcecff;
+  color: var(--cobalt);
+  display: grid;
+  height: 48px;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.miyun-upload-preview-media img,
+.miyun-upload-preview-media video {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.miyun-upload-preview-card > span:last-of-type {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.miyun-upload-preview-card b {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miyun-upload-preview-card small {
+  color: var(--muted);
+  font-size: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miyun-upload-preview-remove {
+  align-items: center;
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid #b8d3f5 !important;
+  border-radius: 50% !important;
+  color: var(--cobalt);
+  display: grid !important;
+  height: 25px;
+  justify-content: center;
+  min-height: 25px !important;
+  padding: 0 !important;
+  position: static;
+  width: 25px;
+}
+
+.miyun-upload-document-card .miyun-upload-preview-media {
+  border: 1px dashed #9fc3ef;
+}
+
+.miyun-upload-selection-note {
+  max-width: 620px !important;
+}
+
+.miyun-upload-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.miyun-upload-link {
+  background: transparent;
+  color: var(--cobalt);
+  font-size: 11px;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.miyun-upload-link:focus-visible,
+.miyun-asset-choice:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 3px;
+}
+
+.miyun-upload-input {
+  block-size: 1px;
+  clip-path: inset(50%);
+  inline-size: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+}
+
+.miyun-asset-picker-backdrop {
+  align-items: center;
+  backdrop-filter: blur(3px);
+  background: rgb(18 28 42 / 48%);
+  display: grid;
+  inset: 0;
+  padding: 28px;
+  position: fixed;
+  z-index: 80;
+}
+
+.miyun-asset-picker {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 24px 70px rgb(18 28 42 / 25%);
+  max-height: min(760px, 90vh);
+  overflow: auto;
+  width: min(900px, 94vw);
+}
+
+.miyun-asset-picker > header,
+.miyun-asset-picker > footer {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 20px 24px;
+}
+
+.miyun-asset-picker > header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line);
+}
+
+.miyun-asset-picker h3 {
+  font-size: 16px;
+  margin-top: 4px;
+}
+
+.miyun-asset-picker header p,
+.miyun-asset-picker footer small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.miyun-asset-picker header > button {
+  align-items: center;
+  background: var(--subtle);
+  border-radius: 50%;
+  color: var(--muted);
+  display: grid;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.miyun-asset-picker-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 20px 24px;
+}
+
+.miyun-asset-choice {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  position: relative;
+  text-align: left;
+}
+
+.miyun-asset-choice.selected {
+  border-color: var(--cobalt);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cobalt) 14%, transparent);
+}
+
+.miyun-asset-choice > svg {
+  background: var(--cobalt);
+  border-radius: 50%;
+  color: white;
+  padding: 3px;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
+
+.miyun-asset-choice-preview {
+  align-items: center;
+  background: var(--subtle);
+  display: grid;
+  height: 140px;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.miyun-asset-choice-preview img,
+.miyun-asset-choice-preview video {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.miyun-asset-choice-preview > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.miyun-asset-choice > span:last-of-type {
+  display: grid;
+  gap: 2px;
+}
+
+.miyun-asset-choice b {
+  font-size: 10px;
+}
+
+.miyun-asset-choice small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.miyun-asset-picker > footer {
+  border-top: 1px solid var(--line);
+}
+
+.miyun-material-list {
+  display: grid;
+  gap: 12px;
+}
+
+.miyun-material-list .prelaunch-filterbar {
+  border: 1px solid var(--line);
+}
+
+.miyun-material-list .surface-card > div {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+}
+
+.miyun-material-list .surface-card > div span {
+  background: var(--subtle);
+  font-size: 10px;
+  padding: 8px;
+}
+
+.miyun-material-list video {
+  background: #101010;
+  max-height: 320px;
+  max-width: 100%;
+  width: 480px;
+}
+
 @media (max-width: 760px) {
   .delivery-config-approval-handoff,
   .approval-decision-heading,
@@ -6248,5 +6724,59 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 
   .approval-decision-actions {
     display: grid;
+  }
+
+  .miyun-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .miyun-connection-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .miyun-settings-main {
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+    padding: 20px;
+  }
+
+  .miyun-cookie-guide {
+    padding: 20px;
+  }
+
+  .miyun-connection-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .miyun-connection-banner .secondary-button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .miyun-material-list .prelaunch-filterbar {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .miyun-material-list .search-field {
+    width: 100%;
+  }
+
+  .miyun-material-list .surface-card > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .miyun-materials-page .miyun-upload-zone {
+    min-height: 210px;
+  }
+
+  .miyun-asset-picker-backdrop {
+    padding: 12px;
+  }
+
+  .miyun-asset-picker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px;
   }
 }

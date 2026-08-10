@@ -16,6 +16,7 @@ import { PreLaunchInsightPage } from './PreLaunchInsightPage'
 import { ReportCenterPage } from './ReportCenterPage'
 import { shortId } from '../data/shortId'
 import { AssetLibraryPage } from './AssetLibraryPage'
+import { MiyunMaterialsPage } from './MiyunMaterialsPage'
 import { ContentAnalysisPage } from './ContentAnalysisPage'
 import { DataConnectionsPage } from './DataConnectionsPage'
 import { CapabilityOperationsPage } from './CapabilityOperationsPage'
@@ -1487,6 +1488,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, tourR
     : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'miyun-materials' ? <MiyunMaterialsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>

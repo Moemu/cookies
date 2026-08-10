@@ -36,6 +36,19 @@ func TestMiyunSecretCipherRoundTripAndKeyVersionIsolation(t *testing.T) {
 	}
 }
 
+func TestMiyunConnectionVerificationPersistsSafeUpstreamFailureState(t *testing.T) {
+	service, repository, _, _ := newMiyunCrawlTestService(t)
+	service.MiyunVerifier = miyunVerifierTestDouble{err: errors.New("tls handshake failed")}
+
+	value, err := service.VerifyMiyunConnection(context.Background(), miyunTestActor(), "project_1", VerifyMiyunConnectionRequest{ExpectedVersion: repository.connection.Version})
+	if err != nil {
+		t.Fatalf("verification should return persisted state, not an internal error: %v", err)
+	}
+	if value.LastErrorKind != string(crawler.YouShuTransport) || value.LastErrorCode != "UNCLASSIFIED" || repository.connection.Version != 2 {
+		t.Fatalf("persisted verification state=%#v", value)
+	}
+}
+
 func TestMiyunCrawlCreateIsConfirmedAndIdempotent(t *testing.T) {
 	service, repository, runtime, _ := newMiyunCrawlTestService(t)
 	profile := confirmedMiyunCrawlTestProfile(t, &service)
@@ -319,6 +332,10 @@ type miyunPageTestClient struct {
 	calls     int
 	requested []int
 }
+
+type miyunVerifierTestDouble struct{ err error }
+
+func (v miyunVerifierTestDouble) VerifyMiyunConnection(context.Context, []byte) error { return v.err }
 
 func (c *miyunPageTestClient) FetchMiyunPage(_ context.Context, _ MiyunConnection, _ string, query crawler.YouShuQuery) (crawler.YouShuPage, error) {
 	c.calls++

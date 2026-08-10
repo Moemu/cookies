@@ -70,6 +70,58 @@ type miyunAuthorizedImportAdapter struct {
 	workRoot   string
 }
 
+// miyunAuthorizedPreviewAdapter keeps upstream video fetches on the server.
+// It reuses the downloader's HTTPS, allowlist, redirect, MP4 and size checks,
+// but never creates an Asset or returns the upstream resource locator.
+type miyunAuthorizedPreviewAdapter struct {
+	downloader *crawler.YouShuDownloader
+	workRoot   string
+}
+
+func (a miyunAuthorizedPreviewAdapter) OpenMiyunMaterialPreview(ctx context.Context, request insights.MiyunAuthorizedPreviewRequest) (insights.MiyunMaterialPreview, error) {
+	if a.downloader == nil || request.MiyunMaterialID == "" {
+		return insights.MiyunMaterialPreview{}, fmt.Errorf("Miyun candidate preview is unavailable")
+	}
+	if err := os.MkdirAll(a.workRoot, 0o700); err != nil {
+		return insights.MiyunMaterialPreview{}, err
+	}
+	temporary, err := os.CreateTemp(a.workRoot, "miyun-preview-*.mp4")
+	if err != nil {
+		return insights.MiyunMaterialPreview{}, err
+	}
+	name := temporary.Name()
+	result, downloadErr := a.downloader.Download(ctx, request.ResourceURL, request.ExpectedSize, temporary)
+	closeErr := temporary.Close()
+	if downloadErr != nil {
+		_ = os.Remove(name)
+		return insights.MiyunMaterialPreview{}, downloadErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(name)
+		return insights.MiyunMaterialPreview{}, closeErr
+	}
+	stream, err := os.Open(name)
+	if err != nil {
+		_ = os.Remove(name)
+		return insights.MiyunMaterialPreview{}, err
+	}
+	return insights.MiyunMaterialPreview{Content: removeOnClose{ReadCloser: stream, path: name}, SizeBytes: result.SizeBytes, MIMEType: "video/mp4"}, nil
+}
+
+type removeOnClose struct {
+	io.ReadCloser
+	path string
+}
+
+func (r removeOnClose) Close() error {
+	closeErr := r.ReadCloser.Close()
+	removeErr := os.Remove(r.path)
+	if closeErr != nil {
+		return closeErr
+	}
+	return removeErr
+}
+
 func (a miyunAuthorizedImportAdapter) ImportMiyunMaterial(ctx context.Context, request insights.MiyunAuthorizedImportRequest) (insights.MiyunAuthorizedImportResult, error) {
 	if a.downloader == nil || a.ledger == nil || request.MiyunMaterialID == "" {
 		return insights.MiyunAuthorizedImportResult{}, fmt.Errorf("Miyun authorized import is unavailable")

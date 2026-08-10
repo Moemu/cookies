@@ -1691,6 +1691,19 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
         '409': {$ref: '#/components/responses/Problem'}
         default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/product-source:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Read Project-scoped product identities available to Miyun analysis
+      operationId: getMiyunProductSource
+      responses:
+        '200':
+          description: Human-readable Project product identities, never a global product catalogue.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunProductSource'}
+        default: {$ref: '#/components/responses/Problem'}
   /api/insights/v1/projects/{project_id}/miyun/crawl-jobs:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -1781,6 +1794,20 @@ paths:
       operationId: getMiyunMaterial
       responses:
         '200': {description: Material detail., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDetail'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}/preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    get:
+      summary: Stream an authorized Miyun candidate preview without exposing its upstream locator
+      operationId: previewMiyunMaterial
+      responses:
+        '200':
+          description: Project-authorized MP4 bytes proxied by the server; the upstream resource URL is never returned.
+          content:
+            video/mp4:
+              schema: {type: string, format: binary}
         default: {$ref: '#/components/responses/Problem'}
   /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:confirm:
     parameters:
@@ -1981,7 +2008,7 @@ components:
       additionalProperties: false
       required: [session]
       properties:
-        session: {type: string, minLength: 8, maxLength: 4096, writeOnly: true}
+        session: {type: string, minLength: 8, maxLength: 16356, writeOnly: true}
         session_expires_at: {type: string, format: date-time}
         expected_version: {type: integer, minimum: 0}
     CreateMiyunCrawlJobRequest:
@@ -2035,10 +2062,16 @@ components:
     AnalyzeMiyunProductProfileRequest:
       type: object
       additionalProperties: false
-      required: [connection_id, product_id, product_asset_refs, knowledge_document_ids]
+      required: [connection_id, product_asset_refs, knowledge_document_ids]
       properties:
         connection_id: {type: string, minLength: 1}
-        product_id: {type: string, minLength: 1}
+        product_id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          description: Existing Project product identity. Omit to analyze an unregistered Project product under a server-generated pending identity.
+        product_name: {type: string, minLength: 1, maxLength: 255}
+        category_name: {type: string, minLength: 1, maxLength: 255}
         product_asset_refs:
           type: array
           uniqueItems: true
@@ -2047,6 +2080,23 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, minLength: 1}
+    MiyunProductSource:
+      type: object
+      additionalProperties: false
+      required: [project_name, brand_name, category_name, products]
+      properties:
+        project_name: {type: string}
+        brand_name: {type: string}
+        category_name: {type: string}
+        products:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name]
+            properties:
+              id: {type: string}
+              name: {type: string}
     MiyunProfileQuery:
       type: object
       additionalProperties: false

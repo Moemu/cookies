@@ -128,6 +128,18 @@ func TestNewYouShuClientRequiresSafeEndpointAndKeepsSessionPrivate(t *testing.T)
 		if r.Header.Get("Cookie") != "sid=sanitized" {
 			t.Errorf("cookie was not injected")
 		}
+		if r.Header.Get("Origin") != YouShuConsoleOrigin {
+			t.Errorf("origin=%q", r.Header.Get("Origin"))
+		}
+		if r.Header.Get("Accept") != "application/json, text/plain, */*" {
+			t.Errorf("accept=%q", r.Header.Get("Accept"))
+		}
+		if r.Header.Get("Referer") != youShuConsoleReferer {
+			t.Errorf("referer=%q", r.Header.Get("Referer"))
+		}
+		if r.Header.Get("User-Agent") != youShuUserAgent {
+			t.Errorf("user-agent=%q", r.Header.Get("User-Agent"))
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(fixture(t, "product.json"))
 	}))

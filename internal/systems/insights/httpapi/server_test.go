@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -93,6 +94,28 @@ func TestMiyunVersionConflictUsesHTTP409(t *testing.T) {
 		`{"expected_version":1,"query":{"product_name":"Cup","keywords":["cup"],"material_content_types":[],"window_start":"2026-08-01","window_end":"2026-08-10"}}`))
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "VERSION_CONFLICT") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMiyunCandidatePreviewStreamsOnlyAuthorizedBytes(t *testing.T) {
+	t.Parallel()
+	server := New(&applicationStub{miyunPreview: []byte("authorized-mp4")})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/materials/miyunmaterial_1/preview", ""))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "video/mp4" || response.Header().Get("Cache-Control") != "private, no-store" || response.Body.String() != "authorized-mp4" {
+		t.Fatalf("preview status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestMiyunProductSourceStaysProjectScoped(t *testing.T) {
+	t.Parallel()
+	server := New(&applicationStub{miyunProductSource: insights.MiyunProductSource{ProjectName: "Project", Products: []insights.MiyunProjectProduct{{ID: "product_1", Name: "Product"}}}})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/product-source", ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"product_1"`) {
+		t.Fatalf("product source status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -398,6 +421,8 @@ type applicationStub struct {
 	miyunManual         insights.MiyunManualImportResult
 	miyunConfirmRequest insights.ConfirmMiyunProductProfileRequest
 	miyunIdempotencyKey contract.IdempotencyKey
+	miyunPreview        []byte
+	miyunProductSource  insights.MiyunProductSource
 	miyunErr            error
 	report              insights.InsightReport
 	experience          insights.Experience
@@ -491,6 +516,15 @@ func (s *applicationStub) ListMiyunMaterials(context.Context, contract.ActorCont
 }
 func (s *applicationStub) GetMiyunMaterialDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialDetail, error) {
 	return insights.MiyunMaterialDetail{Material: insights.MiyunMaterial{ID: "miyunmaterial_1"}}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunProductSource(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunProductSource, error) {
+	return s.miyunProductSource, s.miyunErr
+}
+func (s *applicationStub) OpenMiyunMaterialPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialPreview, error) {
+	if s.miyunErr != nil {
+		return insights.MiyunMaterialPreview{}, s.miyunErr
+	}
+	return insights.MiyunMaterialPreview{Content: io.NopCloser(bytes.NewReader(s.miyunPreview)), SizeBytes: int64(len(s.miyunPreview)), MIMEType: "video/mp4"}, nil
 }
 func (s *applicationStub) DecideMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, string, bool, insights.MiyunMaterialDecisionRequest) (insights.MiyunMaterial, error) {
 	return insights.MiyunMaterial{ID: "miyunmaterial_1"}, s.miyunErr

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,46 @@ func TestMiyunAnalyzeIsDeterministicExplainableAndSupersedesDraft(t *testing.T) 
 	}
 	if changedContext.InputHash == second.InputHash {
 		t.Fatal("context version changed without changing the frozen input hash")
+	}
+}
+
+func TestUpdateMiyunConnectionExplainsConfigurationAndCookieBounds(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	service := newMiyunTestService(newMiyunServiceRepository(now), now)
+	request := UpdateMiyunConnectionRequest{Session: "cookie=value", ExpectedVersion: 0}
+	if _, err := service.UpdateMiyunConnection(context.Background(), miyunTestActor(), "project_1", request); !errors.Is(err, ErrInvalidState) || !strings.Contains(err.Error(), "会话加密") {
+		t.Fatalf("missing server encryption error=%v", err)
+	}
+
+	service.MiyunSecrets = miyunCipherTestDouble{}
+	request.Session = "short"
+	if _, err := service.UpdateMiyunConnection(context.Background(), miyunTestActor(), "project_1", request); !errors.Is(err, ErrInvalidRequest) || !strings.Contains(err.Error(), "Cookie 值不完整") {
+		t.Fatalf("short cookie error=%v", err)
+	}
+	request.Session = strings.Repeat("x", maxMiyunSessionBytes+1)
+	if _, err := service.UpdateMiyunConnection(context.Background(), miyunTestActor(), "project_1", request); !errors.Is(err, ErrInvalidRequest) || !strings.Contains(err.Error(), "超过 16 KiB") {
+		t.Fatalf("oversized cookie error=%v", err)
+	}
+}
+
+func TestMiyunAnalyzeCreatesPendingIdentityWhenProjectHasNoRegisteredProduct(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	repository := newMiyunServiceRepository(now)
+	service := newMiyunTestService(repository, now)
+	projectReader := service.MiyunProjects.(fakeMiyunProjectReader)
+	projectReader.source.Context.ProductIDs = []contract.ProductID{}
+	projectReader.source.Products = []MiyunProjectProduct{}
+	service.MiyunProjects = projectReader
+
+	draft, err := service.AnalyzeMiyunProductProfile(context.Background(), miyunTestActor(), "project_1", AnalyzeMiyunProductProfileRequest{
+		ConnectionID: "miyun_connection_1", ProductName: "手冲咖啡套装", CategoryName: "咖啡器具",
+		ProductAssetRefs: []contract.AssetVersionRef{}, KnowledgeDocumentIDs: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(draft.ProductID), "project_input:") || draft.ProductName != "手冲咖啡套装" || draft.CategoryName != "咖啡器具" || !containsString(draft.AnalysisWarnings, "product_identity_pending_confirmation") {
+		t.Fatalf("pending product identity was not explicit: %#v", draft)
 	}
 }
 

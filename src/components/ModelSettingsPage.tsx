@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Check, CircleAlert, KeyRound, LockKeyhole, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import { useModelConfig } from '../context/ModelConfigContext'
+import { MiyunConnectionSettings } from './MiyunConnectionSettings'
 
 export function ModelSettingsPage() {
   const { providers, configuredCount, isLoading, refresh, saveProvider, clearProvider } = useModelConfig()
@@ -43,6 +44,8 @@ export function ModelSettingsPage() {
       <div><span>组织级配置</span><h1>系统设置</h1><p>模型能力、默认规则和通知配置统一在此处管理；不会分散在策略、创意、洞察或投放模块。</p></div>
       <div className="provider-summary"><b>{configuredCount} / {providers.length || 1}</b><span>服务已配置</span></div>
     </header>
+
+    <MiyunConnectionSettings/>
 
     <div className="model-settings-layout">
       <aside className="provider-index" aria-label="模型服务商">
