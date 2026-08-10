@@ -460,21 +460,12 @@ function toApiProjectMediaAsset(asset: PlatformProjectAsset, projectId: string):
   const version = asset.version?.version ?? asset.ref?.asset_version.version
   const kind = asset.asset?.asset_kind
   const mimeType = asset.version?.mime_type ?? ''
-  const sourceType = asset.version?.source_type
-  const normalizedSourceType = sourceType === 'upload'
-    || sourceType === 'provider_generated'
-    || sourceType === 'imported'
-    || sourceType === 'captured'
-    || sourceType === 'rendered'
-    ? sourceType
-    : undefined
   if (!id || !version || (kind !== 'video' && kind !== 'image' && kind !== 'document')) return []
   return [{
     id,
     projectId,
     version,
     kind,
-    sourceType: normalizedSourceType,
     mimeType,
     sizeBytes: asset.version?.size_bytes ?? 0,
     durationSeconds: asset.version?.media?.duration_seconds,

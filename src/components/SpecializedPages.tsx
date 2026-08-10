@@ -557,52 +557,26 @@ function ProjectMediaContext() {
   const { currentProject } = useProject()
   const [assets, setAssets] = useState<ApiProjectMediaAsset[]>([])
   const [selectedId, setSelectedId] = useState('')
-  const [scope, setScope] = useState<'generated' | 'all'>('generated')
-  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [reloadKey, setReloadKey] = useState(0)
   useEffect(() => {
     let active = true
-    setLoadState('loading')
     void api.listProjectMediaAssets(currentProject.id).then(items => {
       if (!active) return
       const videos = items.filter(item => item.kind === 'video')
       setAssets(items)
       setSelectedId(current => videos.some(item => item.id === current) ? current : videos[0]?.id ?? '')
-      setLoadState('ready')
     }).catch(() => {
-      if (active) {
-        setAssets([])
-        setSelectedId('')
-        setLoadState('error')
-      }
+      if (active) setAssets([])
     })
     return () => { active = false }
-  }, [currentProject.id, reloadKey])
+  }, [currentProject.id])
   const videos = assets.filter(asset => asset.kind === 'video')
-  const generatedVideos = videos.filter(asset => asset.sourceType === 'provider_generated' || asset.sourceType === 'rendered')
-  const visibleVideos = scope === 'generated' ? generatedVideos : videos
-  const images = assets.filter(asset => asset.kind === 'image')
   const brief = assets.find(asset => asset.mimeType === 'application/pdf')
-  const selected = visibleVideos.find(asset => asset.id === selectedId) ?? visibleVideos[0]
-  const emptyCopy = loadState === 'error'
-    ? '视频资产读取失败，请检查本地 API 服务后重试。'
-    : scope === 'generated' && videos.length > 0
-      ? `当前 Project 有 ${videos.length} 个视频，但暂未发现由模型生成或渲染回流的视频。`
-      : images.length > 0
-        ? `当前 Project 已有 ${images.length} 张图片，但尚未生成视频。完成任一视频生成任务后会自动出现在这里。`
-        : '当前 Project 尚未生成视频。完成任一视频生成任务后会自动出现在这里。'
-  return <section className="project-media-context" aria-label="当前项目视频资产">
-    <header className="project-media-context-summary">
-      <div><span className="section-label">CURRENT PROJECT VIDEO ASSETS</span><b>当前项目生成视频</b><small>已生成 {generatedVideos.length} 个 · 全部视频 {videos.length} 个 · {brief ? '1 个 PDF Brief' : `${images.length} 张图片`}</small></div>
-      <div className="project-media-context-filters" role="tablist" aria-label="视频资产范围">
-        <button type="button" role="tab" aria-selected={scope === 'generated'} className={scope === 'generated' ? 'active' : ''} onClick={() => setScope('generated')}>生成视频 <span>{generatedVideos.length}</span></button>
-        <button type="button" role="tab" aria-selected={scope === 'all'} className={scope === 'all' ? 'active' : ''} onClick={() => setScope('all')}>全部视频 <span>{videos.length}</span></button>
-      </div>
-    </header>
-    {loadState === 'loading' ? <div className="project-media-context-empty" role="status"><LoaderCircle className="spin" size={18}/><b>正在读取当前项目视频…</b></div>
-      : visibleVideos.length > 0 ? <div className="project-media-context-list">{visibleVideos.map((asset, index) => <button type="button" key={`${asset.id}-v${asset.version}`} className={selected?.id === asset.id ? 'active' : ''} onClick={() => setSelectedId(asset.id)} aria-label={shortDramaVideoLabel(asset, index)} title={`${asset.sourceType === 'rendered' ? '渲染成片' : asset.sourceType === 'provider_generated' ? '模型生成' : '项目视频'} · ${asset.id}`}><Play size={13} fill="currentColor"/><span>{asset.durationSeconds ? `${asset.durationSeconds.toFixed(0)}s` : `视频 ${String(index + 1).padStart(2, '0')}`}</span><small>{asset.sourceType === 'rendered' ? '渲染成片' : asset.sourceType === 'provider_generated' ? '模型生成' : '项目素材'}</small></button>)}</div>
-        : <div className="project-media-context-empty" role={loadState === 'error' ? 'alert' : 'status'}><Film size={18}/><div><b>{loadState === 'error' ? '暂时无法读取视频资产' : '当前范围暂无视频'}</b><small>{emptyCopy}</small></div>{loadState === 'error' ? <button type="button" className="secondary-button" onClick={() => setReloadKey(value => value + 1)}><RotateCcw size={14}/>重新读取</button> : scope === 'generated' && videos.length > 0 ? <button type="button" className="secondary-button" onClick={() => setScope('all')}>查看全部视频</button> : null}</div>}
-    {selected ? <div className="project-media-context-preview"><video key={`${selected.id}-v${selected.version}`} controls playsInline preload="metadata" src={selected.contentUrl}/><small>{selected.sourceType === 'rendered' ? '渲染成片' : selected.sourceType === 'provider_generated' ? '模型生成视频' : '项目视频素材'} · v{selected.version}</small></div> : null}
+  const selected = videos.find(asset => asset.id === selectedId) ?? videos[0]
+  if (!assets.length) return null
+  return <section className="project-media-context" aria-label="当前 Project 导入媒体">
+    <div><span className="section-label">PROJECT MEDIA</span><b>{videos.length} 个视频 · {brief ? '1 个 PDF Brief' : '未发现 PDF Brief'}</b><small>全部由平台 API 返回，视频可直接作为创作参考或加入混剪。</small></div>
+    <div className="project-media-context-list">{videos.slice(0, 6).map((asset, index) => <button key={asset.id} className={selected?.id === asset.id ? 'active' : ''} onClick={() => setSelectedId(asset.id)} aria-label={shortDramaVideoLabel(asset, index)}><Play size={13} fill="currentColor"/><span>{asset.durationSeconds ? `${asset.durationSeconds.toFixed(0)}s` : `正片 ${String(index + 1).padStart(2, '0')}`}</span></button>)}</div>
+    {selected ? <video className="project-media-context-preview" controls preload="metadata" src={selected.contentUrl}/> : null}
   </section>
 }
 
