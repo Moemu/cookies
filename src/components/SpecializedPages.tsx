@@ -783,22 +783,24 @@ function ProjectMediaContext() {
     let active = true
     void api.listProjectMediaAssets(currentProject.id).then(items => {
       if (!active) return
-      const videos = items.filter(item => item.kind === 'video')
+      const media = items.filter(item => item.kind === 'video' || item.kind === 'image')
       setAssets(items)
-      setSelectedId(current => videos.some(item => item.id === current) ? current : videos[0]?.id ?? '')
+      setSelectedId(current => media.some(item => item.id === current) ? current : media[0]?.id ?? '')
     }).catch(() => {
       if (active) setAssets([])
     })
     return () => { active = false }
   }, [currentProject.id])
   const videos = assets.filter(asset => asset.kind === 'video')
+  const images = assets.filter(asset => asset.kind === 'image')
+  const media = [...videos, ...images]
   const brief = assets.find(asset => asset.mimeType === 'application/pdf')
-  const selected = videos.find(asset => asset.id === selectedId) ?? videos[0]
+  const selected = media.find(asset => asset.id === selectedId) ?? media[0]
   if (!assets.length) return null
   return <section className="project-media-context" aria-label="当前 Project 导入媒体">
-    <div><span className="section-label">PROJECT MEDIA</span><b>{videos.length} 个视频 · {brief ? '1 个 PDF Brief' : '未发现 PDF Brief'}</b><small>全部由平台 API 返回，视频可直接作为创作参考或加入混剪。</small></div>
-    <div className="project-media-context-list">{videos.slice(0, 6).map((asset, index) => <button key={asset.id} className={selected?.id === asset.id ? 'active' : ''} onClick={() => setSelectedId(asset.id)} aria-label={shortDramaVideoLabel(asset, index)}><Play size={13} fill="currentColor"/><span>{asset.durationSeconds ? `${asset.durationSeconds.toFixed(0)}s` : `正片 ${String(index + 1).padStart(2, '0')}`}</span></button>)}</div>
-    {selected ? <video className="project-media-context-preview" controls preload="metadata" src={selected.contentUrl}/> : null}
+    <div><span className="section-label">PROJECT MEDIA</span><b>{videos.length} 个视频 · {images.length} 张图片 · {brief ? '1 个 PDF Brief' : '未发现 PDF Brief'}</b><small>全部由平台 API 返回；视频可作创作参考或加入混剪，图片会保留为首帧与视觉参考。</small></div>
+    <div className="project-media-context-list">{media.map((asset, index) => <button key={asset.id} className={selected?.id === asset.id ? 'active' : ''} onClick={() => setSelectedId(asset.id)} aria-label={asset.kind === 'video' ? shortDramaVideoLabel(asset, index) : `项目图片 ${String(index - videos.length + 1).padStart(2, '0')}`}><>{asset.kind === 'video' ? <Play size={13} fill="currentColor"/> : <Image size={13}/>}</><span>{asset.kind === 'video' ? (asset.durationSeconds ? `${asset.durationSeconds.toFixed(0)}s` : `正片 ${String(index + 1).padStart(2, '0')}`) : `图片 ${String(index - videos.length + 1).padStart(2, '0')}`}</span></button>)}</div>
+    {selected?.kind === 'video' ? <video className="project-media-context-preview" controls preload="metadata" src={selected.contentUrl}/> : selected ? <img className="project-media-context-preview" src={selected.contentUrl} alt="当前 Project 图片素材预览"/> : null}
   </section>
 }
 
