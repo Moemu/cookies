@@ -166,6 +166,12 @@ const performanceSections = [
 
 type PerformanceSectionId = (typeof performanceSections)[number]['id']
 
+const performanceFunctionTabs = [
+  ...prerollModes.map(mode => ({ ...mode, section: 'preroll' as const })),
+  { id: 'viral-remake', label: '爆款复刻', detail: '结构拆解、品牌映射与原创改写', section: 'viral-remake' as const },
+  { id: 'ai-native', label: 'AI 效果广告生成', detail: '从商品需求到完整广告视频', section: 'ai-native' as const },
+] as const
+
 function initialPerformanceSection(): PerformanceSectionId {
   const section = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('section')
   return performanceSections.some(item => item.id === section) ? section as PerformanceSectionId : 'preroll'
@@ -306,6 +312,15 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask,
   const expectsBrandIntake = category === 'brand' && Boolean(activeTaskId && !activeTask)
   const activePrerollMode = prerollModes.find(item => item.id === selectedPreroll) ?? prerollModes[0]
   const activePerformanceLabel = selectedSection === 'viral-remake' ? '爆款复刻' : selectedSection === 'ai-native' ? 'AI 效果广告生成' : activePrerollMode.label
+  const selectedPerformanceFunction = selectedSection === 'preroll' ? selectedPreroll : selectedSection
+  const selectPerformanceFunction = (id: string) => {
+    const selection = performanceFunctionTabs.find(item => item.id === id)
+    if (!selection) return
+    setSelectedSection(selection.section)
+    if (selection.section === 'preroll') setSelectedPreroll(selection.id)
+    rememberPerformanceSection(selection.section)
+    setNotice('')
+  }
   const selectLegacyPerformanceMode = (mode: string) => {
     if (mode === 'viral-remake') {
       setSelectedSection('viral-remake')
@@ -658,14 +673,10 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask,
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
     <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : brandIntake ? <div className="creative-task-banner compact"><span>Strategy → CreativeIntake → Brand Film</span><b>{brandIntake.base_handoff?.creative_view?.communication?.single_minded_proposition || '品牌策略已冻结'}</b><small>{brandTask ? '品牌任务已绑定，正在恢复对应制作工作台' : brandBrief?.status === 'confirmed' ? `Brief v${brandBrief.revision} 已确认，可进入品牌方向` : '先完成 Brief 分析确认，再进入品牌方向'}</small></div> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' && selectedSection !== 'ai-native' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activePerformanceLabel}</button> : null}</header>
     {category !== 'editing' && activeTaskId ? <div className="creative-task-banner compact"><span>成片后续处理</span><b>将当前广告成片带入素材剪辑</b><small>只有已冻结且已入库的最终视频可以进入；原资产不会被覆盖。</small><button className="secondary-button" onClick={() => void openCreativeTaskInEditor()}><Scissors size={15}/>进入素材剪辑</button></div> : null}
-    {category !== 'brand' ? <><IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/><ProjectMediaContext /></> : null}
+    {category !== 'brand' ? <ProjectMediaContext /> : null}
     {category === 'performance' ? <>
-      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); rememberPerformanceSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
+      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告生成类型">{performanceFunctionTabs.map(item => <button key={item.id} id={`performance-function-${item.id}`} role="tab" aria-selected={selectedPerformanceFunction === item.id} className={selectedPerformanceFunction === item.id ? 'active' : ''} onClick={() => selectPerformanceFunction(item.id)}><b>{item.label}</b><small>{item.detail}</small></button>)}</div>
       {selectedSection === 'preroll' ? <>
-        <div className="preroll-subnav">
-          <span className="preroll-subnav-label"><b>前贴广告</b><i>/</i>选择类型</span>
-          <div className="performance-mode-tabs preroll-mode-tabs" role="tablist" aria-label="前贴广告类型">{prerollModes.map(mode => <button key={mode.id} id={`preroll-mode-${mode.id}`} role="tab" title={mode.guard} aria-selected={selectedPreroll === mode.id} className={selectedPreroll === mode.id ? 'active' : ''} onClick={() => { setSelectedPreroll(mode.id); setNotice('') }}><b>{mode.label}</b></button>)}</div>
-        </div>
         {selectedPreroll === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selectedPreroll === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : <ShortDramaPrerollWorkspace onNotice={setNotice} onOpenEditTask={onOpenEditTask}/>}
       </> : selectedSection === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <Suspense fallback={<div className="ai-native-feature-loading">正在加载 AI 效果广告工作台…</div>}><AINativeAdWorkspace projectId={currentProject.id} onNotice={setNotice}/></Suspense>}
     </> : category === 'brand' && brandTask ? <BrandFilmWorkspace taskId={brandTask.id} onNotice={setNotice}/>
