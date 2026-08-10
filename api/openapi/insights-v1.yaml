@@ -1653,6 +1653,175 @@ paths:
               schema: {$ref: '#/components/schemas/MiyunManualImportResult'}
         '409': {$ref: '#/components/responses/Problem'}
         default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/connection:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Get the safe public Miyun connection state
+      operationId: getMiyunConnection
+      responses:
+        '200':
+          description: Encrypted-session metadata; the session is never returned.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      summary: Create or rotate the encrypted Miyun session
+      operationId: updateMiyunConnection
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UpdateMiyunConnectionRequest'}}}
+      responses:
+        '200':
+          description: Updated safe connection state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/connection:verify:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Explicitly perform one bounded read-only connection probe
+      operationId: verifyMiyunConnection
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ExpectedVersion'}}}
+      responses:
+        '200':
+          description: Verified safe connection state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List persistent Miyun crawl jobs
+      operationId: listMiyunCrawlJobs
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Jobs newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties: {items: {type: array, items: {$ref: '#/components/schemas/MiyunCrawlJob'}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      summary: Freeze a confirmed profile query and enqueue collection
+      operationId: createMiyunCrawlJob
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateMiyunCrawlJobRequest'}}}
+      responses:
+        '201':
+          description: Persistent queued job or its idempotent replay.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunJobID'
+    get:
+      summary: Get a persistent Miyun crawl job
+      operationId: getMiyunCrawlJob
+      responses:
+        '200': {description: Crawl job., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}:cancel:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunJobID'
+    post:
+      summary: Cancel queued or running collection
+      operationId: cancelMiyunCrawlJob
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '200': {description: Cancelled job., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}:retry:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunJobID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      summary: Create an explicitly idempotent retry from a terminal job
+      operationId: retryMiyunCrawlJob
+      responses:
+        '201': {description: Retry job., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List Miyun current material projections
+      operationId: listMiyunMaterials
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Current materials; snapshots remain separate.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties: {items: {type: array, items: {$ref: '#/components/schemas/MiyunMaterial'}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    get:
+      summary: Get current material and append-only snapshots
+      operationId: getMiyunMaterial
+      responses:
+        '200': {description: Material detail., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDetail'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    post:
+      summary: Human-confirm a material and enqueue authorized MP4 import
+      operationId: confirmMiyunMaterial
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDecisionRequest'}}}
+      responses:
+        '200': {description: Confirmed material., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:reject:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    post:
+      summary: Human-reject a material without downloading it
+      operationId: rejectMiyunMaterial
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDecisionRequest'}}}
+      responses:
+        '200': {description: Rejected material., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:retry-import:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    post:
+      summary: Retry only a failed confirmed material import
+      operationId: retryMiyunMaterialImport
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '202': {description: Import retry accepted., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     sessionCookie:
@@ -1667,6 +1836,16 @@ components:
       schema: { type: string }
     MiyunProfileID:
       name: profile_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunJobID:
+      name: job_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunMaterialID:
+      name: material_id
       in: path
       required: true
       schema: {type: string}
@@ -1772,6 +1951,80 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ExpectedVersion:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties: {expected_version: {type: integer, minimum: 1}}
+    MiyunConnection:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, status, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        status: {type: string, enum: [unverified, ready, auth_required, disabled]}
+        session_expires_at: {type: string, format: date-time}
+        last_verified_at: {type: string, format: date-time}
+        last_successful_request_at: {type: string, format: date-time}
+        cooldown_until: {type: string, format: date-time}
+        last_error_kind: {type: string}
+        last_error_code: {type: string}
+        last_error_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    UpdateMiyunConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [session]
+      properties:
+        session: {type: string, minLength: 8, maxLength: 4096, writeOnly: true}
+        session_expires_at: {type: string, format: date-time}
+        expected_version: {type: integer, minimum: 0}
+    CreateMiyunCrawlJobRequest:
+      type: object
+      additionalProperties: false
+      required: [product_profile_id, operation]
+      properties:
+        product_profile_id: {type: string, minLength: 1}
+        operation: {type: string, enum: [product, cid]}
+    MiyunCrawlJob:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, connection_id, product_profile_id, status, operation, query_schema_version, query_snapshot, runtime_job_id, completed_pages, discovered_count, deduplicated_count, downloaded_count, failed_count, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        connection_id: {type: string}
+        product_profile_id: {type: string}
+        status: {type: string, enum: [queued, running, cooling_down, auth_required, partial, succeeded, failed, cancelled]}
+        operation: {type: string, enum: [product, cid]}
+        query_schema_version: {type: string, const: miyun-query/v1}
+        query_snapshot: {type: object, additionalProperties: true, readOnly: true}
+        runtime_job_id: {type: string}
+        completed_pages: {type: integer, minimum: 0}
+        discovered_count: {type: integer, minimum: 0}
+        deduplicated_count: {type: integer, minimum: 0}
+        downloaded_count: {type: integer, minimum: 0}
+        failed_count: {type: integer, minimum: 0}
+        cooldown_until: {type: string, format: date-time}
+        last_error_kind: {type: string}
+        last_error_code: {type: string}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MiyunMaterialDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        note: {type: string, maxLength: 1000}
     AssetVersionRef:
       type: object
       additionalProperties: false
@@ -1914,7 +2167,7 @@ components:
     MiyunMaterial:
       type: object
       additionalProperties: false
-      required: [id, organization_id, project_id, miyun_material_id, import_method, selection_status, import_status, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, miyun_material_id, import_method, source_ref_status, selection_status, import_status, version, created_by, created_at, updated_at]
       properties:
         id: {type: string}
         organization_id: {type: string}
@@ -1923,7 +2176,9 @@ components:
         first_seen_crawl_job_id: {type: string}
         import_method: {type: string, enum: [crawler, manual]}
         resource_id: {type: string}
+        resource_expected_size: {type: integer, minimum: 0}
         source_ref: {type: string}
+        source_ref_status: {type: string, enum: [verified, unknown]}
         title: {type: string}
         selection_status: {type: string, enum: [discovered, confirmed, rejected]}
         import_status: {type: string, enum: [pending, downloading, imported, deduplicated, failed, skipped]}
@@ -1931,6 +2186,11 @@ components:
         platform_asset_version: {type: integer, minimum: 1}
         insight_asset_id: {type: string}
         external_import_id: {type: string}
+        decision_by: {type: string}
+        decision_at: {type: string, format: date-time}
+        decision_note: {type: string, maxLength: 1000}
+        last_import_error_kind: {type: string}
+        last_import_error_code: {type: string}
         version: {type: integer, minimum: 1}
         created_by: {type: string}
         created_at: {type: string, format: date-time}
@@ -1938,13 +2198,14 @@ components:
     MiyunMaterialSnapshot:
       type: object
       additionalProperties: false
-      required: [id, organization_id, project_id, material_id, import_method, schema_version, captured_at, delivery_days, cumulative_impressions, cumulative_impressions_raw, related_ads, related_creators, material_score, views, likes, comments, shares, saves, created_at]
+      required: [id, organization_id, project_id, material_id, source_page, import_method, schema_version, captured_at, delivery_days, cumulative_impressions, cumulative_impressions_raw, related_ads, related_creators, related_creators_raw, related_creators_known, material_score, views, likes, comments, shares, saves, created_at]
       properties:
         id: {type: string}
         organization_id: {type: string}
         project_id: {type: string}
         material_id: {type: string}
         crawl_job_id: {type: string}
+        source_page: {type: integer, minimum: 0}
         import_method: {type: string, enum: [crawler, manual]}
         schema_version: {type: string}
         captured_at: {type: string, format: date-time}
@@ -1955,6 +2216,8 @@ components:
         cumulative_impressions_raw: {type: string}
         related_ads: {type: integer, minimum: 0}
         related_creators: {type: integer, minimum: 0}
+        related_creators_raw: {type: string}
+        related_creators_known: {type: boolean}
         material_score: {type: number, minimum: 0}
         views: {type: integer, minimum: 0}
         likes: {type: integer, minimum: 0}
@@ -1963,6 +2226,15 @@ components:
         saves: {type: integer, minimum: 0}
         sanitized_raw: {type: object, additionalProperties: true}
         created_at: {type: string, format: date-time}
+    MiyunMaterialDetail:
+      type: object
+      additionalProperties: false
+      required: [material, snapshots]
+      properties:
+        material: {$ref: '#/components/schemas/MiyunMaterial'}
+        snapshots:
+          type: array
+          items: {$ref: '#/components/schemas/MiyunMaterialSnapshot'}
     MiyunManualImportResult:
       type: object
       additionalProperties: false

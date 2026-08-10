@@ -422,6 +422,13 @@ type Service struct {
 	MiyunAssets    MiyunAssetSourceReader
 	MiyunKnowledge MiyunKnowledgeSourceReader
 	MiyunMedia     MiyunMediaEvidenceReader
+	MiyunCrawl     MiyunCrawlRepository
+	MiyunJobs      MiyunRuntimeJobs
+	MiyunPages     MiyunPageClient
+	MiyunImports   MiyunAuthorizedImporter
+	MiyunSecrets   MiyunSecretCipher
+	MiyunVerifier  MiyunConnectionVerifier
+	MiyunCooldown  time.Duration
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.
 	Assets AssetRepository

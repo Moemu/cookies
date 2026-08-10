@@ -167,6 +167,7 @@ type MiyunConnection struct {
 	SessionExpiresAt        *time.Time              `json:"session_expires_at,omitempty"`
 	LastVerifiedAt          *time.Time              `json:"last_verified_at,omitempty"`
 	LastSuccessfulRequestAt *time.Time              `json:"last_successful_request_at,omitempty"`
+	CooldownUntil           *time.Time              `json:"cooldown_until,omitempty"`
 	LastErrorKind           string                  `json:"last_error_kind,omitempty"`
 	LastErrorCode           string                  `json:"last_error_code,omitempty"`
 	LastErrorAt             *time.Time              `json:"last_error_at,omitempty"`
@@ -293,6 +294,9 @@ type MiyunCrawlJob struct {
 	Operation          string                  `json:"operation"`
 	QuerySchemaVersion string                  `json:"query_schema_version"`
 	QuerySnapshot      json.RawMessage         `json:"query_snapshot"`
+	IdempotencyKey     string                  `json:"-"`
+	RequestHash        string                  `json:"-"`
+	RuntimeJobID       string                  `json:"runtime_job_id"`
 	CompletedPages     int64                   `json:"completed_pages"`
 	DiscoveredCount    int64                   `json:"discovered_count"`
 	DeduplicatedCount  int64                   `json:"deduplicated_count"`
@@ -320,6 +324,9 @@ func (j MiyunCrawlJob) Validate() error {
 	if strings.TrimSpace(j.QuerySchemaVersion) == "" || !json.Valid(j.QuerySnapshot) {
 		return fmt.Errorf("%w: versioned query snapshot must be valid JSON", ErrInvalidRequest)
 	}
+	if strings.TrimSpace(j.IdempotencyKey) == "" || len(j.IdempotencyKey) > 128 || len(j.RequestHash) != 64 || strings.TrimSpace(j.RuntimeJobID) == "" {
+		return fmt.Errorf("%w: job idempotency identity and runtime job are required", ErrInvalidRequest)
+	}
 	if j.CompletedPages < 0 || j.DiscoveredCount < 0 || j.DeduplicatedCount < 0 || j.DownloadedCount < 0 || j.FailedCount < 0 {
 		return fmt.Errorf("%w: job counters must be non-negative", ErrInvalidRequest)
 	}
@@ -333,27 +340,36 @@ func (j MiyunCrawlJob) Validate() error {
 }
 
 type MiyunMaterial struct {
-	ID                   string                       `json:"id"`
-	OrganizationID       contract.OrganizationID      `json:"organization_id"`
-	ProjectID            contract.ProjectID           `json:"project_id"`
-	MiyunMaterialID      string                       `json:"miyun_material_id"`
-	FirstSeenCrawlJobID  string                       `json:"first_seen_crawl_job_id,omitempty"`
-	ImportMethod         MiyunImportMethod            `json:"import_method"`
-	ManualIdempotencyKey string                       `json:"-"`
-	ManualRequestHash    string                       `json:"-"`
-	ResourceID           string                       `json:"resource_id,omitempty"`
-	SourceRef            string                       `json:"source_ref,omitempty"`
-	Title                string                       `json:"title,omitempty"`
-	SelectionStatus      MiyunMaterialSelectionStatus `json:"selection_status"`
-	ImportStatus         MiyunMaterialImportStatus    `json:"import_status"`
-	PlatformAssetID      contract.AssetID             `json:"platform_asset_id,omitempty"`
-	PlatformAssetVersion int64                        `json:"platform_asset_version,omitempty"`
-	InsightAssetID       string                       `json:"insight_asset_id,omitempty"`
-	ExternalImportID     string                       `json:"external_import_id,omitempty"`
-	Version              int64                        `json:"version"`
-	CreatedBy            string                       `json:"created_by"`
-	CreatedAt            time.Time                    `json:"created_at"`
-	UpdatedAt            time.Time                    `json:"updated_at"`
+	ID                    string                       `json:"id"`
+	OrganizationID        contract.OrganizationID      `json:"organization_id"`
+	ProjectID             contract.ProjectID           `json:"project_id"`
+	MiyunMaterialID       string                       `json:"miyun_material_id"`
+	FirstSeenCrawlJobID   string                       `json:"first_seen_crawl_job_id,omitempty"`
+	ImportMethod          MiyunImportMethod            `json:"import_method"`
+	ManualIdempotencyKey  string                       `json:"-"`
+	ManualRequestHash     string                       `json:"-"`
+	ResourceID            string                       `json:"resource_id,omitempty"`
+	ResourceURLCiphertext []byte                       `json:"-"`
+	ResourceURLKeyVersion string                       `json:"-"`
+	ResourceExpectedSize  int64                        `json:"resource_expected_size,omitempty"`
+	SourceRef             string                       `json:"source_ref,omitempty"`
+	SourceRefStatus       string                       `json:"source_ref_status"`
+	Title                 string                       `json:"title,omitempty"`
+	SelectionStatus       MiyunMaterialSelectionStatus `json:"selection_status"`
+	ImportStatus          MiyunMaterialImportStatus    `json:"import_status"`
+	PlatformAssetID       contract.AssetID             `json:"platform_asset_id,omitempty"`
+	PlatformAssetVersion  int64                        `json:"platform_asset_version,omitempty"`
+	InsightAssetID        string                       `json:"insight_asset_id,omitempty"`
+	ExternalImportID      string                       `json:"external_import_id,omitempty"`
+	DecisionBy            string                       `json:"decision_by,omitempty"`
+	DecisionAt            *time.Time                   `json:"decision_at,omitempty"`
+	DecisionNote          string                       `json:"decision_note,omitempty"`
+	LastImportErrorKind   string                       `json:"last_import_error_kind,omitempty"`
+	LastImportErrorCode   string                       `json:"last_import_error_code,omitempty"`
+	Version               int64                        `json:"version"`
+	CreatedBy             string                       `json:"created_by"`
+	CreatedAt             time.Time                    `json:"created_at"`
+	UpdatedAt             time.Time                    `json:"updated_at"`
 }
 
 func (m MiyunMaterial) Validate() error {
@@ -364,8 +380,20 @@ func (m MiyunMaterial) Validate() error {
 		return fmt.Errorf("%w: Miyun material ID and import method are required", ErrInvalidRequest)
 	}
 	if len(m.MiyunMaterialID) > 191 || len(m.FirstSeenCrawlJobID) > 96 || len(m.ManualIdempotencyKey) > 128 ||
-		len(m.SourceRef) > 512 || len([]rune(m.Title)) > 255 {
+		len(m.SourceRef) > 512 || len([]rune(m.Title)) > 255 || len([]rune(m.DecisionNote)) > 1000 {
 		return fmt.Errorf("%w: Miyun material identity or source is too long", ErrInvalidRequest)
+	}
+	if m.ImportMethod == MiyunImportCrawler && (len(m.ResourceURLCiphertext) == 0 || strings.TrimSpace(m.ResourceURLKeyVersion) == "") {
+		return fmt.Errorf("%w: crawler material requires an encrypted resource locator", ErrInvalidRequest)
+	}
+	if m.ResourceExpectedSize < 0 {
+		return fmt.Errorf("%w: resource expected size must not be negative", ErrInvalidRequest)
+	}
+	if m.SourceRefStatus != "verified" && m.SourceRefStatus != "unknown" {
+		return fmt.Errorf("%w: source reference status must be verified or unknown", ErrInvalidRequest)
+	}
+	if m.SourceRefStatus == "verified" && strings.TrimSpace(m.SourceRef) == "" {
+		return fmt.Errorf("%w: verified source reference is missing", ErrInvalidRequest)
 	}
 	if (m.ImportMethod == MiyunImportCrawler) != (strings.TrimSpace(m.FirstSeenCrawlJobID) != "") {
 		return fmt.Errorf("%w: crawler materials require a crawl job and manual materials must not have one", ErrInvalidRequest)
@@ -383,6 +411,12 @@ func (m MiyunMaterial) Validate() error {
 	if !m.SelectionStatus.valid() || !m.ImportStatus.valid() {
 		return fmt.Errorf("%w: unsupported material selection or import status", ErrInvalidRequest)
 	}
+	if m.SelectionStatus != MiyunMaterialDiscovered && (strings.TrimSpace(m.DecisionBy) == "" || m.DecisionAt == nil) {
+		return fmt.Errorf("%w: decided material requires operator and timestamp", ErrInvalidRequest)
+	}
+	if (m.LastImportErrorKind == "") != (m.LastImportErrorCode == "") {
+		return fmt.Errorf("%w: import error kind and code must be supplied together", ErrInvalidRequest)
+	}
 	if (m.PlatformAssetID == "") != (m.PlatformAssetVersion == 0) {
 		return fmt.Errorf("%w: platform asset ID and version must be supplied together", ErrInvalidRequest)
 	}
@@ -398,6 +432,7 @@ type MiyunMaterialSnapshot struct {
 	ProjectID                contract.ProjectID      `json:"project_id"`
 	MaterialID               string                  `json:"material_id"`
 	CrawlJobID               string                  `json:"crawl_job_id,omitempty"`
+	SourcePage               int64                   `json:"source_page"`
 	ImportMethod             MiyunImportMethod       `json:"import_method"`
 	SchemaVersion            string                  `json:"schema_version"`
 	CapturedAt               time.Time               `json:"captured_at"`
@@ -408,6 +443,8 @@ type MiyunMaterialSnapshot struct {
 	CumulativeImpressionsRaw string                  `json:"cumulative_impressions_raw"`
 	RelatedAds               int64                   `json:"related_ads"`
 	RelatedCreators          int64                   `json:"related_creators"`
+	RelatedCreatorsRaw       string                  `json:"related_creators_raw"`
+	RelatedCreatorsKnown     bool                    `json:"related_creators_known"`
 	MaterialScore            float64                 `json:"material_score"`
 	Views                    int64                   `json:"views"`
 	Likes                    int64                   `json:"likes"`
@@ -428,6 +465,12 @@ func (s MiyunMaterialSnapshot) Validate() error {
 	if (s.ImportMethod == MiyunImportCrawler) != (strings.TrimSpace(s.CrawlJobID) != "") {
 		return fmt.Errorf("%w: crawler snapshots require a crawl job and manual snapshots must not have one", ErrInvalidRequest)
 	}
+	if s.ImportMethod == MiyunImportCrawler && s.SourcePage < 1 {
+		return fmt.Errorf("%w: crawler snapshot source page is required", ErrInvalidRequest)
+	}
+	if s.ImportMethod == MiyunImportManual && s.SourcePage != 0 {
+		return fmt.Errorf("%w: manual snapshot must not carry a source page", ErrInvalidRequest)
+	}
 	if s.ImportMethod == MiyunImportManual && s.SchemaVersion != MiyunDataCardSchemaV1 {
 		return fmt.Errorf("%w: manual snapshots require the supported Miyun data-card schema", ErrInvalidRequest)
 	}
@@ -437,6 +480,9 @@ func (s MiyunMaterialSnapshot) Validate() error {
 	if s.DeliveryDays < 0 || s.CumulativeImpressions < 0 || s.RelatedAds < 0 || s.RelatedCreators < 0 ||
 		s.MaterialScore < 0 || s.Views < 0 || s.Likes < 0 || s.Comments < 0 || s.Shares < 0 || s.Saves < 0 {
 		return fmt.Errorf("%w: snapshot metrics must be non-negative", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(s.RelatedCreatorsRaw) == "" || (s.RelatedCreatorsKnown && s.RelatedCreatorsRaw == "unknown") {
+		return fmt.Errorf("%w: related creator source state must be explicit", ErrInvalidRequest)
 	}
 	if len(s.SanitizedRaw) > 0 && !json.Valid(s.SanitizedRaw) {
 		return fmt.Errorf("%w: sanitized raw snapshot must be valid JSON", ErrInvalidRequest)

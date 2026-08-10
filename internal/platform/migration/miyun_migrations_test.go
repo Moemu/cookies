@@ -14,7 +14,8 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 	assets := readMiyunMigration(t, filepath.Join(root, "migrations", "assets", "20260810100000_asset_external_imports.up.sql"))
 	insights := readMiyunMigration(t, filepath.Join(root, "migrations", "insights", "20260810101000_insight_miyun_pipeline.up.sql"))
 	intake := readMiyunMigration(t, filepath.Join(root, "migrations", "insights", "20260810102000_insight_miyun_product_analysis_intake.up.sql"))
-	all := assets + insights + intake
+	authorizedImport := readMiyunMigration(t, filepath.Join(root, "migrations", "insights", "20260810103000_insight_miyun_crawl_authorized_import.up.sql"))
+	all := assets + insights + intake + authorizedImport
 
 	for _, table := range []string{
 		"asset_external_imports",
@@ -65,6 +66,13 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 		"UNIQUE KEY uq_insight_miyun_materials_manual_idempotency",
 		"(import_method = 'manual' AND first_seen_crawl_job_id IS NULL",
 		"cumulative_impressions_raw VARCHAR(64) NOT NULL",
+		"ADD COLUMN idempotency_key VARCHAR(128)",
+		"ADD COLUMN runtime_job_id VARCHAR(96)",
+		"ADD COLUMN resource_url_ciphertext VARBINARY(4096)",
+		"ADD COLUMN source_ref_status VARCHAR(16)",
+		"ADD COLUMN source_page BIGINT UNSIGNED",
+		"ADD COLUMN related_creators_raw VARCHAR(64)",
+		"CONSTRAINT chk_insight_miyun_materials_decision",
 	} {
 		if !strings.Contains(all, required) {
 			t.Errorf("missing required migration contract %q", required)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +68,34 @@ type YouShuClient struct {
 	HTTPClient *http.Client
 	Gate       *YouShuGate
 	gate       YouShuGate
+	// sessionCookie is deliberately unexported so normal serialization and
+	// formatting cannot accidentally disclose an upstream session.
+	sessionCookie string
+}
+
+// MarshalJSON intentionally omits the HTTP transport, gate, and session.
+// A crawler client is runtime configuration rather than a persisted DTO.
+func (c *YouShuClient) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Endpoint string `json:"endpoint"`
+	}{Endpoint: c.Endpoint})
+}
+
+// NewYouShuClient creates the production client.  The endpoint is constrained
+// to HTTPS and must not carry credentials or query parameters.  sessionCookie
+// is sent only as the request Cookie header and is never retained in errors.
+//
+// Tests that replay a local HTTP server may still construct YouShuClient
+// directly; production code should use this constructor.
+func NewYouShuClient(endpoint, sessionCookie string, httpClient *http.Client) (*YouShuClient, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, &YouShuError{Kind: YouShuInvalidRequest, Strategy: YouShuCorrectRequest, Source: "endpoint"}
+	}
+	if strings.TrimSpace(sessionCookie) == "" {
+		return nil, &YouShuError{Kind: YouShuInvalidRequest, Strategy: YouShuCorrectRequest, Source: "session"}
+	}
+	return &YouShuClient{Endpoint: u.String(), HTTPClient: httpClient, sessionCookie: sessionCookie}, nil
 }
 
 func (c *YouShuClient) Product(x context.Context, q YouShuQuery) (YouShuPage, error) {
@@ -102,6 +131,9 @@ func (c *YouShuClient) list(x context.Context, op string, q YouShuQuery) (YouShu
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
 	r.Header.Set("X-Operation-Name", op)
+	if c.sessionCookie != "" {
+		r.Header.Set("Cookie", c.sessionCookie)
+	}
 	h := c.HTTPClient
 	if h == nil {
 		h = http.DefaultClient

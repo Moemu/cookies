@@ -1,9 +1,11 @@
 package insights_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"os"
 	"strconv"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/project"
@@ -41,7 +44,7 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 	actor := contract.ActorContext{
 		OrganizationID: organizationID,
 		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: userID},
-		Scopes:         []contract.Scope{"project.read", "project.write"},
+		Scopes:         []contract.Scope{"project.read", "project.write", "assets.write"},
 	}
 	t.Cleanup(func() {
 		cleanupMiyunIntegration(t, db, organizationID)
@@ -128,12 +131,16 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 		ID: "miyun_job_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID,
 		ConnectionID: connection.ID, ProductProfileID: profile.ID, Status: insights.MiyunCrawlJobQueued,
 		Operation: "product", QuerySchemaVersion: "youshu-query-v1",
-		QuerySnapshot: []byte(`{"keyword":"test keyword","page":1}`), Version: 1,
+		QuerySnapshot: []byte(`{"keyword":"test keyword","page":1}`), IdempotencyKey: "crawl_" + suffix,
+		RequestHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RuntimeJobID: "miyun_job_it_" + suffix, Version: 1,
 		CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 	job, err = repository.CreateMiyunCrawlJob(ctx, job)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if replayed, duplicate, err := repository.CreateMiyunCrawlJobIdempotent(ctx, job); err != nil || !duplicate || replayed.ID != job.ID {
+		t.Fatalf("crawl idempotency replay=%#v duplicate=%v err=%v", replayed, duplicate, err)
 	}
 	if _, err := repository.GetMiyunCrawlJob(ctx, organizationID, projectID, job.ID); err != nil {
 		t.Fatal(err)
@@ -142,11 +149,25 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 	material := insights.MiyunMaterial{
 		ID: "miyun_material_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID,
 		MiyunMaterialID: "remote-material-test", FirstSeenCrawlJobID: job.ID,
-		ImportMethod:    insights.MiyunImportCrawler,
+		ImportMethod: insights.MiyunImportCrawler, ResourceURLCiphertext: []byte("encrypted"), ResourceURLKeyVersion: "v1", SourceRefStatus: "unknown",
 		SelectionStatus: insights.MiyunMaterialDiscovered, ImportStatus: insights.MiyunMaterialImportPending,
 		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
-	material, err = repository.CreateMiyunMaterial(ctx, material)
+	firstSnapshot := insights.MiyunMaterialSnapshot{
+		ID: "miyun_snapshot_0_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID,
+		MaterialID: material.ID, CrawlJobID: job.ID, SourcePage: 1, ImportMethod: insights.MiyunImportCrawler,
+		SchemaVersion: "miyun-card-v1", CapturedAt: now, CumulativeImpressions: 100,
+		CumulativeImpressionsRaw: "100", RelatedAds: 5, RelatedCreatorsRaw: "unknown",
+		SanitizedRaw: []byte(`{"schema_version":"miyun-card-v1"}`), CreatedAt: now,
+	}
+	job, err = repository.ApplyMiyunCrawlPage(ctx, job, 1, []insights.MiyunCrawlPageRecord{{Material: material, Snapshot: firstSnapshot}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != insights.MiyunCrawlJobSucceeded || job.CompletedPages != 1 || job.DiscoveredCount != 1 {
+		t.Fatalf("applied crawl page=%#v", job)
+	}
+	material, err = repository.GetMiyunMaterial(ctx, organizationID, projectID, material.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,22 +180,101 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 		t.Fatalf("cross-project material read should be hidden: %v", err)
 	}
 
-	for index := range 2 {
-		capturedAt := now.Add(time.Duration(index) * time.Hour)
-		_, err := repository.AppendMiyunMaterialSnapshot(ctx, insights.MiyunMaterialSnapshot{
-			ID:             "miyun_snapshot_" + strconv.Itoa(index) + "_it_" + suffix,
-			OrganizationID: organizationID, ProjectID: projectID, MaterialID: material.ID, CrawlJobID: job.ID, ImportMethod: insights.MiyunImportCrawler,
-			SchemaVersion: "miyun-card-v1", CapturedAt: capturedAt,
-			CumulativeImpressions: int64(100 + index), CumulativeImpressionsRaw: strconv.Itoa(100 + index), RelatedAds: int64(5 + index),
-			SanitizedRaw: []byte(`{"schema_version":"miyun-card-v1"}`), CreatedAt: capturedAt,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+	capturedAt := now.Add(time.Hour)
+	_, err = repository.AppendMiyunMaterialSnapshot(ctx, insights.MiyunMaterialSnapshot{
+		ID:             "miyun_snapshot_1_it_" + suffix,
+		OrganizationID: organizationID, ProjectID: projectID, MaterialID: material.ID, CrawlJobID: job.ID, SourcePage: 2, ImportMethod: insights.MiyunImportCrawler,
+		SchemaVersion: "miyun-card-v1", CapturedAt: capturedAt,
+		CumulativeImpressions: 101, CumulativeImpressionsRaw: "101", RelatedAds: 6,
+		RelatedCreatorsRaw: "unknown", SanitizedRaw: []byte(`{"schema_version":"miyun-card-v1"}`), CreatedAt: capturedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	snapshots, err := repository.ListMiyunMaterialSnapshots(ctx, organizationID, projectID, material.ID)
 	if err != nil || len(snapshots) != 2 || snapshots[0].CumulativeImpressions == snapshots[1].CumulativeImpressions {
 		t.Fatalf("append-only snapshots=%#v err=%v", snapshots, err)
+	}
+
+	decisionAt := now.Add(2 * time.Hour)
+	material.SelectionStatus, material.DecisionBy, material.DecisionAt, material.DecisionNote = insights.MiyunMaterialConfirmed, userID, &decisionAt, "confirmed in integration test"
+	material.UpdatedAt = decisionAt
+	material, err = repository.DecideMiyunMaterial(ctx, material, material.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err = repository.MarkMiyunMaterialImporting(ctx, material, material.Version, "runtime-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	material.UpdatedAt = decisionAt.Add(time.Second)
+	material, err = repository.FailMiyunMaterialImport(ctx, material, material.Version, "download", "EXPIRED_URL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = repository.GetMiyunCrawlJob(ctx, organizationID, projectID, job.ID)
+	if err != nil || job.Status != insights.MiyunCrawlJobPartial || job.FailedCount != 1 {
+		t.Fatalf("partial crawl job=%#v err=%v", job, err)
+	}
+	material, err = repository.MarkMiyunMaterialImporting(ctx, material, material.Version, "runtime-retry-test")
+	if err != nil {
+		t.Fatalf("failed material was not retryable: %v", err)
+	}
+
+	blobs := assets.NewMemoryBlobStore()
+	assetRepository := assets.MySQLRepository{DB: db}
+	assetImports := assets.ExternalImportService{
+		Repository: assetRepository,
+		Projects:   &project.Service{Store: projects, Authorizer: projects},
+		Upload: assets.UploadService{
+			Repository: assetRepository, Projects: &project.Service{Store: projects, Authorizer: projects}, Blobs: blobs,
+			Scanner: assets.NoopScanner{}, QuarantineBucket: "miyun-it-quarantine", AssetsBucket: "miyun-it-assets", VideoProbe: miyunIntegrationVideoProbe{},
+		},
+		QuarantineBucket: "miyun-it-quarantine",
+		NewID:            func(prefix string) (string, error) { return prefix + "_miyun_it_" + suffix, nil },
+	}
+	video := append([]byte{0, 0, 0, 16, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}, bytes.Repeat([]byte{0}, 16)...)
+	assetRef, err := assetImports.Import(ctx, contract.RequestContext{Actor: actor, RequestID: "request_" + suffix, TraceID: "trace_" + suffix}, projectID,
+		contract.IdempotencyKey("miyun_external_"+suffix), assets.ExternalMediaImportRequest{
+			SourceProvider: "miyun", SourceObjectID: material.MiyunMaterialID, MIMEType: "video/mp4", SizeBytes: int64(len(video)),
+		}, func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(video)), nil })
+	if err != nil {
+		t.Fatalf("external asset import: %v", err)
+	}
+	ledger, err := assetRepository.GetExternalImportBySource(ctx, organizationID, projectID, "miyun", material.MiyunMaterialID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insightAssetID := "insightasset_miyun_it_" + suffix
+	material.UpdatedAt = decisionAt.Add(2 * time.Second)
+	material, err = repository.CompleteMiyunMaterialImport(ctx, insights.MiyunMaterialImportCompletion{
+		Material: material, ExpectedVersion: material.Version,
+		Result: insights.MiyunAuthorizedImportResult{ExternalImportID: ledger.ID, AssetRef: assetRef.AssetVersion},
+		InsightAsset: insights.Asset{
+			ID: insightAssetID, OrganizationID: organizationID, ProjectID: projectID, LineageID: insightAssetID, Revision: 1,
+			Title: "Imported Miyun material", SourceKind: insights.AssetSourceExternal, SourceRef: "miyun://material/" + material.MiyunMaterialID,
+			SourceJobID: job.ID, PlatformAssetID: string(assetRef.AssetVersion.AssetID), PlatformAssetVersion: assetRef.AssetVersion.Version,
+			AnalysisStatus: insights.AnalysisAwaitingData, AnalysisStatusReason: "Authorized Miyun import; awaiting analysis.",
+			AnalysisStatusChangedAt: &material.UpdatedAt, Version: 1, CreatedBy: userID, CreatedAt: material.UpdatedAt, UpdatedAt: material.UpdatedAt,
+		},
+	})
+	if err != nil || material.ImportStatus != insights.MiyunMaterialImportImported || material.InsightAssetID != insightAssetID {
+		t.Fatalf("completed Miyun import=%#v err=%v", material, err)
+	}
+	job, err = repository.GetMiyunCrawlJob(ctx, organizationID, projectID, job.ID)
+	if err != nil || job.Status != insights.MiyunCrawlJobSucceeded || job.DownloadedCount != 1 {
+		t.Fatalf("recovered crawl job=%#v err=%v", job, err)
+	}
+	authAt := decisionAt.Add(3 * time.Second)
+	job.Status, job.LastErrorKind, job.LastErrorCode, job.UpdatedAt = insights.MiyunCrawlJobAuthRequired, "auth_required", "00:403005", authAt
+	connection.Status, connection.LastErrorKind, connection.LastErrorCode, connection.LastErrorAt, connection.UpdatedAt = insights.MiyunConnectionAuthRequired, "auth_required", "00:403005", &authAt, authAt
+	job, connection, err = repository.UpdateMiyunCrawlJobAndConnection(ctx, job, job.Version, connection, connection.Version)
+	if err != nil || job.Status != insights.MiyunCrawlJobAuthRequired || connection.Status != insights.MiyunConnectionAuthRequired {
+		t.Fatalf("atomic auth transition job=%#v connection=%#v err=%v", job, connection, err)
+	}
+	projectAsset, err := assetRepository.GetProjectAsset(ctx, organizationID, projectID, assetRef.AssetVersion)
+	if err != nil || projectAsset.Version.SourceType != contract.AssetSourceImported {
+		t.Fatalf("imported AssetVersion=%#v err=%v", projectAsset, err)
 	}
 
 	handoff := insights.MiyunHandoff{
@@ -200,14 +300,26 @@ func cleanupMiyunIntegration(t *testing.T, db *sql.DB, organizationID contract.O
 		"DELETE FROM insight_miyun_handoffs WHERE organization_id=?",
 		"DELETE FROM insight_miyun_material_snapshots WHERE organization_id=?",
 		"DELETE FROM insight_miyun_materials WHERE organization_id=?",
+		"DELETE FROM insight_assets WHERE organization_id=?",
 		"DELETE FROM insight_miyun_crawl_jobs WHERE organization_id=?",
 		"DELETE FROM insight_miyun_product_profiles WHERE organization_id=?",
 		"DELETE FROM insight_miyun_connections WHERE organization_id=?",
 		"DELETE FROM asset_external_imports WHERE organization_id=?",
+		"DELETE FROM assets_outbox WHERE organization_id=?",
+		"DELETE FROM project_assets WHERE organization_id=?",
+		"DELETE FROM asset_versions WHERE organization_id=?",
+		"DELETE FROM assets WHERE organization_id=?",
+		"DELETE FROM asset_blobs WHERE organization_id=?",
 		"DELETE FROM platform_project_runtimes WHERE organization_id=?",
 	} {
 		if _, err := db.ExecContext(ctx, statement, organizationID); err != nil {
 			t.Errorf("cleanup %q: %v", statement, err)
 		}
 	}
+}
+
+type miyunIntegrationVideoProbe struct{}
+
+func (miyunIntegrationVideoProbe) Probe(context.Context, []byte) (assets.VideoMetadata, error) {
+	return assets.VideoMetadata{DurationMS: 1000, WidthPixels: 16, HeightPixels: 16, FrameRate: "25/1", VideoCodec: "h264"}, nil
 }

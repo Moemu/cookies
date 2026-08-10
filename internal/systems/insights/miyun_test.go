@@ -63,6 +63,11 @@ func TestMiyunStatusContracts(t *testing.T) {
 			MiyunMaterialImportDeduplicated, MiyunMaterialImportFailed, MiyunMaterialImportSkipped,
 		} {
 			material.SelectionStatus, material.ImportStatus = selection, importStatus
+			if selection == MiyunMaterialDiscovered {
+				material.DecisionBy, material.DecisionAt = "", nil
+			} else {
+				material.DecisionBy, material.DecisionAt = "operator_1", &now
+			}
 			if err := material.Validate(); err != nil {
 				t.Fatalf("material statuses %q/%q: %v", selection, importStatus, err)
 			}
@@ -143,7 +148,8 @@ func validMiyunCrawlJob(now time.Time) MiyunCrawlJob {
 		ID: "miyun_job_1", OrganizationID: "org_1", ProjectID: "project_1",
 		ConnectionID: "miyun_connection_1", ProductProfileID: "miyun_profile_1",
 		Status: MiyunCrawlJobQueued, Operation: "product", QuerySchemaVersion: "youshu-query-v1",
-		QuerySnapshot: []byte(`{"keyword":"insulated cup","page":1}`), Version: 1,
+		QuerySnapshot: []byte(`{"keyword":"insulated cup","page":1}`), IdempotencyKey: "crawl_1",
+		RequestHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RuntimeJobID: "miyun_job_1", Version: 1,
 		CreatedBy: "operator_1", CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -152,7 +158,7 @@ func validMiyunMaterial(now time.Time) MiyunMaterial {
 	return MiyunMaterial{
 		ID: "miyun_material_1", OrganizationID: "org_1", ProjectID: "project_1",
 		MiyunMaterialID: "remote_material_1", FirstSeenCrawlJobID: "miyun_job_1",
-		ImportMethod:    MiyunImportCrawler,
+		ImportMethod: MiyunImportCrawler, ResourceURLCiphertext: []byte("encrypted"), ResourceURLKeyVersion: "v1", SourceRefStatus: "unknown",
 		SelectionStatus: MiyunMaterialDiscovered, ImportStatus: MiyunMaterialImportPending,
 		Version: 1, CreatedBy: "operator_1", CreatedAt: now, UpdatedAt: now,
 	}
@@ -161,9 +167,9 @@ func validMiyunMaterial(now time.Time) MiyunMaterial {
 func validMiyunMaterialSnapshot(now time.Time) MiyunMaterialSnapshot {
 	return MiyunMaterialSnapshot{
 		ID: "miyun_snapshot_1", OrganizationID: "org_1", ProjectID: "project_1",
-		MaterialID: "miyun_material_1", CrawlJobID: "miyun_job_1", ImportMethod: MiyunImportCrawler, SchemaVersion: "miyun-card-v1",
-		CumulativeImpressionsRaw: "0",
-		CapturedAt:               now, SanitizedRaw: []byte(`{"fixture_version":"1"}`), CreatedAt: now,
+		MaterialID: "miyun_material_1", CrawlJobID: "miyun_job_1", SourcePage: 1, ImportMethod: MiyunImportCrawler, SchemaVersion: "miyun-card-v1",
+		CumulativeImpressionsRaw: "0", RelatedCreatorsRaw: "unknown",
+		CapturedAt: now, SanitizedRaw: []byte(`{"fixture_version":"1"}`), CreatedAt: now,
 	}
 }
 

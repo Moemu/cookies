@@ -240,12 +240,13 @@ func insertMiyunInsightAsset(ctx context.Context, execer miyunSQLExecer, value A
 func insertManualMiyunMaterial(ctx context.Context, execer miyunSQLExecer, value MiyunMaterial) error {
 	_, err := execer.ExecContext(ctx, `INSERT INTO insight_miyun_materials (
 		id, organization_id, project_id, miyun_material_id, first_seen_crawl_job_id, import_method,
-		manual_idempotency_key, manual_request_hash, resource_id, source_ref, title,
-		selection_status, import_status, external_import_id, platform_asset_id, platform_asset_version,
+		manual_idempotency_key, manual_request_hash, resource_id, resource_url_ciphertext, resource_url_key_version, resource_expected_size,
+		source_ref, source_ref_status, title, selection_status, import_status, decision_note,
+		external_import_id, platform_asset_id, platform_asset_version,
 		insight_asset_id, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.MiyunMaterialID, nil, value.ImportMethod,
-		value.ManualIdempotencyKey, value.ManualRequestHash, value.ResourceID, value.SourceRef, value.Title,
+		value.ManualIdempotencyKey, value.ManualRequestHash, value.ResourceID, value.SourceRef, value.SourceRefStatus, value.Title,
 		value.SelectionStatus, value.ImportStatus, nullableString(value.ExternalImportID), value.PlatformAssetID,
 		value.PlatformAssetVersion, value.InsightAssetID, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	return err
@@ -257,15 +258,15 @@ func insertManualMiyunSnapshot(ctx context.Context, execer miyunSQLExecer, value
 		raw = value.SanitizedRaw
 	}
 	_, err := execer.ExecContext(ctx, `INSERT INTO insight_miyun_material_snapshots (
-		id, organization_id, project_id, material_id, crawl_job_id, import_method, schema_version,
+		id, organization_id, project_id, material_id, crawl_job_id, source_page, import_method, schema_version,
 		captured_at, first_published_at, last_published_at, delivery_days, cumulative_impressions,
-		cumulative_impressions_raw, related_ads, related_creators, material_score, views, likes,
+		cumulative_impressions_raw, related_ads, related_creators, related_creators_raw, related_creators_known, material_score, views, likes,
 		comments, shares, saves, sanitized_raw, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.MaterialID, nil, value.ImportMethod,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.MaterialID, nil, value.SourcePage, value.ImportMethod,
 		value.SchemaVersion, value.CapturedAt, value.FirstPublishedAt, value.LastPublishedAt,
 		value.DeliveryDays, value.CumulativeImpressions, value.CumulativeImpressionsRaw,
-		value.RelatedAds, value.RelatedCreators, value.MaterialScore, value.Views, value.Likes,
+		value.RelatedAds, value.RelatedCreators, value.RelatedCreatorsRaw, value.RelatedCreatorsKnown, value.MaterialScore, value.Views, value.Likes,
 		value.Comments, value.Shares, value.Saves, raw, value.CreatedAt)
 	return err
 }

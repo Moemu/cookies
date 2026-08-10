@@ -462,6 +462,42 @@ func (s *applicationStub) ManualImportMiyunMaterial(_ context.Context, _ contrac
 	s.miyunIdempotencyKey = key
 	return s.miyunManual, s.miyunErr
 }
+func (s *applicationStub) GetMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunConnection, error) {
+	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
+}
+func (s *applicationStub) UpdateMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateMiyunConnectionRequest) (insights.MiyunConnection, error) {
+	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
+}
+func (s *applicationStub) VerifyMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyMiyunConnectionRequest) (insights.MiyunConnection, error) {
+	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
+}
+func (s *applicationStub) CreateMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, contract.IdempotencyKey, insights.CreateMiyunCrawlJobRequest) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) ListMiyunCrawlJobs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunCrawlJob, error) {
+	return []insights.MiyunCrawlJob{{ID: "miyuncrawljob_1"}}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) CancelMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) RetryMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) ListMiyunMaterials(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunMaterial, error) {
+	return []insights.MiyunMaterial{{ID: "miyunmaterial_1"}}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunMaterialDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialDetail, error) {
+	return insights.MiyunMaterialDetail{Material: insights.MiyunMaterial{ID: "miyunmaterial_1"}}, s.miyunErr
+}
+func (s *applicationStub) DecideMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, string, bool, insights.MiyunMaterialDecisionRequest) (insights.MiyunMaterial, error) {
+	return insights.MiyunMaterial{ID: "miyunmaterial_1"}, s.miyunErr
+}
+func (s *applicationStub) RetryMiyunMaterialImport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunMaterial, error) {
+	return insights.MiyunMaterial{ID: "miyunmaterial_1"}, s.miyunErr
+}
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {
 	s.reportWindow = request.Window

@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shikanon/cookies/internal/integrations/crawler"
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
@@ -398,6 +399,35 @@ func main() {
 		creativeService.AINativeStoryboardPlanner = creative.ModelAINativeStoryboardPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 		creativeService.AINativeVoiceoverFitter = creative.ModelAINativeVoiceoverFitter{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 	}
+	var miyunCipher insights.MiyunSecretCipher
+	var miyunPages insights.MiyunPageClient
+	var miyunVerifier insights.MiyunConnectionVerifier
+	var miyunImports insights.MiyunAuthorizedImporter
+	if cfg.Miyun.Enabled {
+		cipher, cipherErr := insights.NewAESGCMMiyunSecretCipher(cfg.Miyun.MasterKey, cfg.Miyun.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure Miyun secret encryption: %v", cipherErr)
+		}
+		if uploadService.VideoProbe == nil && uploadService.MediaProbe == nil {
+			log.Fatalf("configure Miyun external import: ffprobe or media probe is required")
+		}
+		gate := &crawler.YouShuGate{
+			MaxConcurrent: cfg.Miyun.MaxConcurrent, RequestsPerSecond: cfg.Miyun.RequestsPerSecond,
+			Cooldown: time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
+		}
+		protocol := miyunProtocolAdapter{endpoint: cfg.Miyun.Endpoint, cipher: cipher, client: &http.Client{Timeout: 30 * time.Second}, gate: gate}
+		externalImports := assets.ExternalImportService{
+			Repository: assetRepository, Projects: projectService, Upload: *uploadService,
+			QuarantineBucket: cfg.ObjectStorage.QuarantineBucket,
+		}
+		miyunCipher, miyunPages, miyunVerifier = cipher, protocol, protocol
+		miyunImports = miyunAuthorizedImportAdapter{
+			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
+			assets:     externalImports, ledger: assetRepository, workRoot: miyunWorkRoot(cfg.Media.VideoWorkRoot),
+		}
+		log.Printf("Miyun collection configured: real_calls=true concurrency=%d rate=%d cooldown_seconds=%d download_hosts=%d",
+			cfg.Miyun.MaxConcurrent, cfg.Miyun.RequestsPerSecond, cfg.Miyun.CooldownSeconds, len(cfg.Miyun.DownloadAllowedHosts))
+	}
 	insightsService := &insights.Service{
 		Repository:     insights.MySQLRepository{DB: db},
 		Miyun:          insights.MySQLRepository{DB: db},
@@ -405,6 +435,13 @@ func main() {
 		MiyunAssets:    miyunAssetSourceAdapter{uploads: uploadService},
 		MiyunKnowledge: miyunKnowledgeSourceAdapter{knowledge: knowledgeService},
 		MiyunMedia:     miyunMediaEvidenceAdapter{media: mediaUnderstandingService},
+		MiyunCrawl:     insights.MySQLRepository{DB: db},
+		MiyunJobs:      runtimeStore,
+		MiyunPages:     miyunPages,
+		MiyunImports:   miyunImports,
+		MiyunSecrets:   miyunCipher,
+		MiyunVerifier:  miyunVerifier,
+		MiyunCooldown:  time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
 		Assets:         insights.MySQLRepository{DB: db},
 		Connectors:     insights.MySQLRepository{DB: db},
 		Runs:           insights.MySQLRepository{DB: db},
@@ -424,6 +461,10 @@ func main() {
 	defer stopWorkers()
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	if cfg.Miyun.Enabled {
+		runtimeHandlers[insights.MiyunCrawlJobKind] = insightsService.HandleMiyunCrawlJob
+		runtimeHandlers[insights.MiyunMaterialImportJobKind] = insightsService.HandleMiyunMaterialImportJob
+	}
 	runtimeHandlers[creative.DirectionGenerationJobKind] = creativeService.HandleDirectionGenerationJob
 	creativeService.AINativeScriptScheduler = creative.JobRuntimeAINativeScriptScheduler{
 		Store: runtimeStore,

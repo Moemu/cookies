@@ -248,6 +248,13 @@ func (r *memoryMiyunServiceRepository) GetMiyunConnection(_ context.Context, org
 	return r.connection, nil
 }
 
+func (r *memoryMiyunServiceRepository) GetProjectMiyunConnection(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (MiyunConnection, error) {
+	if r.connection.OrganizationID != organizationID || r.connection.ProjectID != projectID {
+		return MiyunConnection{}, ErrNotFound
+	}
+	return r.connection, nil
+}
+
 func (r *memoryMiyunServiceRepository) CreateMiyunConnection(context.Context, MiyunConnection) (MiyunConnection, error) {
 	return MiyunConnection{}, errors.New("unused")
 }

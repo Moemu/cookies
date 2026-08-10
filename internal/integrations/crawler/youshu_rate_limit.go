@@ -57,7 +57,31 @@ func (g *YouShuGate) Acquire(ctx context.Context) error {
 		g.mu.Unlock()
 		return &YouShuError{Kind: YouShuRateLimited, Strategy: YouShuRetryLater, Source: "local_cooldown"}
 	}
+	reservedProbe := false
 	if !g.coolingUntil.IsZero() && !now.Before(g.coolingUntil) {
+		g.probe = true
+		reservedProbe = true
+	}
+	g.mu.Unlock()
+	select {
+	case g.slots <- struct{}{}:
+	case <-ctx.Done():
+		if reservedProbe {
+			g.mu.Lock()
+			g.probe = false
+			g.mu.Unlock()
+		}
+		return contextError(ctx)
+	}
+
+	g.mu.Lock()
+	now = g.Clock.Now()
+	if now.Before(g.coolingUntil) || (!g.coolingUntil.IsZero() && !now.Before(g.coolingUntil) && g.probe && !reservedProbe) {
+		g.mu.Unlock()
+		<-g.slots
+		return &YouShuError{Kind: YouShuRateLimited, Strategy: YouShuRetryLater, Source: "local_cooldown"}
+	}
+	if !reservedProbe && !g.coolingUntil.IsZero() && !now.Before(g.coolingUntil) {
 		g.probe = true
 	}
 	cutoff := now.Add(-time.Second)
@@ -70,16 +94,10 @@ func (g *YouShuGate) Acquire(ctx context.Context) error {
 	g.starts = kept
 	if len(g.starts) >= g.RequestsPerSecond {
 		g.mu.Unlock()
+		<-g.slots
 		return &YouShuError{Kind: YouShuThrottled, Strategy: YouShuRetryLater, Source: "local_rate"}
 	}
-	g.mu.Unlock()
-	select {
-	case g.slots <- struct{}{}:
-	case <-ctx.Done():
-		return contextError(ctx)
-	}
-	g.mu.Lock()
-	g.starts = append(g.starts, g.Clock.Now())
+	g.starts = append(g.starts, now)
 	g.mu.Unlock()
 	return nil
 }

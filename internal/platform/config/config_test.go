@@ -632,6 +632,32 @@ func TestSeedResearchRequiresCredentialEncryptionKey(t *testing.T) {
 	}
 }
 
+func TestMiyunConfigurationIsDisabledByDefaultAndStrictWhenEnabled(t *testing.T) {
+	t.Parallel()
+	defaults, err := FromLookup(mapLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Miyun.Enabled || defaults.Miyun.MaxConcurrent != 1 || defaults.Miyun.RequestsPerSecond != 5 || defaults.Miyun.CooldownSeconds != 300 {
+		t.Fatalf("unsafe Miyun defaults: %#v", defaults.Miyun)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_MIYUN_ENABLED": "true"})); err == nil {
+		t.Fatal("enabled Miyun without key and host allowlist was accepted")
+	}
+	configured, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_MIYUN_ENABLED":                "true",
+		"COOKIES_MIYUN_MASTER_KEY":             base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"COOKIES_MIYUN_MASTER_KEY_VERSION":     "key-v1",
+		"COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS": "cdn.example.test,media.example.test",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.Miyun.Enabled || len(configured.Miyun.DownloadAllowedHosts) != 2 {
+		t.Fatalf("Miyun configuration = %#v", configured.Miyun)
+	}
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

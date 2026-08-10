@@ -120,6 +120,34 @@ func TestYouShuInvalidCIDDoesNotTransport(t *testing.T) {
 	}
 }
 
+func TestNewYouShuClientRequiresSafeEndpointAndKeepsSessionPrivate(t *testing.T) {
+	if _, err := NewYouShuClient("http://api.example/graphql", "sid=sanitized", nil); err == nil {
+		t.Fatal("expected insecure endpoint rejection")
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") != "sid=sanitized" {
+			t.Errorf("cookie was not injected")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(fixture(t, "product.json"))
+	}))
+	defer server.Close()
+	client, err := NewYouShuClient(server.URL, "sid=sanitized", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "sanitized") {
+		t.Fatal("session appeared in a serializable representation")
+	}
+	if _, err := client.Product(context.Background(), validQuery()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestYouShuFixtureErrors(t *testing.T) {
 	cases := []struct {
 		name, file string
@@ -276,6 +304,33 @@ func TestYouShuGateDefaultsAndHardCaps(t *testing.T) {
 	capped.Done(true, false)
 	if capped.MaxConcurrent != 2 || capped.RequestsPerSecond != 8 {
 		t.Fatalf("hard caps=%+v", capped)
+	}
+}
+
+func TestYouShuGateEnforcesRateAcrossConcurrentCallers(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	gate := &YouShuGate{Clock: clock, MaxConcurrent: 2, RequestsPerSecond: 1}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			err := gate.Acquire(context.Background())
+			results <- err
+			if err == nil {
+				gate.Done(true, false)
+			}
+		}()
+	}
+	close(start)
+	accepted := 0
+	for range 2 {
+		if err := <-results; err == nil {
+			accepted++
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted %d concurrent calls with a one request/second limit", accepted)
 	}
 }
 

@@ -45,6 +45,7 @@ type Config struct {
 	Creative      Creative
 	Strategy      Strategy
 	Research      Research
+	Miyun         Miyun
 	LocalIdentity *LocalIdentity
 }
 
@@ -137,6 +138,19 @@ type Research struct {
 	MCPEnvAllowlist    []string
 	TimeoutSeconds     int
 	MaxOutputBytes     int
+}
+
+// Miyun controls the real third-party collection path. It is disabled by
+// default; enabling it requires an application key and explicit CDN allowlist.
+type Miyun struct {
+	Enabled              bool
+	Endpoint             string
+	MasterKey            string
+	MasterKeyVersion     string
+	DownloadAllowedHosts []string
+	MaxConcurrent        int
+	RequestsPerSecond    int
+	CooldownSeconds      int
 }
 
 // Provider contains only local composition choices. Credentials are read from
@@ -382,6 +396,10 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	miyunEnabled, err := strictBoolValueOr(lookup, "COOKIES_MIYUN_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	generatePromptDefault := "strategy.generate.v2"
 	conversationPromptDefault := "strategy.conversation.v3"
 	revisePromptDefault := "strategy.revise.v2"
@@ -473,6 +491,13 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MCPEnvAllowlist:    splitCSV(valueOr(lookup, "COOKIES_RESEARCH_MCP_ENV_ALLOWLIST", "PATH,PATHEXT,SystemRoot,TEMP,TMP,ComSpec")),
 			TimeoutSeconds:     intValueOr(lookup, "COOKIES_RESEARCH_TIMEOUT_SECONDS", 120),
 			MaxOutputBytes:     intValueOr(lookup, "COOKIES_RESEARCH_MAX_OUTPUT_BYTES", 4*1024*1024),
+		},
+		Miyun: Miyun{
+			Enabled: miyunEnabled, Endpoint: valueOr(lookup, "COOKIES_MIYUN_ENDPOINT", "https://api.youshu.youcloud.com/graphql"),
+			MasterKey: valueOr(lookup, "COOKIES_MIYUN_MASTER_KEY", ""), MasterKeyVersion: valueOr(lookup, "COOKIES_MIYUN_MASTER_KEY_VERSION", "v1"),
+			DownloadAllowedHosts: splitCSV(valueOr(lookup, "COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS", "")),
+			MaxConcurrent:        intValueOr(lookup, "COOKIES_MIYUN_MAX_CONCURRENT", 1), RequestsPerSecond: intValueOr(lookup, "COOKIES_MIYUN_REQUESTS_PER_SECOND", 5),
+			CooldownSeconds: intValueOr(lookup, "COOKIES_MIYUN_COOLDOWN_SECONDS", 300),
 		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
@@ -636,6 +661,33 @@ func (c Config) Validate() error {
 	if c.Research.MCPStdioCommand != "" &&
 		(strings.TrimSpace(c.Research.MCPToolName) == "" || strings.TrimSpace(c.Research.MCPProtocolVersion) == "") {
 		return fmt.Errorf("MCP stdio research requires a tool name and protocol version")
+	}
+	if c.Miyun.MaxConcurrent < 1 || c.Miyun.MaxConcurrent > 2 {
+		return fmt.Errorf("COOKIES_MIYUN_MAX_CONCURRENT must be between 1 and 2")
+	}
+	if c.Miyun.RequestsPerSecond < 1 || c.Miyun.RequestsPerSecond > 8 {
+		return fmt.Errorf("COOKIES_MIYUN_REQUESTS_PER_SECOND must be between 1 and 8")
+	}
+	if c.Miyun.CooldownSeconds < 60 || c.Miyun.CooldownSeconds > 3600 {
+		return fmt.Errorf("COOKIES_MIYUN_COOLDOWN_SECONDS must be between 60 and 3600")
+	}
+	if c.Miyun.Enabled {
+		endpoint, err := url.Parse(strings.TrimSpace(c.Miyun.Endpoint))
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil {
+			return fmt.Errorf("COOKIES_MIYUN_ENDPOINT must be an absolute HTTPS URL")
+		}
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.Miyun.MasterKey))
+		if err != nil || len(key) != 32 || strings.TrimSpace(c.Miyun.MasterKeyVersion) == "" {
+			return fmt.Errorf("COOKIES_MIYUN_MASTER_KEY must be a base64-encoded 32-byte key with a version")
+		}
+		if len(c.Miyun.DownloadAllowedHosts) == 0 {
+			return fmt.Errorf("COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS is required when Miyun is enabled")
+		}
+		for _, host := range c.Miyun.DownloadAllowedHosts {
+			if strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/@?#") {
+				return fmt.Errorf("COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS must contain hostnames only")
+			}
+		}
 	}
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")
