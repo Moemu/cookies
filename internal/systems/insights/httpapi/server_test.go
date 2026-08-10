@@ -43,6 +43,79 @@ func TestInsightsHTTPExposesReportExperienceAndPreLaunchLoop(t *testing.T) {
 	}
 }
 
+func TestInsightsHTTPExposesMiyunProductProfileAndManualIntake(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{
+		miyunProfile: insights.MiyunProductProfile{ID: "miyunprofile_1", Version: 1},
+		miyunManual:  insights.MiyunManualImportResult{Material: insights.MiyunMaterial{ID: "miyunmaterial_1"}},
+	}
+	server := New(app)
+	tests := []struct {
+		method string
+		path   string
+		body   string
+		key    string
+		status int
+		want   string
+	}{
+		{http.MethodGet, "/api/insights/v1/projects/project_1/miyun/product-profiles", "", "", 200, "miyunprofile_1"},
+		{http.MethodGet, "/api/insights/v1/projects/project_1/miyun/product-profiles/miyunprofile_1", "", "", 200, "miyunprofile_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/miyun/product-profiles:analyze", `{"connection_id":"connection_1","product_id":"product_1","product_asset_refs":[],"knowledge_document_ids":[]}`, "", 201, "miyunprofile_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/miyun/product-profiles/miyunprofile_1:confirm", `{"expected_version":1,"query":{"product_name":"Cup","category_id":"cid","category_name":"Drinkware","keywords":["cup"],"material_content_types":[],"window_start":"2026-08-01","window_end":"2026-08-10"}}`, "", 200, "miyunprofile_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/miyun/materials:manual-import", `{"asset_ref":{"asset_id":"asset_1","version":1},"miyun_material_id":"remote_1","source_ref":"https://example.test/material/1","title":"Manual","data_card":{"schema_version":"miyun-data-card/v1","captured_at":"2026-08-10T12:00:00Z","delivery_days":0,"cumulative_impressions_raw":"0","cumulative_impressions":0,"related_ads":0,"related_creators":0,"material_score":0,"views":0,"likes":0,"comments":0,"shares":0,"saves":0}}`, "manual-key", 201, "miyunmaterial_1"},
+	}
+	for _, test := range tests {
+		request := authenticatedRequest(test.method, test.path, test.body)
+		if test.key != "" {
+			request.Header.Set("Idempotency-Key", test.key)
+		}
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
+			t.Fatalf("%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+	}
+	if app.miyunConfirmRequest.ExpectedVersion != 1 || app.miyunConfirmRequest.Query.WindowStart.Format("2006-01-02") != "2026-08-01" {
+		t.Fatalf("confirm request=%#v", app.miyunConfirmRequest)
+	}
+	if app.miyunIdempotencyKey != "manual-key" {
+		t.Fatalf("idempotency key=%q", app.miyunIdempotencyKey)
+	}
+}
+
+func TestMiyunVersionConflictUsesHTTP409(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{miyunErr: insights.ErrVersionConflict}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/miyun/product-profiles/profile_1:confirm",
+		`{"expected_version":1,"query":{"product_name":"Cup","keywords":["cup"],"material_content_types":[],"window_start":"2026-08-01","window_end":"2026-08-10"}}`))
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "VERSION_CONFLICT") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMiyunManualImportRequiresKeyAndMapsIdempotencyConflict(t *testing.T) {
+	t.Parallel()
+	body := `{"asset_ref":{"asset_id":"asset_1","version":1},"miyun_material_id":"remote_1","source_ref":"https://example.test/material/1","data_card":{"schema_version":"miyun-data-card/v1","captured_at":"2026-08-10T12:00:00Z","delivery_days":0,"cumulative_impressions_raw":"0","cumulative_impressions":0,"related_ads":0,"related_creators":0,"material_score":0,"views":0,"likes":0,"comments":0,"shares":0,"saves":0}}`
+	server := New(&applicationStub{})
+	missing := httptest.NewRecorder()
+	server.ServeHTTP(missing, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/materials:manual-import", body))
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	server = New(&applicationStub{miyunErr: insights.ErrIdempotencyConflict})
+	request := authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/materials:manual-import", body)
+	request.Header.Set("Idempotency-Key", "manual-key")
+	conflict := httptest.NewRecorder()
+	server.ServeHTTP(conflict, request)
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), contract.ErrorIdempotencyConflict) {
+		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+}
+
 // 定格窗口按天传，不能只传一头。补一个默认值等于替人挑了半个窗口，
 // 而报告上会写得像是他自己选的。
 func TestCreateReportWindowMustBeWholeOrAbsent(t *testing.T) {
@@ -321,10 +394,15 @@ func authenticatedRequest(method, target, body string) *http.Request {
 }
 
 type applicationStub struct {
-	report          insights.InsightReport
-	experience      insights.Experience
-	listedStatus    insights.ExperienceStatus
-	preLaunchFilter insights.PreLaunchFilter
+	miyunProfile        insights.MiyunProductProfile
+	miyunManual         insights.MiyunManualImportResult
+	miyunConfirmRequest insights.ConfirmMiyunProductProfileRequest
+	miyunIdempotencyKey contract.IdempotencyKey
+	miyunErr            error
+	report              insights.InsightReport
+	experience          insights.Experience
+	listedStatus        insights.ExperienceStatus
+	preLaunchFilter     insights.PreLaunchFilter
 
 	asset          insights.Asset
 	mapping        insights.AssetMapping
@@ -365,6 +443,24 @@ type applicationStub struct {
 	droppedFlag       bool
 
 	registerErr error
+}
+
+func (s *applicationStub) AnalyzeMiyunProductProfile(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ insights.AnalyzeMiyunProductProfileRequest) (insights.MiyunProductProfile, error) {
+	return s.miyunProfile, s.miyunErr
+}
+func (s *applicationStub) ConfirmMiyunProductProfile(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request insights.ConfirmMiyunProductProfileRequest) (insights.MiyunProductProfile, error) {
+	s.miyunConfirmRequest = request
+	return s.miyunProfile, s.miyunErr
+}
+func (s *applicationStub) ListMiyunProductProfiles(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunProductProfile, error) {
+	return []insights.MiyunProductProfile{s.miyunProfile}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunProductProfile, error) {
+	return s.miyunProfile, s.miyunErr
+}
+func (s *applicationStub) ManualImportMiyunMaterial(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, key contract.IdempotencyKey, _ insights.ManualMiyunMaterialRequest) (insights.MiyunManualImportResult, error) {
+	s.miyunIdempotencyKey = key
+	return s.miyunManual, s.miyunErr
 }
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {

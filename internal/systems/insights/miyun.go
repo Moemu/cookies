@@ -44,6 +44,41 @@ func (s MiyunProfileStatus) valid() bool {
 	return false
 }
 
+type MiyunImportMethod string
+
+const (
+	MiyunImportCrawler MiyunImportMethod = "crawler"
+	MiyunImportManual  MiyunImportMethod = "manual"
+)
+
+func (m MiyunImportMethod) valid() bool {
+	return m == MiyunImportCrawler || m == MiyunImportManual
+}
+
+type MiyunProfileFieldSource struct {
+	Field       string   `json:"field"`
+	SourceKind  string   `json:"source_kind"`
+	SourceRefs  []string `json:"source_refs"`
+	Confidence  string   `json:"confidence"`
+	ReviewState string   `json:"review_state"`
+	Explanation string   `json:"explanation"`
+}
+
+func (s MiyunProfileFieldSource) Validate() error {
+	if strings.TrimSpace(s.Field) == "" || strings.TrimSpace(s.SourceKind) == "" ||
+		strings.TrimSpace(s.Confidence) == "" || strings.TrimSpace(s.ReviewState) == "" ||
+		strings.TrimSpace(s.Explanation) == "" || len(s.SourceRefs) == 0 {
+		return fmt.Errorf("%w: profile field source must be explainable", ErrInvalidRequest)
+	}
+	if s.Confidence != "high" && s.Confidence != "medium" && s.Confidence != "low" && s.Confidence != "unknown" {
+		return fmt.Errorf("%w: profile field source confidence is invalid", ErrInvalidRequest)
+	}
+	if s.ReviewState != "suggested" && s.ReviewState != "unknown" && s.ReviewState != "human_confirmed" {
+		return fmt.Errorf("%w: profile field source review state is invalid", ErrInvalidRequest)
+	}
+	return validateUniqueStrings("profile source reference", s.SourceRefs)
+}
+
 type MiyunCrawlJobStatus string
 
 const (
@@ -163,7 +198,9 @@ type MiyunProductProfile struct {
 	ProjectID             contract.ProjectID         `json:"project_id"`
 	ConnectionID          string                     `json:"connection_id"`
 	Status                MiyunProfileStatus         `json:"status"`
+	ProductID             contract.ProductID         `json:"product_id"`
 	ProductName           string                     `json:"product_name"`
+	BrandName             string                     `json:"brand_name,omitempty"`
 	CategoryID            string                     `json:"category_id,omitempty"`
 	CategoryName          string                     `json:"category_name,omitempty"`
 	Keywords              []string                   `json:"keywords"`
@@ -174,7 +211,12 @@ type MiyunProductProfile struct {
 	ProductAssetRefs      []contract.AssetVersionRef `json:"product_asset_refs"`
 	KnowledgeDocumentIDs  []string                   `json:"knowledge_document_ids"`
 	RuleVersion           string                     `json:"rule_version"`
+	ModelVersion          string                     `json:"model_version,omitempty"`
+	AnalysisMethod        string                     `json:"analysis_method"`
 	InputHash             string                     `json:"input_hash"`
+	InputSnapshot         json.RawMessage            `json:"input_snapshot"`
+	FieldSources          []MiyunProfileFieldSource  `json:"field_sources"`
+	AnalysisWarnings      []string                   `json:"analysis_warnings"`
 	ConfirmedBy           string                     `json:"confirmed_by,omitempty"`
 	ConfirmedAt           *time.Time                 `json:"confirmed_at,omitempty"`
 	Version               int64                      `json:"version"`
@@ -187,14 +229,23 @@ func (p MiyunProductProfile) Validate() error {
 	if err := validateMiyunAggregate(p.ID, p.OrganizationID, p.ProjectID, p.Version, p.CreatedBy, p.CreatedAt, p.UpdatedAt); err != nil {
 		return err
 	}
-	if !p.Status.valid() || strings.TrimSpace(p.ConnectionID) == "" || strings.TrimSpace(p.ProductName) == "" || len(p.Keywords) == 0 {
+	if !p.Status.valid() || strings.TrimSpace(p.ConnectionID) == "" || strings.TrimSpace(string(p.ProductID)) == "" ||
+		strings.TrimSpace(p.ProductName) == "" || len(p.Keywords) == 0 {
 		return fmt.Errorf("%w: profile status, connection, product name, and at least one keyword are required", ErrInvalidRequest)
+	}
+	if len(p.ConnectionID) > 96 || len(p.ProductID) > 96 || len([]rune(p.ProductName)) > 255 ||
+		len(p.CategoryID) > 96 || len([]rune(p.CategoryName)) > 255 || len(p.RuleVersion) > 96 {
+		return fmt.Errorf("%w: profile identity or query field is too long", ErrInvalidRequest)
 	}
 	if p.WindowStart.IsZero() || p.WindowEnd.IsZero() || p.WindowEnd.Before(p.WindowStart) {
 		return fmt.Errorf("%w: profile date window is invalid", ErrInvalidRequest)
 	}
-	if p.ProjectContextVersion < 1 || strings.TrimSpace(p.RuleVersion) == "" || len(p.InputHash) != 64 {
+	if p.ProjectContextVersion < 1 || strings.TrimSpace(p.RuleVersion) == "" || p.AnalysisMethod != "rules" ||
+		len(p.InputHash) != 64 || !json.Valid(p.InputSnapshot) {
 		return fmt.Errorf("%w: profile context version, rule version, and SHA-256 input hash are required", ErrInvalidRequest)
+	}
+	if p.ModelVersion != "" {
+		return fmt.Errorf("%w: deterministic rule profiles must not claim model lineage", ErrInvalidRequest)
 	}
 	if err := validateUniqueStrings("keyword", p.Keywords); err != nil {
 		return err
@@ -204,6 +255,22 @@ func (p MiyunProductProfile) Validate() error {
 	}
 	if err := validateUniqueStrings("knowledge document ID", p.KnowledgeDocumentIDs); err != nil {
 		return err
+	}
+	if err := validateUniqueStrings("analysis warning", p.AnalysisWarnings); err != nil {
+		return err
+	}
+	if len(p.FieldSources) == 0 {
+		return fmt.Errorf("%w: profile field sources are required", ErrInvalidRequest)
+	}
+	seenFields := map[string]struct{}{}
+	for _, source := range p.FieldSources {
+		if err := source.Validate(); err != nil {
+			return err
+		}
+		if _, exists := seenFields[source.Field]; exists {
+			return fmt.Errorf("%w: duplicate profile field source %q", ErrInvalidRequest, source.Field)
+		}
+		seenFields[source.Field] = struct{}{}
 	}
 	for _, ref := range p.ProductAssetRefs {
 		if err := ref.Validate(); err != nil {
@@ -270,7 +337,10 @@ type MiyunMaterial struct {
 	OrganizationID       contract.OrganizationID      `json:"organization_id"`
 	ProjectID            contract.ProjectID           `json:"project_id"`
 	MiyunMaterialID      string                       `json:"miyun_material_id"`
-	FirstSeenCrawlJobID  string                       `json:"first_seen_crawl_job_id"`
+	FirstSeenCrawlJobID  string                       `json:"first_seen_crawl_job_id,omitempty"`
+	ImportMethod         MiyunImportMethod            `json:"import_method"`
+	ManualIdempotencyKey string                       `json:"-"`
+	ManualRequestHash    string                       `json:"-"`
 	ResourceID           string                       `json:"resource_id,omitempty"`
 	SourceRef            string                       `json:"source_ref,omitempty"`
 	Title                string                       `json:"title,omitempty"`
@@ -290,8 +360,25 @@ func (m MiyunMaterial) Validate() error {
 	if err := validateMiyunAggregate(m.ID, m.OrganizationID, m.ProjectID, m.Version, m.CreatedBy, m.CreatedAt, m.UpdatedAt); err != nil {
 		return err
 	}
-	if strings.TrimSpace(m.MiyunMaterialID) == "" || strings.TrimSpace(m.FirstSeenCrawlJobID) == "" {
-		return fmt.Errorf("%w: Miyun material ID and first crawl job are required", ErrInvalidRequest)
+	if strings.TrimSpace(m.MiyunMaterialID) == "" || !m.ImportMethod.valid() {
+		return fmt.Errorf("%w: Miyun material ID and import method are required", ErrInvalidRequest)
+	}
+	if len(m.MiyunMaterialID) > 191 || len(m.FirstSeenCrawlJobID) > 96 || len(m.ManualIdempotencyKey) > 128 ||
+		len(m.SourceRef) > 512 || len([]rune(m.Title)) > 255 {
+		return fmt.Errorf("%w: Miyun material identity or source is too long", ErrInvalidRequest)
+	}
+	if (m.ImportMethod == MiyunImportCrawler) != (strings.TrimSpace(m.FirstSeenCrawlJobID) != "") {
+		return fmt.Errorf("%w: crawler materials require a crawl job and manual materials must not have one", ErrInvalidRequest)
+	}
+	if m.ImportMethod == MiyunImportManual {
+		if strings.TrimSpace(m.ManualIdempotencyKey) == "" || len(m.ManualRequestHash) != 64 {
+			return fmt.Errorf("%w: manual material requires idempotency identity", ErrInvalidRequest)
+		}
+		if m.PlatformAssetID == "" || m.PlatformAssetVersion < 1 || strings.TrimSpace(m.InsightAssetID) == "" || strings.TrimSpace(m.SourceRef) == "" {
+			return fmt.Errorf("%w: manual material requires its source AssetVersion and Insight Asset", ErrInvalidRequest)
+		}
+	} else if m.ManualIdempotencyKey != "" || m.ManualRequestHash != "" {
+		return fmt.Errorf("%w: crawler material must not carry manual idempotency identity", ErrInvalidRequest)
 	}
 	if !m.SelectionStatus.valid() || !m.ImportStatus.valid() {
 		return fmt.Errorf("%w: unsupported material selection or import status", ErrInvalidRequest)
@@ -306,35 +393,46 @@ func (m MiyunMaterial) Validate() error {
 }
 
 type MiyunMaterialSnapshot struct {
-	ID                    string                  `json:"id"`
-	OrganizationID        contract.OrganizationID `json:"organization_id"`
-	ProjectID             contract.ProjectID      `json:"project_id"`
-	MaterialID            string                  `json:"material_id"`
-	CrawlJobID            string                  `json:"crawl_job_id"`
-	SchemaVersion         string                  `json:"schema_version"`
-	CapturedAt            time.Time               `json:"captured_at"`
-	FirstPublishedAt      *time.Time              `json:"first_published_at,omitempty"`
-	LastPublishedAt       *time.Time              `json:"last_published_at,omitempty"`
-	DeliveryDays          int64                   `json:"delivery_days"`
-	CumulativeImpressions int64                   `json:"cumulative_impressions"`
-	RelatedAds            int64                   `json:"related_ads"`
-	RelatedCreators       int64                   `json:"related_creators"`
-	MaterialScore         float64                 `json:"material_score"`
-	Views                 int64                   `json:"views"`
-	Likes                 int64                   `json:"likes"`
-	Comments              int64                   `json:"comments"`
-	Shares                int64                   `json:"shares"`
-	Saves                 int64                   `json:"saves"`
-	SanitizedRaw          json.RawMessage         `json:"sanitized_raw,omitempty"`
-	CreatedAt             time.Time               `json:"created_at"`
+	ID                       string                  `json:"id"`
+	OrganizationID           contract.OrganizationID `json:"organization_id"`
+	ProjectID                contract.ProjectID      `json:"project_id"`
+	MaterialID               string                  `json:"material_id"`
+	CrawlJobID               string                  `json:"crawl_job_id,omitempty"`
+	ImportMethod             MiyunImportMethod       `json:"import_method"`
+	SchemaVersion            string                  `json:"schema_version"`
+	CapturedAt               time.Time               `json:"captured_at"`
+	FirstPublishedAt         *time.Time              `json:"first_published_at,omitempty"`
+	LastPublishedAt          *time.Time              `json:"last_published_at,omitempty"`
+	DeliveryDays             int64                   `json:"delivery_days"`
+	CumulativeImpressions    int64                   `json:"cumulative_impressions"`
+	CumulativeImpressionsRaw string                  `json:"cumulative_impressions_raw"`
+	RelatedAds               int64                   `json:"related_ads"`
+	RelatedCreators          int64                   `json:"related_creators"`
+	MaterialScore            float64                 `json:"material_score"`
+	Views                    int64                   `json:"views"`
+	Likes                    int64                   `json:"likes"`
+	Comments                 int64                   `json:"comments"`
+	Shares                   int64                   `json:"shares"`
+	Saves                    int64                   `json:"saves"`
+	SanitizedRaw             json.RawMessage         `json:"sanitized_raw,omitempty"`
+	CreatedAt                time.Time               `json:"created_at"`
 }
 
 func (s MiyunMaterialSnapshot) Validate() error {
 	if strings.TrimSpace(s.ID) == "" || strings.TrimSpace(string(s.OrganizationID)) == "" ||
 		strings.TrimSpace(string(s.ProjectID)) == "" || strings.TrimSpace(s.MaterialID) == "" ||
-		strings.TrimSpace(s.CrawlJobID) == "" || strings.TrimSpace(s.SchemaVersion) == "" ||
+		strings.TrimSpace(s.SchemaVersion) == "" || !s.ImportMethod.valid() ||
 		s.CapturedAt.IsZero() || s.CreatedAt.IsZero() {
 		return fmt.Errorf("%w: snapshot identity, scope, schema, and timestamps are required", ErrInvalidRequest)
+	}
+	if (s.ImportMethod == MiyunImportCrawler) != (strings.TrimSpace(s.CrawlJobID) != "") {
+		return fmt.Errorf("%w: crawler snapshots require a crawl job and manual snapshots must not have one", ErrInvalidRequest)
+	}
+	if s.ImportMethod == MiyunImportManual && s.SchemaVersion != MiyunDataCardSchemaV1 {
+		return fmt.Errorf("%w: manual snapshots require the supported Miyun data-card schema", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(s.CumulativeImpressionsRaw) == "" || len(s.CumulativeImpressionsRaw) > 64 {
+		return fmt.Errorf("%w: cumulative impressions raw value is required", ErrInvalidRequest)
 	}
 	if s.DeliveryDays < 0 || s.CumulativeImpressions < 0 || s.RelatedAds < 0 || s.RelatedCreators < 0 ||
 		s.MaterialScore < 0 || s.Views < 0 || s.Likes < 0 || s.Comments < 0 || s.Shares < 0 || s.Saves < 0 {

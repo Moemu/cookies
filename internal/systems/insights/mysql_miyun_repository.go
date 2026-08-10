@@ -11,21 +11,25 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-// MiyunRepository is deliberately limited to the M01 persistence foundation.
-// Later slices add workflow-specific list and transition methods instead of
-// publishing write routes before their service semantics exist.
+// MiyunRepository owns the Goal 1 persistence foundation plus Goal 2's
+// product-profile review and manual intake transaction. Crawl execution and
+// later handoff workflows stay behind future, workflow-specific services.
 type MiyunRepository interface {
 	CreateMiyunConnection(context.Context, MiyunConnection) (MiyunConnection, error)
 	GetMiyunConnection(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunConnection, error)
 	UpdateMiyunConnection(context.Context, MiyunConnection, int64) (MiyunConnection, error)
 	CreateMiyunProductProfile(context.Context, MiyunProductProfile) (MiyunProductProfile, error)
+	CreateMiyunProductProfileDraft(context.Context, MiyunProductProfile) (MiyunProductProfile, error)
 	GetMiyunProductProfile(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunProductProfile, error)
+	ListMiyunProductProfiles(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]MiyunProductProfile, error)
+	ConfirmMiyunProductProfile(context.Context, MiyunProductProfile, int64) (MiyunProductProfile, error)
 	CreateMiyunCrawlJob(context.Context, MiyunCrawlJob) (MiyunCrawlJob, error)
 	GetMiyunCrawlJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunCrawlJob, error)
 	CreateMiyunMaterial(context.Context, MiyunMaterial) (MiyunMaterial, error)
 	GetMiyunMaterial(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunMaterial, error)
 	AppendMiyunMaterialSnapshot(context.Context, MiyunMaterialSnapshot) (MiyunMaterialSnapshot, error)
 	ListMiyunMaterialSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]MiyunMaterialSnapshot, error)
+	CreateManualMiyunMaterial(context.Context, MiyunManualImportRecord) (MiyunManualImportResult, error)
 	CreateMiyunHandoff(context.Context, MiyunHandoff) (MiyunHandoff, error)
 	GetMiyunHandoff(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunHandoff, error)
 }
@@ -114,8 +118,9 @@ func scanMiyunConnection(row rowScanner) (MiyunConnection, error) {
 }
 
 const miyunProductProfileSelect = `SELECT id, organization_id, project_id, connection_id, status,
-	product_name, category_id, category_name, keywords, material_content_types, window_start, window_end,
-	project_context_version, product_asset_refs, knowledge_document_ids, rule_version, input_hash,
+	product_id, product_name, brand_name, category_id, category_name, keywords, material_content_types, window_start, window_end,
+	project_context_version, product_asset_refs, knowledge_document_ids, rule_version,
+	COALESCE(model_version, ''), analysis_method, input_hash, input_snapshot, field_sources, analysis_warnings,
 	confirmed_by, confirmed_at, version, created_by, created_at, updated_at FROM insight_miyun_product_profiles`
 
 func (r MySQLRepository) CreateMiyunProductProfile(ctx context.Context, value MiyunProductProfile) (MiyunProductProfile, error) {
@@ -138,16 +143,26 @@ func (r MySQLRepository) CreateMiyunProductProfile(ctx context.Context, value Mi
 	if err != nil {
 		return MiyunProductProfile{}, err
 	}
+	fieldSources, err := json.Marshal(value.FieldSources)
+	if err != nil {
+		return MiyunProductProfile{}, err
+	}
+	warnings, err := json.Marshal(value.AnalysisWarnings)
+	if err != nil {
+		return MiyunProductProfile{}, err
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_product_profiles (
-		id, organization_id, project_id, connection_id, status, product_name, category_id, category_name,
+		id, organization_id, project_id, connection_id, status, product_id, product_name, brand_name, category_id, category_name,
 		keywords, material_content_types, window_start, window_end, project_context_version,
-		product_asset_refs, knowledge_document_ids, rule_version, input_hash, confirmed_by, confirmed_at,
+		product_asset_refs, knowledge_document_ids, rule_version, model_version, analysis_method, input_hash,
+		input_snapshot, field_sources, analysis_warnings, confirmed_by, confirmed_at,
 		version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.ConnectionID, value.Status, value.ProductName,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.ConnectionID, value.Status, value.ProductID, value.ProductName, value.BrandName,
 		value.CategoryID, value.CategoryName, keywords, contentTypes, value.WindowStart.Format("2006-01-02"),
 		value.WindowEnd.Format("2006-01-02"), value.ProjectContextVersion, assetRefs, documentIDs,
-		value.RuleVersion, value.InputHash, nullableString(value.ConfirmedBy), value.ConfirmedAt,
+		value.RuleVersion, nullableString(value.ModelVersion), value.AnalysisMethod, value.InputHash,
+		value.InputSnapshot, fieldSources, warnings, nullableString(value.ConfirmedBy), value.ConfirmedAt,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if isDuplicateKey(err) {
 		return MiyunProductProfile{}, fmt.Errorf("%w: Miyun product profile identity already exists", ErrInvalidState)
@@ -167,13 +182,14 @@ func (r MySQLRepository) GetMiyunProductProfile(ctx context.Context, organizatio
 
 func scanMiyunProductProfile(row rowScanner) (MiyunProductProfile, error) {
 	var value MiyunProductProfile
-	var keywords, contentTypes, assetRefs, documentIDs []byte
+	var keywords, contentTypes, assetRefs, documentIDs, inputSnapshot, fieldSources, warnings []byte
 	var confirmedBy sql.NullString
 	var confirmedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ConnectionID, &value.Status,
-		&value.ProductName, &value.CategoryID, &value.CategoryName, &keywords, &contentTypes,
+		&value.ProductID, &value.ProductName, &value.BrandName, &value.CategoryID, &value.CategoryName, &keywords, &contentTypes,
 		&value.WindowStart, &value.WindowEnd, &value.ProjectContextVersion, &assetRefs, &documentIDs,
-		&value.RuleVersion, &value.InputHash, &confirmedBy, &confirmedAt, &value.Version,
+		&value.RuleVersion, &value.ModelVersion, &value.AnalysisMethod, &value.InputHash,
+		&inputSnapshot, &fieldSources, &warnings, &confirmedBy, &confirmedAt, &value.Version,
 		&value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return MiyunProductProfile{}, err
@@ -188,6 +204,13 @@ func scanMiyunProductProfile(row rowScanner) (MiyunProductProfile, error) {
 		return MiyunProductProfile{}, err
 	}
 	if err := json.Unmarshal(documentIDs, &value.KnowledgeDocumentIDs); err != nil {
+		return MiyunProductProfile{}, err
+	}
+	value.InputSnapshot = json.RawMessage(inputSnapshot)
+	if err := json.Unmarshal(fieldSources, &value.FieldSources); err != nil {
+		return MiyunProductProfile{}, err
+	}
+	if err := json.Unmarshal(warnings, &value.AnalysisWarnings); err != nil {
 		return MiyunProductProfile{}, err
 	}
 	value.ConfirmedBy, value.ConfirmedAt = confirmedBy.String, nullTimePointer(confirmedAt)
@@ -247,7 +270,7 @@ func scanMiyunCrawlJob(row rowScanner) (MiyunCrawlJob, error) {
 }
 
 const miyunMaterialSelect = `SELECT id, organization_id, project_id, miyun_material_id, first_seen_crawl_job_id,
-	resource_id, source_ref, title, selection_status, import_status, external_import_id,
+	import_method, manual_idempotency_key, manual_request_hash, resource_id, source_ref, title, selection_status, import_status, external_import_id,
 	platform_asset_id, platform_asset_version, insight_asset_id, version, created_by, created_at, updated_at
 	FROM insight_miyun_materials`
 
@@ -256,11 +279,13 @@ func (r MySQLRepository) CreateMiyunMaterial(ctx context.Context, value MiyunMat
 		return MiyunMaterial{}, err
 	}
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_materials (
-		id, organization_id, project_id, miyun_material_id, first_seen_crawl_job_id,
+		id, organization_id, project_id, miyun_material_id, first_seen_crawl_job_id, import_method,
+		manual_idempotency_key, manual_request_hash,
 		resource_id, source_ref, title, selection_status, import_status, external_import_id,
 		platform_asset_id, platform_asset_version, insight_asset_id, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.MiyunMaterialID, value.FirstSeenCrawlJobID,
+		value.ImportMethod, nullableString(value.ManualIdempotencyKey), nullableString(value.ManualRequestHash),
 		value.ResourceID, value.SourceRef, value.Title, value.SelectionStatus, value.ImportStatus,
 		nullableString(value.ExternalImportID), nullableString(string(value.PlatformAssetID)), nullableInt64(value.PlatformAssetVersion),
 		nullableString(value.InsightAssetID), value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
@@ -282,15 +307,19 @@ func (r MySQLRepository) GetMiyunMaterial(ctx context.Context, organizationID co
 
 func scanMiyunMaterial(row rowScanner) (MiyunMaterial, error) {
 	var value MiyunMaterial
+	var firstSeenCrawlJobID, manualIdempotencyKey, manualRequestHash sql.NullString
 	var externalImportID, platformAssetID, insightAssetID sql.NullString
 	var platformAssetVersion sql.NullInt64
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.MiyunMaterialID,
-		&value.FirstSeenCrawlJobID, &value.ResourceID, &value.SourceRef, &value.Title,
+		&firstSeenCrawlJobID, &value.ImportMethod, &manualIdempotencyKey, &manualRequestHash,
+		&value.ResourceID, &value.SourceRef, &value.Title,
 		&value.SelectionStatus, &value.ImportStatus, &externalImportID, &platformAssetID,
 		&platformAssetVersion, &insightAssetID, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return MiyunMaterial{}, err
 	}
+	value.FirstSeenCrawlJobID = firstSeenCrawlJobID.String
+	value.ManualIdempotencyKey, value.ManualRequestHash = manualIdempotencyKey.String, manualRequestHash.String
 	value.ExternalImportID = externalImportID.String
 	value.PlatformAssetID = contract.AssetID(platformAssetID.String)
 	value.PlatformAssetVersion = platformAssetVersion.Int64
@@ -298,9 +327,9 @@ func scanMiyunMaterial(row rowScanner) (MiyunMaterial, error) {
 	return value, nil
 }
 
-const miyunMaterialSnapshotSelect = `SELECT id, organization_id, project_id, material_id, crawl_job_id,
+const miyunMaterialSnapshotSelect = `SELECT id, organization_id, project_id, material_id, crawl_job_id, import_method,
 	schema_version, captured_at, first_published_at, last_published_at, delivery_days,
-	cumulative_impressions, related_ads, related_creators, material_score, views, likes, comments,
+	cumulative_impressions, cumulative_impressions_raw, related_ads, related_creators, material_score, views, likes, comments,
 	shares, saves, sanitized_raw, created_at FROM insight_miyun_material_snapshots`
 
 func (r MySQLRepository) AppendMiyunMaterialSnapshot(ctx context.Context, value MiyunMaterialSnapshot) (MiyunMaterialSnapshot, error) {
@@ -312,13 +341,13 @@ func (r MySQLRepository) AppendMiyunMaterialSnapshot(ctx context.Context, value 
 		raw = value.SanitizedRaw
 	}
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_material_snapshots (
-		id, organization_id, project_id, material_id, crawl_job_id, schema_version, captured_at,
-		first_published_at, last_published_at, delivery_days, cumulative_impressions, related_ads,
+		id, organization_id, project_id, material_id, crawl_job_id, import_method, schema_version, captured_at,
+		first_published_at, last_published_at, delivery_days, cumulative_impressions, cumulative_impressions_raw, related_ads,
 		related_creators, material_score, views, likes, comments, shares, saves, sanitized_raw, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.MaterialID, value.CrawlJobID,
-		value.SchemaVersion, value.CapturedAt, value.FirstPublishedAt, value.LastPublishedAt,
-		value.DeliveryDays, value.CumulativeImpressions, value.RelatedAds, value.RelatedCreators,
+		value.ImportMethod, value.SchemaVersion, value.CapturedAt, value.FirstPublishedAt, value.LastPublishedAt,
+		value.DeliveryDays, value.CumulativeImpressions, value.CumulativeImpressionsRaw, value.RelatedAds, value.RelatedCreators,
 		value.MaterialScore, value.Views, value.Likes, value.Comments, value.Shares, value.Saves,
 		raw, value.CreatedAt)
 	if isDuplicateKey(err) {
@@ -350,14 +379,16 @@ func (r MySQLRepository) ListMiyunMaterialSnapshots(ctx context.Context, organiz
 func scanMiyunMaterialSnapshot(row rowScanner) (MiyunMaterialSnapshot, error) {
 	var value MiyunMaterialSnapshot
 	var firstPublishedAt, lastPublishedAt sql.NullTime
+	var crawlJobID sql.NullString
 	var sanitizedRaw []byte
-	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.MaterialID, &value.CrawlJobID,
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.MaterialID, &crawlJobID, &value.ImportMethod,
 		&value.SchemaVersion, &value.CapturedAt, &firstPublishedAt, &lastPublishedAt, &value.DeliveryDays,
-		&value.CumulativeImpressions, &value.RelatedAds, &value.RelatedCreators, &value.MaterialScore,
+		&value.CumulativeImpressions, &value.CumulativeImpressionsRaw, &value.RelatedAds, &value.RelatedCreators, &value.MaterialScore,
 		&value.Views, &value.Likes, &value.Comments, &value.Shares, &value.Saves, &sanitizedRaw, &value.CreatedAt)
 	if err != nil {
 		return MiyunMaterialSnapshot{}, err
 	}
+	value.CrawlJobID = crawlJobID.String
 	value.FirstPublishedAt, value.LastPublishedAt = nullTimePointer(firstPublishedAt), nullTimePointer(lastPublishedAt)
 	if len(sanitizedRaw) > 0 {
 		value.SanitizedRaw = json.RawMessage(sanitizedRaw)

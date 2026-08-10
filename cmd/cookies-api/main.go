@@ -399,13 +399,18 @@ func main() {
 		creativeService.AINativeVoiceoverFitter = creative.ModelAINativeVoiceoverFitter{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 	}
 	insightsService := &insights.Service{
-		Repository:  insights.MySQLRepository{DB: db},
-		Assets:      insights.MySQLRepository{DB: db},
-		Connectors:  insights.MySQLRepository{DB: db},
-		Runs:        insights.MySQLRepository{DB: db},
-		Experiments: insights.MySQLRepository{DB: db},
-		Projects:    projectService,
-		Delivery:    deliveryinsights.Reader{Service: deliveryService},
+		Repository:     insights.MySQLRepository{DB: db},
+		Miyun:          insights.MySQLRepository{DB: db},
+		MiyunProjects:  miyunProjectSourceAdapter{projects: projectService},
+		MiyunAssets:    miyunAssetSourceAdapter{uploads: uploadService},
+		MiyunKnowledge: miyunKnowledgeSourceAdapter{knowledge: knowledgeService},
+		MiyunMedia:     miyunMediaEvidenceAdapter{media: mediaUnderstandingService},
+		Assets:         insights.MySQLRepository{DB: db},
+		Connectors:     insights.MySQLRepository{DB: db},
+		Runs:           insights.MySQLRepository{DB: db},
+		Experiments:    insights.MySQLRepository{DB: db},
+		Projects:       projectService,
+		Delivery:       deliveryinsights.Reader{Service: deliveryService},
 	}
 	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
 	// 库里一条编造的特征，代价远大于一次失败的提取。
@@ -789,6 +794,84 @@ func strategyOrganizationAllowlist(values []string) map[contract.OrganizationID]
 }
 
 type assetVisionSourceResolver struct{ uploads *assets.UploadService }
+
+type miyunProjectSourceAdapter struct{ projects *project.Service }
+type miyunAssetSourceAdapter struct{ uploads *assets.UploadService }
+type miyunKnowledgeSourceAdapter struct{ knowledge *knowledge.Service }
+type miyunMediaEvidenceAdapter struct{ media *mediaunderstanding.Service }
+
+func (a miyunProjectSourceAdapter) ReadMiyunProjectSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (insights.MiyunProjectSource, error) {
+	projectContext, err := a.projects.GetContext(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	businessContext, err := a.projects.GetBusinessContext(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	workbench, err := a.projects.GetWorkbench(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	if businessContext.ProjectID != projectID || workbench.Project.ProjectID != string(projectID) ||
+		workbench.Project.OrganizationID != string(actor.OrganizationID) {
+		return insights.MiyunProjectSource{}, fmt.Errorf("%w: Miyun Project projections are inconsistent", insights.ErrInvalidState)
+	}
+	products := make([]insights.MiyunProjectProduct, 0, len(businessContext.Products))
+	for _, product := range businessContext.Products {
+		products = append(products, insights.MiyunProjectProduct{ID: product.ID, Name: product.Name})
+	}
+	return insights.MiyunProjectSource{
+		Context: projectContext, ProjectName: businessContext.ProjectName,
+		BrandName: businessContext.BrandName, CategoryName: workbench.Brand.Category,
+		Products: products,
+	}, nil
+}
+
+func (a miyunAssetSourceAdapter) ReadMiyunAssetSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunAssetSource, error) {
+	value, err := a.uploads.Get(ctx, actor, projectID, ref)
+	if err != nil {
+		return insights.MiyunAssetSource{}, err
+	}
+	return insights.MiyunAssetSource{
+		Ref: value.Version.Ref(), Kind: value.Asset.Kind, MIMEType: value.Version.MIMEType,
+		SHA256: value.Version.SHA256,
+		Ready:  value.Asset.Status == assets.AssetReady && value.Version.Status == assets.AssetReady,
+	}, nil
+}
+
+func (a miyunKnowledgeSourceAdapter) ReadMiyunKnowledgeSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, documentID string) (insights.MiyunKnowledgeSource, error) {
+	value, err := a.knowledge.GetDocument(ctx, actor, projectID, documentID)
+	if err != nil {
+		return insights.MiyunKnowledgeSource{}, err
+	}
+	return insights.MiyunKnowledgeSource{
+		ID: value.ID, Filename: value.Filename, MIMEType: value.MIMEType,
+		Status: value.Status, Text: value.ExtractedText, TextSHA256: value.TextSHA256,
+	}, nil
+}
+
+func (a miyunMediaEvidenceAdapter) ReadLatestMiyunMediaEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunMediaEvidence, bool, error) {
+	value, err := a.media.GetLatestForAsset(ctx, actor, projectID, ref)
+	if errors.Is(err, mediaunderstanding.ErrNotFound) {
+		return insights.MiyunMediaEvidence{}, false, nil
+	}
+	if err != nil {
+		return insights.MiyunMediaEvidence{}, false, err
+	}
+	evidence := make([]string, 0, 1+len(value.VisibleText)+len(value.Observations)+len(value.Inferences)+len(value.Risks)+len(value.Unknowns)+len(value.Transcript))
+	if value.Summary != "" {
+		evidence = append(evidence, value.Summary)
+	}
+	for _, group := range [][]mediaunderstanding.Evidence{value.VisibleText, value.Observations, value.Inferences, value.Risks, value.Unknowns, value.Transcript} {
+		for _, item := range group {
+			evidence = append(evidence, item.Text)
+		}
+	}
+	return insights.MiyunMediaEvidence{
+		ArtifactID: value.ID, Status: string(value.Status), ContentHash: value.ContentHash, Evidence: evidence,
+	}, true, nil
+}
 
 type creativeAssetReader struct{ uploads *assets.UploadService }
 

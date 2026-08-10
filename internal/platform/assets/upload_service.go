@@ -19,6 +19,7 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
+	_ "golang.org/x/image/webp"
 )
 
 type ActiveProjectResolver interface {
@@ -651,6 +652,9 @@ func (s UploadService) ingestStoredObject(ctx context.Context, organizationID co
 	case contract.AssetImage:
 		if !allowedDeclaredImageMIME(mimeType) {
 			return AssetCommit{}, fmt.Errorf("%w: detected content is not a supported image", ErrInvalidAssetContent)
+		}
+		if mimeType != info.MIMEType {
+			return AssetCommit{}, fmt.Errorf("%w: detected image type does not match declared type", ErrInvalidAssetContent)
 		}
 		imageConfig, _, decodeErr := image.DecodeConfig(bytes.NewReader(data))
 		if decodeErr != nil {

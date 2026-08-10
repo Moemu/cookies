@@ -85,18 +85,42 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 
 	profile := insights.MiyunProductProfile{
 		ID: "miyun_profile_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID,
-		ConnectionID: connection.ID, Status: insights.MiyunProfileDraft, ProductName: "Test product",
+		ConnectionID: connection.ID, Status: insights.MiyunProfileDraft, ProductID: "product_test", ProductName: "Test product",
 		CategoryID: "category-test", CategoryName: "Test category", Keywords: []string{"test keyword"},
 		MaterialContentTypes: []string{"product_demo"}, WindowStart: now.AddDate(0, -1, 0), WindowEnd: now,
 		ProjectContextVersion: 1, ProductAssetRefs: []contract.AssetVersionRef{}, KnowledgeDocumentIDs: []string{},
-		RuleVersion: "miyun-profile-v1", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
+		RuleVersion: insights.MiyunProductProfileRuleVersion, AnalysisMethod: "rules",
+		InputSnapshot:    []byte(`{"version":"1"}`),
+		FieldSources:     []insights.MiyunProfileFieldSource{{Field: "keywords", SourceKind: "deterministic_rules", SourceRefs: []string{"product:product_1"}, Confidence: "medium", ReviewState: "suggested", Explanation: "fixture"}},
+		AnalysisWarnings: []string{"model_not_used:deterministic_rules"},
+		InputHash:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Version:          1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
-	profile, err = repository.CreateMiyunProductProfile(ctx, profile)
+	profile, err = repository.CreateMiyunProductProfileDraft(ctx, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded, err := repository.GetMiyunProductProfile(ctx, organizationID, projectID, profile.ID); err != nil || reloaded.Keywords[0] != "test keyword" {
+	replacement := profile
+	replacement.ID = "miyun_profile_replacement_it_" + suffix
+	replacement.CreatedAt, replacement.UpdatedAt = now.Add(time.Second), now.Add(time.Second)
+	replacement, err = repository.CreateMiyunProductProfileDraft(ctx, replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if superseded, err := repository.GetMiyunProductProfile(ctx, organizationID, projectID, profile.ID); err != nil || superseded.Status != insights.MiyunProfileSuperseded || superseded.Version != 2 {
+		t.Fatalf("superseded profile=%#v err=%v", superseded, err)
+	}
+	confirmedAt := now.Add(2 * time.Second)
+	replacement.Status, replacement.ConfirmedBy, replacement.ConfirmedAt = insights.MiyunProfileConfirmed, userID, &confirmedAt
+	replacement.UpdatedAt = confirmedAt
+	for index := range replacement.FieldSources {
+		replacement.FieldSources[index].ReviewState = "human_confirmed"
+	}
+	profile, err = repository.ConfirmMiyunProductProfile(ctx, replacement, 1)
+	if err != nil || profile.Version != 2 {
+		t.Fatalf("confirmed profile=%#v err=%v", profile, err)
+	}
+	if reloaded, err := repository.GetMiyunProductProfile(ctx, organizationID, projectID, profile.ID); err != nil || reloaded.Keywords[0] != "test keyword" || reloaded.Status != insights.MiyunProfileConfirmed {
 		t.Fatalf("profile=%#v err=%v", reloaded, err)
 	}
 
@@ -118,6 +142,7 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 	material := insights.MiyunMaterial{
 		ID: "miyun_material_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID,
 		MiyunMaterialID: "remote-material-test", FirstSeenCrawlJobID: job.ID,
+		ImportMethod:    insights.MiyunImportCrawler,
 		SelectionStatus: insights.MiyunMaterialDiscovered, ImportStatus: insights.MiyunMaterialImportPending,
 		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -138,9 +163,9 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 		capturedAt := now.Add(time.Duration(index) * time.Hour)
 		_, err := repository.AppendMiyunMaterialSnapshot(ctx, insights.MiyunMaterialSnapshot{
 			ID:             "miyun_snapshot_" + strconv.Itoa(index) + "_it_" + suffix,
-			OrganizationID: organizationID, ProjectID: projectID, MaterialID: material.ID, CrawlJobID: job.ID,
+			OrganizationID: organizationID, ProjectID: projectID, MaterialID: material.ID, CrawlJobID: job.ID, ImportMethod: insights.MiyunImportCrawler,
 			SchemaVersion: "miyun-card-v1", CapturedAt: capturedAt,
-			CumulativeImpressions: int64(100 + index), RelatedAds: int64(5 + index),
+			CumulativeImpressions: int64(100 + index), CumulativeImpressionsRaw: strconv.Itoa(100 + index), RelatedAds: int64(5 + index),
 			SanitizedRaw: []byte(`{"schema_version":"miyun-card-v1"}`), CreatedAt: capturedAt,
 		})
 		if err != nil {
@@ -179,6 +204,7 @@ func cleanupMiyunIntegration(t *testing.T, db *sql.DB, organizationID contract.O
 		"DELETE FROM insight_miyun_product_profiles WHERE organization_id=?",
 		"DELETE FROM insight_miyun_connections WHERE organization_id=?",
 		"DELETE FROM asset_external_imports WHERE organization_id=?",
+		"DELETE FROM platform_project_runtimes WHERE organization_id=?",
 	} {
 		if _, err := db.ExecContext(ctx, statement, organizationID); err != nil {
 			t.Errorf("cleanup %q: %v", statement, err)

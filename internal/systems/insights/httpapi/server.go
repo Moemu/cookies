@@ -17,6 +17,12 @@ import (
 )
 
 type Application interface {
+	AnalyzeMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, insights.AnalyzeMiyunProductProfileRequest) (insights.MiyunProductProfile, error)
+	ConfirmMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ConfirmMiyunProductProfileRequest) (insights.MiyunProductProfile, error)
+	ListMiyunProductProfiles(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunProductProfile, error)
+	GetMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunProductProfile, error)
+	ManualImportMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, contract.IdempotencyKey, insights.ManualMiyunMaterialRequest) (insights.MiyunManualImportResult, error)
+
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)
 	ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error)
@@ -115,6 +121,7 @@ func New(app Application) *Server {
 	server.registerAssetRoutes()
 	server.registerConnectorRoutes()
 	server.registerExperimentRoutes()
+	server.registerMiyunRoutes()
 	return server
 }
 
@@ -490,6 +497,9 @@ func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	case errors.Is(err, insights.ErrVersionConflict):
 		status, code, retryable = http.StatusPreconditionFailed, "VERSION_CONFLICT", false
 		message = detailOr(err, insights.ErrVersionConflict, "资源已被更新，请刷新后重试")
+	case errors.Is(err, insights.ErrIdempotencyConflict):
+		status, code, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, false
+		message = "The idempotency key conflicts with an earlier Miyun request."
 	case strings.Contains(err.Error(), "scope is required"):
 		status, code, message, retryable = http.StatusForbidden, "SCOPE_REQUIRED", "缺少所需的洞察权限", false
 	}

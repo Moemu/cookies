@@ -124,14 +124,17 @@ func validMiyunConnection(now time.Time) MiyunConnection {
 func validMiyunProductProfile(now time.Time) MiyunProductProfile {
 	return MiyunProductProfile{
 		ID: "miyun_profile_1", OrganizationID: "org_1", ProjectID: "project_1", Status: MiyunProfileDraft,
-		ConnectionID: "miyun_connection_1",
-		ProductName:  "Insulated cup", CategoryID: "category_1", CategoryName: "Drinkware",
+		ConnectionID: "miyun_connection_1", ProductID: "product_1",
+		ProductName: "Insulated cup", CategoryID: "category_1", CategoryName: "Drinkware",
 		Keywords: []string{"insulated cup"}, MaterialContentTypes: []string{"product_demo"},
 		WindowStart: now.AddDate(0, -1, 0), WindowEnd: now, ProjectContextVersion: 3,
 		ProductAssetRefs:     []contract.AssetVersionRef{{AssetID: "asset_1", Version: 2}},
-		KnowledgeDocumentIDs: []string{"document_1"}, RuleVersion: "miyun-profile-v1",
-		InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Version:   1, CreatedBy: "operator_1", CreatedAt: now, UpdatedAt: now,
+		KnowledgeDocumentIDs: []string{"document_1"}, RuleVersion: MiyunProductProfileRuleVersion,
+		AnalysisMethod: "rules", InputSnapshot: []byte(`{"version":"1"}`),
+		FieldSources:     []MiyunProfileFieldSource{{Field: "keywords", SourceKind: "deterministic_rules", SourceRefs: []string{"product:product_1"}, Confidence: "medium", ReviewState: "suggested", Explanation: "fixture"}},
+		AnalysisWarnings: []string{"model_not_used:deterministic_rules"},
+		InputHash:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Version:          1, CreatedBy: "operator_1", CreatedAt: now, UpdatedAt: now,
 	}
 }
 
@@ -149,6 +152,7 @@ func validMiyunMaterial(now time.Time) MiyunMaterial {
 	return MiyunMaterial{
 		ID: "miyun_material_1", OrganizationID: "org_1", ProjectID: "project_1",
 		MiyunMaterialID: "remote_material_1", FirstSeenCrawlJobID: "miyun_job_1",
+		ImportMethod:    MiyunImportCrawler,
 		SelectionStatus: MiyunMaterialDiscovered, ImportStatus: MiyunMaterialImportPending,
 		Version: 1, CreatedBy: "operator_1", CreatedAt: now, UpdatedAt: now,
 	}
@@ -157,8 +161,9 @@ func validMiyunMaterial(now time.Time) MiyunMaterial {
 func validMiyunMaterialSnapshot(now time.Time) MiyunMaterialSnapshot {
 	return MiyunMaterialSnapshot{
 		ID: "miyun_snapshot_1", OrganizationID: "org_1", ProjectID: "project_1",
-		MaterialID: "miyun_material_1", CrawlJobID: "miyun_job_1", SchemaVersion: "miyun-card-v1",
-		CapturedAt: now, SanitizedRaw: []byte(`{"fixture_version":"1"}`), CreatedAt: now,
+		MaterialID: "miyun_material_1", CrawlJobID: "miyun_job_1", ImportMethod: MiyunImportCrawler, SchemaVersion: "miyun-card-v1",
+		CumulativeImpressionsRaw: "0",
+		CapturedAt:               now, SanitizedRaw: []byte(`{"fixture_version":"1"}`), CreatedAt: now,
 	}
 }
 

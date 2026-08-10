@@ -13,6 +13,8 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	assets := readMiyunMigration(t, filepath.Join(root, "migrations", "assets", "20260810100000_asset_external_imports.up.sql"))
 	insights := readMiyunMigration(t, filepath.Join(root, "migrations", "insights", "20260810101000_insight_miyun_pipeline.up.sql"))
+	intake := readMiyunMigration(t, filepath.Join(root, "migrations", "insights", "20260810102000_insight_miyun_product_analysis_intake.up.sql"))
+	all := assets + insights + intake
 
 	for _, table := range []string{
 		"asset_external_imports",
@@ -23,7 +25,7 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 		"insight_miyun_material_snapshots",
 		"insight_miyun_handoffs",
 	} {
-		if !strings.Contains(assets+insights, "CREATE TABLE IF NOT EXISTS "+table) {
+		if !strings.Contains(all, "CREATE TABLE IF NOT EXISTS "+table) {
 			t.Errorf("missing Miyun table %q", table)
 		}
 	}
@@ -37,7 +39,7 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 		"'exporting', 'exported', 'delivered', 'returned', 'failed'",
 		"'queued', 'running', 'succeeded', 'failed'",
 	} {
-		if !strings.Contains(assets+insights, status) {
+		if !strings.Contains(all, status) {
 			t.Errorf("missing required status set %q", status)
 		}
 	}
@@ -56,14 +58,21 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 		"cumulative_impressions BIGINT UNSIGNED NOT NULL DEFAULT 0",
 		"manifest_version VARCHAR(64)",
 		"CONSTRAINT chk_asset_external_imports_succeeded CHECK (status <> 'succeeded' OR committed_asset_id IS NOT NULL)",
+		"analysis_method VARCHAR(24)",
+		"input_snapshot JSON NOT NULL",
+		"field_sources JSON NOT NULL",
+		"analysis_warnings JSON NOT NULL",
+		"UNIQUE KEY uq_insight_miyun_materials_manual_idempotency",
+		"(import_method = 'manual' AND first_seen_crawl_job_id IS NULL",
+		"cumulative_impressions_raw VARCHAR(64) NOT NULL",
 	} {
-		if !strings.Contains(assets+insights, required) {
+		if !strings.Contains(all, required) {
 			t.Errorf("missing required migration contract %q", required)
 		}
 	}
 
 	for _, forbidden := range []string{"provider_job_id", "provider_output_id", "plaintext_cookie", "cookie_plaintext"} {
-		if strings.Contains(assets+insights, forbidden) {
+		if strings.Contains(all, forbidden) {
 			t.Errorf("forbidden migration field %q", forbidden)
 		}
 	}

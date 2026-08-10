@@ -291,7 +291,7 @@ type AssetCommit struct {
 }
 
 func allowedDeclaredImageMIME(value string) bool {
-	return value == "image/jpeg" || value == "image/png"
+	return value == "image/jpeg" || value == "image/png" || value == "image/webp"
 }
 
 func allowedDeclaredVideoMIME(value string) bool {

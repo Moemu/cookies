@@ -370,7 +370,7 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
     post:
       operationId: createKnowledgeDocument
-      summary: Scan, store, and parse one Markdown, DOCX, or PDF document.
+      summary: Scan, store, and parse one MD, TXT, DOCX, XLSX, or PDF document.
       parameters:
       - $ref: '#/components/parameters/ProjectID'
       requestBody:
@@ -416,6 +416,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KnowledgeDocument'
+        '403':
+          $ref: '#/components/responses/ProjectAccessDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/original:
+    get:
+      operationId: downloadKnowledgeDocumentOriginal
+      summary: Re-authorize and download the immutable original Project document.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Private no-store original document bytes.
+          headers:
+            Cache-Control:
+              schema: {type: string, example: 'private, no-store'}
+            Content-Disposition:
+              schema: {type: string, example: 'attachment; filename="product.xlsx"'}
+            X-Content-Type-Options:
+              schema: {type: string, example: nosniff}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+            text/markdown:
+              schema: {type: string, format: binary}
+            text/plain:
+              schema: {type: string, format: binary}
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: {type: string, format: binary}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+            application/pdf:
+              schema: {type: string, format: binary}
         '403':
           $ref: '#/components/responses/ProjectAccessDenied'
         '404':
@@ -609,6 +646,10 @@ paths:
             schema:
               type: string
               contentEncoding: binary
+          image/webp:
+            schema:
+              type: string
+              contentEncoding: binary
       responses:
         '204':
           description: Upload stored in quarantine.
@@ -744,6 +785,10 @@ paths:
                 type: string
                 format: binary
             image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
               schema:
                 type: string
                 format: binary
@@ -2718,7 +2763,7 @@ components:
           format: date-time
         declared_mime_type:
           type: string
-          enum: [image/jpeg, image/png, video/mp4, audio/wav, audio/mpeg, audio/aac]
+          enum: [image/jpeg, image/png, image/webp, video/mp4, audio/wav, audio/mpeg, audio/aac]
           minLength: 1
         declared_size_bytes:
           type: integer
@@ -3821,7 +3866,7 @@ components:
           maxLength: 512
         declared_mime_type:
           type: string
-          enum: [image/jpeg, image/png, video/mp4, audio/wav, audio/mpeg, audio/aac]
+          enum: [image/jpeg, image/png, image/webp, video/mp4, audio/wav, audio/mpeg, audio/aac]
         declared_size_bytes:
           type: integer
           minimum: 1

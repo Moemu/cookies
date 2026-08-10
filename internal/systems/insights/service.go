@@ -20,10 +20,11 @@ const (
 )
 
 var (
-	ErrNotFound        = errors.New("insights resource not found")
-	ErrInvalidRequest  = errors.New("insights request is invalid")
-	ErrInvalidState    = errors.New("insights resource is not in a state that allows this action")
-	ErrVersionConflict = errors.New("insights resource version conflict")
+	ErrNotFound            = errors.New("insights resource not found")
+	ErrInvalidRequest      = errors.New("insights request is invalid")
+	ErrInvalidState        = errors.New("insights resource is not in a state that allows this action")
+	ErrVersionConflict     = errors.New("insights resource version conflict")
+	ErrIdempotencyConflict = errors.New("insights idempotency key conflicts with an existing request")
 )
 
 type ReportStatus string
@@ -413,6 +414,14 @@ type Repository interface {
 
 type Service struct {
 	Repository Repository
+	// Miyun owns the product-profile and material intake state introduced by
+	// the Miyun MVP. The source readers are narrow, authorized projections;
+	// Insights never reaches into another module's tables.
+	Miyun          MiyunRepository
+	MiyunProjects  MiyunProjectSourceReader
+	MiyunAssets    MiyunAssetSourceReader
+	MiyunKnowledge MiyunKnowledgeSourceReader
+	MiyunMedia     MiyunMediaEvidenceReader
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.
 	Assets AssetRepository
