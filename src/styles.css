@@ -5659,6 +5659,8 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 #brand-film-stage-brief .brand-assets article { grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 12px 0; }
 #brand-film-stage-brief .brand-assets article:first-of-type { border-top: 0; }
 #brand-film-stage-brief .brand-asset-thumb { width: 72px; height: 64px; }
+#brand-film-stage-brief .brand-asset-copy { min-width: 0; }
+#brand-film-stage-brief .brand-asset-source { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
 #brand-film-stage-brief .brand-assets .brand-checkbox,
 #brand-film-stage-brief .brand-assets .brand-upload { grid-column: 2; justify-self: start; }
 #brand-film-stage-brief .brand-fact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

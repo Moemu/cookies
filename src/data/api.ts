@@ -3803,7 +3803,11 @@ async function uploadKnowledgeDocument(projectId: string, file: File): Promise<A
   })
   const payload = await response.json() as ApiKnowledgeDocument | { error?: { message?: string } }
   if (!response.ok) throw new Error('error' in payload ? payload.error?.message ?? 'Brief 上传失败' : 'Brief 上传失败')
-  return payload as ApiKnowledgeDocument
+  const document = payload as ApiKnowledgeDocument
+  if (document.status === 'ready' && !document.extracted_text?.trim()) {
+    return getKnowledgeDocument(projectId, document.id)
+  }
+  return document
 }
 
 function getKnowledgeDocument(projectId: string, documentId: string) {
@@ -3857,6 +3861,7 @@ function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDo
         product_name: productName,
       },
     },
+    { 'Idempotency-Key': `manual-brand-film-${document.id}-${durationSeconds}` },
   )
 }
 

@@ -1860,6 +1860,16 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusServiceUnavailable, "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", "视觉分析模型网关暂时不可用，请稍后重试。", true
 	case errors.Is(err, creative.ErrViralAnalysisResponseInvalid):
 		status, code, message, retryable = http.StatusBadGateway, "VIRAL_ANALYSIS_RESPONSE_INVALID", "视觉分析模型未返回可用的五维拆解结果，请稍后重试。", true
+	case errors.Is(err, creative.ErrShortDramaAnalysisSourceUnavailable):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "SHORT_DRAMA_SOURCE_UNAVAILABLE", "短剧源视频不可读取，请重新上传后再进行素材理解。", false
+	case errors.Is(err, creative.ErrShortDramaAnalysisPreparationFailed):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "SHORT_DRAMA_VIDEO_UNREADABLE", "短剧源视频无法抽帧分析，请上传可正常播放的视频后重试。", false
+	case errors.Is(err, creative.ErrShortDramaAnalysisProviderRejected):
+		status, code, message, retryable = http.StatusBadGateway, "SHORT_DRAMA_ANALYSIS_REQUEST_REJECTED", "视频理解模型拒绝了本次多模态请求，请检查模型能力配置。", false
+	case errors.Is(err, creative.ErrShortDramaAnalysisProviderUnavailable):
+		status, code, message, retryable = http.StatusServiceUnavailable, "SHORT_DRAMA_ANALYSIS_PROVIDER_UNAVAILABLE", "视频理解模型网关暂时不可用，系统已重试，请稍后再次尝试。", true
+	case errors.Is(err, creative.ErrShortDramaAnalysisResponseInvalid):
+		status, code, message, retryable = http.StatusBadGateway, "SHORT_DRAMA_ANALYSIS_RESPONSE_INVALID", "视频理解模型没有返回符合剧情分析合约的结果，请重新生成。", true
 	case errors.Is(err, creative.ErrInvalidAINativeRequirement):
 		status, code, message, retryable = http.StatusBadRequest, "INVALID_AI_NATIVE_REQUIREMENT", "AI 原生广告需求参数不符合当前抖音 P0 规则。", false
 	case errors.Is(err, creative.ErrAINativeProductLinkIncomplete):
