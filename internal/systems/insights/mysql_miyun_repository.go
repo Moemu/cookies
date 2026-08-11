@@ -44,6 +44,17 @@ type MiyunHandoffRepository interface {
 	UpdateMiyunHandoffStatus(context.Context, MiyunHandoff, int64) (MiyunHandoff, error)
 }
 
+type MiyunReturnRepository interface {
+	MiyunHandoffRepository
+	CreateMiyunHandoffReturn(context.Context, MiyunHandoffReturn) (MiyunHandoffReturn, bool, error)
+	GetMiyunHandoffReturnByIdempotencyKey(context.Context, contract.OrganizationID, contract.ProjectID, string, string) (MiyunHandoffReturn, error)
+	GetMiyunHandoffReturn(context.Context, contract.OrganizationID, contract.ProjectID, string, string) (MiyunHandoffReturn, error)
+	ListMiyunHandoffReturns(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]MiyunHandoffReturn, error)
+	MarkMiyunHandoffReturnUploaded(context.Context, MiyunHandoffReturn, int64) (MiyunHandoffReturn, error)
+	FailMiyunHandoffReturn(context.Context, MiyunHandoffReturn, int64, string) (MiyunHandoffReturn, error)
+	CompleteMiyunHandoffReturn(context.Context, MiyunHandoffReturn, int64, MiyunHandoff, int64) (MiyunHandoffReturn, MiyunHandoff, error)
+}
+
 const miyunConnectionSelect = `SELECT id, organization_id, project_id, status,
 	session_ciphertext, session_key_version, session_expires_at,
 	last_verified_at, last_successful_request_at, cooldown_until, last_error_kind, last_error_code, last_error_at,
@@ -433,6 +444,109 @@ const miyunHandoffSelect = `SELECT id, organization_id, project_id, source_mater
 	status, manifest_version, parameter_version, product_files_snapshot, source_snapshot,
 	profile_snapshot, input_hash, version, created_by, created_at, updated_at FROM insight_miyun_handoffs`
 
+const miyunHandoffReturnSelect = `SELECT id, organization_id, project_id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, status, idempotency_key, request_hash, upload_idempotency_key, upload_request_hash, filename, asset_id, asset_version, mime_type, sha256, size_bytes, insight_asset_id, uploaded_by, uploaded_at, failure_code, mark_idempotency_key, mark_request_hash, returned_by, returned_at, version, created_at, updated_at FROM insight_miyun_handoff_returns`
+
+func (r MySQLRepository) CreateMiyunHandoffReturn(ctx context.Context, value MiyunHandoffReturn) (MiyunHandoffReturn, bool, error) {
+	if err := value.Validate(); err != nil {
+		return MiyunHandoffReturn{}, false, err
+	}
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_handoff_returns (id, organization_id, project_id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, status, idempotency_key, request_hash, uploaded_by, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.HandoffID, value.HandoffVersion, value.ManifestVersion, value.InputHash, value.ParameterVersion, value.ProductProfileID, value.Status, value.IdempotencyKey, value.RequestHash, value.UploadedBy, value.Version, value.CreatedAt, value.UpdatedAt)
+	if err == nil {
+		return value, true, nil
+	}
+	if !isDuplicateKey(err) {
+		return MiyunHandoffReturn{}, false, err
+	}
+	existing, getErr := r.GetMiyunHandoffReturnByIdempotencyKey(ctx, value.OrganizationID, value.ProjectID, value.HandoffID, value.IdempotencyKey)
+	if getErr != nil {
+		return MiyunHandoffReturn{}, false, getErr
+	}
+	if existing.RequestHash != value.RequestHash {
+		return MiyunHandoffReturn{}, false, ErrIdempotencyConflict
+	}
+	return existing, false, nil
+}
+func (r MySQLRepository) GetMiyunHandoffReturnByIdempotencyKey(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, handoffID, key string) (MiyunHandoffReturn, error) {
+	value, err := scanMiyunHandoffReturn(r.DB.QueryRowContext(ctx, miyunHandoffReturnSelect+` WHERE organization_id=? AND project_id=? AND handoff_id=? AND idempotency_key=?`, org, project, handoffID, key))
+	if errors.Is(err, sql.ErrNoRows) {
+		return MiyunHandoffReturn{}, ErrNotFound
+	}
+	return value, err
+}
+func (r MySQLRepository) GetMiyunHandoffReturn(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, handoffID, id string) (MiyunHandoffReturn, error) {
+	return scanMiyunHandoffReturn(r.DB.QueryRowContext(ctx, miyunHandoffReturnSelect+` WHERE organization_id=? AND project_id=? AND handoff_id=? AND id=?`, org, project, handoffID, id))
+}
+func (r MySQLRepository) ListMiyunHandoffReturns(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, handoffID string) ([]MiyunHandoffReturn, error) {
+	rows, err := r.DB.QueryContext(ctx, miyunHandoffReturnSelect+` WHERE organization_id=? AND project_id=? AND handoff_id=? ORDER BY created_at DESC, id DESC`, org, project, handoffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []MiyunHandoffReturn{}
+	for rows.Next() {
+		v, e := scanMiyunHandoffReturn(rows)
+		if e != nil {
+			return nil, e
+		}
+		values = append(values, v)
+	}
+	return values, rows.Err()
+}
+func (r MySQLRepository) MarkMiyunHandoffReturnUploaded(ctx context.Context, value MiyunHandoffReturn, expected int64) (MiyunHandoffReturn, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_miyun_handoff_returns SET status=?, upload_idempotency_key=?, upload_request_hash=?, filename=?, asset_id=?, asset_version=?, mime_type=?, sha256=?, size_bytes=?, insight_asset_id=?, uploaded_by=?, uploaded_at=?, failure_code=NULL, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND handoff_id=? AND id=? AND version=? AND status IN ('created','failed')`, value.Status, value.UploadIdempotencyKey, value.UploadRequestHash, value.Filename, value.AssetVersion.AssetID, value.AssetVersion.Version, value.MIMEType, value.SHA256, value.SizeBytes, nullableString(value.InsightAssetID), value.UploadedBy, value.UploadedAt, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.HandoffID, value.ID, expected)
+	if err != nil {
+		return MiyunHandoffReturn{}, err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return MiyunHandoffReturn{}, ErrVersionConflict
+	}
+	value.Version = expected + 1
+	return value, nil
+}
+func (r MySQLRepository) FailMiyunHandoffReturn(ctx context.Context, value MiyunHandoffReturn, expected int64, code string) (MiyunHandoffReturn, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_miyun_handoff_returns SET status='failed', upload_idempotency_key=?, upload_request_hash=?, failure_code=?, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND handoff_id=? AND id=? AND version=? AND status IN ('created','failed')`, nullableString(value.UploadIdempotencyKey), nullableString(value.UploadRequestHash), code, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.HandoffID, value.ID, expected)
+	if err != nil {
+		return MiyunHandoffReturn{}, err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return MiyunHandoffReturn{}, ErrVersionConflict
+	}
+	value.Status, value.FailureCode, value.Version = MiyunHandoffReturnFailed, code, expected+1
+	return value, nil
+}
+
+func (r MySQLRepository) CompleteMiyunHandoffReturn(ctx context.Context, value MiyunHandoffReturn, returnVersion int64, handoff MiyunHandoff, handoffVersion int64) (MiyunHandoffReturn, MiyunHandoff, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE insight_miyun_handoff_returns SET status='returned', mark_idempotency_key=?, mark_request_hash=?, returned_by=?, returned_at=?, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND handoff_id=? AND id=? AND version=? AND status='uploaded'`, value.MarkIdempotencyKey, value.MarkRequestHash, value.ReturnedBy, value.ReturnedAt, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.HandoffID, value.ID, returnVersion)
+	if err != nil {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE insight_miyun_handoffs SET status='returned', version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND status IN ('exported','delivered')`, handoff.UpdatedAt, handoff.OrganizationID, handoff.ProjectID, handoff.ID, handoffVersion)
+	if err != nil {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, err
+	}
+	n, _ = result.RowsAffected()
+	if n == 0 {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
+	}
+	if err = tx.Commit(); err != nil {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, err
+	}
+	value.Status, value.Version = MiyunHandoffReturnReturned, returnVersion+1
+	handoff.Status, handoff.Version = MiyunHandoffReturned, handoffVersion+1
+	return value, handoff, nil
+}
+
 func (r MySQLRepository) CreateMiyunHandoff(ctx context.Context, value MiyunHandoff) (MiyunHandoff, error) {
 	if err := value.Validate(); err != nil {
 		return MiyunHandoff{}, err
@@ -520,6 +634,34 @@ func scanMiyunHandoff(row rowScanner) (MiyunHandoff, error) {
 	value.ProductFilesSnapshot = json.RawMessage(productFilesSnapshot)
 	value.SourceSnapshot = json.RawMessage(sourceSnapshot)
 	value.ProfileSnapshot = json.RawMessage(profileSnapshot)
+	return value, nil
+}
+
+func scanMiyunHandoffReturn(row rowScanner) (MiyunHandoffReturn, error) {
+	var value MiyunHandoffReturn
+	var uploadKey, uploadHash, filename, assetID, mime, digest, insightID, failure, markKey, markHash, returnedBy sql.NullString
+	var assetVersion, size sql.NullInt64
+	var uploadedAt, returnedAt sql.NullTime
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.HandoffID, &value.HandoffVersion, &value.ManifestVersion, &value.InputHash, &value.ParameterVersion, &value.ProductProfileID, &value.Status, &value.IdempotencyKey, &value.RequestHash, &uploadKey, &uploadHash, &filename, &assetID, &assetVersion, &mime, &digest, &size, &insightID, &value.UploadedBy, &uploadedAt, &failure, &markKey, &markHash, &returnedBy, &returnedAt, &value.Version, &value.CreatedAt, &value.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MiyunHandoffReturn{}, ErrNotFound
+	}
+	if err != nil {
+		return MiyunHandoffReturn{}, err
+	}
+	value.UploadIdempotencyKey, value.UploadRequestHash = uploadKey.String, uploadHash.String
+	value.Filename, value.MIMEType, value.SHA256, value.InsightAssetID, value.FailureCode = filename.String, mime.String, digest.String, insightID.String, failure.String
+	value.MarkIdempotencyKey, value.MarkRequestHash, value.ReturnedBy = markKey.String, markHash.String, returnedBy.String
+	value.AssetVersion = contract.AssetVersionRef{AssetID: contract.AssetID(assetID.String), Version: assetVersion.Int64}
+	value.SizeBytes = size.Int64
+	if uploadedAt.Valid {
+		v := uploadedAt.Time
+		value.UploadedAt = &v
+	}
+	if returnedAt.Valid {
+		v := returnedAt.Time
+		value.ReturnedAt = &v
+	}
 	return value, nil
 }
 

@@ -78,6 +78,7 @@ type AssetRelationType string
 const (
 	AssetRelationGeneratedFrom AssetRelationType = "generated_from"
 	AssetRelationDerivedFrom   AssetRelationType = "derived_from"
+	AssetRelationReturnedFrom  AssetRelationType = "returned_from"
 )
 
 type AssetRelation struct {
@@ -96,7 +97,7 @@ func (r AssetRelation) Validate() error {
 	if err := r.OutputAsset.Validate(); err != nil {
 		return fmt.Errorf("output asset: %w", err)
 	}
-	if r.RelationType != AssetRelationGeneratedFrom && r.RelationType != AssetRelationDerivedFrom {
+	if r.RelationType != AssetRelationGeneratedFrom && r.RelationType != AssetRelationDerivedFrom && r.RelationType != AssetRelationReturnedFrom {
 		return fmt.Errorf("asset relation type is invalid")
 	}
 	if err := r.Source.Validate(); err != nil {

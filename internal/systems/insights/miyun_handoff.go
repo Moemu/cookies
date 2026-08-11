@@ -227,13 +227,35 @@ func (s Service) ListMiyunHandoffs(ctx context.Context, actor contract.ActorCont
 	if err != nil {
 		return nil, err
 	}
-	return r.ListMiyunHandoffs(ctx, actor.OrganizationID, projectID, limit)
+	values, err := r.ListMiyunHandoffs(ctx, actor.OrganizationID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	if returns, ok := s.Miyun.(MiyunReturnRepository); ok {
+		for index := range values {
+			values[index].Returns, err = returns.ListMiyunHandoffReturns(ctx, actor.OrganizationID, projectID, values[index].ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return values, nil
 }
 func (s Service) GetMiyunHandoff(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (MiyunHandoff, error) {
 	if err := s.miyunReady(actor, projectID, ScopeRead); err != nil {
 		return MiyunHandoff{}, err
 	}
-	return s.Miyun.GetMiyunHandoff(ctx, actor.OrganizationID, projectID, strings.TrimSpace(id))
+	value, err := s.Miyun.GetMiyunHandoff(ctx, actor.OrganizationID, projectID, strings.TrimSpace(id))
+	if err != nil {
+		return MiyunHandoff{}, err
+	}
+	if returns, ok := s.Miyun.(MiyunReturnRepository); ok {
+		value.Returns, err = returns.ListMiyunHandoffReturns(ctx, actor.OrganizationID, projectID, value.ID)
+		if err != nil {
+			return MiyunHandoff{}, err
+		}
+	}
+	return value, nil
 }
 func (s Service) MarkMiyunHandoffDelivered(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, expectedVersion int64) (MiyunHandoff, error) {
 	if err := s.miyunReady(actor, projectID, ScopeConfirm); err != nil {

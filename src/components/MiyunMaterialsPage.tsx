@@ -38,6 +38,81 @@ const idempotencyKey = () =>
   globalThis.crypto?.randomUUID?.() ?? `miyun-${Date.now()}`;
 const miyunDocumentFile = /\.(pdf|docx|md)$/i;
 const miyunProjectMediaFile = /\.(png|jpe?g|webp|mp4)$/i;
+const miyunReturnVideoFile = /\.mp4$/i;
+
+type MiyunReturnUpload = {
+  handoffId: string;
+  file: File;
+  expectedVersion: number;
+  onProgress: (progress: number) => void;
+};
+
+type MiyunReturnRecord = { id: string; version: number };
+
+function safeReturnRecord(value: unknown): MiyunReturnRecord | null {
+  const record = value && typeof value === "object" && "return" in value
+    ? (value as { return: unknown }).return
+    : value;
+  if (!record || typeof record !== "object") return null;
+  const { id, version } = record as { id?: unknown; version?: unknown };
+  return typeof id === "string" && typeof version === "number" ? { id, version } : null;
+}
+
+function returnRequestError(status: number) {
+  if (status === 403) return new Error("你没有向当前 Project 回传该交接的权限。");
+  if (status === 409) return new Error("交接状态已更新，请刷新后重试。");
+  return new Error("回传未完成，请检查 MP4 文件后重试。");
+}
+
+// TODO(api): move this three-step contract into the shared client once its
+// public types are available. A user action creates a return record, uploads
+// its MP4, then explicitly marks it returned; it never publishes or dispatches AI.
+async function uploadMiyunHandoffReturn({
+  projectId,
+  handoffId,
+  file,
+  expectedVersion,
+  onProgress,
+}: MiyunReturnUpload & { projectId: string }): Promise<void> {
+  const handoffPath = `/api/insights/v1/projects/${encodeURIComponent(projectId)}/miyun/handoffs/${encodeURIComponent(handoffId)}`;
+  const createResponse = await fetch(`${handoffPath}/returns`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey() },
+    body: JSON.stringify({ expected_version: expectedVersion }),
+  });
+  if (!createResponse.ok) throw returnRequestError(createResponse.status);
+  const returnRecord = safeReturnRecord(await createResponse.json());
+  if (!returnRecord) throw new Error("回传记录未创建，请刷新后重试。");
+  await new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    const endpoint = `${handoffPath}/returns/${encodeURIComponent(returnRecord.id)}:upload`;
+    request.open("POST", endpoint);
+    request.responseType = "json";
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    request.onerror = () => reject(new Error("回传上传失败，请检查网络后重试。"));
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        onProgress(100);
+        resolve();
+        return;
+      }
+      reject(returnRequestError(request.status));
+    };
+    const form = new FormData();
+    form.append("file", file);
+    form.append("expected_version", String(expectedVersion));
+    form.append("idempotency_key", idempotencyKey());
+    request.send(form);
+  });
+  const markResponse = await fetch(`${handoffPath}/returns/${encodeURIComponent(returnRecord.id)}:mark-returned`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey() },
+    body: JSON.stringify({ expected_version: expectedVersion }),
+  });
+  if (!markResponse.ok) throw returnRequestError(markResponse.status);
+}
 
 function miyunAssetLabel(asset: ApiProjectMediaAsset, index: number) {
   const kind = asset.kind === "video" ? "视频" : asset.kind === "image" ? "图片" : "文档";
@@ -140,6 +215,15 @@ function errorText(error: unknown) {
   if (error instanceof ApiRequestError && error.status === 403)
     return miyunStateCopy("forbidden").title;
   return error instanceof Error ? error.message : "操作失败，请稍后重试。";
+}
+function miyunHandoffStatusCopy(status: ApiMiyunHandoff["status"]) {
+  return {
+    exporting: "导出中",
+    exported: "已导出（尚未交付）",
+    delivered: "已交付（可人工回传）",
+    returned: "已回传",
+    failed: "导出失败",
+  }[status];
 }
 
 export function MiyunMaterialsPage({
@@ -427,6 +511,15 @@ export function MiyunMaterialsPage({
                   () => api.markMiyunHandoffDelivered(currentProject.id, handoff.id, handoff.version),
                   "已人工标记为已交付。",
                 )
+              }
+              onManualReturn={({ handoffId, file, expectedVersion, onProgress }) =>
+                uploadMiyunHandoffReturn({
+                  projectId: currentProject.id,
+                  handoffId,
+                  file,
+                  expectedVersion,
+                  onProgress,
+                })
               }
               onRetry={() => void load()}
             />
@@ -1042,6 +1135,7 @@ function FissionTask({
   onProfileChange,
   onCreate,
   onMarkDelivered,
+  onManualReturn,
   onRetry,
 }: {
   busy: boolean;
@@ -1057,6 +1151,7 @@ function FissionTask({
   onProfileChange: (id: string) => void;
   onCreate: () => Promise<void>;
   onMarkDelivered: (handoff: ApiMiyunHandoff) => Promise<void>;
+  onManualReturn: (upload: MiyunReturnUpload) => Promise<void>;
   onRetry: () => void;
 }) {
   const selectedProfile = profiles.find((item) => item.id === selectedProfileId);
@@ -1106,16 +1201,95 @@ function FissionTask({
         {!handoffs.length ? <div className="panel-empty">暂无交接记录。</div> : handoffs.map((handoff) => (
           <div className="miyun-handoff-history-row" key={handoff.id}>
             <b>{handoff.id}</b>
-            <small>{handoff.status} · manifest {handoff.manifest_version} · 参数 {handoff.parameter_version} · v{handoff.version}</small>
+            <small>状态：{miyunHandoffStatusCopy(handoff.status)} · manifest {handoff.manifest_version} · 参数 {handoff.parameter_version} · v{handoff.version}</small>
             <small>输入哈希：{handoff.input_hash}</small>
             {handoff.status === "exporting" || handoff.status === "exported" || handoff.status === "delivered" ? <a className="secondary-button" href={api.getMiyunHandoffExportUrl(projectId, handoff.id)} download>{handoff.status === "exporting" ? "导出并下载交接 zip" : "下载交接 zip"}</a> : null}
             {handoff.status === "exported" ? <button type="button" disabled={busy} onClick={() => void onMarkDelivered(handoff)}>人工确认已交付</button> : null}
+            {handoff.status === "exported" || handoff.status === "delivered" ? (
+              <ManualHandoffReturnUpload
+                handoff={handoff}
+                busy={busy}
+                onUpload={onManualReturn}
+                onComplete={onRetry}
+              />
+            ) : null}
+            {handoff.status === "returned" ? (
+              <div role="status" className="miyun-handoff-returned">
+                <b>已回传</b>
+                <small>此 MP4 由人工回传；不会自动发布、交付或进入 AI。</small>
+              </div>
+            ) : null}
+            {handoff.returns?.length ? <small>回传历史：{handoff.returns.map((item) => `${item.status}${item.filename ? ` · ${item.filename}` : ""}${item.sha256 ? ` · SHA-256 ${item.sha256}` : ""}`).join("；")}</small> : null}
+            <small>血缘：本 Project · 素材 {handoff.source_material_ids.join("、")} · profile {handoff.product_profile_id} · 输入哈希 {handoff.input_hash}</small>
             {handoff.status === "exporting" ? <small>等待导出：点击“导出并下载交接 zip”开始流式导出；成功后才可人工确认交付。</small> : null}
             {handoff.status === "failed" ? <small>导出失败；请重新下载，失败不会标记为已导出或已交付。</small> : null}
           </div>
         ))}
       </article>
     </section>
+  );
+}
+
+function ManualHandoffReturnUpload({
+  handoff,
+  busy,
+  onUpload,
+  onComplete,
+}: {
+  handoff: ApiMiyunHandoff;
+  busy: boolean;
+  onUpload: (upload: MiyunReturnUpload) => Promise<void>;
+  onComplete: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const upload = async () => {
+    if (!file) {
+      setError("请选择要人工回传的 MP4 文件。");
+      return;
+    }
+    setError("");
+    setProgress(0);
+    try {
+      await onUpload({
+        handoffId: handoff.id,
+        file,
+        expectedVersion: handoff.version,
+        onProgress: setProgress,
+      });
+      setFile(null);
+      onComplete();
+    } catch (cause) {
+      // The transport helper deliberately produces safe messages only; never
+      // render server response bodies, which can contain storage paths.
+      setError(cause instanceof Error ? cause.message : "回传未完成，请重试。");
+    } finally {
+      setProgress(null);
+    }
+  };
+  return (
+    <div className="miyun-handoff-return-upload" aria-label={`人工回传 ${handoff.id}`}>
+      <b>人工回传 MP4</b>
+      <small>仅可对当前 Project 的已导出或已交付交接手动上传；不会触发发布、交付或 AI。</small>
+      <input
+        type="file"
+        accept="video/mp4,.mp4"
+        aria-label={`选择 ${handoff.id} 的回传 MP4`}
+        disabled={busy || progress !== null}
+        onChange={(event) => {
+          const selected = event.target.files?.[0] ?? null;
+          setError(selected && !miyunReturnVideoFile.test(selected.name) ? "仅支持 MP4 文件回传。" : "");
+          setFile(selected && miyunReturnVideoFile.test(selected.name) ? selected : null);
+        }}
+      />
+      {file ? <small>已选择：{file.name}</small> : null}
+      {progress !== null ? <progress max="100" value={progress} aria-label="回传上传进度">{progress}%</progress> : null}
+      <button type="button" disabled={busy || progress !== null || !file} onClick={() => void upload()}>
+        {progress !== null ? `正在回传 ${progress}%` : "人工上传回传"}
+      </button>
+      {error ? <div className="inline-notice" role="alert">{error}<button type="button" disabled={busy || progress !== null || !file} onClick={() => void upload()}>重试回传</button></div> : null}
+    </div>
   );
 }
 

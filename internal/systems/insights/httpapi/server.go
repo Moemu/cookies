@@ -41,6 +41,9 @@ type Application interface {
 	GetMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunHandoff, error)
 	MarkMiyunHandoffDelivered(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunHandoff, error)
 	ExportMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string, io.Writer) error
+	CreateMiyunHandoffReturn(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey, insights.CreateMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error)
+	UploadMiyunHandoffReturn(context.Context, contract.ActorContext, contract.ProjectID, string, string, contract.IdempotencyKey, insights.UploadMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error)
+	MarkMiyunHandoffReturned(context.Context, contract.ActorContext, contract.ProjectID, string, string, contract.IdempotencyKey, int64) (insights.MiyunHandoff, insights.MiyunHandoffReturn, error)
 
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)

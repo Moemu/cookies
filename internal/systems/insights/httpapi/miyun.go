@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/insights"
 )
@@ -35,7 +36,98 @@ func (s *Server) registerMiyunRoutes() {
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs", s.createMiyunHandoff)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}", s.getMiyunHandoff)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/export", s.exportMiyunHandoff)
+	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns", s.createMiyunHandoffReturn)
+	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_action}", s.miyunHandoffReturnAction)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_action}", s.miyunHandoffAction)
+}
+
+func (s *Server) createMiyunHandoffReturn(writer http.ResponseWriter, request *http.Request) {
+	key, ok := miyunIdempotencyKey(writer, request)
+	if !ok {
+		return
+	}
+	var body insights.CreateMiyunHandoffReturnRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.CreateMiyunHandoffReturn(request.Context(), mustActor(request), projectID(request), request.PathValue("handoff_id"), key, body)
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) miyunHandoffReturnAction(writer http.ResponseWriter, request *http.Request) {
+	action := request.PathValue("return_action")
+	handoffID := request.PathValue("handoff_id")
+	if strings.HasSuffix(action, ":upload") {
+		s.uploadMiyunHandoffReturn(writer, request, handoffID, strings.TrimSuffix(action, ":upload"))
+		return
+	}
+	if strings.HasSuffix(action, ":mark-returned") {
+		s.markMiyunHandoffReturned(writer, request, handoffID, strings.TrimSuffix(action, ":mark-returned"))
+		return
+	}
+	http.NotFound(writer, request)
+}
+
+func (s *Server) uploadMiyunHandoffReturn(writer http.ResponseWriter, request *http.Request, handoffID, returnID string) {
+	request.Body = http.MaxBytesReader(writer, request.Body, assets.MaxVideoBytes+1024*1024)
+	if err := request.ParseMultipartForm(1024 * 1024); err != nil {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	file, header, err := request.FormFile("file")
+	if err != nil {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	defer file.Close()
+	expected, err := strconv.ParseInt(request.FormValue("expected_version"), 10, 64)
+	if err != nil || expected < 1 {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	key := contract.IdempotencyKey(strings.TrimSpace(request.FormValue("idempotency_key")))
+	if err := key.Validate(); err != nil {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	declaredHash := strings.TrimSpace(request.FormValue("declared_sha256"))
+	var digest *string
+	if declaredHash != "" {
+		digest = &declaredHash
+	}
+	declaredMIMEType := header.Header.Get("Content-Type")
+	if declaredMIMEType == "" && strings.HasSuffix(strings.ToLower(header.Filename), ".mp4") {
+		declaredMIMEType = "video/mp4"
+	}
+	value, err := s.app.UploadMiyunHandoffReturn(request.Context(), mustActor(request), projectID(request), handoffID, returnID, key, insights.UploadMiyunHandoffReturnRequest{ExpectedVersion: expected, Filename: header.Filename, DeclaredMIMEType: declaredMIMEType, DeclaredSizeBytes: header.Size, DeclaredSHA256: digest, Content: file})
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) markMiyunHandoffReturned(writer http.ResponseWriter, request *http.Request, handoffID, returnID string) {
+	key, ok := miyunIdempotencyKey(writer, request)
+	if !ok {
+		return
+	}
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	handoff, value, err := s.app.MarkMiyunHandoffReturned(request.Context(), mustActor(request), projectID(request), handoffID, returnID, key, body.ExpectedVersion)
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"handoff": handoff, "return": value})
 }
 
 func (s *Server) listMiyunHandoffs(writer http.ResponseWriter, request *http.Request) {

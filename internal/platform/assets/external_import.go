@@ -17,11 +17,12 @@ import (
 // and transport metadata. Provider generated IDs are never used as Assets
 // lineage fields.
 type ExternalMediaImportRequest struct {
-	SourceProvider string `json:"source_provider"`
-	SourceObjectID string `json:"source_object_id"`
-	SourceLocator  string `json:"source_locator,omitempty"`
-	MIMEType       string `json:"mime_type"`
-	SizeBytes      int64  `json:"size_bytes"`
+	SourceProvider string                 `json:"source_provider"`
+	SourceObjectID string                 `json:"source_object_id"`
+	SourceLocator  string                 `json:"source_locator,omitempty"`
+	MIMEType       string                 `json:"mime_type"`
+	SizeBytes      int64                  `json:"size_bytes"`
+	ReturnSources  []contract.ResourceRef `json:"-"`
 }
 
 func (r ExternalMediaImportRequest) Validate() error {
@@ -30,6 +31,11 @@ func (r ExternalMediaImportRequest) Validate() error {
 	}
 	if r.MIMEType != "video/mp4" || r.SizeBytes < 1 || r.SizeBytes > MaxVideoBytes {
 		return fmt.Errorf("external import must be an MP4 within the video size limit")
+	}
+	for _, source := range r.ReturnSources {
+		if err := source.Validate(); err != nil {
+			return fmt.Errorf("external import return source: %w", err)
+		}
 	}
 	return nil
 }
@@ -140,6 +146,13 @@ func (s ExternalImportService) Import(ctx context.Context, requestContext contra
 	}
 	if commit.MIMEType != "video/mp4" || commit.SizeBytes > MaxVideoBytes {
 		return s.fail(ctx, stored, "INVALID_CONTENT", ErrInvalidAssetContent)
+	}
+	for _, source := range request.ReturnSources {
+		commit.Relations = append(commit.Relations, AssetRelation{
+			OrganizationID: stored.OrganizationID, ProjectID: projectID,
+			OutputAsset:  contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version},
+			RelationType: AssetRelationReturnedFrom, Source: source,
+		})
 	}
 	if reused, findErr := s.Repository.FindProjectAssetBySHA256(ctx, stored.OrganizationID, projectID, commit.SHA256); findErr == nil {
 		_ = s.Upload.Blobs.Delete(ctx, commit.Location)

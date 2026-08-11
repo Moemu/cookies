@@ -445,6 +445,7 @@ func main() {
 		MiyunJobs:           runtimeStore,
 		MiyunPages:          miyunPages,
 		MiyunImports:        miyunImports,
+		MiyunReturns:        miyunReturnImportAdapter{imports: assets.ExternalImportService{Repository: assetRepository, Projects: projectService, Upload: *uploadService, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket}, uploads: *uploadService},
 		MiyunPreviews:       miyunPreviews,
 		MiyunSecrets:        miyunCipher,
 		MiyunVerifier:       miyunVerifier,

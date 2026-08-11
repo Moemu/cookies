@@ -86,6 +86,34 @@ func TestMiyunPipelineMigrationContract(t *testing.T) {
 	}
 }
 
+func TestMiyunReturnMigrationContract(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join("..", "..", "..")
+	returns := readMiyunMigration(t, filepath.Join(root, "migrations", "insights", "20260811110000_insight_miyun_handoff_returns.up.sql"))
+	lineage := readMiyunMigration(t, filepath.Join(root, "migrations", "assets", "20260811110000_asset_returned_lineage.up.sql"))
+	for _, required := range []string{
+		"CREATE TABLE insight_miyun_handoff_returns",
+		"handoff_version BIGINT NOT NULL",
+		"input_hash CHAR(64)",
+		"asset_id VARCHAR(96)",
+		"asset_version BIGINT",
+		"upload_idempotency_key VARCHAR(128)",
+		"upload_request_hash CHAR(64)",
+		"mark_idempotency_key VARCHAR(128)",
+		"returned_by VARCHAR(96)",
+		"UNIQUE KEY uq_insight_miyun_return_idem",
+		"FOREIGN KEY (organization_id, project_id, handoff_id) REFERENCES insight_miyun_handoffs",
+		"CHECK (status IN ('created','uploaded','failed','returned'))",
+	} {
+		if !strings.Contains(returns, required) {
+			t.Errorf("missing return migration contract %q", required)
+		}
+	}
+	if !strings.Contains(lineage, "'returned_from'") {
+		t.Error("returned Asset lineage relation is missing from the migration")
+	}
+}
+
 func readMiyunMigration(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)

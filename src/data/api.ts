@@ -5347,11 +5347,15 @@ export type ApiMiyunMaterialSnapshot = {
   delivery_days: number; cumulative_impressions: number; cumulative_impressions_raw: string; related_ads: number; related_creators: number; related_creators_raw: string; related_creators_known: boolean; material_score: number; views: number; likes: number; comments: number; shares: number; saves: number; sanitized_raw?: Record<string, unknown>; created_at: string
 }
 export type ApiMiyunMaterialDetail = { material: ApiMiyunMaterial; snapshots: ApiMiyunMaterialSnapshot[] }
+export type ApiMiyunHandoffReturn = {
+  id: string; handoff_id: string; handoff_version: number; manifest_version: string; input_hash: string; parameter_version: string; product_profile_id: string
+  status: 'created' | 'uploaded' | 'failed' | 'returned'; filename?: string; asset_version?: { asset_id: string; version: number }; mime_type?: 'video/mp4'; sha256?: string; size_bytes?: number; insight_asset_id?: string; uploaded_by?: string; uploaded_at?: string; failure_code?: string; returned_by?: string; returned_at?: string; version: number; created_at: string; updated_at: string
+}
 export type ApiMiyunHandoff = {
   id: string; organization_id: string; project_id: string; source_material_id: string; source_material_ids: string[]; product_profile_id: string
   status: 'exporting' | 'exported' | 'delivered' | 'returned' | 'failed'; manifest_version: string; parameter_version: string
   product_files_snapshot: Record<string, unknown>; source_snapshot: Record<string, unknown>; profile_snapshot: Record<string, unknown>; input_hash: string
-  version: number; created_by: string; created_at: string; updated_at: string
+  version: number; created_by: string; created_at: string; updated_at: string; returns?: ApiMiyunHandoffReturn[]
 }
 
 export const api = {

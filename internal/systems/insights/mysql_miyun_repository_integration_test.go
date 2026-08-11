@@ -3,8 +3,10 @@ package insights_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -282,13 +284,85 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 		SourceMaterialID: material.ID, SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, Status: insights.MiyunHandoffExporting,
 		ManifestVersion: "miyun-manifest-v1", ParameterVersion: "parameters-v1",
 		ProductFilesSnapshot: []byte(`[]`), SourceSnapshot: []byte(`{"material_id":"remote-material-test"}`),
-		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
+		ProfileSnapshot: []byte(`{"profile_id":"miyun_profile"}`),
+		InputHash:       fmt.Sprintf("%064x", sha256.Sum256([]byte("handoff-input-"+suffix))),
+		Version:         1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := repository.CreateMiyunHandoff(ctx, handoff); err != nil {
 		t.Fatal(err)
 	}
 	if reloaded, err := repository.GetMiyunHandoff(ctx, organizationID, projectID, handoff.ID); err != nil || reloaded.ManifestVersion != handoff.ManifestVersion {
 		t.Fatalf("handoff=%#v err=%v", reloaded, err)
+	}
+	if _, err := repository.GetMiyunHandoff(ctx, organizationID, otherProjectID, handoff.ID); !errors.Is(err, insights.ErrNotFound) {
+		t.Fatalf("cross-project handoff read should be hidden: %v", err)
+	}
+
+	handoff.Status, handoff.UpdatedAt = insights.MiyunHandoffExported, now.Add(4*time.Second)
+	handoff, err = repository.UpdateMiyunHandoffStatus(ctx, handoff, handoff.Version)
+	if err != nil {
+		t.Fatalf("mark handoff exported: %v", err)
+	}
+	handoff.Status, handoff.UpdatedAt = insights.MiyunHandoffDelivered, now.Add(5*time.Second)
+	handoff, err = repository.UpdateMiyunHandoffStatus(ctx, handoff, handoff.Version)
+	if err != nil {
+		t.Fatalf("mark handoff delivered: %v", err)
+	}
+
+	// A failed registration must leave the handoff deliverable. The return
+	// workflow is responsible for performing this Assets import before it
+	// persists a returned state.
+	_, err = assetImports.Import(ctx, contract.RequestContext{Actor: actor, RequestID: "return-failed_" + suffix, TraceID: "return-failed_" + suffix}, projectID,
+		contract.IdempotencyKey("miyun_return_failed_"+suffix), assets.ExternalMediaImportRequest{
+			SourceProvider: "miyun-return", SourceObjectID: handoff.ID + "-failed", MIMEType: "video/mp4", SizeBytes: int64(len(video) + 1),
+		}, func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(video)), nil })
+	if err == nil {
+		t.Fatal("return registration with a wrong frozen size should fail")
+	}
+	if persisted, err := repository.GetMiyunHandoff(ctx, organizationID, projectID, handoff.ID); err != nil || persisted.Status != insights.MiyunHandoffDelivered {
+		t.Fatalf("failed return must not mark handoff returned: handoff=%#v err=%v", persisted, err)
+	}
+
+	returnedAsset, err := assetImports.Import(ctx, contract.RequestContext{Actor: actor, RequestID: "return-success_" + suffix, TraceID: "return-success_" + suffix}, projectID,
+		contract.IdempotencyKey("miyun_return_success_"+suffix), assets.ExternalMediaImportRequest{
+			SourceProvider: "miyun-return", SourceObjectID: handoff.ID, MIMEType: "video/mp4", SizeBytes: int64(len(video)),
+		}, func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(video)), nil })
+	if err != nil {
+		t.Fatalf("register returned MP4 through Assets: %v", err)
+	}
+	returnedProjectAsset, err := assetRepository.GetProjectAsset(ctx, organizationID, projectID, returnedAsset.AssetVersion)
+	if err != nil {
+		t.Fatalf("load registered returned MP4: %v", err)
+	}
+	returnedHash := fmt.Sprintf("%x", sha256.Sum256(video))
+	if returnedProjectAsset.Version.SourceType != contract.AssetSourceImported || returnedProjectAsset.Version.MIMEType != "video/mp4" ||
+		returnedProjectAsset.Version.SizeBytes != int64(len(video)) || returnedProjectAsset.Version.SHA256 != returnedHash ||
+		returnedProjectAsset.Version.Media.ProbeStatus != assets.MediaProbeSucceeded {
+		t.Fatalf("returned MP4 must be scanned and probed before the handoff transition: %#v", returnedProjectAsset.Version)
+	}
+	returnedAt := now.Add(6 * time.Second)
+	returnRecord := insights.MiyunHandoffReturn{ID: "miyun_return_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID, HandoffID: handoff.ID, HandoffVersion: handoff.Version, ManifestVersion: handoff.ManifestVersion, InputHash: handoff.InputHash, ParameterVersion: handoff.ParameterVersion, ProductProfileID: handoff.ProductProfileID, Status: insights.MiyunHandoffReturnCreated, IdempotencyKey: "miyun_return_create_" + suffix, RequestHash: fmt.Sprintf("%064x", sha256.Sum256([]byte("return-create-"+suffix))), UploadedBy: userID, Version: 1, CreatedAt: returnedAt, UpdatedAt: returnedAt}
+	returnRecord, _, err = repository.CreateMiyunHandoffReturn(ctx, returnRecord)
+	if err != nil {
+		t.Fatalf("create persistent return: %v", err)
+	}
+	returnRecord.Status, returnRecord.UploadIdempotencyKey, returnRecord.UploadRequestHash, returnRecord.Filename, returnRecord.AssetVersion, returnRecord.MIMEType, returnRecord.SHA256, returnRecord.SizeBytes, returnRecord.UploadedAt, returnRecord.UpdatedAt = insights.MiyunHandoffReturnUploaded, "miyun_return_upload_"+suffix, fmt.Sprintf("%064x", sha256.Sum256([]byte("return-upload-"+suffix))), "returned.mp4", returnedAsset.AssetVersion, "video/mp4", returnedHash, int64(len(video)), &returnedAt, returnedAt
+	returnRecord, err = repository.MarkMiyunHandoffReturnUploaded(ctx, returnRecord, returnRecord.Version)
+	if err != nil {
+		t.Fatalf("freeze uploaded return: %v", err)
+	}
+	returnRecord.MarkIdempotencyKey, returnRecord.MarkRequestHash, returnRecord.ReturnedBy, returnRecord.ReturnedAt, returnRecord.UpdatedAt = "miyun_return_mark_"+suffix, fmt.Sprintf("%064x", sha256.Sum256([]byte("return-mark-"+suffix))), userID, &returnedAt, returnedAt
+	returnRecord, handoff, err = repository.CompleteMiyunHandoffReturn(ctx, returnRecord, returnRecord.Version, handoff, handoff.Version)
+	if err != nil {
+		t.Fatalf("atomically mark returned: %v", err)
+	}
+	if reloaded, err := repository.GetMiyunHandoffReturn(ctx, organizationID, projectID, handoff.ID, returnRecord.ID); err != nil || reloaded.SHA256 != returnedHash || reloaded.AssetVersion != returnedAsset.AssetVersion || reloaded.UploadIdempotencyKey != returnRecord.UploadIdempotencyKey || reloaded.ReturnedBy != userID {
+		t.Fatalf("reloaded return=%#v err=%v", reloaded, err)
+	}
+	if persisted, err := repository.GetMiyunHandoff(ctx, organizationID, projectID, handoff.ID); err != nil || persisted.Status != insights.MiyunHandoffReturned ||
+		persisted.InputHash != returnRecord.InputHash || !bytes.Equal(persisted.ProductFilesSnapshot, handoff.ProductFilesSnapshot) ||
+		!bytes.Equal(persisted.SourceSnapshot, handoff.SourceSnapshot) || !bytes.Equal(persisted.ProfileSnapshot, handoff.ProfileSnapshot) {
+		t.Fatalf("returned handoff must retain frozen manifest inputs: handoff=%#v err=%v", persisted, err)
 	}
 }
 
@@ -297,6 +371,7 @@ func cleanupMiyunIntegration(t *testing.T, db *sql.DB, organizationID contract.O
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	for _, statement := range []string{
+		"DELETE FROM insight_miyun_handoff_returns WHERE organization_id=?",
 		"DELETE FROM insight_miyun_handoffs WHERE organization_id=?",
 		"DELETE FROM insight_miyun_material_snapshots WHERE organization_id=?",
 		"DELETE FROM insight_miyun_materials WHERE organization_id=?",

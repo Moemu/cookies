@@ -221,13 +221,14 @@ type memoryMiyunServiceRepository struct {
 	materials  map[string]MiyunMaterial
 	snapshots  map[string][]MiyunMaterialSnapshot
 	handoffs   map[string]MiyunHandoff
+	returns    map[string]MiyunHandoffReturn
 }
 
 func newMiyunServiceRepository(now time.Time) *memoryMiyunServiceRepository {
 	connection := validMiyunConnection(now)
 	connection.Status = MiyunConnectionReady
 	return &memoryMiyunServiceRepository{
-		connection: connection, profiles: map[string]MiyunProductProfile{}, manual: map[string]MiyunManualImportResult{}, materials: map[string]MiyunMaterial{}, snapshots: map[string][]MiyunMaterialSnapshot{}, handoffs: map[string]MiyunHandoff{},
+		connection: connection, profiles: map[string]MiyunProductProfile{}, manual: map[string]MiyunManualImportResult{}, materials: map[string]MiyunMaterial{}, snapshots: map[string][]MiyunMaterialSnapshot{}, handoffs: map[string]MiyunHandoff{}, returns: map[string]MiyunHandoffReturn{},
 	}
 }
 
@@ -383,6 +384,75 @@ func (r *memoryMiyunServiceRepository) UpdateMiyunHandoffStatus(_ context.Contex
 	value.Version = expectedVersion + 1
 	r.handoffs[value.ID] = value
 	return value, nil
+}
+
+func (r *memoryMiyunServiceRepository) CreateMiyunHandoffReturn(_ context.Context, value MiyunHandoffReturn) (MiyunHandoffReturn, bool, error) {
+	for _, existing := range r.returns {
+		if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.HandoffID == value.HandoffID && existing.IdempotencyKey == value.IdempotencyKey {
+			if existing.RequestHash != value.RequestHash {
+				return MiyunHandoffReturn{}, false, ErrIdempotencyConflict
+			}
+			return existing, false, nil
+		}
+	}
+	r.returns[value.ID] = value
+	return value, true, nil
+}
+func (r *memoryMiyunServiceRepository) GetMiyunHandoffReturnByIdempotencyKey(_ context.Context, org contract.OrganizationID, project contract.ProjectID, handoffID, key string) (MiyunHandoffReturn, error) {
+	for _, value := range r.returns {
+		if value.OrganizationID == org && value.ProjectID == project && value.HandoffID == handoffID && value.IdempotencyKey == key {
+			return value, nil
+		}
+	}
+	return MiyunHandoffReturn{}, ErrNotFound
+}
+func (r *memoryMiyunServiceRepository) GetMiyunHandoffReturn(_ context.Context, org contract.OrganizationID, project contract.ProjectID, handoffID, id string) (MiyunHandoffReturn, error) {
+	value, ok := r.returns[id]
+	if !ok || value.OrganizationID != org || value.ProjectID != project || value.HandoffID != handoffID {
+		return MiyunHandoffReturn{}, ErrNotFound
+	}
+	return value, nil
+}
+func (r *memoryMiyunServiceRepository) ListMiyunHandoffReturns(_ context.Context, org contract.OrganizationID, project contract.ProjectID, handoffID string) ([]MiyunHandoffReturn, error) {
+	values := []MiyunHandoffReturn{}
+	for _, value := range r.returns {
+		if value.OrganizationID == org && value.ProjectID == project && value.HandoffID == handoffID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
+func (r *memoryMiyunServiceRepository) MarkMiyunHandoffReturnUploaded(_ context.Context, value MiyunHandoffReturn, expected int64) (MiyunHandoffReturn, error) {
+	current, ok := r.returns[value.ID]
+	if !ok || current.Version != expected {
+		return MiyunHandoffReturn{}, ErrVersionConflict
+	}
+	value.Version = expected + 1
+	r.returns[value.ID] = value
+	return value, nil
+}
+func (r *memoryMiyunServiceRepository) FailMiyunHandoffReturn(_ context.Context, value MiyunHandoffReturn, expected int64, code string) (MiyunHandoffReturn, error) {
+	current, ok := r.returns[value.ID]
+	if !ok || current.Version != expected {
+		return MiyunHandoffReturn{}, ErrVersionConflict
+	}
+	value.Status, value.FailureCode, value.Version = MiyunHandoffReturnFailed, code, expected+1
+	r.returns[value.ID] = value
+	return value, nil
+}
+func (r *memoryMiyunServiceRepository) CompleteMiyunHandoffReturn(_ context.Context, value MiyunHandoffReturn, returnVersion int64, handoff MiyunHandoff, handoffVersion int64) (MiyunHandoffReturn, MiyunHandoff, error) {
+	current, ok := r.returns[value.ID]
+	if !ok || current.Version != returnVersion {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
+	}
+	currentHandoff, ok := r.handoffs[handoff.ID]
+	if !ok || currentHandoff.Version != handoffVersion {
+		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
+	}
+	value.Status, value.Version = MiyunHandoffReturnReturned, returnVersion+1
+	handoff.Status, handoff.Version = MiyunHandoffReturned, handoffVersion+1
+	r.returns[value.ID], r.handoffs[handoff.ID] = value, handoff
+	return value, handoff, nil
 }
 
 type fakeMiyunProjectReader struct{ source MiyunProjectSource }
@@ -579,6 +649,134 @@ func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
 	if failed.Status != MiyunHandoffFailed {
 		t.Fatalf("failed export status=%s", failed.Status)
 	}
+}
+
+func TestMiyunReturnCreateRequiresExportedOrDeliveredAndReplays(t *testing.T) {
+	now := time.Date(2026, 8, 11, 3, 0, 0, 0, time.UTC)
+	repository := newMiyunServiceRepository(now)
+	service := newMiyunTestService(repository, now)
+	handoff := MiyunHandoff{ID: "handoff_return_1", OrganizationID: "org_1", ProjectID: "project_1", SourceMaterialID: "material_1", SourceMaterialIDs: []string{"material_1"}, ProductProfileID: "profile_1", Status: MiyunHandoffExported, ManifestVersion: MiyunHandoffManifestVersion, ParameterVersion: MiyunHandoffParameterVersion, ProductFilesSnapshot: []byte(`{"media":[],"documents":[]}`), SourceSnapshot: []byte(`{"sources":[]}`), ProfileSnapshot: []byte(`{"profile":{},"profile_version":1}`), InputHash: strings.Repeat("a", 64), Version: 7, CreatedBy: "user_1", CreatedAt: now, UpdatedAt: now}
+	repository.handoffs[handoff.ID] = handoff
+	first, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, "return-key", CreateMiyunHandoffReturnRequest{ExpectedVersion: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, "return-key", CreateMiyunHandoffReturnRequest{ExpectedVersion: 7})
+	if err != nil || first.ID != second.ID || first.InputHash != handoff.InputHash {
+		t.Fatalf("replay=%#v %#v %v", first, second, err)
+	}
+	if _, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, "different", CreateMiyunHandoffReturnRequest{ExpectedVersion: 6}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale=%v", err)
+	}
+	handoff.Status = MiyunHandoffFailed
+	repository.handoffs[handoff.ID] = handoff
+	if _, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, "failed", CreateMiyunHandoffReturnRequest{ExpectedVersion: 7}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("failed state=%v", err)
+	}
+	if _, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "other_project", handoff.ID, "scope", CreateMiyunHandoffReturnRequest{ExpectedVersion: 7}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross project=%v", err)
+	}
+}
+
+func TestMiyunReturnUploadFreezesAssetThenExplicitlyMarksReturned(t *testing.T) {
+	now := time.Date(2026, 8, 11, 3, 30, 0, 0, time.UTC)
+	repository := newMiyunServiceRepository(now)
+	service := newMiyunTestService(repository, now)
+	service.Assets = testAssetService().Assets
+	service.Projects = testProjects{}
+	returnedHash := strings.Repeat("b", 64)
+	importer := &fakeMiyunReturnImporter{result: MiyunReturnAssetImportResult{AssetVersion: contract.AssetVersionRef{AssetID: "returned_asset_1", Version: 1}, MIMEType: MiyunReturnImportMIMEType, SHA256: returnedHash, SizeBytes: 42}}
+	service.MiyunReturns = importer
+	handoff := MiyunHandoff{ID: "handoff_return_upload", OrganizationID: "org_1", ProjectID: "project_1", SourceMaterialID: "material_1", SourceMaterialIDs: []string{"material_1"}, ProductProfileID: "profile_1", Status: MiyunHandoffDelivered, ManifestVersion: MiyunHandoffManifestVersion, ParameterVersion: MiyunHandoffParameterVersion, ProductFilesSnapshot: []byte(`{"media":[],"documents":[]}`), SourceSnapshot: []byte(`{"sources":[]}`), ProfileSnapshot: []byte(`{"profile":{},"profile_version":1}`), InputHash: strings.Repeat("a", 64), Version: 7, CreatedBy: "user_1", CreatedAt: now, UpdatedAt: now}
+	repository.handoffs[handoff.ID] = handoff
+
+	created, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, "return-create", CreateMiyunHandoffReturnRequest{ExpectedVersion: handoff.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploaded, err := service.UploadMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "return-upload", UploadMiyunHandoffReturnRequest{ExpectedVersion: handoff.Version, Filename: "final.mp4", DeclaredMIMEType: MiyunReturnImportMIMEType, DeclaredSizeBytes: 42, DeclaredSHA256: &returnedHash, Content: bytes.NewReader(make([]byte, 42))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uploaded.Status != MiyunHandoffReturnUploaded || uploaded.AssetVersion != importer.result.AssetVersion || uploaded.SHA256 != returnedHash || uploaded.InputHash != handoff.InputHash || uploaded.UploadedBy != "operator_1" || importer.calls != 1 {
+		t.Fatalf("uploaded return = %#v; importer=%#v", uploaded, importer)
+	}
+	if len(importer.request.SourceResources) != 2 || importer.request.SourceResources[0].ID != handoff.ID {
+		t.Fatalf("return sources = %#v", importer.request.SourceResources)
+	}
+	if replay, err := service.UploadMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "return-upload", UploadMiyunHandoffReturnRequest{ExpectedVersion: handoff.Version, Filename: "final.mp4", DeclaredMIMEType: MiyunReturnImportMIMEType, DeclaredSizeBytes: 42, DeclaredSHA256: &returnedHash, Content: bytes.NewReader(make([]byte, 42))}); err != nil || replay.ID != uploaded.ID || importer.calls != 1 {
+		t.Fatalf("uploaded replay = %#v, importer calls=%d, err=%v", replay, importer.calls, err)
+	}
+	if _, err := service.UploadMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "other-upload-key", UploadMiyunHandoffReturnRequest{ExpectedVersion: handoff.Version, Filename: "final.mp4", DeclaredMIMEType: MiyunReturnImportMIMEType, DeclaredSizeBytes: 42, DeclaredSHA256: &returnedHash, Content: bytes.NewReader(make([]byte, 42))}); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("upload idempotency conflict = %v", err)
+	}
+	if _, err := service.UploadMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "return-upload", UploadMiyunHandoffReturnRequest{ExpectedVersion: handoff.Version - 1, Filename: "final.mp4", DeclaredMIMEType: MiyunReturnImportMIMEType, DeclaredSizeBytes: 42, Content: bytes.NewReader(make([]byte, 42))}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale uploaded retry = %v", err)
+	}
+	returnedHandoff, returned, err := service.MarkMiyunHandoffReturned(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "return-mark", handoff.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if returned.Status != MiyunHandoffReturnReturned || returned.ReturnedBy != "operator_1" || returned.ReturnedAt == nil || returnedHandoff.Status != MiyunHandoffReturned {
+		t.Fatalf("returned state = handoff %#v return %#v", returnedHandoff, returned)
+	}
+	if _, _, err := service.MarkMiyunHandoffReturned(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "return-mark", handoff.Version-1); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale mark replay = %v", err)
+	}
+	if _, _, err := service.MarkMiyunHandoffReturned(context.Background(), miyunTestActor(), "project_1", handoff.ID, created.ID, "other-mark-key", handoff.Version); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("mark idempotency conflict = %v", err)
+	}
+	if replay, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", handoff.ID, "return-create", CreateMiyunHandoffReturnRequest{ExpectedVersion: handoff.Version}); err != nil || replay.ID != created.ID || replay.Status != MiyunHandoffReturnReturned {
+		t.Fatalf("create replay after returned = %#v, %v", replay, err)
+	}
+
+	failing := handoff
+	failing.ID, failing.Status, failing.Version = "handoff_return_failure", MiyunHandoffExported, 3
+	repository.handoffs[failing.ID] = failing
+	failedReturn, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", failing.ID, "failure-create", CreateMiyunHandoffReturnRequest{ExpectedVersion: failing.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.MiyunReturns = &fakeMiyunReturnImporter{err: errors.New("client disconnected")}
+	if _, err := service.UploadMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", failing.ID, failedReturn.ID, "failure-upload", UploadMiyunHandoffReturnRequest{ExpectedVersion: failing.Version, Filename: "final.mp4", DeclaredMIMEType: MiyunReturnImportMIMEType, DeclaredSizeBytes: 42, Content: bytes.NewReader(make([]byte, 42))}); err == nil {
+		t.Fatal("upload failure unexpectedly succeeded")
+	}
+	failedStored, err := repository.GetMiyunHandoffReturn(context.Background(), "org_1", "project_1", failing.ID, failedReturn.ID)
+	if err != nil || failedStored.Status != MiyunHandoffReturnFailed || repository.handoffs[failing.ID].Status != MiyunHandoffExported {
+		t.Fatalf("failed upload must preserve exported handoff: return=%#v handoff=%#v err=%v", failedStored, repository.handoffs[failing.ID], err)
+	}
+
+	invalid := handoff
+	invalid.ID, invalid.Status, invalid.Version = "handoff_return_invalid_asset", MiyunHandoffDelivered, 4
+	repository.handoffs[invalid.ID] = invalid
+	invalidReturn, err := service.CreateMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", invalid.ID, "invalid-create", CreateMiyunHandoffReturnRequest{ExpectedVersion: invalid.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.MiyunReturns = &fakeMiyunReturnImporter{result: MiyunReturnAssetImportResult{AssetVersion: contract.AssetVersionRef{AssetID: "invalid_asset", Version: 1}, MIMEType: MiyunReturnImportMIMEType, SHA256: "not-a-sha", SizeBytes: 42}}
+	if _, err := service.UploadMiyunHandoffReturn(context.Background(), miyunTestActor(), "project_1", invalid.ID, invalidReturn.ID, "invalid-upload", UploadMiyunHandoffReturnRequest{ExpectedVersion: invalid.Version, Filename: "final.mp4", DeclaredMIMEType: MiyunReturnImportMIMEType, DeclaredSizeBytes: 42, Content: bytes.NewReader(make([]byte, 42))}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("invalid Asset result error = %v", err)
+	}
+	invalidStored, err := repository.GetMiyunHandoffReturn(context.Background(), "org_1", "project_1", invalid.ID, invalidReturn.ID)
+	if err != nil || invalidStored.Status != MiyunHandoffReturnFailed || invalidStored.FailureCode != "ASSET_METADATA_INVALID" || repository.handoffs[invalid.ID].Status != MiyunHandoffDelivered {
+		t.Fatalf("invalid asset metadata must preserve delivered handoff: return=%#v handoff=%#v err=%v", invalidStored, repository.handoffs[invalid.ID], err)
+	}
+}
+
+type fakeMiyunReturnImporter struct {
+	result  MiyunReturnAssetImportResult
+	err     error
+	calls   int
+	request MiyunReturnAssetImportRequest
+}
+
+func (i *fakeMiyunReturnImporter) ImportMiyunReturnMP4(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, _ contract.IdempotencyKey, request MiyunReturnAssetImportRequest) (MiyunReturnAssetImportResult, error) {
+	i.calls++
+	i.request = request
+	if i.err != nil {
+		return MiyunReturnAssetImportResult{}, i.err
+	}
+	return i.result, nil
 }
 
 type miyunHandoffContentTestDouble struct{ content map[string][]byte }

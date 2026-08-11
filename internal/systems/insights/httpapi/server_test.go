@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,6 +95,42 @@ func TestMiyunVersionConflictUsesHTTP409(t *testing.T) {
 		`{"expected_version":1,"query":{"product_name":"Cup","keywords":["cup"],"material_content_types":[],"window_start":"2026-08-01","window_end":"2026-08-10"}}`))
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "VERSION_CONFLICT") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMiyunManualReturnUsesCreateUploadAndExplicitMark(t *testing.T) {
+	server := New(&applicationStub{})
+	create := authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/returns", `{"expected_version":7}`)
+	create.Header.Set("Idempotency-Key", "return-create")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, create)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "miyunreturn_1") {
+		t.Fatalf("create=%d %s", response.Code, response.Body.String())
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("expected_version", "7")
+	_ = writer.WriteField("idempotency_key", "return-upload")
+	part, err := writer.CreateFormFile("file", "final.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("mp4"))
+	_ = writer.Close()
+	upload := httptest.NewRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/returns/miyunreturn_1:upload", &body)
+	upload.Header.Set("Content-Type", writer.FormDataContentType())
+	upload = upload.WithContext(create.Context())
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, upload)
+	if response.Code != http.StatusOK {
+		t.Fatalf("upload=%d %s", response.Code, response.Body.String())
+	}
+	mark := authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/returns/miyunreturn_1:mark-returned", `{"expected_version":7}`)
+	mark.Header.Set("Idempotency-Key", "return-mark")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, mark)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "returned") {
+		t.Fatalf("mark=%d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -469,6 +506,25 @@ type applicationStub struct {
 	droppedFlag       bool
 
 	registerErr error
+}
+
+func (a *applicationStub) CreateMiyunHandoffReturn(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID string, _ contract.IdempotencyKey, _ insights.CreateMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoffReturn{}, a.miyunErr
+	}
+	return insights.MiyunHandoffReturn{ID: "miyunreturn_1", HandoffID: handoffID, Version: 1}, nil
+}
+func (a *applicationStub) UploadMiyunHandoffReturn(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID, returnID string, _ contract.IdempotencyKey, _ insights.UploadMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoffReturn{}, a.miyunErr
+	}
+	return insights.MiyunHandoffReturn{ID: returnID, HandoffID: handoffID, Version: 2}, nil
+}
+func (a *applicationStub) MarkMiyunHandoffReturned(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID, returnID string, _ contract.IdempotencyKey, _ int64) (insights.MiyunHandoff, insights.MiyunHandoffReturn, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoff{}, insights.MiyunHandoffReturn{}, a.miyunErr
+	}
+	return insights.MiyunHandoff{ID: handoffID, Status: insights.MiyunHandoffReturned, Version: 2}, insights.MiyunHandoffReturn{ID: returnID, HandoffID: handoffID, Status: insights.MiyunHandoffReturnReturned, Version: 3}, nil
 }
 
 func (s *applicationStub) AnalyzeMiyunProductProfile(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ insights.AnalyzeMiyunProductProfileRequest) (insights.MiyunProductProfile, error) {

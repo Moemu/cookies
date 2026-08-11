@@ -1880,6 +1880,31 @@ paths:
       operationId: markMiyunHandoffDelivered
       requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
       responses: {'200': {description: Delivered handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      summary: Explicitly create one recoverable manual MP4 return for an exported or delivered handoff
+      operationId: createMiyunHandoffReturn
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses: {'201': {description: Return record., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_id}:upload:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/MiyunReturnID'}]
+    post:
+      summary: Upload one manual MP4 through the Assets authorized import, scan and probe path
+      operationId: uploadMiyunHandoffReturn
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {type: object, required: [file, expected_version, idempotency_key], properties: {file: {type: string, format: binary}, expected_version: {type: integer, minimum: 1}, idempotency_key: {type: string, minLength: 1}, declared_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}}}
+      responses: {'200': {description: Scanned and probed return asset, not yet marked returned., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_id}:mark-returned:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/MiyunReturnID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      summary: Atomically freeze a successful manual return and mark its handoff returned
+      operationId: markMiyunHandoffReturned
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses: {'200': {description: Returned handoff and frozen return record., content: {application/json: {schema: {type: object, required: [handoff, return], properties: {handoff: {$ref: '#/components/schemas/MiyunHandoff'}, return: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes:
     sessionCookie:
@@ -1909,6 +1934,11 @@ components:
       schema: {type: string}
     MiyunHandoffID:
       name: handoff_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunReturnID:
+      name: return_id
       in: path
       required: true
       schema: {type: string}
@@ -2355,6 +2385,33 @@ components:
         input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
         version: {type: integer, minimum: 1}
         created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        returns: {type: array, items: {$ref: '#/components/schemas/MiyunHandoffReturn'}}
+    MiyunHandoffReturn:
+      type: object
+      required: [id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, status, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        handoff_id: {type: string}
+        handoff_version: {type: integer, minimum: 1}
+        manifest_version: {type: string}
+        input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        parameter_version: {type: string}
+        product_profile_id: {type: string}
+        status: {type: string, enum: [created, uploaded, failed, returned]}
+        filename: {type: string}
+        asset_version: {type: object, properties: {asset_id: {type: string}, version: {type: integer, minimum: 1}}}
+        mime_type: {type: string, enum: [video/mp4]}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        size_bytes: {type: integer, minimum: 1}
+        insight_asset_id: {type: string}
+        uploaded_by: {type: string}
+        uploaded_at: {type: string, format: date-time}
+        failure_code: {type: string}
+        returned_by: {type: string}
+        returned_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     MiyunManualImportResult:

@@ -506,20 +506,21 @@ type MiyunHandoff struct {
 	ProjectID      contract.ProjectID      `json:"project_id"`
 	// SourceMaterialID is retained as the first, stable source for legacy
 	// relational lineage. SourceMaterialIDs is the complete frozen selection.
-	SourceMaterialID     string             `json:"source_material_id"`
-	SourceMaterialIDs    []string           `json:"source_material_ids"`
-	ProductProfileID     string             `json:"product_profile_id"`
-	Status               MiyunHandoffStatus `json:"status"`
-	ManifestVersion      string             `json:"manifest_version"`
-	ParameterVersion     string             `json:"parameter_version"`
-	ProductFilesSnapshot json.RawMessage    `json:"product_files_snapshot"`
-	SourceSnapshot       json.RawMessage    `json:"source_snapshot"`
-	ProfileSnapshot      json.RawMessage    `json:"profile_snapshot"`
-	InputHash            string             `json:"input_hash"`
-	Version              int64              `json:"version"`
-	CreatedBy            string             `json:"created_by"`
-	CreatedAt            time.Time          `json:"created_at"`
-	UpdatedAt            time.Time          `json:"updated_at"`
+	SourceMaterialID     string               `json:"source_material_id"`
+	SourceMaterialIDs    []string             `json:"source_material_ids"`
+	ProductProfileID     string               `json:"product_profile_id"`
+	Status               MiyunHandoffStatus   `json:"status"`
+	ManifestVersion      string               `json:"manifest_version"`
+	ParameterVersion     string               `json:"parameter_version"`
+	ProductFilesSnapshot json.RawMessage      `json:"product_files_snapshot"`
+	SourceSnapshot       json.RawMessage      `json:"source_snapshot"`
+	ProfileSnapshot      json.RawMessage      `json:"profile_snapshot"`
+	InputHash            string               `json:"input_hash"`
+	Version              int64                `json:"version"`
+	CreatedBy            string               `json:"created_by"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	Returns              []MiyunHandoffReturn `json:"returns,omitempty"`
 }
 
 func (h MiyunHandoff) Validate() error {

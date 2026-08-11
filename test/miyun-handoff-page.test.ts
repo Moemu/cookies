@@ -50,3 +50,25 @@ test("handoff API 为同源交接端点，创建携带幂等键、交付携带 e
   assert.equal(new Headers(calls[0].init?.headers).get("Idempotency-Key"), "key");
   assert.match(api.getMiyunHandoffExportUrl("p", "handoff"), /^\/api\//);
 });
+
+test("人工回传只允许 exported/delivered、仅接收 MP4，并展示进度、可安全重试和血缘", () => {
+  assert.match(page, /handoff\.status === "exported" \|\| handoff\.status === "delivered"/);
+  assert.match(page, /accept="video\/mp4,\.mp4"/);
+  assert.match(page, /miyunReturnVideoFile/);
+  assert.match(page, /request\.upload\.onprogress/);
+  assert.match(page, /<progress max="100" value=\{progress\}/);
+  assert.match(page, /重试回传/);
+  assert.match(page, /handoff\.status === "returned"/);
+  assert.match(page, /不会自动发布、交付或进入 AI/);
+  assert.match(page, /血缘：本 Project/);
+  assert.match(page, /expected_version/);
+  assert.match(page, /\/returns/);
+  assert.match(page, /:upload/);
+  assert.match(page, /:mark-returned/);
+  assert.doesNotMatch(page, /handoffs\/\$\{encodeURIComponent\(handoffId\)\}:return/);
+});
+
+test("回传错误不会渲染服务端响应或存储路径", () => {
+  assert.doesNotMatch(page, /request\.responseText/);
+  assert.match(page, /回传未完成，请检查 MP4 文件后重试/);
+});
