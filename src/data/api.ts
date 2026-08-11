@@ -1186,6 +1186,29 @@ export type ApiExperience = {
   updated_at: string
 }
 
+// 一条命中。matched 说清「凭什么推给你」，default 说清「能不能直接照着做」。
+//
+// default 是后端算的两道闸（状态在用 + 判定 ✅ 能归因），前端不重算：
+// 重算一次就多一套规则，两边哪天不一致，同一条经验会在两个页面上一个能用一个不能用。
+export type ApiExperienceMatch = {
+  experience: ApiExperience
+  matched: string[]
+  default: boolean
+}
+
+// 「查」的条件。每一格空着表示不限。字段名跟后端 ExperienceLookup 逐字对齐。
+export type ApiExperienceLookup = {
+  brand?: string
+  product?: string
+  channel?: string
+  ad_type?: string
+  objective?: string
+  audience?: string
+  feature?: string
+  include_observed?: boolean
+  limit?: number
+}
+
 export type ApiExperienceAudit = {
   id: string
   organization_id: string
@@ -4295,6 +4318,11 @@ export const api = {
       `${insightProjectPath(projectId)}/experiences?${search.toString()}`,
     )
   },
+  // 「查」用 POST：条件有七格、好几格是自由文本，塞 query string 里既难读也容易漏转义。
+  lookupExperiences: (projectId: string, body: ApiExperienceLookup) =>
+    request<{ items: ApiExperienceMatch[] }>(
+      `${insightProjectPath(projectId)}/experiences/lookup`, 'POST', body,
+    ),
   listExperienceAudits: (projectId: string, experienceId: string, limit = 50) =>
     request<{ items: ApiExperienceAudit[] }>(
       `${insightExperiencePath(projectId, experienceId)}/audits?limit=${limit}`,
