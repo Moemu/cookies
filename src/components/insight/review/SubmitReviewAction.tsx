@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Camera, CircleAlert } from 'lucide-react'
 import { api, type ApiDeliveryExecutionResult } from '../../../data/api'
+import { shortId } from '../../../data/shortId'
 import { useProject } from '../../../context/ProjectContext'
 
 /**
@@ -62,13 +63,22 @@ export function SubmitReviewAction({ window, busy, onSubmit }: {
       : pickState === 'error' ? <div className="panel-empty">投放执行读取失败，请重试。</div>
       : !executions.length ? <div className="prelaunch-boundary">
           <CircleAlert size={16}/><span><small>这个 Project 还没有投放执行</small>
-            复盘要挂在一次投放上，否则「这次复盘的是哪一轮」谁也答不上来。先去智能投放跑一次执行。
+            复盘要挂在一次投放上，否则「这次复盘的是哪一轮」谁也答不上来。
+            去「智能投放 → 上线后优化闭环」，那条 9 步的路走完就会有一条执行记录，再回来提交。
           </span></div>
       : <label className="freeze-pick">
           <small>这份复盘算哪次投放？</small>
           <select aria-label="投放执行" value={chosen} onChange={event => setChosen(event.target.value)}>
-            {executions.map(item => <option key={item.execution.id} value={item.execution.id}>
-              {formatDate(item.execution.completed_at || item.execution.started_at)} · {item.evidence.summary || item.execution.id}
+            {/* 只给日期加一句 evidence.summary 是不够的：同一天跑几次演练，summary 又是
+                同一句模板话，四个选项会长得一模一样，人没法选——下拉的意义就没了。
+                时分能分开同一天的几次，短码能分开同一分钟的几次，两个都得有。
+                「最近一次」跟的是后端顺序（ListExecutions 按 started_at DESC），不是这里显示的
+                完成时间——先开始的未必先跑完，两者极少但可能不一致。 */}
+            {executions.map((item, index) => <option key={item.execution.id} value={item.execution.id}>
+              {formatMoment(item.execution.completed_at || item.execution.started_at)}
+              {' · '}{shortId(item.execution.id)}
+              {index === 0 ? ' · 最近一次' : ''}
+              {item.evidence.summary ? ` · ${item.evidence.summary}` : ''}
             </option>)}
           </select>
         </label>}
@@ -86,4 +96,11 @@ export function SubmitReviewAction({ window, busy, onSubmit }: {
 function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleDateString('zh-CN')
+}
+
+/** 选执行时要精确到分：同一天跑好几次演练是常态，只给日期等于没给。 */
+function formatMoment(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return value
+  return `${date.toLocaleDateString('zh-CN')} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
 }

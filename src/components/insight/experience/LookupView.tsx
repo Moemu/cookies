@@ -67,11 +67,18 @@ export function LookupView() {
   const scope = [lookup.brand, lookup.product, lookup.channel, lookup.ad_type, lookup.objective, lookup.audience]
     .filter(Boolean).join(' · ')
 
-  // 空结果要分清两种空。第二种在项目刚起步时是常态，说成「暂无数据」的话，
-  // 人会以为是系统坏了，而实际该做的事完全不同——一个是放宽条件，一个是去复盘。
-  const emptyHint = confirmed.length
-    ? '这些条件下还没有能用的经验。放宽条件再看看，或者去「复盘」里沉淀一条。'
-    : '这个 Project 还没有在用的经验。经验来自复盘——投完一轮、提交复盘、有人确认，它才会出现在这里。'
+  // 空结果要分清三种空，因为该做的事完全不同：一个是勾开关，一个是放宽条件，
+  // 一个是去复盘。说成「暂无数据」，人只会以为是系统坏了。
+  //
+  // 第一种最容易把人坑住：新 Project 沉淀出来的头几条多半都是「👁 只是观察」，
+  // 而这一屏默认不给观察级的。人辛苦复盘沉淀完，回头一查还是空的，会以为白干了。
+  // 「放宽条件」这种说法救不了他——要放宽的不是上面那排条件，是那个复选框。
+  const observedHidden = !lookup.include_observed && confirmed.some(item => item.verdict === 'observed')
+  const emptyHint = observedHidden
+    ? '这些条件下没有能照着做的经验，但有「👁 只是观察」的被默认藏起来了——勾上「连只是观察的也看」能看到。它们没排除掉别的变量，只能当线索。'
+    : confirmed.length
+      ? '这些条件下还没有能用的经验。放宽条件再看看，或者去「复盘」里沉淀一条。'
+      : '这个 Project 还没有在用的经验。经验来自复盘——投完一轮、提交复盘、有人确认，它才会出现在这里。'
 
   return <div className="experience-lookup">
     <div className="core-flow-toolbar">
