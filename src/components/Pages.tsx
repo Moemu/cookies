@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Download, ExternalLink, Filter, MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { systems, quickActions } from '../data/navigation'
 import { api, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiAgentRun, type ApiArtifact, type ApiAssetVersionPointer, type ApiAuditEvent, type ApiBindingHealthStatus, type ApiMaterialConfirmation, type ApiOperationalRecord, type ApiOperationalRecordKind, type ApiQualityCheckRun, type ApiRemixEvalCase, type ApiRemixEvalRun } from '../data/api'
@@ -7,28 +7,50 @@ import { useModelConfig } from '../context/ModelConfigContext'
 import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectRecord, SystemDefinition, SystemKey } from '../types'
 import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
-import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { shortId } from '../data/shortId'
-// 原「分析素材库」「内容分析」「数据接入」三个页面不再直接挂在导航上，
-// 它们现在由 insight/assets 下的视图委托使用；「数据质量」「能力运营」同理，
-// 由 insight/settings 下的体检与字典两屏委托，这里都不再 import。
-import { ExperimentCenterPage } from './ExperimentCenterPage'
-import { AnalysisPage, type AnalysisView } from './insight/analysis'
-import { AssetsPage, type AssetsView } from './insight/assets'
-import { ReviewPage, type ReviewView } from './insight/review'
-import { ExperiencePage, type ExperienceView } from './insight/experience'
-import { SettingsPage, type SettingsView } from './insight/settings'
-import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
+// 洞察五个入口的页面本身在下面跟着其他页面一起 lazy，这里只静态引它们的视图类型
+// ——类型在编译期就消掉了，不会把 chunk 拽回主包。
+import type { AnalysisView } from './insight/analysis'
+import type { AssetsView } from './insight/assets'
+import type { ReviewView } from './insight/review'
+import type { ExperienceView } from './insight/experience'
+import type { SettingsView } from './insight/settings'
 import { StateBoundary, StatePreview } from './StateBoundary'
-import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
 import { KanonStrategyTaskCenter, KanonStrategyTaskDialog } from '../features/strategy/KanonStrategyTaskCenter'
 import { KanonBriefCenter, KanonResearchEvidenceCenter, KanonStrategyLibrary } from '../features/strategy/KanonStrategyCenters'
 import type { StrategyTaskBundle } from '../features/strategy/types'
 import { KanonSkillsOperations } from '../features/strategy/KanonSkillsOperations'
 import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
+import { strategyStageLabel } from '../features/strategy/workspace/StageRail'
+import type { StrategyPanel, StrategyStage, StrategyWorkspaceLocation } from '../features/strategy/workspace/workspaceRoute'
 import { industryProfile } from '../data/industry-profiles'
 
-type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
+const ApprovalCenterPage = lazy(() => import('./SpecializedPages').then(module => ({ default: module.ApprovalCenterPage })))
+const ArtifactFlow = lazy(() => import('./SpecializedPages').then(module => ({ default: module.ArtifactFlow })))
+const DeliveryPlanPage = lazy(() => import('./SpecializedPages').then(module => ({ default: module.DeliveryPlanPage })))
+const ImageTextCreationPage = lazy(() => import('./SpecializedPages').then(module => ({ default: module.ImageTextCreationPage })))
+const VideoCreationPage = lazy(() => import('./SpecializedPages').then(module => ({ default: module.VideoCreationPage })))
+const DeliveryMonitoringPage = lazy(() => import('./DeliveryMonitoringPage').then(module => ({ default: module.DeliveryMonitoringPage })))
+const DeliveryOptimizationPage = lazy(() => import('./DeliveryOptimizationPage').then(module => ({ default: module.DeliveryOptimizationPage })))
+const DeliveryThreeTierPage = lazy(() => import('./DeliveryThreeTierPage').then(module => ({ default: module.DeliveryThreeTierPage })))
+const DeliveryMockEnvironmentBanner = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryMockEnvironmentBanner })))
+const DeliveryTourContextBanner = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryTourContextBanner })))
+const DeliveryTourPage = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryTourPage })))
+const ExperimentCenterPage = lazy(() => import('./ExperimentCenterPage').then(module => ({ default: module.ExperimentCenterPage })))
+const AnalysisPage = lazy(() => import('./insight/analysis/AnalysisPage').then(module => ({ default: module.AnalysisPage })))
+const AssetsPage = lazy(() => import('./insight/assets/AssetsPage').then(module => ({ default: module.AssetsPage })))
+const ReviewPage = lazy(() => import('./insight/review/ReviewPage').then(module => ({ default: module.ReviewPage })))
+const ExperiencePage = lazy(() => import('./insight/experience/ExperiencePage').then(module => ({ default: module.ExperiencePage })))
+const SettingsPage = lazy(() => import('./insight/settings/SettingsPage').then(module => ({ default: module.SettingsPage })))
+const TaskCenterPage = lazy(() => import('./BusinessTaskPages').then(module => ({ default: module.TaskCenterPage })))
+const TaskCreateDialog = lazy(() => import('./BusinessTaskPages').then(module => ({ default: module.TaskCreateDialog })))
+
+const StrategyWorkspaceRoute = lazy(() => import('../features/strategy/workspace/StrategyWorkspaceRoute').then(module => ({
+  default: module.StrategyWorkspaceRoute,
+})))
+
+type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string, tourRunId?: string, tourCase?: string) => void
+type OpenStrategyWorkspace = (projectId: string, workspaceId: string, location: StrategyWorkspaceLocation, replace?: boolean) => void
 
 function creativeTaskDestination(task: BusinessTaskRecord): { navId: string; view?: string } {
   if (task.type === 'creative') return { navId: 'image-text' }
@@ -1031,31 +1053,6 @@ function AnalysisSurface({ item, activeView }: { item: NavItem; activeView: stri
   </div>
 }
 
-function DeliveryStrategySurface() {
-  const { addChangeSet, currentProject } = useProject()
-  const industry = industryProfile(currentProject.industry)
-  const [notice, setNotice] = useState('')
-  const deliveryDiagnostics = operationRecords(currentProject.operations, 'delivery_diagnostic')
-  const deliveryActions = operationRecords(currentProject.operations, 'delivery_action')
-  const createChangeSet = async () => {
-    try {
-      const change = await addChangeSet()
-      setNotice(`${change.id} 已在服务端创建`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '创建 ChangeSet 失败，请重试。')
-    }
-  }
-  return <div className="strategy-analysis-layout">
-    <section className="strategy-analysis-main delivery-strategy">
-      <IndustrySchema module="智能投放" profile={industry.delivery} industry={industry.label}/>
-      <div className="analysis-heading"><div><span className="section-label">商品 × 素材诊断</span><h2>先减少重复，再为新素材留出探索空间。</h2><p>当前同时出现起量放缓和组合重复信号，建议生成 ChangeSet；任何暂停、删除和预算动作仍需人工审批。</p></div><span className="source-chip alert">{deliveryDiagnostics.length} 项服务端诊断</span></div>
-      <div className="diagnostic-grid">{deliveryDiagnostics.map(item => <div className={`diagnostic-card ${item.status}`} key={item.id}><span>{item.id}</span><small>{item.title}</small><b>{operationField(item, 'value')}</b><p>{operationField(item, 'detail')}</p></div>)}{!deliveryDiagnostics.length ? <div className="panel-empty">暂无服务端投放诊断。</div> : null}</div>
-      <div className="action-table"><div className="action-head"><span>优先级</span><span>建议动作</span><span>依据</span><span>预计影响</span></div>{deliveryActions.map(item => <div className="action-row" key={item.id}><strong>{item.status}</strong><b>{item.title}</b><span>{operationField(item, 'detail')}</span><em>{operationField(item, 'impact')}</em></div>)}{!deliveryActions.length ? <div className="panel-empty">暂无服务端建议动作。</div> : null}</div>
-    </section>
-    <aside className="strategy-method-rail"><span className="section-label">执行边界</span><h3>自动建议，人工决策</h3>{['准确绑定商品与资产', '统计重复组合与无消耗广告', '新素材改变核心内容', '变更进入 ChangeSet 审批'].map((item, index) => <div className="guardrail" key={item}><CircleCheck size={16}/><span><b>{String(index + 1).padStart(2, '0')}</b>{item}</span></div>)}<button className="primary-button full" onClick={() => void createChangeSet()}>生成优化 ChangeSet</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}<p className="source-note">60% / 90% 差异与 5–10% 探索预算均为来源建议，不是平台保证。</p></aside>
-  </div>
-}
-
 function IndustrySchema({ module, profile, industry }: { module: string; industry: string; profile: { fields: string[]; format: string } }) {
   return <section className="industry-schema" aria-label={`${industry}${module}配置`}>
     <span>{industry} · {module}</span><b>{profile.format}</b>
@@ -1488,13 +1485,45 @@ const settingsViews: Record<string, SettingsView> = {
   确认权限: 'permission',
 }
 
-export function ModulePage({ system, item, contextId, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; contextId?: string; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
-  const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
+export function ModulePage({
+  system,
+  item,
+  contextId,
+  objectId,
+  routeView,
+  strategyStage,
+  strategyPanel,
+  strategyResource,
+  tourRunId,
+  tourCase,
+  onOpenProject,
+  onOpenStrategyWorkspace,
+}: {
+  system: SystemDefinition
+  item: NavItem
+  contextId?: string
+  objectId?: string
+  routeView?: string
+  strategyStage?: StrategyStage
+  strategyPanel?: StrategyPanel
+  strategyResource?: string
+  tourRunId?: string
+  tourCase?: string
+  onOpenProject: OpenProject
+  onOpenStrategyWorkspace: OpenStrategyWorkspace
+}) {
+  const normalizedRouteView = routeView
+  const strategyWorkspaceLocation = useMemo<StrategyWorkspaceLocation>(() => ({
+    stage: strategyStage ?? 'intake',
+    panel: strategyPanel,
+    resource: strategyResource,
+  }), [strategyPanel, strategyResource, strategyStage])
+  const [activeView, setActiveView] = useState(() => normalizedRouteView && item.views.includes(normalizedRouteView) ? normalizedRouteView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [taskDialog, setTaskDialog] = useState<{ domain: 'strategy' | 'creative'; initialType?: BusinessTaskType } | null>(null)
-  const { currentProject, addChangeSet } = useProject()
+  const { currentProject } = useProject()
 
   useEffect(() => { if (routeView && item.views.includes(routeView)) setActiveView(routeView) }, [item.views, routeView])
 
@@ -1509,11 +1538,6 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     }
     setBusy(true)
     try {
-      if (system.key === 'delivery' && item.id === 'optimization') {
-        const change = await addChangeSet()
-        setNotice(`${change.id} 已在服务端创建，已进入审批中心继续处理。`)
-        onOpenProject(currentProject.id, 'delivery', 'approvals', change.id)
-      }
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '保存失败，请在服务恢复后重试。')
     } finally {
@@ -1526,7 +1550,15 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   const taskCenter = item.id === 'tasks' && taskDomain !== null
   const specialized = system.key === 'strategy' && item.id === 'tasks' ? <KanonStrategyTaskCenter activeView={activeView} onOpenWorkspace={id => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, '概览')} onRequestCreate={() => setTaskDialog({ domain: 'strategy', initialType: 'strategy' })}/>
     : taskCenter && taskDomain ? <TaskCenterPage state={dataState} domain={taskDomain} activeView={activeView} selectedId={objectId} onOpenTask={id => onOpenProject(currentProject.id, taskDomain, 'tasks', id, activeView)} onRequestCreate={() => setTaskDialog({ domain: taskDomain, initialType: taskDomain === 'strategy' ? 'strategy' : 'creative' })} onContinueTask={taskDomain === 'creative' ? task => { const destination = creativeTaskDestination(task); onOpenProject(currentProject.id, 'creative', destination.navId, task.id, destination.view) } : undefined} onOpenProject={onOpenProject}/>
-    : system.key === 'strategy' && item.id === 'workspaces' ? <KanonStrategyWorkspace activeView={activeView} workspaceId={objectId} onOpenProject={onOpenProject}/>
+    : system.key === 'strategy' && item.id === 'workspaces' ? <Suspense fallback={<div className="kanon-strategy-state" role="status">正在加载策略工作区…</div>}>
+      <StrategyWorkspaceRoute
+        location={strategyWorkspaceLocation}
+        projectId={currentProject.id}
+        workspaceId={objectId}
+        onNavigate={(workspaceId, location, replace) => onOpenStrategyWorkspace(currentProject.id, workspaceId, location, replace)}
+        onOpenCreative={(navId, view, contextId) => onOpenProject(currentProject.id, 'creative', navId, undefined, view, contextId)}
+      />
+    </Suspense>
     : system.key === 'strategy' && item.id === 'briefs' ? <KanonBriefCenter activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
     : system.key === 'strategy' && item.id === 'strategies' ? <KanonStrategyLibrary activeView={activeView} onOpenWorkspace={(id, view) => onOpenProject(currentProject.id, 'strategy', 'workspaces', id, view)}/>
     : system.key === 'strategy' && item.id === 'research' ? <KanonResearchEvidenceCenter activeView={activeView}/>
@@ -1538,7 +1570,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
         onTaskCreated={id => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView, id)}
         onBack={() => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView)}
       />
-    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
+    : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)} onOpenBrandTask={id => onOpenProject(currentProject.id, 'creative', 'video', undefined, '品牌广告', id)} onOpenEditTask={id => onOpenProject(currentProject.id, 'creative', 'video', undefined, '素材剪辑', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'analysis' ? <AnalysisPage state={dataState} view={analysisViews[activeView] ?? 'overview'} onOpenExperiments={() => onOpenProject(currentProject.id, 'insight', 'experiments')}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetsPage
@@ -1551,14 +1583,17 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'insight' && item.id === 'review' ? <ReviewPage state={dataState} view={reviewViews[activeView] ?? 'current'} objectId={objectId}/>
     : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'settings' ? <SettingsPage state={dataState} view={settingsViews[activeView] ?? 'thresholds'}/>
+    : system.key === 'delivery' && item.id === 'tour' ? <DeliveryTourPage projectId={currentProject.id} routeRunId={tourRunId}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
-    : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
+    : system.key === 'delivery' && (item.id === 'configuration' || item.id === 'three-tier') ? <DeliveryThreeTierPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
+    : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState} tourCase={tourCase} tourRunId={tourRunId} selectedChangeSetId={objectId}/>
+    : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage tourCase={tourCase}/>
+    : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryOptimizationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
     : null
   if (specialized) surface = specialized
   else {
-    const analysisSurface = system.key === 'delivery' && item.id === 'optimization' ? <DeliveryStrategySurface/> : <AnalysisSurface item={item} activeView={activeView}/>
-    const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? analysisSurface : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : <OperationsSurface item={item}/>
+    const genericSurface = item.layout === 'workspace' ? <WorkspaceSurface item={item} activeView={activeView}/> : item.layout === 'analysis' ? <AnalysisSurface item={item} activeView={activeView}/> : item.layout === 'editor' ? <EditorSurface item={item} activeView={activeView}/> : item.layout === 'table' ? <TableSurface item={item} activeView={activeView} onOpenRecord={id => onOpenProject(currentProject.id, system.key, item.id, id, activeView)}/> : <OperationsSurface item={item}/>
     surface = <StateBoundary
       state={dataState}
       contextLabel={`${system.label} / ${item.label}`}
@@ -1566,7 +1601,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
       emptyDetail="这里不会用示例内容冒充已保存结果。请先完成上游步骤、创建业务对象，或切换到已有数据的 Project。"
       errorDetail="页面数据读取失败，当前内容不会被覆盖。请确认本地 MVP API 正常运行后重新加载。"
       forbiddenDetail="当前角色不能查看或操作此页面，请联系 Project 管理员授予相应权限。"
-      createLabel={system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet' : '创建业务对象'}
+      createLabel="创建业务对象"
       onRetry={() => setDataState('ready')}
       onCreate={primaryAction}
     >{genericSurface}</StateBoundary>
@@ -1574,7 +1609,6 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
 
   const actionLabel = system.key === 'strategy' && item.id === 'tasks' ? '新建策略任务'
     : system.key === 'creative' && item.id === 'tasks' ? '新建创意任务'
-    : system.key === 'delivery' && item.id === 'optimization' ? '生成 ChangeSet'
     // 素材洞察的系统设置整页只读，没有一处可保存，所以这里不给「保存配置」按钮——
     // 留一个点下去什么都不发生的按钮，会被读成「保存失败」而不是「不需要保存」。
     : undefined
@@ -1590,14 +1624,17 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
   }
 
   const projectProgress = calculateProjectProgress(currentProject)
-  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces'))
+  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces') && !(system.key === 'delivery' && item.id === 'approvals'))
   const isStrategyWorkspace = system.key === 'strategy' && item.id === 'workspaces'
-  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'plans' || item.id === 'approvals'))
+  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'tour' || item.id === 'plans' || item.id === 'approvals' || item.id === 'monitoring'))
   const changeView = (view: string) => {
     setActiveView(view)
-    onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view)
+    onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view, undefined, tourRunId, tourCase)
   }
-  const pageSurface = <div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div>
+  const tourContext = system.key === 'delivery' && item.id !== 'tour' && tourRunId ? <DeliveryTourContextBanner projectId={currentProject.id} runId={tourRunId} tourCase={tourCase}/> : null
+  const deliveryEnvironment = system.key === 'delivery' ? <DeliveryMockEnvironmentBanner/> : null
+  const pageSurface = <>{deliveryEnvironment}{tourContext}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div></>
 
-  return <div className={`module-page page-frame layout-${item.layout}${isStrategyWorkspace ? ' strategy-workspace-page' : ''}`}><PageHeader item={item} activeView={activeView} onViewChange={changeView} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel} showTabs={!isStrategyWorkspace && hasImplementedHeaderViews}/>{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}{isStrategyWorkspace ? <div className="strategy-workspace-shell"><ViewTabs item={item} activeView={activeView} onViewChange={changeView}/>{pageSurface}</div> : pageSurface}{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
+  const strategyStatusLabel = isStrategyWorkspace ? strategyStageLabel(strategyStage ?? 'intake') : activeView
+  return <div className={`module-page page-frame layout-${item.layout}${isStrategyWorkspace ? ' strategy-workspace-page' : ''}`}>{isStrategyWorkspace ? null : <PageHeader item={item} activeView={activeView} onViewChange={changeView} onPrimaryAction={() => { void primaryAction() }} busy={busy} actionLabel={actionLabel} showTabs={hasImplementedHeaderViews}/>}{import.meta.env.VITE_SHOW_STATE_PREVIEW === 'true' ? <StatePreview value={dataState} onChange={setDataState}/> : null}{notice ? <div className="page-notice" role="status"><CircleCheck size={16}/>{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div> : null}{isStrategyWorkspace ? <div className="strategy-workspace-shell">{pageSurface}</div> : pageSurface}{system.key === 'strategy' && specialized ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>阶段：{strategyStatusLabel}</span><span>状态源：Strategy 服务</span><strong>持久化：已启用</strong></footer> : system.key === 'strategy' ? <footer className="statusbar"><span>Project：{currentProject.name}</span><span>模块：{item.label}</span><span>视图：{activeView}</span><span>状态源：通用页面</span><strong>尚未接入专用数据源</strong></footer> : <footer className="statusbar"><span>Project：{currentProject.name}</span><span>阶段：{projectProgress.stageLabel}</span><span>进度：{progressPercentLabel(projectProgress)}</span><span>更新时间：{currentProject.updatedAt}</span><strong>进度状态：{progressStatusLabel(projectProgress)}</strong></footer>}{taskDialog?.domain === 'strategy' ? <KanonStrategyTaskDialog onClose={() => setTaskDialog(null)} onCreated={strategyTaskCreated}/> : taskDialog ? <TaskCreateDialog domain={taskDialog.domain} initialType={taskDialog.initialType} onClose={() => setTaskDialog(null)} onCreated={taskCreated}/> : null}</div>
 }

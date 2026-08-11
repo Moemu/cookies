@@ -33,6 +33,7 @@ node_modules/
 web/dist/
 web/.vite/
 test-results/
+/output/
 *.tsbuildinfo
 
 # Local persistent object storage

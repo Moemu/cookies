@@ -20,6 +20,101 @@ type Reader struct {
 	Service strategy.Service
 }
 
+func (r Reader) ReadRequirementForCreative(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	reference creative.RequirementSnapshotReference,
+	capability creative.BusinessCapabilityReference,
+) (creative.RequirementSnapshot, error) {
+	if err := reference.Validate(); err != nil {
+		return creative.RequirementSnapshot{}, err
+	}
+	if err := capability.Validate(); err != nil {
+		return creative.RequirementSnapshot{}, err
+	}
+	brief, err := r.Service.GetBriefVersion(ctx, actor, reference.BriefID, reference.BriefVersion)
+	if err != nil {
+		return creative.RequirementSnapshot{}, err
+	}
+	if brief.ProjectID != projectID || !strings.EqualFold(string(brief.ContentHash), strings.TrimSpace(reference.ContentHash)) {
+		return creative.RequirementSnapshot{}, fmt.Errorf("Requirement content hash no longer matches the selected version")
+	}
+	profile, err := r.Service.GetCreativeBusiness(ctx, actor, projectID, capability.BusinessCode)
+	if err != nil {
+		return creative.RequirementSnapshot{}, err
+	}
+	if profile.Version != capability.Version || !strings.EqualFold(profile.ContentHash, strings.TrimSpace(capability.ContentHash)) ||
+		!profile.Selectable || profile.Lifecycle != "active" {
+		return creative.RequirementSnapshot{}, fmt.Errorf("Creative business capability no longer matches the selected version")
+	}
+	if profile.BusinessCode != creative.BusinessViralRemake {
+		return creative.RequirementSnapshot{}, creative.ErrFullStrategyRequired
+	}
+
+	document := brief.Snapshot
+	document.SyncV3LegacyProjection()
+	deliverableIntent := creative.PerformanceModeViralRemake
+	if document.ContractVersion == strategy.BriefContractVersionV3 {
+		deliverableIntent = strings.TrimSpace(document.Core.DeliverableIntent)
+	}
+	sellingPoints := append([]string{}, document.Product.SellingPoints...)
+	if len(sellingPoints) == 0 && strings.TrimSpace(document.Proposition) != "" {
+		sellingPoints = append(sellingPoints, strings.TrimSpace(document.Proposition))
+	}
+	assets := append([]contract.AssetVersionRef{}, document.AssetRefs...)
+	for _, ref := range document.Product.AssetRefs {
+		duplicate := false
+		for _, existing := range assets {
+			if existing == ref {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			assets = append(assets, ref)
+		}
+	}
+	assumptions := make([]string, 0, len(document.Assumptions))
+	for _, value := range document.Assumptions {
+		if statement := strings.TrimSpace(value.Statement); statement != "" {
+			assumptions = append(assumptions, statement)
+		}
+	}
+	blocking := make([]string, 0)
+	for _, value := range document.Unknowns {
+		if value.RequiredFor == "creative_intake" && strings.TrimSpace(value.Question) != "" {
+			blocking = append(blocking, strings.TrimSpace(value.Question))
+		}
+	}
+	for _, value := range document.Conflicts {
+		if value.Status == "open" {
+			blocking = append(blocking, "请确认冲突字段："+value.Field)
+		}
+	}
+	product := strings.TrimSpace(document.Product.Name)
+	if product == "" {
+		product = strings.TrimSpace(document.Core.ProductOrSubject)
+	}
+	audience := strings.TrimSpace(document.Audience.Primary)
+	if audience == "" {
+		audience = strings.TrimSpace(document.Core.Audience)
+	}
+	objective := strings.TrimSpace(document.Campaign.Objective)
+	if objective == "" {
+		objective = strings.TrimSpace(document.Core.Objective)
+	}
+	return creative.RequirementSnapshot{
+		Objective: objective, DeliverableIntent: deliverableIntent,
+		ProductOrSubject: product, Audience: audience,
+		CoreMessage: strings.TrimSpace(document.Proposition), SellingPoints: sellingPoints,
+		Constraints:      append([]string{}, document.Constraints...),
+		ProhibitedClaims: append([]string{}, document.Creative.ProhibitedClaims...),
+		AssetRefs:        assets, ReferenceIDs: append([]string{}, document.ReferenceIDs...),
+		Assumptions: assumptions, BlockingQuestions: blocking,
+	}, nil
+}
+
 func (r Reader) ListCreativeSources(
 	ctx context.Context,
 	actor contract.ActorContext,
@@ -146,6 +241,14 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		!strings.EqualFold(string(handoff.HandoffContentHash), expected) {
 		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy handoff content hash no longer matches the selected version")
 	}
+	packageVersion, err := r.Service.GetPackage(ctx, actor, projectID, reference.PackageID, reference.PackageVersion)
+	if err != nil {
+		return creative.StrategyPackageSnapshot{}, err
+	}
+	if !packageVersion.ContentHash.Equal(handoff.PackageRef.PackageContentHash) {
+		return creative.StrategyPackageSnapshot{}, fmt.Errorf("strategy package no longer matches its frozen handoff")
+	}
+	brief := packageVersion.Snapshot.Brief.Snapshot
 
 	audience := ""
 	bestPriority := int(^uint(0) >> 1)
@@ -184,7 +287,11 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		Objective:     handoff.CreativeView.Objective.Statement, Audience: audience,
 		CoreMessage:  handoff.CreativeView.Communication.SingleMindedProposition,
 		CallToAction: cta, Tone: append([]string{}, handoff.CreativeView.Communication.ToneConstraints...),
-		Mandatory: appendUnique(mandatory), Prohibited: appendUnique(prohibited),
+		BrandName: brief.Brand.Name, ProductName: brief.Product.Name,
+		SellingPoints:  append([]string{}, brief.Product.SellingPoints...),
+		ProofPoints:    append([]string{}, brief.Product.Evidence...),
+		UsageScenarios: append([]string{}, brief.Audience.Scenarios...),
+		Mandatory:      appendUnique(mandatory), Prohibited: appendUnique(prohibited),
 		CreativeRoutes: routes, HandoffSnapshot: handoffSnapshot,
 	}, nil
 }

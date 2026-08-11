@@ -10,21 +10,21 @@ func (s Service) conversationPromptVersion() string {
 	if value := strings.TrimSpace(s.ConversationPromptVersion); value != "" {
 		return value
 	}
-	return promptkit.ConversationV5
+	return promptkit.ConversationV6
 }
 
 func (s Service) generatePromptVersion() string {
 	if value := strings.TrimSpace(s.PromptVersion); value != "" {
 		return value
 	}
-	return promptkit.GenerateV4
+	return promptkit.GenerateV5
 }
 
 func (s Service) revisePromptVersion() string {
 	if value := strings.TrimSpace(s.RevisePromptVersion); value != "" {
 		return value
 	}
-	return promptkit.ReviseV3
+	return promptkit.ReviseV4
 }
 
 func (s Service) reviewPromptVersion() string {
@@ -38,5 +38,5 @@ func (s Service) repairPromptVersion() string {
 	if value := strings.TrimSpace(s.RepairPromptVersion); value != "" {
 		return value
 	}
-	return promptkit.RepairV2
+	return promptkit.RepairV3
 }

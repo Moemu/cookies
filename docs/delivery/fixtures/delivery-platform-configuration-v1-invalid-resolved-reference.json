@@ -1,0 +1,7 @@
+{
+  "base_fixture": "delivery-platform-configuration-v1-valid.json",
+  "expected_error": "must be string",
+  "mutations": [
+    { "path": "payload.platform_project.account_ref.external_id", "value": null }
+  ]
+}

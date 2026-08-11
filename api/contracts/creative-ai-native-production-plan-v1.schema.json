@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-ai-native-production-plan-v1.schema.json",
+  "title": "AI Native Ad Production Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "revision", "status", "based_on_storyboard_revision", "based_on_storyboard_hash", "channel_profile_id", "channel_profile_hash", "total_duration_ms", "aspect_ratio", "video_model_alias", "speech_model_alias", "units", "speech_units", "created_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "creative.ai-native.production-plan/v1"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["prepared", "running", "assets_ready", "rendering", "completed", "render_failed", "failed", "cancelled"]},
+    "based_on_storyboard_revision": {"type": "integer", "minimum": 1},
+    "based_on_storyboard_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "channel_profile_id": {"type": "string", "minLength": 1},
+    "channel_profile_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "total_duration_ms": {"type": "integer", "minimum": 15000, "maximum": 30000},
+    "aspect_ratio": {"const": "9:16"},
+    "video_model_alias": {"type": "string", "minLength": 1},
+    "speech_model_alias": {"type": "string", "minLength": 1},
+    "units": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/videoUnit"}},
+    "speech_units": {"type": "array", "items": {"$ref": "#/$defs/speechUnit"}},
+    "render": {"$ref": "#/$defs/render"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "assetRef": {"type": "object", "additionalProperties": false, "required": ["asset_id", "version"], "properties": {"asset_id": {"type": "string", "minLength": 1}, "version": {"type": "integer", "minimum": 1}}},
+    "attempt": {"type": "object", "additionalProperties": false, "required": ["id", "ordinal", "status", "created_at", "updated_at"], "properties": {"id": {"type": "string", "minLength": 1}, "ordinal": {"type": "integer", "minimum": 1}, "retry_of": {"type": "string"}, "status": {"enum": ["planned", "submitted", "running", "ingesting", "succeeded", "failed", "cancelled"]}, "provider_job_id": {"type": "string"}, "output_asset_ref": {"$ref": "#/$defs/assetRef"}, "error_code": {"type": "string"}, "error_message": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}}},
+    "videoUnit": {"type": "object", "additionalProperties": false, "required": ["id", "order", "shot_ids", "start_ms", "end_ms", "duration_seconds", "prompt", "prompt_hash", "aspect_ratio", "resolution", "product_identity_required", "attempts"], "properties": {"id": {"type": "string"}, "order": {"type": "integer", "minimum": 1}, "shot_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "start_ms": {"type": "integer", "minimum": 0}, "end_ms": {"type": "integer", "minimum": 1}, "duration_seconds": {"type": "integer", "minimum": 4, "maximum": 15}, "prompt": {"type": "string"}, "prompt_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "aspect_ratio": {"const": "9:16"}, "resolution": {"enum": ["480p", "720p", "1080p"]}, "reference_asset": {"$ref": "#/$defs/assetRef"}, "reference_role": {"type": "string"}, "product_identity_required": {"type": "boolean"}, "attempts": {"type": "array", "items": {"$ref": "#/$defs/attempt"}}, "selected_attempt_id": {"type": "string"}}},
+    "speechUnit": {"type": "object", "additionalProperties": false, "required": ["id", "order", "shot_id", "start_ms", "end_ms", "text", "language", "voice_alias", "attempts"], "properties": {"id": {"type": "string"}, "order": {"type": "integer", "minimum": 1}, "shot_id": {"type": "string"}, "start_ms": {"type": "integer", "minimum": 0}, "end_ms": {"type": "integer", "minimum": 1}, "text": {"type": "string"}, "language": {"type": "string"}, "voice_alias": {"type": "string"}, "normalized_text": {"type": "string"}, "audio_codec": {"type": "string"}, "sample_rate": {"type": "integer"}, "duration_ms": {"type": "integer"}, "word_timings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["text", "begin_ms", "end_ms"], "properties": {"text": {"type": "string"}, "begin_ms": {"type": "integer"}, "end_ms": {"type": "integer"}}}}, "provider_snapshot": {"type": "string"}, "attempts": {"type": "array", "items": {"$ref": "#/$defs/attempt"}}, "selected_attempt_id": {"type": "string"}}},
+    "render": {"type": "object", "additionalProperties": false, "required": ["id", "status", "progress_percent", "eta_seconds", "renderer_version", "started_at", "updated_at"], "properties": {"id": {"type": "string", "minLength": 1}, "status": {"enum": ["rendering", "completed", "render_failed"]}, "progress_percent": {"type": "integer", "minimum": 0, "maximum": 100}, "eta_seconds": {"type": "integer", "minimum": 0}, "renderer_version": {"const": "ffmpeg-ai-ad-timeline/v1"}, "output_asset_ref": {"$ref": "#/$defs/assetRef"}, "error_code": {"type": "string"}, "error_message": {"type": "string"}, "started_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}}}
+  }
+}

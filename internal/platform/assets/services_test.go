@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -74,6 +75,77 @@ func TestUploadCreatesImmutableProjectAsset(t *testing.T) {
 	}
 }
 
+func TestUploadRemovesDurableObjectWhenDatabaseCommitFails(t *testing.T) {
+	now := time.Date(2026, 8, 11, 8, 10, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	blobs := NewMemoryBlobStore()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: blobs, Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testPNG(t)
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "upload-db-failure", CreateUploadRequest{
+		Filename: "hero.png", DeclaredMIMEType: "image/png", DeclaredSizeBytes: int64(len(data)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	repo.completeUploadErr = errors.New("fault-injected database commit failure")
+	if _, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID); err == nil || !strings.Contains(err.Error(), "database commit failure") {
+		t.Fatalf("Finalize() error = %v", err)
+	}
+	durable := ObjectLocation{Bucket: "assets", Key: "assets/org_1/project_1/" + string(created.Session.TargetAssetID) + "/versions/1/original"}
+	if _, err := blobs.Head(context.Background(), durable); err == nil {
+		t.Fatal("database failure left an unowned durable asset object")
+	}
+	if _, err := blobs.Head(context.Background(), created.Session.Quarantine); err != nil {
+		t.Fatalf("recoverable quarantine source was deleted: %v", err)
+	}
+	stored, err := repo.GetUpload(context.Background(), "org_1", "project_1", created.Session.ID)
+	if err != nil || stored.Status != UploadProcessing || stored.ProjectAssetRef != nil {
+		t.Fatalf("upload state after database failure = %#v, err=%v", stored, err)
+	}
+}
+
+func TestUploadKeepsCommittedAssetWhenQuarantineCleanupFails(t *testing.T) {
+	now := time.Date(2026, 8, 11, 8, 15, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	memory := NewMemoryBlobStore()
+	blobs := &deleteFailBlobStore{MemoryBlobStore: memory}
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: blobs, Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testPNG(t)
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "upload-cleanup-failure", CreateUploadRequest{
+		Filename: "hero.png", DeclaredMIMEType: "image/png", DeclaredSizeBytes: int64(len(data)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs.failDelete = created.Session.Quarantine
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID)
+	if err != nil || result.Status != UploadSucceeded || result.ProjectAssetRef == nil {
+		t.Fatalf("Finalize() result=%#v err=%v", result, err)
+	}
+	if _, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", result.ProjectAssetRef.AssetVersion); err != nil {
+		t.Fatalf("cleanup failure rolled back committed asset: %v", err)
+	}
+	if _, err := memory.Head(context.Background(), created.Session.Quarantine); err != nil {
+		t.Fatalf("fault injection did not preserve quarantine object: %v", err)
+	}
+}
+
 func TestUploadPersistsVideoProbeMetadata(t *testing.T) {
 	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
 	repo := newFakeRepository()
@@ -126,6 +198,95 @@ func TestUploadPersistsVideoProbeMetadata(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Version.Media.FPS != 29.97 {
 		t.Fatalf("list did not return media metadata: %#v", items)
+	}
+}
+
+func TestUploadPersistsProjectAuthorizedAudioWithProbeMetadata(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	blobs := NewMemoryBlobStore()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: blobs, Scanner: NoopScanner{},
+		QuarantineBucket: "quarantine", AssetsBucket: "assets", Now: func() time.Time { return now }, NewID: sequenceIDs(),
+		AudioProbe: fakeAudioProbe{metadata: AudioMetadata{DurationMS: 2400, Codec: "pcm_s16le", Channels: 1, SampleRate: 48000, BitrateBPS: 768000}},
+	}
+	data := testWAV(48000, 2400)
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "audio-upload-key", CreateUploadRequest{Filename: "voice.wav", DeclaredMIMEType: "audio/wav", DeclaredSizeBytes: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", result.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Asset.Kind != contract.AssetAudio || stored.Version.MIMEType != "audio/wav" || stored.Version.DurationMS != 2400 {
+		t.Fatalf("audio asset = %#v", stored)
+	}
+	if stored.Version.Media.AudioCodec != "pcm_s16le" || stored.Version.Media.AudioChannels != 1 || stored.Version.Media.AudioSampleRate != 48000 || stored.Version.Media.ProbeStatus != MediaProbeSucceeded {
+		t.Fatalf("audio metadata = %#v", stored.Version.Media)
+	}
+	preview, info, err := service.OpenPreview(context.Background(), rc.Actor, "project_1", result.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer preview.Close()
+	got, err := io.ReadAll(preview)
+	if err != nil || !bytes.Equal(got, data) || info.MIMEType != "audio/wav" {
+		t.Fatalf("audio preview size=%d mime=%q err=%v", len(got), info.MIMEType, err)
+	}
+}
+
+func TestDerivedAudioIntakeIsIdempotentAndPreservesCreativeLineage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 4, 12, 30, 0, 0, time.UTC)
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+		AudioProbe: fakeAudioProbe{metadata: AudioMetadata{DurationMS: 600, Codec: "pcm_s16le", Channels: 1, SampleRate: 48000, BitrateBPS: 768000}},
+	}
+	contents := testWAV(48000, 600)
+	planRevision := int64(2)
+	sources := []contract.ResourceRef{{Type: "creative_brand_film_plan", ID: "task_1", Version: &planRevision}}
+	rc := testRequestContext("org_1", "project_1")
+	first, err := service.IngestDerivedAudio(context.Background(), rc, "project_1", "brand-audio-fixture-abc", bytes.NewReader(contents), int64(len(contents)), "audio/wav", sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.IngestDerivedAudio(context.Background(), rc, "project_1", "brand-audio-fixture-abc", bytes.NewReader(contents), int64(len(contents)), "audio/wav", sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("derived audio retry created a second asset: first=%+v second=%+v", first, second)
+	}
+	asset, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil || asset.Asset.Kind != contract.AssetAudio || asset.Version.SourceType != contract.AssetSourceDerived {
+		t.Fatalf("derived audio = %#v err=%v", asset, err)
+	}
+	relations, err := repository.ListAssetRelations(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil || len(relations) != 1 || relations[0].Source.Type != "creative_brand_film_plan" || relations[0].Source.ID != "task_1" {
+		t.Fatalf("derived audio lineage = %#v err=%v", relations, err)
+	}
+}
+
+func TestCanonicalDetectedMediaMIMEAcceptsFilesystemWAVAlias(t *testing.T) {
+	t.Parallel()
+	if got := canonicalDetectedMediaMIME("audio/wave"); got != "audio/wav" {
+		t.Fatalf("canonical WAV MIME = %q", got)
+	}
+	if got := canonicalDetectedMediaMIME("audio/x-wav"); got != "audio/wav" {
+		t.Fatalf("canonical x-wav MIME = %q", got)
 	}
 }
 
@@ -513,6 +674,49 @@ func TestRenderedVideoIntakeIsIdempotentByRenderJob(t *testing.T) {
 	}
 }
 
+func TestDerivedImageIntakeIsIdempotentAndPreservesSourceLineage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 31, 16, 0, 0, 0, time.UTC)
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	source := repository.commit(AssetCommit{
+		BlobID: "source_blob", OrganizationID: "org_1", ProjectID: "project_1", AssetID: "source_video", Version: 1,
+		Kind: contract.AssetVideo, SourceType: contract.AssetSourceUpload, OwnerSystem: "assets", MIMEType: "video/mp4",
+		SizeBytes: 128, SHA256: strings.Repeat("a", 64), Location: ObjectLocation{Provider: "memory", Bucket: "assets", Key: "source"},
+	}, now).AssetVersion
+	frame := testPNG(t)
+	rc := testRequestContext("org_1", "project_1")
+	first, err := service.IngestDerivedImage(context.Background(), rc, "project_1", "game-frame-source_video-v1-21271ms-v1", source, bytes.NewReader(frame), int64(len(frame)), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.IngestDerivedImage(context.Background(), rc, "project_1", "game-frame-source_video-v1-21271ms-v1", source, bytes.NewReader(frame), int64(len(frame)), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("derivation retry created a second asset: first=%+v second=%+v", first, second)
+	}
+	stored, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Asset.Kind != contract.AssetImage || stored.Version.SourceType != contract.AssetSourceDerived || stored.Version.DerivationID == "" {
+		t.Fatalf("derived asset metadata = %+v", stored.Version)
+	}
+	relations, err := repository.ListAssetRelations(context.Background(), "org_1", "project_1", first.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(relations) != 1 || relations[0].RelationType != AssetRelationDerivedFrom || relations[0].Source.ID != string(source.AssetID) || relations[0].Source.Version == nil || *relations[0].Source.Version != source.Version {
+		t.Fatalf("derived source lineage = %+v", relations)
+	}
+}
+
 func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC)
@@ -537,6 +741,7 @@ func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	first, err := service.IngestRenderedImage(
 		context.Background(), requestContext, "project_1", "image_render_1",
 		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()),
+		1080, 1440,
 		[]contract.AssetVersionRef{sourceAsset}, []contract.ResourceRef{sourceResource},
 	)
 	if err != nil {
@@ -545,6 +750,7 @@ func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	second, err := service.IngestRenderedImage(
 		context.Background(), requestContext, "project_1", "image_render_1",
 		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()),
+		1080, 1440,
 		[]contract.AssetVersionRef{sourceAsset}, []contract.ResourceRef{sourceResource},
 	)
 	if err != nil {
@@ -561,6 +767,36 @@ func TestRenderedImageIntakePreservesLineageAndFrozenDimensions(t *testing.T) {
 	}
 	if len(relations) != 2 {
 		t.Fatalf("relations = %+v, want base asset and Creative draft lineage", relations)
+	}
+}
+
+func TestRenderedImageIntakeAcceptsDeclaredCanvasDimensions(t *testing.T) {
+	t.Parallel()
+	repository := newFakeRepository()
+	service := UploadService{
+		Repository: repository,
+		Projects:   fakeProjects{organization: "org_1", project: "project_1", version: 7},
+		Blobs:      NewMemoryBlobStore(), Scanner: NoopScanner{},
+		QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: time.Now, NewID: sequenceIDs(),
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 720, 1280))); err != nil {
+		t.Fatalf("encode canvas image: %v", err)
+	}
+	ref, err := service.IngestRenderedImage(
+		context.Background(), testRequestContext("org_1", "project_1"), "project_1", "short_drama_canvas_1",
+		bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), 720, 1280, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("IngestRenderedImage() arbitrary canvas error = %v", err)
+	}
+	stored, err := repository.GetProjectAsset(context.Background(), "org_1", "project_1", ref.AssetVersion)
+	if err != nil {
+		t.Fatalf("GetProjectAsset() error = %v", err)
+	}
+	if stored.Asset.Kind != contract.AssetImage || stored.Version.WidthPixels != 720 || stored.Version.HeightPixels != 1280 {
+		t.Fatalf("canvas metadata = %+v", stored.Version)
 	}
 }
 
@@ -612,14 +848,15 @@ func (transientFetcherError) Error() string   { return "temporary fetch failure"
 func (transientFetcherError) Retryable() bool { return true }
 
 type fakeRepository struct {
-	mu         sync.Mutex
-	uploads    map[string]UploadSession
-	uploadKeys map[string]string
-	intakes    map[string]GeneratedIntake
-	intakeKeys map[string]string
-	assets     map[string]ProjectAsset
-	relations  map[string][]AssetRelation
-	features   map[string]AssetFeature
+	mu                sync.Mutex
+	uploads           map[string]UploadSession
+	uploadKeys        map[string]string
+	intakes           map[string]GeneratedIntake
+	intakeKeys        map[string]string
+	assets            map[string]ProjectAsset
+	relations         map[string][]AssetRelation
+	features          map[string]AssetFeature
+	completeUploadErr error
 }
 
 func newFakeRepository() *fakeRepository {
@@ -670,6 +907,9 @@ func (r *fakeRepository) setUploadStatus(o contract.OrganizationID, p contract.P
 func (r *fakeRepository) CompleteUpload(_ context.Context, id string, c AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.completeUploadErr != nil {
+		return contract.ProjectAssetRef{}, r.completeUploadErr
+	}
 	v, ok := r.uploads[id]
 	if !ok {
 		return contract.ProjectAssetRef{}, ErrNotFound
@@ -679,6 +919,18 @@ func (r *fakeRepository) CompleteUpload(_ context.Context, id string, c AssetCom
 	v.ProjectAssetRef = &ref
 	r.uploads[id] = v
 	return ref, nil
+}
+
+type deleteFailBlobStore struct {
+	*MemoryBlobStore
+	failDelete ObjectLocation
+}
+
+func (s *deleteFailBlobStore) Delete(ctx context.Context, location ObjectLocation) error {
+	if location.Bucket == s.failDelete.Bucket && location.Key == s.failDelete.Key {
+		return errors.New("fault-injected quarantine cleanup failure")
+	}
+	return s.MemoryBlobStore.Delete(ctx, location)
 }
 func (r *fakeRepository) FailUpload(_ context.Context, o contract.OrganizationID, p contract.ProjectID, id, code string, now time.Time) error {
 	r.mu.Lock()
@@ -768,9 +1020,19 @@ func (r *fakeRepository) CompleteRender(_ context.Context, renderJobID string, c
 	}
 	return r.commit(c, now), nil
 }
+func (r *fakeRepository) CompleteDerived(_ context.Context, derivationID string, c AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.assets {
+		if existing.Asset.OrganizationID == c.OrganizationID && existing.Version.DerivationID == derivationID {
+			return existing.Ref, nil
+		}
+	}
+	return r.commit(c, now), nil
+}
 func (r *fakeRepository) commit(c AssetCommit, now time.Time) contract.ProjectAssetRef {
 	ref := contract.ProjectAssetRef{ProjectID: c.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: c.AssetID, Version: c.Version}}
-	r.assets[string(c.OrganizationID)+"/"+string(c.ProjectID)+"/"+string(c.AssetID)] = ProjectAsset{Ref: ref, Asset: Asset{ID: c.AssetID, OrganizationID: c.OrganizationID, Kind: c.Kind, Status: AssetReady, OwnerSystem: c.OwnerSystem, LatestVersion: c.Version, CreatedAt: now, UpdatedAt: now}, Version: AssetVersion{OrganizationID: c.OrganizationID, AssetID: c.AssetID, Version: c.Version, Status: AssetReady, SourceType: c.SourceType, MIMEType: c.MIMEType, SizeBytes: c.SizeBytes, SHA256: c.SHA256, WidthPixels: c.WidthPixels, HeightPixels: c.HeightPixels, Media: c.Media, DurationMS: c.DurationMS, FrameRate: c.FrameRate, VideoCodec: c.VideoCodec, AudioCodec: c.AudioCodec, RenderJobID: c.RenderJobID, ProviderJobID: c.ProviderJobID, ProviderOutputID: c.ProviderOutputID, ProjectContextVersion: c.ProjectContextVersion, Blob: c.Location, CreatedAt: now}, CreatedAt: now}
+	r.assets[string(c.OrganizationID)+"/"+string(c.ProjectID)+"/"+string(c.AssetID)] = ProjectAsset{Ref: ref, Asset: Asset{ID: c.AssetID, OrganizationID: c.OrganizationID, Kind: c.Kind, Status: AssetReady, OwnerSystem: c.OwnerSystem, LatestVersion: c.Version, CreatedAt: now, UpdatedAt: now}, Version: AssetVersion{OrganizationID: c.OrganizationID, AssetID: c.AssetID, Version: c.Version, Status: AssetReady, SourceType: c.SourceType, MIMEType: c.MIMEType, SizeBytes: c.SizeBytes, SHA256: c.SHA256, WidthPixels: c.WidthPixels, HeightPixels: c.HeightPixels, Media: c.Media, DurationMS: c.DurationMS, FrameRate: c.FrameRate, VideoCodec: c.VideoCodec, AudioCodec: c.AudioCodec, RenderJobID: c.RenderJobID, DerivationID: c.DerivationID, ProviderJobID: c.ProviderJobID, ProviderOutputID: c.ProviderOutputID, ProjectContextVersion: c.ProjectContextVersion, Blob: c.Location, CreatedAt: now}, CreatedAt: now}
 	for _, relation := range c.Relations {
 		relation.CreatedAt = now
 		key := relationKey(c.OrganizationID, c.ProjectID, relation.OutputAsset)

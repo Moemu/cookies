@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,14 @@ type JobRuntimeResearchScheduler struct {
 }
 
 func (s JobRuntimeResearchScheduler) Schedule(ctx context.Context, run ResearchRun) error {
+	return s.schedule(ctx, run, false)
+}
+
+func (s JobRuntimeResearchScheduler) ScheduleResearchRetry(ctx context.Context, run ResearchRun) error {
+	return s.schedule(ctx, run, true)
+}
+
+func (s JobRuntimeResearchScheduler) schedule(ctx context.Context, run ResearchRun, retry bool) error {
 	if s.Store == nil || s.NewID == nil {
 		return fmt.Errorf("research job store and ID generator are required")
 	}
@@ -44,16 +53,20 @@ func (s JobRuntimeResearchScheduler) Schedule(ctx context.Context, run ResearchR
 	if s.Now != nil {
 		now = s.Now
 	}
+	idempotencyKey := "knowledge_research_" + run.ID
+	if retry {
+		idempotencyKey += "_retry_" + jobID
+	}
 	_, _, err = s.Store.Enqueue(ctx, jobruntime.CreateRequest{
 		Job: contract.Job{
 			ID: jobID, Kind: ResearchJobKind,
 			OrganizationID: run.OrganizationID, ProjectID: run.ProjectID,
 			Status: contract.JobQueued, Progress: 0, Cancellable: true,
-			AttemptCount: 0, MaxAttempts: 1, Version: 1,
+			AttemptCount: 0, MaxAttempts: 2, Version: 1,
 			CreatedAt: now().UTC(), UpdatedAt: now().UTC(),
 		},
 		Payload:        payload,
-		IdempotencyKey: contract.IdempotencyKey("knowledge_research_" + run.ID),
+		IdempotencyKey: contract.IdempotencyKey(idempotencyKey),
 		RequestHash:    hex.EncodeToString(sum[:]),
 	})
 	return err
@@ -76,11 +89,14 @@ func (s Service) HandleResearchJob(ctx context.Context, claim jobruntime.Claim) 
 		return jobruntime.Result{}, err
 	}
 	ref := contract.ResourceRef{Type: "knowledge_research_run", ID: run.ID}
-	if run.Status != "running" {
+	if !researchStatusActive(run.Status) {
 		return jobruntime.Result{Ref: &ref}, nil
 	}
+	if err := s.reportJobProgress(ctx, claim, 10, "研究任务已启动，正在确认目标与可用资料"); err != nil {
+		return jobruntime.Result{}, err
+	}
 	if s.Runner == nil {
-		s.markResearchTerminal(ctx, run, "unavailable", "EXTERNAL_RUNNER_UNAVAILABLE", ErrExternalRunnerUnavailable.Error())
+		s.markResearchTerminal(ctx, run, "failed", "EXTERNAL_RUNNER_UNAVAILABLE", ErrExternalRunnerUnavailable.Error())
 		return jobruntime.Result{Ref: &ref}, nil
 	}
 	documents, err := s.selectResearchChunks(
@@ -93,16 +109,46 @@ func (s Service) HandleResearchJob(ctx context.Context, claim jobruntime.Claim) 
 		)
 		return jobruntime.Result{Ref: &ref}, nil
 	}
-	if _, err := s.executeResearch(ctx, run, documents); err != nil {
+	if err := s.reportJobProgress(ctx, claim, 30, "内部资料已准备，正在执行联网检索与来源整理"); err != nil {
+		return jobruntime.Result{}, err
+	}
+	var executeErr error
+	if run.RunMode == "deep" {
+		allowProviderRetry := claim.Job.AttemptCount > 0 && claim.Job.AttemptCount < claim.Job.MaxAttempts
+		_, executeErr = s.executeDeepResearch(ctx, run, documents, func(round int, status, message string) error {
+			progress := 20
+			if run.MaxRounds > 0 {
+				progress = 15 + (round*65)/run.MaxRounds
+			}
+			if status == "drafting" || status == "auditing" {
+				progress = 88
+			}
+			return s.reportJobProgress(ctx, claim, progress, message)
+		}, allowProviderRetry)
+	} else {
+		_, executeErr = s.executeResearch(ctx, run, documents)
+	}
+	if errors.Is(executeErr, errResearchProviderRetryable) {
+		backoff := time.Duration(maxInt(claim.Job.AttemptCount, 1)*2) * time.Second
+		return jobruntime.Result{}, jobruntime.DeferredError{AvailableAt: s.now().Add(backoff)}
+	}
+	if executeErr != nil {
 		s.markResearchTerminal(ctx, run, "failed", "RESEARCH_PERSIST_FAILED", "研究结果持久化失败")
+		return jobruntime.Result{}, executeErr
+	}
+	if err := s.reportJobProgress(ctx, claim, 95, "研究结果已返回，正在确认持久化结果"); err != nil {
 		return jobruntime.Result{}, err
 	}
 	return jobruntime.Result{Ref: &ref}, nil
 }
 
 func (s Service) markResearchTerminal(ctx context.Context, run ResearchRun, status, code, message string) {
+	now := s.now()
 	_, _ = s.DB.ExecContext(ctx, `UPDATE platform_research_runs
-		SET status = ?, error_code = ?, error_message = ?, updated_at = ?
-		WHERE organization_id = ? AND project_id = ? AND id = ? AND status = 'running'`,
-		status, code, message, s.now(), run.OrganizationID, run.ProjectID, run.ID)
+		SET status = ?, error_code = ?, error_message = ?, stop_reason = ?,
+			heartbeat_at = ?, completed_at = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ?
+		  AND status IN ('queued', 'planning', 'searching', 'reading', 'cross_checking', 'drafting', 'auditing')`,
+		status, code, message, strings.ToLower(code), now, now, now,
+		run.OrganizationID, run.ProjectID, run.ID)
 }

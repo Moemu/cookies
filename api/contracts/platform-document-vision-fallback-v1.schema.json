@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "platform-document-vision-fallback-v1.schema.json",
+  "title": "Platform document visual fallback capability v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "document_id", "eligible", "recommended", "available", "model_alias", "conversion_required", "max_pages_per_request", "requires_page_selection"],
+  "properties": {
+    "contract_version": {"const": "platform-document-vision-fallback/v1"},
+    "document_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "eligible": {"type": "boolean"},
+    "recommended": {"type": "boolean"},
+    "available": {"type": "boolean"},
+    "reason_code": {"type": "string", "pattern": "^[A-Z0-9_]{1,96}$"},
+    "model_alias": {"type": "string", "maxLength": 160},
+    "route_revision_id": {"type": "string", "maxLength": 96},
+    "conversion_required": {"type": "boolean"},
+    "converter_code": {"type": "string", "minLength": 1, "maxLength": 64},
+    "converter_version": {"type": "string", "minLength": 1, "maxLength": 160},
+    "max_pages_per_request": {"const": 24},
+    "requires_page_selection": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"available": {"const": false}}, "required": ["available"]},
+      "then": {"required": ["reason_code"]}
+    },
+    {
+      "if": {"properties": {"available": {"const": true}}, "required": ["available"]},
+      "then": {"required": ["route_revision_id"]}
+    },
+    {
+      "if": {
+        "properties": {"available": {"const": true}, "conversion_required": {"const": true}},
+        "required": ["available", "conversion_required"]
+      },
+      "then": {"required": ["converter_code", "converter_version"]}
+    }
+  ]
+}

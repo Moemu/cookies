@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-conversation-capabilities-v1.schema.json",
+  "title": "Strategy Conversation Capabilities v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "multimodal_input",
+    "deep_reasoning",
+    "web_search",
+    "quick_viral_remake"
+  ],
+  "properties": {
+    "contract_version": {"const": "strategy-conversation-capabilities/v1"},
+    "multimodal_input": {"$ref": "#/$defs/capability"},
+    "deep_reasoning": {"$ref": "#/$defs/capability"},
+    "web_search": {"$ref": "#/$defs/capability"},
+    "quick_viral_remake": {"$ref": "#/$defs/capability"}
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available"],
+      "properties": {
+        "available": {"type": "boolean"},
+        "estimated_wait_seconds": {"type": "integer", "minimum": 1},
+        "disclosure": {"enum": ["query_only"]}
+      }
+    }
+  }
+}

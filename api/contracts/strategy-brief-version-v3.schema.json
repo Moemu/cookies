@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-brief-version-v3.schema.json",
+  "title": "Strategy Brief Version v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "core", "facts", "constraints", "assumptions", "unknowns", "conflicts", "asset_refs", "reference_ids", "extensions"],
+  "properties": {
+    "contract_version": {"const": "strategy-brief-version/v3"},
+    "core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "deliverable_intent", "product_or_subject", "audience"],
+      "properties": {
+        "objective": {"type": "string"},
+        "deliverable_intent": {"type": "string"},
+        "product_or_subject": {"type": "string"},
+        "audience": {"type": "string"}
+      }
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "value", "source_refs", "confidence"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[^\\s]+$"},
+          "kind": {"enum": ["brand", "proposition", "industry", "region", "language", "channel", "selling_point", "budget", "schedule", "primary_kpi", "claim", "custom"]},
+          "label": {"type": "string"},
+          "value": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "number"},
+              {"type": "boolean"},
+              {"type": "array", "items": {"type": "string"}}
+            ]
+          },
+          "source_refs": {"type": "array", "items": {"$ref": "#/$defs/sourceRef"}},
+          "confidence": {"enum": ["low", "medium", "high"]}
+        }
+      }
+    },
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "source_refs"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[^\\s]+$"},
+          "statement": {"type": "string", "minLength": 1},
+          "reason": {"type": "string"},
+          "source_refs": {"type": "array", "items": {"$ref": "#/$defs/sourceRef"}}
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "required_for"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[^\\s]+$"},
+          "question": {"type": "string", "minLength": 1},
+          "impact": {"type": "string"},
+          "required_for": {"enum": ["creative_intake", "production", "optional"]}
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "field", "candidates", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[^\\s]+$"},
+          "field": {"type": "string", "minLength": 1},
+          "candidates": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["value", "source_refs"],
+              "properties": {
+                "value": {},
+                "source_refs": {"type": "array", "items": {"$ref": "#/$defs/sourceRef"}}
+              }
+            }
+          },
+          "status": {"enum": ["open", "resolved"]}
+        }
+      }
+    },
+    "asset_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "version"],
+        "properties": {
+          "asset_id": {"type": "string", "minLength": 1},
+          "version": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "reference_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "extensions": {"type": "object"}
+  },
+  "$defs": {
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "id": {"type": "string", "minLength": 1},
+        "locator": {"type": "string"}
+      }
+    }
+  }
+}

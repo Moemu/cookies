@@ -123,7 +123,7 @@ INSERT INTO provider_connections (id, connection_code, connection_type, current_
 VALUES ('$connectionID', 'ark-research-web', 'ark', NULL, 'enabled');
 INSERT INTO provider_connection_revisions
   (id, connection_id, revision_number, base_url, timeout_seconds, max_response_bytes)
-VALUES ('connection_ark_research_r1', '$connectionID', 1, '$normalizedBaseURL', 120, 4194304);
+VALUES ('connection_ark_research_r1', '$connectionID', 1, '$normalizedBaseURL', 300, 4194304);
 UPDATE provider_connections
 SET current_revision_id = 'connection_ark_research_r1'
 WHERE id = '$connectionID';

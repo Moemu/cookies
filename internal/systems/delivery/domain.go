@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -15,13 +16,20 @@ type CheckSeverity string
 const (
 	SourceMock Source = "mock"
 
-	ScenarioGoldenPath          Scenario = "golden_path"
-	ScenarioBudgetZero          Scenario = "budget_zero"
-	ScenarioCreativeUnconfirmed Scenario = "creative_unconfirmed"
-	ScenarioTrackingMissing     Scenario = "tracking_missing"
-	ScenarioIncompleteDraft     Scenario = "incomplete_draft"
-	ScenarioPlanList            Scenario = "project_plan_list"
-	ScenarioApprovalQueue       Scenario = "approval_queue"
+	DeliveryPlanVersionSchemaV2  = "delivery-plan-version/v2"
+	PlanRuntimeActive            = "active"
+	PlanRuntimeCapabilityPending = "capability_pending"
+	PlanRuntimeLegacyUnsupported = "legacy_unsupported"
+
+	ScenarioGoldenPath            Scenario = "golden_path"
+	ScenarioBudgetZero            Scenario = "budget_zero"
+	ScenarioCreativeUnconfirmed   Scenario = "creative_unconfirmed"
+	ScenarioTrackingMissing       Scenario = "tracking_missing"
+	ScenarioIncompleteDraft       Scenario = "incomplete_draft"
+	ScenarioPlanList              Scenario = "project_plan_list"
+	ScenarioApprovalQueue         Scenario = "approval_queue"
+	ScenarioPlatformConfiguration Scenario = "platform_configuration"
+	ScenarioCapabilityPending     Scenario = "capability_pending"
 
 	CheckSeverityError   CheckSeverity = "error"
 	CheckSeverityWarning CheckSeverity = "warning"
@@ -59,9 +67,20 @@ type Tracking struct {
 }
 
 type CreativeReference struct {
-	AssetID   string `json:"asset_id"`
-	Version   int    `json:"version"`
-	Confirmed bool   `json:"confirmed"`
+	AssetID     string `json:"asset_id"`
+	Version     int    `json:"version"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Route       string `json:"route,omitempty"`
+	Confirmed   bool   `json:"confirmed"`
+}
+
+// StrategyReference is a resolvable forward reference to the immutable
+// upstream task version used to author a delivery plan.
+type StrategyReference struct {
+	TaskID      string `json:"task_id"`
+	Version     int64  `json:"version"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Route       string `json:"route,omitempty"`
 }
 
 type PlanDraft struct {
@@ -72,33 +91,49 @@ type PlanDraft struct {
 	Schedule              Schedule            `json:"schedule"`
 	Tracking              Tracking            `json:"tracking"`
 	CreativeReferences    []CreativeReference `json:"creative_references"`
+	StrategyReference     StrategyReference   `json:"strategy_reference"`
 	SourceStrategyVersion string              `json:"source_strategy_version"`
 }
 
 type DeliveryPlanVersion struct {
-	PlanID                string                  `json:"plan_id"`
-	OrganizationID        contract.OrganizationID `json:"organization_id"`
-	ProjectID             contract.ProjectID      `json:"project_id"`
-	VersionNumber         int                     `json:"version_number"`
-	CanonicalHash         string                  `json:"canonical_hash"`
-	Name                  string                  `json:"name"`
-	Objective             string                  `json:"objective"`
-	Advertiser            MockAdvertiser          `json:"advertiser"`
-	Budget                Budget                  `json:"budget"`
-	Schedule              Schedule                `json:"schedule"`
-	Tracking              Tracking                `json:"tracking"`
-	CreativeReferences    []CreativeReference     `json:"creative_references"`
-	SourceStrategyVersion string                  `json:"source_strategy_version"`
-	Platform              string                  `json:"platform"`
-	Source                Source                  `json:"source"`
-	Scenario              Scenario                `json:"scenario"`
-	CreatedBy             contract.Principal      `json:"created_by"`
-	CreatedAt             time.Time               `json:"created_at"`
+	SchemaVersion          string                  `json:"schema_version,omitempty"`
+	RuntimeStatus          string                  `json:"runtime_status,omitempty"`
+	ReadOnly               bool                    `json:"read_only"`
+	PlanID                 string                  `json:"plan_id"`
+	OrganizationID         contract.OrganizationID `json:"organization_id"`
+	ProjectID              contract.ProjectID      `json:"project_id"`
+	VersionNumber          int                     `json:"version_number"`
+	CanonicalHash          string                  `json:"canonical_hash"`
+	DeliveryIntent         *DeliveryIntent         `json:"intent,omitempty"`
+	PlatformConfiguration  *PlatformConfiguration  `json:"platform_configuration,omitempty"`
+	Name                   string                  `json:"name,omitempty"`
+	Objective              string                  `json:"objective,omitempty"`
+	Advertiser             MockAdvertiser          `json:"advertiser,omitempty"`
+	Budget                 Budget                  `json:"budget,omitempty"`
+	Schedule               Schedule                `json:"schedule,omitempty"`
+	Tracking               Tracking                `json:"tracking,omitempty"`
+	CreativeReferences     []CreativeReference     `json:"creative_references,omitempty"`
+	StrategyReference      StrategyReference       `json:"strategy_reference,omitempty"`
+	SourceStrategyVersion  string                  `json:"source_strategy_version,omitempty"`
+	Platform               string                  `json:"platform"`
+	Source                 Source                  `json:"source"`
+	Scenario               Scenario                `json:"scenario"`
+	CreatedBy              contract.Principal      `json:"created_by"`
+	CreatedAt              time.Time               `json:"created_at"`
+	ThreeTierConfiguration *ThreeTierConfiguration `json:"three_tier_configuration,omitempty"`
 }
+
+func (v DeliveryPlanVersion) IsPlatformConfigurationV2() bool {
+	return v.SchemaVersion == DeliveryPlanVersionSchemaV2 && v.DeliveryIntent != nil && v.PlatformConfiguration != nil
+}
+
+func (v DeliveryPlanVersion) IsLegacy() bool { return !v.IsPlatformConfigurationV2() }
 
 type UpdatePlanRequest struct {
 	ExpectedVersion int `json:"expected_version"`
 	PlanDraft
+	Intent                *DeliveryIntent        `json:"intent,omitempty"`
+	PlatformConfiguration *PlatformConfiguration `json:"platform_configuration,omitempty"`
 }
 
 type RepairTarget struct {
@@ -141,6 +176,12 @@ type PlanVersionList struct {
 func (request UpdatePlanRequest) Validate() error {
 	if request.ExpectedVersion < 1 {
 		return fmt.Errorf("expected_version must be at least 1")
+	}
+	if request.Intent != nil || request.PlatformConfiguration != nil {
+		if request.Intent == nil || request.PlatformConfiguration == nil {
+			return fmt.Errorf("intent and platform_configuration are both required")
+		}
+		return nil
 	}
 	return request.PlanDraft.Validate()
 }
@@ -187,6 +228,7 @@ func versionFromDraft(plan DeliveryPlan, versionNumber int, draft PlanDraft, act
 		},
 		Budget: draft.Budget, Schedule: draft.Schedule,
 		Tracking: draft.Tracking, CreativeReferences: draft.CreativeReferences,
+		StrategyReference:     draft.StrategyReference,
 		SourceStrategyVersion: draft.SourceStrategyVersion, Platform: plan.Platform,
 		Source: SourceMock, Scenario: scenario,
 		CreatedBy: actor, CreatedAt: now,
@@ -210,6 +252,14 @@ func normalizeDraft(draft PlanDraft, scenario Scenario) PlanDraft {
 	draft.Tracking.PixelID = strings.TrimSpace(draft.Tracking.PixelID)
 	draft.Tracking.ConversionEvent = strings.TrimSpace(draft.Tracking.ConversionEvent)
 	draft.SourceStrategyVersion = strings.TrimSpace(draft.SourceStrategyVersion)
+	draft.StrategyReference.TaskID = strings.TrimSpace(draft.StrategyReference.TaskID)
+	draft.StrategyReference.ContentHash = strings.TrimSpace(draft.StrategyReference.ContentHash)
+	draft.StrategyReference.Route = strings.TrimSpace(draft.StrategyReference.Route)
+	for index := range draft.CreativeReferences {
+		draft.CreativeReferences[index].AssetID = strings.TrimSpace(draft.CreativeReferences[index].AssetID)
+		draft.CreativeReferences[index].ContentHash = strings.TrimSpace(draft.CreativeReferences[index].ContentHash)
+		draft.CreativeReferences[index].Route = strings.TrimSpace(draft.CreativeReferences[index].Route)
+	}
 	draft.CreativeReferences = append([]CreativeReference(nil), draft.CreativeReferences...)
 	return draft
 }
@@ -222,11 +272,30 @@ func draftFromVersion(version DeliveryPlanVersion) PlanDraft {
 		},
 		Budget: version.Budget, Schedule: version.Schedule, Tracking: version.Tracking,
 		CreativeReferences:    append([]CreativeReference(nil), version.CreativeReferences...),
+		StrategyReference:     version.StrategyReference,
 		SourceStrategyVersion: version.SourceStrategyVersion,
 	}
 }
 
 func cloneVersion(version DeliveryPlanVersion) DeliveryPlanVersion {
 	version.CreativeReferences = append([]CreativeReference(nil), version.CreativeReferences...)
+	version.ThreeTierConfiguration = cloneThreeTierConfiguration(version.ThreeTierConfiguration)
+	version.DeliveryIntent = cloneJSONPointer(version.DeliveryIntent)
+	version.PlatformConfiguration = cloneJSONPointer(version.PlatformConfiguration)
 	return version
+}
+
+func cloneJSONPointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var cloned T
+	if err := json.Unmarshal(payload, &cloned); err != nil {
+		return nil
+	}
+	return &cloned
 }

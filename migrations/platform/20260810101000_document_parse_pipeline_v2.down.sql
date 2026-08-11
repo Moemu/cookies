@@ -1,0 +1,14 @@
+ALTER TABLE platform_knowledge_documents
+  DROP INDEX idx_knowledge_document_parse_activity,
+  DROP COLUMN heartbeat_at,
+  DROP COLUMN page_quality_summary,
+  DROP COLUMN preview_status,
+  DROP COLUMN fallback_reason,
+  DROP COLUMN quality_tier,
+  DROP COLUMN quality_score,
+  DROP COLUMN total_pages,
+  DROP COLUMN processed_pages,
+  DROP COLUMN progress_kind,
+  DROP COLUMN parse_progress,
+  DROP COLUMN parse_phase,
+  DROP COLUMN parse_strategy;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, X } from 'lucide-react'
+import { Bell, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, UserRound, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { useProject } from '../context/ProjectContext'
@@ -29,6 +29,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
   const { projects, currentProject, agencyWorkbench, createProject } = useProject()
   const { configuredCount } = useModelConfig()
   const [projectMenu, setProjectMenu] = useState(false)
+  const [userMenu, setUserMenu] = useState(false)
   const [projectMenuSearch, setProjectMenuSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -81,7 +82,14 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
 
   const withoutSidebar = isHome || isProjectHome || isProjectManagement || isGlobalSettings
   return <div className={`${withoutSidebar ? 'app-shell home-shell' : 'app-shell'}${collapsed && !withoutSidebar ? ' sidebar-collapsed' : ''}`}>
-    <a className="skip-link" href="#main-content">跳到主内容</a>
+    <a
+      className="skip-link"
+      href="#main-content"
+      onClick={event => {
+        event.preventDefault()
+        window.setTimeout(() => document.getElementById('main-content')?.focus(), 0)
+      }}
+    >跳到主内容</a>
     <header className="topbar">
       <button className="brand" onClick={onHome} aria-label="返回 Home 首页"><CookiesMark className="brand-mark"/><span>cookies</span></button>
       <nav className="system-nav" aria-label="业务系统">
@@ -90,7 +98,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
       </nav>
       <span className="top-divider"/>
       {!isGlobalSettings ? <div className="top-switcher-wrap">
-        <button className="top-switcher project" onClick={() => setProjectMenu(value => !value)} aria-expanded={projectMenu} aria-haspopup="menu"><span>{currentProject.name}</span><ChevronDown size={14}/></button>
+        <button className="top-switcher project" onClick={() => { setProjectMenu(value => !value); setUserMenu(false) }} aria-expanded={projectMenu} aria-haspopup="menu"><span>{currentProject.name}</span><ChevronDown size={14}/></button>
         <div className="top-context-chain" aria-label="当前组织、客户、品牌、Project 和系统上下文">
           <span>{currentContext?.organizationName ?? '组织未连接'}</span>
           <span>{currentContext?.clientName ?? '客户未分配'}</span>
@@ -123,20 +131,68 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
         {searchOpen ? <button aria-label="关闭搜索" onClick={() => { setSearchOpen(false); setSearch('') }}><X size={15}/></button> : <kbd>/</kbd>}
         {searchOpen && search ? <div className="search-results" role="listbox" aria-label="全局搜索结果">{searchResults.length ? searchResults.map(result => <button key={result.id} role="option" onClick={() => { if ('projectHome' in result) onProjectChange(result.projectId); else onProjectChange(result.projectId, result.system, result.navId, result.objectId); setSearch(''); setSearchOpen(false) }}><b>{result.title}</b><small>{result.meta}</small></button>) : <div className="search-empty">没有匹配结果</div>}</div> : null}
       </div>
-      <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button><button className="avatar" aria-label={`当前用户：${userLabel}`}>{userInitials}</button><button className="icon-button" aria-label="退出登录" onClick={() => void logout()}><LogOut size={17}/></button>
+      <button className={isGlobalSettings ? 'icon-button active' : configuredCount ? 'icon-button' : 'icon-button has-warning'} aria-label="模型与密钥设置" onClick={onModelSettings}><KeyRound size={18}/></button><button className="icon-button" aria-label="命令中心"><Command size={18}/></button><button className="icon-button" aria-label="帮助"><CircleHelp size={18}/></button><button className="icon-button has-dot" aria-label="通知"><Bell size={18}/></button>
+      <div className="user-menu-wrap">
+        <button className="avatar" aria-label={`当前用户：${userLabel}，打开用户菜单`} aria-expanded={userMenu} aria-haspopup="menu" onClick={() => { setUserMenu(value => !value); setProjectMenu(false) }}>{userInitials}</button>
+        {userMenu ? <div className="menu user-menu" role="menu">
+          <div className="user-menu-profile"><span><UserRound size={18}/></span><div><b>{userLabel}</b><small>{session.user?.email ?? '本地账号'}</small></div></div>
+          <div className="user-menu-context"><span><small>组织</small>{session.organization?.name ?? '本地组织'}</span><span><small>角色</small>{membershipRoleLabel(session.membership?.role)}</span></div>
+          <button className="menu-link" role="menuitem" onClick={() => { setUserMenu(false); onModelSettings() }}><KeyRound size={15}/>模型与密钥设置</button>
+          <button className="menu-link user-menu-logout" role="menuitem" onClick={() => void logout()}><LogOut size={15}/>退出登录</button>
+        </div> : null}
+      </div>
     </header>
     {!withoutSidebar ? <aside className="sidebar" aria-label={`${system.label}导航`}>
       <div className="side-title"><system.icon size={18}/><span>{system.label}</span></div>
-      <nav>{groups.map(group => <div className="nav-group" key={group}><div className="nav-group-label">{group}</div>{visibleNav.filter(item => item.group === group).map(item => <button key={item.id} className={activeNav === item.id ? 'nav-item active' : 'nav-item'} onClick={() => onNavChange(item.id)} aria-label={collapsed ? item.label : undefined}><item.icon size={17}/><span>{item.label}</span></button>)}</div>)}</nav>
+      <nav>{groups.map(group => {
+        const hubGroup = visibleNav.some(item => item.group === group && item.prominence === 'hub')
+        return <div className={hubGroup ? 'nav-group nav-hub-group' : 'nav-group'} key={group}>
+          <div className="nav-group-label">
+            {hubGroup ? <>
+              <span className="nav-hub-eyebrow"><b>核心</b> {group}</span>
+              <small>4 个独立中心 · 共享项目上下文</small>
+            </> : <span>{group}</span>}
+          </div>
+          {visibleNav.filter(item => item.group === group).map(item => <button
+            key={item.id}
+            className={`${activeNav === item.id ? 'nav-item active' : 'nav-item'}${item.prominence === 'hub' ? ' nav-item-hub' : ''}`}
+            onClick={() => onNavChange(item.id)}
+            aria-current={activeNav === item.id ? 'page' : undefined}
+            aria-label={item.prominence === 'hub'
+              ? `${item.label}：${item.navHint ?? item.description}`
+              : collapsed ? item.label : undefined}
+            title={item.prominence === 'hub' ? `${item.label} · ${item.navHint ?? item.description}` : undefined}
+          >
+            <span className="nav-item-icon"><item.icon size={17}/></span>
+            <span className="nav-item-copy">
+              <b>{item.label}</b>
+              {item.navHint ? <small>{item.navHint}</small> : null}
+            </span>
+            {item.prominence === 'hub'
+              ? <ChevronRight className="nav-item-arrow" size={14} aria-hidden="true"/>
+              : null}
+          </button>)}
+        </div>
+      })}</nav>
       <button className="collapse-button" aria-label={collapsed ? '展开侧栏' : '收起侧栏'} onClick={() => setCollapsed(value => !value)}><Menu size={17}/><span>{collapsed ? '展开侧栏' : '收起侧栏'}</span></button>
     </aside> : null}
-    <main id="main-content" className="main-content">{children}</main>
+    <main id="main-content" className="main-content" tabIndex={-1}>{children}</main>
     {newProjectOpen ? <NewProjectDialog onClose={() => setNewProjectOpen(false)} onCreate={async input => {
       const created = await createProject(input)
       setNewProjectOpen(false)
       onProjectChange(created.id, 'strategy', 'tasks')
     }}/> : null}
   </div>
+}
+
+function membershipRoleLabel(role?: 'owner' | 'admin' | 'member' | 'auditor') {
+  switch (role) {
+    case 'owner': return '组织所有者'
+    case 'admin': return '管理员'
+    case 'auditor': return '审阅者'
+    case 'member': return '成员'
+    default: return '本地成员'
+  }
 }
 
 function NewProjectDialog({ onClose, onCreate }: {

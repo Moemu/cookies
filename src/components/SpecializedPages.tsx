@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
   Check,
@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Film,
   Image,
+  LoaderCircle,
   Music2,
   Play,
   RotateCcw,
@@ -21,6 +22,7 @@ import {
   Subtitles,
   ThumbsDown,
   ThumbsUp,
+  Upload,
   Video,
   Volume2,
   WandSparkles,
@@ -28,7 +30,9 @@ import {
 import { useProject } from '../context/ProjectContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { commerceHookTemplates, commerceTemplateApiId, guerlainPromptCopy, hookStoryboard } from '../data/commerceHooks'
-import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiCommercePrerollWorkspace, type ApiCreativeDirection, type ApiCreativeIntakeBootstrap, type ApiCreativeSourceOption, type ApiCreativeTaskSummary, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPreparedCommercePreroll, type ApiPrerollScope, type ApiProjectMediaAsset, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaGenerationConfig, type ApiShortDramaHookStrategy, type ApiShortDramaPaceProfile, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaPrerollWorkspace, type ApiShortDramaStoryContext, type ApiShortDramaSubtitleStyle, type ApiTaskStrategyCreativeIntake, type ApiViralRemakeWorkspace, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
+import { api, buildHitAnalysisInput, buildLocalHitAnalysis, buildVideoReplicationPrompt, type ApiAdAccountBinding, type ApiAgencyWorkbench, type ApiArtifact, type ApiAssetFeature, type ApiAssetVersionPointer, type ApiCommercePrerollWorkspace, type ApiCreativeDirection, type ApiCreativeDirectionBatch, type ApiCreativeIntakeBootstrap, type ApiCreativeSourceOption, type ApiCreativeTaskSummary, type ApiGenerationJob, type ApiHitAnalysis, type ApiMaterialConfirmation, type ApiPreparedCommercePreroll, type ApiPrerollScope, type ApiProjectMediaAsset, type ApiQualityReport, type ApiRemixRenderJob, type ApiShortDramaGenerationConfig, type ApiShortDramaHookStrategy, type ApiShortDramaPaceProfile, type ApiShortDramaPrerollCandidate, type ApiShortDramaPrerollPlan, type ApiShortDramaPrerollWorkspace, type ApiShortDramaStoryContext, type ApiShortDramaSubtitleStyle, type ApiTaskStrategyCreativeIntake, type ApiViralRemakeWorkspace, type ApiVideoPromptDimension, type ApiVideoReplicationPrompt } from '../data/api'
+import { resolveBrandVideoRouteTarget } from '../features/creative/brandVideoRoute'
+import { activeBrandVideoTasks, availableBrandDirections, brandDirectionFailureMessage, brandVideoTaskStatusLabel, isBrandDirectionGenerating } from '../features/creative/brandDirectionGeneration'
 import type { ArtifactKey, BusinessTaskType, DataState } from '../types'
 import { deliveryApi, type DeliveryChangeSet } from '../api/delivery'
 import { StateBoundary } from './StateBoundary'
@@ -36,12 +40,18 @@ import { shortId } from '../data/shortId'
 import { industryProfile } from '../data/industry-profiles'
 import { findLocalShortDramaBrief, localShortDramaBriefs, shortDramaVideoLabel } from '../data/shortDramaBriefs'
 import { GamePrerollWorkspace } from './GamePrerollWorkspace'
+import { BrandFilmWorkspace } from './BrandFilmWorkspace'
+import { ShortDramaPrerollWorkspace } from '../features/short-drama-preroll-v2/ShortDramaPrerollWorkspace'
+import { editingApi, type ApiEditTask, type ApiEditingRenderJob, type EditingTimeline } from '../features/video-editing/api'
+import { VideoEditingWorkspaceV2 } from '../features/video-editing/VideoEditingWorkspace'
 import {
   TaskStrategyHandoffBanner,
   taskStrategyPerformanceMode,
   useTaskStrategyCreativeIntake,
   useTaskStrategyTaskHandoffDetail,
 } from '../features/creative/TaskStrategyHandoff'
+
+const AINativeAdWorkspace = lazy(() => import('../features/ai-native-ad/AINativeAdWorkspace').then(module => ({ default: module.AINativeAdWorkspace })))
 
 export { DeliveryPlanLifecyclePage as DeliveryPlanPage } from './DeliveryPlanLifecyclePage'
 export { DeliveryApprovalCenterPage as ApprovalCenterPage } from './DeliveryApprovalCenterPage'
@@ -135,12 +145,30 @@ export function LegacyImageTextCreationPage({ state, activeTaskId }: { state: Da
 
 export { ImageTextWorkspacePage as ImageTextCreationPage } from './ImageTextWorkspacePage'
 
-const performanceModes = [
+const prerollModes = [
   { id: 'short-drama', label: '短剧前贴', detail: '用人物冲突、风险升级和结果反转，在 6 秒内建立继续观看的理由。', guard: '人物连续性与静音可理解' },
   { id: 'game', label: '游戏前贴', detail: '用可读目标、失败瞬间和即时反馈建立挑战感，再衔接产品或正片。', guard: '玩法真实性与结果可读性' },
   { id: 'pre-roll', label: '电商前贴', detail: '为商品视频生成 4–10 秒高注意力开场并无缝拼接。', guard: '商品保真与静音可理解' },
-  { id: 'viral-remake', label: '爆款复刻', detail: '拆解爆款结构与节奏，完成品牌映射和原创改写。', guard: '相似性与授权检查' },
 ]
+
+const performanceSections = [
+  { id: 'preroll', label: '前贴广告', detail: '短剧、游戏与电商短片段开场' },
+  { id: 'viral-remake', label: '爆款复刻', detail: '结构拆解、品牌映射与原创改写' },
+  { id: 'ai-native', label: 'AI 效果广告生成', detail: '从商品需求到完整广告视频' },
+] as const
+
+type PerformanceSectionId = (typeof performanceSections)[number]['id']
+
+function initialPerformanceSection(): PerformanceSectionId {
+  const section = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('section')
+  return performanceSections.some(item => item.id === section) ? section as PerformanceSectionId : 'preroll'
+}
+
+function rememberPerformanceSection(section: PerformanceSectionId) {
+  const search = new URLSearchParams(window.location.search)
+  search.set('section', section)
+  window.history.replaceState(null, '', `${window.location.pathname}?${search.toString()}${window.location.hash}`)
+}
 
 const preRollPresets = {
   'short-drama': {
@@ -159,25 +187,27 @@ const preRollPresets = {
   },
 }
 
-const brandSteps = [
-  ['01', '解析 Brief', '提取品牌主张、受众、边界与交付目标。'],
-  ['02', '编写剧本', '形成叙事主线、分镜、台词和声音设计。'],
-  ['03', '生成资产', '按镜头生成画面、角色、配音、音乐与图形资产。'],
-  ['04', '生成广告', '基于已确认资产和剧本生成可预览的广告草稿。'],
-  ['05', '剪辑与交付', '完成多轨剪辑、品牌检查、导出和版本归档。'],
-]
-
-export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask }: { state: DataState, activeView: string, activeTaskId?: string, onOpenTask: (id: string) => void }) {
+export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask, onOpenBrandTask, onOpenEditTask }: { state: DataState, activeView: string, activeTaskId?: string, onOpenTask: (id: string) => void, onOpenBrandTask: (id: string) => void, onOpenEditTask: (id: string) => void }) {
   const { currentProject, createTask } = useProject()
   const industry = industryProfile(currentProject.industry)
-  const [selected, setSelected] = useState('short-drama')
+  const [selectedSection, setSelectedSection] = useState<PerformanceSectionId>(initialPerformanceSection)
+  const [selectedPreroll, setSelectedPreroll] = useState('short-drama')
   const [notice, setNotice] = useState('')
-  const [brandGenerated, setBrandGenerated] = useState(false)
-  const [brandStage, setBrandStage] = useState(0)
   const [brandIntake, setBrandIntake] = useState<ApiCreativeIntakeBootstrap | null>(null)
+  const [brandDirectionBatch, setBrandDirectionBatch] = useState<ApiCreativeDirectionBatch | null>(null)
   const [brandDirections, setBrandDirections] = useState<ApiCreativeDirection[]>([])
   const [brandTask, setBrandTask] = useState<ApiCreativeTaskSummary | null>(null)
   const [brandBusy, setBrandBusy] = useState('')
+  const [brandIntakeError, setBrandIntakeError] = useState('')
+  const [brandIntakeRetry, setBrandIntakeRetry] = useState(0)
+  const [brandTaskOptions, setBrandTaskOptions] = useState<ApiCreativeTaskSummary[]>([])
+  const [brandIntakeOptions, setBrandIntakeOptions] = useState<ApiCreativeIntakeBootstrap[]>([])
+  const [brandUploadBusy, setBrandUploadBusy] = useState(false)
+  const [brandDuration, setBrandDuration] = useState(15)
+  const [brandContextLoading, setBrandContextLoading] = useState(false)
+  const [brandContextError, setBrandContextError] = useState('')
+  const [brandContextRetry, setBrandContextRetry] = useState(0)
+  const category = activeView === '品牌广告' ? 'brand' : activeView === '素材剪辑' ? 'editing' : 'performance'
   const activeTask = currentProject.tasks.find(task => task.id === activeTaskId)
   const activeTaskType = activeTask?.type
   const handoffIntake = useTaskStrategyCreativeIntake(
@@ -185,8 +215,19 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
     activeTaskId,
     Boolean(activeTaskId && !activeTask),
   )
-  const category = activeView === '品牌广告' ? 'brand' : activeView === '素材剪辑' ? 'editing' : 'performance'
-  const activeMode = performanceModes.find(item => item.id === selected) ?? performanceModes[0]
+  const expectsBrandIntake = category === 'brand' && Boolean(activeTaskId && !activeTask)
+  const activePrerollMode = prerollModes.find(item => item.id === selectedPreroll) ?? prerollModes[0]
+  const activePerformanceLabel = selectedSection === 'viral-remake' ? '爆款复刻' : selectedSection === 'ai-native' ? 'AI 效果广告生成' : activePrerollMode.label
+  const selectLegacyPerformanceMode = (mode: string) => {
+    if (mode === 'viral-remake') {
+      setSelectedSection('viral-remake')
+      return
+    }
+    if (prerollModes.some(item => item.id === mode)) {
+      setSelectedSection('preroll')
+      setSelectedPreroll(mode)
+    }
+  }
   useEffect(() => {
     if (!activeTaskType) return
     const modeByType: Partial<Record<BusinessTaskType, string>> = {
@@ -197,47 +238,128 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       video: 'short-drama',
     }
     const nextMode = modeByType[activeTaskType]
-    if (nextMode) setSelected(nextMode)
+    if (nextMode) selectLegacyPerformanceMode(nextMode)
   }, [activeTaskType])
   useEffect(() => {
     if (!handoffIntake) return
     const nextMode = taskStrategyPerformanceMode(
       handoffIntake.request.task_strategy_input.business_code,
     )
-    if (nextMode) setSelected(nextMode)
+    if (nextMode) selectLegacyPerformanceMode(nextMode)
     setNotice('任务策略已冻结到 Creative；请补齐生产素材和人工确认后继续。')
   }, [handoffIntake])
   useEffect(() => {
+    if (category !== 'brand' || activeTaskId) return
+    let active = true
+    setBrandContextLoading(true)
+    setBrandContextError('')
+    void Promise.all([api.listCreativeTasks(currentProject.id, 30), api.listCreativeIntakes(currentProject.id, 60)])
+      .then(([tasks, intakes]) => {
+        if (!active) return
+        setBrandTaskOptions(activeBrandVideoTasks(tasks.items))
+        setBrandIntakeOptions(intakes.items.filter(intake => {
+          if (intake.source !== 'strategy_package') return false
+          try { resolveBrandVideoRouteTarget(intake); return true } catch { return false }
+        }))
+      })
+      .catch(cause => {
+        if (!active) return
+        setBrandTaskOptions([])
+        setBrandIntakeOptions([])
+        setBrandContextError(cause instanceof Error ? cause.message : '品牌广告任务列表读取失败')
+      })
+      .finally(() => {
+        if (active) setBrandContextLoading(false)
+      })
+    return () => { active = false }
+  }, [activeTaskId, brandContextRetry, category, currentProject.id])
+  useEffect(() => {
     if (category !== 'brand' || !activeTaskId || activeTask) {
       setBrandIntake(null)
+      setBrandDirectionBatch(null)
+      setBrandDirections([])
+      setBrandIntakeError('')
       return
     }
     let active = true
+    setBrandIntakeError('')
+    setBrandDirectionBatch(null)
+    setBrandDirections([])
+    setBrandTask(null)
     void api.getCreativeIntake(currentProject.id, activeTaskId)
-      .then(value => {
-        if (active && value.source === 'strategy_package') setBrandIntake(value)
+      .then(async value => {
+        if (!active) return
+        if (value.source === 'strategy_package') {
+          setBrandBusy('materialize')
+          const target = resolveBrandVideoRouteTarget(value)
+          const task = await api.createBrandFilmTaskFromIntake(currentProject.id, value.id, target.selectedRouteId, target.channel)
+          if (!active) return
+          setNotice('策略交接已绑定到品牌广告任务，接下来先确认 Brief，再在品牌模块内生成创意候选。')
+          onOpenBrandTask(task.id)
+          return
+        }
+        setBrandIntakeError('当前交接不是可用的品牌策略包来源。')
       })
       .catch(async cause => {
         try {
           const detail = await api.getCreativeTaskHandoffDetail(currentProject.id, activeTaskId)
           if (!active || detail.task.format !== 'video') return
-          setBrandIntake(detail.intake as unknown as ApiCreativeIntakeBootstrap)
           setBrandTask(detail.task as unknown as ApiCreativeTaskSummary)
-          setNotice('品牌视频任务已恢复，可继续补齐生产素材。')
+          setNotice('品牌视频任务已恢复，可继续完成 Brief、创意、分镜、生成与声音。')
         } catch {
-          if (active) setNotice(cause instanceof Error ? cause.message : '品牌策略交接读取失败')
+          if (active) {
+            const message = cause instanceof Error ? cause.message : '品牌策略交接读取失败'
+            setBrandIntakeError(message)
+            setNotice(message)
+          }
         }
       })
+      .finally(() => { if (active) setBrandBusy('') })
     return () => { active = false }
-  }, [activeTask, activeTaskId, category, currentProject.id])
+  }, [activeTask, activeTaskId, brandIntakeRetry, category, currentProject.id, onOpenBrandTask])
+  useEffect(() => {
+    if (!brandIntake || !isBrandDirectionGenerating(brandDirectionBatch)) return
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      try {
+        const batch = await api.getLatestCreativeDirectionBatch(currentProject.id, brandIntake.id)
+        if (!active || !batch) return
+        setBrandDirectionBatch(batch)
+        if (batch.status === 'ready') {
+          setBrandDirections(availableBrandDirections(batch))
+          setNotice('三个品牌方向已通过质量门，请选择一个进入视频任务。')
+          return
+        }
+        if (batch.status === 'failed') {
+          setBrandDirections([])
+          setNotice(brandDirectionFailureMessage(batch.failure_code))
+          return
+        }
+        timer = setTimeout(poll, 2000)
+      } catch (cause) {
+        if (!active) return
+        setNotice(cause instanceof Error ? cause.message : '品牌方向状态刷新失败，系统稍后会继续重试。')
+        timer = setTimeout(poll, 4000)
+      }
+    }
+    timer = setTimeout(poll, 1200)
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+    }
+  }, [brandDirectionBatch?.batch_id, brandDirectionBatch?.status, brandIntake?.id, currentProject.id])
   const generateBrandDirections = async () => {
     if (!brandIntake) return
     setBrandBusy('generate')
     setNotice('正在生成品牌创意领地；系统会自动拒绝同质化或效果广告式方案。')
     try {
       const batch = await api.generateCreativeDirections(currentProject.id, brandIntake.id)
-      setBrandDirections(batch.candidates)
-      setNotice('三个品牌方向已通过质量门，请选择一个进入视频任务。')
+      setBrandDirectionBatch(batch)
+      setBrandDirections(availableBrandDirections(batch))
+      setNotice(batch.status === 'ready'
+        ? '三个品牌方向已通过质量门，请选择一个进入视频任务。'
+        : '生成任务已进入后台队列，刷新或离开页面不会中断。')
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : '品牌方向生成失败')
     } finally {
@@ -249,7 +371,14 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
     setBrandBusy(direction.direction_id)
     try {
       const confirmed = await api.confirmCreativeDirection(currentProject.id, direction.direction_id)
-      const task = await api.createBrandVideoTaskFromDirection(currentProject.id, brandIntake.id, confirmed.direction_id)
+      const target = resolveBrandVideoRouteTarget(brandIntake)
+      const task = await api.createBrandVideoTaskFromDirection(
+        currentProject.id,
+        brandIntake.id,
+        confirmed.direction_id,
+        target.selectedRouteId,
+        target.channel,
+      )
       setBrandTask(task)
       setNotice('品牌方向已确认，真实视频任务已创建并保留完整策略血缘。')
     } catch (cause) {
@@ -258,14 +387,48 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       setBrandBusy('')
     }
   }
+  const startBrandIntake = async (intake: ApiCreativeIntakeBootstrap) => {
+    setBrandBusy(intake.id)
+    try {
+      const target = resolveBrandVideoRouteTarget(intake)
+      const task = await api.createBrandFilmTaskFromIntake(currentProject.id, intake.id, target.selectedRouteId, target.channel)
+      setNotice('策略已绑定，正在进入品牌广告制作。')
+      onOpenBrandTask(task.id)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '策略绑定失败')
+    } finally { setBrandBusy('') }
+  }
+  const uploadBrandBrief = async (file?: File) => {
+    if (!file) return
+    if (!/\.(pdf|docx|md)$/i.test(file.name)) {
+      setNotice('请上传 PDF、DOCX 或 Markdown Brief。')
+      return
+    }
+    setBrandUploadBusy(true)
+    try {
+      let document = await api.uploadKnowledgeDocument(currentProject.id, file)
+      setNotice(document.status === 'ready' ? 'Brief 已解析，正在创建品牌广告任务。' : 'Brief 已安全入库，正在解析正文…')
+      for (let attempt = 0; document.status === 'parse_queued' && attempt < 45; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 2000))
+        document = await api.getKnowledgeDocument(currentProject.id, document.id)
+      }
+      if (document.status !== 'ready') throw new Error(document.parse_error_message || 'Brief 解析尚未完成，请稍后重试。')
+      const intake = await api.createManualBrandFilmIntake(currentProject.id, document, brandDuration)
+      const task = await api.createBrandFilmTaskFromIntake(currentProject.id, intake.id, 'route_fixture_brand_video_guerlain_v1', 'douyin')
+      setNotice('PDF Brief 已解析并建立可追溯任务，正在进入 Brief 确认。')
+      onOpenBrandTask(task.id)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'PDF Brief 导入失败')
+    } finally { setBrandUploadBusy(false) }
+  }
   const create = async () => {
-    const name = category === 'performance' ? activeMode.label : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
+    const name = category === 'performance' ? activePerformanceLabel : category === 'brand' ? '品牌广告' : '素材剪辑 EditTask'
     const type: BusinessTaskType = category === 'brand' ? 'brand_video'
       : category === 'editing' ? 'video_edit'
-      : activeMode.id === 'short-drama' ? 'short_drama_preroll'
-      : activeMode.id === 'game' ? 'game_preroll'
-      : activeMode.id === 'pre-roll' ? 'commerce_preroll'
-      : 'viral_remake'
+      : selectedSection === 'viral-remake' ? 'viral_remake'
+      : activePrerollMode.id === 'short-drama' ? 'short_drama_preroll'
+      : activePrerollMode.id === 'game' ? 'game_preroll'
+      : 'commerce_preroll'
     try {
       const task = await createTask({
         type,
@@ -278,25 +441,71 @@ export function VideoCreationPage({ state, activeView, activeTaskId, onOpenTask 
       setNotice(cause instanceof Error ? cause.message : '创建创作任务失败，请重试。')
     }
   }
-  const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 到剪辑交付形成完整叙事。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
-  const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '沿着 Brief、剧本、资产、广告生成和剪辑的固定路径推进，所有产物均保留来源与确认记录。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
+  const openCreativeTaskInEditor = async () => {
+    if (!activeTaskId) return
+    try {
+      const editTask = await editingApi.openCreativeVersion(currentProject.id, activeTaskId)
+      onOpenEditTask(editTask.id)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '广告成片暂时无法进入素材剪辑')
+    }
+  }
+  const title = category === 'performance' ? '效果广告，以可测试的转化表达组织创作。' : category === 'brand' ? '品牌广告，从 Brief 确认到剧本分镜形成可追溯闭环。' : '素材剪辑，将已授权素材组织为可交付的视频版本。'
+  const description = category === 'performance' ? '选择一种生成类型，系统会继承策略、品牌规则、渠道规格与来源授权。' : category === 'brand' ? '从 Brief、创意与分镜，到生成锁定、质量确认和版本交付，形成可追溯的品牌广告制作闭环。' : '独立 EditTask 可从品牌、效果任务或存量项目素材进入；字幕、音频与转场在编辑器内完成。'
   return <StateBoundary state={state} onRetry={() => setNotice('创作配置已重新加载')} onCreate={() => { void create() }}><section className="video-creation-workspace">
-    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : brandIntake ? <div className="creative-task-banner compact"><span>Strategy → Brand Film</span><b>{brandIntake.base_handoff?.creative_view?.communication?.single_minded_proposition || '品牌策略已冻结'}</b><small>先选创意方向，再创建真实视频任务</small></div> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category !== 'editing' && !(category === 'brand' && brandIntake) ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{category === 'performance' ? activeMode.label : '品牌广告'}</button> : null}</header>
-    {!brandIntake ? <><IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/><ProjectMediaContext /></> : null}
-    {category === 'performance' ? <><div className="performance-mode-tabs" role="tablist" aria-label="效果广告生成类型">{performanceModes.map(mode => <button key={mode.id} role="tab" aria-selected={selected === mode.id} className={selected === mode.id ? 'active' : ''} onClick={() => { setSelected(mode.id); setNotice('') }}><b>{mode.label}</b><small>{mode.guard}</small></button>)}</div>{selected === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selected === 'short-drama' ? <PreRollWorkspace handoffIntake={handoffIntake ?? undefined} key={selected} mode={selected} onNotice={setNotice}/> : selected === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : selected === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <div className="performance-workflow">
-      <aside className="performance-mode-list"><span className="section-label">当前生成类型</span><div className="mode-summary"><b>{activeMode.label}</b><p>{activeMode.detail}</p></div><span className="section-label">创建前检查</span>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span className="mode-check" key={item}><Check size={14}/>{item}</span>)}</aside>
-      <section className="performance-detail"><div className="video-preview"><div className="preview-grid"/><span>00:00 / 00:15</span><button aria-label="播放视频预览"><Play size={17} fill="currentColor"/></button></div><div className="performance-copy"><span className="section-label">当前路径</span><h3>{activeMode.label}</h3><p>{activeMode.detail}</p><div className="workflow-meta"><span><b>输入</b>已批准策略、渠道规格、授权素材</span><span><b>核心护栏</b>{activeMode.guard}</span></div></div></section>
-      <aside className="video-job-rail"><span className="section-label">创建任务</span><h3>沿用 Project 上下文</h3>{['策略版本与证据', '品牌规则与禁用词', '渠道规格与转化目标', '素材、声音与参考授权'].map(item => <span key={item}><Check size={14}/>{item}</span>)}<button className="secondary-button full" onClick={() => setNotice('来源与授权清单已打开')}>查看来源与授权</button></aside>
-    </div>}</> : category === 'brand' && brandIntake ? <div className="image-text-direction-gate brand-direction-gate">
-      <header><span className="section-label">BRAND DIRECTION DECISION</span><h2>{brandTask ? '品牌视频任务已就绪' : '先选品牌创意领地，再进入制作'}</h2><p>{brandIntake.base_handoff?.creative_view?.objective?.statement || '策略事实、品牌边界与渠道规格已冻结。'}</p></header>
-      {brandTask ? <section className="creative-handoff-status available"><div><b>{brandTask.direction.focus}</b><span>{brandTask.id} · {brandTask.channel} · 方向血缘已绑定</span></div><small>下一步：补齐 Logo、产品画面与音乐/声音权利，再进入剧本和分镜。</small></section> : brandDirections.length === 0 ? <section className="image-text-v2-start"><Sparkles size={24}/><div><h3>生成 3 个真正不同的品牌方向</h3><p>至少两个为情绪或电影化领地；效果 CTA、伪造制作规格和同质化清单会被服务端拒绝。</p></div><button className="primary-button" disabled={Boolean(brandBusy)} onClick={() => void generateBrandDirections()}><WandSparkles size={15}/>{brandBusy ? '正在生成并校验…' : '生成品牌方向'}</button></section> : <><div className="image-text-direction-cards">{brandDirections.map((direction, index) => <article key={direction.direction_id}><span>方向 0{index + 1} · {direction.direction_mode === 'cinematic' ? '电影化' : direction.direction_mode === 'emotional' ? '情绪叙事' : '实用备选'}</span><h3>{direction.concept}</h3><p>{direction.creative_rationale}</p><dl className="brand-direction-evidence"><div><dt>情绪弧</dt><dd>{direction.emotional_arc}</dd></div><div><dt>影像语法</dt><dd>{direction.visual_grammar}</dd></div><div><dt>记忆装置</dt><dd>{direction.brand_memory_device}</dd></div><div><dt>人物瞬间</dt><dd>{direction.human_moment}</dd></div></dl><button className="primary-button full" disabled={Boolean(brandBusy)} onClick={() => void confirmBrandDirection(direction)}>{brandBusy === direction.direction_id ? '正在冻结并创建…' : '确认方向并创建视频任务'}</button></article>)}</div><button className="secondary-button" disabled={Boolean(brandBusy)} onClick={() => void generateBrandDirections()}><RotateCcw size={15}/>重新生成</button></>}
-    </div> : category === 'brand' ? <div className="brand-workflow">
-      <div className="brand-brief-card"><span className="section-label">BRIEF → BRAND FILM</span><h3>{currentProject.artifacts.brief.version} · {currentProject.artifacts.brief.status}</h3><p>{currentProject.artifacts.brief.summary}</p><div><Sparkles size={17}/><span>核心主张：看得见的精度，兑现你的创新。所有镜头保留 Brief、证据与版本来源。</span></div><button className="primary-button full" onClick={() => { setBrandGenerated(true); setBrandStage(1); setNotice('品牌广告方案已从已确认 Brief 解析完成') }}><WandSparkles size={15}/>解析 Brief 并生成方案</button></div>
-      <section className="brand-generation-panel">
-        <div className="brand-generation-heading"><div><span className="section-label">品牌广告生成方案</span><h3>{brandGenerated ? '《精度，先于承诺被看见》' : '等待解析 Brief'}</h3></div>{brandGenerated ? <span className="status success"><span/>方案就绪</span> : null}</div>
-        {brandGenerated ? <><ol>{brandSteps.map(([id, stepTitle, detail], index) => <li className={brandStage === index + 1 ? 'active' : ''} key={id}><button onClick={() => setBrandStage(index + 1)}><span>{id}</span><div><b>{stepTitle}</b><p>{detail}</p></div>{index < brandSteps.length - 1 ? <ArrowRight size={16}/> : <WandSparkles size={17}/>}</button></li>)}</ol><div className="brand-output-card"><div className="brand-film-frame"><Play size={19} fill="currentColor"/><span>00:30 · 9:16</span></div><div><small>当前阶段 0{brandStage} / 05</small><b>{brandSteps[Math.max(0, brandStage - 1)][1]}</b><p>冷白工业光影、微距制造细节与真实工程判断场景；未经证据确认的精度、交付率和客户背书不会进入成片。</p><button className="secondary-button" onClick={() => setNotice('请先从策略交接生成并确认 Creative Direction')}>预览制作框架</button><button className="primary-button" onClick={() => void create()}>保存为创意任务</button></div></div></> : <div className="panel-empty">点击“解析 Brief 并生成方案”后展示剧本、分镜与品牌广告样片。</div>}
+    <header className="video-workspace-header"><div><span className="section-label">视频创作 · {activeView}</span><h2>{title}</h2><p>{description}</p>{handoffIntake ? <TaskStrategyHandoffBanner intake={handoffIntake}/> : activeTask ? <div className="creative-task-banner compact"><span>统一创意任务入口</span><b>{activeTask.name}</b><small>{activeTask.objective}</small></div> : null}</div>{category === 'performance' && selectedSection !== 'ai-native' ? <button className="primary-button" onClick={() => void create()}><Video size={16}/>新建{activePerformanceLabel}</button> : null}</header>
+    {category !== 'editing' && activeTaskId ? <div className="creative-task-banner compact"><span>成片后续处理</span><b>将当前广告成片带入素材剪辑</b><small>只有已冻结且已入库的最终视频可以进入；原资产不会被覆盖。</small><button className="secondary-button" onClick={() => void openCreativeTaskInEditor()}><Scissors size={15}/>进入素材剪辑</button></div> : null}
+    {category !== 'brand' ? <><IndustrySchema module="创意创作" industry={industry.label} profile={industry.creative}/><ProjectMediaContext /></> : null}
+    {category === 'performance' ? <>
+      <div className="performance-mode-tabs level-one" role="tablist" aria-label="效果广告一级模块">{performanceSections.map(section => <button key={section.id} id={`performance-section-${section.id}`} role="tab" aria-selected={selectedSection === section.id} className={selectedSection === section.id ? 'active' : ''} onClick={() => { setSelectedSection(section.id); rememberPerformanceSection(section.id); setNotice('') }}><b>{section.label}</b><small>{section.detail}</small></button>)}</div>
+      {selectedSection === 'preroll' ? <>
+        <div className="preroll-subnav">
+          <span className="preroll-subnav-label"><b>前贴广告</b><i>/</i>选择类型</span>
+          <div className="performance-mode-tabs preroll-mode-tabs" role="tablist" aria-label="前贴广告类型">{prerollModes.map(mode => <button key={mode.id} id={`preroll-mode-${mode.id}`} role="tab" title={mode.guard} aria-selected={selectedPreroll === mode.id} className={selectedPreroll === mode.id ? 'active' : ''} onClick={() => { setSelectedPreroll(mode.id); setNotice('') }}><b>{mode.label}</b></button>)}</div>
+        </div>
+        {selectedPreroll === 'pre-roll' ? <CommerceHookWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : selectedPreroll === 'game' ? <GamePrerollWorkspace onNotice={setNotice}/> : <ShortDramaPrerollWorkspace onNotice={setNotice} onOpenEditTask={onOpenEditTask}/>}
+      </> : selectedSection === 'viral-remake' ? <ViralRemixWorkspace handoffIntake={handoffIntake ?? undefined} onNotice={setNotice}/> : <Suspense fallback={<div className="ai-native-feature-loading">正在加载 AI 效果广告工作台…</div>}><AINativeAdWorkspace projectId={currentProject.id} onNotice={setNotice}/></Suspense>}
+    </> : category === 'brand' && brandTask ? <BrandFilmWorkspace taskId={brandTask.id} onNotice={setNotice}/>
+      : category === 'brand' && !activeTaskId ? <section className="brand-creation-hub" aria-labelledby="brand-hub-title">
+        <header><div><span className="section-label">BRAND CREATION HUB</span><h2 id="brand-hub-title">从已确认策略开始，也可以直接导入 Brief</h2><p>策略与任务彼此独立保存。选择来源后才会创建或恢复对应的品牌广告任务。</p></div><span>{brandIntakeOptions.length} 个可用策略 · {brandTaskOptions.length} 个制作任务</span></header>
+        {brandContextLoading ? <div className="brand-hub-loading"><LoaderCircle className="spin" size={20}/>正在同步策略与任务…</div> : brandContextError ? <div className="brand-hub-error"><CircleAlert size={20}/><span>{brandContextError}</span><button className="secondary-button" onClick={() => setBrandContextRetry(value => value + 1)}>重试</button></div> : <div className="brand-hub-grid">
+          <div className="brand-source-panel"><div className="brand-hub-panel-title"><div><span className="section-label">01 · CHOOSE A SOURCE</span><h3>新建品牌广告创作</h3></div><small>策略交接或独立 Brief</small></div>
+            <div className="brand-strategy-list">{brandIntakeOptions.length ? brandIntakeOptions.map((intake, index) => <article key={intake.id}><div className="brand-strategy-mark">{String(index + 1).padStart(2, '0')}</div><div><span>已确认策略</span><h4>{intake.base_handoff?.creative_view?.communication?.single_minded_proposition || intake.request?.core_message || '品牌传播策略'}</h4><p>{intake.base_handoff?.creative_view?.objective?.statement || intake.request?.objective || '策略事实、品牌边界与渠道路线已冻结。'}</p><small>{intake.id}</small></div><button className="primary-button" disabled={Boolean(brandBusy)} onClick={() => void startBrandIntake(intake)}>{brandBusy === intake.id ? <LoaderCircle className="spin" size={14}/> : <ArrowRight size={14}/>}开始创作</button></article>) : <div className="brand-source-empty"><Sparkles size={20}/><div><b>暂无可用的品牌策略</b><p>策略模块完成“品牌广告”交接后，会自动出现在这里。</p></div></div>}</div>
+            <div className="brand-upload-options"><span>成片规格</span><div>{[15, 30].map(duration => <button key={duration} type="button" className={brandDuration === duration ? 'active' : ''} onClick={() => setBrandDuration(duration)}>{duration === 15 ? '15 秒标准广告 · 3 镜头' : '30 秒品牌故事 · 6 镜头'}</button>)}</div></div>
+            <label className={brandUploadBusy ? 'brand-brief-dropzone busy' : 'brand-brief-dropzone'}><Upload size={22}/><div><b>{brandUploadBusy ? '正在解析并建立任务…' : '不依赖策略，上传自己的 Brief'}</b><span>支持 PDF、DOCX、Markdown · 解析后进入同一套 Brief 确认流程</span></div><em>{brandUploadBusy ? '处理中' : '选择文件'}</em><input type="file" accept=".pdf,.docx,.md,application/pdf" disabled={brandUploadBusy} onChange={event => { void uploadBrandBrief(event.target.files?.[0]); event.target.value = '' }}/></label>
+          </div>
+          <div className="brand-task-panel"><div className="brand-hub-panel-title"><div><span className="section-label">02 · CONTINUE</span><h3>继续已有任务</h3></div><small>最近更新</small></div>
+            <div className="brand-task-list">{brandTaskOptions.length ? brandTaskOptions.map(task => <article key={task.id}><div className="brand-task-status"><span>{brandVideoTaskStatusLabel(task.status)}</span><small>{task.channel || '品牌视频'}</small></div><h4>{task.direction.focus || task.direction.concept || '等待 Brief 确认的品牌广告'}</h4><p>{task.direction.core_message || '任务已保留完整来源与修改记录。'}</p><footer><time dateTime={task.updated_at}>{new Date(task.updated_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time><button className="secondary-button" onClick={() => onOpenBrandTask(task.id)}>继续制作<ArrowRight size={14}/></button></footer></article>) : <div className="brand-source-empty"><Film size={20}/><div><b>还没有品牌广告任务</b><p>从左侧选择策略或上传 Brief，即可建立第一条任务。</p></div></div>}</div>
+          </div>
+        </div>}
       </section>
-    </div> : <VideoEditingWorkspace onNotice={setNotice} onCreate={() => { void create() }}/>}
+      : category === 'brand' && brandIntake ? <div className="image-text-direction-gate brand-direction-gate">
+      <header><span className="section-label">BRAND DIRECTION DECISION</span><h2>{brandTask ? '品牌视频任务已就绪' : '先选品牌创意领地，再进入制作'}</h2><p>{brandIntake.base_handoff?.creative_view?.objective?.statement || '策略事实、品牌边界与渠道规格已冻结。'}</p></header>
+      {brandTask ? <section className="creative-handoff-status available"><div><b>{brandTask.direction.focus}</b><span>{brandTask.id} · {brandTask.channel} · 方向血缘已绑定</span></div><small>下一步：补齐 Logo、产品画面与音乐/声音权利，再进入剧本和分镜。</small></section>
+        : isBrandDirectionGenerating(brandDirectionBatch) ? <section className="image-text-v2-start brand-direction-progress" role="status"><Sparkles size={24}/><div><h3>品牌方向正在后台生成</h3><p>可以安全刷新、切换页面或稍后回来；任务不会中断，完成后会自动显示 3 个候选方向。</p><small>任务批次 {brandDirectionBatch?.batch_id}</small></div><button className="secondary-button" disabled>生成并校验中…</button></section>
+        : brandDirectionBatch?.status === 'failed' ? <section className="image-text-v2-start brand-direction-failed" role="alert"><CircleAlert size={24}/><div><h3>本次生成没有产出可用方向</h3><p>{brandDirectionFailureMessage(brandDirectionBatch.failure_code)}</p><small>失败代码：{brandDirectionBatch.failure_code || 'DIRECTION_GENERATION_FAILED'}</small></div><button className="primary-button" disabled={Boolean(brandBusy)} onClick={() => void generateBrandDirections()}><RotateCcw size={15}/>{brandBusy ? '正在重试…' : '重新生成'}</button></section>
+        : brandDirections.length === 0 ? <section className="image-text-v2-start"><Sparkles size={24}/><div><h3>生成 3 个真正不同的品牌方向</h3><p>至少两个为情绪或电影化领地；效果 CTA、伪造制作规格和同质化清单会被服务端拒绝。</p></div><button className="primary-button" disabled={Boolean(brandBusy)} onClick={() => void generateBrandDirections()}><WandSparkles size={15}/>{brandBusy ? '正在创建任务…' : '生成品牌方向'}</button></section>
+        : <><div className="image-text-direction-cards">{brandDirections.map((direction, index) => <article key={direction.direction_id}><span>方向 0{index + 1} · {direction.direction_mode === 'cinematic' ? '电影化' : direction.direction_mode === 'emotional' ? '情绪叙事' : '实用备选'}</span><h3>{direction.concept}</h3><p>{direction.creative_rationale}</p><dl className="brand-direction-evidence"><div><dt>情绪弧</dt><dd>{direction.emotional_arc}</dd></div><div><dt>影像语法</dt><dd>{direction.visual_grammar}</dd></div><div><dt>记忆装置</dt><dd>{direction.brand_memory_device}</dd></div><div><dt>人物瞬间</dt><dd>{direction.human_moment}</dd></div></dl><button className="primary-button full" disabled={Boolean(brandBusy)} onClick={() => void confirmBrandDirection(direction)}>{brandBusy === direction.direction_id ? '正在冻结并创建…' : '确认方向并创建视频任务'}</button></article>)}</div><button className="secondary-button" disabled={Boolean(brandBusy)} onClick={() => void generateBrandDirections()}><RotateCcw size={15}/>重新生成</button></>}
+    </div> : category === 'brand' && expectsBrandIntake ? <section className="image-text-v2-start" role={brandIntakeError ? 'alert' : 'status'}>
+      {brandIntakeError ? <CircleAlert size={24}/> : <Sparkles size={24}/>}<div><h3>{brandIntakeError ? '品牌策略交接读取失败' : '正在恢复品牌策略交接'}</h3><p>{brandIntakeError || '正在校验策略包、冻结路线与任务 Overlay 血缘。'}</p></div>
+      {brandIntakeError ? <button className="secondary-button" onClick={() => setBrandIntakeRetry(value => value + 1)}><RotateCcw size={15}/>重试</button> : null}
+    </section> : category === 'brand' && brandContextLoading
+      ? <section className="image-text-v2-start" role="status"><LoaderCircle className="spin" size={24}/><div><h3>正在读取品牌广告任务</h3><p>这里只展示当前 Project 的可继续任务，不会自动进入任何一条任务。</p></div></section>
+      : category === 'brand' && brandContextError
+        ? <section className="image-text-v2-start brand-direction-failed" role="alert"><CircleAlert size={24}/><div><h3>品牌广告任务读取失败</h3><p>{brandContextError}</p></div><button className="secondary-button" onClick={() => setBrandContextRetry(value => value + 1)}><RotateCcw size={15}/>重试</button></section>
+        : category === 'brand' && brandTaskOptions.length > 0
+          ? <section className="brand-route-entry" aria-labelledby="brand-task-entry-title">
+            <header><div><span className="section-label">BRAND VIDEO TASKS</span><h2 id="brand-task-entry-title">选择要继续的品牌广告任务</h2><p>任务不会被系统自动绑定。进入后，地址才会写入对应的 context。</p></div><span>{brandTaskOptions.length} 个可继续任务</span></header>
+            <div className="brand-route-task-grid">{brandTaskOptions.map(task => <article key={task.id} className="brand-route-task-card">
+              <div className="brand-route-task-card-heading"><span>{brandVideoTaskStatusLabel(task.status)}</span><small>{task.channel || '品牌视频'}</small></div>
+              <h3>{task.direction.focus || task.direction.concept || '未命名品牌方向'}</h3>
+              <p>{task.direction.core_message || task.direction.concept || '策略与品牌方向已绑定，可进入任务继续完善制作信息。'}</p>
+              <footer><time dateTime={task.updated_at}>更新于 {new Date(task.updated_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time><button className="secondary-button" onClick={() => onOpenBrandTask(task.id)}>进入任务<ArrowRight size={15}/></button></footer>
+            </article>)}</div>
+          </section>
+          : category === 'brand'
+            ? <section className="image-text-v2-start" role="status"><Film size={24}/><div><h3>当前 Project 暂无可继续的品牌广告任务</h3><p>请先在策略工作台选择“品牌广告”并完成交接；创建任务后会显示在这里，由你明确选择进入。</p></div></section>
+      : <VideoEditingWorkspaceV2 onNotice={setNotice} onCreate={() => { void create() }} editTaskId={activeTaskId} onOpenEditTask={onOpenEditTask}/>}
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </section></StateBoundary>
 }
@@ -1435,7 +1644,7 @@ function CommerceHookWorkspace({ onNotice, handoffIntake }: { onNotice: (message
   </div>
 }
 
-function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: string) => void, onCreate: () => void }) {
+function VideoEditingWorkspace({ onNotice, onCreate: _onCreate, editTaskId, onOpenEditTask }: { onNotice: (message: string) => void, onCreate: () => void, editTaskId?: string, onOpenEditTask: (id: string) => void }) {
   const { currentProject } = useProject()
   const [assets, setAssets] = useState<ApiProjectMediaAsset[]>([])
   const [selectedAssets, setSelectedAssets] = useState<string[]>([])
@@ -1446,10 +1655,13 @@ function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: str
   const [renderPlanId, setRenderPlanId] = useState('')
   const [renderJob, setRenderJob] = useState<ApiRemixRenderJob | null>(null)
   const [qualityReport, setQualityReport] = useState<ApiQualityReport | null>(null)
-  const [renderNotice, setRenderNotice] = useState('输入已保存的 RemixPlan ID 后，可创建持久化 RenderJob。')
+  const [renderNotice, setRenderNotice] = useState('操作顺序：选择素材 → 创建 EditTask → 创建低清预览或正式导出。')
   const [feedbackRating, setFeedbackRating] = useState(5)
   const [feedbackComment, setFeedbackComment] = useState('结构清晰，商品卖点表达完整。')
   const [feedbackNotice, setFeedbackNotice] = useState('反馈将以 append-only 事件写入，不会修改历史 RemixPlan 或 RenderJob。')
+  const [editTask, setEditTask] = useState<ApiEditTask | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editingRender, setEditingRender] = useState<ApiEditingRenderJob | null>(null)
   useEffect(() => {
     let active = true
     setAssetState('loading')
@@ -1469,7 +1681,27 @@ function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: str
     })
     return () => { active = false }
   }, [currentProject.id])
-  const selectedAssetObjects = assets.filter(asset => selectedAssets.includes(asset.id))
+  useEffect(() => {
+    let active = true
+    if (!editTaskId) {
+      setEditTask(null)
+      return () => { active = false }
+    }
+    void editingApi.get(currentProject.id, editTaskId).then(value => {
+      if (active) setEditTask(value)
+    }).catch(cause => {
+      if (active) onNotice(cause instanceof Error ? cause.message : '素材剪辑任务读取失败')
+    })
+    return () => { active = false }
+  }, [currentProject.id, editTaskId, onNotice])
+  useEffect(() => {
+    if (!editTask || !assets.length) return
+    const clips = editTask.current_timeline.timeline.tracks.find(track => track.role === 'primary_video')?.clips ?? []
+    const ids = clips.flatMap(clip => clip.asset_ref && assets.some(asset => asset.id === clip.asset_ref?.asset_id && asset.version === clip.asset_ref.version) ? [clip.asset_ref.asset_id] : [])
+    setSelectedAssets(ids)
+    setClipCount(clips.length)
+  }, [assets, editTask])
+  const selectedAssetObjects = selectedAssets.flatMap(id => assets.find(asset => asset.id === id) ?? [])
   const activePreview = assets.find(asset => asset.id === previewAssetId) ?? selectedAssetObjects[0] ?? assets[0]
   const toggleAsset = (id: string) => {
     setPreviewAssetId(id)
@@ -1496,25 +1728,52 @@ function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: str
     return () => window.clearInterval(timer)
   }, [currentProject.id, renderJob])
   const togglePackaging = (name: string) => setPackaging(current => current.includes(name) ? current.filter(item => item !== name) : [...current, name])
-  const addClip = () => { setClipCount(value => value + selectedAssets.length); onNotice(`已将 ${selectedAssets.length} 段已持久化视频加入混剪时间线`) }
-  const createRenderJob = async () => {
-    if (!renderPlanId.trim()) {
-      setRenderNotice('请先填写已保存的 RemixPlan ID。')
-      return
-    }
+  const buildEditingTimeline = (): EditingTimeline => {
+    if (!selectedAssetObjects.length) throw new Error('请至少选择一段已完成媒体探测的视频素材。')
+    let cursor = 0
+    const clips = selectedAssetObjects.map((asset, index) => {
+      const duration = Math.round((asset.durationSeconds ?? 0) * 1000)
+      if (duration < 1000) throw new Error(`素材 ${asset.id} 尚未具备可用时长，暂不能写入时间线。`)
+      const clip = { id: `clip-${index + 1}-${asset.id}-v${asset.version}`, asset_ref: { asset_id: asset.id, version: asset.version }, timeline_start_ms: cursor, timeline_end_ms: cursor + duration, source_out_ms: duration }
+      cursor += duration
+      return clip
+    })
+    return { schema_version: 'editing-timeline/v1', output_profile: { id: 'cookies-editing-vertical-v1', width: 720, height: 1280, frame_rate: 30, sample_rate: 48000 }, duration_ms: cursor, tracks: [{ id: 'video-primary', role: 'primary_video', clips }] }
+  }
+  const persistEditTask = async () => {
+    setEditSaving(true)
     try {
-      const key = `remix-render-${currentProject.id}-${renderPlanId.trim()}-${selectedAssets.slice().sort().join('-') || 'timeline'}`
-      const next = await api.createRemixRenderJob(currentProject.id, {
-        plan_id: renderPlanId.trim(),
-        target_format: 'mp4',
-        target_quality: 'standard',
-      }, key)
-      setRenderJob(next)
-      setQualityReport(null)
-      setRenderNotice(next.status === 'succeeded' && next.output_asset ? 'RenderJob 已完成，成片已回流素材库。' : 'RenderJob 已持久化，正在轮询状态。')
+      const timeline = buildEditingTimeline()
+      const saved = editTask
+        ? await editingApi.saveTimeline(currentProject.id, editTask.id, editTask.current_timeline.version, timeline)
+        : await editingApi.create(currentProject.id, { display_name: '素材剪辑', timeline })
+      setEditTask(saved)
+      setClipCount(saved.current_timeline.timeline.tracks.find(track => track.role === 'primary_video')?.clips.length ?? 0)
+      onNotice(`EditTask ${saved.id} 的时间线 v${saved.current_timeline.version} 已保存。`)
+      if (!editTask) onOpenEditTask(saved.id)
     } catch (cause) {
-      setRenderNotice(cause instanceof Error ? cause.message : '创建 RenderJob 失败，请确认 RemixPlan 已保存。')
+      onNotice(cause instanceof Error ? cause.message : '素材剪辑任务保存失败')
+    } finally {
+      setEditSaving(false)
     }
+  }
+  const onCreate = () => { void persistEditTask() }
+  useEffect(() => {
+    if (!editingRender || !['queued', 'running'].includes(editingRender.status)) return
+    const timer = window.setInterval(() => {
+      void editingApi.getRender(currentProject.id, editingRender.id).then(next => {
+        setEditingRender(next)
+        if (next.status === 'succeeded') setRenderNotice(`${next.kind === 'preview' ? '低清预览' : '正式导出'}已完成，成片已回流素材库。`)
+        if (next.status === 'failed') setRenderNotice(`渲染失败${next.error_message ? `：${next.error_message}` : '，可点击重试。'}`)
+        if (next.status === 'cancelled') setRenderNotice('渲染任务已取消，可以重新创建。')
+      }).catch(cause => setRenderNotice(cause instanceof Error ? cause.message : '剪辑渲染状态读取失败'))
+    }, 1200)
+    return () => window.clearInterval(timer)
+  }, [currentProject.id, editingRender])
+  const createRenderJob = async (kind: 'preview' | 'export') => {
+    if (!editTask) { setRenderNotice('请先保存时间线，再创建预览或导出任务。'); return }
+    try { const job = await editingApi.createRender(currentProject.id, editTask.id, kind); setEditingRender(job); setRenderNotice(`${kind === 'preview' ? '低清预览' : '正式导出'}已排队，绑定时间线 v${job.timeline.version}。`) }
+    catch (cause) { setRenderNotice(cause instanceof Error ? cause.message : '剪辑渲染任务创建失败') }
   }
   const createQualityReport = async () => {
     if (!renderJob) {
@@ -1581,17 +1840,23 @@ function VideoEditingWorkspace({ onNotice, onCreate }: { onNotice: (message: str
   }
   const titleForAsset = (asset: ApiProjectMediaAsset) => `导入视频 · ${asset.id.slice(-8)}`
   const labelForAsset = (_asset?: ApiProjectMediaAsset) => '服务端视频'
-  const genreTabs = ['推荐', '热榜', '榜单', '逆袭', '爱情', '剧情', '反转', '亲情', '悬疑', '喜剧']
-  const renderBusy = renderJob?.status === 'queued' || renderJob?.status === 'running'
+  const renderBusy = editingRender?.status === 'queued' || editingRender?.status === 'running'
+  const renderPrerequisite = !selectedAssets.length
+    ? '请先在左侧选择至少一段视频素材。'
+    : !editTask
+      ? '素材已进入时间线，请先创建 EditTask。'
+      : renderBusy
+        ? '当前渲染任务执行中，可取消后重新创建。'
+        : '时间线已保存，可以创建低清预览或正式导出。'
   const outputAssetLabel = renderJob?.output_asset ? `${renderJob.output_asset.asset_version.asset_id} v${renderJob.output_asset.asset_version.version}` : ''
   const outputPreviewURL = renderJob?.output_preview?.url ?? ''
   const provenanceLabel = renderJob?.provenance ? `血缘：Plan ${renderJob.provenance.plan_id.slice(-12)} · Render ${renderJob.provenance.render_job_id.slice(-12)} · 输入素材 ${renderJob.provenance.input_assets.length} 个` : ''
   return <div className="video-editing-workspace">
-    <div className="editing-toolbar"><div><span className="section-label">EditTask · ED-2607-12</span><b>15 秒竖版产品广告</b><small>来源：策略 v2.4 · Creative v1.3</small></div><div><button className="secondary-button" onClick={() => onNotice('低清预览渲染已创建')}><Play size={14} fill="currentColor"/>预览</button><button className="primary-button" disabled={!selectedAssets.length || renderBusy} onClick={() => void createRenderJob()}><Download size={15}/>{renderBusy ? '导出中…' : '导出'}</button></div></div>
+    <div className="editing-toolbar"><div><span className="section-label">EditTask · {editTask?.id ?? '未保存'}</span><b>{editTask?.display_name ?? '素材剪辑'}</b><small>{editTask ? `时间线 v${editTask.current_timeline.version} · ${editTask.entry_source === 'short_drama_preroll_v2' ? '短剧前贴预填' : '手动创建'}` : '选择项目素材后保存为独立剪辑任务'}</small></div><div><button className="secondary-button" aria-describedby="editing-render-prerequisite" title={renderPrerequisite} disabled={!editTask || renderBusy} onClick={() => void createRenderJob('preview')}><Play size={14} fill="currentColor"/>低清预览</button><button className="primary-button" aria-describedby="editing-render-prerequisite" title={renderPrerequisite} disabled={!editTask || renderBusy} onClick={() => void createRenderJob('export')}><Download size={15}/>导出</button>{editingRender?.status === 'failed' ? <button className="secondary-button" onClick={() => void editingApi.retryRender(currentProject.id, editingRender.id).then(setEditingRender)}><Play size={14}/>重试</button> : null}{renderBusy ? <button className="secondary-button" onClick={() => void editingApi.cancelRender(currentProject.id, editingRender!.id).then(setEditingRender)}>取消</button> : null}</div></div>
     <div className="editing-shell">
-      <aside className="editing-assets video-asset-library"><div className="surface-toolbar"><h3>视频素材箱</h3><span>{assets.length} 个已入库</span></div><div className="video-platform-tabs" aria-label="短剧素材分类">{genreTabs.map((tab, index) => <span key={tab} className={index === 0 ? 'active' : ''}>{tab}</span>)}</div><div className="asset-group video-asset-stage"><span>选择参与混剪的视频 · {selectedAssets.length}/{assets.length}</span>{assetState === 'loading' ? <div className="panel-empty">正在加载服务端持久化资产…</div> : null}{assetState === 'error' ? <div className="panel-empty">素材箱加载失败，请刷新后重试。</div> : null}{assetState === 'ready' && !assets.length ? <div className="panel-empty">当前 Project 暂无可用于混剪的已持久化视频资产。</div> : null}<div className="asset-card-flow">{assets.map((asset, index) => { const selected = selectedAssets.includes(asset.id); const previewing = activePreview?.id === asset.id; return <button key={asset.id} className={`video-asset-card poster-${index % 6}${selected ? ' active' : ''}${previewing ? ' previewing' : ''}`} onMouseEnter={() => setPreviewAssetId(asset.id)} onFocus={() => setPreviewAssetId(asset.id)} onClick={() => toggleAsset(asset.id)} aria-pressed={selected}><span className="video-poster-frame"><span className="poster-glow"/><span className="poster-cast"><span/><span/><span/></span><span className="poster-play"><Play size={13} fill="currentColor"/></span><b>{titleForAsset(asset)}</b><small>{asset.durationSeconds?.toFixed(1) ?? '—'} 秒 · v{asset.version}</small><em>{previewing ? 'PREVIEW READY' : `${(asset.sizeBytes / 1024 / 1024).toFixed(1)} MB`}</em></span><span className="video-card-meta"><span className="asset-check">{selected ? <Check size={12}/> : null}</span><span><b>{labelForAsset(asset)}视频</b><small>{previewing ? '点击加入混剪队列' : `已持久化 · ${shortId(asset.id)}`}</small></span></span></button> })}</div></div><div className="video-library-preview" aria-live="polite"><span>{activePreview ? labelForAsset(activePreview) : '等待素材'}</span><b>{activePreview ? titleForAsset(activePreview) : '选择一个视频素材开始预览'}</b>{activePreview ? <video className="project-asset-preview" controls preload="metadata" src={activePreview.contentUrl}/> : <small>素材成功生成并保存后会出现在这里。</small>}<div><Play size={14} fill="currentColor"/>点击素材可加入或移出混剪队列</div></div><button className="secondary-button full" disabled={!selectedAssets.length} onClick={addClip}><Scissors size={15}/>加入混剪时间线</button></aside>
-      <section className="editing-center"><div className="editing-preview"><div className="preview-grid"/><div className="editing-safe-frame"><span>9:16</span><b>精度，先于承诺被看见。</b><small>WHITE PRECISION</small></div><button aria-label="播放剪辑预览" onClick={() => onNotice('正在播放当前时间线')}><Play size={18} fill="currentColor"/></button><time>00:06.8 / 00:15.0</time></div><div className="timeline-toolbar"><span>时间线 · v1.3</span><div><button aria-label="撤销编辑" onClick={() => onNotice('已撤销上一步编辑')}>撤销</button><button aria-label="保存时间线" onClick={() => onNotice('时间线 v1.4 已保存')}><Save size={14}/>保存</button></div></div><div className="editing-timeline">{[['视频', 'clip video-a'], ['叠加', 'clip overlay'], ['字幕', 'clip caption'], ['配音', 'clip voice'], ['音乐', 'clip music']].map(([track, className], index) => <div className="timeline-row" key={track}><span>{index === 2 ? <Subtitles size={14}/> : index > 2 ? <Volume2 size={14}/> : <Film size={14}/>} {track}</span><div className="timeline-lane"><button className={className} onClick={() => onNotice(`${track}轨道已选中`)}>{index === 0 ? `${clipCount} 个镜头 · 00:15` : index === 2 ? '精度，先于承诺被看见。' : index === 3 ? '品牌旁白' : index === 4 ? <><Music2 size={13}/>品牌节奏</> : '产品卖点与品牌标识'}</button></div></div>)}</div></section>
-      <aside className="editing-inspector"><div className="surface-toolbar"><h3>视频包装</h3><span className={`status ${qualityReport ? qualityStatusClass(qualityReport.verdict) : 'success'}`}><span/>{qualityReport ? qualityVerdictText(qualityReport.verdict) : '可导出'}</span></div><div className="inspector-section"><span>画面规格</span><b>1080 × 1920 · 9:16</b><small>抖音 / 快手信息流</small></div><label>RemixPlan ID<input value={renderPlanId} onChange={event => setRenderPlanId(event.target.value)} placeholder="remixplan_xxx"/></label><div className="packaging-options"><span>包装组件</span>{['动态字幕', '节奏音效', '品牌片尾', '转化 CTA'].map(item => <button key={item} className={packaging.includes(item) ? 'active' : ''} onClick={() => togglePackaging(item)} aria-pressed={packaging.includes(item)}>{packaging.includes(item) ? <Check size={13}/> : null}{item}</button>)}</div><div className="editing-checks"><span><Check size={14}/>已选 {selectedAssets.length} 段生成视频</span><span><Check size={14}/>{packaging.length} 个包装组件启用</span><span><Check size={14}/>字幕静音可理解</span><span><Check size={14}/>品牌检查通过</span></div><button className="primary-button full" disabled={!selectedAssets.length} onClick={() => onNotice(`混剪版本 v1.4 已生成：${selectedAssets.length} 段视频 + ${packaging.length} 个包装组件`)}><Sparkles size={15}/>生成混剪版本</button><button className="secondary-button full" onClick={onCreate}><Video size={15}/>保存为 EditTask</button><button className="secondary-button full" disabled={!selectedAssets.length || renderBusy} onClick={() => void createRenderJob()}><Download size={15}/>{renderBusy ? '导出中…' : '创建 RenderJob'}</button><button className="secondary-button full" disabled={!renderJob || renderBusy || Boolean(qualityReport)} onClick={() => void createQualityReport()}><ShieldCheck size={15}/>执行质量检查</button>{renderJob ? <div className="inline-notice" role="status">RenderJob {shortId(renderJob.id)} · {renderJob.status} · {renderJob.progress}%{renderJob.requires_review ? ' · 需人工复核' : ''}{renderJob.quality_report_id ? ` · 报告 ${shortId(renderJob.quality_report_id)}` : ''}{renderJob.error_message ? ` · ${renderJob.error_message}` : ''}<progress value={renderJob.progress} max={100}/>{outputAssetLabel ? <span>成片资产：{outputAssetLabel}</span> : null}{outputPreviewURL ? <a href={outputPreviewURL} target="_blank" rel="noreferrer">打开成片预览</a> : null}{provenanceLabel ? <small>{provenanceLabel}</small> : null}</div> : null}{qualityReport ? <div className="quality-report-card"><div><span>QualityReport</span><b>{qualityVerdictText(qualityReport.verdict)} · {Math.round(qualityReport.score * 100)}分</b></div><ul>{qualityReport.dimensions.slice(0, 3).map(dimension => <li key={dimension.name}><span>{dimension.name}</span><b>{Math.round(dimension.score * 100)}%</b><small>{dimension.summary}</small></li>)}</ul>{qualityReport.issues[0] ? <p>{qualityReport.issues[0].start_seconds.toFixed(1)}s-{qualityReport.issues[0].end_seconds.toFixed(1)}s · {qualityReport.issues[0].description} · {qualityReport.issues[0].repair_suggestion}</p> : <p>未发现 critical/major 问题，可继续进入成片回流。</p>}</div> : null}<div className="feedback-card"><div><span>反馈飞轮</span><b>人工评分与评论</b></div><div className="feedback-rating"><button aria-label="降低评分" onClick={() => setFeedbackRating(value => Math.max(1, value - 1))}><ThumbsDown size={13}/></button><strong>{feedbackRating}/5</strong><button aria-label="提高评分" onClick={() => setFeedbackRating(value => Math.min(5, value + 1))}><ThumbsUp size={13}/></button></div><textarea value={feedbackComment} onChange={event => setFeedbackComment(event.target.value)} maxLength={1000}/><button className="secondary-button full" onClick={() => void submitPlanFeedback()}><Save size={15}/>提交计划反馈</button><button className="secondary-button full" disabled={!renderJob?.output_asset} onClick={() => void submitOutputFeedback()}><Sparkles size={15}/>提交成片反馈并生成权重快照</button><small>{feedbackNotice}</small></div><div className="inline-notice" role="status">{renderNotice}</div></aside>
+      <aside className="editing-assets video-asset-library"><div className="surface-toolbar"><h3>视频素材箱</h3><span>{assets.length} 个已入库</span></div><div className="video-library-scope"><span>全部项目视频</span><small>点击下方卡片选择</small></div><div className="asset-group video-asset-stage"><span>选择参与混剪的视频 · {selectedAssets.length}/{assets.length}</span>{assetState === 'loading' ? <div className="panel-empty">正在加载服务端持久化资产…</div> : null}{assetState === 'error' ? <div className="panel-empty">素材箱加载失败，请刷新后重试。</div> : null}{assetState === 'ready' && !assets.length ? <div className="panel-empty">当前 Project 暂无可用于混剪的已持久化视频资产。</div> : null}<div className="asset-card-flow">{assets.map((asset, index) => { const selected = selectedAssets.includes(asset.id); const previewing = activePreview?.id === asset.id; return <button key={asset.id} className={`video-asset-card poster-${index % 6}${selected ? ' active' : ''}${previewing ? ' previewing' : ''}`} onMouseEnter={() => setPreviewAssetId(asset.id)} onFocus={() => setPreviewAssetId(asset.id)} onClick={() => toggleAsset(asset.id)} aria-pressed={selected}><span className="video-poster-frame"><span className="poster-glow"/><span className="poster-cast"><span/><span/><span/></span><span className="poster-play"><Play size={13} fill="currentColor"/></span><b>{titleForAsset(asset)}</b><small>{asset.durationSeconds?.toFixed(1) ?? '—'} 秒 · v{asset.version}</small><em>{previewing ? 'PREVIEW READY' : `${(asset.sizeBytes / 1024 / 1024).toFixed(1)} MB`}</em></span><span className="video-card-meta"><span className="asset-check">{selected ? <Check size={12}/> : null}</span><span><b>{labelForAsset(asset)}视频</b><small>{previewing ? '点击卡片加入时间线' : `已持久化 · ${shortId(asset.id)}`}</small></span></span></button> })}</div></div><div className="video-library-preview" aria-live="polite"><span>{activePreview ? labelForAsset(activePreview) : '等待素材'}</span><b>{activePreview ? titleForAsset(activePreview) : '选择一个视频素材开始预览'}</b>{activePreview ? <video className="project-asset-preview" controls preload="metadata" src={activePreview.contentUrl}/> : <small>素材成功生成并保存后会出现在这里。</small>}<button type="button" className={`video-preview-select${activePreview && selectedAssets.includes(activePreview.id) ? ' active' : ''}`} disabled={!activePreview} onClick={() => { if (activePreview) toggleAsset(activePreview.id) }}><Scissors size={14}/>{activePreview && selectedAssets.includes(activePreview.id) ? '已选择，点击移出时间线' : '选择此素材加入时间线'}</button></div><div className="editing-selection-hint"><Scissors size={15}/>{selectedAssets.length ? `已将 ${selectedAssets.length} 段素材加入时间线，按选择顺序拼接。` : '选择素材卡片或上方选择按钮后，会自动加入时间线。'}</div></aside>
+      <section className="editing-center"><div className="editing-preview"><div className="preview-grid"/><div className="editing-safe-frame"><span>9:16</span><b>精度，先于承诺被看见。</b><small>WHITE PRECISION</small></div><button aria-label="创建剪辑预览" aria-describedby="editing-render-prerequisite" title={renderPrerequisite} disabled={!editTask || renderBusy} onClick={() => void createRenderJob('preview')}><Play size={18} fill="currentColor"/></button><time>00:00.0 / {(selectedAssetObjects.reduce((total, asset) => total + (asset.durationSeconds ?? 0), 0)).toFixed(1)}</time></div><div className="timeline-toolbar"><span>时间线 · v{editTask?.current_timeline.version ?? 0}</span><div><button aria-label="撤销编辑暂不可用" title="当前 MVP 暂不提供撤销，保存会创建新的时间线版本。" disabled>撤销</button><button aria-label="保存时间线" disabled={editSaving || !selectedAssets.length} onClick={() => void persistEditTask()}><Save size={14}/>{editSaving ? '保存中…' : '保存'}</button></div></div><div className="editing-timeline">{[['视频', 'clip video-a'], ['叠加', 'clip overlay'], ['字幕', 'clip caption'], ['配音', 'clip voice'], ['音乐', 'clip music']].map(([track, className], index) => <div className="timeline-row" key={track}><span>{index === 2 ? <Subtitles size={14}/> : index > 2 ? <Volume2 size={14}/> : <Film size={14}/>} {track}</span><div className="timeline-lane"><div className={className}>{index === 0 ? `${editTask ? clipCount : selectedAssets.length} 个${editTask ? '已保存' : '待保存'}镜头 · ${(selectedAssetObjects.reduce((total, asset) => total + (asset.durationSeconds ?? 0), 0)).toFixed(1)}s` : index === 4 ? <><Music2 size={13}/>{track}渲染引擎已支持，MVP 暂无可视化编辑</> : `${track}渲染引擎已支持，MVP 暂无可视化编辑`}</div></div></div>)}</div></section>
+      <aside className="editing-inspector"><div className="surface-toolbar"><h3>剪辑任务</h3><span className={`status ${editingRender?.status === 'failed' ? 'danger' : editTask ? 'success' : 'pending'}`}><span/>{editingRender?.status ?? (editTask ? '已保存' : '待保存')}</span></div><div className="inspector-section"><span>固定输出规格</span><b>720 × 1280 · 9:16</b><small>MP4 / H.264 / AAC · 30fps · 48kHz</small></div><div className="editing-checks"><span><Check size={14}/>已选 {selectedAssets.length} 段项目视频</span><span><Check size={14}/>视频顺序即主视频轨顺序</span><span>{editTask ? <Check size={14}/> : <span/>}时间线 {editTask ? `v${editTask.current_timeline.version}` : '尚未保存'}</span><span>{editingRender ? `渲染 ${editingRender.progress_percent}% · ${editingRender.kind}` : '可创建低清预览或正式导出'}</span></div><p id="editing-render-prerequisite" className="editing-prerequisite">{renderPrerequisite}</p><button className="primary-button full" title={!selectedAssets.length ? renderPrerequisite : undefined} disabled={!selectedAssets.length || editSaving} onClick={() => void persistEditTask()}><Save size={15}/>{editSaving ? '保存中…' : editTask ? '保存时间线新版本' : '创建 EditTask'}</button><button className="secondary-button full" title={renderPrerequisite} disabled={!editTask || renderBusy} onClick={() => void createRenderJob('preview')}><Play size={15}/>创建低清预览</button><button className="secondary-button full" title={renderPrerequisite} disabled={!editTask || renderBusy} onClick={() => void createRenderJob('export')}><Download size={15}/>创建正式导出</button>{editingRender?.output_asset ? <a className="secondary-button full" href={`/platform/v1/projects/${currentProject.id}/assets/${editingRender.output_asset.asset_version.asset_id}/versions/${editingRender.output_asset.asset_version.version}/preview`} target="_blank" rel="noreferrer">打开成片预览</a> : null}<div className="inline-notice" role="status">{renderNotice}</div></aside>
     </div>
   </div>
 }

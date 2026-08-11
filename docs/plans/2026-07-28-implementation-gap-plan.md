@@ -15,8 +15,8 @@
 2. Project 资产上传、读取、预览、删除、特征读写和生成产物回流。
 3. Provider 图片任务，以及本地环境下的策略提案生成、策略批准、创意计划和图片任务。
 4. AI 混剪计划、渲染任务契约、质量报告、爆款拆解、商品映射、前贴、反馈、评测和诊断 Agent 的 MVP seam。
-5. Project-scoped DeliveryPlan/不可变版本、权威预检、ChangeSet、内容哈希绑定审批、模拟执行/回滚和审计记录。
-6. React 中的 Project 中心化导航、任务中心、部分图文/视频生成、素材剪辑演示、素材洞察展示、投放计划与审批演示。
+5. Project-scoped DeliveryPlan/不可变版本、权威预检、ChangeSet、内容哈希绑定审批、持久化 mock Execution/Step 场景、恢复决策和审计记录。
+6. React 中的 Project 中心化导航、任务中心、部分图文/视频生成、素材剪辑演示、素材洞察展示，以及投放计划、审批与持久化 mock Execution 演示。
 
 但四个业务系统尚未完整实现。当前主要缺口是：
 
@@ -39,7 +39,7 @@
 | --- | --- |
 | 运维与身份 | `GET /healthz`、`GET /readyz`、`GET /platform/v1/context`、`GET /platform/v1/me` |
 | Brand 与 Project | `POST /platform/v1/brands`；Project 创建、列表、详情、更新、上下文读取 |
-| Project 任务 | Project 下 Task 的创建、列表、详情、更新 |
+| Project 产物与任务 | Project 下 Artifact 的创建、列表、详情、乐观并发更新；Task 的创建、列表、详情、更新 |
 | Project 运营记录 | Project 下 Operation 的创建、列表、详情、幂等更新 |
 | ChangeSet 与审计 | ChangeSet 创建、列表、详情、预检、批准、模拟执行、模拟回滚；AuditEvent 列表 |
 | 媒体资产 | 上传会话创建、内容写入、完成上传、资产列表、预览、内容读取、版本删除、AssetFeature 读写与列表 |
@@ -58,7 +58,7 @@
 | 需求与策略 | 创建 Proposal、基于 Proposal 生成 Strategy、批准 Strategy | 只覆盖 proposal-to-strategy 路径；未覆盖对话、Brief、研究和通用评审 |
 | 创意创作 | 创建/读取 CreativePlan、基于计划创建图片 Job | 只覆盖已批准策略到图片任务；未覆盖完整 Draft、Version、视频、评审与交付 |
 | 素材洞察 | 无 `/api/insights/v1/*` 业务路由 | 只有共享 AssetFeature、Remix 分析 seam 和兼容服务公共样例 |
-| 智能投放 | 已有 Project-in-path 的 Plan/Version/Preflight/ChangeSet/Approval/即时模拟执行路由 | A03 为明确 `source=mock` 的受控闭环；尚无真实账户、Computer Use、监控和优化 |
+| 智能投放 | 已有 Project-in-path 的 Plan/Version/Preflight/ChangeSet/Approval/持久化 mock Execution 路由 | 版本绑定审批与持久化模拟执行是明确 `source=mock` 的受控闭环；尚无真实账户、Computer Use、监控和优化 |
 
 ### 2.3 TypeScript 兼容 API
 
@@ -71,7 +71,7 @@
 - 短剧前贴候选规划。
 - 公共视频洞察 CSV 的总览、筛选、列表和详情。
 
-这些接口服务于本地兼容和演示，不应继续扩展为生产权威数据源。当前前端仍有 Artifact 写入、短剧前贴和公共洞察等调用依赖该服务，后续需要迁移到 Go 契约；Project 更新和 Project scoped AuditEvent 读取已迁至 Go。
+这些接口服务于本地兼容和演示，不应继续扩展为生产权威数据源。Project 更新、Project scoped AuditEvent 读取以及通用 Artifact 的创建、读取和更新均已迁至 Go；短剧前贴和公共洞察等调用仍依赖该服务，后续需要继续迁移。
 
 ## 3. 已实现功能及实现等级
 
@@ -79,7 +79,8 @@
 | --- | --- | --- |
 | 登录与本地身份 | 已实现 | 演示账号 + Go 本地身份注入；非企业 SSO |
 | Project 工作台 | 已实现 | 可读取真实 Go Project 快照、任务、运营记录、ChangeSet 和资产摘要 |
-| Project 创建 | 已实现 | 已落 Go；Project 编辑仍走 TypeScript 旧接口，数据源未统一 |
+| Project 创建与编辑 | 已实现 | 已落 Go，更新具备 ProjectContextVersion 乐观并发 |
+| 通用 Artifact/产物 | 已实现 | Project scoped Go 契约已持久化 Brief、图像、视频和文档产物，支持创建、读取、列表、状态更新与版本冲突检测 |
 | Project 任务 | 已实现 | 可创建、筛选、查看和更新状态，Go/MySQL 持久化 |
 | Project/四模块导航 | 已实现 | 路由和页面入口完整；入口完整不代表每个业务对象已实现 |
 | 素材上传与读取 | API 已实现 | Go 接口和对象存储 seam 已有；当前 React 没有完整上传、摄取、权利管理流程 |
@@ -94,7 +95,7 @@
 | 素材洞察 | 展示 + 局部数据 | 公共 CSV 洞察、Project 运营记录和 AssetFeature 可展示；没有指标接入与分析领域模型 |
 | 素材检查 | 样例驱动 | QualityCheckRun、MaterialConfirmation、版本指针来自前端 sample 过滤，不是服务端权威对象 |
 | 投放计划 | Mock 业务实现 | DeliveryPlan 与不可变版本已持久化；支持乐观并发、Project 隔离和服务端权威预检 |
-| 审批与执行 | 受控 Mock 实现 | Approval 绑定 Plan/ChangeSet 版本、canonical/action hash、24 小时有效期、execute_mock scope 和预算快照；即时模拟执行/回滚可审计，不会写真实广告平台 |
+| 审批与执行 | 受控 Mock 实现 | Approval 绑定 Plan/ChangeSet 版本、canonical/action hash、24 小时有效期、execute_mock scope 和预算快照；持久化模拟执行以 Idempotency-Key + canonical request hash 保存 Execution/Step、证据和恢复决策，不会写真实广告平台 |
 | 监控、优化、账户环境 | 展示实现 | 多数页面复用 Project 运营记录或 agency sample，无 Connector/平台实时数据 |
 
 ## 4. 未实现接口清单
@@ -157,7 +158,7 @@
 
 ### 4.4 P0：智能投放与 Computer Use
 
-当前已经注册 Project-scoped `/api/delivery/v1/projects/{project_id}/...` 的 Plan/Version/Preflight/ChangeSet/Approval/即时模拟执行子集。以下仍需实现：
+当前已经注册 Project-scoped `/api/delivery/v1/projects/{project_id}/...` 的 Plan/Version/Preflight/ChangeSet/Approval 和持久化 mock Execution 子集：`POST ...change-sets/{id}:execute` 带 `Idempotency-Key` 与 `{expected_version,scenario}`，以及 Execution 列表/详情读取。Execution 只支持 `success`、`failed`、`partial`、`result_unknown` fixture，返回显式 mock provenance；`result_unknown` 先查询/恢复决策而非盲目重试。以下仍需实现：
 
 - `POST /api/delivery/v1/conversations`
 - `POST /api/delivery/v1/plans/{id}/pause`
@@ -236,8 +237,6 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 
 迁移并删除以下前端依赖后，才能把 TypeScript 服务缩减为纯本地登录兼容层或完全移除：
 
-- Project 更新。
-- Artifact 创建与更新。
 - GenerationJob 取消和部分列表查询。
 - 短剧前贴候选规划。
 - Provider 配置管理。
@@ -300,7 +299,7 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 
 | 阶段 | 优先目标 | 完成判据 |
 | --- | --- | --- |
-| P0-A：统一数据权威 | 已完成 Project 更新和 Project scoped Audit 查询迁移（2026-07-28）；继续补 Artifact/产物契约、Provider 能力，并迁移剩余前端旧 `/api` 调用 | Project 主路径不再跨 Go/TypeScript 双写或读取不同权威源 |
+| P0-A：统一数据权威 | 已完成 Project 更新、Project scoped Audit 查询以及通用 Artifact/产物读写迁移（2026-07-28～29）；继续补 Provider 能力，并迁移剩余前端旧 `/api` 调用 | Project 主路径不再跨 Go/TypeScript 双写或读取不同权威源 |
 | P0-B：闭合策略与创意 | Conversation/Brief/Strategy 和 CreativeTask/Draft/Version/Review/Delivery | 能从需求输入生成并批准稳定 Brief/Strategy，再产出可评审和可交付 CreativeVersion |
 | P0-C：闭合素材洞察 | Connector、映射、指标、AnalysisRun、Insight、Experience | 投放数据和素材版本可复现关联，结论有证据、口径、限制和人工确认 |
 | P0-D：闭合安全投放 | DeliveryPlan、账户绑定、Computer Use、监控、证据 | 在受控测试账户完成计划、审批、执行、验证、暂停和审计，不再只是模拟 |
@@ -331,3 +330,4 @@ Computer Use 文档当前同时出现 `/platform/v1/computer-use-runs` 和 `/pla
 | 日期 | 迭代 | 已完成内容 | 验证 |
 | --- | --- | --- | --- |
 | 2026-07-28 | P0-A / Project 数据权威 | 新增 `PATCH /platform/v1/projects/{project_id}`；支持名称、展示品牌、目标、行业和可选 `expected_context_version` 更新；MySQL 原子递增 ProjectContextVersion 并写入对应上下文快照；前端 Project 创建/更新与 Project scoped Audit 查询均改走 Go 平台客户端 | Go Project/HTTP/OpenAPI 契约测试、前端 platform client 测试、`npm run build` |
+| 2026-07-29 | P0-A / Artifact 产物契约 | 新增 Project scoped Artifact 的创建、列表、详情和乐观并发更新；MySQL 持久化版本化产物和审计事件；前端 Artifact 读写与 Project 快照改走 Go 平台客户端，消除通用 Artifact 对 TypeScript JSON 兼容服务的写入依赖 | Go Project/HTTP 测试、前端 platform client 测试、`npm run build` |

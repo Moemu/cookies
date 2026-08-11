@@ -1,0 +1,123 @@
+{
+  "contract_version": "creative-video-intake/v1",
+  "intake_id": "fixture_video_brand_video_guerlain_v1",
+  "organization_id": "fixture_org",
+  "project_id": "fixture_project_guerlain_brand",
+  "status": "fixture_ready",
+  "source": {
+    "kind": "fixture",
+    "fixture_id": "brand-video-guerlain/v1",
+    "documents": [
+      {
+        "file_name": "【娇兰】brief.pdf",
+        "locator": "fixture://briefs/guerlain-25x-bee-water-v1",
+        "sha256": "sha256:303e97a42018a9a59763a9785e4c59b24d8afa0b398d411b5eed76937dfe9535",
+        "page_refs": ["2", "8-12", "17-19", "25-27"],
+        "note": "固定开发样例只选择娇兰 25X 蜂皇水；其他产品不进入本次品牌广告范围。"
+      }
+    ]
+  },
+  "campaign": {
+    "objective": "用 15 秒竖屏品牌片建立娇兰 25X 蜂皇水的高端修护心智。",
+    "audience": "关注补水、修护与轻盈肤感的都市护肤人群。",
+    "core_message": "轻盈如水的使用体验，承载娇兰黑蜂修护科技与高端品牌质感。",
+    "call_to_action": "了解娇兰 25X 蜂皇水",
+    "channels": ["douyin"],
+    "locale": "zh-CN"
+  },
+  "video": {
+    "mode": "brand_video",
+    "purpose": "brand",
+    "target_duration_seconds": 15,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "variant_count": 1,
+    "hook_deadline_seconds": 3,
+    "audio_policy": "voiceover",
+    "transition": "hard_cut"
+  },
+  "product": {
+    "brand_name": "法国娇兰",
+    "product_name": "娇兰 25X 蜂皇水",
+    "selling_points": [
+      "精华水质地轻盈不黏腻",
+      "强调补水、修护与屏障护理",
+      "含微囊蜂王浆与黑蜂修护科技",
+      "适合湿敷与日常全脸护理"
+    ],
+    "proof_points": [
+      "Brief 标注 98% 天然来源成分，正式传播需保留原文适用范围",
+      "功效、成分与测试结论必须绑定 Brief 页码和原始脚注"
+    ],
+    "usage_scenarios": ["日常补水修护", "湿敷护理", "妆前护肤"]
+  },
+  "creative": {
+    "concept": "以蜂巢光影、流动水感和产品定格建立从自然能量到肌肤修护的 15 秒品牌叙事。",
+    "tone": ["高端", "温润", "克制", "可信"],
+    "visual_keywords": ["暖金蜂巢", "水感微距", "琥珀瓶身", "柔和晨光", "奢华留白"],
+    "mandatory_elements": [
+      "商品瓶型、颜色、标签与比例保持真实",
+      "书面统一使用“25X蜂皇水”，口播使用“二十五倍蜂皇水”",
+      "包含湿敷或全脸使用方式",
+      "功效表达必须来自已确认 Brief 事实"
+    ],
+    "prohibited_claims": [
+      "不得编造未在 Brief 中出现的医学或绝对化功效",
+      "不得生成错误 Logo、包装文字、价格或促销信息",
+      "不得把其他娇兰产品的卖点混入 25X 蜂皇水"
+    ],
+    "reference_policy": "商品正面图、Logo 与包装属于事实资产，进入生产前必须由用户确认或替换为同 Project 的授权 AssetVersionRef。",
+    "similarity_policy": "只继承娇兰自身 Brief 的品牌语言，不模仿其他品牌广告的具体镜头、文案或音乐。"
+  },
+  "source_assets": [
+    {
+      "role": "product_image",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://briefs/guerlain-25x-bee-water-v1#product-front",
+      "rights_status": "pending",
+      "note": "从 Brief 商品页识别的正面图候选；允许用户替换、上传或单图重识别。"
+    },
+    {
+      "role": "logo",
+      "required": true,
+      "availability": "placeholder",
+      "fixture_uri": "fixture://briefs/guerlain-25x-bee-water-v1#logo",
+      "rights_status": "pending",
+      "note": "品牌 Logo 候选，生产前必须确认。"
+    }
+  ],
+  "claims": [
+    {
+      "text": "98% 天然来源成分",
+      "status": "needs_confirmation",
+      "evidence_refs": ["guerlain_25x_brief_product_pages"]
+    },
+    {
+      "text": "补水、修护与屏障护理",
+      "status": "needs_confirmation",
+      "evidence_refs": ["guerlain_25x_brief_product_pages"]
+    }
+  ],
+  "evidence_refs": [
+    {
+      "id": "guerlain_25x_brief_product_pages",
+      "source_type": "fixture_document",
+      "locator": "fixture://briefs/guerlain-25x-bee-water-v1#pages=8-12",
+      "note": "25X 蜂皇水产品信息、使用方式与传播要求。"
+    }
+  ],
+  "readiness": {
+    "planning_ready": true,
+    "generation_ready": false,
+    "production_ready": false,
+    "missing_fields": ["source_assets.production_refs", "voice.voice_id"],
+    "blockers": ["brief_analysis_confirmation", "creative_concept_selection", "production_plan_confirmation"],
+    "assumptions": []
+  },
+  "confirmation": {
+    "required": true,
+    "status": "unconfirmed"
+  },
+  "created_at": "2026-07-31T00:00:00Z"
+}

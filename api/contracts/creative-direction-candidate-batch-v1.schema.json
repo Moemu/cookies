@@ -12,6 +12,7 @@
     "project_id": {"type": "string", "minLength": 1},
     "intake_id": {"type": "string", "minLength": 1},
     "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "brand_brief_ref": {"$ref": "#/$defs/brandBriefRef"},
     "status": {"enum": ["generating", "ready", "failed"]},
     "candidates": {
       "type": "array",
@@ -22,5 +23,16 @@
     "failure_code": {"type": "string"},
     "created_by": {"type": "string", "minLength": 1},
     "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "brandBriefRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "content_hash"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
   }
 }

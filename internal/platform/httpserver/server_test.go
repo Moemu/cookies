@@ -15,6 +15,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/platform/remix"
@@ -210,6 +211,11 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 		{name: "viral source unavailable", err: creative.ErrViralAnalysisSourceUnavailable, wantStatus: http.StatusUnprocessableEntity, wantCode: "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE"},
 		{name: "viral provider unavailable", err: creative.ErrViralAnalysisProviderUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", wantRetryable: true},
 		{name: "viral invalid response", err: creative.ErrViralAnalysisResponseInvalid, wantStatus: http.StatusBadGateway, wantCode: "VIRAL_ANALYSIS_RESPONSE_INVALID", wantRetryable: true},
+		{name: "document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationRequired, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_REQUIRED"},
+		{name: "document vision reconciliation forbidden", err: knowledge.ErrDocumentVisionReconciliationForbidden, wantStatus: http.StatusForbidden, wantCode: "DOCUMENT_VISION_RECONCILIATION_FORBIDDEN"},
+		{name: "invalid document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationInvalid, wantStatus: http.StatusBadRequest, wantCode: "INVALID_DOCUMENT_VISION_RECONCILIATION"},
+		{name: "same document vision operator", err: knowledge.ErrDocumentVisionReconciliationSameActor, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_SECOND_OPERATOR_REQUIRED"},
+		{name: "document vision reconciliation conflict", err: knowledge.ErrDocumentVisionReconciliationConflict, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_CONFLICT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -235,6 +241,44 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDocumentVisionReconciliationConfirmationRequiresExplicitDecision(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "admin_2"},
+		Scopes:         []contract.Scope{knowledge.ScopeDocumentVisionReconcile},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &knowledge.Service{}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: allowingProjectAuthorizer{}, Knowledge: service,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/platform/v1/projects/project_1/knowledge/document-vision-reconciliations/reconciliation_1/confirm",
+		strings.NewReader(`{}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_DOCUMENT_VISION_RECONCILIATION") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type allowingProjectAuthorizer struct{}
+
+func (allowingProjectAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
+	return nil
+}
+
+func (allowingProjectAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
 }
 
 func TestAuthenticatedDomainMountReceivesTrustedRequestContext(t *testing.T) {
@@ -1634,6 +1678,41 @@ func TestGetLatestShortDramaWorkspaceRestoresThePersistedTask(t *testing.T) {
 	}
 }
 
+func TestGetLatestAINativeWorkspaceRestoresThePersistedStage(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{latestAINativeWorkspace: creative.AINativeRequirementWorkspace{
+		WorkspaceID: "ainativeworkspace_1", OrganizationID: "org_1", ProjectID: "project_1", CurrentStage: creative.AINativeStageStoryboard,
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Creative: manager,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/ai-native-ads:latest", nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"workspace_id":"ainativeworkspace_1"`) ||
+		!strings.Contains(response.Body.String(), `"current_stage":"storyboard"`) {
+		t.Fatalf("workspace body = %s", response.Body.String())
+	}
+	if manager.latestAINativeProjectID != "project_1" {
+		t.Fatalf("latest AI native workspace project = %q", manager.latestAINativeProjectID)
+	}
+}
+
 func TestGamePrerollWorkspaceRestoresAndForwardsHumanSelection(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{
@@ -2145,6 +2224,18 @@ func (staticProjectManager) ListProjects(context.Context, contract.ActorContext)
 func (staticProjectManager) GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error) {
 	return project.ProjectDetail{}, nil
 }
+func (staticProjectManager) CreateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, project.CreateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) ListProjectArtifacts(context.Context, contract.ActorContext, contract.ProjectID) ([]project.ProjectArtifact, error) {
+	return nil, nil
+}
+func (staticProjectManager) GetProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
+func (staticProjectManager) UpdateProjectArtifact(context.Context, contract.ActorContext, contract.ProjectID, string, project.UpdateProjectArtifactRequest) (project.ProjectArtifact, error) {
+	return project.ProjectArtifact{}, nil
+}
 func (staticProjectManager) GetWorkbench(context.Context, contract.ActorContext, contract.ProjectID) (project.Workbench, error) {
 	return project.Workbench{}, nil
 }
@@ -2250,6 +2341,8 @@ type creativeManagerStub struct {
 	regenerateGameTaskID               string
 	regenerateGameRequest              creative.RegenerateGamePrerollCandidatesRequest
 	latestShortDramaProjectID          contract.ProjectID
+	latestAINativeWorkspace            creative.AINativeRequirementWorkspace
+	latestAINativeProjectID            contract.ProjectID
 	latestGamePrerollProjectID         contract.ProjectID
 	selectedGameTaskID                 string
 	selectedGameRequest                creative.SelectGamePrerollCandidateRequest
@@ -2260,6 +2353,11 @@ type creativeManagerStub struct {
 	preparedImageOrder                 int
 	attachedImageProviderJobID         string
 	failedImageAttemptID               string
+}
+
+func (s *creativeManagerStub) GetLatestAINativeRequirementWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.AINativeRequirementWorkspace, error) {
+	s.latestAINativeProjectID = projectID
+	return s.latestAINativeWorkspace, nil
 }
 
 func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {
@@ -2285,6 +2383,102 @@ func (s *creativeManagerStub) ConfirmCommerceGeneration(context.Context, contrac
 }
 func (s *creativeManagerStub) CommerceProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string) (provider.VideoGenerationInput, string, error) {
 	return provider.VideoGenerationInput{}, "", nil
+}
+func (s *creativeManagerStub) EnsureBrandFilmFixtureWorkspace(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetLatestBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) InitializeStrategyBrandFilmWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) AnalyzeBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandBriefAnalysisRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmBrandFilmBrief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GenerateBrandFilmConcepts(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmConcepts(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandConceptsRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) SelectBrandFilmConcept(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectBrandConceptRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GenerateBrandFilmPlan(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmPlan(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandFilmPlanRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmBrandFilmPlan(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) PrepareBrandFilmGeneration(context.Context, contract.ActorContext, contract.ProjectID, string, creative.PrepareBrandFilmGenerationRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RegenerateBrandFilmUnit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RegenerateBrandFilmUnitRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) BrandFilmProviderInput(context.Context, contract.ActorContext, contract.ProjectID, string, string) (provider.VideoGenerationInput, string, error) {
+	return provider.VideoGenerationInput{}, "", nil
+}
+func (s *creativeManagerStub) RegisterBrandFilmGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ReconcileBrandFilmGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, contract.ProviderJob) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) LockBrandFilmGenerationUnit(context.Context, contract.ActorContext, contract.ProjectID, string, creative.LockBrandFilmUnitRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ComposeBrandFilmPreview(context.Context, contract.RequestContext, contract.ProjectID, string, creative.ComposeBrandFilmPreviewRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) PrepareBrandFilmAudio(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) MaterializeBrandFilmAudioAssets(context.Context, contract.RequestContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateBrandFilmAudioMix(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateBrandAudioMixRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) SelectBrandFilmAudioVariant(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectBrandAudioVariantRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RenderBrandFilmAudioPreview(context.Context, contract.RequestContext, contract.ProjectID, string, creative.BrandFilmRevisionRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GenerateBrandFilmVoiceClip(context.Context, contract.RequestContext, contract.ProjectID, string, creative.GenerateBrandVoiceClipRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ProbeBrandFilmSpeech(context.Context, contract.ActorContext, contract.ProjectID) (provider.SpeechCapability, error) {
+	return provider.SpeechCapability{Provider: "fixture", Available: false, VoiceAliases: []string{}}, nil
+}
+func (s *creativeManagerStub) RunBrandFilmQuality(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RunBrandFilmQualityRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmBrandFilmQuality(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmBrandFilmQualityRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) FinalizeBrandFilmVersion(context.Context, contract.RequestContext, contract.ProjectID, string, creative.BrandFilmVersionRequest, contract.IdempotencyKey) (creative.BrandFilmVersionResult, error) {
+	return creative.BrandFilmVersionResult{Workspace: s.detail}, nil
+}
+func (s *creativeManagerStub) ApproveBrandFilmVersion(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmVersionRequest) (creative.BrandFilmVersionResult, error) {
+	return creative.BrandFilmVersionResult{Workspace: s.detail}, nil
+}
+func (s *creativeManagerStub) DeliverBrandFilmVersion(context.Context, contract.ActorContext, contract.ProjectID, string, creative.BrandFilmVersionRequest) (creative.BrandFilmDeliveryResult, error) {
+	return creative.BrandFilmDeliveryResult{Workspace: s.detail}, nil
 }
 func (s *creativeManagerStub) CreateIntake(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, _ contract.IdempotencyKey, request creative.CreateIntakeRequest) (creative.CreativeIntake, error) {
 	s.createdIntakeRequest = request
@@ -2322,6 +2516,9 @@ func (s *creativeManagerStub) ShortDramaProviderInput(context.Context, contract.
 }
 func (s *creativeManagerStub) GetLatestGamePrerollWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.TaskDetail, error) {
 	s.latestGamePrerollProjectID = projectID
+	return s.detail, nil
+}
+func (s *creativeManagerStub) PrepareGamePrerollEvidence(_ context.Context, _ contract.RequestContext, _ contract.ProjectID, _ string, _ creative.PrepareGamePrerollEvidenceRequest) (creative.TaskDetail, error) {
 	return s.detail, nil
 }
 func (s *creativeManagerStub) SelectGamePrerollCandidate(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.SelectGamePrerollCandidateRequest) (creative.TaskDetail, error) {

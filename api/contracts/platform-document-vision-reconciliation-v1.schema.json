@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "platform-document-vision-reconciliation-v1.schema.json",
+  "title": "Platform document vision reconciliation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "id", "organization_id", "project_id", "document_id",
+    "attempt_id", "task_index", "intent_id", "decision", "evidence_ref", "status",
+    "proposed_by", "proposed_at", "created_at", "updated_at"
+  ],
+  "properties": {
+    "contract_version": {"const": "platform-document-vision-reconciliation/v1"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "organization_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "project_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "document_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "attempt_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "task_index": {"type": "integer", "minimum": 0},
+    "intent_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "decision": {"enum": ["accepted", "not_accepted"]},
+    "external_task_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[!-~]+$"},
+    "evidence_ref": {"type": "string", "minLength": 3, "maxLength": 512, "pattern": "^[^\\r\\n]+:[^\\r\\n]+$"},
+    "status": {"enum": ["proposed", "rejected", "applied"]},
+    "proposed_by": {"type": "string", "minLength": 1, "maxLength": 96},
+    "proposed_at": {"type": "string", "format": "date-time"},
+    "confirmed_by": {"type": "string", "minLength": 1, "maxLength": 96},
+    "confirmed_at": {"type": "string", "format": "date-time"},
+    "applied_at": {"type": "string", "format": "date-time"},
+    "scheduled_at": {"type": "string", "format": "date-time"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"decision": {"const": "accepted"}}, "required": ["decision"]},
+      "then": {"required": ["external_task_id"]},
+      "else": {"not": {"required": ["external_task_id"]}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "proposed"}}, "required": ["status"]},
+      "then": {"not": {"anyOf": [{"required": ["confirmed_by"]}, {"required": ["confirmed_at"]}, {"required": ["applied_at"]}]}}
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["rejected", "applied"]}}, "required": ["status"]},
+      "then": {"required": ["confirmed_by", "confirmed_at"]}
+    },
+    {
+      "if": {"properties": {"status": {"const": "applied"}}, "required": ["status"]},
+      "then": {"required": ["applied_at"]}
+    }
+  ]
+}

@@ -129,8 +129,8 @@ func chunksForParsedDocument(document Document, parsed ParsedDocument) []Chunk {
 		sum := sha256.Sum256([]byte(text))
 		textHash := hex.EncodeToString(sum[:])
 		ordinal := len(chunks)
-		idInput := fmt.Sprintf("%s|%s|%s|%d|%s",
-			document.ContentSHA256, parsed.ParserCode, parsed.ParserVersion, ordinal, textHash)
+		idInput := fmt.Sprintf("%s|%s|%s|%s|%d|%s",
+			document.ID, document.ContentSHA256, parsed.ParserCode, parsed.ParserVersion, ordinal, textHash)
 		idSum := sha256.Sum256([]byte(idInput))
 		chunks = append(chunks, Chunk{
 			ID:         "knowledgechunk_" + hex.EncodeToString(idSum[:24]),

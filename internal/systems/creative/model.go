@@ -24,6 +24,7 @@ const (
 	IntakeSourceTaskStrategy     IntakeSource = "task_strategy"
 	IntakeSourceUploadedDocument IntakeSource = "uploaded_document"
 	IntakeSourceConversation     IntakeSource = "conversation"
+	IntakeSourceRequirement      IntakeSource = "requirement_snapshot"
 )
 
 type IntakeStatus string
@@ -67,8 +68,11 @@ const (
 )
 
 type CreateIntakeRequest struct {
-	ContractVersion string       `json:"contract_version,omitempty"`
-	Source          IntakeSource `json:"source"`
+	ContractVersion          string                        `json:"contract_version,omitempty"`
+	Source                   IntakeSource                  `json:"source"`
+	RequirementSnapshotRef   *RequirementSnapshotReference `json:"requirement_snapshot_ref,omitempty"`
+	BusinessCapabilityRef    *BusinessCapabilityReference  `json:"business_capability_ref,omitempty"`
+	RequirementSnapshotInput *RequirementSnapshotInput     `json:"requirement_snapshot_input,omitempty"`
 	// ParentIntakeID links a production-specific manual intake back to a
 	// task-strategy handoff without allowing the manual flow to rewrite it.
 	ParentIntakeID string `json:"parent_intake_id,omitempty"`
@@ -87,25 +91,27 @@ type CreateIntakeRequest struct {
 	StrategyHandoffInput json.RawMessage               `json:"strategy_handoff_input,omitempty"`
 	// TaskStrategy is the immutable Strategy-side version selected by the
 	// user. TaskStrategyInput is populated only by the server-side adapter.
-	TaskStrategy            *TaskStrategyReference        `json:"task_strategy,omitempty"`
-	TaskStrategyInput       *TaskStrategyInput            `json:"task_strategy_input,omitempty"`
-	CreativeRoutes          []CreativeRouteSnapshot       `json:"creative_routes,omitempty"`
-	Format                  CreativeFormat                `json:"format,omitempty"`
-	PerformanceMode         string                        `json:"performance_mode,omitempty"`
-	ManualViralRemake       *ManualViralRemakeInput       `json:"manual_viral_remake,omitempty"`
-	ManualShortDramaPreroll *ManualShortDramaPrerollInput `json:"manual_short_drama_preroll,omitempty"`
-	ManualGamePreroll       *ManualGamePrerollInput       `json:"manual_game_preroll,omitempty"`
-	ManualCommercePreroll   *ManualCommercePrerollInput   `json:"manual_commerce_preroll,omitempty"`
-	Channel                 CreativeChannel               `json:"channel"`
-	Objective               string                        `json:"objective"`
-	Audience                string                        `json:"audience"`
-	CoreMessage             string                        `json:"core_message"`
-	CallToAction            string                        `json:"call_to_action"`
-	Concept                 string                        `json:"concept"`
-	Tone                    []string                      `json:"tone"`
-	VisualKeywords          []string                      `json:"visual_keywords"`
-	Mandatory               []string                      `json:"mandatory_elements"`
-	Prohibited              []string                      `json:"prohibited_claims"`
+	TaskStrategy              *TaskStrategyReference          `json:"task_strategy,omitempty"`
+	TaskStrategyInput         *TaskStrategyInput              `json:"task_strategy_input,omitempty"`
+	CreativeRoutes            []CreativeRouteSnapshot         `json:"creative_routes,omitempty"`
+	Format                    CreativeFormat                  `json:"format,omitempty"`
+	PerformanceMode           string                          `json:"performance_mode,omitempty"`
+	ManualViralRemake         *ManualViralRemakeInput         `json:"manual_viral_remake,omitempty"`
+	ManualShortDramaPreroll   *ManualShortDramaPrerollInput   `json:"manual_short_drama_preroll,omitempty"`
+	ManualShortDramaPrerollV2 *ManualShortDramaPrerollV2Input `json:"manual_short_drama_preroll_v2,omitempty"`
+	ManualGamePreroll         *ManualGamePrerollInput         `json:"manual_game_preroll,omitempty"`
+	ManualCommercePreroll     *ManualCommercePrerollInput     `json:"manual_commerce_preroll,omitempty"`
+	ManualBrandFilm           *ManualBrandFilmInput           `json:"manual_brand_film,omitempty"`
+	Channel                   CreativeChannel                 `json:"channel"`
+	Objective                 string                          `json:"objective"`
+	Audience                  string                          `json:"audience"`
+	CoreMessage               string                          `json:"core_message"`
+	CallToAction              string                          `json:"call_to_action"`
+	Concept                   string                          `json:"concept"`
+	Tone                      []string                        `json:"tone"`
+	VisualKeywords            []string                        `json:"visual_keywords"`
+	Mandatory                 []string                        `json:"mandatory_elements"`
+	Prohibited                []string                        `json:"prohibited_claims"`
 }
 
 type CreativeRouteSnapshot struct {
@@ -126,7 +132,7 @@ type CreativeRouteSnapshot struct {
 func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType != CreativeRouteImageText && r.RouteType != CreativeRouteBrandVideo && r.RouteType != "pre_roll" && r.RouteType != PerformanceModeViralRemake &&
 		r.RouteType != PerformanceModeShortDramaPreroll && r.RouteType != PerformanceModeGamePreroll &&
-		r.RouteType != PerformanceModeCommercePreroll {
+		r.RouteType != PerformanceModeCommercePreroll && r.RouteType != PerformanceModeBrandFilm {
 		return fmt.Errorf("creative route type %q is unsupported", r.RouteType)
 	}
 	if r.RouteType == CreativeRouteImageText {
@@ -161,14 +167,18 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == PerformanceModeViralRemake && r.RouteID != ManualViralRemakeRouteID {
 		return fmt.Errorf("viral remake route_id must be %q", ManualViralRemakeRouteID)
 	}
-	if r.RouteType == PerformanceModeShortDramaPreroll && r.RouteID != ManualShortDramaPrerollRouteID {
-		return fmt.Errorf("short drama preroll route_id must be %q", ManualShortDramaPrerollRouteID)
+	if r.RouteType == PerformanceModeShortDramaPreroll &&
+		r.RouteID != ManualShortDramaPrerollRouteID && r.RouteID != ManualShortDramaPrerollV2RouteID {
+		return fmt.Errorf("short drama preroll route_id is unsupported")
 	}
 	if r.RouteType == PerformanceModeGamePreroll && r.RouteID != ManualGamePrerollRouteID {
 		return fmt.Errorf("game preroll route_id must be %q", ManualGamePrerollRouteID)
 	}
 	if r.RouteType == PerformanceModeCommercePreroll && r.RouteID != ManualCommercePrerollRouteID {
 		return fmt.Errorf("commerce preroll route_id must be %q", ManualCommercePrerollRouteID)
+	}
+	if r.RouteType == PerformanceModeBrandFilm && r.RouteID != ManualBrandFilmRouteID {
+		return fmt.Errorf("brand film route_id must be %q", ManualBrandFilmRouteID)
 	}
 	if r.RouteType == "pre_roll" && r.TargetDurationSeconds != 5 {
 		return fmt.Errorf("creative pre-roll route duration must be 5 seconds")
@@ -182,7 +192,14 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == PerformanceModeCommercePreroll && r.TargetDurationSeconds != 6 {
 		return fmt.Errorf("commerce preroll route duration must be 6 seconds")
 	}
-	if r.VideoPurpose != "performance" || len(r.Channels) == 0 ||
+	if r.RouteType == PerformanceModeBrandFilm && r.TargetDurationSeconds != 15 {
+		return fmt.Errorf("brand film route duration must be 15 seconds")
+	}
+	expectedPurpose := "performance"
+	if r.RouteType == PerformanceModeBrandFilm {
+		expectedPurpose = "brand"
+	}
+	if r.VideoPurpose != expectedPurpose || len(r.Channels) == 0 ||
 		r.TargetDurationSeconds < 4 || r.TargetDurationSeconds > 60 || r.AspectRatio != "9:16" || strings.TrimSpace(r.Reason) == "" ||
 		!r.RequiresHumanConfirmation {
 		return fmt.Errorf("creative video route is incomplete")
@@ -227,6 +244,9 @@ func (r CreateIntakeRequest) Validate() error {
 	if r.Source == "" {
 		return fmt.Errorf("source is required")
 	}
+	if r.Source != IntakeSourceRequirement && (r.RequirementSnapshotRef != nil || r.BusinessCapabilityRef != nil || r.RequirementSnapshotInput != nil) {
+		return fmt.Errorf("requirement snapshot fields are only valid for requirement_snapshot intake")
+	}
 	switch r.Source {
 	case IntakeSourceManual:
 		if r.StrategyPackage != nil || r.TaskStrategy != nil || r.TaskStrategyInput != nil ||
@@ -239,11 +259,17 @@ func (r CreateIntakeRequest) Validate() error {
 		if r.ManualShortDramaPreroll != nil {
 			return r.validateManualShortDramaPreroll()
 		}
+		if r.ManualShortDramaPrerollV2 != nil {
+			return r.validateManualShortDramaPrerollV2()
+		}
 		if r.ManualGamePreroll != nil {
 			return r.validateManualGamePreroll()
 		}
 		if r.ManualCommercePreroll != nil {
 			return r.validateManualCommercePreroll()
+		}
+		if r.ManualBrandFilm != nil {
+			return r.validateManualBrandFilm()
 		}
 		if len(r.CreativeRoutes) != 0 || r.SelectedRouteID != "" || r.Format == FormatVideo || r.PerformanceMode != "" {
 			return fmt.Errorf("manual image intake must not include video routing")
@@ -291,6 +317,8 @@ func (r CreateIntakeRequest) Validate() error {
 			return fmt.Errorf("task strategy mapped fields are resolved by Creative and must not be submitted by a caller")
 		}
 		return r.TaskStrategy.Validate()
+	case IntakeSourceRequirement:
+		return r.validateRequirementSnapshotV4()
 	default:
 		return fmt.Errorf("unsupported Creative intake source %q", r.Source)
 	}
@@ -312,6 +340,29 @@ func (r CreateIntakeRequest) validateManualShortDramaPreroll() error {
 	}
 	if err := r.ManualShortDramaPreroll.Validate(); err != nil {
 		return err
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateManualShortDramaPrerollV2() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeShortDramaPreroll {
+		return fmt.Errorf("manual short drama preroll V2 intake requires format=video and performance_mode=short_drama_preroll")
+	}
+	if r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou {
+		return fmt.Errorf("manual short drama preroll V2 supports douyin or kuaishou")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualShortDramaPrerollV2RouteID {
+		return fmt.Errorf("manual short drama preroll V2 requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualShortDramaPrerollV2.Validate(); err != nil {
+		return err
+	}
+	if len(r.CreativeRoutes[0].SourceAssetRefs) != 1 ||
+		r.CreativeRoutes[0].SourceAssetRefs[0] != r.ManualShortDramaPrerollV2.SourceVideo {
+		return fmt.Errorf("short drama preroll V2 route must freeze the licensed source video")
 	}
 	return r.validateVideoContent()
 }
@@ -353,6 +404,25 @@ func (r CreateIntakeRequest) validateManualCommercePreroll() error {
 		return err
 	}
 	if err := r.ManualCommercePreroll.Validate(); err != nil {
+		return err
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateManualBrandFilm() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeBrandFilm {
+		return fmt.Errorf("manual brand film intake requires format=video and performance_mode=brand_video")
+	}
+	if r.Channel != ChannelDouyin {
+		return fmt.Errorf("manual brand film fixture requires channel=douyin")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualBrandFilmRouteID {
+		return fmt.Errorf("manual brand film requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualBrandFilm.Validate(); err != nil {
 		return err
 	}
 	return r.validateVideoContent()
@@ -458,6 +528,7 @@ type CreativeTask struct {
 	Channel         CreativeChannel         `json:"channel"`
 	VideoPurpose    string                  `json:"video_purpose,omitempty"`
 	PerformanceMode string                  `json:"performance_mode,omitempty"`
+	LineageKey      string                  `json:"-"`
 	Status          TaskStatus              `json:"status"`
 	Direction       CreativeDirection       `json:"direction"`
 	Version         int64                   `json:"version"`
@@ -481,12 +552,11 @@ type CreateVideoTaskRequest struct {
 
 func (r CreateVideoTaskRequest) Validate() error {
 	if (strings.TrimSpace(r.SelectedRouteID) == "" && r.RouteIndex < 0) ||
-		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
+		(r.Channel != ChannelXiaohongshu && r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if (strings.TrimSpace(r.DirectionID) == "" && (strings.TrimSpace(r.Concept) == "" || strings.TrimSpace(r.Prompt) == "")) ||
-		len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
-		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
+	if len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
+		return fmt.Errorf("video direction, concept, prompt, or call_to_action exceeds its maximum length")
 	}
 	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
 		return err
@@ -495,24 +565,26 @@ func (r CreateVideoTaskRequest) Validate() error {
 }
 
 type VideoDraft struct {
-	ContractVersion   string                   `json:"contract_version"`
-	TaskID            string                   `json:"task_id"`
-	Revision          int64                    `json:"revision"`
-	Concept           string                   `json:"concept"`
-	Prompt            string                   `json:"prompt"`
-	DurationSeconds   int                      `json:"duration_seconds"`
-	AspectRatio       string                   `json:"aspect_ratio"`
-	Resolution        string                   `json:"resolution"`
-	VideoPurpose      string                   `json:"video_purpose,omitempty"`
-	SourceVideo       contract.AssetVersionRef `json:"source_video,omitempty"`
-	Mandatory         []string                 `json:"mandatory_elements"`
-	Prohibited        []string                 `json:"prohibited_claims"`
-	CallToAction      string                   `json:"cta"`
-	ViralRemake       *ViralRemakeDraft        `json:"viral_remake,omitempty"`
-	ShortDramaPreroll *ShortDramaPrerollDraft  `json:"short_drama_preroll,omitempty"`
-	GamePreroll       *GamePrerollDraft        `json:"game_preroll,omitempty"`
-	CommercePreroll   *CommercePrerollDraft    `json:"commerce_preroll,omitempty"`
-	CreatedAt         time.Time                `json:"created_at"`
+	ContractVersion     string                        `json:"contract_version"`
+	TaskID              string                        `json:"task_id"`
+	Revision            int64                         `json:"revision"`
+	Concept             string                        `json:"concept"`
+	Prompt              string                        `json:"prompt"`
+	DurationSeconds     int                           `json:"duration_seconds"`
+	AspectRatio         string                        `json:"aspect_ratio"`
+	Resolution          string                        `json:"resolution"`
+	VideoPurpose        string                        `json:"video_purpose,omitempty"`
+	SourceVideo         contract.AssetVersionRef      `json:"source_video,omitempty"`
+	Mandatory           []string                      `json:"mandatory_elements"`
+	Prohibited          []string                      `json:"prohibited_claims"`
+	CallToAction        string                        `json:"cta"`
+	ViralRemake         *ViralRemakeDraft             `json:"viral_remake,omitempty"`
+	ShortDramaPreroll   *ShortDramaPrerollDraft       `json:"short_drama_preroll,omitempty"`
+	ShortDramaPrerollV2 *ShortDramaPrerollV2Workspace `json:"short_drama_preroll_v2,omitempty"`
+	GamePreroll         *GamePrerollDraft             `json:"game_preroll,omitempty"`
+	CommercePreroll     *CommercePrerollDraft         `json:"commerce_preroll,omitempty"`
+	BrandFilm           *BrandFilmDraft               `json:"brand_film,omitempty"`
+	CreatedAt           time.Time                     `json:"created_at"`
 }
 
 func (d VideoDraft) Validate() error {
@@ -521,7 +593,7 @@ func (d VideoDraft) Validate() error {
 		strings.TrimSpace(d.AspectRatio) == "" || strings.TrimSpace(d.Resolution) == "" || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
-	if d.VideoPurpose != "brand" && d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
+	if d.VideoPurpose != "brand" && d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.BrandFilm == nil && d.SourceVideo.Validate() != nil {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
 	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {
@@ -530,11 +602,17 @@ func (d VideoDraft) Validate() error {
 	if d.ShortDramaPreroll != nil && d.ShortDramaPreroll.Validate() != nil {
 		return fmt.Errorf("creative short drama preroll draft is incomplete")
 	}
+	if d.ShortDramaPrerollV2 != nil && d.ShortDramaPrerollV2.Validate() != nil {
+		return fmt.Errorf("creative short drama preroll V2 draft is incomplete")
+	}
 	if d.GamePreroll != nil && d.GamePreroll.Validate() != nil {
 		return fmt.Errorf("creative game preroll draft is incomplete")
 	}
 	if d.CommercePreroll != nil && d.CommercePreroll.Validate() != nil {
 		return fmt.Errorf("creative commerce preroll draft is incomplete")
+	}
+	if d.BrandFilm != nil && d.BrandFilm.Validate() != nil {
+		return fmt.Errorf("creative brand film draft is incomplete")
 	}
 	return nil
 }
@@ -777,12 +855,83 @@ type VideoVersionSnapshot struct {
 	FinalVideo       contract.AssetVersionRef  `json:"final_video"`
 	ProviderJobID    string                    `json:"provider_job_id"`
 	RenderJobID      string                    `json:"render_job_id"`
+	BrandFilm        *BrandFilmVersionSnapshot `json:"brand_film,omitempty"`
+}
+
+type BrandFilmVersionSnapshot struct {
+	ContractVersion string                    `json:"contract_version"`
+	PlanRevision    int64                     `json:"plan_revision"`
+	QualityRunID    string                    `json:"quality_run_id"`
+	Lineage         *BrandFilmLineageSnapshot `json:"lineage,omitempty"`
+	ReferenceAsset  contract.AssetVersionRef  `json:"reference_asset"`
+	FinalVideo      contract.AssetVersionRef  `json:"final_video"`
+	UnitCount       int                       `json:"unit_count"`
+	AttemptCount    int                       `json:"attempt_count"`
+	ConfirmedBy     string                    `json:"confirmed_by"`
+	ConfirmedAt     time.Time                 `json:"confirmed_at"`
+}
+
+// BrandFilmLineageSnapshot keeps the immutable cross-system proof required to
+// trace a delivered brand film back to the exact Strategy handoff, confirmed
+// Brand Brief, and CreativeDirection that authored it. It deliberately omits
+// the duplicated Brief body stored in the working draft.
+type BrandFilmLineageSnapshot struct {
+	SourceType             string `json:"source_type"`
+	IntakeID               string `json:"intake_id"`
+	InputIdentityHash      string `json:"input_identity_hash"`
+	StrategyPackageID      string `json:"strategy_package_id"`
+	StrategyPackageVersion int64  `json:"strategy_package_version"`
+	StrategyPackageHash    string `json:"strategy_package_hash"`
+	HandoffContractVersion string `json:"handoff_contract_version"`
+	HandoffContentHash     string `json:"handoff_content_hash"`
+	BrandBriefRevision     int64  `json:"brand_brief_revision"`
+	BrandBriefContentHash  string `json:"brand_brief_content_hash"`
+	DirectionBatchID       string `json:"direction_batch_id"`
+	DirectionID            string `json:"direction_id"`
+	DirectionVersion       int64  `json:"direction_version"`
+	DirectionContentHash   string `json:"direction_content_hash"`
+	RouteID                string `json:"route_id"`
+}
+
+func (v BrandFilmLineageSnapshot) Validate() error {
+	if v.SourceType != strategyBrandFilmSourceType || strings.TrimSpace(v.IntakeID) == "" ||
+		!validSHA256Ref(v.InputIdentityHash) || strings.TrimSpace(v.StrategyPackageID) == "" ||
+		v.StrategyPackageVersion < 1 || !validSHA256Ref(v.StrategyPackageHash) ||
+		strings.TrimSpace(v.HandoffContractVersion) == "" || !validSHA256Ref(v.HandoffContentHash) ||
+		v.BrandBriefRevision < 1 || !validSHA256Ref(v.BrandBriefContentHash) ||
+		strings.TrimSpace(v.DirectionBatchID) == "" || strings.TrimSpace(v.DirectionID) == "" ||
+		v.DirectionVersion < 1 || !validSHA256Ref(v.DirectionContentHash) || strings.TrimSpace(v.RouteID) == "" {
+		return fmt.Errorf("creative brand film lineage snapshot is incomplete")
+	}
+	return nil
+}
+
+func (v BrandFilmVersionSnapshot) Validate() error {
+	if v.ContractVersion != "creative-brand-film-version/v1" || v.PlanRevision < 1 ||
+		strings.TrimSpace(v.QualityRunID) == "" || v.ReferenceAsset.Validate() != nil || v.FinalVideo.Validate() != nil ||
+		v.UnitCount < 1 || v.AttemptCount < v.UnitCount || strings.TrimSpace(v.ConfirmedBy) == "" || v.ConfirmedAt.IsZero() {
+		return fmt.Errorf("creative brand film version snapshot is incomplete")
+	}
+	if v.Lineage != nil && v.Lineage.Validate() != nil {
+		return fmt.Errorf("creative brand film version lineage is incomplete")
+	}
+	return nil
 }
 
 func (v VideoVersionSnapshot) Validate() error {
 	if v.ContractVersion != "creative-video-version/v1" || v.Format != FormatVideo ||
 		(v.Channel != ChannelDouyin && v.Channel != ChannelKuaishou) ||
-		v.VideoPurpose != "performance" || v.PerformanceMode != "pre_roll" || v.DraftRevision < 1 ||
+		v.DraftRevision < 1 {
+		return fmt.Errorf("creative video version snapshot is incomplete")
+	}
+	if v.PerformanceMode == PerformanceModeBrandFilm {
+		if v.VideoPurpose != "brand" || v.BrandFilm == nil || v.BrandFilm.Validate() != nil || v.FinalVideo != v.BrandFilm.FinalVideo ||
+			v.StrategyPackage != nil || strings.TrimSpace(v.ProviderJobID) != "" || strings.TrimSpace(v.RenderJobID) != "" {
+			return fmt.Errorf("creative brand film version snapshot is incomplete")
+		}
+		return nil
+	}
+	if v.VideoPurpose != "performance" || v.PerformanceMode != "pre_roll" || v.BrandFilm != nil ||
 		v.SourceVideo.Validate() != nil || v.GeneratedPreRoll.Validate() != nil || v.FinalVideo.Validate() != nil ||
 		strings.TrimSpace(v.ProviderJobID) == "" || strings.TrimSpace(v.RenderJobID) == "" {
 		return fmt.Errorf("creative video version snapshot is incomplete")
@@ -898,6 +1047,7 @@ type GamePrerollGenerationAttempt struct {
 type TaskDetail struct {
 	Task                          CreativeTask                   `json:"task"`
 	Intake                        CreativeIntake                 `json:"intake"`
+	AINativeWorkspaceID           string                         `json:"ai_native_workspace_id,omitempty"`
 	Draft                         ImageTextDraft                 `json:"draft"`
 	VideoDraft                    *VideoDraft                    `json:"video_draft,omitempty"`
 	ProductionJobs                []ProductionJob                `json:"production_jobs"`

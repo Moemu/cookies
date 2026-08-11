@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,9 +37,16 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/tasks", server.listTasks)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/workspaces", server.listWorkspaces)
 	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}", server.getWorkspace)
+	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}/context-manifest", server.getWorkspaceContextManifest)
+	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}/assistant-proposals", server.listAssistantProposals)
+	mux.HandleFunc("POST /api/strategy/v1/assistant-proposals/{proposal_action}", server.assistantProposalAction)
+	mux.HandleFunc("GET /api/strategy/v1/workspaces/{workspace_id}/research-adoption-proposals", server.listResearchAdoptionProposals)
+	mux.HandleFunc("POST /api/strategy/v1/research-adoption-proposals/{proposal_action}", server.researchAdoptionProposalAction)
 	mux.HandleFunc("POST /api/strategy/v1/conversations", server.createConversation)
+	mux.HandleFunc("GET /api/strategy/v1/conversation-capabilities", server.getConversationCapabilities)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}", server.getConversation)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/memory", server.getConversationMemory)
+	mux.HandleFunc("POST /api/strategy/v1/conversations/{conversation_id}/memory:compact", server.compactConversationMemory)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/messages", server.listMessages)
 	mux.HandleFunc("POST /api/strategy/v1/conversations/{conversation_id}/messages", server.sendMessage)
 	mux.HandleFunc("GET /api/strategy/v1/conversations/{conversation_id}/events", server.streamEvents)
@@ -49,6 +57,7 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_action}", server.taskAction)
 	mux.HandleFunc("GET /api/strategy/v1/tasks/{task_id}/brief-draft", server.getBriefDraft)
 	mux.HandleFunc("PATCH /api/strategy/v1/tasks/{task_id}/brief-draft", server.patchBriefDraft)
+	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief-draft:revise", server.createBriefRevisionDraft)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/brief:confirm", server.confirmBrief)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/brief-versions", server.listProjectBriefVersions)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/briefs", server.listProjectBriefs)
@@ -57,6 +66,11 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/briefs/{brief_id}/versions/{version}", server.getBriefVersion)
 	mux.HandleFunc("POST /api/strategy/v1/tasks/{task_id}/strategies", server.createStrategy)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/generation-readiness", server.getGenerationReadiness)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/model-capabilities", server.getModelCapabilities)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/p0-metrics", server.getP0Metrics)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/workspace-ux-metrics", server.getWorkspaceUXMetrics)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/activities", server.listActivities)
+	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/activities/events", server.streamActivityEvents)
 	mux.HandleFunc("POST /api/strategy/v1/projects/{project_id}/generation-probe", server.probeGeneration)
 	mux.HandleFunc("GET /api/strategy/v1/skills", server.listSkills)
 	mux.HandleFunc("GET /api/strategy/v1/projects/{project_id}/creative-businesses", server.listCreativeBusinesses)
@@ -76,6 +90,8 @@ func New(service strategy.Service, agents agent.MySQLStore, jobs jobruntime.MySQ
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions", server.listStrategyRevisions)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/revisions/{revision}", server.getStrategyRevision)
 	mux.HandleFunc("PATCH /api/strategy/v1/strategy-drafts/{strategy_id}", server.patchStrategy)
+	mux.HandleFunc("POST /api/strategy/v1/strategy-drafts/{strategy_id}/perspective-analysis", server.startStrategyPerspective)
+	mux.HandleFunc("GET /api/strategy/v1/strategy-drafts/{strategy_id}/perspective-analysis", server.getStrategyPerspective)
 	mux.HandleFunc("POST /api/strategy/v1/strategy-drafts/{strategy_action}", server.strategyAction)
 	mux.HandleFunc("GET /api/strategy/v1/strategy-reviews/{review_id}", server.getReview)
 	mux.HandleFunc("GET /api/strategy/v1/reviews", server.listReviews)
@@ -176,6 +192,165 @@ func (s *Server) getWorkspace(writer http.ResponseWriter, request *http.Request)
 	writeResult(writer, value, err)
 }
 
+func (s *Server) getWorkspaceContextManifest(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.BuildProjectContextManifest(
+		request.Context(), mustActor(request), request.PathValue("workspace_id"),
+		strings.TrimSpace(request.URL.Query().Get("stage")),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) listAssistantProposals(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListArtifactProposals(
+		request.Context(), mustActor(request), request.PathValue("workspace_id"),
+		request.URL.Query().Get("status"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) assistantProposalAction(writer http.ResponseWriter, request *http.Request) {
+	pathAction := request.PathValue("proposal_action")
+	action := ""
+	proposalID := ""
+	switch {
+	case strings.HasSuffix(pathAction, ":apply"):
+		action = "apply"
+		proposalID = strings.TrimSuffix(pathAction, ":apply")
+	case strings.HasSuffix(pathAction, ":ignore"):
+		action = "ignore"
+		proposalID = strings.TrimSuffix(pathAction, ":ignore")
+	}
+	if proposalID == "" {
+		writeError(writer, strategy.ErrNotFound)
+		return
+	}
+	if action == "apply" {
+		var body strategy.ApplyArtifactProposalRequest
+		if !decode(writer, request, &body) {
+			return
+		}
+		value, duplicate, err := s.Service.ApplyArtifactProposal(
+			request.Context(), mustActor(request), idempotencyKey(request), proposalID, body,
+		)
+		if err != nil {
+			writeError(writer, err)
+			return
+		}
+		if duplicate {
+			writer.Header().Set("Idempotent-Replay", "true")
+		}
+		writeJSON(writer, http.StatusOK, value)
+		return
+	}
+	var body struct {
+		ExpectedVersion int64 `json:"expected_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.IgnoreArtifactProposal(
+		request.Context(), mustActor(request), idempotencyKey(request), proposalID, body.ExpectedVersion,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) listResearchAdoptionProposals(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.Service.ListResearchAdoptionProposals(
+		request.Context(), mustActor(request), request.PathValue("workspace_id"),
+		request.URL.Query().Get("run_id"),
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) researchAdoptionProposalAction(writer http.ResponseWriter, request *http.Request) {
+	pathAction := request.PathValue("proposal_action")
+	proposalID := ""
+	action := ""
+	for _, candidate := range []string{"apply", "remap", "ignore"} {
+		suffix := ":" + candidate
+		if strings.HasSuffix(pathAction, suffix) {
+			proposalID = strings.TrimSuffix(pathAction, suffix)
+			action = candidate
+			break
+		}
+	}
+	if proposalID == "" {
+		writeError(writer, strategy.ErrNotFound)
+		return
+	}
+	switch action {
+	case "apply":
+		var body strategy.ApplyArtifactProposalRequest
+		if !decode(writer, request, &body) {
+			return
+		}
+		value, duplicate, err := s.Service.ApplyResearchAdoptionProposal(
+			request.Context(), mustActor(request), idempotencyKey(request), proposalID, body,
+		)
+		if err != nil {
+			writeError(writer, err)
+			return
+		}
+		if duplicate {
+			writer.Header().Set("Idempotent-Replay", "true")
+		}
+		writeJSON(writer, http.StatusOK, value)
+	case "remap":
+		var body strategy.RemapResearchProposalRequest
+		if !decode(writer, request, &body) {
+			return
+		}
+		value, duplicate, err := s.Service.RemapResearchAdoptionProposal(
+			request.Context(), mustActor(request), idempotencyKey(request), proposalID, body,
+		)
+		if err != nil {
+			writeError(writer, err)
+			return
+		}
+		if duplicate {
+			writer.Header().Set("Idempotent-Replay", "true")
+		}
+		writeJSON(writer, http.StatusCreated, value)
+	case "ignore":
+		var body struct {
+			ExpectedVersion int64 `json:"expected_version"`
+		}
+		if !decode(writer, request, &body) {
+			return
+		}
+		value, duplicate, err := s.Service.IgnoreArtifactProposal(
+			request.Context(), mustActor(request), idempotencyKey(request), proposalID, body.ExpectedVersion,
+		)
+		if err != nil {
+			writeError(writer, err)
+			return
+		}
+		if duplicate {
+			writer.Header().Set("Idempotent-Replay", "true")
+		}
+		writeJSON(writer, http.StatusOK, value)
+	}
+}
+
 func (s *Server) getGenerationReadiness(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetGenerationReadiness(
 		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
@@ -221,7 +396,33 @@ func (s *Server) getDeepReview(writer http.ResponseWriter, request *http.Request
 	value, err := s.Service.GetLatestDeepReview(
 		request.Context(), mustActor(request), request.PathValue("review_id"),
 	)
-	writeResult(writer, value, err)
+	writeOptionalResult(writer, request, value, err)
+}
+
+func (s *Server) startStrategyPerspective(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.StartStrategyPerspectiveRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.StartStrategyPerspective(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("strategy_id"), body,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func (s *Server) getStrategyPerspective(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetLatestStrategyPerspective(
+		request.Context(), mustActor(request), request.PathValue("strategy_id"),
+	)
+	writeOptionalResult(writer, request, value, err)
 }
 
 func (s *Server) createConversation(writer http.ResponseWriter, request *http.Request) {
@@ -249,8 +450,59 @@ func (s *Server) getConversation(writer http.ResponseWriter, request *http.Reque
 	writeResult(writer, value, err)
 }
 
+func (s *Server) getConversationCapabilities(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetConversationCapabilities(request.Context(), mustActor(request))
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getP0Metrics(writer http.ResponseWriter, request *http.Request) {
+	days := 0
+	if raw := strings.TrimSpace(request.URL.Query().Get("days")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		days = value
+	}
+	value, err := s.Service.GetP0Metrics(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")), days,
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getWorkspaceUXMetrics(writer http.ResponseWriter, request *http.Request) {
+	days := 0
+	if raw := strings.TrimSpace(request.URL.Query().Get("days")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		days = value
+	}
+	value, err := s.Service.GetWorkspaceUXMetrics(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")), days,
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) getModelCapabilities(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.GetModelCapabilities(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+	)
+	writeResult(writer, value, err)
+}
+
 func (s *Server) getConversationMemory(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.Service.GetConversationMemory(
+		request.Context(), mustActor(request), request.PathValue("conversation_id"),
+	)
+	writeResult(writer, value, err)
+}
+
+func (s *Server) compactConversationMemory(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.Service.CompactConversationMemory(
 		request.Context(), mustActor(request), request.PathValue("conversation_id"),
 	)
 	writeResult(writer, value, err)
@@ -268,12 +520,57 @@ func (s *Server) listMessages(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) sendMessage(writer http.ResponseWriter, request *http.Request) {
 	var body struct {
-		Content string `json:"content"`
+		ContractVersion string                           `json:"contract_version,omitempty"`
+		Content         json.RawMessage                  `json:"content"`
+		RequestedPolicy *strategy.MessageRequestedPolicy `json:"requested_policy,omitempty"`
 	}
 	if !decode(writer, request, &body) {
 		return
 	}
-	value, duplicate, err := s.Service.SendMessage(request.Context(), mustActor(request), idempotencyKey(request), request.PathValue("conversation_id"), body.Content)
+	excludedSourceIDs, err := decodeExcludedSourceIDsHeader(request)
+	if err != nil {
+		writeError(writer, strategy.ErrInvalidRequest)
+		return
+	}
+	var value strategy.SendMessageResult
+	var duplicate bool
+	err = nil
+	if body.ContractVersion == "" {
+		if body.RequestedPolicy != nil || len(excludedSourceIDs) != 0 {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		var content string
+		if err := decodeRawStrict(body.Content, &content); err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		value, duplicate, err = s.Service.SendMessage(request.Context(), mustActor(request), idempotencyKey(request), request.PathValue("conversation_id"), content)
+	} else {
+		if body.ContractVersion != strategy.MessageCreateContractV2 {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		var blocks []strategy.MessageContentBlock
+		if err := decodeRawStrict(body.Content, &blocks); err != nil {
+			writeError(writer, strategy.ErrInvalidRequest)
+			return
+		}
+		value, duplicate, err = s.Service.SendMessageV2(
+			request.Context(),
+			mustActor(request),
+			idempotencyKey(request),
+			request.PathValue("conversation_id"),
+			strategy.SendMessageV2Request{
+				ContractVersion:   body.ContractVersion,
+				Content:           blocks,
+				RequestedPolicy:   body.RequestedPolicy,
+				ContextStage:      strings.TrimSpace(request.Header.Get("X-Strategy-Stage")),
+				ContextSurface:    strings.TrimSpace(request.Header.Get("X-Strategy-Surface")),
+				ExcludedSourceIDs: excludedSourceIDs,
+			},
+		)
+	}
 	if err != nil {
 		writeError(writer, err)
 		return
@@ -282,6 +579,33 @@ func (s *Server) sendMessage(writer http.ResponseWriter, request *http.Request) 
 		writer.Header().Set("Idempotent-Replay", "true")
 	}
 	writeJSON(writer, http.StatusAccepted, value)
+}
+
+func decodeExcludedSourceIDsHeader(request *http.Request) ([]string, error) {
+	raw := strings.TrimSpace(request.Header.Get("X-Strategy-Excluded-Source-Ids"))
+	if raw == "" {
+		return nil, nil
+	}
+	if len(raw) > 4096 {
+		return nil, strategy.ErrInvalidRequest
+	}
+	var values []string
+	if err := decodeRawStrict(json.RawMessage(raw), &values); err != nil {
+		return nil, strategy.ErrInvalidRequest
+	}
+	return values, nil
+}
+
+func decodeRawStrict(raw json.RawMessage, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return strategy.ErrInvalidRequest
+	}
+	return nil
 }
 
 func (s *Server) getTask(writer http.ResponseWriter, request *http.Request) {
@@ -362,6 +686,28 @@ func (s *Server) patchBriefDraft(writer http.ResponseWriter, request *http.Reque
 	}
 	writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
 	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) createBriefRevisionDraft(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		BaseBriefVersion int64 `json:"base_brief_version"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.CreateBriefRevisionDraft(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("task_id"), body.BaseBriefVersion,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writer.Header().Set("ETag", fmt.Sprintf(`"v%d"`, value.Version))
+	writeJSON(writer, http.StatusCreated, value)
 }
 
 func (s *Server) confirmBrief(writer http.ResponseWriter, request *http.Request) {
@@ -731,6 +1077,9 @@ func (s *Server) strategyAction(writer http.ResponseWriter, request *http.Reques
 	case strings.HasSuffix(value, ":submit"):
 		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":submit"))
 		s.submitStrategy(writer, request)
+	case strings.HasSuffix(value, ":confirm"):
+		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":confirm"))
+		s.confirmStrategy(writer, request)
 	case strings.HasSuffix(value, ":approve"):
 		request.SetPathValue("strategy_id", strings.TrimSuffix(value, ":approve"))
 		s.approveStrategy(writer, request)
@@ -841,6 +1190,25 @@ func (s *Server) submitStrategy(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	value, duplicate, err := s.Service.SubmitStrategy(request.Context(), mustActor(request), idempotencyKey(request), request.PathValue("strategy_id"), body.ExpectedVersion, body.CandidateRevision)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	if duplicate {
+		writer.Header().Set("Idempotent-Replay", "true")
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) confirmStrategy(writer http.ResponseWriter, request *http.Request) {
+	var body strategy.ConfirmRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, duplicate, err := s.Service.ConfirmStrategy(
+		request.Context(), mustActor(request), idempotencyKey(request),
+		request.PathValue("strategy_id"), body,
+	)
 	if err != nil {
 		writeError(writer, err)
 		return
@@ -1190,6 +1558,125 @@ func (s *Server) streamEvents(writer http.ResponseWriter, request *http.Request)
 	}
 }
 
+func (s *Server) listActivities(writer http.ResponseWriter, request *http.Request) {
+	limit, err := activityLimit(request)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	snapshot, err := s.Service.ListTaskActivities(
+		request.Context(), mustActor(request), contract.ProjectID(request.PathValue("project_id")),
+		request.URL.Query().Get("workspace_id"), limit,
+	)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	etag := `"` + snapshot.SnapshotID + `"`
+	writer.Header().Set("ETag", etag)
+	writer.Header().Set("Cache-Control", "private, no-cache")
+	if matchesIfNoneMatch(request.Header.Get("If-None-Match"), etag) {
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(writer, http.StatusOK, snapshot)
+}
+
+// streamActivityEvents emits complete, content-addressed snapshots rather
+// than deltas. A dropped SSE frame therefore cannot leave the client in a
+// permanently inconsistent state; every reconnect immediately reconciles
+// from the same read model used by the REST endpoint.
+func (s *Server) streamActivityEvents(writer http.ResponseWriter, request *http.Request) {
+	limit, err := activityLimit(request)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	flusher, ok := writer.(http.Flusher)
+	if !ok {
+		writeError(writer, fmt.Errorf("streaming unsupported"))
+		return
+	}
+	actor := mustActor(request)
+	projectID := contract.ProjectID(request.PathValue("project_id"))
+	workspaceID := request.URL.Query().Get("workspace_id")
+	snapshot, err := s.Service.ListTaskActivities(request.Context(), actor, projectID, workspaceID, limit)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	lastID := strings.TrimSpace(request.Header.Get("Last-Event-ID"))
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "private, no-cache")
+	writer.Header().Set("X-Accel-Buffering", "no")
+	writer.WriteHeader(http.StatusOK)
+	// Flush headers even when Last-Event-ID already matches the current
+	// snapshot. Otherwise fetch() does not resolve until the heartbeat and the
+	// UI can misleadingly remain in "connecting" for up to 15 seconds.
+	flusher.Flush()
+	controller := http.NewResponseController(writer)
+	poll := s.PollPeriod
+	if poll <= 0 {
+		poll = time.Second
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	send := func(current strategy.TaskActivitySnapshot, force bool) error {
+		if !force && current.SnapshotID == lastID {
+			return nil
+		}
+		payload, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		_ = controller.SetWriteDeadline(time.Now().Add(20 * time.Second))
+		if _, err := fmt.Fprintf(writer, "id: %s\nevent: activity.snapshot\ndata: %s\n\n", current.SnapshotID, payload); err != nil {
+			return err
+		}
+		lastID = current.SnapshotID
+		flusher.Flush()
+		return nil
+	}
+	// A reconnect always receives one complete snapshot. Apart from making
+	// recovery deterministic, the data frame prevents development and edge
+	// proxies from buffering a header-only response when Last-Event-ID already
+	// names the latest snapshot. The client de-duplicates by snapshot_id.
+	if err := send(snapshot, true); err != nil {
+		return
+	}
+	for {
+		select {
+		case <-request.Context().Done():
+			return
+		case <-ticker.C:
+			current, err := s.Service.ListTaskActivities(request.Context(), actor, projectID, workspaceID, limit)
+			if err != nil || send(current, false) != nil {
+				return
+			}
+		case <-heartbeat.C:
+			_ = controller.SetWriteDeadline(time.Now().Add(20 * time.Second))
+			if _, err := io.WriteString(writer, ": activity-keep-alive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func activityLimit(request *http.Request) (int, error) {
+	limit := 50
+	if value := strings.TrimSpace(request.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return 0, strategy.ErrInvalidRequest
+		}
+		limit = parsed
+	}
+	return limit, nil
+}
+
 func decode(writer http.ResponseWriter, request *http.Request, target any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -1247,6 +1734,14 @@ func writeResult(writer http.ResponseWriter, value any, err error) {
 	writeJSON(writer, http.StatusOK, value)
 }
 
+func writeOptionalResult(writer http.ResponseWriter, request *http.Request, value any, err error) {
+	if request.URL.Query().Get("optional") == "1" && errors.Is(err, strategy.ErrNotFound) {
+		writer.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeResult(writer, value, err)
+}
+
 func writeJSON(writer http.ResponseWriter, status int, value any) {
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.WriteHeader(status)
@@ -1260,6 +1755,8 @@ func writeError(writer http.ResponseWriter, err error) {
 	retryable := true
 	var details []strategy.ValidationError
 	switch {
+	case errors.Is(err, strategy.ErrStrategyUpgradeRequired):
+		status, code, message, retryable = 409, "STRATEGY_UPGRADE_REQUIRED", "该历史策略为只读版本，请先升级为新的 v3 后继版本", false
 	case errors.Is(err, strategy.ErrRevisionScopeAmbiguous):
 		status, code, message, retryable = 400, "REVISION_SCOPE_AMBIGUOUS", "请说明要修改的策略章节或明确要求整体重写", false
 	case errors.Is(err, strategy.ErrInvalidRequest):

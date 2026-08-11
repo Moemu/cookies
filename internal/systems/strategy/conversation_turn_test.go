@@ -1,10 +1,16 @@
 package strategy
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/agent"
+	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
+	"github.com/shikanon/cookies/internal/platform/mediaunderstanding"
 )
 
 func TestConversationTurnDoesNotRepeatCapturedFields(t *testing.T) {
@@ -37,8 +43,8 @@ func TestConversationTurnDoesNotRepeatCapturedFields(t *testing.T) {
 	}
 	decision = reconcileConversationTurn(updated, decision)
 	if len(decision.FollowUpQuestions) != 2 ||
-		decision.FollowUpQuestions[0].FieldPath != "region" ||
-		decision.FollowUpQuestions[1].FieldPath != "language" {
+		decision.FollowUpQuestions[0].FieldPath != "campaign.objective" ||
+		decision.FollowUpQuestions[1].FieldPath != "audience.primary" {
 		t.Fatalf("questions = %#v", decision.FollowUpQuestions)
 	}
 	if strings.Contains(decision.AssistantReply, "品牌名称是什么") ||
@@ -66,6 +72,145 @@ func TestConversationTurnRejectsInferredAndUngroundedFields(t *testing.T) {
 	if len(decision.Patch.Operations) != 0 {
 		t.Fatalf("inferred operations were retained: %#v", decision.Patch.Operations)
 	}
+}
+
+func TestConversationTurnRequiresEverySelectedChannelToBeGrounded(t *testing.T) {
+	t.Parallel()
+	message := Message{ID: "msg_1", Content: "首期只在小红书投放"}
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	decision := sanitizeConversationDecision(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements",
+		Patch: BriefPatch{Operations: []BriefPatchOperation{
+			{Op: "set", FieldPath: "channels", Value: json.RawMessage(`["xiaohongshu","douyin"]`), Confidence: "high"},
+		}},
+	})
+	if len(decision.Patch.Operations) != 0 {
+		t.Fatalf("partly invented channels were retained: %#v", decision.Patch.Operations)
+	}
+
+	decision = sanitizeConversationDecision(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements",
+		Patch: BriefPatch{Operations: []BriefPatchOperation{
+			{Op: "set", FieldPath: "channels", Value: json.RawMessage(`["xiaohongshu"]`), Confidence: "high"},
+		}},
+	})
+	if len(decision.Patch.Operations) != 1 {
+		t.Fatalf("grounded channel was rejected: %#v", decision.Patch.Operations)
+	}
+}
+
+func TestConversationTurnAcceptsOnlyDocumentGroundedFactsAndKeepsChunkSource(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{ID: "msg_1", Content: "请读取附件并整理需求"}
+	grounding := []conversationGrounding{{
+		Source:  FieldSource{Type: "knowledge_chunk", ID: "chunk_7", Locator: "产品说明:12-18"},
+		Content: "产品：FlowKit\n核心受众：效率工具用户",
+	}}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", AssistantReply: "已读取资料",
+		Patch: BriefPatch{Operations: []BriefPatchOperation{
+			{Op: "set", FieldPath: "product.name", Value: json.RawMessage(`"FlowKit"`), Confidence: "high"},
+			{Op: "set", FieldPath: "brand.name", Value: json.RawMessage(`"资料中不存在的品牌"`), Confidence: "high"},
+		}},
+	}, grounding)
+	if len(decision.Patch.Operations) != 1 || decision.Patch.Operations[0].FieldPath != "product.name" {
+		t.Fatalf("document grounding filter = %#v", decision.Patch.Operations)
+	}
+	source := conversationOperationSource(message, grounding, decision.Patch.Operations[0])
+	if source.Type != "knowledge_chunk" || source.ID != "chunk_7" || source.Locator != "产品说明:12-18" {
+		t.Fatalf("document source = %#v", source)
+	}
+}
+
+func TestConversationTurnAcceptsMultiProductCandidatesAcrossChunks(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{Status: "open", Version: 1, Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{}}
+	message := Message{ID: "msg_1", Content: "Please parse the attached Brief"}
+	grounding := []conversationGrounding{
+		{Source: FieldSource{Type: "knowledge_chunk", ID: "chunk_1", Locator: "lines:1-20"}, Content: "Product Alpha\nrepair and radiance\nAlpha must be shown"},
+		{Source: FieldSource{Type: "knowledge_chunk", ID: "chunk_2", Locator: "lines:21-40"}, Content: "Product Beta\nhydration and firmness\ndo not claim allergy treatment"},
+	}
+	operation := BriefPatchOperation{
+		Op: "set", FieldPath: "product.candidates", Confidence: "high",
+		Value: json.RawMessage(`[
+			{"name":"Product Alpha","category":"","selling_points":["repair and radiance"],"evidence":[],"mandatory_elements":["Alpha must be shown"],"prohibited_claims":[]},
+			{"name":"Product Beta","category":"","selling_points":["hydration and firmness"],"evidence":[],"mandatory_elements":[],"prohibited_claims":["do not claim allergy treatment"]}
+		]`),
+	}
+	if !productCandidatesAreGrounded(message.Content, grounding, operation.Value) {
+		t.Fatalf("test product candidates should be grounded: %s", operation.Value)
+	}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", AssistantReply: "Parsed", Patch: BriefPatch{Operations: []BriefPatchOperation{operation}},
+	}, grounding)
+	if len(decision.Patch.Operations) != 1 {
+		t.Fatalf("grounded product candidates were rejected: %#v", decision.Patch.Operations)
+	}
+	enriched := enrichProductCandidateSources(message, grounding, decision.Patch.Operations[0].Value)
+	var candidates []BriefProductCandidate
+	if err := json.Unmarshal(enriched, &candidates); err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || len(candidates[0].SourceRefs) != 1 || candidates[0].SourceRefs[0].ID != "chunk_1" ||
+		len(candidates[1].SourceRefs) != 1 || candidates[1].SourceRefs[0].ID != "chunk_2" {
+		t.Fatalf("candidate source refs = %#v", candidates)
+	}
+
+	operation.Value = json.RawMessage(`[{"name":"Product Alpha","category":"","selling_points":["invented claim"],"evidence":[],"mandatory_elements":[],"prohibited_claims":[]}]`)
+	decision = sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", AssistantReply: "Parsed", Patch: BriefPatch{Operations: []BriefPatchOperation{operation}},
+	}, grounding)
+	if len(decision.Patch.Operations) != 1 {
+		t.Fatalf("grounded candidate was discarded with its ungrounded fact: %#v", decision.Patch.Operations)
+	}
+	var sanitized []BriefProductCandidate
+	if err := json.Unmarshal(decision.Patch.Operations[0].Value, &sanitized); err != nil {
+		t.Fatal(err)
+	}
+	if len(sanitized) != 1 || len(sanitized[0].SellingPoints) != 0 {
+		t.Fatalf("ungrounded candidate fact was retained: %#v", sanitized)
+	}
+}
+
+func TestConversationGroundingReadsOnlyDirectMediaEvidence(t *testing.T) {
+	t.Parallel()
+	timestamp := int64(2400)
+	ref := contract.AssetVersionRef{AssetID: "asset_video", Version: 2}
+	artifact := mediaunderstanding.Artifact{
+		ID: "media_1", Status: mediaunderstanding.StatusReady,
+		VisibleText: []mediaunderstanding.Evidence{{
+			ID: "visible_01", Text: "FlowKit", Confidence: .94,
+			Locator: mediaunderstanding.Locator{Kind: "video_frame", AssetRef: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: ref}, TimestampMS: &timestamp},
+		}},
+		Observations: []mediaunderstanding.Evidence{},
+		Inferences: []mediaunderstanding.Evidence{{
+			ID: "inference_01", Text: "适合年轻人", Confidence: .6,
+			Locator: mediaunderstanding.Locator{Kind: "video_frame", AssetRef: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: ref}, TimestampMS: &timestamp},
+		}},
+	}
+	service := Service{ConversationMedia: staticConversationMedia{artifact: artifact}}
+	grounding, err := service.loadConversationGrounding(context.Background(), agent.Task{
+		OrganizationID: "org_1", ProjectID: "project_1", CreatedBy: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+	}, Message{ContentBlocks: []MessageContentBlock{{Type: "asset_ref", AssetKind: "video", AssetID: "asset_video", AssetVersion: 2}}})
+	if err != nil || len(grounding) != 1 {
+		t.Fatalf("media grounding=%#v err=%v", grounding, err)
+	}
+	if grounding[0].Content != "FlowKit" || grounding[0].Source.Type != "media_artifact" || grounding[0].Source.Locator != "video:2400ms" {
+		t.Fatalf("media grounding source=%#v", grounding[0])
+	}
+}
+
+type staticConversationMedia struct{ artifact mediaunderstanding.Artifact }
+
+func (s staticConversationMedia) GetLatestForAsset(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (mediaunderstanding.Artifact, error) {
+	return s.artifact, nil
 }
 
 func TestConversationConfirmationConfirmsCapturedFields(t *testing.T) {
@@ -193,6 +338,31 @@ func TestConversationTurnMergesExplicitLabeledBriefFields(t *testing.T) {
 	}
 }
 
+func TestDeterministicConversationKeepsExplicitLabeledFacts(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 4,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{ID: "msg_1", CreatedBy: "user_1", Content: "品牌：轻氧"}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent:         "provide_requirements",
+		Patch:          deterministicBriefPatch(draft, message),
+		AssistantReply: "已记录。",
+	}, nil)
+	decision, err := finalizeDeterministicConversationDecision(draft, message, nil, decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.Patch.Operations) != 1 || decision.Patch.Operations[0].FieldPath != "brand.name" || decision.Patch.Operations[0].Confidence != "high" {
+		t.Fatalf("deterministic operations=%#v", decision.Patch.Operations)
+	}
+	updated, err := ApplyBriefPatch(draft, decision.Patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil || updated.Document.Brand.Name != "轻氧" {
+		t.Fatalf("updated brand=%q err=%v", updated.Document.Brand.Name, err)
+	}
+}
+
 func TestConversationTurnMergesExplicitNarrativeCNCBriefFields(t *testing.T) {
 	t.Parallel()
 	draft := BriefDraft{
@@ -236,5 +406,79 @@ func TestConversationTurnMergesExplicitNarrativeCNCBriefFields(t *testing.T) {
 	}
 	if len(updated.Document.Product.Evidence) != 2 {
 		t.Fatalf("evidence = %#v", updated.Document.Product.Evidence)
+	}
+}
+
+func TestConversationTurnCapturesCompactNaturalLanguageBrief(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{
+		ID: "msg_compact", CreatedBy: "user_1",
+		Content: "推广 FlowKit 团队协作工具，目标是提升 30 天企业试用转化，核心受众是 20-200 人科技公司的运营负责人；强调跨团队流程透明和减少重复沟通。",
+	}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", Patch: deterministicBriefPatch(draft, message),
+	}, nil)
+	decision, err := finalizeDeterministicConversationDecision(draft, message, nil, decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := ApplyBriefPatch(draft, decision.Patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Document.Product.Name != "FlowKit 团队协作工具" {
+		t.Fatalf("product name = %q", updated.Document.Product.Name)
+	}
+	if updated.Document.Campaign.Objective != "提升 30 天企业试用转化" {
+		t.Fatalf("objective = %q", updated.Document.Campaign.Objective)
+	}
+	if updated.Document.Audience.Primary != "20-200 人科技公司的运营负责人" {
+		t.Fatalf("audience = %q", updated.Document.Audience.Primary)
+	}
+	if updated.Document.Proposition != "跨团队流程透明和减少重复沟通" {
+		t.Fatalf("proposition = %q", updated.Document.Proposition)
+	}
+	if missing := missingConversationFields(updated); len(missing) != 0 {
+		t.Fatalf("compact explicit brief still has missing fields: %#v", missing)
+	}
+}
+
+func TestConversationResearchGroundingAnswersButDoesNotMutateBrief(t *testing.T) {
+	t.Parallel()
+	hash := strings.Repeat("b", 64)
+	service := Service{Knowledge: stubKnowledgeReader{values: map[string]knowledge.Reference{
+		"research_1": {
+			ID: "research_1", Kind: "research_artifact", Title: "行业查证",
+			Content: "市场报告称核心受众是采购负责人", ContentHash: hash,
+			Citations: []string{"https://example.com/report"},
+		},
+	}}}
+	message := Message{
+		ID: "message_1", Content: "请联网查证一下目标用户",
+		ContentBlocks: []MessageContentBlock{{
+			Type: "research_ref", ResearchArtifactID: "research_1", ExpectedContentHash: hash,
+		}},
+	}
+	grounding, err := service.loadConversationGrounding(context.Background(), agent.Task{
+		OrganizationID: "org_1", ProjectID: "project_1",
+	}, message)
+	if err != nil {
+		t.Fatalf("load research grounding: %v", err)
+	}
+	if len(grounding) != 1 || grounding[0].Source.Type != "research_artifact" ||
+		grounding[0].Source.Locator != "https://example.com/report" {
+		t.Fatalf("grounding=%#v", grounding)
+	}
+	decision := sanitizeConversationDecisionWithGrounding(BriefDraft{
+		Version: 1, Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}, message, ConversationTurnDecision{Patch: BriefPatch{Operations: []BriefPatchOperation{{
+		Op: "set", FieldPath: "audience.primary", Value: json.RawMessage(`"采购负责人"`), Confidence: "high",
+	}}}}, grounding)
+	if len(decision.Patch.Operations) != 0 {
+		t.Fatalf("research finding mutated Brief without user confirmation: %#v", decision.Patch.Operations)
 	}
 }

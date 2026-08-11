@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-ai-native-requirement-v1.schema.json",
+  "title": "AI Native Ad Requirement Draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "revision",
+    "status",
+    "product",
+    "product_name",
+    "product_description",
+    "target_audiences",
+    "media",
+    "core_selling_points",
+    "supplemental_requirement",
+    "channel",
+    "aspect_ratio",
+    "duration_seconds",
+    "language",
+    "needs_confirmation",
+    "generation"
+  ],
+  "properties": {
+    "contract_version": {"const": "creative.ai-native.requirement/v1"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"const": "draft"},
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "product_id", "name", "description", "images", "price", "sales", "source_url"],
+      "properties": {
+        "source": {"const": "douyin_mall"},
+        "product_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url", "role"],
+            "properties": {
+              "url": {"type": "string", "format": "uri"},
+			  "role": {"type": "string", "minLength": 1},
+			  "asset_ref": {"$ref": "#/$defs/assetRef"}
+            }
+          }
+        },
+        "price": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min_raw", "max_raw", "currency", "display_unconfirmed"],
+          "properties": {
+            "min_raw": {"type": "integer", "minimum": 0},
+            "max_raw": {"type": "integer", "minimum": 0},
+            "currency": {"const": "CNY"},
+            "display_unconfirmed": {"type": "boolean"}
+          }
+        },
+        "sales": {"type": "integer", "minimum": 0},
+        "source_url": {"type": "string", "format": "uri"}
+      }
+    },
+    "product_name": {"type": "string", "minLength": 1},
+    "product_description": {"type": "string", "minLength": 1},
+    "target_audiences": {"$ref": "#/$defs/editableItems", "maxItems": 10},
+    "media": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "url", "role", "source"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "url": {"type": "string", "format": "uri"},
+          "role": {"type": "string", "minLength": 1},
+		  "source": {"type": "string", "minLength": 1},
+		  "asset_ref": {"$ref": "#/$defs/assetRef"}
+        }
+      }
+    },
+    "core_selling_points": {"$ref": "#/$defs/editableItems", "maxItems": 20},
+    "supplemental_requirement": {"type": "string", "maxLength": 2000},
+    "channel": {"const": "douyin"},
+    "aspect_ratio": {"const": "9:16"},
+    "duration_seconds": {"type": "integer", "minimum": 15, "maximum": 30},
+    "language": {"const": "zh-CN"},
+    "needs_confirmation": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "model_alias", "model_version", "prompt_version"],
+      "properties": {
+        "mode": {"enum": ["model", "deterministic_fallback"]},
+        "model_alias": {"type": "string", "minLength": 1},
+        "model_version": {"type": "string", "minLength": 1},
+        "route_revision_id": {"type": "string"},
+        "prompt_version": {"const": "ai-native-requirement/douyin-v1"}
+      }
+    }
+  },
+  "$defs": {
+	"assetRef": {
+	  "type": "object",
+	  "additionalProperties": false,
+	  "required": ["asset_id", "version"],
+	  "properties": {
+		"asset_id": {"type": "string", "minLength": 1},
+		"version": {"type": "integer", "minimum": 1}
+	  }
+	},
+    "editableItems": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "text": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

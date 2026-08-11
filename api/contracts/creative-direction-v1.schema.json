@@ -13,6 +13,7 @@
     "batch_id": {"type": "string", "minLength": 1},
     "intake_id": {"type": "string", "minLength": 1},
     "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "brand_brief_ref": {"$ref": "#/$defs/brandBriefRef"},
     "route_id": {"type": "string", "minLength": 1},
     "concept": {"type": "string", "minLength": 1},
     "creative_rationale": {"type": "string", "minLength": 1},
@@ -25,5 +26,16 @@
     "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "confirmed_at": {"type": "string", "format": "date-time"},
     "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "brandBriefRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "content_hash"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
   }
 }

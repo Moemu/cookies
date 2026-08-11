@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delivery-insights-fixture/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixture_version", "schema_version", "source", "quality", "quality_reason", "observed_at", "data_through", "objects", "metrics", "evidence_refs"],
+  "properties": {
+    "fixture_version": {"type": "string", "minLength": 1},
+    "schema_version": {"type": "string", "minLength": 1},
+    "source": {"type": "string", "const": "mock"},
+    "quality": {"type": "string", "enum": ["usable", "empty", "stale", "incomplete", "schema_mismatch", "unavailable"]},
+    "quality_reason": {"type": "string", "minLength": 1},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "data_through": {"type": "string", "format": "date-time"},
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "id", "parent_id", "version", "name", "platform"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["account", "project", "unit", "promotion", "material"]},
+          "id": {"type": "string", "minLength": 1},
+          "parent_id": {"type": "string"},
+          "version": {"type": "integer", "minimum": 1},
+          "name": {"type": "string", "minLength": 1},
+          "platform": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metric", "object_kind", "object_id", "value", "unit", "currency", "window_start", "window_end", "granularity", "timezone", "schema_version", "definition_version", "freshness", "quality", "evidence_refs"],
+        "properties": {
+          "metric": {"type": "string", "enum": ["spend", "impressions", "clicks", "conversions", "deep_conversions"]},
+          "object_kind": {"type": "string", "enum": ["account", "project", "unit", "promotion", "material"]},
+          "object_id": {"type": "string", "minLength": 1},
+          "value": {"type": "number", "minimum": 0},
+          "unit": {"type": "string", "minLength": 1},
+          "currency": {"type": "string"},
+          "window_start": {"type": "string", "format": "date-time"},
+          "window_end": {"type": "string", "format": "date-time"},
+          "granularity": {"type": "string", "minLength": 1},
+          "timezone": {"type": "string", "minLength": 1},
+          "schema_version": {"type": "string", "minLength": 1},
+          "definition_version": {"type": "string", "minLength": 1},
+          "freshness": {"type": "string", "enum": ["fresh", "unknown"]},
+          "quality": {"type": "string", "enum": ["usable", "empty", "stale", "incomplete", "schema_mismatch", "unavailable"]},
+          "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

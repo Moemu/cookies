@@ -130,6 +130,37 @@ func TestBuildCreativeHandoffDiagnosesMissingPlanningFields(t *testing.T) {
 	}
 }
 
+func TestPackageVersionWithHandoffReadinessDowngradesContradictoryPackage(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Readiness.CreativeReady = true
+	value := packageVersionForHandoffTest(t, snapshot)
+	originalHash := value.ContentHash
+
+	normalized, handoff, err := packageVersionWithHandoffReadiness(value, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Snapshot.Readiness.CreativeReady {
+		t.Fatal("creative_ready remained true for a blocked frozen handoff")
+	}
+	if handoff.UpstreamReadiness.Status != "blocked" {
+		t.Fatalf("readiness = %#v", handoff.UpstreamReadiness)
+	}
+	if normalized.ContentHash.Equal(originalHash) {
+		t.Fatalf("readiness mutation retained content hash %q", originalHash)
+	}
+	if !normalized.Snapshot.Approval.ContentHash.Equal(normalized.ContentHash) {
+		t.Fatalf("approval hash = %q, package hash = %q", normalized.Snapshot.Approval.ContentHash, normalized.ContentHash)
+	}
+	if !handoff.PackageRef.PackageContentHash.Equal(normalized.ContentHash) {
+		t.Fatalf("handoff package hash = %q, package hash = %q", handoff.PackageRef.PackageContentHash, normalized.ContentHash)
+	}
+	if err := VerifyPackageContentHash(normalized.Snapshot); err != nil {
+		t.Fatalf("normalized package hash invalid: %v", err)
+	}
+}
+
 func TestBuildCreativeHandoffRejectsFrozenSchemaLengthViolation(t *testing.T) {
 	t.Parallel()
 	snapshot := packageHashFixture()
@@ -166,6 +197,104 @@ func TestBuildCreativeHandoffDoesNotGuessLegacyPreRollMode(t *testing.T) {
 	if len(handoff.Routes) != 0 ||
 		!hasHandoffIssue(handoff.UpstreamReadiness.Blockers, "creative_route_mode_missing") {
 		t.Fatalf("legacy route was guessed or not diagnosed: %#v", handoff)
+	}
+}
+
+func TestBuildCreativeHandoffFreezesCommerceRouteFromApprovedConversionPlan(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Brief.Snapshot.Campaign.Objective = "提升购买转化"
+	snapshot.Brief.Snapshot.Channels = []string{"douyin"}
+	snapshot.Strategy.Objective = "提升购买转化"
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "douyin", Role: "用短视频承接销售转化", Formats: []string{"竖屏短视频"},
+	}}
+	snapshot.CreativeRoutes = []CreativeRoute{{
+		RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"},
+		Reason: "承接正片", TargetDurationSeconds: 5, AspectRatio: "9:16",
+		SourceAssetRefs: []contract.AssetVersionRef{}, EvidenceRefs: []string{},
+		RequiresHumanConfirmation: true,
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handoff.UpstreamReadiness.Status != "ready" || len(handoff.Routes) != 1 {
+		t.Fatalf("handoff = %#v", handoff)
+	}
+	route := handoff.Routes[0]
+	if route.RouteID != "route_douyin_commerce_preroll" || route.DeliverableType != "video" ||
+		route.Purpose != "performance" || route.PerformanceMode != "commerce_preroll" ||
+		route.Spec.TargetDurationSeconds != 6 || route.Spec.AspectRatio != "9:16" ||
+		route.Spec.Resolution != "720p" || route.Spec.HookDeadlineSeconds != 1 ||
+		!route.Spec.CompositionRequired || route.RouteReadiness.Status != "ready" {
+		t.Fatalf("route = %#v", route)
+	}
+	if !hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "creative_route_legacy_ignored") ||
+		!hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "cta_missing") {
+		t.Fatalf("warnings = %#v", handoff.UpstreamReadiness.Warnings)
+	}
+}
+
+func TestBuildCreativeHandoffBlocksCommerceRouteWithoutProductReference(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Brief.Snapshot.Campaign.Objective = "提升购买转化"
+	snapshot.Strategy.Objective = "提升购买转化"
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "douyin", Role: "效果转化", Formats: []string{"短视频"},
+	}}
+	snapshot.CreativeRoutes = []CreativeRoute{{
+		RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"},
+		Reason: "承接正片", TargetDurationSeconds: 5, AspectRatio: "9:16",
+		SourceAssetRefs: []contract.AssetVersionRef{}, EvidenceRefs: []string{},
+		RequiresHumanConfirmation: true,
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteReadiness.Status != "blocked" ||
+		!hasHandoffIssue(handoff.Routes[0].RouteReadiness.Blockers, "product_missing") ||
+		!hasHandoffIssue(handoff.UpstreamReadiness.Blockers, "product_missing") {
+		t.Fatalf("handoff = %#v", handoff)
+	}
+}
+
+func TestBuildCreativeHandoffDoesNotMisclassifyGameConversionAsCommerce(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Brief.Snapshot.Product.Name = "星际远征手游"
+	snapshot.Brief.Snapshot.Product.Category = "游戏"
+	snapshot.Brief.Snapshot.Campaign.Objective = "提升游戏安装转化"
+	snapshot.Strategy.Objective = "提升游戏安装转化"
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{{
+		Platform: "douyin", Role: "效果转化", Formats: []string{"短视频"},
+	}}
+	snapshot.CreativeRoutes = []CreativeRoute{{
+		RouteType: "pre_roll", VideoPurpose: "performance", Channels: []string{"douyin"},
+		Reason: "承接正片", TargetDurationSeconds: 5, AspectRatio: "9:16",
+		SourceAssetRefs: []contract.AssetVersionRef{}, EvidenceRefs: []string{},
+		RequiresHumanConfirmation: true,
+	}}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_game"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(handoff.Routes) != 0 || !hasHandoffIssue(handoff.UpstreamReadiness.Blockers, "creative_route_mode_missing") {
+		t.Fatalf("game conversion was misclassified as commerce: %#v", handoff)
 	}
 }
 
@@ -244,6 +373,35 @@ func TestBuildCreativeHandoffFreezesBrandVideoRouteFromApprovedVideoPlan(t *test
 		brandRoute.Spec.TargetDurationSeconds != 30 || brandRoute.Spec.AspectRatio != "9:16" ||
 		len(brandRoute.AssetRequirements) != 3 || brandRoute.RouteReadiness.Status != "ready" {
 		t.Fatalf("brand route = %#v", brandRoute)
+	}
+}
+
+func TestBuildCreativeHandoffKeepsBrandVideoForMixedBrandAndConversionGoal(t *testing.T) {
+	t.Parallel()
+	snapshot := packageHashFixture()
+	snapshot.Brief.Snapshot.Region = "CN"
+	snapshot.Brief.Snapshot.Language = "zh-CN"
+	snapshot.Brief.Snapshot.Campaign.Objective = "建立第三代黄金复原蜜产品认知并促进购买转化"
+	snapshot.Strategy.Objective = "通过内容种草强化产品认知，承接搜索和销售转化"
+	snapshot.Strategy.Measurement = []string{"品牌搜索提升", "购买转化率"}
+	snapshot.Strategy.ChannelStrategy = []ChannelStrategy{
+		{Platform: "xiaohongshu", Role: "品牌种草与搜索转化", Formats: []string{"图文笔记", "竖屏短视频"}},
+		{Platform: "douyin", Role: "产品认知与销售转化", Formats: []string{"short_video"}},
+	}
+	value := packageVersionForHandoffTest(t, snapshot)
+
+	handoff, err := BuildCreativeHandoff(value, []contract.ProductID{"product_guerlain_abeille_royale"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handoff.UpstreamReadiness.Status != "ready" {
+		t.Fatalf("mixed goal blocked an executable brand route: %#v", handoff.UpstreamReadiness)
+	}
+	if len(handoff.Routes) != 1 || handoff.Routes[0].RouteID != "route_brand_video" {
+		t.Fatalf("mixed brand and conversion goal lost brand video: %#v", handoff.Routes)
+	}
+	if !hasHandoffIssue(handoff.UpstreamReadiness.Warnings, "route_purpose_missing") {
+		t.Fatalf("ambiguous image route diagnosis was lost: %#v", handoff.UpstreamReadiness)
 	}
 }
 

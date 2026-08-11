@@ -1,5 +1,6 @@
 param(
-    [string]$CsvPath = "C:\Users\Admin\Desktop\zz_model_provider_202607231201.csv"
+    [Parameter(Mandatory = $true)]
+    [string]$CsvPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,7 +113,7 @@ try {
         "COOKIES_STRATEGY_ENABLED" = "true"
         "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" = "true"
         "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" = "cookies.text.standard"
-        "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" = "cookies.text.standard"
+        "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" = "cookies.text.deep_review"
         "COOKIES_STRATEGY_CRITIC_ENABLED" = "true"
         "COOKIES_STRATEGY_APPROVE_ENABLED" = "true"
         "COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED" = "true"
@@ -167,7 +168,12 @@ UPDATE provider_model_routes SET current_revision_id=NULL
     'route_clawex_enhance_image',
     'route_clawex_remove_background',
     'route_cookies_image_standard',
-    'route_cookies_text_standard'
+    'route_cookies_text_standard',
+    'route_cookies_text_deep_review',
+    'route_cookies_video_standard',
+    'route_cookies_vision_standard',
+    'route_cookies_image_enhance',
+    'route_cookies_video_enhance'
   );
 DELETE FROM provider_model_route_revisions
   WHERE route_id IN (
@@ -181,7 +187,12 @@ DELETE FROM provider_model_route_revisions
     'route_clawex_enhance_image',
     'route_clawex_remove_background',
     'route_cookies_image_standard',
-    'route_cookies_text_standard'
+    'route_cookies_text_standard',
+    'route_cookies_text_deep_review',
+    'route_cookies_video_standard',
+    'route_cookies_vision_standard',
+    'route_cookies_image_enhance',
+    'route_cookies_video_enhance'
   );
 DELETE FROM provider_model_routes
   WHERE id IN (
@@ -195,7 +206,12 @@ DELETE FROM provider_model_routes
     'route_clawex_enhance_image',
     'route_clawex_remove_background',
     'route_cookies_image_standard',
-    'route_cookies_text_standard'
+    'route_cookies_text_standard',
+    'route_cookies_text_deep_review',
+    'route_cookies_video_standard',
+    'route_cookies_vision_standard',
+    'route_cookies_image_enhance',
+    'route_cookies_video_enhance'
   );
 DELETE FROM provider_credentials WHERE connection_id='connection_clawex_adapter';
 UPDATE provider_connections SET current_revision_id=NULL
@@ -241,6 +257,8 @@ INSERT INTO provider_credentials
   );
 "@
 
+    # Seedream 5.0 Pro is intentionally not imported on this Adapter connection.
+    # The children-compliant route must be provisioned on a separate native Ark connection.
     $routes = @(
         @{
             ID = "route_clawex_minimax_m27"
@@ -264,7 +282,7 @@ INSERT INTO provider_credentials
             Alias = "gpt-image-2"
             Model = "gpt-image-2"
             Endpoint = "/v1/images/generations"
-            SourceProvider = "artsapi-gateway"
+            SourceProvider = "aigai"
         },
         @{
             ID = "route_clawex_seedance_20"
@@ -291,14 +309,6 @@ INSERT INTO provider_credentials
             SourceProvider = "ark"
         },
         @{
-            ID = "route_clawex_seedream_5"
-            Capability = "image.generate"
-            Alias = "doubao-seedream-5-0-260128"
-            Model = "doubao-seedream-5-0-260128"
-            Endpoint = "/v1/images/generations"
-            SourceProvider = "ark"
-        },
-        @{
             ID = "route_clawex_enhance_image"
             Capability = "image.enhance"
             Alias = "enhance-image"
@@ -320,7 +330,7 @@ INSERT INTO provider_credentials
             Alias = "cookies.image.standard"
             Model = "gpt-image-2"
             Endpoint = "/v1/images/generations"
-            SourceProvider = "artsapi-gateway"
+            SourceProvider = "aigai"
         },
         @{
             ID = "route_cookies_text_standard"
@@ -333,6 +343,57 @@ INSERT INTO provider_credentials
             MaxOutputTokens = 4096
             Temperature = 0.3
             ThinkingMode = "disabled"
+        },
+        @{
+            ID = "route_cookies_text_deep_review"
+            Capability = "text.generate"
+            Alias = "cookies.text.deep_review"
+            Model = "doubao-seed-2-0-pro-260215"
+            Endpoint = "/v1/chat/completions"
+            SourceProvider = "ark"
+            TextResponseMode = "prompt_json"
+            MaxOutputTokens = 16384
+            Temperature = 0.2
+            ThinkingMode = "enabled"
+        },
+        @{
+            ID = "route_cookies_video_standard"
+            Capability = "video.generate"
+            Alias = "cookies.video.standard"
+            Model = "doubao-seedance-2-0-fast-260128"
+            Endpoint = "/v1/videos/generations"
+            PollEndpoint = "/v1/videos/generations/{task_id}"
+            SourceProvider = "globalrouter"
+            VideoInputModes = @("text_only", "reference_image", "first_last_frame")
+            VideoAudioPolicies = @("silent", "generated_audio")
+        },
+        @{
+            ID = "route_cookies_vision_standard"
+            Capability = "vision.understand"
+            Alias = "cookies.vision.standard"
+            Model = "doubao-seed-2-0-pro-260215"
+            Endpoint = "/v1/chat/completions"
+            SourceProvider = "globalrouter"
+            TextResponseMode = "prompt_json"
+            MaxOutputTokens = 4096
+            Temperature = 0.1
+            ThinkingMode = "disabled"
+        },
+        @{
+            ID = "route_cookies_image_enhance"
+            Capability = "image.enhance"
+            Alias = "cookies.image.enhance"
+            Model = "enhance-image"
+            Endpoint = "/api/v1/tools-sync/enhance-image"
+            SourceProvider = "volc-mediakit"
+        },
+        @{
+            ID = "route_cookies_video_enhance"
+            Capability = "video.enhance"
+            Alias = "cookies.video.enhance"
+            Model = "enhance-video"
+            Endpoint = "/api/v1/tools-sync/enhance-video"
+            SourceProvider = "volc-mediakit"
         }
     )
 
@@ -340,7 +401,7 @@ INSERT INTO provider_credentials
     foreach ($route in $routes) {
         $revisionID = "$($route.ID)_r1"
         $textConstraints = ""
-        if ($route.Capability -eq "text.generate") {
+        if ($route.Capability -in @("text.generate", "vision.understand")) {
             $responseMode = if ($route.TextResponseMode) { $route.TextResponseMode } else { "prompt_json" }
             $maxOutputTokens = if ($route.MaxOutputTokens) { $route.MaxOutputTokens } else { 8000 }
             $temperature = if ($null -ne $route.Temperature) { $route.Temperature } else { 0.3 }
@@ -351,6 +412,16 @@ INSERT INTO provider_credentials
       ,'max_output_tokens',$maxOutputTokens
       ,'temperature',$temperature
 $thinkingConstraint
+"@
+        }
+        $videoConstraints = ""
+        if ($route.Capability -eq "video.generate") {
+            $inputModes = ($route.VideoInputModes | ForEach-Object { "'$_'" }) -join ","
+            $audioPolicies = ($route.VideoAudioPolicies | ForEach-Object { "'$_'" }) -join ","
+            $videoConstraints = @"
+      ,'poll_endpoint','$($route.PollEndpoint)'
+      ,'video_input_modes',JSON_ARRAY($inputModes)
+      ,'video_audio_policies',JSON_ARRAY($audioPolicies)
 "@
         }
         [void]$routeSQL.AppendLine(@"
@@ -373,6 +444,7 @@ INSERT INTO provider_model_route_revisions
       'source_provider','$($route.SourceProvider)',
       'source','clawex_csv'
       $textConstraints
+      $videoConstraints
     )
   );
 UPDATE provider_model_routes

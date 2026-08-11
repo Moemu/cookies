@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/schemas/editing-timeline-v1.schema.json",
+  "title": "cookies editing timeline v1",
+  "description": "Immutable, renderer-neutral editing snapshot. Project authorization and AssetVersion availability are validated by the owning EditTask module, not by this schema.",
+  "type": "object",
+  "required": ["schema_version", "output_profile", "duration_ms", "tracks"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "editing-timeline/v1" },
+    "output_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "width", "height", "frame_rate", "sample_rate"],
+      "properties": {
+        "id": { "const": "cookies-editing-vertical-v1" },
+        "width": { "const": 720 },
+        "height": { "const": 1280 },
+        "frame_rate": { "const": 30 },
+        "sample_rate": { "const": 48000 }
+      }
+    },
+    "duration_ms": { "type": "integer", "minimum": 1000 },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/track" }
+    }
+  },
+  "$defs": {
+    "asset_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "version"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "clip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "timeline_start_ms", "timeline_end_ms"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "asset_ref": { "$ref": "#/$defs/asset_ref" },
+        "timeline_start_ms": { "type": "integer", "minimum": 0 },
+        "timeline_end_ms": { "type": "integer", "minimum": 1 },
+        "source_in_ms": { "type": "integer", "minimum": 0 },
+        "source_out_ms": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "gain_db": { "type": "number" },
+        "loop": { "type": "boolean" }
+      }
+    },
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "clips"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["primary_video", "caption", "voiceover", "music", "sfx"] },
+        "clips": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/clip" } }
+      }
+    }
+  },
+  "x-cookies-invariants": [
+    "Exactly one primary_video track is required and its clips must be contiguous from zero through duration_ms.",
+    "Media clips require asset_ref and a source range whose duration equals the timeline range.",
+    "Caption clips require text and do not contain asset_ref.",
+    "Track roles are unique; authorization, asset readiness, and output rights are checked outside JSON Schema."
+  ]
+}

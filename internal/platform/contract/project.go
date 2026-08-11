@@ -40,6 +40,23 @@ type ProjectContext struct {
 	ProjectContextVersion   int64          `json:"project_context_version"`
 }
 
+// ProjectBusinessContext is the human-readable identity used to prevent a
+// Brief from crossing into a different client's Project. It is deliberately
+// separate from ProjectContext: names are validation metadata and must never
+// become Provider lineage identifiers.
+type ProjectBusinessContext struct {
+	ProjectID   ProjectID                `json:"project_id"`
+	ProjectName string                   `json:"project_name"`
+	BrandID     *BrandID                 `json:"brand_id"`
+	BrandName   string                   `json:"brand_name"`
+	Products    []ProjectBusinessProduct `json:"products"`
+}
+
+type ProjectBusinessProduct struct {
+	ID   ProductID `json:"id"`
+	Name string    `json:"name"`
+}
+
 func (c ProjectContext) Validate() error {
 	if err := (ProjectRef{OrganizationID: c.OrganizationID, ProjectID: c.ProjectID, ProjectContextVersion: c.ProjectContextVersion}).Validate(); err != nil {
 		return err

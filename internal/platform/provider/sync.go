@@ -120,9 +120,10 @@ func (r VisionUnderstandRequest) Validate() error {
 }
 
 type VisionAdapterRequest struct {
-	ModelAlias string
-	Input      VisionUnderstandingInput
-	Sources    []VisionSource
+	OrganizationID contract.OrganizationID
+	ModelAlias     string
+	Input          VisionUnderstandingInput
+	Sources        []VisionSource
 }
 
 type VisionProviderAdapter interface {
@@ -212,12 +213,31 @@ type TextRouteInspector interface {
 	InspectTextRoute(context.Context, contract.OrganizationID, string) (TextRouteInspection, error)
 }
 
+type CapabilityRouteInspection struct {
+	ModelAlias      string `json:"model_alias"`
+	UpstreamModel   string `json:"upstream_model"`
+	RouteRevisionID string `json:"route_revision_id"`
+	Ready           bool   `json:"ready"`
+}
+
+type VisionRouteInspector interface {
+	InspectVisionRoute(context.Context, contract.OrganizationID, string) (CapabilityRouteInspection, error)
+}
+
 func (s Service) InspectTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (TextRouteInspection, error) {
 	inspector, ok := s.TextAdapter.(TextRouteInspector)
 	if !ok {
 		return TextRouteInspection{}, fmt.Errorf("text provider does not expose route inspection")
 	}
 	return inspector.InspectTextRoute(ctx, organizationID, modelAlias)
+}
+
+func (s Service) InspectVisionRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (CapabilityRouteInspection, error) {
+	inspector, ok := s.VisionAdapter.(VisionRouteInspector)
+	if !ok {
+		return CapabilityRouteInspection{}, fmt.Errorf("vision provider does not expose route inspection")
+	}
+	return inspector.InspectVisionRoute(ctx, organizationID, modelAlias)
 }
 
 func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) (SynchronousResponse, error) {
@@ -264,14 +284,21 @@ func (s Service) UnderstandVision(ctx context.Context, request VisionUnderstandR
 	for _, source := range sources {
 		defer source.Content.Close()
 	}
-	result, err := s.VisionAdapter.UnderstandVision(ctx, VisionAdapterRequest{ModelAlias: request.ModelAlias, Input: request.Input, Sources: sources})
+	result, err := s.VisionAdapter.UnderstandVision(ctx, VisionAdapterRequest{OrganizationID: request.Actor.OrganizationID, ModelAlias: request.ModelAlias, Input: request.Input, Sources: sources})
 	if err != nil {
 		return SynchronousResponse{}, err
 	}
 	if err := result.Validate(); err != nil {
 		return SynchronousResponse{}, fmt.Errorf("vision provider response: %w", err)
 	}
-	return SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}, nil
+	response := SynchronousResponse{ProviderCode: result.ProviderCode, ModelAlias: request.ModelAlias, ModelVersion: result.ModelVersion, Text: result.Text, StructuredOutput: result.StructuredOutput, Usage: result.Usage}
+	if result.RouteSnapshot != nil {
+		response.RouteRevisionID = result.RouteSnapshot.RouteRevisionID
+		response.ResponseMode = result.RouteSnapshot.TextResponseMode
+		response.APIMode = result.RouteSnapshot.TextAPIMode
+		response.Background = result.RouteSnapshot.Background
+	}
+	return response, nil
 }
 
 func validateVisionSources(requested []contract.ProjectAssetRef, sources []VisionSource) error {

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-p0-metrics-v1.schema.json",
+  "title": "Strategy P0 Metrics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "window", "funnel", "turns", "paths", "timings", "feedback", "interpretation"],
+  "properties": {
+    "contract_version": {"const": "strategy-p0-metrics/v1"},
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days", "from", "to"],
+      "properties": {
+        "days": {"type": "integer", "minimum": 1, "maximum": 90},
+        "from": {"type": "string", "format": "date-time"},
+        "to": {"type": "string", "format": "date-time"}
+      }
+    },
+    "funnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conversations_started", "conversations_engaged", "requirements_confirmed", "strategies_started", "packages_published", "creative_tasks_created"],
+      "properties": {
+        "conversations_started": {"$ref": "#/$defs/count"},
+        "conversations_engaged": {"$ref": "#/$defs/count"},
+        "requirements_confirmed": {"$ref": "#/$defs/count"},
+        "strategies_started": {"$ref": "#/$defs/count"},
+        "packages_published": {"$ref": "#/$defs/count"},
+        "creative_tasks_created": {"$ref": "#/$defs/count"}
+      }
+    },
+    "turns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["user_turns", "assistant_turns", "failed_agent_turns", "deep_turns", "web_search_turns", "document_ref_turns", "media_ref_turns", "research_ref_turns"],
+      "properties": {
+        "user_turns": {"$ref": "#/$defs/count"},
+        "assistant_turns": {"$ref": "#/$defs/count"},
+        "failed_agent_turns": {"$ref": "#/$defs/count"},
+        "deep_turns": {"$ref": "#/$defs/count"},
+        "web_search_turns": {"$ref": "#/$defs/count"},
+        "document_ref_turns": {"$ref": "#/$defs/count"},
+        "media_ref_turns": {"$ref": "#/$defs/count"},
+        "research_ref_turns": {"$ref": "#/$defs/count"}
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quick_intakes", "quick_ready_intakes", "full_intakes", "full_ready_intakes"],
+      "properties": {
+        "quick_intakes": {"$ref": "#/$defs/count"},
+        "quick_ready_intakes": {"$ref": "#/$defs/count"},
+        "full_intakes": {"$ref": "#/$defs/count"},
+        "full_ready_intakes": {"$ref": "#/$defs/count"}
+      }
+    },
+    "timings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement_samples", "median_seconds_to_requirement", "average_user_turns_to_requirement", "quick_task_samples", "median_seconds_to_quick_task", "published_package_samples", "median_seconds_to_published_package"],
+      "properties": {
+        "requirement_samples": {"$ref": "#/$defs/count"},
+        "median_seconds_to_requirement": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+        "average_user_turns_to_requirement": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+        "quick_task_samples": {"$ref": "#/$defs/count"},
+        "median_seconds_to_quick_task": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+        "published_package_samples": {"$ref": "#/$defs/count"},
+        "median_seconds_to_published_package": {"$ref": "#/$defs/nullableNonNegativeNumber"}
+      }
+    },
+    "feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["responses", "useful", "partly_useful", "not_useful", "useful_rate"],
+      "properties": {
+        "responses": {"$ref": "#/$defs/count"},
+        "useful": {"$ref": "#/$defs/count"},
+        "partly_useful": {"$ref": "#/$defs/count"},
+        "not_useful": {"$ref": "#/$defs/count"},
+        "useful_rate": {"anyOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}]}
+      }
+    },
+    "interpretation": {"const": "observed_activity_not_causal_effect"}
+  },
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0},
+    "nullableNonNegativeNumber": {"anyOf": [{"type": "number", "minimum": 0}, {"type": "null"}]}
+  }
+}

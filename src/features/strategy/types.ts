@@ -54,12 +54,94 @@ export type StrategyTaskBundle = {
   brief_draft: BriefDraft
 }
 
+export type MessageContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'document_ref'; document_id: string; expected_content_sha256: string }
+  | { type: 'asset_ref'; asset_kind: 'image' | 'video'; asset_id: string; asset_version: number }
+  | { type: 'research_ref'; research_artifact_id: string; expected_content_hash: string }
+
+export type MessageRequestedPolicy = {
+  reasoning_mode?: 'standard' | 'deep'
+  web_search?: 'disabled' | 'allowed'
+  // P0 intentionally accepts no server ids; the field is reserved for the
+  // separately reviewed Remote MCP phase.
+  mcp_server_ids?: []
+}
+
+export type MessageCreateV2 = {
+  contract_version: 'strategy-conversation-message-create/v2'
+  content: MessageContentBlock[]
+  requested_policy?: MessageRequestedPolicy
+}
+
+export type ConversationCapability = {
+  available: boolean
+  estimated_wait_seconds?: number
+  disclosure?: 'query_only'
+}
+
+export type ConversationCapabilities = {
+  contract_version: 'strategy-conversation-capabilities/v1'
+  multimodal_input: ConversationCapability
+  deep_reasoning: ConversationCapability
+  web_search: ConversationCapability
+  quick_viral_remake: ConversationCapability
+}
+
+export type StrategyP0Metrics = {
+  contract_version: 'strategy-p0-metrics/v1'
+  window: { days: number; from: string; to: string }
+  funnel: {
+    conversations_started: number
+    conversations_engaged: number
+    requirements_confirmed: number
+    strategies_started: number
+    packages_published: number
+    creative_tasks_created: number
+  }
+  turns: {
+    user_turns: number
+    assistant_turns: number
+    failed_agent_turns: number
+    deep_turns: number
+    web_search_turns: number
+    document_ref_turns: number
+    media_ref_turns: number
+    research_ref_turns: number
+  }
+  paths: {
+    quick_intakes: number
+    quick_ready_intakes: number
+    full_intakes: number
+    full_ready_intakes: number
+  }
+  timings: {
+    requirement_samples: number
+    median_seconds_to_requirement: number | null
+    average_user_turns_to_requirement: number | null
+    quick_task_samples: number
+    median_seconds_to_quick_task: number | null
+    published_package_samples: number
+    median_seconds_to_published_package: number | null
+  }
+  feedback: {
+    responses: number
+    useful: number
+    partly_useful: number
+    not_useful: number
+    useful_rate: number | null
+  }
+  interpretation: 'observed_activity_not_causal_effect'
+}
+
 export type Message = {
   id: string
   conversation_id: string
   role: 'user' | 'assistant' | 'system_event'
   content_type: 'text' | 'business_card' | 'error_notice'
   content: string
+  content_blocks?: MessageContentBlock[]
+  requested_policy?: MessageRequestedPolicy
   ai_generated: boolean
   agent_task_id?: string
   skill_run_ids?: string[]
@@ -81,6 +163,15 @@ export type BriefDocument = {
     category?: string
     selling_points?: string[]
     evidence?: string[]
+    candidates?: Array<{
+      name: string
+      category?: string
+      selling_points?: string[]
+      evidence?: string[]
+      mandatory_elements?: string[]
+      prohibited_claims?: string[]
+      source_refs?: Array<{ type: string; id: string; locator?: string }>
+    }>
     asset_refs?: Array<{ asset_id: string; version: number }>
   }
   industry?: string
@@ -110,18 +201,53 @@ export type BriefDocument = {
   reference_ids?: string[]
 }
 
+export type BriefProductCandidate = NonNullable<NonNullable<BriefDocument['product']>['candidates']>[number]
+
+export type BriefDocumentV3 = {
+  contract_version: 'strategy-brief-version/v3'
+  core: {
+    objective: string
+    deliverable_intent: string
+    product_or_subject: string
+    audience: string
+  }
+  facts: Array<{
+    id: string
+    kind: 'brand' | 'proposition' | 'industry' | 'region' | 'language' | 'channel' | 'selling_point' | 'budget' | 'schedule' | 'primary_kpi' | 'claim' | 'custom'
+    label?: string
+    value: string | number | boolean | string[]
+    source_refs: Array<{ type: string; id: string; locator?: string }>
+    confidence: 'low' | 'medium' | 'high'
+  }>
+  constraints: string[]
+  assumptions: Array<{ id: string; statement: string; reason?: string; source_refs: Array<{ type: string; id: string; locator?: string }> }>
+  unknowns: Array<{ id: string; question: string; impact?: string; required_for: 'creative_intake' | 'production' | 'optional' }>
+  conflicts: Array<{
+    id: string
+    field: string
+    candidates: Array<{ value: unknown; source_refs: Array<{ type: string; id: string; locator?: string }> }>
+    status: 'open' | 'resolved'
+  }>
+  asset_refs: Array<{ asset_id: string; version: number }>
+  reference_ids: string[]
+  extensions: Record<string, unknown>
+}
+
 export type BriefDraft = {
   id: string
   brief_id: string
   status: 'open' | 'confirmed' | 'superseded'
   version: number
+  base_brief_version?: number
   document: BriefDocument
   field_states: Record<string, FieldState>
-  completeness: {
-    ready: boolean
-    blockers: Array<{ field: string; reason: string }>
-    warnings: Array<{ field: string; reason: string }>
-  }
+  completeness: BriefReadiness
+}
+
+export type BriefReadiness = {
+  ready: boolean
+  blockers: Array<{ field: string; reason: string }>
+  warnings: Array<{ field: string; reason: string }>
 }
 
 export type BriefVersion = {
@@ -129,6 +255,7 @@ export type BriefVersion = {
   version: number
   content_hash: string
   snapshot: BriefDocument
+  full_strategy_readiness?: BriefReadiness
 }
 
 export type CreativeBusinessQuestion = {
@@ -408,6 +535,33 @@ export type CreativeIntakeV3 = {
   id: string
   status: CreativeIntakeStatus
   selected_route_id: string
+  missing_fields?: string[]
+  warnings?: string[]
+  input_identity_hash: string
+}
+
+export type CreativeIntakeV4 = {
+  contract_version: 'creative-intake/v4'
+  id: string
+  source: 'requirement_snapshot'
+  status: CreativeIntakeStatus
+  request: {
+    objective: string
+    audience: string
+    core_message: string
+    mandatory_elements: string[]
+    prohibited_claims: string[]
+    creative_routes: Array<{
+      route_id: string
+      source_asset_refs: Array<{ asset_id: string; version: number }>
+    }>
+    manual_viral_remake?: {
+      product_name: string
+      reference_video: { asset_id: string; version: number }
+    }
+  }
+  missing_fields: string[]
+  warnings: string[]
   input_identity_hash: string
 }
 
@@ -447,13 +601,38 @@ export type PlatformPlan = {
   constraints: string[]
 }
 
+export type CreativeChannelAdaptation = {
+  platform: string
+  role: string
+  adaptation: string
+  formats?: string[]
+}
+
+export type CreativeTerritory = {
+  name: string
+  audience_tension: string
+  core_idea: string
+  proof: string[]
+  channel_adaptations: CreativeChannelAdaptation[]
+}
+
+export type CreativeStrategy = {
+  objective: string
+  message_hierarchy: string[]
+  territories: CreativeTerritory[]
+  tone: string[]
+  mandatories: string[]
+  avoidances: string[]
+}
+
 export type StrategyDocument = {
-  contract_version: 'strategy-draft/v1' | 'strategy-draft/v2'
+  contract_version: 'strategy-draft/v1' | 'strategy-draft/v2' | 'strategy-draft/v3'
   objective: string
   audience: { primary: string; insights: string[] }
   proposition: string
   channel_strategy: Array<{ platform: string; role: string; formats: string[] }>
-  creative_recommendations: string[]
+  creative_recommendations?: string[]
+  creative_strategy?: CreativeStrategy
   constraints: string[]
   budget_and_cadence: { budget: string; cadence: string }
   experiment_matrix: Array<{ hypothesis: string; variable: string; metric: string }>
@@ -621,7 +800,8 @@ export type DeepReviewFinding = {
 
 export type DeepReviewAnalysis = {
   id: string
-  review_id: string
+  target_kind: 'review_candidate' | 'strategy_revision'
+  review_id?: string
   strategy_id: string
   candidate_revision: number
   candidate_content_hash: string
@@ -647,7 +827,7 @@ export type PackageVersion = {
   published_by?: string
   published_at?: string
   snapshot: {
-    contract_version?: 'strategy-package/v1' | 'strategy-package/v2'
+    contract_version?: 'strategy-package/v1' | 'strategy-package/v2' | 'strategy-package/v3'
     strategy_id: string
     strategy_revision: number
     strategy?: StrategyDocument
@@ -706,6 +886,7 @@ export type SkillDescriptor = {
 }
 
 export type KnowledgeDocument = {
+	contract_version: 'platform-document-parse/v2'
   id: string
   project_id: string
   title?: string
@@ -717,17 +898,206 @@ export type KnowledgeDocument = {
   content_sha256: string
   text_sha256: string
   chunk_count: number
-  status: 'parse_queued' | 'parsing' | 'ready' | 'parse_failed'
+	status: 'parse_queued' | 'parsing' | 'ready' | 'partial' | 'parse_failed'
+	parse_strategy: 'text_native' | 'tika_text' | 'hybrid' | 'visual'
+	parse_phase: 'queued' | 'scanning' | 'extracting' | 'quality_checking' | 'visual_conversion' | 'visual_fallback' | 'chunking' | 'ready' | 'partial' | 'failed'
+	parse_progress: number | null
+	progress_kind: 'milestone' | 'pages' | 'indeterminate'
+	processed_pages: number | null
+	total_pages: number | null
+	quality_score: number | null
+	quality_tier: 'unknown' | 'high' | 'medium' | 'low'
+	fallback_reason: string
+	preview_status: 'unavailable' | 'building' | 'ready' | 'partial' | 'failed'
+	page_quality_summary?: DocumentQualitySummary
+	heartbeat_at: string | null
+	vision_fallback_status: 'not_requested' | 'queued' | 'running' | 'partial' | 'succeeded' | 'failed'
+	vision_selected_pages: number[]
+	vision_completed_pages: number[]
+	vision_model_alias?: string
+	vision_route_revision_id?: string
+	vision_model_version?: string
+	vision_error_code?: string
+	vision_error_message?: string
+	vision_started_at?: string
+	vision_completed_at?: string
   parser_code?: string
   parser_version?: string
   parse_error_code?: string
   parse_error_message?: string
   parsed_at?: string
   created_at: string
+  updated_at: string
+}
+
+export type DocumentVisionFallbackCapability = {
+	contract_version: 'platform-document-vision-fallback/v1'
+	document_id: string
+	eligible: boolean
+	recommended: boolean
+	available: boolean
+	reason_code?: string
+	model_alias: string
+	route_revision_id?: string
+	conversion_required: boolean
+	converter_code?: string
+	converter_version?: string
+	max_pages_per_request: 24
+	requires_page_selection: boolean
+}
+
+export type DocumentQualitySummary = {
+	contract_version: 'document-quality-summary/v1'
+	scoring_kind: 'routing_signal_not_accuracy'
+	character_count: number
+	line_count: number
+	characters_per_page: number | null
+	replacement_character_rate: number
+	control_character_rate: number
+	meaningful_character_rate: number
+	short_line_rate: number
+	locator_coverage: number
+	metadata_image_signals: number
+	metadata_table_signals: number
+	metadata_image_signal_ratio?: number | null
+	metadata_table_signal_ratio?: number | null
+	empty_pages: number | null
+	empty_page_ratio?: number | null
+	reading_order_signal: string
+	shadow_fallback_recommended: boolean
+	signals: Array<{ code: string; severity: 'high' | 'medium' | 'low'; message: string; observed: number }>
+}
+
+export type DocumentPreview = Pick<KnowledgeDocument,
+	'parse_strategy' | 'parse_phase' | 'parse_progress' | 'progress_kind' |
+	'processed_pages' | 'total_pages' | 'quality_score' | 'quality_tier' | 'fallback_reason' |
+	'preview_status' | 'page_quality_summary' | 'heartbeat_at' | 'filename' | 'mime_type' | 'status' | 'chunk_count'
+> & {
+	contract_version: 'platform-document-preview/v1'
+	document_id: string
+	text: string
+	text_truncated: boolean
+	total_characters: number
+	original_available: boolean
+	chunks: Array<{
+		id: string
+		index: number
+		section: string
+		page_number?: number
+		start_line: number
+		end_line: number
+		snippet: string
+		locator: Record<string, unknown>
+	}>
+}
+
+export type TaskActivityStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_user'
+  | 'partially_completed'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'stalled'
+
+export type TaskActivity = {
+  contract_version: 'strategy-task-activity/v1'
+  id: string
+  kind: 'assistant' | 'quick_research' | 'deep_research' | 'document_parse' | 'brief_generation' | 'strategy_generation' | 'deep_review'
+  status: TaskActivityStatus
+  phase: string
+  round: null | { current: number; max: number }
+  progress: { kind: 'milestone' | 'pages' | 'indeterminate'; value: number | null; message: string }
+  summary: string
+  confirmed_conclusions: Array<{
+    id: string
+    text: string
+    status: 'tentative' | 'verified' | 'conflicting'
+    source_count: number
+  }>
+  source_scope: { project_id: string; workspace_id?: string; conversation_id?: string }
+  resource_ref: { type: string; id: string; version?: number }
+  execution_ref?: { type: string; id: string; version?: number }
+  actions: Array<'open' | 'cancel' | 'retry' | 'provide_input'>
+  cancel_requested: boolean
+  failure?: { code: string; message: string; retryable: boolean }
+  heartbeat_at: string | null
+  updated_at: string
+}
+
+export type TaskActivitySnapshot = {
+  contract_version: 'strategy-task-activity-snapshot/v1'
+  snapshot_id: string
+  captured_at: string
+  items: TaskActivity[]
+}
+
+export type ActivityConnection = 'connecting' | 'live' | 'reconnecting' | 'offline'
+
+export type KnowledgeJobControl = {
+  resource_type: 'knowledge_document' | 'knowledge_research_run'
+  resource_id: string
+  execution_id: string
+  execution_status: 'queued' | 'running' | 'cancelled'
+  cancel_requested: true
+  accepted_at: string
+}
+
+export type MediaEvidence = {
+  id: string
+  text: string
+  confidence: number
+  locator: {
+    kind: 'image' | 'video' | 'video_frame'
+    asset_ref: { project_id: string; asset_version: { asset_id: string; version: number } }
+    timestamp_ms?: number
+    frame_ref?: { project_id: string; asset_version: { asset_id: string; version: number } }
+  }
+}
+
+export type MediaUnderstandingArtifact = {
+  contract_version: 'platform-media-understanding-artifact/v1'
+  id: string
+  project_id: string
+  asset_ref: { project_id: string; asset_version: { asset_id: string; version: number } }
+  asset_kind: 'image' | 'video'
+  asset_sha256: string
+  profile: string
+  profile_version: string
+  input_identity_hash: string
+  status: 'running' | 'ready' | 'partial' | 'failed'
+  job_id?: string
+  summary?: string
+  visible_text: MediaEvidence[]
+  observations: MediaEvidence[]
+  inferences: MediaEvidence[]
+  risks: MediaEvidence[]
+  unknowns: MediaEvidence[]
+  keyframes: Array<{
+    timestamp_ms: number
+    frame_ref: { project_id: string; asset_version: { asset_id: string; version: number } }
+  }>
+  transcript: MediaEvidence[]
+  warnings: string[]
+  model_lineage: {
+    provider_code?: string
+    model_alias?: string
+    model_version?: string
+    route_revision_id?: string
+    prompt_version: string
+    schema_version: string
+  }
+  content_hash: string
+  error_code?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
 }
 
 export type AgentTask = {
   id: string
+  kind: string
   status: 'dispatch_pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   version: number
   error?: { code: string; message: string; retryable: boolean }
@@ -745,6 +1115,8 @@ export type AgentTaskInspection = {
 
 export type ResearchArtifact = {
   id: string
+  organization_id: string
+  project_id: string
   research_run_id: string
   source_type: string
   category: 'general' | 'audience' | 'competitor' | 'industry'
@@ -754,10 +1126,13 @@ export type ResearchArtifact = {
   citations: string[]
   sources: ResearchSource[]
   content_hash: string
+  created_at: string
 }
 
 export type ResearchSource = {
   id: string
+  organization_id: string
+  project_id: string
   research_run_id: string
   source_class: 'web' | 'toutiao' | 'douyin' | 'weather' | 'unknown'
   media_type: 'article' | 'video' | 'data' | 'unknown'
@@ -775,14 +1150,34 @@ export type ResearchSource = {
 }
 
 export type ResearchRun = {
+	contract_version: 'strategy-research-run/v2'
   id: string
+  organization_id: string
+  project_id: string
   mode: 'web'
+	run_mode: 'quick' | 'deep'
   category: ResearchArtifact['category']
+  purpose: 'deep_research' | 'conversation_web_search'
+  source_ref?: { type: 'strategy_message' | 'strategy_workspace'; id: string }
   query: string
   document_ids: string[]
   disclosed_fields: string[]
   disclosed_chunk_ids: string[]
-  status: 'running' | 'succeeded' | 'failed' | 'unavailable'
+	status: 'queued' | 'planning' | 'searching' | 'reading' | 'cross_checking' | 'drafting' | 'auditing' | 'completed' | 'partially_completed' | 'failed' | 'cancelled'
+	current_round: number
+	max_rounds: number
+	time_budget_seconds: number
+	token_budget: number
+	input_snapshot_ref: string
+	input_snapshot_hash: string
+	coverage: Record<string, boolean>
+	open_gaps: string[]
+	stop_reason: string
+	heartbeat_at: string | null
+	report_artifact_id: string | null
+  started_at?: string
+  completed_at?: string
+  confirmed_by: string
   confirmed_at: string
   created_at: string
   updated_at: string
@@ -793,6 +1188,45 @@ export type ResearchRun = {
   provider_response_id?: string
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number }
   artifacts: ResearchArtifact[]
+	iterations: ResearchIteration[]
+	findings: ResearchFinding[]
+}
+
+export type ResearchIteration = {
+	id: string
+	research_run_id: string
+	round: number
+	status: 'running' | 'completed' | 'failed' | 'cancelled'
+	objective: string
+	query: string
+	action_summary: string
+	source_ids: string[]
+	artifact_ids: string[]
+	finding_ids: string[]
+	coverage: Record<string, boolean>
+	open_gaps: string[]
+	usage?: ResearchRun['usage']
+	input_hash: string
+	output_hash: string
+	started_at: string
+	completed_at?: string
+}
+
+export type ResearchFinding = {
+	contract_version: 'strategy-research-finding/v1'
+	id: string
+	research_run_id?: string
+	claim: string
+	status: 'tentative' | 'verified' | 'conflicting' | 'invalid'
+	time_scope: string
+	confidence: 'low' | 'medium' | 'high'
+	supporting_source_ids: string[]
+	conflicting_source_ids: string[]
+	target: { artifact: 'brief' | 'strategy'; field_path: string }
+	implication: string
+	proposed_value?: unknown
+	round: number
+	content_hash: string
 }
 
 export type EvidenceReference = {
@@ -821,6 +1255,81 @@ export type ConversationBundle = {
 
 export type ConversationMemory = {
   summary: string
+  summary_kind: 'deterministic' | 'model'
+  summary_model_alias?: string
+  summary_prompt_version?: string
+  summary_content_hash: string
   open_questions: string[]
+  last_message_id: string
+  recent_window_start_message_id?: string
+  artifact_manifest: {
+    brief_ref: ProjectContextSnapshotRef
+    selected_source_ids: string[]
+  }
+  last_compacted_at?: string
   version: number
+}
+
+export type ProjectContextSnapshotRef = {
+  type: string
+  id: string
+  version?: number
+  content_hash: string
+}
+
+export type ProjectContextManifest = {
+  contract_version: 'strategy-project-context-manifest/v1'
+  workspace_ref: { type: 'strategy_workspace'; id: string; version: number }
+  project_context_ref: { type: 'project_context'; id: string; version: number }
+  stage: 'intake' | 'brief' | 'strategy' | 'review' | 'handoff'
+  brief_ref: ProjectContextSnapshotRef | null
+  strategy_ref: ProjectContextSnapshotRef | null
+  selected_source_refs: ProjectContextSnapshotRef[]
+  memory_version: number
+  generated_at: string
+}
+
+export type BriefPatchOperation = {
+  op: 'set'
+  field_path: string
+  value: unknown
+  source?: { type: string; id: string; locator?: string }
+  confidence?: string
+  confirmation?: string
+}
+
+export type ArtifactProposal = {
+  contract_version: 'strategy-artifact-proposal/v1' | 'strategy-research-adoption-proposal/v1'
+  id: string
+  organization_id: string
+  project_id: string
+  workspace_id: string
+  conversation_id: string
+  proposal_kind: 'assistant' | 'research'
+  target_type: 'brief_draft' | 'strategy_revision'
+  target_id: string
+  target_version: number
+  base_content_hash: string
+  operations: BriefPatchOperation[]
+  rationale: string
+  risk: 'low' | 'medium' | 'high'
+  status: 'proposed' | 'applied' | 'edited' | 'ignored' | 'stale'
+  source_message_id?: string
+	finding_ids?: string[]
+	source_research_run_id?: string
+	stale_reason: string
+	supersedes_proposal_id?: string
+  created_by: string
+  applied_by?: string
+  applied_at?: string
+  ignored_by?: string
+  ignored_at?: string
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export type ApplyArtifactProposalResult = {
+  proposal: ArtifactProposal
+  brief_draft: BriefDraft
 }

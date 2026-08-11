@@ -120,6 +120,50 @@ func TestServiceExecutesVideoJobFromSubmitThroughAssetIntake(t *testing.T) {
 	}
 }
 
+func TestProcessVideoJobPreservesConditioningAssetProvenance(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 31, 3, 0, 0, 0, time.UTC)
+	record := executableVideoJobRecord(now)
+	record.Job.ProviderStatus = contract.ProviderJobOutputsReady
+	record.Job.ExecutionStatus = contract.JobRunning
+	record.ProviderCode = "fake-video"
+	record.ModelVersion = "fake-video-v1"
+	record.VideoInput = VideoGenerationInput{
+		Prompt: "six-second evidence-grounded game pre-roll", DurationSeconds: 6,
+		AspectRatio: "9:16", Resolution: "720p", InputMode: VideoInputFirstLastFrame,
+		ConditioningAssets: []VideoConditioningAsset{
+			{Role: VideoConditioningFirstFrame, Reference: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "frame_first", Version: 2}}},
+			{Role: VideoConditioningLastFrame, Reference: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "frame_last", Version: 4}}},
+		},
+	}
+	record.Outputs = []OutputRecord{{
+		Ref: contract.ProviderOutputRef{
+			ProviderCode: "fake-video", ProviderJobID: record.Job.ID, OutputID: "output_1",
+			RetrievalExpiresAt: now.Add(time.Hour), DeclaredMIMEType: "video/mp4", DeclaredSizeBytes: 1024,
+		},
+		Status: OutputReady,
+	}}
+	store := &processingStore{record: record}
+	intake := &fakeIntakeClient{response: assets.GeneratedAssetIntakeResponse{
+		ID: "intake_video_1", ProviderJobID: record.Job.ID, OutputID: "output_1", Status: assets.GeneratedIntakeSucceeded,
+		ProjectAssetRef: &contract.ProjectAssetRef{ProjectID: record.Job.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: "asset_video_1", Version: 1}},
+	}}
+	service := Service{Store: store, Intake: intake, Now: func() time.Time { return now }}
+
+	if _, _, err := service.ProcessVideoJob(context.Background(), record.Job.OrganizationID, record.Job.ProjectID, record.Job.ID); err != nil {
+		t.Fatalf("ProcessVideoJob() error = %v", err)
+	}
+	want := []contract.AssetVersionRef{
+		{AssetID: "frame_first", Version: 2},
+		{AssetID: "frame_last", Version: 4},
+	}
+	if len(intake.request.Provenance.SourceAssetRefs) != len(want) ||
+		intake.request.Provenance.SourceAssetRefs[0] != want[0] ||
+		intake.request.Provenance.SourceAssetRefs[1] != want[1] {
+		t.Fatalf("video source provenance = %+v, want %+v", intake.request.Provenance.SourceAssetRefs, want)
+	}
+}
+
 func TestServiceHandsSynchronousSubmissionToAssetsWithoutPolling(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 4, 30, 0, 0, time.UTC)

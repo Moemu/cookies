@@ -14,6 +14,7 @@ import (
 type CreativePlanningContext struct {
 	ContractVersion   string                   `json:"contract_version"`
 	InputIdentityHash string                   `json:"input_identity_hash"`
+	GenerationID      string                   `json:"generation_id,omitempty"`
 	SelectedRoute     CreativeRouteSnapshot    `json:"selected_route"`
 	Objective         json.RawMessage          `json:"objective"`
 	Audience          []json.RawMessage        `json:"audience"`
@@ -23,6 +24,8 @@ type CreativePlanningContext struct {
 	Claims            []json.RawMessage        `json:"claims"`
 	Assets            []json.RawMessage        `json:"assets"`
 	Hypotheses        []json.RawMessage        `json:"hypotheses"`
+	BrandBrief        *BrandBriefDocument      `json:"brand_brief,omitempty"`
+	BrandBriefRef     *BrandBriefReference     `json:"brand_brief_ref,omitempty"`
 	TaskRefinements   *CreativeTaskRefinements `json:"task_refinements,omitempty"`
 }
 
@@ -76,6 +79,7 @@ type CreativeDirectionVersion struct {
 	BatchID           string                  `json:"batch_id"`
 	IntakeID          string                  `json:"intake_id"`
 	InputIdentityHash string                  `json:"input_identity_hash"`
+	BrandBriefRef     *BrandBriefReference    `json:"brand_brief_ref,omitempty"`
 	RouteID           string                  `json:"route_id"`
 	Concept           string                  `json:"concept"`
 	CreativeRationale string                  `json:"creative_rationale"`
@@ -102,6 +106,7 @@ type CreativeDirectionBatch struct {
 	ProjectID         contract.ProjectID           `json:"project_id"`
 	IntakeID          string                       `json:"intake_id"`
 	InputIdentityHash string                       `json:"input_identity_hash"`
+	BrandBriefRef     *BrandBriefReference         `json:"brand_brief_ref,omitempty"`
 	Status            CreativeDirectionBatchStatus `json:"status"`
 	Candidates        []CreativeDirectionVersion   `json:"candidates"`
 	Model             string                       `json:"model"`
@@ -130,8 +135,34 @@ type CreativeDirectionPlanner interface {
 
 type DirectionRepository interface {
 	CreateDirectionBatch(context.Context, CreativeDirectionBatch) (CreativeDirectionBatch, error)
+	GetDirectionBatch(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeDirectionBatch, error)
+	CompleteDirectionBatch(context.Context, CreativeDirectionBatch) (CreativeDirectionBatch, error)
+	FailDirectionBatch(context.Context, contract.OrganizationID, contract.ProjectID, string, string) error
 	GetDirection(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeDirectionVersion, error)
 	ConfirmDirection(context.Context, contract.OrganizationID, contract.ProjectID, string, string, time.Time) (CreativeDirectionVersion, error)
+}
+
+type DirectionBatchReader interface {
+	GetLatestDirectionBatch(context.Context, contract.OrganizationID, contract.ProjectID, string) (CreativeDirectionBatch, error)
+}
+
+func (s Service) GetLatestDirectionBatch(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	intakeID string,
+) (CreativeDirectionBatch, error) {
+	reader, ok := s.Directions.(DirectionBatchReader)
+	if s.Projects == nil || !ok {
+		return CreativeDirectionBatch{}, fmt.Errorf("creative direction history is unavailable")
+	}
+	if !actor.HasScope(ScopeRead) {
+		return CreativeDirectionBatch{}, fmt.Errorf("%s scope is required", ScopeRead)
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return CreativeDirectionBatch{}, err
+	}
+	return reader.GetLatestDirectionBatch(ctx, actor.OrganizationID, projectID, intakeID)
 }
 
 func (s Service) GenerateDirectionCandidates(
@@ -147,34 +178,82 @@ func (s Service) GenerateDirectionCandidates(
 	if !actor.HasScope(ScopeWrite) {
 		return CreativeDirectionBatch{}, fmt.Errorf("%s scope is required", ScopeWrite)
 	}
-	project, err := s.Projects.RequireActiveContext(ctx, actor, projectID)
+	prepared, err := s.prepareDirectionPlanning(ctx, actor, projectID, intakeID, request)
 	if err != nil {
 		return CreativeDirectionBatch{}, err
+	}
+	batchID, err := s.idGenerator()("directionbatch")
+	if err != nil {
+		return CreativeDirectionBatch{}, err
+	}
+	batch, err := s.planDirectionBatch(ctx, actor, prepared, batchID, s.now())
+	if err != nil {
+		return CreativeDirectionBatch{}, err
+	}
+	return s.Directions.CreateDirectionBatch(ctx, batch)
+}
+
+type preparedDirectionPlanning struct {
+	Project         contract.ProjectContext
+	Intake          CreativeIntake
+	Route           CreativeRouteSnapshot
+	BrandBriefRef   *BrandBriefReference
+	PlanningContext CreativePlanningContext
+	CandidateCount  int
+}
+
+func (s Service) prepareDirectionPlanning(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	intakeID string,
+	request GenerateDirectionRequest,
+) (preparedDirectionPlanning, error) {
+	project, err := s.Projects.RequireActiveContext(ctx, actor, projectID)
+	if err != nil {
+		return preparedDirectionPlanning{}, err
 	}
 	intake, err := s.Repository.GetIntake(ctx, actor.OrganizationID, projectID, intakeID)
 	if err != nil {
-		return CreativeDirectionBatch{}, err
+		return preparedDirectionPlanning{}, err
 	}
 	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.Status != IntakeReady ||
 		intake.InputIdentityHash == "" || intake.Request.SelectedRouteID == "" {
-		return CreativeDirectionBatch{}, fmt.Errorf("a ready v3 creative intake is required")
+		return preparedDirectionPlanning{}, fmt.Errorf("a ready v3 creative intake is required")
 	}
 	route, err := selectedPlanningRoute(intake.Request.CreativeRoutes, intake.Request.SelectedRouteID)
 	if err != nil {
-		return CreativeDirectionBatch{}, err
+		return preparedDirectionPlanning{}, err
 	}
 	if route.RouteType != CreativeRouteImageText && route.RouteType != CreativeRouteBrandVideo {
-		return CreativeDirectionBatch{}, fmt.Errorf("creative direction planning is not enabled for route %q", route.RouteType)
+		return preparedDirectionPlanning{}, fmt.Errorf("creative direction planning is not enabled for route %q", route.RouteType)
 	}
 	if request.CandidateCount == 0 {
 		request.CandidateCount = 3
 	}
 	if request.CandidateCount < 2 || request.CandidateCount > 4 {
-		return CreativeDirectionBatch{}, fmt.Errorf("candidate_count must be between 2 and 4")
+		return preparedDirectionPlanning{}, fmt.Errorf("candidate_count must be between 2 and 4")
 	}
-	planningContext, err := planningContextFromIntake(intake, route)
+	var brandBriefRef *BrandBriefReference
+	var planningContext CreativePlanningContext
+	if route.RouteType == CreativeRouteBrandVideo {
+		if s.BrandBriefs == nil {
+			return preparedDirectionPlanning{}, fmt.Errorf("brand Brief confirmation is unavailable")
+		}
+		review, reviewErr := s.BrandBriefs.GetBrandBrief(ctx, actor.OrganizationID, projectID, intakeID)
+		if reviewErr != nil {
+			return preparedDirectionPlanning{}, fmt.Errorf("confirm the brand Brief before generating directions: %w", reviewErr)
+		}
+		if review.Status != BrandBriefConfirmed || review.InputIdentityHash != intake.InputIdentityHash {
+			return preparedDirectionPlanning{}, fmt.Errorf("confirm the current brand Brief before generating directions")
+		}
+		brandBriefRef = &BrandBriefReference{Revision: review.Revision, ContentHash: review.ContentHash}
+		planningContext, err = planningContextFromBrandBrief(intake, route, review)
+	} else {
+		planningContext, err = planningContextFromIntake(intake, route)
+	}
 	if err != nil {
-		return CreativeDirectionBatch{}, err
+		return preparedDirectionPlanning{}, err
 	}
 	if overlay := intake.Request.TaskOverlayInput; overlay != nil {
 		planningContext.TaskRefinements = &CreativeTaskRefinements{
@@ -186,19 +265,26 @@ func (s Service) GenerateDirectionCandidates(
 			OpenQuestions:      append([]string{}, overlay.OpenQuestions...),
 		}
 	}
-	result, err := s.DirectionPlanner.Generate(ctx, actor, project, planningContext, request.CandidateCount)
+	return preparedDirectionPlanning{Project: project, Intake: intake, Route: route, BrandBriefRef: brandBriefRef, PlanningContext: planningContext, CandidateCount: request.CandidateCount}, nil
+}
+
+func (s Service) planDirectionBatch(
+	ctx context.Context,
+	actor contract.ActorContext,
+	prepared preparedDirectionPlanning,
+	batchID string,
+	createdAt time.Time,
+) (CreativeDirectionBatch, error) {
+	planningContext := prepared.PlanningContext
+	planningContext.GenerationID = batchID
+	result, err := s.DirectionPlanner.Generate(ctx, actor, prepared.Project, planningContext, prepared.CandidateCount)
 	if err != nil {
 		return CreativeDirectionBatch{}, fmt.Errorf("generate creative directions: %w", err)
 	}
 	if strings.TrimSpace(result.Model) == "" || strings.TrimSpace(result.PromptVersion) == "" ||
-		len(result.Candidates) != request.CandidateCount {
+		len(result.Candidates) != prepared.CandidateCount {
 		return CreativeDirectionBatch{}, fmt.Errorf("creative direction provider returned an invalid candidate batch")
 	}
-	batchID, err := s.idGenerator()("directionbatch")
-	if err != nil {
-		return CreativeDirectionBatch{}, err
-	}
-	now := s.now()
 	directions := make([]CreativeDirectionVersion, 0, len(result.Candidates))
 	seenConcepts := map[string]bool{}
 	for _, candidate := range result.Candidates {
@@ -219,8 +305,8 @@ func (s Service) GenerateDirectionCandidates(
 		}
 		value := CreativeDirectionVersion{
 			ContractVersion: CreativeDirectionVersionV1, ID: directionID,
-			OrganizationID: actor.OrganizationID, ProjectID: projectID, BatchID: batchID,
-			IntakeID: intakeID, InputIdentityHash: intake.InputIdentityHash, RouteID: route.RouteID,
+			OrganizationID: actor.OrganizationID, ProjectID: prepared.Project.ProjectID, BatchID: batchID,
+			IntakeID: prepared.Intake.ID, InputIdentityHash: prepared.Intake.InputIdentityHash, BrandBriefRef: prepared.BrandBriefRef, RouteID: prepared.Route.RouteID,
 			Concept: candidate.Concept, CreativeRationale: candidate.CreativeRationale,
 			MessagePlan:      append([]string{}, candidate.MessagePlan...),
 			ExecutionOutline: append([]string{}, candidate.ExecutionOutline...),
@@ -228,7 +314,7 @@ func (s Service) GenerateDirectionCandidates(
 			DirectionMode:    candidate.DirectionMode, EmotionalArc: candidate.EmotionalArc,
 			VisualGrammar: candidate.VisualGrammar, BrandMemoryDevice: candidate.BrandMemoryDevice,
 			HumanMoment: candidate.HumanMoment,
-			Status:      DirectionStatusCandidate, Version: 1, CreatedAt: now,
+			Status:      DirectionStatusCandidate, Version: 1, CreatedAt: createdAt,
 		}
 		contentHash, hashErr := contract.NewContentHash(value)
 		if hashErr != nil {
@@ -237,17 +323,17 @@ func (s Service) GenerateDirectionCandidates(
 		value.ContentHash = string(contentHash)
 		directions = append(directions, value)
 	}
-	if err := validateDirectionBatchQuality(planningContext, result.Candidates); err != nil {
+	if err := validateDirectionBatchQuality(prepared.PlanningContext, result.Candidates); err != nil {
 		return CreativeDirectionBatch{}, err
 	}
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1, ID: batchID,
-		OrganizationID: actor.OrganizationID, ProjectID: projectID, IntakeID: intakeID,
-		InputIdentityHash: intake.InputIdentityHash, Status: DirectionBatchReady, Candidates: directions,
+		OrganizationID: actor.OrganizationID, ProjectID: prepared.Project.ProjectID, IntakeID: prepared.Intake.ID,
+		InputIdentityHash: prepared.Intake.InputIdentityHash, BrandBriefRef: prepared.BrandBriefRef, Status: DirectionBatchReady, Candidates: directions,
 		Model: result.Model, PromptVersion: result.PromptVersion,
-		CreatedBy: actor.Principal.ID, CreatedAt: now,
+		CreatedBy: actor.Principal.ID, CreatedAt: createdAt,
 	}
-	return s.Directions.CreateDirectionBatch(ctx, batch)
+	return batch, nil
 }
 
 func validateDirectionBatchQuality(planningContext CreativePlanningContext, candidates []DirectionCandidate) error {
@@ -279,6 +365,9 @@ func validateDirectionBatchQuality(planningContext CreativePlanningContext, cand
 		if phrase := firstBrandPerformanceCue(candidate); phrase != "" {
 			return fmt.Errorf("brand-video direction contains performance CTA or unsupported production spec: %s", phrase)
 		}
+		if phrase := firstBrandChannelCue(candidate); phrase != "" {
+			return fmt.Errorf("brand-video master direction contains channel-specific language: %s", phrase)
+		}
 		if mode == "utility" || utilityLed {
 			utilityCount++
 		} else {
@@ -291,12 +380,38 @@ func validateDirectionBatchQuality(planningContext CreativePlanningContext, cand
 	return nil
 }
 
+func firstBrandChannelCue(candidate DirectionCandidate) string {
+	text := strings.ToLower(strings.Join(append(
+		[]string{
+			candidate.Concept,
+			candidate.CreativeRationale,
+			candidate.VisualGrammar,
+			candidate.HumanMoment,
+			candidate.EmotionalArc,
+			candidate.BrandMemoryDevice,
+		},
+		append(candidate.MessagePlan, candidate.ExecutionOutline...)...,
+	), "\n"))
+	for _, phrase := range []string{
+		"小红书", "抖音", "快手", "xiaohongshu", "douyin", "kuaishou",
+		"平台用户习惯", "平台观看习惯", "平台投放节奏", "渠道原生",
+	} {
+		if strings.Contains(text, phrase) {
+			return phrase
+		}
+	}
+	return ""
+}
+
 func firstBrandPerformanceCue(candidate DirectionCandidate) string {
 	text := strings.ToLower(strings.Join(append(
 		[]string{candidate.Concept, candidate.CreativeRationale, candidate.VisualGrammar, candidate.HumanMoment},
 		candidate.ExecutionOutline...,
 	), "\n"))
-	for _, phrase := range []string{"点击", "评论区", "私信", "扣1", "扣 1", "领取", "领完整", "立即咨询", "获取专属", "4k", "8k"} {
+	for _, phrase := range []string{
+		"点击了解", "点击查看", "点击购买", "点击咨询", "点击领取", "点击链接", "点击主页", "点击下单", "点击获取",
+		"评论区", "私信", "扣1", "扣 1", "领取福利", "领取优惠", "领取资料", "领完整", "立即咨询", "获取专属", "4k", "8k",
+	} {
 		if strings.Contains(text, phrase) {
 			return phrase
 		}
@@ -309,7 +424,10 @@ func isUtilityLedDirection(candidate DirectionCandidate) bool {
 		[]string{candidate.Concept, candidate.CreativeRationale},
 		candidate.MessagePlan...,
 	), "\n"))
-	for _, phrase := range []string{"指南", "清单", "三步", "步骤", "避坑", "工具", "教程", "科普", "方法论", "checklist", "how-to", "how to"} {
+	for _, phrase := range []string{
+		"指南", "清单", "三步", "步骤", "避坑", "教程", "科普", "方法论", "checklist", "how-to", "how to",
+		"判断工具", "核验工具", "评估工具", "选择工具", "决策工具", "工具箱",
+	} {
 		if strings.Contains(text, phrase) {
 			return true
 		}
@@ -501,4 +619,60 @@ func planningContextFromIntake(
 		Guardrails:       handoff.CreativeView.Guardrails, Claims: handoff.CreativeView.Claims,
 		Assets: handoff.CreativeView.Assets, Hypotheses: handoff.CreativeView.Hypotheses,
 	}, nil
+}
+
+func planningContextFromBrandBrief(
+	intake CreativeIntake,
+	route CreativeRouteSnapshot,
+	review BrandBriefReview,
+) (CreativePlanningContext, error) {
+	if review.Status != BrandBriefConfirmed || review.InputIdentityHash != intake.InputIdentityHash ||
+		review.ContentHash == "" || review.Revision < 1 {
+		return CreativePlanningContext{}, fmt.Errorf("a confirmed current brand Brief is required")
+	}
+	objective, err := json.Marshal(review.Document.Objective)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief objective: %w", err)
+	}
+	audiences, err := marshalBrandBriefItems(review.Document.AudienceSegments)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief audience: %w", err)
+	}
+	messages, err := marshalBrandBriefItems(review.Document.Communication.MessageHierarchy)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief message hierarchy: %w", err)
+	}
+	guardrails, err := marshalBrandBriefItems(review.Document.Guardrails)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief guardrails: %w", err)
+	}
+	claims, err := marshalBrandBriefItems(review.Document.Claims)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief claims: %w", err)
+	}
+	assets, err := marshalBrandBriefItems(review.Document.Assets)
+	if err != nil {
+		return CreativePlanningContext{}, fmt.Errorf("encode brand Brief assets: %w", err)
+	}
+	document := review.Document
+	return CreativePlanningContext{
+		ContractVersion: CreativePlanningContextV1, InputIdentityHash: intake.InputIdentityHash,
+		SelectedRoute: route, Objective: objective, Audience: audiences,
+		Proposition: document.Communication.SingleMindedProposition, MessageHierarchy: messages,
+		Guardrails: guardrails, Claims: claims, Assets: assets, Hypotheses: []json.RawMessage{},
+		BrandBrief:    &document,
+		BrandBriefRef: &BrandBriefReference{Revision: review.Revision, ContentHash: review.ContentHash},
+	}, nil
+}
+
+func marshalBrandBriefItems[T any](values []T) ([]json.RawMessage, error) {
+	result := make([]json.RawMessage, 0, len(values))
+	for _, value := range values {
+		payload, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, payload)
+	}
+	return result, nil
 }

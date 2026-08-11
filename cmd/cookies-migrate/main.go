@@ -18,7 +18,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// A fresh schema applies every module-owned migration and can legitimately
+	// exceed 30 seconds on local Docker/WSL storage. Keep one bounded context,
+	// but leave enough headroom for the documented fresh-database verification.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	db, err := database.Open(ctx, cfg.MySQL)
 	if err != nil {
@@ -36,14 +39,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("backfill Delivery approvals: %v", err)
 	}
+	executionBackfilled, err := delivery.BackfillLegacyExecutions(ctx, db)
+	if err != nil {
+		log.Fatalf("backfill Delivery executions: %v", err)
+	}
 	backfilled, err := strategy.BackfillCreativeHandoffs(ctx, db)
 	if err != nil {
 		log.Fatalf("backfill Strategy Creative Handoffs: %v", err)
 	}
 	log.Printf(
-		"migrations are current; backfilled %d DeliveryPlan canonical hashes, %d Delivery approvals, and %d Strategy Creative Handoffs",
+		"migrations are current; backfilled %d DeliveryPlan canonical hashes, %d Delivery approvals, %d Delivery executions, and %d Strategy Creative Handoffs",
 		deliveryBackfilled,
 		approvalBackfilled,
+		executionBackfilled,
 		backfilled,
 	)
 }

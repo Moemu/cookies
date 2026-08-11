@@ -157,6 +157,25 @@ func TestArkVideoAdapterEncodesConfirmedFirstAndLastFrames(t *testing.T) {
 	}
 }
 
+func TestEncodeArkVideoContentUsesAuthorizedAssetURIWithoutUploadingBytes(t *testing.T) {
+	t.Parallel()
+	first := contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "first", Version: 1}}
+	input := VideoGenerationInput{
+		Prompt: "authorized actor", DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p", InputMode: VideoInputReferenceImage,
+		ConditioningAssets: []VideoConditioningAsset{{Role: VideoConditioningReferenceImage, Reference: first, AuthorizedAsset: &VideoAuthorizedAssetReference{ProviderCode: arkVideoProviderCode, AssetID: "asset-20260222234430-mxpgh"}}},
+	}
+	content, err := encodeArkVideoContent(VideoGenerationRequest{
+		OrganizationID: "org_1", ProjectID: "project_1", ProviderJobID: "job_1", ModelAlias: "cookies.video.standard", IdempotencyKey: "authorized-asset-1",
+		Input: input, Sources: []VideoSource{{Role: VideoConditioningReferenceImage, Reference: first, AuthorizedAsset: input.ConditioningAssets[0].AuthorizedAsset}},
+	})
+	if err != nil {
+		t.Fatalf("encode authorized content: %v", err)
+	}
+	if len(content) != 2 || content[1].ImageURL == nil || content[1].ImageURL.URL != "asset://asset-20260222234430-mxpgh" || content[1].Role != "reference_image" {
+		t.Fatalf("authorized content = %#v", content)
+	}
+}
+
 func TestArkVideoHTTPErrorPreservesSafeUpstreamDetails(t *testing.T) {
 	t.Parallel()
 

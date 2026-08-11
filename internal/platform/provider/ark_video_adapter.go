@@ -204,6 +204,17 @@ func encodeArkVideoContent(request VideoGenerationRequest) ([]arkVideoContent, e
 	content := make([]arkVideoContent, 0, 1+len(request.Sources))
 	content = append(content, arkVideoContent{Type: "text", Text: request.Input.Prompt})
 	for index, source := range request.Sources {
+		if source.AuthorizedAsset != nil {
+			if source.AuthorizedAsset.ProviderCode != arkVideoProviderCode {
+				return nil, ExecutionError{JobError: contract.JobError{
+					Code: "MODEL_INPUT_UNSUPPORTED", Message: fmt.Sprintf("authorized video asset at index %d targets another provider", index), Retryable: false,
+				}}
+			}
+			content = append(content, arkVideoContent{
+				Type: "image_url", ImageURL: &arkVideoImageURL{URL: "asset://" + source.AuthorizedAsset.AssetID}, Role: string(source.Role),
+			})
+			continue
+		}
 		mimeType := strings.ToLower(strings.TrimSpace(source.MIMEType))
 		switch mimeType {
 		case "image/png", "image/jpeg", "image/webp":

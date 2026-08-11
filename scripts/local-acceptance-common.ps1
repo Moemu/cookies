@@ -140,7 +140,8 @@ function Initialize-LocalAcceptanceEnvironment {
     Set-LocalAcceptanceProcessSetting "COOKIES_PROVIDER_IMAGE_ADAPTER" "adapter_gateway"
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_REAL_PROVIDER_ENABLED" "true"
     Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_TEXT_MODEL_ALIAS" $script:SeedTextAlias
-    Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $script:SeedTextAlias
+    $deepReviewAlias = Get-LocalAcceptanceSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $script:SeedTextAlias
+    Set-LocalAcceptanceProcessSetting "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS" $deepReviewAlias
 }
 
 function Test-LocalHTTP {
@@ -194,10 +195,10 @@ GROUP BY r.model_alias, rr.upstream_model, r.status, c.connection_type, c.status
         $fields[0] -ne $script:SeedTextAlias -or
         $fields[1] -ne $script:SeedTextModel -or
         $fields[2] -ne "enabled" -or
-        $fields[3] -ne "adapter_gateway" -or
+        $fields[3] -notin @("adapter_gateway", "ark") -or
         $fields[4] -ne "enabled" -or
         [int]$fields[5] -lt 1) {
-        throw "The '$script:SeedTextAlias' route is not ready for $script:SeedTextModel. Re-import the shared Adapter provider configuration."
+        throw "The '$script:SeedTextAlias' route is not ready for $script:SeedTextModel. Configure an active Adapter or Ark provider connection."
     }
     Write-Host "Seed text route verified: $script:SeedTextAlias -> $script:SeedTextModel"
 }

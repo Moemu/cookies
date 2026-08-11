@@ -1,0 +1,44 @@
+{
+  "contract_version": "strategy-workspace-ux-metrics/v1",
+  "window": {
+    "days": 30,
+    "from": "2026-07-12T08:00:00Z",
+    "to": "2026-08-11T08:00:00Z"
+  },
+  "assistant": {
+    "commands": 18,
+    "missing_acknowledgements": 0,
+    "missing_meaningful_updates": 1,
+    "first_acknowledgement": {"samples": 18, "p50_ms": 84, "p95_ms": 190},
+    "first_meaningful_update": {"samples": 17, "p50_ms": 1380, "p95_ms": 6400}
+  },
+  "research": {
+    "runs": 4,
+    "completed": 2,
+    "partially_completed": 1,
+    "failed": 1,
+    "cancelled": 0,
+    "verified_findings": 11,
+    "conflicting_findings": 2,
+    "proposals_applied": 5,
+    "proposals_stale": 1,
+    "proposal_adoption_rate": 0.833
+  },
+  "documents": {
+    "parse_started": 7,
+    "ready": 5,
+    "partial": 2,
+    "failed": 0,
+    "vision_attempts": 1,
+    "vision_succeeded": 0,
+    "vision_partial": 1,
+    "vision_failed": 0,
+    "billable_vision_pages": 3,
+    "terminal_parse_latency": {"samples": 7, "p50_ms": 920, "p95_ms": 4100},
+    "vision_latency": {"samples": 1, "p50_ms": 8200, "p95_ms": 8200}
+  },
+  "recovery": {"stalled": 1, "retried": 1},
+  "interpretation": "observed_workflow_evidence_not_causal_effect",
+  "time_saving_measured": false,
+  "time_saving_reason": "human_correction_baseline_not_collected"
+}

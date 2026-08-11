@@ -184,23 +184,64 @@ type GameCandidateBatch struct {
 	CreatedAt               time.Time                   `json:"created_at"`
 }
 
+type GameEvidenceFrameAsset struct {
+	EvidenceMomentID        string                   `json:"evidence_moment_id"`
+	SourceStartMilliseconds int                      `json:"source_start_milliseconds"`
+	SourceEndMilliseconds   int                      `json:"source_end_milliseconds"`
+	RepresentativeFrameMS   int                      `json:"representative_frame_milliseconds"`
+	FrameAsset              contract.ProjectAssetRef `json:"frame_asset"`
+	ExtractionVersion       string                   `json:"extraction_version"`
+}
+
+type GameEvidenceAssetSet struct {
+	SourceVideo contract.AssetVersionRef `json:"source_video"`
+	Status      string                   `json:"status"`
+	Frames      []GameEvidenceFrameAsset `json:"frames"`
+	ContentHash string                   `json:"content_hash"`
+}
+
+type GameVideoConditioningAsset struct {
+	Role             string                   `json:"role"`
+	EvidenceMomentID string                   `json:"evidence_moment_id"`
+	Reference        contract.ProjectAssetRef `json:"reference"`
+}
+
+type GamePrerollGenerationSpec struct {
+	ContractVersion    string                       `json:"contract_version"`
+	TaskID             string                       `json:"task_id"`
+	DraftRevision      int64                        `json:"draft_revision"`
+	InputSnapshotHash  string                       `json:"input_snapshot_hash"`
+	CandidateBatchID   string                       `json:"candidate_batch_id"`
+	CandidateID        string                       `json:"candidate_id"`
+	PromptPackageHash  string                       `json:"prompt_package_hash"`
+	InputMode          string                       `json:"input_mode"`
+	ConditioningAssets []GameVideoConditioningAsset `json:"conditioning_assets"`
+	DurationSeconds    int                          `json:"duration_seconds"`
+	AspectRatio        string                       `json:"aspect_ratio"`
+	Resolution         string                       `json:"resolution"`
+	AudioPolicy        string                       `json:"audio_policy"`
+	Hash               string                       `json:"hash"`
+}
+
 type GamePrerollDraft struct {
-	ContractVersion      string                   `json:"contract_version"`
-	TaskID               string                   `json:"task_id"`
-	Revision             int64                    `json:"revision"`
-	SelectedRouteID      string                   `json:"selected_route_id"`
-	InputSnapshot        GamePrerollInputSnapshot `json:"input_snapshot"`
-	InputHash            string                   `json:"input_hash"`
-	Readiness            CreativeReadiness        `json:"readiness"`
-	ActiveCandidateBatch *GameCandidateBatch      `json:"active_candidate_batch,omitempty"`
-	Candidates           []GamePrerollCandidate   `json:"candidates"`
-	SelectedCandidateID  string                   `json:"selected_candidate_id,omitempty"`
-	CreatedAt            time.Time                `json:"created_at"`
-	UpdatedAt            time.Time                `json:"updated_at"`
+	ContractVersion      string                     `json:"contract_version"`
+	TaskID               string                     `json:"task_id"`
+	Revision             int64                      `json:"revision"`
+	SelectedRouteID      string                     `json:"selected_route_id"`
+	InputSnapshot        GamePrerollInputSnapshot   `json:"input_snapshot"`
+	InputHash            string                     `json:"input_hash"`
+	Readiness            CreativeReadiness          `json:"readiness"`
+	ActiveCandidateBatch *GameCandidateBatch        `json:"active_candidate_batch,omitempty"`
+	Candidates           []GamePrerollCandidate     `json:"candidates"`
+	SelectedCandidateID  string                     `json:"selected_candidate_id,omitempty"`
+	EvidenceAssets       *GameEvidenceAssetSet      `json:"evidence_assets,omitempty"`
+	GenerationSpec       *GamePrerollGenerationSpec `json:"generation_spec,omitempty"`
+	CreatedAt            time.Time                  `json:"created_at"`
+	UpdatedAt            time.Time                  `json:"updated_at"`
 }
 
 func (d GamePrerollDraft) Validate() error {
-	if d.ContractVersion != "creative-game-preroll-draft/v1" || strings.TrimSpace(d.TaskID) == "" ||
+	if (d.ContractVersion != "creative-game-preroll-draft/v1" && d.ContractVersion != "creative-game-preroll-draft/v2") || strings.TrimSpace(d.TaskID) == "" ||
 		d.Revision < 1 || d.SelectedRouteID != ManualGamePrerollRouteID || strings.TrimSpace(d.InputHash) == "" ||
 		!d.Readiness.PlanningReady || len(d.Candidates) != 3 || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
 		return fmt.Errorf("game preroll draft is incomplete")
@@ -275,7 +316,8 @@ func compileGamePrerollCandidateBatch(
 		}
 		if !containsGameHookMechanism(snapshot.AllowedMechanisms, outline.Mechanism) ||
 			containsGameHookMechanism(snapshot.ProhibitedMechanisms, outline.Mechanism) ||
-			!gameEvidenceIDsExist(snapshot.EvidenceMoments, outline.EvidenceMomentIDs) {
+			!gameEvidenceIDsExist(snapshot.EvidenceMoments, outline.EvidenceMomentIDs) ||
+			len(outline.Beats) < 2 || outline.Beats[0].EvidenceMomentID == outline.Beats[len(outline.Beats)-1].EvidenceMomentID {
 			continue
 		}
 		candidateID := fmt.Sprintf("%s_candidate_%d", batchID, len(candidates)+1)
@@ -358,11 +400,11 @@ func defaultGameCandidateOutlines(snapshot GamePrerollInputSnapshot) []gameCandi
 			Mechanism: GameHookWaveEscalation, ExecutionAngle: "next_wave_pressure",
 			PrimaryTestVariable: "wave_pressure", VariantHypothesis: "先给下一波压力再回看技能选择，能把选择和继续闯关自然连起来。",
 			HookLine:          "第 2 波马上开始，这个技能怎么选？",
-			EvidenceMomentIDs: []string{"wave_2", "skill_choice_2", "wave_2"},
+			EvidenceMomentIDs: []string{"wave_2", "skill_choice_2", "skill_choice_1"},
 			Beats: []GameStoryboardBeat{
 				{StartMilliseconds: 0, EndMilliseconds: 2000, Visual: "用真实第 2/10 波画面建立下一波压力。", Copy: "第 2 波马上开始", EvidenceMomentID: "wave_2"},
 				{StartMilliseconds: 2000, EndMilliseconds: 4000, Visual: "回切第二次真实技能三选一，突出可读选项。", Copy: "这个技能怎么选？", EvidenceMomentID: "skill_choice_2"},
-				{StartMilliseconds: 4000, EndMilliseconds: 6000, Visual: "回到第 2/10 波战斗画面并显示 CTA，不暗示未经验证的胜负。", Copy: cta, EvidenceMomentID: "wave_2"},
+				{StartMilliseconds: 4000, EndMilliseconds: 6000, Visual: "回扣第一次真实技能三选一并显示 CTA，不暗示未经验证的胜负。", Copy: cta, EvidenceMomentID: "skill_choice_1"},
 			},
 		},
 	}

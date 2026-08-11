@@ -66,11 +66,29 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 		taskStrategyVersion = intake.Request.TaskStrategy.StrategyVersion
 		taskStrategyHash = intake.Request.TaskStrategy.ExpectedContentHash
 	}
+	requirementBriefID := ""
+	requirementBriefVersion := int64(0)
+	requirementContentHash := ""
+	if intake.Request.RequirementSnapshotRef != nil {
+		requirementBriefID = intake.Request.RequirementSnapshotRef.BriefID
+		requirementBriefVersion = intake.Request.RequirementSnapshotRef.BriefVersion
+		requirementContentHash = intake.Request.RequirementSnapshotRef.ContentHash
+	}
+	businessCode := ""
+	businessVersion := ""
+	businessContentHash := ""
+	if intake.Request.BusinessCapabilityRef != nil {
+		businessCode = intake.Request.BusinessCapabilityRef.BusinessCode
+		businessVersion = intake.Request.BusinessCapabilityRef.Version
+		businessContentHash = intake.Request.BusinessCapabilityRef.ContentHash
+	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO creative_intakes (
 		id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 		request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash,
 		strategy_package_id, strategy_package_version, strategy_package_content_hash,
 		task_strategy_plan_id, task_strategy_version, task_strategy_content_hash,
+		requirement_brief_id, requirement_brief_version, requirement_content_hash,
+		business_code, business_version, business_content_hash,
 		contract_version, selected_route_id, handoff_contract_version,
 		handoff_content_hash, task_overlay_id, task_overlay_content_hash,
 		task_overlay_identity, input_identity_hash,
@@ -78,6 +96,8 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?,
 		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
 		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
+		NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
+		NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
 		?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
 		NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''),
 		?, ?, ?)`,
@@ -85,6 +105,8 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 		request, missing, warnings, intake.ConfirmedBy, intake.IdempotencyKey, intake.RequestHash,
 		strategyPackageID, strategyPackageVersion, strategyPackageHash,
 		taskStrategyPlanID, taskStrategyVersion, taskStrategyHash,
+		requirementBriefID, requirementBriefVersion, requirementContentHash,
+		businessCode, businessVersion, businessContentHash,
 		intakeContractVersion, selectedRouteID, handoffContractVersion,
 		handoffContentHash, taskOverlayID, taskOverlayHash, taskOverlayID,
 		intake.InputIdentityHash,
@@ -102,6 +124,15 @@ func (r MySQLRepository) CreateIntake(ctx context.Context, intake CreativeIntake
 			return CreativeIntake{}, false, ErrIdempotencyConflict
 		}
 		return existing, true, nil
+	}
+	if intake.InputIdentityHash != "" {
+		existing, identityErr := r.getIntakeByInputIdentity(ctx, intake.OrganizationID, intake.ProjectID, intake.Source, intake.InputIdentityHash)
+		if identityErr == nil {
+			return existing, true, nil
+		}
+		if !errors.Is(identityErr, sql.ErrNoRows) {
+			return CreativeIntake{}, false, identityErr
+		}
 	}
 	if intake.Source == IntakeSourceStrategyPackage && intake.Request.StrategyPackage != nil {
 		existing, packageErr := r.getIntakeByStrategyPackage(ctx, intake.OrganizationID, intake.ProjectID, intake.Request)
@@ -155,6 +186,44 @@ func (r MySQLRepository) GetIntake(ctx context.Context, organizationID contract.
 	return value, err
 }
 
+func (r MySQLRepository) UpdateIntakeReadiness(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	intakeID string,
+	expectedVersion int64,
+	status IntakeStatus,
+	missingFields []string,
+	confirmedBy string,
+	updatedAt time.Time,
+) (CreativeIntake, error) {
+	if r.DB == nil {
+		return CreativeIntake{}, fmt.Errorf("creative MySQL database is required")
+	}
+	missing, err := json.Marshal(missingFields)
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_intakes
+		SET status = ?, missing_fields = ?, confirmed_by = NULLIF(?, ''),
+			version = version + 1, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ?`,
+		status, missing, confirmedBy, updatedAt,
+		organizationID, projectID, intakeID, expectedVersion,
+	)
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return CreativeIntake{}, err
+	}
+	if affected != 1 {
+		return CreativeIntake{}, ErrVersionConflict
+	}
+	return r.GetIntake(ctx, organizationID, projectID, intakeID)
+}
+
 func (r MySQLRepository) CreateTask(ctx context.Context, task CreativeTask, draft ImageTextDraft) (CreativeTask, error) {
 	if r.DB == nil {
 		return CreativeTask{}, fmt.Errorf("creative MySQL database is required")
@@ -173,9 +242,9 @@ func (r MySQLRepository) CreateTask(ctx context.Context, task CreativeTask, draf
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO creative_tasks (
-		id, organization_id, project_id, intake_id, creative_format, channel, status, direction_payload, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
+		id, organization_id, project_id, intake_id, creative_format, channel, lineage_key, status, direction_payload, version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
+		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel, task.LineageKey, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return CreativeTask{}, err
 	}
@@ -212,11 +281,16 @@ func (r MySQLRepository) CreateVideoTask(ctx context.Context, task CreativeTask,
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO creative_tasks (
 		id, organization_id, project_id, intake_id, creative_format, channel, video_purpose, performance_mode,
-		status, direction_payload, version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		lineage_key, status, direction_payload, version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
 		task.ID, task.OrganizationID, task.ProjectID, task.IntakeID, task.Format, task.Channel,
-		task.VideoPurpose, task.PerformanceMode, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
+		task.VideoPurpose, task.PerformanceMode, task.LineageKey, task.Status, direction, task.Version, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
+		var mysqlError *mysqlDriver.MySQLError
+		if task.LineageKey != "" && errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
+			_ = tx.Rollback()
+			return scanTask(r.DB.QueryRowContext(ctx, creativeTaskSelect+` WHERE organization_id = ? AND project_id = ? AND lineage_key = ?`, task.OrganizationID, task.ProjectID, task.LineageKey))
+		}
 		return CreativeTask{}, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO creative_video_drafts
@@ -235,8 +309,11 @@ func (r MySQLRepository) ReviseVideoDraft(ctx context.Context, organizationID co
 	if r.DB == nil {
 		return VideoDraft{}, fmt.Errorf("creative MySQL database is required")
 	}
-	if draft.TaskID != taskID || draft.Revision != expectedRevision+1 || draft.Validate() != nil {
+	if draft.TaskID != taskID || draft.Revision != expectedRevision+1 {
 		return VideoDraft{}, fmt.Errorf("next creative video draft revision is invalid")
+	}
+	if err := draft.Validate(); err != nil {
+		return VideoDraft{}, fmt.Errorf("next creative video draft revision is invalid: %w", err)
 	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -333,7 +410,16 @@ func (r MySQLRepository) GetTaskDetail(ctx context.Context, organizationID contr
 	}
 	var draft ImageTextDraft
 	var videoDraft *VideoDraft
-	if task.Format == FormatVideo {
+	var aiNativeWorkspaceID string
+	if task.Format == FormatVideo && task.PerformanceMode == PerformanceModeAINativeAd {
+		if err = r.DB.QueryRowContext(ctx, `SELECT workspace_id FROM creative_ai_native_requirement_workspaces
+			WHERE organization_id=? AND project_id=? AND creative_task_id=?`, organizationID, projectID, taskID).Scan(&aiNativeWorkspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return TaskDetail{}, ErrNotFound
+			}
+			return TaskDetail{}, err
+		}
+	} else if task.Format == FormatVideo {
 		value, videoErr := r.getLatestVideoDraft(ctx, organizationID, taskID)
 		if videoErr != nil {
 			return TaskDetail{}, videoErr
@@ -358,7 +444,7 @@ func (r MySQLRepository) GetTaskDetail(ctx context.Context, organizationID contr
 		return TaskDetail{}, err
 	}
 	return TaskDetail{
-		Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft,
+		Task: task, Intake: intake, Draft: draft, VideoDraft: videoDraft, AINativeWorkspaceID: aiNativeWorkspaceID,
 		ProductionJobs: jobs, ShortDramaGenerationAttempts: attempts,
 		GamePrerollGenerationAttempts: gameAttempts,
 	}, nil
@@ -776,7 +862,7 @@ func (r MySQLRepository) ListPackages(ctx context.Context, organizationID contra
 const creativeIntakeSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, source_type, status,
 	request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash,
 	contract_version, COALESCE(input_identity_hash, ''), version, created_at, updated_at FROM creative_intakes`
-const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks`
+const creativeTaskSelect = `SELECT id, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks`
 const creativeVersionSelect = `SELECT id, organization_id, project_id, task_id, version, draft_version, status,
 	creative_format, snapshot_payload, video_snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
 const creativePackageSelect = `SELECT id, organization_id, project_id, creative_version_id, creative_format, content_hash, snapshot_payload, video_snapshot_payload, created_by, created_at FROM creative_packages`
@@ -833,7 +919,7 @@ func scanCreativePackage(row rowScanner) (CreativePackage, error) {
 func scanTask(row rowScanner) (CreativeTask, error) {
 	var value CreativeTask
 	var direction []byte
-	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.IntakeID, &value.Format, &value.Channel, &value.VideoPurpose, &value.PerformanceMode, &value.Status, &direction, &value.Version, &value.CreatedAt, &value.UpdatedAt)
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.IntakeID, &value.Format, &value.Channel, &value.VideoPurpose, &value.PerformanceMode, &value.LineageKey, &value.Status, &direction, &value.Version, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return CreativeTask{}, err
 	}
@@ -910,6 +996,10 @@ func (r MySQLRepository) getPackageByVersion(ctx context.Context, organizationID
 
 func (r MySQLRepository) getIntakeByIdempotency(ctx context.Context, intake CreativeIntake) (CreativeIntake, error) {
 	return scanIntake(r.DB.QueryRowContext(ctx, creativeIntakeSelect+` WHERE organization_id = ? AND project_id = ? AND principal_kind = ? AND principal_id = ? AND idempotency_key = ?`, intake.OrganizationID, intake.ProjectID, intake.Principal.Kind, intake.Principal.ID, intake.IdempotencyKey))
+}
+
+func (r MySQLRepository) getIntakeByInputIdentity(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, source IntakeSource, inputIdentityHash string) (CreativeIntake, error) {
+	return scanIntake(r.DB.QueryRowContext(ctx, creativeIntakeSelect+` WHERE organization_id = ? AND project_id = ? AND source_type = ? AND input_identity_hash = ?`, organizationID, projectID, source, inputIdentityHash))
 }
 
 func (r MySQLRepository) getIntakeByStrategyPackage(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, request CreateIntakeRequest) (CreativeIntake, error) {

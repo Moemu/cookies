@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-intake-v4.schema.json",
+  "title": "creative-intake/v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "id", "organization_id", "project_id", "source", "status", "request", "missing_fields", "warnings", "input_identity_hash", "version", "created_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "creative-intake/v4"},
+    "id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "source": {"const": "requirement_snapshot"},
+    "status": {"enum": ["needs_clarification", "ready", "superseded"]},
+    "request": {"type": "object"},
+    "missing_fields": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "confirmed_by": {"type": "string", "minLength": 1},
+    "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "version": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

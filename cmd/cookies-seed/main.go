@@ -69,6 +69,20 @@ func main() {
 	}
 	log.Printf("canonical investor demo is ready: project_id=%s assets=%d tasks=%d operations=%d",
 		result.ProjectID, len(result.AssetRefs), result.TaskCount, result.RecordCount)
+	guerlainProject, err := projectStore.EnsureCanonicalDemoProject(ctx, actor, project.CanonicalDemoProject{
+		ProjectID:   "project_guerlain_abeille_royale_acceptance",
+		BrandID:     "brand_guerlain",
+		ProductID:   "product_guerlain_abeille_royale",
+		Name:        "娇兰第三代黄金复原蜜品牌广告验收",
+		Industry:    project.IndustryEcommerce,
+		BrandName:   "法国娇兰",
+		ProductName: "娇兰第三代黄金复原蜜",
+	})
+	if err != nil {
+		log.Fatalf("seed Guerlain brand-video acceptance project: %v", err)
+	}
+	log.Printf("Guerlain brand-video acceptance project is ready: project_id=%s brand_id=%s product_id=%s",
+		guerlainProject.ID, *guerlainProject.PrimaryBrandID, "product_guerlain_abeille_royale")
 	if directory := os.Getenv("COOKIES_DEMO_DATA_DIR"); directory != "" {
 		blobs, err := buildBlobStore(cfg)
 		if err != nil {

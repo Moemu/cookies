@@ -289,6 +289,106 @@ type ProjectArtifactSummary struct {
 	AssetRef      *contract.ProjectAssetRef `json:"asset_ref,omitempty"`
 }
 
+type ArtifactKind string
+
+const (
+	ArtifactKindBrief    ArtifactKind = "brief"
+	ArtifactKindImage    ArtifactKind = "image"
+	ArtifactKindVideo    ArtifactKind = "video"
+	ArtifactKindDocument ArtifactKind = "document"
+)
+
+func (k ArtifactKind) Valid() bool {
+	switch k {
+	case ArtifactKindBrief, ArtifactKindImage, ArtifactKindVideo, ArtifactKindDocument:
+		return true
+	default:
+		return false
+	}
+}
+
+type ArtifactStatus string
+
+const (
+	ArtifactStatusDraft    ArtifactStatus = "draft"
+	ArtifactStatusReady    ArtifactStatus = "ready"
+	ArtifactStatusArchived ArtifactStatus = "archived"
+)
+
+func (s ArtifactStatus) Valid() bool {
+	switch s {
+	case ArtifactStatusDraft, ArtifactStatusReady, ArtifactStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+// ProjectArtifact is the Project-scoped, versioned text or media reference
+// used by the MVP workflow. Binary media remains owned by the assets service;
+// this entity records the business artifact and its source job reference.
+type ProjectArtifact struct {
+	ID             string                  `json:"id"`
+	OrganizationID contract.OrganizationID `json:"-"`
+	ProjectID      contract.ProjectID      `json:"project_id"`
+	Kind           ArtifactKind            `json:"kind"`
+	Status         ArtifactStatus          `json:"status"`
+	Content        string                  `json:"content"`
+	SourceJobID    string                  `json:"source_job_id,omitempty"`
+	Version        int64                   `json:"version"`
+	CreatedAt      time.Time               `json:"created_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
+}
+
+type CreateProjectArtifactRequest struct {
+	Kind        ArtifactKind   `json:"kind"`
+	Content     string         `json:"content"`
+	Status      ArtifactStatus `json:"status"`
+	SourceJobID string         `json:"source_job_id,omitempty"`
+}
+
+func (r CreateProjectArtifactRequest) Validate() error {
+	if !r.Kind.Valid() {
+		return fmt.Errorf("artifact kind is invalid")
+	}
+	if !r.Status.Valid() {
+		return fmt.Errorf("artifact status is invalid")
+	}
+	if strings.TrimSpace(r.Content) == "" || len(r.Content) > 1<<20 {
+		return fmt.Errorf("artifact content must be between 1 and 1048576 bytes")
+	}
+	if len(strings.TrimSpace(r.SourceJobID)) > 96 {
+		return fmt.Errorf("source_job_id must be at most 96 characters")
+	}
+	return nil
+}
+
+type UpdateProjectArtifactRequest struct {
+	Content         *string         `json:"content,omitempty"`
+	Status          *ArtifactStatus `json:"status,omitempty"`
+	SourceJobID     *string         `json:"source_job_id,omitempty"`
+	ExpectedVersion *int64          `json:"expected_version,omitempty"`
+}
+
+func (r UpdateProjectArtifactRequest) Validate() error {
+	if r.Content == nil && r.Status == nil && r.SourceJobID == nil {
+		return fmt.Errorf("at least one mutable artifact field is required")
+	}
+	if r.Content != nil && (strings.TrimSpace(*r.Content) == "" || len(*r.Content) > 1<<20) {
+		return fmt.Errorf("artifact content must be between 1 and 1048576 bytes")
+	}
+	if r.Status != nil && !r.Status.Valid() {
+		return fmt.Errorf("artifact status is invalid")
+	}
+	if r.SourceJobID != nil && len(strings.TrimSpace(*r.SourceJobID)) > 96 {
+		return fmt.Errorf("source_job_id must be at most 96 characters")
+	}
+	if r.ExpectedVersion != nil && *r.ExpectedVersion < 1 {
+		return fmt.Errorf("expected_version must be positive")
+	}
+	return nil
+}
+
 type Brand struct {
 	ID             contract.BrandID        `json:"id"`
 	OrganizationID contract.OrganizationID `json:"organization_id"`

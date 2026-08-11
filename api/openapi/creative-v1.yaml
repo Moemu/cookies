@@ -14,6 +14,779 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/creative/v1/projects/{project_id}/ai-native-ads/requirements:analyze:
+    post:
+      operationId: analyzeAINativeAdRequirement
+      summary: Resolve a Douyin Mall product link and produce one editable AI-native-ad requirement draft.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [product_link, supplemental_requirement]
+              properties:
+                product_link: {type: string, minLength: 1, maxLength: 16384}
+                supplemental_requirement: {type: string, maxLength: 2000}
+                channel: {type: string, enum: [douyin], default: douyin}
+                aspect_ratio: {type: string, enum: ['9:16'], default: '9:16'}
+                duration_seconds: {type: integer, minimum: 15, maximum: 30, default: 20}
+                language: {type: string, enum: [zh-CN], default: zh-CN}
+      responses:
+        '200':
+          description: Editable requirement-analysis draft; price and incomplete product facts remain explicitly unconfirmed.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '422': {description: The product link could not be resolved into usable commerce data.}
+  /api/creative/v1/projects/{project_id}/ai-native-ads:latest:
+    get:
+      operationId: getLatestAINativeAdWorkspace
+      summary: Restore the most recently updated AI-native-ad workspace for this project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Most recently updated AI-native-ad workspace, including its current stage.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}:
+    get:
+      operationId: getAINativeAdRequirementWorkspace
+      summary: Restore the latest persisted requirement revision and freeze state.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '200':
+          description: Current AI-native-ad requirement workspace.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/requirement:
+    patch:
+      operationId: updateAINativeAdRequirement
+      summary: Append one immutable user-edited requirement revision with optimistic concurrency protection.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, product_name, product_description, target_audiences, media, core_selling_points, supplemental_requirement, aspect_ratio, duration_seconds, language]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                product_name: {type: string, minLength: 1}
+                product_description: {type: string, minLength: 1}
+                target_audiences: {type: array, minItems: 1, maxItems: 10, items: {$ref: '#/components/schemas/AINativeEditableText'}}
+                media: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/AINativeRequirementMedia'}}
+                core_selling_points: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/AINativeEditableText'}}
+                supplemental_requirement: {type: string, maxLength: 2000}
+                aspect_ratio: {const: '9:16'}
+                duration_seconds: {type: integer, minimum: 15, maximum: 30}
+                language: {const: zh-CN}
+      responses:
+        '200':
+          description: Workspace pointing to the newly appended revision.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/requirement:confirm:
+    post:
+      operationId: confirmAINativeAdRequirement
+      summary: Freeze the current requirement revision before script generation.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Workspace frozen at the requested current revision.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/reopen-impact:
+    get:
+      operationId: getAINativeAdReopenImpact
+      summary: Preview the immutable revisions and downstream resources invalidated by reopening a stage.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+        - {name: stage, in: query, required: true, schema: {enum: [requirement, script, storyboard]}}
+      responses:
+        '200':
+          description: Reopen impact calculated from current server state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AINativeReopenImpact'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/script:generate:
+    post:
+      operationId: generateAINativeAdScript
+      summary: Start one durable generation operation that produces exactly one complete script draft.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AINativeScriptGenerationRequest'}
+      responses:
+        '202':
+          description: Script generation was persisted and queued.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/script:regenerate:
+    post:
+      operationId: regenerateAINativeAdScript
+      summary: Start a durable full-script regeneration and preserve the previous revision lineage.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AINativeScriptGenerationRequest'}
+      responses:
+        '202':
+          description: Full-script regeneration was persisted and queued.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/script:
+    patch:
+      operationId: updateAINativeAdScript
+      summary: Append a user-edited script revision without overwriting prior revisions.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, script]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                script: {$ref: '../contracts/creative-ai-native-script-v1.schema.json'}
+      responses:
+        '200':
+          description: Workspace pointing to the appended script revision.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/script:confirm:
+    post:
+      operationId: confirmAINativeAdScript
+      summary: Freeze the current complete script revision before storyboard generation.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, expected_workspace_version]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                expected_workspace_version: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Script revision is frozen.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/script:reopen:
+    post:
+      operationId: reopenAINativeAdScript
+      summary: Append a new editable script revision and invalidate its downstream state.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_workspace_version, invalidate_downstream]
+              properties:
+                expected_workspace_version: {type: integer, minimum: 1}
+                invalidate_downstream: {const: true}
+      responses:
+        '200':
+          description: Script reopened as a new draft revision.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/requirement:reopen:
+    post:
+      operationId: reopenAINativeAdRequirement
+      summary: Append a new editable requirement revision and atomically supersede current downstream state.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_workspace_version, invalidate_downstream]
+              properties:
+                expected_workspace_version: {type: integer, minimum: 1}
+                invalidate_downstream: {const: true}
+      responses:
+        '200':
+          description: Workspace restored to requirement draft with a new immutable revision.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard:generate:
+    post:
+      operationId: generateAINativeAdStoryboard
+      summary: Generate and durably prepare a complete storyboard from the confirmed script.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AINativeStoryboardGenerationRequest'}}}}
+      responses: {'202': {description: Storyboard and image preparation operation queued.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard:
+    patch:
+      operationId: updateAINativeAdStoryboard
+      summary: Append a complete user-edited storyboard revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, storyboard], properties: {expected_revision: {type: integer, minimum: 1}, storyboard: {$ref: '../contracts/creative-ai-native-storyboard-v1.schema.json'}}}}}
+      responses: {'200': {description: Storyboard revision appended.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard:confirm:
+    post:
+      operationId: confirmAINativeAdStoryboard
+      summary: Freeze a ready storyboard before video production.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, expected_workspace_version], properties: {expected_revision: {type: integer, minimum: 1}, expected_workspace_version: {type: integer, minimum: 1}}}}}}
+      responses: {'200': {description: Storyboard revision frozen.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard:reopen:
+    post:
+      operationId: reopenAINativeAdStoryboard
+      summary: Append an editable storyboard revision and invalidate downstream video state.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version, invalidate_downstream], properties: {expected_workspace_version: {type: integer, minimum: 1}, invalidate_downstream: {const: true}}}}}}
+      responses: {'200': {description: Storyboard reopened as a new draft revision.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard/assets/{asset_id}/regenerate:
+    post:
+      operationId: regenerateAINativeAdStoryboardAsset
+      summary: Regenerate one AI-created storyboard asset with optional user feedback.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}, {name: asset_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version], properties: {expected_workspace_version: {type: integer, minimum: 1}, feedback: {type: string, maxLength: 500}}}}}}
+      responses: {'202': {description: Selected storyboard asset regeneration queued.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/storyboard/voiceover:fit:
+    post:
+      operationId: suggestAINativeAdVoiceoverFit
+      summary: Generate a shorter voiceover suggestion for one failed speech Unit without mutating the storyboard.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version, speech_unit_id], properties: {expected_workspace_version: {type: integer, minimum: 1}, speech_unit_id: {type: string, minLength: 1}}}}}}
+      responses:
+        '200':
+          description: A duration-safe voiceover suggestion for explicit user review.
+          content: {application/json: {schema: {type: object, additionalProperties: false, required: [shot_id, original_voiceover, suggested_voiceover, duration_ms, max_characters, prompt_version, model_alias, model_version], properties: {shot_id: {type: string}, original_voiceover: {type: string}, suggested_voiceover: {type: string}, duration_ms: {type: integer}, max_characters: {type: integer}, prompt_version: {type: string}, model_alias: {type: string}, model_version: {type: string}, route_revision_id: {type: string}}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/production:start:
+    post:
+      operationId: startAINativeAdProduction
+      summary: Freeze the confirmed storyboard into recoverable video and speech generation units and queue production.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version], properties: {expected_workspace_version: {type: integer, minimum: 1}}}}}}
+      responses:
+        '202': {description: Production plan persisted and queued., content: {application/json: {schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/production/units/{unit_id}/retry:
+    post:
+      operationId: retryAINativeAdProductionUnit
+      summary: Append one Attempt to the failed Unit without re-running successful Units.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}, {name: unit_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version], properties: {expected_workspace_version: {type: integer, minimum: 1}}}}}}
+      responses: {'202': {description: Local Unit retry queued.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/production:cancel:
+    post:
+      operationId: cancelAINativeAdProduction
+      summary: Best-effort cancel the active production operation while preserving completed assets.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {name: workspace_id, in: path, required: true, schema: {type: string, minLength: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_workspace_version], properties: {expected_workspace_version: {type: integer, minimum: 1}}}}}}
+      responses: {'200': {description: Production marked cancelled.}, '409': {$ref: '#/components/responses/Conflict'}}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/game-preroll:prepare-evidence:
+    post:
+      operationId: prepareGamePrerollEvidence
+      summary: Extract the three verified gameplay evidence frames and persist their source-video lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200': {description: Workspace upgraded to game-preroll draft v2 with stable evidence image assets.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/brand-film:ensure-fixture:
+    post:
+      operationId: ensureBrandFilmFixtureWorkspace
+      summary: Idempotently materialize the Guerlain brand-film development fixture as a durable Creative workspace.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      responses:
+        '200': {description: Existing or newly materialized Phase 0 brand-film workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-workspaces/brand-film:
+    get:
+      operationId: getLatestBrandFilmWorkspace
+      summary: Restore the latest durable brand-film workspace in the Project.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200': {description: Latest task, intake, and versioned brand-film draft.}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:
+    get:
+      operationId: getBrandFilmWorkspace
+      summary: Read one brand-film workspace by CreativeTask ID.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+      responses:
+        '200': {description: Versioned Phase 0-2 brand-film workspace.}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:initialize-from-strategy:
+    post:
+      operationId: initializeStrategyBrandFilmWorkspace
+      summary: Idempotently upgrade a pre-workspace Strategy brand task using its confirmed Brief and direction lineage.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - {$ref: '#/components/parameters/TaskID'}
+      responses:
+        '200': {description: Existing or newly initialized Strategy brand-film workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:analyze-brief:
+    post:
+      operationId: analyzeBrandFilmBrief
+      summary: Append an editable, evidence-aware Brief analysis revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at brief_analysis_draft.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/brief:
+    patch:
+      operationId: updateBrandFilmBrief
+      summary: Persist a user-edited Brief as a new revision and invalidate every downstream artifact that depended on the prior confirmed revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, analysis]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                analysis: {type: object, description: BrandBriefAnalysisVersion; see creative-brand-film-draft-v1.schema.json.}
+      responses:
+        '200': {description: Workspace with a new editable Brief revision.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:confirm-brief:
+    post:
+      operationId: confirmBrandFilmBrief
+      summary: Confirm the current Brief after explicit product-front and brand-logo reference approval.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at brief_confirmed.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:generate-concepts:
+    post:
+      operationId: generateBrandFilmConcepts
+      summary: Generate two or three differentiated creative directions from the confirmed Brief.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at concept_selection; no direction is auto-selected.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:select-concept:
+    post:
+      operationId: selectBrandFilmConcept
+      summary: Human-select and freeze one creative direction.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, concept_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                concept_id: {type: string, minLength: 1}
+      responses:
+        '200': {description: Workspace at concept_confirmed.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/concepts:
+    patch:
+      operationId: updateBrandFilmConcepts
+      summary: Persist human edits as a new creative-direction set and invalidate downstream selection, plan, generation, quality, and delivery state.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, candidates]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                candidates:
+                  type: array
+                  minItems: 2
+                  maxItems: 3
+                  items: {type: object, description: BrandCreativeConcept; see creative-brand-film-draft-v1.schema.json.}
+      responses:
+        '200': {description: Workspace with a new editable concept-set revision and no selected direction.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:generate-plan:
+    post:
+      operationId: generateBrandFilmPlan
+      summary: Generate an editable 15-second script and shot table from the selected direction.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at production_plan_draft.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/plan:
+    patch:
+      operationId: updateBrandFilmPlan
+      summary: Persist a user-edited script and shot-table revision and invalidate downstream generation, quality, and delivery state.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, plan]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                plan: {type: object, description: BrandFilmPlanVersion; see creative-brand-film-draft-v1.schema.json.}
+      responses:
+        '200': {description: Workspace with a new editable film-plan revision.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:confirm-plan:
+    post:
+      operationId: confirmBrandFilmPlan
+      summary: Confirm the current script and shot table, completing Phase 0-2 without creating a video job.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace at production_plan_confirmed with GenerationUnit/PromptPackage/Attempt seam reserved.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:prepare-generation:
+    post:
+      operationId: prepareBrandFilmGeneration
+      summary: Aggregate the confirmed shot table into 4-15 second GenerationUnits and freeze one PromptPackage per unit.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, reference_asset]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                reference_asset: {$ref: '#/components/schemas/AssetVersionRef'}
+      responses:
+        '200': {description: Workspace at generation_ready with immutable prompt hashes.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:generate-unit:
+    post:
+      operationId: generateBrandFilmUnit
+      summary: Create one Seedance attempt for a GenerationUnit; optional feedback first freezes a new PromptPackage revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, unit_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                unit_id: {type: string, minLength: 1}
+                feedback: {type: string}
+                model_alias: {type: string, default: cookies.video.standard}
+      responses:
+        '202': {description: Provider job and workspace containing the durable queued Attempt.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:reconcile-unit:
+    post:
+      operationId: reconcileBrandFilmUnit
+      summary: Reconcile one Provider job into its durable GenerationAttempt and output AssetVersionRef.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unit_id, provider_job_id]
+              properties:
+                unit_id: {type: string, minLength: 1}
+                provider_job_id: {type: string, minLength: 1}
+      responses:
+        '200': {description: Reconciled workspace.}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:lock-unit:
+    post:
+      operationId: lockBrandFilmUnit
+      summary: Human-lock one succeeded Attempt as the selected unit output.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, unit_id, attempt_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                unit_id: {type: string, minLength: 1}
+                attempt_id: {type: string, minLength: 1}
+      responses:
+        '200': {description: Workspace with the unit selection locked.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:compose-preview:
+    post:
+      operationId: composeBrandFilmPreview
+      summary: Trim and concatenate all locked outputs into one 15-second preview asset.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace with a durable 15-second preview AssetVersionRef.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/audio:
+    get:
+      operationId: getBrandFilmAudioWorkspace
+      summary: Restore the current persisted Audio Blueprint, variant and immutable mix revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: Current BrandAudioWorkspace, content: {application/json: {schema: {$ref: '#/components/schemas/BrandAudioWorkspace'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:prepare-audio:
+    post:
+      operationId: prepareBrandFilmAudio
+      summary: Build or upgrade an explainable AI Audio Director blueprint and A/B mix variants from the confirmed FilmPlan and locked visual preview.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace containing the initial persisted BrandAudioWorkspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:materialize-audio-assets:
+    post:
+      operationId: materializeBrandFilmAudioAssets
+      summary: Persist deterministic Fixture WAV media and append an asset-backed AudioMixVersion.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace whose active clips reference stable project AssetVersions.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:render-audio-preview:
+    post:
+      operationId: renderBrandFilmAudioPreview
+      summary: Queue an FFmpeg render that combines the locked visual with the current immutable audio mix revision.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace containing the durable queued or existing AudioMixRenderJob.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:generate-voice:
+    post:
+      operationId: generateBrandFilmVoiceClip
+      summary: Generate or regenerate one narration clip through the configured MiniMax Speech route.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, clip_id, voice_alias]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                clip_id: {type: string, minLength: 1}
+                voice_alias: {type: string, minLength: 1}
+      responses:
+        '200': {description: Workspace with a new TTS-backed MixVersion, or an explicit Fixture fallback attempt.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/brand-film/speech-capability:
+    get:
+      operationId: probeBrandFilmSpeechCapability
+      summary: Perform a real MiniMax synthesis probe and report available logical voice aliases without exposing credentials.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Speech capability and fallback state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider, available, voice_aliases]
+                properties:
+                  provider: {type: string}
+                  model: {type: string}
+                  voice_id: {type: string}
+                  available: {type: boolean}
+                  error_code: {type: string}
+                  error_message: {type: string}
+                  voice_aliases: {type: array, items: {type: string}}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/audio/mix:
+    patch:
+      operationId: updateBrandFilmAudioMix
+      summary: Apply structured edits and append an immutable AudioMixVersion.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, operations]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                operations: {type: array, minItems: 1, items: {$ref: '#/components/schemas/BrandAudioMixOperation'}}
+      responses:
+        '200': {description: Workspace containing the appended AudioMixVersion.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film/audio:select-variant:
+    post:
+      operationId: selectBrandFilmAudioVariant
+      summary: Switch the active AI-directed audio treatment without changing the locked visual preview.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, variant_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                variant_id: {type: string, minLength: 1}
+      responses:
+        '200': {description: Workspace pointing to the selected variant and its independent active MixVersion.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:run-quality:
+    post:
+      operationId: runBrandFilmQuality
+      summary: Run deterministic unit and full-film technical, copy, audio, and brand readiness checks.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Workspace containing an auditable BrandFilmQualityRun and production metrics.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:confirm-quality:
+    post:
+      operationId: confirmBrandFilmQuality
+      summary: Record all required human review dimensions for the latest passing automatic quality run.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, manual_checks]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                manual_checks:
+                  type: array
+                  minItems: 4
+                  maxItems: 4
+                  items:
+                    type: object
+                    required: [code, passed]
+                    properties:
+                      code: {type: string, enum: [product_fidelity, brand_logo_packaging, subtitle_voiceover, sound_music]}
+                      passed: {type: boolean}
+                      note: {type: string}
+                      unit_id: {type: string}
+      responses:
+        '200': {description: Workspace ready for immutable versioning only when every manual check passes.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:finalize-version:
+    post:
+      operationId: finalizeBrandFilmVersion
+      summary: Freeze and deterministically check the human-confirmed brand film as a CreativeVersion.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '201': {description: Checked immutable CreativeVersion plus restored workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:approve-version:
+    post:
+      operationId: approveBrandFilmVersion
+      summary: Human-approve the checked immutable brand film version.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Approved CreativeVersion plus restored workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:deliver-version:
+    post:
+      operationId: deliverBrandFilmVersion
+      summary: Create the stable CreativePackage for an approved brand film version.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/BrandFilmRevision'}
+      responses:
+        '200': {description: Stable CreativePackage plus delivered workspace.}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/commerce-preroll/sources:
     get:
       operationId: listCommercePrerollSources
@@ -168,13 +941,86 @@ paths:
         '200': {description: Frozen CreativeIntake snapshot.}
         '403': {$ref: '#/components/responses/ProjectAccessDenied'}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/brand-brief:prepare:
+    post:
+      operationId: prepareCreativeBrandBrief
+      summary: Idempotently project a frozen brand-video CreativeIntake into a Creative-owned Brief review.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200':
+          description: Existing or newly prepared Brand Brief review.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/brand-brief:
+    get:
+      operationId: getCreativeBrandBrief
+      summary: Restore the persisted Brand Brief review for one frozen CreativeIntake.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      responses:
+        '200':
+          description: Persisted Brand Brief review.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateCreativeBrandBrief
+      summary: Update Creative-owned interpretation fields while preserving frozen Strategy facts and lineage.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, document]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                document: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json#/$defs/document'}
+      responses:
+        '200':
+          description: Updated draft and recalculated readiness.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/brand-brief:confirm:
+    post:
+      operationId: confirmCreativeBrandBrief
+      summary: Confirm a complete Brand Brief and freeze the exact revision/hash used by direction generation.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Confirmed Brand Brief review.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-brand-brief-review-v1.schema.json'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches:
     post:
       operationId: generateCreativeDirectionCandidates
-      summary: Generate schema-constrained CreativeDirection candidates from one frozen v3 Strategy intake.
+      summary: Start durable schema-constrained CreativeDirection generation from one frozen v3 Strategy intake.
       description: >-
-        This is the first LLM-authored creative step. Strategy facts and
-        guardrails are immutable inputs; provider failures are returned and
+        This is the first LLM-authored creative step. The endpoint persists a
+        generating batch and enqueues background work before returning, so the
+        status can be restored after navigation or refresh. Strategy facts and
+        guardrails are immutable inputs. Brand-video routes additionally require
+        a confirmed Brand Brief revision/hash; provider failures are persisted and
         never replaced with a fabricated fallback concept.
       parameters:
         - {$ref: '#/components/parameters/ProjectID'}
@@ -192,13 +1038,31 @@ paths:
               properties:
                 candidate_count: {type: integer, minimum: 2, maximum: 4, default: 3}
       responses:
-        '201':
-          description: Immutable candidate batch.
+        '202':
+          description: Persisted generating batch. Poll the latest-batch endpoint until ready or failed.
           content:
             application/json:
               schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}/direction-candidate-batches/latest:
+    get:
+      operationId: getLatestCreativeDirectionBatch
+      summary: Restore the latest persisted CreativeDirection batch for one frozen intake.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: intake_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Latest persisted candidate batch with authoritative lifecycle statuses.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/creative-direction-candidate-batch-v1.schema.json'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/creative/v1/projects/{project_id}/creative-directions/{direction_id}/confirm:
     post:
       operationId: confirmCreativeDirection
@@ -251,7 +1115,7 @@ paths:
   /api/creative/v1/projects/{project_id}/creative-intakes/{intake_id}:create-video-task:
     post:
       operationId: createCreativePreRollVideoTask
-      summary: Confirm an approved Strategy route and create one pre-roll video CreativeTask.
+      summary: Confirm an approved video route and create or resume one CreativeTask, including a BrandFilm workspace for brand_video.
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/IntakeID'}]
       requestBody:
         required: true
@@ -602,6 +1466,17 @@ paths:
       parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/VersionID'}]
       responses: {'200': {description: Stable CreativePackage created or replayed.}, '409': {$ref: '#/components/responses/Conflict'}}
 components:
+  requestBodies:
+    BrandFilmRevision:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_revision]
+            properties:
+              expected_revision: {type: integer, minimum: 1}
   securitySchemes:
     cookiesAuth: {type: http, scheme: bearer}
   parameters:
@@ -617,6 +1492,100 @@ components:
     RenderJobID: {name: render_job_id, in: path, required: true, schema: {type: string, minLength: 1}}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 255}}
   schemas:
+    BrandAudioWorkspace:
+      type: object
+      additionalProperties: false
+      required: [contract_version, plan_revision, master_duration_ms, visual_preview_asset_ref, blueprint_versions, variants, active_variant_id, active_mix_revision, generation_attempts, render_jobs, status, updated_at]
+      properties:
+        contract_version: {const: creative-brand-audio-workspace/v1}
+        plan_revision: {type: integer, minimum: 1}
+        master_duration_ms: {type: integer, minimum: 12000}
+        visual_preview_asset_ref: {type: object}
+        blueprint_versions: {type: array, minItems: 1, items: {type: object}}
+        variants: {type: array, minItems: 1, items: {type: object}}
+        active_variant_id: {type: string, minLength: 1}
+        active_mix_revision: {type: integer, minimum: 1}
+        mixed_preview_asset_ref: {type: object}
+        final_mixed_asset_ref: {type: object}
+        generation_attempts: {type: array, items: {type: object}}
+        render_jobs: {type: array, items: {type: object}}
+        status: {type: string, enum: [draft, assets_ready, tts_fallback, preview_queued, preview_rendering, preview_ready, preview_failed, confirmed]}
+        updated_at: {type: string, format: date-time}
+    BrandAudioMixOperation:
+      type: object
+      additionalProperties: false
+      required: [op]
+      properties:
+        op: {type: string, enum: [set_track_gain, set_track_muted, replace_clip_asset, set_clip_timing]}
+        track_id: {type: string, minLength: 1}
+        gain_db: {type: number, minimum: -96, maximum: 24}
+        muted: {type: boolean}
+        clip_id: {type: string, minLength: 1}
+        asset_ref: {type: object}
+        timeline_start_ms: {type: integer, minimum: 0}
+        timeline_end_ms: {type: integer, minimum: 1}
+    AINativeReopenImpact:
+      type: object
+      additionalProperties: false
+      required: [workspace_id, stage, expected_workspace_version, superseded_requirement_revisions, superseded_script_revisions, invalidated_resources]
+      properties:
+        workspace_id: {type: string, minLength: 1}
+        stage: {enum: [requirement, script, storyboard]}
+        expected_workspace_version: {type: integer, minimum: 1}
+        superseded_requirement_revisions: {type: array, items: {type: integer, minimum: 1}}
+        superseded_script_revisions: {type: array, items: {type: integer, minimum: 1}}
+        superseded_storyboard_revisions: {type: array, items: {type: integer, minimum: 1}}
+        invalidated_resources:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [type, id, status]
+            properties:
+              type: {type: string, minLength: 1}
+              id: {type: string, minLength: 1}
+              status: {type: string, minLength: 1}
+              version: {type: integer, minimum: 1}
+    AINativeScriptGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_workspace_version]
+      properties:
+        expected_workspace_version: {type: integer, minimum: 1}
+        regeneration_note: {type: string, maxLength: 2000}
+    AINativeStoryboardGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_workspace_version]
+      properties:
+        expected_workspace_version: {type: integer, minimum: 1}
+    AINativeEditableText:
+      type: object
+      additionalProperties: false
+      required: [id, text]
+      properties:
+        id: {type: string, minLength: 1}
+        text: {type: string, minLength: 1}
+    AINativeRequirementMedia:
+      type: object
+      additionalProperties: false
+      required: [id, url, role, source]
+      properties:
+        id: {type: string, minLength: 1}
+        url: {type: string, format: uri}
+        role: {type: string, minLength: 1}
+        source: {type: string, minLength: 1}
+        asset_ref:
+          type: object
+          additionalProperties: false
+          required: [asset_id, version]
+          properties:
+            asset_id: {type: string, minLength: 1}
+            version: {type: integer, minimum: 1}
+    CreativeIntakeCreateV4:
+      $ref: '../contracts/creative-intake-create-v4.schema.json'
+    CreativeIntakeV4:
+      $ref: '../contracts/creative-intake-v4.schema.json'
     PrepareImageSlotRequest:
       type: object
       additionalProperties: false
@@ -650,9 +1619,13 @@ components:
             contract_version: {const: creative-intake-create/v3}
             source: {const: strategy_package}
           required: [contract_version, strategy_package_ref, selected_route_id]
+        - properties:
+            contract_version: {const: creative-intake-create/v4}
+            source: {const: requirement_snapshot}
+          required: [contract_version, requirement_snapshot_ref, business_capability_ref, selected_route_id]
       properties:
-        contract_version: {const: creative-intake-create/v3}
-        source: {enum: [manual, strategy_package]}
+        contract_version: {enum: [creative-intake-create/v3, creative-intake-create/v4]}
+        source: {enum: [manual, strategy_package, requirement_snapshot]}
         strategy_package:
           type: object
           additionalProperties: false
@@ -670,6 +1643,22 @@ components:
           required: [overlay_id, content_hash]
           properties:
             overlay_id: {type: string, minLength: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        requirement_snapshot_ref:
+          type: object
+          additionalProperties: false
+          required: [brief_id, brief_version, content_hash]
+          properties:
+            brief_id: {type: string, minLength: 1}
+            brief_version: {type: integer, minimum: 1}
+            content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        business_capability_ref:
+          type: object
+          additionalProperties: false
+          required: [business_code, version, content_hash]
+          properties:
+            business_code: {const: viral_remake}
+            version: {type: string, minLength: 1}
             content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
         format: {enum: [image_text, video]}
         performance_mode: {enum: [viral_remake]}
@@ -728,14 +1717,15 @@ components:
     CreateVideoTaskRequest:
       type: object
       additionalProperties: false
-      required: [channel, source_video, concept, prompt, call_to_action, mandatory_elements, prohibited_claims, confirm_route]
+      required: [channel, mandatory_elements, prohibited_claims, confirm_route]
       anyOf:
         - required: [selected_route_id]
         - required: [route_index]
       properties:
         selected_route_id: {type: string, minLength: 1, maxLength: 128}
+        direction_id: {type: string, minLength: 1, maxLength: 96}
         route_index: {type: integer, minimum: 0}
-        channel: {enum: [douyin, kuaishou]}
+        channel: {enum: [xiaohongshu, douyin, kuaishou]}
         source_video: {$ref: '#/components/schemas/AssetVersionRef'}
         concept: {type: string, minLength: 1, maxLength: 500}
         prompt: {type: string, minLength: 1, maxLength: 4000}

@@ -14,11 +14,14 @@ import (
 )
 
 type Dispatcher struct {
-	DB      *sql.DB
-	Jobs    jobruntime.Store
-	NewID   func(string) (string, error)
-	Now     func() time.Time
-	RetryIn time.Duration
+	DB                  *sql.DB
+	Jobs                jobruntime.Store
+	ClaimOrganizationID contract.OrganizationID
+	ClaimProjectID      contract.ProjectID
+	ClaimAgentTaskID    string
+	NewID               func(string) (string, error)
+	Now                 func() time.Time
+	RetryIn             time.Duration
 }
 
 func (d Dispatcher) RunOnce(ctx context.Context) (bool, error) {
@@ -38,7 +41,12 @@ func (d Dispatcher) RunOnce(ctx context.Context) (bool, error) {
 			AND t.project_id = d.project_id AND t.id = d.agent_task_id
 			AND t.status = 'dispatch_pending'
 		WHERE d.status = 'pending' AND d.available_at <= ?
-		ORDER BY d.available_at, d.created_at LIMIT 1`, now).Scan(&taskID, &organizationID, &projectID)
+		  AND (? = '' OR d.organization_id = ?) AND (? = '' OR d.project_id = ?)
+		  AND (? = '' OR d.agent_task_id = ?)
+		ORDER BY d.available_at, d.created_at LIMIT 1`,
+		now, d.ClaimOrganizationID, d.ClaimOrganizationID, d.ClaimProjectID, d.ClaimProjectID,
+		d.ClaimAgentTaskID, d.ClaimAgentTaskID,
+	).Scan(&taskID, &organizationID, &projectID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

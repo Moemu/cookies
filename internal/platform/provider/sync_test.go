@@ -62,6 +62,18 @@ func TestServiceUnderstandsVisionUsingProjectAssetReferences(t *testing.T) {
 	}
 }
 
+func TestServiceInspectsVisionCapabilityWithoutInvokingModel(t *testing.T) {
+	t.Parallel()
+	service := Service{VisionAdapter: FakeSyncAdapter{}}
+	inspection, err := service.InspectVisionRoute(context.Background(), "org_1", "cookies.document.vision.standard")
+	if err != nil {
+		t.Fatalf("InspectVisionRoute() error = %v", err)
+	}
+	if !inspection.Ready || inspection.ModelAlias != "cookies.document.vision.standard" || inspection.UpstreamModel != fakeVisionModelVersion {
+		t.Fatalf("unexpected vision inspection: %#v", inspection)
+	}
+}
+
 func testProviderActor() contract.ActorContext {
 	return contract.ActorContext{
 		OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},

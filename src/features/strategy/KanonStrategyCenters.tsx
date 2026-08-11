@@ -236,7 +236,8 @@ function SourceList({ documents }: { documents: KnowledgeDocument[] }) {
 }
 
 function RunList({ runs }: { runs: ResearchRun[] }) {
-  return <div className="kanon-source-list"><div className="kanon-strategy-heading"><div><span className="section-label">RESEARCH RUNS</span><h2>研究任务</h2><p>外部研究由后端任务队列执行，并保留披露字段和产物。</p></div><span className="source-chip">{runs.length} 个</span></div>{runs.map(run => <article key={run.id}><RefreshCw className={run.status === 'running' ? 'spin' : ''} size={18}/><span><b>{run.query}</b><small>{researchCategoryLabel(run.category)} · {run.mode} · {run.artifacts.length} 个产物</small></span><em>{run.status}</em></article>)}{!runs.length ? <div className="panel-empty">当前 Project 尚未执行研究任务。</div> : null}</div>
+	const active = new Set<ResearchRun['status']>(['queued', 'planning', 'searching', 'reading', 'cross_checking', 'drafting', 'auditing'])
+	return <div className="kanon-source-list"><div className="kanon-strategy-heading"><div><span className="section-label">RESEARCH RUNS</span><h2>研究任务</h2><p>外部研究由后端任务队列执行，并保留披露字段和产物。</p></div><span className="source-chip">{runs.length} 个</span></div>{runs.map(run => <article key={run.id}><RefreshCw className={active.has(run.status) ? 'spin' : ''} size={18}/><span><b>{run.query}</b><small>{researchCategoryLabel(run.category)} · {run.run_mode} · 第 {run.current_round}/{run.max_rounds} 轮</small></span><em>{run.status}</em></article>)}{!runs.length ? <div className="panel-empty">当前 Project 尚未执行研究任务。</div> : null}</div>
 }
 
 function CenterState({ icon, title, detail, action }: { icon: ReactNode; title: string; detail?: string; action?: () => void }) {

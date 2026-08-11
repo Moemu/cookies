@@ -43,6 +43,55 @@ func TestTikaParserUsesBoundedRecursiveMetadataEndpoint(t *testing.T) {
 	}
 }
 
+func TestTikaParserFailsClosedForUnavailableEmptyAndOversizedResponses(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		maxBytes  int64
+		wantError string
+	}{
+		{name: "provider unavailable", status: http.StatusServiceUnavailable, body: `{"error":"unavailable"}`, maxBytes: 4096, wantError: "returned HTTP 503"},
+		{name: "empty text", status: http.StatusOK, body: `[{"X-TIKA:content":"   ","Content-Type":"application/pdf"}]`, maxBytes: 4096, wantError: "returned no valid text"},
+		{name: "oversized output", status: http.StatusOK, body: strings.Repeat("x", 65), maxBytes: 64, wantError: "exceeded the safety limit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.WriteHeader(test.status)
+				_, _ = writer.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			_, err := (TikaParser{
+				BaseURL: server.URL, Timeout: time.Second, MaxOutputBytes: test.maxBytes,
+			}).Parse(context.Background(), DocumentParseRequest{
+				Filename: "brief.pdf", MIMEType: "application/pdf", Size: 4, Source: strings.NewReader("test"),
+			})
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Parse() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestTikaParserTimeoutDoesNotClaimTheDocumentFailedPermanently(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		select {
+		case <-request.Context().Done():
+		case <-time.After(250 * time.Millisecond):
+		}
+	}))
+	defer server.Close()
+	_, err := (TikaParser{
+		BaseURL: server.URL, Timeout: 10 * time.Millisecond, MaxOutputBytes: 4096,
+	}).Parse(context.Background(), DocumentParseRequest{
+		Filename: "brief.pdf", MIMEType: "application/pdf", Size: 4, Source: strings.NewReader("test"),
+	})
+	if err == nil || err.Error() != "Tika parsing timed out" {
+		t.Fatalf("Parse() error = %v", err)
+	}
+}
+
 func TestChunksForParsedDocumentAreDeterministicAndBounded(t *testing.T) {
 	document := Document{
 		ID: "doc_1", OrganizationID: "org_1", ProjectID: "project_1",
@@ -67,5 +116,11 @@ func TestChunksForParsedDocumentAreDeterministicAndBounded(t *testing.T) {
 		if len([]rune(first[index].Text)) > 800 {
 			t.Fatalf("chunk %d has %d runes", index, len([]rune(first[index].Text)))
 		}
+	}
+	duplicate := document
+	duplicate.ID = "doc_2"
+	duplicateChunks := chunksForParsedDocument(duplicate, parsed)
+	if duplicateChunks[0].ID == first[0].ID {
+		t.Fatal("different document records must not share globally unique chunk IDs")
 	}
 }

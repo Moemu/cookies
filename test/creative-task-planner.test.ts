@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { createRouteRevisionChannelStrategy, findPublishedPackageForDraft } from '../src/features/strategy/creativeTaskPlanning'
+import { findPublishedPackageForDraft } from '../src/features/strategy/creativeTaskPlanning'
 import type { PackageVersion } from '../src/features/strategy/types'
 
 function strategyPackage(
@@ -43,14 +44,15 @@ test('creative task planning does not fall back to another strategy with the sam
   ), null)
 })
 
-test('route repair makes a concrete Xiaohongshu image strategy explicit without changing other channels', () => {
-  const result = createRouteRevisionChannelStrategy([{
-    platform: 'xiaohongshu', role: '搜索承接与种草获客', formats: ['精度检测实拍三联图'],
-  }, {
-    platform: 'douyin', role: '短视频触达', formats: ['short_video'],
-  }])
+test('creative handoff cannot write back to Strategy and keeps task overlay as its only editable seam', async () => {
+  const [plannerSource, workspaceSource] = await Promise.all([
+    readFile(new URL('../src/features/strategy/CreativeTaskPlanner.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/strategy/KanonStrategyWorkspace.tsx', import.meta.url), 'utf8'),
+  ])
 
-  assert.equal(result.changed, true)
-  assert.deepEqual(result.value[0].formats, ['精度检测实拍三联图', '小红书图文笔记'])
-  assert.deepEqual(result.value[1].formats, ['short_video'])
+  assert.doesNotMatch(plannerSource, /onCreateRouteRevision|createRouteRevisionChannelStrategy|patchStrategySection/)
+  assert.doesNotMatch(workspaceSource, /onCreateRouteRevision|patchStrategySection\(['"]channel_strategy['"]/)
+  assert.match(plannerSource, /patchCreativeTaskPlanAnswers/)
+  assert.match(plannerSource, /handoffCreativeTaskStrategy/)
+  assert.match(plannerSource, /返回策略查看修复建议/)
 })

@@ -1,0 +1,12 @@
+{
+  "fixture_version": "delivery-insights/v1/schema-mismatch",
+  "schema_version": "delivery-insights/v0",
+  "source": "mock",
+  "quality": "schema_mismatch",
+  "quality_reason": "fixture schema version is not the consumer contract version",
+  "observed_at": "2026-08-02T00:05:00Z",
+  "data_through": "2026-08-02T00:00:00Z",
+  "objects": [],
+  "metrics": [],
+  "evidence_refs": ["fixture://delivery-insights/schema-mismatch"]
+}
