@@ -388,8 +388,8 @@ func (r MySQLRepository) ConfirmExperience(ctx context.Context, input ConfirmExp
 			OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: input.ID,
 			ExpectedVersion: input.ExpectedVersion,
 			// 在用也能确认：那是「标了复审、重新看过、还成立」这条路径。
-			From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed},
-			To:              ExperienceConfirmed, ActorID: input.ActorID, Now: input.Now, AuditID: input.AuditID,
+			From: []ExperienceStatus{ExperiencePending, ExperienceConfirmed},
+			To:   ExperienceConfirmed, ActorID: input.ActorID, Now: input.Now, AuditID: input.AuditID,
 		})
 		if txErr != nil {
 			return txErr

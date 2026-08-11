@@ -169,6 +169,38 @@ paths:
                       $ref: '#/components/schemas/Experience'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/lookup:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Look up experience that applies to the round about to be produced
+      description: >
+        A read that uses POST: the lookup carries seven conditions, several of
+        them free text, which are unreadable and easy to mis-escape in a query
+        string. Only confirmed experience is searched; observed-only entries are
+        withheld unless include_observed is set.
+      operationId: lookupExperiences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceLookup'
+      responses:
+        '200':
+          description: Matching experience with the reason each one matched.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceMatch'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/experiences/{experience_id}:confirm:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -2013,7 +2045,11 @@ components:
         Lifecycle of an organisational conclusion. A new conclusion starts as
         pending; only confirmed is quotable downstream; retired is a logical
         delete that keeps the row readable.
-      enum: [pending, confirmed, needs_review, retired]
+
+        「待复审」曾经是第四个状态，现在不是了：它是 confirmed 上的一个标记
+        （见 Experience.needs_review）。做成状态会让一条被质疑的经验当场从所有
+        下游消失——「有人觉得该重新看一眼」和「这条结论不成立」是两回事。
+      enum: [pending, confirmed, retired]
     ReviseExperience:
       type: object
       additionalProperties: false
@@ -2057,7 +2093,7 @@ components:
       enum: [referenced, adopted, modified, rejected]
     Experience:
       type: object
-      required: [id, organization_id, project_id, lineage_id, revision, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, status_reason, status_changed_by, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, lineage_id, revision, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, verdict, verdict_label, note, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, needs_review, status_reason, status_changed_by, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -2073,8 +2109,16 @@ components:
         conclusion: { type: string }
         card_type:
           $ref: '#/components/schemas/InsightCardType'
+        # 以下四格是内嵌的 Judgement（见 schemas/Judgement），在 JSON 里平铺。
+        # 它们不落库，每次读出来由后端唯一收敛点从 confidence 重算。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string }
         recommended_action: { type: string }
         conditions:
           type: array
@@ -2090,6 +2134,11 @@ components:
           $ref: '#/components/schemas/ContentBasis'
         status:
           $ref: '#/components/schemas/ExperienceStatus'
+        needs_review:
+          type: boolean
+          description: >
+            「该看一眼了」。不影响这条经验能不能用，只是提醒有人重新看一遍依据。
+            被标记的经验仍然是 confirmed，仍然出现在下游默认引用集里。
         status_reason: { type: string }
         status_changed_by: { type: string }
         status_changed_at: { type: string, format: date-time }
@@ -2099,6 +2148,58 @@ components:
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ExperienceLookup:
+      type: object
+      additionalProperties: false
+      description: |
+        「查」的条件。每一格空着表示不限。
+
+        匹配规则：经验没声明某一格适用条件 = 该格不限，能对上任何取值；声明了就
+        必须对上。反过来做（没声明就不匹配）会把绝大多数经验筛没——大部分经验只
+        写了两三格适用条件，而查的人会把当前项目的几格全填上。
+
+        适用条件每一格在经验那边是一组值（一条经验可以同时适用于抖音和小红书），
+        所以命中的判断是「查的这个值在那一组里」，不是相等。
+      properties:
+        brand: { type: string, maxLength: 200 }
+        product: { type: string, maxLength: 200 }
+        channel: { type: string, maxLength: 200 }
+        ad_type:
+          type: string
+          maxLength: 200
+          description: 对应经验适用条件里的 creative_types。
+        objective: { type: string, maxLength: 200 }
+        audience: { type: string, maxLength: 200 }
+        feature:
+          type: string
+          maxLength: 200
+          description: >
+            按内容特征找：「有没有关于开场的经验」。子串匹配，结论、建议动作、
+            内容依据里的特征三处都搜——问的人想不起来那条经验当初写在了哪一栏。
+        include_observed:
+          type: boolean
+          description: >
+            打开之后连「👁 只是观察」的也给，默认关着。查的人多数时候要的是能照着
+            做的东西，混进观察会让他分不清哪条能信。给出来的观察项 default 为 false。
+        limit: { type: integer, minimum: 1, maximum: 100 }
+    ExperienceMatch:
+      type: object
+      required: [experience, matched, default]
+      properties:
+        experience:
+          $ref: '#/components/schemas/Experience'
+        matched:
+          type: array
+          description: >
+            凭哪几格推给你（品牌 / 产品 / 渠道 / 广告类型 / 目标 / 受众 / 内容特征）。
+            人看到一条经验被推荐，第一个问题就是「凭什么」。只列真正卡住的格子——
+            经验没声明、或者查的人没填的格子不算。
+          items: { type: string }
+        default:
+          type: boolean
+          description: >
+            能不能直接照着做。两道闸都过（状态在用 + 判定 ✅ 能归因）才是 true；
+            只是观察的经验即使被查出来，也标 false。
     ExperienceAudit:
       type: object
       required: [id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at]

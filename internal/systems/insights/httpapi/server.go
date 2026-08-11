@@ -27,6 +27,8 @@ type Application interface {
 	DropReportFinding(context.Context, contract.ActorContext, contract.ProjectID, string, int64, int, bool) (insights.InsightReport, error)
 	CreateExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64, insights.CreateExperienceRequest) (insights.Experience, error)
 	ListExperiences(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperienceStatus, int) ([]insights.Experience, error)
+	// 「查」模式：按这一轮的适用条件找以前什么有效。
+	LookupExperiences(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperienceLookup) ([]insights.ExperienceMatch, error)
 	ConfirmExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experience, error)
 	RejectExperience(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ExperienceTransitionRequest) (insights.Experience, error)
 	RequestExperienceReview(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ExperienceTransitionRequest) (insights.Experience, error)
@@ -116,6 +118,10 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports/{report_id}/submit", server.submitReview)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/findings", server.pinFinding)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experiences", server.listExperiences)
+	// 这一条要排在 {experience_action} 之前读：路径段是字面量 lookup，比通配符更具体，
+	// ServeMux 会挑它。少了它，lookup 会掉进 experienceAction 的动作分发里——那里认的是
+	// 「{id}:动词」这种带冒号的形状，lookup 不带冒号，最后落到 404。
+	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/experiences/lookup", server.lookupExperiences)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/experiences/{experience_action}", server.experienceAction)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experience-references", server.listProjectExperienceReferences)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experiences/{experience_id}/references", server.listExperienceReferences)
@@ -305,6 +311,23 @@ func (s *Server) reportAction(writer http.ResponseWriter, request *http.Request)
 func (s *Server) listExperiences(writer http.ResponseWriter, request *http.Request) {
 	status := insights.ExperienceStatus(request.URL.Query().Get("status"))
 	values, err := s.app.ListExperiences(request.Context(), mustActor(request), projectID(request), status, queryLimit(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+// lookupExperiences 回答「这一轮的条件下，以前什么有效」。
+//
+// 查询却用 POST：条件有七格，塞进 query string 既难读又容易漏转义，
+// 而且以后要按内容特征查长文本，URL 长度也不够。
+func (s *Server) lookupExperiences(writer http.ResponseWriter, request *http.Request) {
+	var body insights.ExperienceLookup
+	if !decode(writer, request, &body) {
+		return
+	}
+	values, err := s.app.LookupExperiences(request.Context(), mustActor(request), projectID(request), body)
 	if err != nil {
 		writeError(writer, request, err)
 		return

@@ -257,6 +257,27 @@ func TestListExperiencesForwardsStatusFilter(t *testing.T) {
 	}
 }
 
+// lookup 和「{id}:动词」共用同一段路径，很容易被通配符那条路由吃掉——
+// 吃掉的表现是 404，不是编译错，所以这里钉一下路由确实分得开、条件确实传到了服务层。
+func TestExperienceLookupIsNotSwallowedByTheActionRoute(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{experience: insights.Experience{ID: "experience_1"}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/experiences/lookup",
+		`{"channel":"抖音","include_observed":true}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if app.lookup.Channel != "抖音" || !app.lookup.IncludeObserved {
+		t.Fatalf("条件没传到服务层：%#v", app.lookup)
+	}
+	if !strings.Contains(response.Body.String(), `"matched"`) {
+		t.Fatalf("命中理由要一起给出去：%s", response.Body.String())
+	}
+}
+
 func TestInsightsHTTPExposesAssetAnalysisSurface(t *testing.T) {
 	t.Parallel()
 	app := &applicationStub{
@@ -409,6 +430,7 @@ type applicationStub struct {
 	report          insights.InsightReport
 	experience      insights.Experience
 	listedStatus    insights.ExperienceStatus
+	lookup          insights.ExperienceLookup
 	preLaunchFilter insights.PreLaunchFilter
 
 	asset          insights.Asset
@@ -488,6 +510,10 @@ func (s *applicationStub) CreateExperience(context.Context, contract.ActorContex
 func (s *applicationStub) ListExperiences(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, status insights.ExperienceStatus, _ int) ([]insights.Experience, error) {
 	s.listedStatus = status
 	return []insights.Experience{s.experience}, nil
+}
+func (s *applicationStub) LookupExperiences(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, lookup insights.ExperienceLookup) ([]insights.ExperienceMatch, error) {
+	s.lookup = lookup
+	return []insights.ExperienceMatch{{Experience: s.experience, Matched: []string{"渠道"}, Default: true}}, nil
 }
 func (s *applicationStub) ConfirmExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experience, error) {
 	return s.experience, nil
