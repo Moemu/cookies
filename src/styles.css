@@ -4013,3 +4013,25 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   .insight-asset-row { grid-template-columns: minmax(190px, 1.2fr) 96px 84px 96px 78px; }
   .insight-issue-row { grid-template-columns: minmax(210px, 1.2fr) 64px minmax(130px, 1fr) 92px; }
 }
+
+/* 素材洞察 · 三档共用件 */
+/* tone 名沿用 ok / warning / muted，颜色变量按本仓库实际名字取：--success、--line。 */
+.verdict-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 18px; }
+.verdict-ok { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.verdict-warning { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); }
+.verdict-muted { background: color-mix(in srgb, var(--muted) 12%, transparent); color: var(--muted); }
+.verdict-upgrade { margin-left: 4px; border: none; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-size: 12px; padding: 0; }
+.evidence-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 90vw); background: var(--surface); box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; z-index: 40; }
+.evidence-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.evidence-drawer-head h3 { margin: 0; font-size: 14px; }
+.evidence-drawer-head button { border: none; background: none; font-size: 20px; line-height: 1; cursor: pointer; }
+.evidence-drawer-body { padding: 16px; overflow: auto; }
+.how-computed { position: relative; display: inline-block; }
+.how-computed-trigger { border: none; background: none; color: var(--muted); text-decoration: underline dotted; cursor: pointer; font-size: 12px; padding: 0; }
+.how-computed-steps { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.not-enough-sample { padding: 24px; text-align: center; color: var(--muted); }
+.not-enough-sample-verdict { margin: 0 0 4px; font-size: 14px; }
+.not-enough-sample-note { margin: 0 0 12px; font-size: 12px; }
+.pin-finding { border: 1px solid var(--line); background: none; border-radius: 6px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.pin-finding:disabled { opacity: .45; cursor: default; }
+.pin-finding.pinned { border-color: var(--success); color: var(--success); }
