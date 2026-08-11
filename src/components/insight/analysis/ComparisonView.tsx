@@ -1,5 +1,5 @@
-import type { ApiMetricRates, ApiVariantVerdict } from '../../../data/api'
-import { PinFindingButton, VerdictBadge } from '../shared'
+import { api, type ApiFeatureDiff, type ApiMetricRates, type ApiVariantVerdict } from '../../../data/api'
+import { FindSimilarAction, PinFindingButton, VerdictBadge } from '../shared'
 import type { ViewProps } from './AnalysisPage'
 import { formatCount, formatMoney, formatRate, formatSigned } from './format'
 import { pinKey } from './usePinFinding'
@@ -38,7 +38,21 @@ export function hasInadmissibleFeature(features?: Array<{ admissible: boolean }>
   return (features ?? []).some(diff => !diff.admissible)
 }
 
-export function ComparisonView({ analysis, onPin, pinned, pinning }: ViewProps) {
+/**
+ * 拿去找相似素材的那组变量：只取可归因的，取试验侧的取值。
+ *
+ * 把模型推断的也塞进去的话，找回来的一批就是靠一个没人核过的推断凑起来的
+ * ——样本是厚了，但厚在一个猜出来的共同点上，重算一遍还是不能进结论。
+ */
+export function admissibleProbe(features?: ApiFeatureDiff[]): Record<string, string> {
+  const probe: Record<string, string> = {}
+  for (const diff of features ?? []) {
+    if (diff.admissible) probe[diff.key] = diff.variant
+  }
+  return probe
+}
+
+export function ComparisonView({ analysis, projectId, onPin, pinned, pinning }: ViewProps) {
   return <div className="insight-analysis-list" role="list" aria-label="素材对比">
     {(analysis.comparisons ?? []).map(item => {
       // 去重键取第一个改动的变量，和后端一致。一组对比改了不止一个变量时，
@@ -49,6 +63,7 @@ export function ComparisonView({ analysis, onPin, pinned, pinning }: ViewProps) 
         variable: (item.changed_features ?? [])[0]?.key,
       }
       const inadmissible = hasInadmissibleFeature(item.changed_features)
+      const probe = admissibleProbe(item.changed_features)
       return <article className="insight-analysis-card" role="listitem"
         key={`${item.baseline_asset_id}-${item.variant_asset_id}`}>
         <header>
@@ -82,6 +97,12 @@ export function ComparisonView({ analysis, onPin, pinned, pinning }: ViewProps) 
             pinned={pinned.has(pinKey(target))}
             reason={inadmissible ? '这条差异里有模型推断的变量，不能进结论。' : undefined}/>
         </footer>
+
+        {/* 只有 ❓ 给这个口子，而且得有至少一个可归因的变量可以拿去找
+            ——两边改的全是模型推断出来的东西时，按它去凑一批样本没有意义。 */}
+        {item.verdict === 'unclear' && Object.keys(probe).length
+          ? <FindSimilarAction probe={() => api.findSimilarAssets(projectId, { features: probe })}/>
+          : null}
       </article>
     })}
   </div>

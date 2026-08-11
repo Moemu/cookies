@@ -245,3 +245,16 @@ func TestRankRespectsLimit(t *testing.T) {
 		t.Errorf("limit 没生效，得到 %d 条", len(got))
 	}
 }
+
+func TestLabelOfKeyResolvesWithoutAssetType(t *testing.T) {
+	t.Parallel()
+
+	// 显式按变量找时没有类型上下文，探针那一行仍然要写中文名，
+	// 否则页面上会出现「按这些变量找的：target_duration=15」。
+	if got := labelOfKey("target_duration"); got == "target_duration" {
+		t.Error("已登记的变量键应该解析成中文名，不该退回原始键")
+	}
+	if got := labelOfKey("完全没登记过的键"); got != "完全没登记过的键" {
+		t.Errorf("没登记过的键要原样返回，得到 %q", got)
+	}
+}

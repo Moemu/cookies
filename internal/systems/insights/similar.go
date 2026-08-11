@@ -313,7 +313,7 @@ func (s Service) buildProbe(ctx context.Context, actor contract.ActorContext,
 		// 显式给的变量没有来源可言——它是一个问题，不是一条标注。标成人给的，
 		// 因为按它找回来的结果确实由人负责。
 		reasons = append(reasons, SimilarityReason{
-			Key: key, Label: key, Value: value, Source: SourceHuman,
+			Key: key, Label: labelOfKey(key), Value: value, Source: SourceHuman,
 		})
 	}
 	return probe, reasons, nil
@@ -327,6 +327,21 @@ func dropReason(reasons []SimilarityReason, key string) []SimilarityReason {
 		}
 	}
 	return kept
+}
+
+// labelOfKey 找出一个变量键在名词表里的中文名，不看素材类型。
+//
+// 显式按变量找的时候没有类型上下文（问的是「时长 15 秒的还有哪些」，不是
+// 「和这条素材像的」）。退回原始键名的话，探针那一行会写成
+// 「按这些变量找的：target_duration=15」——人看不出那是「目标时长」。
+// 六套特征体系里同名的键说的是同一件事，所以取第一个命中的即可。
+func labelOfKey(key string) string {
+	for _, schema := range AllFeatureSchemas() {
+		if field, found := schema.Field(key); found {
+			return field.Label
+		}
+	}
+	return key
 }
 
 func similarNote(items []SimilarAsset) string {

@@ -4172,6 +4172,14 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .form-hint { color: var(--muted); font-size: 9px; line-height: 1.6; }
 .form-error { margin-top: 12px; padding: 9px 12px; border: 1px solid oklch(.85 .09 25); background: oklch(.975 .02 25); color: var(--danger); font-size: 10px; line-height: 1.6; }
 
+/* ❓ 的升级通道就地展开（P3 Task 6）。左边那道竖线是为了让展开的一大块结果
+   看上去仍然属于上面那条结论，而不是一条新的独立发现。 */
+.find-similar { margin-top: 10px; padding-left: 11px; border-left: 2px solid var(--line); }
+.find-similar .text-button { height: auto; font-size: 10px; }
+.find-similar .similar-panel { margin-top: 8px; }
+.find-similar .form-error { margin-top: 6px; }
+.not-enough-sample .find-similar { display: inline-block; margin: 0 auto; text-align: left; border-left: 0; padding-left: 0; }
+
 @media (max-width: 1180px) {
   .assets-queues { grid-template-columns: minmax(0, 1fr); }
   .external-columns { grid-template-columns: minmax(0, 1fr); }

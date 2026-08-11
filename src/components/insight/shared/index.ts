@@ -1,5 +1,6 @@
 export { VerdictBadge } from './VerdictBadge'
 export { EvidenceDrawer } from './EvidenceDrawer'
+export { FindSimilarAction } from './FindSimilarAction'
 export { HowItWasComputed } from './HowItWasComputed'
 export { NotEnoughSample } from './NotEnoughSample'
 export { PinFindingButton } from './PinFindingButton'

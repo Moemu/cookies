@@ -33,6 +33,8 @@ export type AnalysisView = 'overview' | 'comparisons' | 'trends' | 'fatigue' | '
 /** 六个视图统一的入参。overview 另外要窗口，因为它自己还要取一次指标总览。 */
 export interface ViewProps {
   analysis: ApiPerformanceAnalysis
+  /** 素材对比和驱动因素上「找相似素材」要用。在这一层取，六个视图不各拿一次。 */
+  projectId: string
   window: { start: string; end: string }
   onPin: (target: PinTarget) => void
   pinned: ReadonlySet<string>
@@ -183,7 +185,7 @@ export function AnalysisPage({ state, view, onOpenExperiments }: {
           : rows === 0 && view !== 'overview' ? <NotEnoughSample judgement={{
             ...analysis.judgement, verdict: 'unclear', verdict_label: verdictLabel.unclear, note: emptyHints[view],
           }}/>
-          : renderView(view, { analysis, window, onPin: pin, pinned, pinning })}
+          : renderView(view, { analysis, projectId: currentProject.id, window, onPin: pin, pinned, pinning })}
       </section>
 
       <aside className="prelaunch-detail">

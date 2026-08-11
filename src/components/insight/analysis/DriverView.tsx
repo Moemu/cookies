@@ -1,4 +1,5 @@
-import { PinFindingButton, VerdictBadge } from '../shared'
+import { api } from '../../../data/api'
+import { FindSimilarAction, PinFindingButton, VerdictBadge } from '../shared'
 import type { ViewProps } from './AnalysisPage'
 import { formatCount, formatMoney, formatRate, formatSigned } from './format'
 import { pinKey } from './usePinFinding'
@@ -9,7 +10,7 @@ import { pinKey } from './usePinFinding'
  * 一起变化不等于起了作用：组内还有别的特征同向变化时，后端会把它标成
  * 「分不开」，这里照样把那几个特征原样列出来——人得看见分不开的是什么。
  */
-export function DriverView({ analysis, onPin, pinned, pinning }: ViewProps) {
+export function DriverView({ analysis, projectId, onPin, pinned, pinning }: ViewProps) {
   return <div className="insight-analysis-list" role="list" aria-label="驱动因素">
     {(analysis.drivers ?? []).map(item => {
       // 驱动因素说的是「某个特征取某个值时怎么样」，没有素材主语，所以只给变量。
@@ -46,6 +47,11 @@ export function DriverView({ analysis, onPin, pinned, pinning }: ViewProps) {
           {item.intervals_overlap ? ' 两组置信区间重叠，差异可能只是噪声' : ' 两组置信区间不重叠'}
           {' '}<PinFindingButton onPin={pinning ? undefined : () => onPin(target)} pinned={pinned.has(pinKey(target))}/>
         </footer>
+
+        {/* ❓ 才给这个口子。👁 和 ✅ 缺的不是样本：👁 缺的是「只改这一个变量」，
+            那得做实验，把更多素材拉进来只会让混杂更多一层。 */}
+        {item.verdict === 'unclear' ? <FindSimilarAction probe={() =>
+          api.findSimilarAssets(projectId, { features: { [item.key]: item.value } })}/> : null}
 
         {item.covarying_features?.length ? <div className="insight-analysis-diff">
           <span>这些特征跟着一起变了，分不开谁在起作用</span>
