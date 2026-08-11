@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // 复盘报告的四块内容（20 §118：报告中心不产生新分析，只组织已有分析）。
@@ -36,6 +37,24 @@ var ReportSectionLabels = map[ReportSectionKind]string{
 	SectionRecommendation:   "下一轮建议",
 }
 
+// FindingOrigin 区分这条发现是人自己挑的，还是系统按规则补的。
+//
+// 复盘页要把两者分开标（● 我记的 / ○ 系统补的）。混在一起显示，人就分不清
+// 哪几条是自己看着数据决定要留的——而那几条恰恰是这次复盘真正的产出。
+type FindingOrigin string
+
+const (
+	OriginSystem FindingOrigin = "system"
+	OriginPinned FindingOrigin = "pinned"
+)
+
+func (o FindingOrigin) Label() string {
+	if o == OriginPinned {
+		return "我记的"
+	}
+	return "系统补的"
+}
+
 // ReportFinding 是报告里的一条发现。它是**定格**的：投后分析是活的，今天打开和
 // 下周打开数字就不一样；报告要被引用、被追溯，必须固化，不能实时现算
 // （基线文档 §7.9.8「定格」）。
@@ -44,8 +63,22 @@ type ReportFinding struct {
 	Text string            `json:"text"`
 
 	// Strength 是投后分析已经算好的强度，报告不重算，只挑。
-	Strength   VariantVerdict  `json:"strength,omitempty"`
-	Confidence ConfidenceLevel `json:"confidence,omitempty"`
+	Strength VariantVerdict `json:"strength,omitempty"`
+
+	// Judgement 是这条发现的三档与理由，同样是定格的。内嵌而不是摆一个 confidence
+	// 字段：档位和它的理由必须一起搬运，分开搬迟早只搬一半。
+	Judgement
+
+	// Origin 说明这条是谁放进来的。
+	Origin FindingOrigin `json:"origin"`
+	// Dimension 是这条出自六个视图里的哪一个（comparisons / trends / fatigue /
+	// anomalies / drivers / overview），Variable 是它说的哪个变量。
+	// 这两个字段是复盘合并时的去重键——人记过的，系统不再补一条。
+	Dimension string `json:"dimension,omitempty"`
+	Variable  string `json:"variable,omitempty"`
+
+	PinnedBy string     `json:"pinned_by,omitempty"`
+	PinnedAt *time.Time `json:"pinned_at,omitempty"`
 
 	// SourceRef 指回算出这条的东西：素材 ID、实验 ID、经验 ID。可追溯（03 §MVP⑫）。
 	SourceRef string `json:"source_ref,omitempty"`
@@ -53,6 +86,26 @@ type ReportFinding struct {
 	// Dropped 为 true 表示人把它删掉了。**不物理删除**——留着才知道
 	// 「系统带了什么、人不要什么」，这是评估自动带入好不好用的唯一依据。
 	Dropped bool `json:"dropped"`
+}
+
+// normalize 补齐旧数据。digest 是 JSON 列，老行里没有 origin 也没有 verdict；
+// 补齐放在读取路径上而不是刷一次数据，是因为刷完还会有更旧的备份被恢复回来。
+func (f *ReportFinding) normalize() {
+	if f.Origin == "" {
+		f.Origin = OriginSystem
+	}
+	if f.Verdict == "" {
+		f.Judgement = judge(f.Confidence, f.Note)
+	}
+}
+
+// dedupeKey 是「哪个维度上的哪个变量」。两者都空表示这条是自由文本
+// （比如口径警告），不参与去重——拿空键去重会把它们全折成一条。
+func (f ReportFinding) dedupeKey() string {
+	if f.Dimension == "" && f.Variable == "" {
+		return ""
+	}
+	return f.Dimension + "\x00" + f.Variable
 }
 
 // strengthRank 决定发现在报告里的先后。报告是给人扫一眼的，最强的证据必须在最上面
@@ -100,6 +153,12 @@ func buildReportDigest(analysis PerformanceAnalysis, experiments []Experiment,
 	findings = append(findings, experimentFindings(experiments)...)
 	findings = append(findings, experienceFindings(experiences)...)
 	findings = append(findings, recommendationFindings(analysis, experiments)...)
+	// 这里出来的每一条都是系统按规则补的，统一在出口标一次 Origin，而不是让四个
+	// 子函数各自在二十来个构造点上抄一遍——抄漏一条，复盘页上它就会顶着「我记的」
+	// 出现，而人根本没记过它。
+	for index := range findings {
+		findings[index].normalize()
+	}
 	return findings
 }
 
@@ -139,12 +198,20 @@ func performanceFindings(analysis PerformanceAnalysis) []ReportFinding {
 			})
 			break
 		}
+		// 去重键要的是「这条说的哪个变量」。一组对比可能改了不止一个变量，取第一个
+		// ——多变量的对比本来就归不了因，它进报告只是作为观察，键撞不撞无所谓。
+		changedKey := ""
+		if len(item.ChangedFeatures) > 0 {
+			changedKey = item.ChangedFeatures[0].Key
+		}
 		findings = append(findings, ReportFinding{
-			Kind:       SectionAssetPerformance,
-			Text:       fmt.Sprintf("「%s」对比「%s」：%s", item.VariantTitle, item.BaselineTitle, item.Note),
-			Strength:   item.VariantVerdict,
-			Confidence: item.Confidence,
-			SourceRef:  item.VariantAssetID,
+			Kind:      SectionAssetPerformance,
+			Text:      fmt.Sprintf("「%s」对比「%s」：%s", item.VariantTitle, item.BaselineTitle, item.Note),
+			Strength:  item.VariantVerdict,
+			Judgement: item.Judgement,
+			Dimension: "comparisons",
+			Variable:  changedKey,
+			SourceRef: item.VariantAssetID,
 		})
 	}
 	if skipped := len(analysis.Comparisons) - len(kept); skipped > 0 {
@@ -163,10 +230,12 @@ func performanceFindings(analysis PerformanceAnalysis) []ReportFinding {
 			break
 		}
 		findings = append(findings, ReportFinding{
-			Kind:       SectionAssetPerformance,
-			Text:       fmt.Sprintf("特征「%s = %s」：%s", driver.Label, driver.Value, driver.Note),
-			Confidence: driver.Confidence,
-			SourceRef:  driver.Key,
+			Kind:      SectionAssetPerformance,
+			Text:      fmt.Sprintf("特征「%s = %s」：%s", driver.Label, driver.Value, driver.Note),
+			Judgement: driver.Judgement,
+			Dimension: "drivers",
+			Variable:  driver.Key,
+			SourceRef: driver.Key,
 		})
 	}
 
@@ -193,10 +262,12 @@ func performanceFindings(analysis PerformanceAnalysis) []ReportFinding {
 			text += fmt.Sprintf("（没能排除的其他解释：%s）", strings.Join(signal.AlternativeExplanations, "；"))
 		}
 		findings = append(findings, ReportFinding{
-			Kind:       SectionAssetPerformance,
-			Text:       text,
-			Confidence: signal.Confidence,
-			SourceRef:  signal.AssetID,
+			Kind:      SectionAssetPerformance,
+			Text:      text,
+			Judgement: signal.Judgement,
+			Dimension: "fatigue",
+			Variable:  signal.AssetID,
+			SourceRef: signal.AssetID,
 		})
 	}
 
@@ -211,6 +282,9 @@ func performanceFindings(analysis PerformanceAnalysis) []ReportFinding {
 		findings = append(findings, ReportFinding{
 			Kind:      SectionAssetPerformance,
 			Text:      fmt.Sprintf("%s 数据异常：%s", anomaly.Date, anomaly.Note),
+			Judgement: anomaly.Judgement,
+			Dimension: "anomalies",
+			Variable:  anomaly.AssetID,
 			SourceRef: anomaly.AssetID,
 		})
 	}
@@ -369,12 +443,14 @@ func directionFindings(comparisons []VariantComparison) []ReportFinding {
 		if only.lift != nil {
 			text += fmt.Sprintf("箭头指向的那一边，本轮点击率相对高 %.1f%%。", *only.lift*100)
 		}
+		// 建议不带维度：它不是六个视图里的某一条，而是好几条对比归并出来的。
+		// 给它一个维度会让复盘去重把它和它的来源折成一条。
 		findings = append(findings, ReportFinding{
-			Kind:       SectionRecommendation,
-			Text:       text,
-			Strength:   VerdictAttributable,
-			Confidence: only.confidence,
-			SourceRef:  only.sourceRef,
+			Kind:      SectionRecommendation,
+			Text:      text,
+			Strength:  VerdictAttributable,
+			Judgement: judge(only.confidence, ""),
+			SourceRef: only.sourceRef,
 		})
 	}
 	return findings
@@ -404,10 +480,10 @@ func experienceFindings(experiences []Experience) []ReportFinding {
 			continue
 		}
 		findings = append(findings, ReportFinding{
-			Kind:       SectionExperience,
-			Text:       fmt.Sprintf("已有经验（%s）：%s", cardTypeText(experience.CardType), experience.Conclusion),
-			Confidence: experience.Confidence,
-			SourceRef:  experience.ID,
+			Kind:      SectionExperience,
+			Text:      fmt.Sprintf("已有经验（%s）：%s", cardTypeText(experience.CardType), experience.Conclusion),
+			Judgement: judge(experience.Confidence, ""),
+			SourceRef: experience.ID,
 		})
 	}
 	if len(findings) == 0 {

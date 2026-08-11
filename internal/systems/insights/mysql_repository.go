@@ -507,6 +507,12 @@ func scanInsightReport(row rowScanner) (InsightReport, error) {
 	if value.Digest == nil {
 		value.Digest = make([]ReportFinding, 0)
 	}
+	// 补齐旧行：digest 是 JSON 列，早先存进去的发现只有 confidence，没有 verdict
+	// 也没有 origin。补在这里而不是各个查询方法里，是因为报告只有这一条读取路径，
+	// 漏一个入口就会有一半的发现在复盘页上没有档位。
+	for index := range value.Digest {
+		value.Digest[index].normalize()
+	}
 	value.WindowStart = windowStart.String
 	value.WindowEnd = windowEnd.String
 	if confirmedBy.Valid {
