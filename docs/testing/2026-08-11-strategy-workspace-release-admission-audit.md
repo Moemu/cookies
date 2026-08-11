@@ -27,7 +27,7 @@ The latest complete local gate run passed:
 
 - `go test ./...`;
 - `go vet ./...`;
-- `npm test`: 205/205 passed;
+- `npm test`: 208/208 passed after the Kanon integration merge;
 - `npm run contract:check`;
 - `npm run build`;
 - `git diff --check`;
@@ -39,7 +39,7 @@ After the authorized `origin/main` synchronization, local merge commit `3503b515
 
 The merge also exposed a Windows checkout hazard in content-addressed migrations: an untracked LF migration restored through Git stash became CRLF and correctly tripped the prior raw-byte checksum. SQL files are now declared `eol=lf`, while the migrator defines one canonical LF identity, recognizes only the exact legacy raw LF/CRLF variants, atomically upgrades a matching historical checksum, and still rejects statement, BOM, lone-CR or other byte changes. Unit tests, a real-MySQL historical-CRLF upgrade test, the full migration command and the 20-test browser run all passed after this hardening.
 
-The production entry is now 423.79 kB minified / 124.05 kB gzip, down from 1,121.12 kB / 316.64 kB (62.2% and 60.8% smaller respectively). `Pages` is 112.92 kB, the Strategy workspace route is 214.07 kB, and the 309.94 kB specialized-page bundle is lazy. `npm run build` enforces 450 kB entry, 140 kB `Pages`, 230 kB Strategy-route and 500 kB per-chunk ceilings, so this boundary can no longer regress as an advisory-only warning. These are transfer/build measurements, not a human time-saving claim.
+The production entry is now 423.93 kB minified / 124.08 kB gzip, down from 1,121.12 kB / 316.64 kB (62.2% and 60.8% smaller respectively). `Pages` is 112.92 kB, the Strategy workspace route is 214.07 kB, and the 288.78 kB specialized-page bundle is lazy. `npm run build` enforces 450 kB entry, 140 kB `Pages`, 230 kB Strategy-route and 500 kB per-chunk ceilings, so this boundary can no longer regress as an advisory-only warning. These are transfer/build measurements, not a human time-saving claim.
 
 Additional local evidence already recorded by the phase reports:
 
@@ -52,9 +52,11 @@ Additional local evidence already recorded by the phase reports:
 - the generic approved pre-roll projection now becomes a stable commerce-pre-roll Handoff candidate only when the approved objective/channel evidence supports it; missing product lineage remains blocked and explicit game, short-drama or remake language fails closed instead of being mislabeled as commerce;
 - optional second-perspective reads now use a successful empty response before analysis exists, eliminating normal-workflow 404 console noise without hiding actual endpoint failures;
 - Project bootstrap now resolves the requested Project first and hydrates remaining Project records progressively in two-item batches; the Project list endpoint no longer causes a blocking detail request per item. Research also has one Activity-backed status path rather than competing Activity and component pollers;
-- no production migration, deploy or push was performed; after explicit operator authorization, one bounded real LAS PDF canary completed locally through the Shanghai one-bucket TOS profile. The only new commit remains the local upstream synchronization merge described above, not a frozen Strategy release candidate.
+- no production migration, deploy or push was performed; after explicit operator authorization, one bounded real LAS PDF canary completed locally through the Shanghai one-bucket TOS profile. The Strategy implementation is now represented by local commit `aa857769906d4f35dbdc2f0ff39c6f24bd8d9317`, followed by the Kanon merge containing this audit; neither has been pushed or covered by required CI.
 
 A final submission-readiness follow-up passed `scripts/check.ps1` in 58.3 seconds and the combined platform browser suite 20/20 in 153.4 seconds after the historical sanitization migration was added. It also closed three locally discovered reliability defects: expiring LAS image URLs are removed from page and aggregate Markdown before persistence, the filesystem-backed Playwright service cannot inherit enabled LAS/converter flags from `.env`, and stale Delivery monitoring loads cannot overwrite a newer simulation or alert result. The browser suite ran without manual environment overrides and recorded 376 ms local LCP, 84.3 ms maximum center interaction, 2,754.0 ms dense-message readiness and 407.5 ms maximum dense-panel transition.
+
+The subsequent authorized Kanon integration merges `origin/codex/sync-completed-20260810` at `2c90c71d800b6e340b6fa4c6d01a6091dedb66a5` as a distinct second-parent boundary. Five conflicts were resolved while retaining both the fixed provider transport limits and document-vision constraints, the newer Strategy workspace behavior, and Kanon's non-Strategy creative/media changes. The merge-final `scripts/check.ps1` passed in 65.7 seconds and the platform browser suite passed 20/20 in 149.2 seconds; the combined candidate contains 294 paths with no unstaged, untracked or unmerged path at the pre-commit freeze.
 
 ## 3. Release blockers
 
@@ -80,11 +82,11 @@ Offline matched-page correction time is not equivalent to total task time. The 2
 
 A repeatable, fail-closed rehearsal command now exists and a populated synthetic qualification has passed: 25,000 rows in each of seven affected tables, 13 staged migrations, zero concurrent read errors, 2,347 ms slowest migration and 132 ms maximum concurrent-read latency on local MySQL 8.4.10. The report truthfully records `production_like=false`. This validates the harness and exposes table-specific timing, but does not predict locking at the real data distribution or close this gate. The provider CHECK replacement and larger Strategy/Knowledge tables still require the approved production row-count baseline on a production-like clone with lock/rollback observation.
 
-### B5 — No immutable release artifact or CI evidence exists
+### B5 — Local candidate exists; required CI evidence does not
 
-The shared working tree still contains a broad, unstaged multi-phase Strategy change set. The authorized local merge commit synchronizes `origin/main`, but it does not contain that Strategy implementation and has not been pushed. Consequently there is still no immutable Strategy candidate SHA and no GitHub Actions result covering the release scope. Before delivery, the remaining changes must be intentionally packaged without unrelated files, then pushed only after explicit authorization; all required checks must finish green.
+The local candidate is intentionally split into Strategy/LAS commit `aa857769906d4f35dbdc2f0ff39c6f24bd8d9317` and the following Kanon integration merge with second parent `2c90c71d800b6e340b6fa4c6d01a6091dedb66a5`. Neither boundary has been pushed, so no GitHub Actions result covers the release scope. Before delivery, push only after authorization and monitor every required check to green.
 
-The path-complete [candidate scope audit](2026-08-11-strategy-workspace-candidate-scope-audit.md) classifies every current file, records the manifest hash, explains shared-file changes, and finds no downstream production module, generated artifact or credential material. It reduces packaging ambiguity but does not replace an immutable candidate or exact-candidate CI.
+The path-complete [candidate scope audit](2026-08-11-strategy-workspace-candidate-scope-audit.md) classifies every current file, records the manifest hash, explains shared-file changes, separately identifies the authorized Kanon creative paths, and finds no generated artifact or credential material. It reduces packaging ambiguity but does not replace exact-candidate CI.
 
 The [requirement evidence ledger](2026-08-11-strategy-workspace-requirement-evidence-ledger.md) separately maps all 87 numbered requirements to implementation and verification evidence. Its document-quality review found and closed a local `DOC-04` gap: parser metadata now exposes bounded image/table signal density and blank-page evidence without treating dimensions as counts or presenting the signals as accuracy. The full local CI-parity script and the two document browser journeys pass after that change.
 
@@ -126,7 +128,7 @@ Residual risks are external evidence, real-account reconciliation matching, roll
 4. Retain the completed bounded PDF evidence and, with explicit paid-test approval, run one PPTX conversion + LAS canary; reconcile billing.
 5. Collect the deidentified blinded corpus under Phase 11 and archive the dataset hash and report.
 6. Keep manual fallback unless the report passes and the product owner separately approves automatic fallback.
-7. Freeze an immutable candidate, package only intended files, rerun all local gates, push only with authorization, and monitor every required CI check to green.
+7. Preserve the clean local two-commit candidate, push only with authorization, and monitor every required CI check to green.
 8. Run final desktop/mobile/accessibility smoke tests against the exact candidate and execute the release checklist.
 9. Release to canary, observe 15-minute and 24-hour metrics, then decide expand/hold/rollback. Never infer causal time savings from runtime latency alone.
 

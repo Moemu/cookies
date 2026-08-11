@@ -13,6 +13,10 @@ test('short drama preroll V3 uses one selected frame reference and persistent wo
 
   assert.doesNotMatch(workspace, /fixtureAnalysis|fixtureHooks|fixtureImages/)
   assert.match(workspace, /api\.uploadProjectAsset/)
+  assert.match(workspace, /requireAuthoritativeVideo/)
+  assert.match(workspace, /findAuthoritativeVideo/)
+  assert.doesNotMatch(workspace, /sourceType: 'upload' as const/)
+  assert.match(workspace, /sourceUnavailableMessage/)
   assert.match(workspace, /api\.analyzeShortDramaV2Source/)
   assert.match(workspace, /api\.generateShortDramaV2Directions/)
   assert.match(workspace, /direction_batch\?\.selected_direction_id/)

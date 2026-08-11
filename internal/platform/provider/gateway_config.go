@@ -86,6 +86,20 @@ type GatewayRouteSnapshot struct {
 	DocumentPollIntervalMS       int                      `json:"document_poll_interval_ms,omitempty"`
 }
 
+// ChatCompletionsEndpoint resolves the provider-specific OpenAI-compatible
+// path from an immutable route snapshot. Ark base URLs already include
+// /api/v3, while legacy adapter gateways expose their API below /v1.
+func (s GatewayRouteSnapshot) ChatCompletionsEndpoint() string {
+	base := strings.TrimRight(s.BaseURL, "/")
+	if s.ConnectionType == "ark" {
+		return base + "/chat/completions"
+	}
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/chat/completions"
+	}
+	return base + "/v1/chat/completions"
+}
+
 func (s GatewayRouteSnapshot) Validate() error {
 	return s.ValidateWithPolicy(false)
 }
@@ -310,7 +324,14 @@ func (s MySQLGatewayConfigStore) ResolveImageRoute(ctx context.Context, organiza
 }
 
 func (s MySQLGatewayConfigStore) ResolveTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
-	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "adapter_gateway")
+	snapshot, err := s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "adapter_gateway")
+	if err == nil || !errors.Is(err, ErrGatewayRouteNotFound) {
+		return snapshot, err
+	}
+	// Ark exposes an OpenAI-compatible chat-completions surface. Allow a text
+	// route to reuse an encrypted Ark project credential when the legacy
+	// adapter-gateway connection is unavailable or has been retired.
+	return s.resolveRoute(ctx, organizationID, "text.generate", modelAlias, "ark")
 }
 
 func (s MySQLGatewayConfigStore) ResolveVisionRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (GatewayRouteSnapshot, error) {
@@ -374,6 +395,7 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		if err := applyTextRouteConstraints(&snapshot, constraintsJSON); err != nil {
 			return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q constraints: %w", modelAlias, err)
 		}
+		normalizeTextRouteTransportLimits(&snapshot)
 	} else if capability == "document.vision.parse" {
 		if err := applyDocumentVisionRouteConstraints(&snapshot, constraintsJSON); err != nil {
 			return ImageRouteSnapshot{}, fmt.Errorf("invalid document vision route %q constraints: %w", modelAlias, err)
@@ -399,6 +421,20 @@ func (s MySQLGatewayConfigStore) resolveRoute(ctx context.Context, organizationI
 		return ImageRouteSnapshot{}, fmt.Errorf("invalid adapter gateway route %q: %w", modelAlias, err)
 	}
 	return snapshot, nil
+}
+
+// Text and multimodal understanding calls may share an Ark connection with
+// long-running video generation. Keep the immutable connection revision as
+// the provider's upper bound, then narrow the invocation snapshot to the
+// safety envelope of the requested capability. This prevents a valid video
+// timeout/response limit from making the same credential unusable for text.
+func normalizeTextRouteTransportLimits(snapshot *GatewayRouteSnapshot) {
+	if snapshot.TimeoutSeconds > 600 {
+		snapshot.TimeoutSeconds = 600
+	}
+	if snapshot.MaxResponseBytes > 100<<20 {
+		snapshot.MaxResponseBytes = 100 << 20
+	}
 }
 
 func applyDocumentVisionRouteConstraints(snapshot *GatewayRouteSnapshot, raw json.RawMessage) error {

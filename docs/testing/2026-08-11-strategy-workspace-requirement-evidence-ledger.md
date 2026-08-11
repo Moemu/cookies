@@ -119,7 +119,7 @@ Evidence labels:
 | `HOF-04` | Local pass | Route/task changes create plan/overlay revisions only. |
 | `HOF-05` | Local pass | Backend/API/TS boundary tests prove no `patchStrategySection('channel_strategy', ...)` path. |
 | `HOF-06` | Local pass | Existing `creative-task-strategy/v2` and Creative intake fixtures/contracts pass. |
-| `HOF-07` | Local pass | Candidate-scope audit contains no downstream image/video/audio production module change. |
+| `HOF-07` | Local pass | Strategy Handoff itself stops at the existing Creative intake/task-strategy seam and its contract tests pass. The separately authorized Kanon synchronization touches existing brand-film/short-drama paths, is classified outside the Strategy scope, and has its own regression coverage. |
 
 ## Document parsing and visual fallback
 
