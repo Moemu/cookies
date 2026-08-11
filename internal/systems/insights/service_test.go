@@ -612,8 +612,19 @@ func testService() Service {
 
 type testProjects struct{}
 
+// 返回的东西要跟真实的 project.Service 一样过得了 ValidateBrandBound——
+// 那边出口就校验了品牌与产品列表。桩比真实实现宽松的话，一个组不出合法
+// 项目上下文的 bug 在单测里全绿，到线上才被供应商层拒掉。
 func (testProjects) RequireActiveContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
-	return contract.ProjectContext{OrganizationID: actor.OrganizationID, ProjectID: projectID, ProjectContextVersion: 1}, nil
+	brandID := contract.BrandID("brand_1")
+	value := contract.ProjectContext{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID, ProjectContextVersion: 1,
+		BrandID: &brandID, ProductIDs: []contract.ProductID{"product_1"},
+	}
+	if err := value.ValidateBrandBound(); err != nil {
+		panic(err)
+	}
+	return value, nil
 }
 
 type testDelivery struct{}
