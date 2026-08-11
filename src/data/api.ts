@@ -19,6 +19,9 @@ import {
   unsupportedKanonWrite,
 } from '../backend/kanon-api.js'
 import type { CreativeIntakeStatus, CreativeTaskStatus } from '../contracts/creative'
+// 纯类型的循环引用：verdict.ts 反过来从这里取 ApiConfidenceLevel。
+// import type 会被 TS 完全擦除，运行时不成环。
+import type { Judgement } from './verdict'
 import { platformClient } from './platformClient.js'
 
 export type ApiProject = {
@@ -1612,6 +1615,11 @@ export type ApiImportBatch = {
   updated_at: string
 }
 
+/**
+ * 带三档判定的类型一律写成 `{...} & Judgement`：后端那边是 embedded struct，
+ * 四个字段在 JSON 里平铺在宿主对象上。抄八遍字段的话，改一次要改八处，
+ * 改漏一处就有一页在说另一套话——这正是这轮重构要消灭的东西。
+ */
 export type ApiAssetMetricPerformance = {
   asset_id?: string
   asset_title: string
@@ -1620,8 +1628,7 @@ export type ApiAssetMetricPerformance = {
   counts: ApiMetricCounts
   rates: ApiMetricRates
   attributable: boolean
-  confidence: ApiConfidenceLevel
-}
+} & Judgement
 
 export type ApiPerformancePoint = {
   date: string
@@ -1655,9 +1662,6 @@ export type ApiMetricOverview = {
   totals: ApiMetricCounts
   rates: ApiMetricRates
   ctr_interval?: ApiRateInterval
-  confidence: ApiConfidenceLevel
-  /** 原来叫 confidence_note。同一个意思两个键名，前端要写两套渲染，已统一成 note。 */
-  note: string
   series: ApiPerformancePoint[]
   assets: ApiAssetMetricPerformance[]
   unmatched_objects: number
@@ -1665,7 +1669,8 @@ export type ApiMetricOverview = {
   sources: ApiSourceHealth[]
   warnings?: string[]
   platforms: ApiPlatformTotal[]
-}
+  /** note 原来叫 confidence_note。同一个意思两个键名，前端要写两套渲染，已统一。 */
+} & Judgement
 
 /**
  * AM-009 的判定阶梯，从严到松。**只有 attributable 是「能归到这个变量」**，
@@ -1720,9 +1725,7 @@ export type ApiVariantComparison = {
    * （见后端 internal/systems/insights/verdict.go）。
    */
   variant_verdict: ApiVariantVerdict
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 /** direction 为 unknown 表示天数不足或前半段无曝光，不能当成持平。 */
 export type ApiAssetTrend = {
@@ -1734,9 +1737,7 @@ export type ApiAssetTrend = {
   active_days: number
   direction: 'rising' | 'flat' | 'declining' | 'unknown'
   ctr_change?: number
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 /** likely 需要两项条件同时成立；单项恶化只到 watch。 */
 export type ApiFatigueSeverity = 'none' | 'watch' | 'likely'
@@ -1755,9 +1756,7 @@ export type ApiFatigueSignal = {
   severity: ApiFatigueSeverity
   /** 没能排除的其他解释。这里列的是「排除不了」，不是「已排除」。 */
   alternative_explanations?: string[]
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 export type ApiAnomalyKind = 'spike' | 'drop' | 'gap'
 
@@ -1773,8 +1772,8 @@ export type ApiMetricAnomaly = {
   median: number
   /** 偏离中位数多少个 MAD。 */
   deviation: number
-  note: string
-}
+  /** 异常永远只到 👁：这一天不对劲是事实，为什么不对劲这里答不了。 */
+} & Judgement
 
 /**
  * 驱动因素：某个特征取值的素材组与其余素材的对比。**这不是因果**——
@@ -1798,9 +1797,7 @@ export type ApiFeatureDriver = {
   ctr_lift?: number
   /** 与本特征完全同向变化的其他特征，分不开谁在起作用。 */
   covarying_features?: string[]
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 /**
  * 投后分析五个二级视图（素材对比 / 趋势 / 疲劳 / 异常 / 驱动因素）的共用载荷。
@@ -1820,6 +1817,11 @@ export type ApiPerformanceAnalysis = {
   assets_in_window: number
   /** 其中有内容特征的素材数。远小于 assets_in_window 时，对比和驱动因素都会大面积空着。 */
   assets_with_features: number
+  /**
+   * 整屏的档位，取五类结论里最弱的那一档。这是唯一一处 judgement 以嵌套对象
+   * 出现的地方（后端那边它是具名字段而非 embedded），其余都平铺。
+   */
+  judgement: Judgement
   notes?: string[]
 }
 

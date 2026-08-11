@@ -4,7 +4,6 @@ import { useProject } from '../context/ProjectContext'
 import {
   api,
   type ApiAssetTrend,
-  type ApiConfidenceLevel,
   type ApiDeliveryExecutionResult,
   type ApiFatigueSignal,
   type ApiFeatureDriver,
@@ -14,8 +13,10 @@ import {
   type ApiVariantComparison,
   type ApiVariantVerdict,
 } from '../data/api'
+import { verdictLabel } from '../data/verdict'
 import type { DataState, SystemKey } from '../types'
 import { FreezeReportAction, isoDay } from './FreezeReportAction'
+import { NotEnoughSample, VerdictBadge } from './insight/shared'
 import { PostLaunchOverviewPage } from './PostLaunchOverviewPage'
 import { StateBoundary } from './StateBoundary'
 
@@ -84,13 +85,12 @@ const emptyHints: Record<ViewTarget, string> = {
   drivers: '还没有素材记录内容特征，或同一取值下的素材不足 2 个。去「分析素材库 · 特征库」补齐特征后再来看。',
 }
 
-const confidenceLabels: Record<ApiConfidenceLevel, string> = {
-  sufficient: '充分',
-  directional: '方向性',
-  low_sample: '样本不足',
-  confounded: '存在混杂',
-}
+// 这里原来有一张把四档译成中文的表。删了——档位文案由后端随每条结论一起给
+// （verdict_label），前端再存一份就会和后端说的不一样，而这一页恰恰是最不能
+// 出现两套说法的地方：五个视图并排，任何一处不齐都会被当成数据本身有矛盾。
 
+// 下面这张表是素材对比专有的五档，不是三档。它多回答一件事：归不了因，
+// 是因为变量太多，还是因为压根没有特征数据。
 // 判定文案刻意写成「能不能」而不是「好不好」：读者要先知道这条结论能不能用。
 const verdictLabels: Record<ApiVariantVerdict, string> = {
   attributable: '可归因到该变量',
@@ -246,7 +246,15 @@ function AnalysisViews({ state, target, onOpenProject }: {
 
         {listState === 'loading' ? <div className="panel-empty">正在取数…</div>
           : listState === 'error' ? <div className="panel-empty">读取失败，请重试。</div>
-          : !analysis || rows === 0 ? <div className="panel-empty">{emptyHints[target]}</div>
+          : !analysis ? <div className="panel-empty">{emptyHints[target]}</div>
+          /* 空列表不是「暂无数据」，是「这一屏现在算不出来」——档位照样要标出来，
+             理由用这个视图专属的那句：整屏的 note 说的是有结论的那几条为什么弱，
+             对一个一条都没有的视图答非所问。档位也不能照抄整屏的：整屏取的是六个
+             视图里最弱的一档，别的视图有结论时它可能是「只是观察」，安到一条都
+             没有的这一屏上就成了「❓ 只是观察」——图标和字自己打架。 */
+          : rows === 0 ? <NotEnoughSample judgement={{
+            ...analysis.judgement, verdict: 'unclear', verdict_label: verdictLabel.unclear, note: emptyHints[target],
+          }}/>
           : target === 'comparisons' ? <ComparisonList items={analysis.comparisons}/>
           : target === 'trends' ? <TrendList items={analysis.trends}/>
           : target === 'fatigue' ? <FatigueList items={analysis.fatigue}/>
@@ -328,7 +336,7 @@ function ComparisonList({ items }: { items: ApiVariantComparison[] }) {
       <footer>
         点击率相对变化 {formatSigned(item.ctr_lift)} ·
         {item.intervals_overlap ? ' 两侧置信区间重叠，这个差异可能只是噪声' : ' 两侧置信区间不重叠'} ·
-        置信{confidenceLabels[item.confidence]}
+        {' '}<VerdictBadge judgement={item}/>
       </footer>
     </article>)}
   </div>
@@ -361,7 +369,7 @@ function TrendList({ items }: { items: ApiAssetTrend[] }) {
         <p>{item.note}</p>
         <div className="insight-series">
           <span className="section-label">
-            {item.active_days} 天有数据 · 点击率变化 {formatSigned(item.ctr_change)} · 置信{confidenceLabels[item.confidence]}
+            {item.active_days} 天有数据 · 点击率变化 {formatSigned(item.ctr_change)} <VerdictBadge judgement={item}/>
           </span>
           {points.map(point => <div className="insight-series-row" key={point.date}>
             <span>{formatDate(point.date)}</span>
@@ -384,9 +392,10 @@ function FatigueList({ items }: { items: ApiFatigueSignal[] }) {
       <header>
         <b>{item.asset_title}</b>
         {/* 「没有迹象」和「判断不了」对读者是两句相反的话：前者是查过了没问题，
-            后者是压根没法查。后端在天数不足时会把置信压到 low_sample，这里据此分开。 */}
-        <em className={item.severity === 'none' && item.confidence === 'low_sample' ? 'muted' : severityTone[item.severity]}>
-          {item.severity === 'none' && item.confidence === 'low_sample' ? '判断不了' : severityLabels[item.severity]}
+            后者是压根没法查。看三档就够了——unclear 的定义就是「连有没有差异都判断不了」，
+            前端不必再自己拼一遍 severity 和 confidence 的组合条件。 */}
+        <em className={item.verdict === 'unclear' ? 'muted' : severityTone[item.severity]}>
+          {item.verdict === 'unclear' ? '判断不了' : severityLabels[item.severity]}
         </em>
       </header>
       <p>{item.note}</p>
@@ -406,7 +415,7 @@ function FatigueList({ items }: { items: ApiFatigueSignal[] }) {
 
       <footer>
         点击率 {formatSigned(item.ctr_change)} · 转化成本 {formatSigned(item.cpa_change)} ·
-        曝光 {formatSigned(item.impression_change)} · 置信{confidenceLabels[item.confidence]}
+        曝光 {formatSigned(item.impression_change)} <VerdictBadge judgement={item}/>
       </footer>
 
       {/* 03 §7.4 要求区分四种解释。这里只列「排除不了的」，不写「已排除」——
@@ -444,9 +453,7 @@ function DriverList({ items }: { items: ApiFeatureDriver[] }) {
       key={`${item.asset_type ?? ''}-${item.key}-${item.value}`}>
       <header>
         <b>{item.label}：{item.value}</b>
-        <em className={item.confidence === 'sufficient' ? 'ok' : item.confidence === 'confounded' ? 'danger' : 'warning'}>
-          置信{confidenceLabels[item.confidence]}
-        </em>
+        <VerdictBadge judgement={item}/>
       </header>
       <p>{item.note}</p>
 

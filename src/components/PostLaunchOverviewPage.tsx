@@ -4,13 +4,13 @@ import { useProject } from '../context/ProjectContext'
 import {
   api,
   type ApiAssetMetricPerformance,
-  type ApiConfidenceLevel,
   type ApiMetricOverview,
   type ApiMetricRates,
   type ApiQualityStatus,
 } from '../data/api'
 import type { DataState, SystemKey } from '../types'
 import { FreezeReportAction, isoDay } from './FreezeReportAction'
+import { VerdictBadge } from './insight/shared'
 import { StateBoundary } from './StateBoundary'
 
 /**
@@ -32,20 +32,9 @@ const rangeOptions = [
   { label: '近 90 天', days: 90 },
 ]
 
-const confidenceLabels: Record<ApiConfidenceLevel, string> = {
-  sufficient: '充分',
-  directional: '方向性',
-  low_sample: '样本不足',
-  confounded: '存在混杂',
-}
-
-// 03 §9 的置信提示词表，每一级都要说清「能拿它做什么、不能做什么」。
-const confidenceMeaning: Record<ApiConfidenceLevel, string> = {
-  sufficient: '样本量和数据质量都够，可以据此下结论并驱动下一步动作。',
-  directional: '只能看方向，不足以支撑「A 比 B 好」这类判断，更不能据此自动调整投放。',
-  low_sample: '样本太少，任何比较都可能只是噪声。先让它多跑一段时间。',
-  confounded: '数据里有未匹配、延迟或质量问题，结论只能是方向性的，不应据此自动优化。',
-}
+// 这里原来有两张表：一张把四档译成中文，一张给每档配一句「能拿它做什么」。
+// 两张都删了——后端现在每一条判定都自带三档和它的理由（note），前端再存一份，
+// 改了后端忘了改这里，同一份数据就会在两个页面上说两套话。
 
 const qualityLabels: Record<ApiQualityStatus, string> = {
   healthy: '正常',
@@ -182,9 +171,9 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
               {overview.caliber.currency} · 归因 {overview.caliber.attribution_window} · 指标口径 {overview.caliber.metric_schema_version} · 时区 {overview.caliber.time_zone}
             </b></span></div>
             <div className="prelaunch-fact">
-              {overview.confidence === 'sufficient' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>}
-              <span><small>置信 · {confidenceLabels[overview.confidence]}</small><b>
-                {overview.note || confidenceMeaning[overview.confidence]}
+              {overview.verdict === 'explained' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>}
+              <span><small>这段数字能用来做什么 <VerdictBadge judgement={overview}/></small><b>
+                {overview.note}
               </b></span>
             </div>
 
@@ -204,7 +193,7 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
 
             <div className="prelaunch-table" role="list" aria-label="素材表现矩阵">
               <div className="prelaunch-row insight-asset-row header">
-                <span>素材版本</span><span>花费</span><span>点击率</span><span>转化成本</span><span>置信</span>
+                <span>素材版本</span><span>花费</span><span>点击率</span><span>转化成本</span><span>结论</span>
               </div>
               {assets.map(asset => {
                 const id = asset.asset_id ?? asset.asset_title
@@ -213,7 +202,7 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
                   <span>{formatMoney(asset.counts.spend_cents)}</span>
                   <span>{formatRate(asset.rates.ctr)}</span>
                   <span>{formatMoney(asset.rates.cpa_cents)}</span>
-                  <span>{confidenceLabels[asset.confidence]}</span>
+                  <span><VerdictBadge judgement={asset}/></span>
                 </button>
               })}
               {assets.length ? null : <div className="panel-empty">
@@ -226,7 +215,7 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
       <aside className="prelaunch-detail">
         {selected ? <>
           <span className="section-label">素材表现</span><h3>{selected.asset_title}</h3>
-          <p>{selected.objects} 个平台对象 · 置信{confidenceLabels[selected.confidence]}</p>
+          <p>{selected.objects} 个平台对象 <VerdictBadge judgement={selected}/></p>
 
           <div className="prelaunch-fact"><TrendingUp size={17}/><span><small>这一版的账</small><b>
             花 {formatMoney(selected.counts.spend_cents)}，换回 {formatCount(selected.counts.impressions)} 次曝光、
@@ -242,7 +231,7 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
           </span></div> : null}
 
           <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>这个数字能用来做什么</small><b>
-            {confidenceMeaning[selected.confidence]}
+            {selected.note}
           </b></span></div>
           {selected.attributable ? null : <div className="prelaunch-boundary"><CircleAlert size={16}/><span>
             <small>归属不确定</small>这一版的部分花费来自还没认领的平台对象，数字只能当参考，不能拿去和别的版本比。
