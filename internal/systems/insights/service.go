@@ -433,6 +433,11 @@ type Repository interface {
 	// 「记一笔」不问人要往哪记——问了等于要求人在看数据之前先声明意图。
 	FindDraftByWindow(context.Context, contract.OrganizationID, contract.ProjectID, string, string) (InsightReport, error)
 	ConfirmReport(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (InsightReport, error)
+	// SubmitReport 在一条 UPDATE 里补执行 ID、写入定格后的 digest、置为已确认。
+	// 拆成三次调用会留下「已确认但没有系统发现」的报告，而它看起来和正常的一模一样。
+	SubmitReport(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID,
+		reportID string, expectedVersion int64, executionID string, digest []ReportFinding,
+		actorID string, at time.Time) (InsightReport, error)
 	UpdateReportDigest(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, []ReportFinding, time.Time) (InsightReport, error)
 	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
 	ReviseExperience(context.Context, ReviseExperienceInput) (Experience, error)
@@ -699,6 +704,66 @@ func (s Service) ConfirmReport(ctx context.Context, actor contract.ActorContext,
 		return InsightReport{}, ErrInvalidState
 	}
 	return s.Repository.ConfirmReport(ctx, actor.OrganizationID, projectID, reportID, expectedVersion, actor.Principal.ID, s.now())
+}
+
+// SubmitReview 提交复盘：补执行、定格系统发现、确认，一次写完。
+func (s Service) SubmitReview(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, reportID string, request SubmitReviewRequest) (InsightReport, error) {
+	if err := s.ready(actor, projectID, ScopeConfirm); err != nil {
+		return InsightReport{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return InsightReport{}, err
+	}
+	report, err := s.Repository.GetReport(ctx, actor.OrganizationID, projectID, reportID)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if err := checkSubmittable(report, request.ExpectedVersion); err != nil {
+		return InsightReport{}, err
+	}
+
+	window, ok := reportMetricWindow(report)
+	if !ok {
+		// 窗口解析不出来就没法算系统发现。宁可只带人记的那几笔提交，
+		// 也不能拿一个猜出来的窗口去算——算出来的数字看起来一样可信。
+		return s.Repository.SubmitReport(ctx, actor.OrganizationID, projectID, reportID,
+			request.ExpectedVersion, request.ExecutionID, report.Digest, actor.Principal.ID, s.now())
+	}
+
+	analysis, err := s.GetPerformanceAnalysis(ctx, actor, projectID, window)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	experiments, err := s.concludedExperimentsInWindow(ctx, actor, projectID, window)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	experiences, err := s.ListExperiences(ctx, actor, projectID, ExperienceConfirmed, 50)
+	if err != nil {
+		return InsightReport{}, err
+	}
+
+	// 人记的那几笔在前，系统补的去重后跟在后面。
+	pinned := make([]ReportFinding, 0, len(report.Digest))
+	for _, finding := range report.Digest {
+		if finding.Origin == OriginPinned {
+			pinned = append(pinned, finding)
+		}
+	}
+	digest := mergeFindings(pinned, buildReportDigest(analysis, experiments, experiences))
+
+	return s.Repository.SubmitReport(ctx, actor.OrganizationID, projectID, reportID,
+		request.ExpectedVersion, request.ExecutionID, digest, actor.Principal.ID, s.now())
+}
+
+// reportMetricWindow 把报告定格的日期串解析回窗口。
+func reportMetricWindow(report InsightReport) (MetricWindow, bool) {
+	start, end := reportWindow(report)
+	if start == nil || end == nil {
+		return MetricWindow{}, false
+	}
+	return MetricWindow{Start: *start, End: *end}, true
 }
 
 func (s Service) CreateExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reportID string, expectedReportVersion int64, request CreateExperienceRequest) (Experience, error) {

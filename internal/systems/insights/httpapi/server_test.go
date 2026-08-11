@@ -129,6 +129,27 @@ func TestPinFindingRejectsAVerdictInTheRequestBody(t *testing.T) {
 	}
 }
 
+// 提交复盘走独立路径，报告 ID 从路径里取，执行和版本从请求体里取。三个值任何一个
+// 串位，提交的都是另一份复盘或另一次投放，而返回的 200 看起来一切正常。
+func TestSubmitReviewTakesReportIDFromPathAndBodyFromJSON(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{report: insights.InsightReport{ID: "insightreport_7", Version: 3}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/reports/insightreport_7/submit",
+		`{"execution_id":"insightexecution_2","expected_version":3}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d，想要 200，body=%s", response.Code, response.Body.String())
+	}
+	if app.submittedReportID != "insightreport_7" {
+		t.Errorf("报告 ID=%q，想要 insightreport_7", app.submittedReportID)
+	}
+	if app.submitted.ExecutionID != "insightexecution_2" || app.submitted.ExpectedVersion != 3 {
+		t.Errorf("请求体没原样传下去：%+v", app.submitted)
+	}
+}
+
 // 人工删减走 :drop-finding。索引和 dropped 都要原样传到后面——
 // 传错一个索引，删掉的就是另一条发现，而人看不出来。
 func TestDropReportFindingPassesIndexAndFlag(t *testing.T) {
@@ -416,6 +437,8 @@ type applicationStub struct {
 	pinned            insights.PinFindingRequest
 	droppedIndex      int
 	droppedFlag       bool
+	submitted         insights.SubmitReviewRequest
+	submittedReportID string
 
 	registerErr error
 }
@@ -437,6 +460,10 @@ func (s *applicationStub) ListReports(context.Context, contract.ActorContext, co
 	return []insights.InsightReport{s.report}, nil
 }
 func (s *applicationStub) ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error) {
+	return s.report, nil
+}
+func (s *applicationStub) SubmitReview(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, reportID string, request insights.SubmitReviewRequest) (insights.InsightReport, error) {
+	s.submittedReportID, s.submitted = reportID, request
 	return s.report, nil
 }
 func (s *applicationStub) CreateExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64, insights.CreateExperienceRequest) (insights.Experience, error) {

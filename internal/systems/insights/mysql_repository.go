@@ -153,6 +153,46 @@ func (r MySQLRepository) ConfirmReport(ctx context.Context, organizationID contr
 	return r.GetReport(ctx, organizationID, projectID, id)
 }
 
+// SubmitReport 补执行 ID、写入定格后的 digest、置为已确认——一条 UPDATE 做完。
+//
+// 分成三次写会留下「已确认但没有系统发现」的报告，而它看起来和正常的一模一样，
+// 没人会怀疑那份复盘漏了东西。
+func (r MySQLRepository) SubmitReport(ctx context.Context, organizationID contract.OrganizationID,
+	projectID contract.ProjectID, reportID string, expectedVersion int64, executionID string,
+	digest []ReportFinding, actorID string, at time.Time) (InsightReport, error) {
+	encoded, err := marshalReportDigest(digest)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_reports SET execution_id = ?, digest = ?, status = ?, confirmed_by = ?, confirmed_at = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
+		executionID, encoded, ReportConfirmed, actorID, at, at,
+		organizationID, projectID, reportID, expectedVersion, ReportDraft)
+	if err != nil {
+		// 唯一键是 (organization_id, project_id, execution_id, window_start, window_end)。
+		// 补执行 ID 的这一下有可能撞上同执行同窗口的另一份复盘——多半是同一轮
+		// 被两个人各记了一份。这时候必须给出能看懂的错，不能扔一个重复键出去。
+		if isDuplicateKey(err) {
+			return InsightReport{}, fmt.Errorf("%w: 这次投放在这个窗口上已经有一份复盘了，先看那一份", ErrInvalidState)
+		}
+		return InsightReport{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if affected == 0 {
+		value, getErr := r.GetReport(ctx, organizationID, projectID, reportID)
+		if getErr != nil {
+			return InsightReport{}, getErr
+		}
+		if value.Version != expectedVersion {
+			return InsightReport{}, ErrVersionConflict
+		}
+		return InsightReport{}, ErrInvalidState
+	}
+	return r.GetReport(ctx, organizationID, projectID, reportID)
+}
+
 // CreateExperience writes the conclusion and its opening audit row together so
 // a 待确认 experience can never exist without a trail (PRD §11.2).
 func (r MySQLRepository) CreateExperience(ctx context.Context, value Experience, audit ExperienceAudit) (Experience, error) {

@@ -22,6 +22,8 @@ type Application interface {
 	PinFinding(context.Context, contract.ActorContext, contract.ProjectID, insights.PinFindingRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)
 	ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error)
+	// 提交复盘：补执行、定格系统发现、确认，一次做完。
+	SubmitReview(context.Context, contract.ActorContext, contract.ProjectID, string, insights.SubmitReviewRequest) (insights.InsightReport, error)
 	DropReportFinding(context.Context, contract.ActorContext, contract.ProjectID, string, int64, int, bool) (insights.InsightReport, error)
 	CreateExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64, insights.CreateExperienceRequest) (insights.Experience, error)
 	ListExperiences(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperienceStatus, int) ([]insights.Experience, error)
@@ -104,6 +106,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/reports", server.listReports)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports", server.createReport)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports/{report_action}", server.reportAction)
+	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports/{report_id}/submit", server.submitReview)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/findings", server.pinFinding)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experiences", server.listExperiences)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/experiences/{experience_action}", server.experienceAction)
@@ -213,6 +216,25 @@ func (s *Server) listReports(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+// submitReview 提交复盘。
+//
+// 单独一条路径，不走 reportAction 的 `{id}:submit` 后缀：提交要带请求体
+// （投放执行 + 版本号），和那一串只带版本号的动作不是一回事，挤在同一个
+// switch 里会让「哪些动作要填什么」变成读代码才知道的事。
+func (s *Server) submitReview(writer http.ResponseWriter, request *http.Request) {
+	var body insights.SubmitReviewRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.SubmitReview(request.Context(), mustActor(request), projectID(request),
+		request.PathValue("report_id"), body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) reportAction(writer http.ResponseWriter, request *http.Request) {

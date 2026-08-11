@@ -670,6 +670,27 @@ func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contr
 	r.reports[id] = value
 	return value, nil
 }
+func (r *memoryRepository) SubmitReport(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, executionID string, digest []ReportFinding, actorID string, at time.Time) (InsightReport, error) {
+	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if value.Status != ReportDraft {
+		return InsightReport{}, ErrInvalidState
+	}
+	if value.Version != expectedVersion {
+		return InsightReport{}, ErrVersionConflict
+	}
+	value.ExecutionID = executionID
+	value.Digest = digest
+	value.Status = ReportConfirmed
+	value.Version++
+	value.ConfirmedBy = actorID
+	value.ConfirmedAt = &at
+	value.UpdatedAt = at
+	r.reports[id] = value
+	return value, nil
+}
 func (r *memoryRepository) UpdateReportDigest(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, digest []ReportFinding, now time.Time) (InsightReport, error) {
 	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
 	if err != nil {
