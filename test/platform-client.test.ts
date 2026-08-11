@@ -149,7 +149,6 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
   assert.deepEqual(calls.map(call => call.url), [
     "https://cookies.example/platform/v1/projects",
     "https://cookies.example/platform/v1/projects/project_demo",
-    "https://cookies.example/platform/v1/projects/project_demo",
     "https://cookies.example/platform/v1/projects/project_demo/artifacts",
     "https://cookies.example/platform/v1/projects/project_demo/artifacts",
     "https://cookies.example/platform/v1/projects/project_demo/artifacts/artifact_1",
@@ -157,21 +156,21 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
     "https://cookies.example/platform/v1/projects/project_demo/change-sets",
     "https://cookies.example/platform/v1/projects/project_demo/model/jobs",
   ]);
-  assert.equal(calls[4].init.method, "POST");
-  assert.equal(new Headers(calls[4].init.headers).get("Idempotency-Key"), "test-key");
-  assert.deepEqual(JSON.parse(calls[4].init.body as string), {
+  assert.equal(calls[3].init.method, "POST");
+  assert.equal(new Headers(calls[3].init.headers).get("Idempotency-Key"), "test-key");
+  assert.deepEqual(JSON.parse(calls[3].init.body as string), {
     kind: "brief", content: "首版策略 Brief", status: "draft",
   });
-  assert.deepEqual(JSON.parse(calls[5].init.body as string), {
+  assert.deepEqual(JSON.parse(calls[4].init.body as string), {
     content: "已确认策略 Brief", status: "ready", expected_version: 1,
   });
-  assert.equal(calls[6].init.method, "POST");
-  assert.equal(new Headers(calls[6].init.headers).get("Idempotency-Key"), "test-key");
-  assert.equal(JSON.parse(calls[6].init.body as string).source_task_ids.length, 0);
-  assert.deepEqual(JSON.parse(calls[7].init.body as string).artifact_refs, [
+  assert.equal(calls[5].init.method, "POST");
+  assert.equal(new Headers(calls[5].init.headers).get("Idempotency-Key"), "test-key");
+  assert.equal(JSON.parse(calls[5].init.body as string).source_task_ids.length, 0);
+  assert.deepEqual(JSON.parse(calls[6].init.body as string).artifact_refs, [
     { project_id: "project_demo", asset_version: { asset_id: "asset_1", version: 1 } },
   ]);
-  assert.equal(JSON.parse(calls[8].init.body as string).capability, "image.generate");
+  assert.equal(JSON.parse(calls[7].init.body as string).capability, "image.generate");
 });
 
 test("platform client ignores draft or unbound Projects when loading the workbench", async () => {
@@ -199,7 +198,6 @@ test("platform client ignores draft or unbound Projects when loading the workben
   assert.deepEqual(projects.map(project => project.id), ["project_demo"]);
   assert.deepEqual(calls, [
     "https://cookies.example/platform/v1/projects",
-    "https://cookies.example/platform/v1/projects/project_demo",
   ]);
 });
 

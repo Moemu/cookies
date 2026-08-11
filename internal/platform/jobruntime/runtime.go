@@ -50,12 +50,13 @@ type Claim struct {
 
 type Result struct{ Ref *contract.ResourceRef }
 
-// LeaseRecovery reports how many abandoned executions became available again.
-// An expired lease is requeued even at its attempt limit so its domain handler
-// can persist any corresponding public state before the generic worker marks
-// the job terminal.
+// LeaseRecovery reports how abandoned executions were resolved. Ordinary
+// expired leases become available again; leases with an accepted cancellation
+// request become terminal so they cannot remain unclaimable in queued state.
 type LeaseRecovery struct {
 	Rescheduled int64
+	Cancelled   int64
+	Failed      int64
 }
 
 // LeaseRecoverer is deliberately separate from Store because recovery is a

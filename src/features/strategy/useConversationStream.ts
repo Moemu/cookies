@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { readSSE } from './readSSE'
 
-export function useConversationStream(conversationId: string | undefined, onEvent: () => void) {
+export function useConversationStream(conversationId: string | undefined, cursorScope: string, onEvent: () => void) {
   const callback = useRef(onEvent)
   useEffect(() => {
     callback.current = onEvent
@@ -10,7 +10,8 @@ export function useConversationStream(conversationId: string | undefined, onEven
   useEffect(() => {
     if (!conversationId) return
     const controller = new AbortController()
-    let lastEventId = sessionStorage.getItem(`strategy:last-event:${conversationId}`) || ''
+    const cursorKey = conversationEventCursorKey(cursorScope, conversationId)
+    let lastEventId = sessionStorage.getItem(cursorKey) || ''
     let retryTimer = 0
     let invalidateTimer = 0
     let retryAttempt = 0
@@ -37,7 +38,7 @@ export function useConversationStream(conversationId: string | undefined, onEven
         )
         if (response.status === 410) {
           lastEventId = ''
-          sessionStorage.removeItem(`strategy:last-event:${conversationId}`)
+          sessionStorage.removeItem(cursorKey)
           invalidate()
           retry()
           return
@@ -46,8 +47,9 @@ export function useConversationStream(conversationId: string | undefined, onEven
         retryAttempt = 0
         await readSSE(response, message => {
           if (message.id) {
+            if (!shouldAdvanceConversationEventCursor(lastEventId, message.id)) return
             lastEventId = message.id
-            sessionStorage.setItem(`strategy:last-event:${conversationId}`, lastEventId)
+            sessionStorage.setItem(cursorKey, lastEventId)
           }
           invalidate()
         }, controller.signal)
@@ -63,5 +65,15 @@ export function useConversationStream(conversationId: string | undefined, onEven
       window.clearTimeout(retryTimer)
       window.clearTimeout(invalidateTimer)
     }
-  }, [conversationId])
+  }, [conversationId, cursorScope])
+}
+
+export function conversationEventCursorKey(cursorScope: string, conversationId: string) {
+  return `strategy:last-event:${encodeURIComponent(cursorScope || 'anonymous')}:${encodeURIComponent(conversationId)}`
+}
+
+export function shouldAdvanceConversationEventCursor(current: string, candidate: string) {
+  if (!/^[1-9]\d*$/.test(candidate)) return false
+  if (!/^[1-9]\d*$/.test(current)) return true
+  return BigInt(candidate) > BigInt(current)
 }

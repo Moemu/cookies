@@ -53,8 +53,9 @@ func creativeRoutesForPackage(brief BriefVersion, document StrategyDocument) []C
 		return nil
 	}
 	reason := "在正片前快速建立产品与目标人群的关联"
-	if len(document.CreativeRecommendations) > 0 && strings.TrimSpace(document.CreativeRecommendations[0]) != "" {
-		reason = strings.TrimSpace(document.CreativeRecommendations[0])
+	directions := document.CreativeDirections()
+	if len(directions) > 0 && strings.TrimSpace(directions[0]) != "" {
+		reason = strings.TrimSpace(directions[0])
 	}
 	return []CreativeRoute{{
 		RouteType: "pre_roll", VideoPurpose: "performance", Channels: channels,

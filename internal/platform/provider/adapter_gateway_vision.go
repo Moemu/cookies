@@ -28,6 +28,29 @@ func NewAdapterGatewayVisionAdapter(routes VisionRouteResolver, credentials Gate
 	return &AdapterGatewayVisionAdapter{routes: routes, credentials: credentials, client: &http.Client{}, allowInsecureHTTP: allowInsecureHTTP}, nil
 }
 
+func (a *AdapterGatewayVisionAdapter) InspectVisionRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (CapabilityRouteInspection, error) {
+	if organizationID == "" || strings.TrimSpace(modelAlias) == "" {
+		return CapabilityRouteInspection{}, fmt.Errorf("vision route inspection scope and model alias are required")
+	}
+	route, err := a.routes.ResolveVisionRoute(ctx, organizationID, modelAlias)
+	if err != nil {
+		return CapabilityRouteInspection{}, err
+	}
+	if err := route.ValidateTextWithPolicy(a.allowInsecureHTTP); err != nil {
+		return CapabilityRouteInspection{}, err
+	}
+	if route.TextAPIMode == TextAPIResponses {
+		return CapabilityRouteInspection{}, fmt.Errorf("vision understanding currently requires a chat-completions route")
+	}
+	if _, err := a.credentials.ResolveGatewayCredential(ctx, route.CredentialID, route.CredentialVersion); err != nil {
+		return CapabilityRouteInspection{}, gatewayExecutionError("MODEL_AUTH_UNAVAILABLE", "Adapter gateway credential could not be resolved")
+	}
+	return CapabilityRouteInspection{
+		ModelAlias: modelAlias, UpstreamModel: route.UpstreamModel,
+		RouteRevisionID: route.RouteRevisionID, Ready: true,
+	}, nil
+}
+
 func (a *AdapterGatewayVisionAdapter) UnderstandVision(ctx context.Context, request VisionAdapterRequest) (SynchronousResult, error) {
 	if strings.TrimSpace(request.ModelAlias) == "" || strings.TrimSpace(request.Input.Instruction) == "" || len(request.Sources) == 0 || len(request.Sources) > 8 {
 		return SynchronousResult{}, fmt.Errorf("adapter gateway vision request is invalid")

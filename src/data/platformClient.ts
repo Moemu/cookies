@@ -256,7 +256,7 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
       // Projects. Drafts remain available through the platform API, but must
       // not make loading every usable Project fail at the active-context gate.
       const operationalProjects = projects.filter(project => project.status === "active" && project.primary_brand_id !== null);
-      return Promise.all(operationalProjects.map(async project => toApiProject(await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(project.id)}`))));
+      return operationalProjects.map(toApiProjectSummary);
     },
     createProject: async (input: Pick<ApiProject, "name" | "brand" | "objective" | "industry">) => {
       const brand = await request<PlatformBrand>("/brands", {
@@ -441,6 +441,30 @@ export function toApiProject(input: PlatformProjectDetail): ApiProject {
     version: project.project_context_version,
     createdAt: project.created_at,
     updatedAt,
+  };
+}
+
+export function toApiProjectSummary(project: PlatformProject): ApiProject {
+  return {
+    id: project.id,
+    name: project.name,
+    industry: project.industry ?? "ecommerce",
+    brand: project.primary_brand_id ?? "尚未绑定品牌",
+    objective: "",
+    runtime: {
+      code: project.id,
+      product: "项目产品",
+      stage: "intake",
+      progress: 0,
+      status: "active",
+      owner: "服务端项目",
+      budget: 0,
+      currency: "CNY",
+      timezone: "Asia/Shanghai",
+    },
+    version: project.project_context_version,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
   };
 }
 

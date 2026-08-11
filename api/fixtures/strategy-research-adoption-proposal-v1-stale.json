@@ -1,0 +1,33 @@
+{
+  "contract_version": "strategy-research-adoption-proposal/v1",
+  "id": "proposal_01",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "workspace_id": "workspace_01",
+  "conversation_id": "conversation_01",
+  "proposal_kind": "research",
+  "target_type": "brief_draft",
+  "target_id": "briefdraft_01",
+  "target_version": 4,
+  "base_content_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "operations": [
+    {
+      "op": "set",
+      "field_path": "constraints",
+      "value": ["短视频作为首触达渠道仍需项目数据验证"],
+      "source": {"type": "research_finding", "id": "finding_01"},
+      "confidence": "medium",
+      "confirmation": "proposed"
+    }
+  ],
+  "rationale": "研究来源存在冲突，因此应补充为待验证约束而不是事实。",
+  "risk": "medium",
+  "status": "stale",
+  "finding_ids": ["finding_01"],
+  "source_research_run_id": "researchrun_01",
+  "stale_reason": "Brief 已从 version 4 更新到 version 5",
+  "created_by": "researchrun_01",
+  "version": 2,
+  "created_at": "2026-08-10T00:12:00Z",
+  "updated_at": "2026-08-10T00:15:00Z"
+}

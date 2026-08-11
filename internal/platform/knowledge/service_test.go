@@ -44,6 +44,21 @@ func TestExtractDocumentRejectsUnsupportedOrMalformedContent(t *testing.T) {
 	}
 }
 
+func TestHTMLDocumentsUseTheBoundedTikaTextPath(t *testing.T) {
+	t.Parallel()
+	for _, extension := range []string{".html", ".htm"} {
+		if !allowedMIME(extension, "text/html; charset=utf-8") ||
+			!allowedMIME(extension, "application/xhtml+xml") ||
+			defaultDocumentMIME(extension) != "text/html" ||
+			documentParseStrategy(extension) != "tika_text" {
+			t.Fatalf("HTML routing is incomplete for %s", extension)
+		}
+	}
+	if allowedMIME(".html", "image/svg+xml") {
+		t.Fatal("HTML extension accepted an unrelated active-content MIME")
+	}
+}
+
 func TestResearchRequiresPerCallConfirmationBeforeDatabaseOrRunner(t *testing.T) {
 	t.Parallel()
 	service := Service{Projects: allowingProjects{}}
@@ -125,6 +140,7 @@ func TestResearchDisclosureMustExactlyMatchPayload(t *testing.T) {
 func TestResearchPurposeSeparatesConversationSearchFromDeepResearch(t *testing.T) {
 	t.Parallel()
 	messageRef := &contract.ResourceRef{Type: "strategy_message", ID: "message_1"}
+	workspaceRef := &contract.ResourceRef{Type: "strategy_workspace", ID: "workspace_1"}
 	tests := []struct {
 		name        string
 		purpose     string
@@ -132,8 +148,9 @@ func TestResearchPurposeSeparatesConversationSearchFromDeepResearch(t *testing.T
 		wantPurpose string
 		wantError   bool
 	}{
-		{name: "legacy defaults to deep research", wantPurpose: "deep_research"},
-		{name: "deep research has no conversation source", purpose: "deep_research", wantPurpose: "deep_research"},
+		{name: "deep research binds one workspace", sourceRef: workspaceRef, wantPurpose: "deep_research"},
+		{name: "explicit deep research binds one workspace", purpose: "deep_research", sourceRef: workspaceRef, wantPurpose: "deep_research"},
+		{name: "deep research requires workspace", purpose: "deep_research", wantError: true},
 		{name: "conversation search binds one message", purpose: "conversation_web_search", sourceRef: messageRef, wantPurpose: "conversation_web_search"},
 		{name: "conversation search requires message", purpose: "conversation_web_search", wantError: true},
 		{name: "deep research rejects message source", purpose: "deep_research", sourceRef: messageRef, wantError: true},

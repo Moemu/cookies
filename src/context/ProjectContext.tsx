@@ -54,11 +54,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     try {
       const apiProjects = await api.listProjects()
-      const workbench = await api.listAgencyWorkbench({ projectIds: apiProjects.map(project => project.id) })
-      const nextProjects = await Promise.all(apiProjects.map(async project => {
-        const snapshot = await api.getProjectSnapshot(project.id)
-        return toProjectRecord(snapshot.project, snapshot.artifacts, snapshot.jobs, snapshot.tasks, snapshot.changeSets, snapshot.operations)
-      }))
+      const requestedProjectId = expectedProjectId || targetProjectIdRef.current
+      const activeProjectId = requestedProjectId && apiProjects.some(project => project.id === requestedProjectId)
+        ? requestedProjectId
+        : !requestedProjectId
+          ? apiProjects[0]?.id ?? ''
+          : ''
+      const activeProject = apiProjects.find(project => project.id === activeProjectId)
+      const [activeSnapshot, workbench] = activeProject
+        ? await Promise.all([
+            api.getProjectSnapshot(activeProject.id),
+            api.listAgencyWorkbench({ projectIds: [activeProject.id] }),
+          ])
+        : [null, await api.listAgencyWorkbench({ projectIds: [] })]
+      const existingProjects = new Map(projectsRef.current.map(project => [project.id, project]))
+      const nextProjects = apiProjects.map(project => {
+        if (activeSnapshot?.project.id === project.id) {
+          return toProjectRecord(activeSnapshot.project, activeSnapshot.artifacts, activeSnapshot.jobs, activeSnapshot.tasks, activeSnapshot.changeSets, activeSnapshot.operations)
+        }
+        return existingProjects.get(project.id) ?? toProjectRecord(project)
+      })
       if (reloadRequestRef.current !== requestId) {
         setRouteDiagnostic(`已忽略过期的 Project 加载响应，当前路由目标为 ${targetProjectIdRef.current || '未选择 Project'}。`)
         return
@@ -84,6 +99,40 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setLoadedProjectId(nextLoadedProjectId)
       setRouteDiagnostic(activeTargetId && !nextLoadedProjectId ? `路由目标 Project ${activeTargetId} 未在服务端返回结果中找到。` : null)
       setError(null)
+
+      const remainingProjects = apiProjects.filter(project => project.id !== activeProjectId)
+      void (async () => {
+        for (let offset = 0; offset < remainingProjects.length; offset += 2) {
+          const batch = remainingProjects.slice(offset, offset + 2)
+          const hydrated = await Promise.all(batch.map(async project => {
+            try {
+              const [snapshot, projectWorkbench] = await Promise.all([
+                api.getProjectSnapshot(project.id),
+                api.listAgencyWorkbench({ projectIds: [project.id] }),
+              ])
+              return {
+                project: toProjectRecord(snapshot.project, snapshot.artifacts, snapshot.jobs, snapshot.tasks, snapshot.changeSets, snapshot.operations),
+                workbench: projectWorkbench,
+              }
+            } catch {
+              return null
+            }
+          }))
+          if (reloadRequestRef.current !== requestId) return
+          const successful = hydrated.filter((value): value is NonNullable<typeof value> => value !== null)
+          if (!successful.length) continue
+          const records = new Map(successful.map(value => [value.project.id, value.project]))
+          setProjects(current => {
+            const next = current.map(project => records.get(project.id) ?? project)
+            projectsRef.current = next
+            return next
+          })
+          setAgencyWorkbench(current => successful.reduce(
+            (merged, value) => mergeAgencyWorkbench(merged, value.workbench),
+            current ?? emptyAgencyWorkbenchValue,
+          ))
+        }
+      })()
     } catch (cause) {
       if (reloadRequestRef.current !== requestId) {
         setRouteDiagnostic(`已忽略过期的 Project 加载失败响应，当前路由目标为 ${targetProjectIdRef.current || '未选择 Project'}。`)
@@ -118,10 +167,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     targetProjectIdRef.current = id
     setTargetProjectId(id)
     setRouteDiagnostic(null)
-    const alreadyLoaded = projectsRef.current.some(project => project.id === id)
-    if (alreadyLoaded) {
-      loadedProjectIdRef.current = id
-      setLoadedProjectId(id)
+    if (loadedProjectIdRef.current === id) {
       setIsLoading(false)
       return
     }
@@ -129,7 +175,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setLoadedProjectId('')
     setIsLoading(true)
     void reloadProjects(id)
-  }, [loadedProjectId, projects, reloadProjects])
+  }, [reloadProjects])
 
   const createProject = useCallback(async (input: Pick<ProjectRecord, 'name' | 'brand' | 'goal' | 'industry'>) => {
     const created = toProjectRecord(await api.createProject({ name: input.name, brand: input.brand || '未指定品牌', objective: input.goal, industry: input.industry }))
@@ -290,6 +336,34 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
     operations,
     knowledgeCount: documents.filter(artifact => artifact.content.startsWith('[knowledge]')).length,
   }
+}
+
+const emptyAgencyWorkbenchValue: ApiAgencyWorkbench = {
+  organizations: [],
+  clients: [],
+  brands: [],
+  projects: [],
+  adAccountBindings: [],
+  qualityCheckRuns: [],
+  materialConfirmations: [],
+  assetVersionPointers: [],
+}
+
+function mergeAgencyWorkbench(current: ApiAgencyWorkbench, incoming: ApiAgencyWorkbench): ApiAgencyWorkbench {
+  return {
+    organizations: mergeRecords(current.organizations, incoming.organizations),
+    clients: mergeRecords(current.clients, incoming.clients),
+    brands: mergeRecords(current.brands, incoming.brands),
+    projects: mergeRecords(current.projects, incoming.projects),
+    adAccountBindings: mergeRecords(current.adAccountBindings, incoming.adAccountBindings),
+    qualityCheckRuns: mergeRecords(current.qualityCheckRuns, incoming.qualityCheckRuns),
+    materialConfirmations: mergeRecords(current.materialConfirmations, incoming.materialConfirmations),
+    assetVersionPointers: mergeRecords(current.assetVersionPointers, incoming.assetVersionPointers),
+  }
+}
+
+function mergeRecords<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  return [...new Map([...current, ...incoming].map(value => [value.id, value])).values()]
 }
 
 const emptyProject: ProjectRecord = {

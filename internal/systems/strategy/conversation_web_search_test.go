@@ -35,7 +35,7 @@ func (fixture *conversationResearchFixture) RunConversationWebSearch(
 func TestConversationWebSearchGroundsTheSameTurn(t *testing.T) {
 	t.Parallel()
 	fixture := &conversationResearchFixture{run: knowledge.ResearchRun{
-		Status:    "succeeded",
+		Status:    "completed",
 		Artifacts: []knowledge.ResearchArtifact{{ID: "research_1", ContentHash: "abc123"}},
 	}}
 	service := Service{ConversationResearch: fixture}

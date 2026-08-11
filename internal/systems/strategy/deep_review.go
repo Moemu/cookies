@@ -60,6 +60,20 @@ func (s Service) StartDeepReview(
 	if found || err != nil {
 		return prior, found, err
 	}
+	var sourceTaskID string
+	if err := s.DB.QueryRowContext(ctx, `SELECT task_id FROM strategy_drafts
+		WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		actor.OrganizationID, review.ProjectID, review.StrategyID).Scan(&sourceTaskID); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	workspaceID, err := s.workspaceIDForTask(ctx, actor.OrganizationID, review.ProjectID, sourceTaskID)
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	manifest, err := s.BuildProjectContextManifest(ctx, actor, workspaceID, "review")
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
 	analysisID, err := s.newID("deepreview")
 	if err != nil {
 		return DeepReviewStartResult{}, false, err
@@ -72,7 +86,9 @@ func (s Service) StartDeepReview(
 	input := map[string]any{
 		"analysis_id": analysisID, "review_id": review.ID, "strategy_id": review.StrategyID,
 		"candidate_revision": review.CandidateRevision, "candidate_content_hash": review.CandidateContentHash,
+		"target_kind": "review_candidate", "brief_id": review.BriefID, "brief_version": review.BriefVersion,
 		"model_alias": modelAlias, "prompt_version": s.reviewPromptVersion(),
+		"context_manifest": manifest,
 	}
 	task := agent.Task{
 		ID: taskID, OrganizationID: actor.OrganizationID, ProjectID: review.ProjectID,
@@ -82,7 +98,8 @@ func (s Service) StartDeepReview(
 	}
 	analysis := DeepReviewAnalysis{
 		ID: analysisID, OrganizationID: actor.OrganizationID, ProjectID: review.ProjectID,
-		ReviewID: review.ID, StrategyID: review.StrategyID, CandidateRevision: review.CandidateRevision,
+		TargetKind: "review_candidate",
+		ReviewID:   review.ID, StrategyID: review.StrategyID, CandidateRevision: review.CandidateRevision,
 		CandidateContentHash: review.CandidateContentHash, AgentTaskID: task.ID, Status: "pending",
 		Findings: []DeepReviewFinding{}, ModelAlias: modelAlias, APIMode: inspection.APIMode,
 		Background: inspection.Background, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
@@ -100,11 +117,11 @@ func (s Service) StartDeepReview(
 		return DeepReviewStartResult{}, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_review_analyses
-		(id, organization_id, project_id, review_id, strategy_id, candidate_revision,
+		(id, organization_id, project_id, target_kind, review_id, strategy_id, candidate_revision,
 		 candidate_content_hash, agent_task_id, status, findings, model_alias, api_mode,
 		 background, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', JSON_ARRAY(), ?, ?, ?, ?, ?, ?)`,
-		analysis.ID, analysis.OrganizationID, analysis.ProjectID, analysis.ReviewID, analysis.StrategyID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', JSON_ARRAY(), ?, ?, ?, ?, ?, ?)`,
+		analysis.ID, analysis.OrganizationID, analysis.ProjectID, analysis.TargetKind, analysis.ReviewID, analysis.StrategyID,
 		analysis.CandidateRevision, analysis.CandidateContentHash, analysis.AgentTaskID,
 		analysis.ModelAlias, analysis.APIMode, analysis.Background, analysis.CreatedBy, now, now); err != nil {
 		return DeepReviewStartResult{}, false, err
@@ -137,34 +154,207 @@ func (s Service) GetLatestDeepReview(ctx context.Context, actor contract.ActorCo
 		ORDER BY created_at DESC LIMIT 1`, actor.OrganizationID, review.ProjectID, reviewID))
 }
 
+// StartStrategyPerspective runs the same evidence-grounded second-opinion
+// analysis as review deep analysis, but binds it directly to an immutable
+// Strategy revision. It deliberately does not create or mutate a human review.
+func (s Service) StartStrategyPerspective(
+	ctx context.Context,
+	actor contract.ActorContext,
+	key contract.IdempotencyKey,
+	strategyID string,
+	request StartStrategyPerspectiveRequest,
+) (DeepReviewStartResult, bool, error) {
+	if err := requireScope(actor, ScopeWrite); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	if err := key.Validate(); err != nil || strings.TrimSpace(strategyID) == "" ||
+		request.ExpectedRevision < 1 || request.ExpectedContentHash.Validate() != nil {
+		return DeepReviewStartResult{}, false, ErrInvalidRequest
+	}
+	draft, err := scanDraft(s.DB.QueryRowContext(ctx, draftSelect+`
+		WHERE organization_id = ? AND id = ?`, actor.OrganizationID, strategyID))
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	if draft.ArchivedAt != nil {
+		return DeepReviewStartResult{}, false, ErrInvalidState
+	}
+	if draft.CurrentRevision != request.ExpectedRevision {
+		return DeepReviewStartResult{}, false, ErrVersionConflict
+	}
+	revision, err := scanDraftRevision(s.DB.QueryRowContext(ctx, draftRevisionSelect+`
+		WHERE organization_id = ? AND project_id = ? AND strategy_id = ? AND revision = ?`,
+		actor.OrganizationID, draft.ProjectID, draft.ID, request.ExpectedRevision))
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	if !revision.ContentHash.Equal(request.ExpectedContentHash) {
+		return DeepReviewStartResult{}, false, ErrVersionConflict
+	}
+	if err := s.ensureConcurrencyLimit(ctx, actor.OrganizationID, draft.ProjectID, 4); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	modelAlias := strings.TrimSpace(s.DeepReviewModelAlias)
+	if modelAlias == "" {
+		modelAlias = "cookies.text.deep_review"
+	}
+	if s.Text == nil {
+		return DeepReviewStartResult{}, false, ErrGenerationUnavailable
+	}
+	inspection, err := s.Text.InspectTextRoute(ctx, actor.OrganizationID, modelAlias)
+	if err != nil || !inspection.Ready || inspection.APIMode != provider.TextAPIResponses || !inspection.Background {
+		return DeepReviewStartResult{}, false, ErrGenerationUnavailable
+	}
+	requestHash, _ := contract.CanonicalJSONHash(struct {
+		StrategyID string                          `json:"strategy_id"`
+		Request    StartStrategyPerspectiveRequest `json:"request"`
+	}{StrategyID: strategyID, Request: request})
+	var prior DeepReviewStartResult
+	found, err := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.perspective", key, requestHash, &prior)
+	if found || err != nil {
+		return prior, found, err
+	}
+	workspaceID, err := s.workspaceIDForTask(ctx, actor.OrganizationID, draft.ProjectID, draft.TaskID)
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	manifest, err := s.BuildProjectContextManifest(ctx, actor, workspaceID, "strategy")
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	analysisID, err := s.newID("deepreview")
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	taskID, err := s.newID("agenttask")
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	now := s.now()
+	input := map[string]any{
+		"analysis_id": analysisID, "target_kind": "strategy_revision", "strategy_id": draft.ID,
+		"candidate_revision": revision.Revision, "candidate_content_hash": revision.ContentHash,
+		"brief_id": draft.BriefID, "brief_version": draft.BriefVersion,
+		"model_alias": modelAlias, "prompt_version": s.reviewPromptVersion(),
+		"context_manifest": manifest,
+	}
+	task := agent.Task{
+		ID: taskID, OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID,
+		SourceSystem: "strategy", SourceType: "strategy_draft", SourceID: draft.ID,
+		Kind: AgentKindReviewDeep, Status: agent.TaskDispatchPending, Version: 1,
+		InputSnapshot: mustJSON(input), CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now,
+	}
+	analysis := DeepReviewAnalysis{
+		ID: analysisID, OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID,
+		TargetKind: "strategy_revision", StrategyID: draft.ID, CandidateRevision: revision.Revision,
+		CandidateContentHash: revision.ContentHash, AgentTaskID: task.ID, Status: "pending",
+		Findings: []DeepReviewFinding{}, ModelAlias: modelAlias, APIMode: inspection.APIMode,
+		Background: inspection.Background, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	defer tx.Rollback()
+	var lockedRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM strategy_drafts
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		actor.OrganizationID, draft.ProjectID, draft.ID).Scan(&lockedRevision); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	if lockedRevision != request.ExpectedRevision {
+		return DeepReviewStartResult{}, false, ErrVersionConflict
+	}
+	writer, err := s.agentWriter()
+	if err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	if err := writer.CreateIn(ctx, tx, agent.CreateRequest{Task: task}); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_review_analyses
+		(id, organization_id, project_id, target_kind, review_id, strategy_id, candidate_revision,
+		 candidate_content_hash, agent_task_id, status, findings, model_alias, api_mode,
+		 background, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, 'strategy_revision', NULL, ?, ?, ?, ?, 'pending', JSON_ARRAY(), ?, ?, ?, ?, ?, ?)`,
+		analysis.ID, analysis.OrganizationID, analysis.ProjectID, analysis.StrategyID,
+		analysis.CandidateRevision, analysis.CandidateContentHash, analysis.AgentTaskID,
+		analysis.ModelAlias, analysis.APIMode, analysis.Background, analysis.CreatedBy, now, now); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	result := DeepReviewStartResult{Analysis: analysis, AgentTask: task}
+	if err := insertReceipt(ctx, tx, actor, draft.ProjectID, "strategy.perspective", key, requestHash, 202, result, now); err != nil {
+		if isDuplicate(err) {
+			tx.Rollback()
+			found, readErr := s.loadReceipt(ctx, actor, draft.ProjectID, "strategy.perspective", key, requestHash, &prior)
+			return prior, found, readErr
+		}
+		return DeepReviewStartResult{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return DeepReviewStartResult{}, false, err
+	}
+	return result, false, nil
+}
+
+func (s Service) GetLatestStrategyPerspective(ctx context.Context, actor contract.ActorContext, strategyID string) (DeepReviewAnalysis, error) {
+	if err := requireScope(actor, ScopeRead); err != nil {
+		return DeepReviewAnalysis{}, err
+	}
+	draft, err := scanDraft(s.DB.QueryRowContext(ctx, draftSelect+`
+		WHERE organization_id = ? AND id = ?`, actor.OrganizationID, strategyID))
+	if err != nil {
+		return DeepReviewAnalysis{}, err
+	}
+	return scanDeepReview(s.DB.QueryRowContext(ctx, deepReviewSelect+`
+		WHERE organization_id = ? AND project_id = ? AND strategy_id = ? AND candidate_revision = ?
+		ORDER BY created_at DESC LIMIT 1`, actor.OrganizationID, draft.ProjectID, draft.ID, draft.CurrentRevision))
+}
+
 func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
 	var input struct {
 		AnalysisID           string               `json:"analysis_id"`
+		TargetKind           string               `json:"target_kind"`
 		ReviewID             string               `json:"review_id"`
 		StrategyID           string               `json:"strategy_id"`
 		CandidateRevision    int64                `json:"candidate_revision"`
 		CandidateContentHash contract.ContentHash `json:"candidate_content_hash"`
+		BriefID              string               `json:"brief_id"`
+		BriefVersion         int64                `json:"brief_version"`
 		ModelAlias           string               `json:"model_alias"`
 		PromptVersion        string               `json:"prompt_version"`
 	}
 	if err := json.Unmarshal(task.InputSnapshot, &input); err != nil {
 		return nil, err
 	}
-	review, err := scanReview(s.DB.QueryRowContext(ctx, reviewSelect+`
-		WHERE organization_id = ? AND project_id = ? AND id = ?`,
-		task.OrganizationID, task.ProjectID, input.ReviewID))
-	if err != nil {
-		return nil, err
+	targetKind := strings.TrimSpace(input.TargetKind)
+	if targetKind == "" {
+		targetKind = "review_candidate"
 	}
-	if review.StrategyID != input.StrategyID || review.CandidateRevision != input.CandidateRevision ||
-		review.CandidateContentHash != input.CandidateContentHash {
-		return nil, ErrReviewStale
+	briefID, briefVersion := input.BriefID, input.BriefVersion
+	if targetKind == "review_candidate" {
+		review, err := scanReview(s.DB.QueryRowContext(ctx, reviewSelect+`
+			WHERE organization_id = ? AND project_id = ? AND id = ?`,
+			task.OrganizationID, task.ProjectID, input.ReviewID))
+		if err != nil {
+			return nil, err
+		}
+		if review.StrategyID != input.StrategyID || review.CandidateRevision != input.CandidateRevision ||
+			review.CandidateContentHash != input.CandidateContentHash {
+			return nil, ErrReviewStale
+		}
+		briefID, briefVersion = review.BriefID, review.BriefVersion
+	} else if targetKind != "strategy_revision" {
+		return nil, ErrInvalidRequest
 	}
 	revision, err := scanDraftRevision(s.DB.QueryRowContext(ctx, draftRevisionSelect+`
 		WHERE organization_id = ? AND project_id = ? AND strategy_id = ? AND revision = ?`,
 		task.OrganizationID, task.ProjectID, input.StrategyID, input.CandidateRevision))
 	if err != nil {
 		return nil, err
+	}
+	if !revision.ContentHash.Equal(input.CandidateContentHash) {
+		return nil, ErrReviewStale
 	}
 	actor := contract.ActorContext{
 		OrganizationID: task.OrganizationID, Principal: task.CreatedBy,
@@ -189,7 +379,7 @@ func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contra
 	if promptVersion == promptkit.ReviewV2 {
 		brief, briefErr := scanBriefVersion(s.DB.QueryRowContext(ctx, briefVersionSelect+`
 			WHERE organization_id = ? AND project_id = ? AND brief_id = ? AND version = ?`,
-			task.OrganizationID, task.ProjectID, review.BriefID, review.BriefVersion))
+			task.OrganizationID, task.ProjectID, briefID, briefVersion))
 		if briefErr != nil {
 			return nil, briefErr
 		}
@@ -280,10 +470,14 @@ func (s Service) handleDeepReview(ctx context.Context, task agent.Task) (*contra
 		return nil, err
 	}
 	version := input.CandidateRevision
-	return &contract.ResourceRef{Type: "strategy.review_analysis", ID: input.AnalysisID, Version: &version}, nil
+	resourceType := "strategy.review_analysis"
+	if targetKind == "strategy_revision" {
+		resourceType = "strategy.perspective_analysis"
+	}
+	return &contract.ResourceRef{Type: resourceType, ID: input.AnalysisID, Version: &version}, nil
 }
 
-const deepReviewSelect = `SELECT id, organization_id, project_id, review_id, strategy_id,
+const deepReviewSelect = `SELECT id, organization_id, project_id, target_kind, COALESCE(review_id, ''), strategy_id,
 	candidate_revision, candidate_content_hash, agent_task_id, status, COALESCE(summary, ''),
 	findings, COALESCE(model_alias, ''), COALESCE(model_version, ''),
 	COALESCE(route_revision_id, ''), COALESCE(response_mode, ''), COALESCE(api_mode, ''),
@@ -294,7 +488,7 @@ func scanDeepReview(row rowScanner) (DeepReviewAnalysis, error) {
 	var value DeepReviewAnalysis
 	var findingsJSON, usageJSON []byte
 	if err := row.Scan(
-		&value.ID, &value.OrganizationID, &value.ProjectID, &value.ReviewID, &value.StrategyID,
+		&value.ID, &value.OrganizationID, &value.ProjectID, &value.TargetKind, &value.ReviewID, &value.StrategyID,
 		&value.CandidateRevision, &value.CandidateContentHash, &value.AgentTaskID, &value.Status,
 		&value.Summary, &findingsJSON, &value.ModelAlias, &value.ModelVersion,
 		&value.RouteRevisionID, &value.ResponseMode, &value.APIMode, &value.Background,

@@ -17,7 +17,13 @@ import { BackendApiError } from '../../backend/platform'
 import type { ApiProjectMediaAsset } from '../../data/api'
 import { platformClient } from '../../data/platformClient'
 import { createMutationKey, strategyApi } from './api'
-import { createRouteRevisionChannelStrategy, findPublishedPackageForDraft } from './creativeTaskPlanning'
+import { findPublishedPackageForDraft } from './creativeTaskPlanning'
+import { CreativeHandoffPackageSummary } from './CreativeHandoffPackageSummary'
+import {
+  clearWorkspaceSessionValue,
+  readWorkspaceSessionValue,
+  writeWorkspaceSessionValue,
+} from './workspace/workspaceSessionState'
 import type {
   BriefVersion,
   CreativeBusinessCapability,
@@ -35,13 +41,18 @@ import type {
 type Props = {
   briefVersion: BriefVersion | null
   draft: StrategyDraft | null
-  onCreateRouteRevision: (channelStrategy: unknown) => Promise<boolean>
+  draftStorageKey: string
   onOpenCreative: (navId: string, view: string, contextId: string) => void
   onOpenStrategy: () => void
   projectId: string
 }
 
-export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision, onOpenCreative, onOpenStrategy, projectId }: Props) {
+type HandoffAnswersSessionDraft = {
+  answers: Record<string, unknown>
+  baseRevision: number
+}
+
+export function CreativeHandoffWorkspace({ briefVersion, draft, draftStorageKey, onOpenCreative, onOpenStrategy, projectId }: Props) {
   const [catalogHash, setCatalogHash] = useState('')
   const [profiles, setProfiles] = useState<CreativeBusinessProfile[]>([])
   const [capabilities, setCapabilities] = useState<CreativeBusinessCapability[]>([])
@@ -128,9 +139,6 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     : !compatibleRoutes.length
       ? '等待可用创作路线'
       : '确认此业务并创建任务计划'
-  const routeRevision = draft?.revision
-    ? createRouteRevisionChannelStrategy(draft.revision.document.channel_strategy, selectedCode)
-    : null
   const hasUnsavedAnswers = Boolean(activePlan && selectedProfile && selectedProfile.questions.some(question => {
     if (question.brief_source_path &&
       hasDisplayValue(readPath(briefVersion?.snapshot, question.brief_source_path))) return false
@@ -145,6 +153,22 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     if (compatibleRoutes.some(route => route.route_id === selectedRouteId)) return
     setSelectedRouteId(compatibleRoutes[0]?.route_id ?? '')
   }, [compatibleRoutes, readyRoutes.length, selectedCode, selectedRouteId])
+
+  useEffect(() => {
+    if (!activePlan) return
+    const storageKey = handoffAnswersSessionKey(draftStorageKey, activePlan.id)
+    const dirtyAnswers = Object.fromEntries(Object.entries(answers).filter(([key, value]) =>
+      JSON.stringify(activePlan.answers[key]) !== JSON.stringify(value),
+    ))
+    if (!Object.keys(dirtyAnswers).length) {
+      clearWorkspaceSessionValue(storageKey)
+      return
+    }
+    writeWorkspaceSessionValue<HandoffAnswersSessionDraft>(storageKey, {
+      answers: dirtyAnswers,
+      baseRevision: activePlan.current_revision,
+    })
+  }, [activePlan, answers, draftStorageKey])
 
   const load = async (signal?: AbortSignal) => {
     if (!briefVersion) return
@@ -181,7 +205,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     })
     setActivePlanId(nextPlan?.id ?? '')
     setSelectedCode(nextPlan?.business_code ?? nextRecommendation.recommended[0]?.business_code ?? catalog.items[0]?.business_code ?? '')
-    setAnswers(nextPlan?.answers ?? {})
+    setAnswers(nextPlan ? answersWithSessionDraft(nextPlan, draftStorageKey) : {})
   }
 
   useEffect(() => {
@@ -204,7 +228,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
   const selectPlan = (plan: CreativeTaskPlan) => {
     setActivePlanId(plan.id)
     setSelectedCode(plan.business_code)
-    setAnswers(plan.answers)
+    setAnswers(answersWithSessionDraft(plan, draftStorageKey))
     setShowSetup(false)
     setError('')
   }
@@ -240,20 +264,6 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     }
   }
 
-  const createRouteRevision = async () => {
-    if (!routeRevision?.changed) {
-      onOpenStrategy()
-      return
-    }
-    setBusy('route-repair')
-    setError('')
-    try {
-      if (await onCreateRouteRevision(routeRevision.value)) onOpenStrategy()
-    } finally {
-      setBusy('')
-    }
-  }
-
   const saveAnswers = async () => {
     if (!activePlan || !selectedProfile || !briefVersion) return
     const editableAnswers = Object.fromEntries(
@@ -278,6 +288,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
         dirtyAnswers,
         createMutationKey('creative-task-answers'),
       )
+      clearWorkspaceSessionValue(handoffAnswersSessionKey(draftStorageKey, activePlan.id))
       setPlans(current => current.map(item => item.id === plan.id ? plan : item))
       setAnswers(plan.answers)
     } catch (cause) {
@@ -296,7 +307,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
       : [plan, ...current])
     setActivePlanId(plan.id)
     setSelectedCode(plan.business_code)
-    setAnswers(plan.answers)
+    setAnswers(answersWithSessionDraft(plan, draftStorageKey))
   }
 
   const generate = async () => {
@@ -327,7 +338,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
       }
       if (inspection.task.status === 'failed' || inspection.task.status === 'cancelled') {
         const problem = inspection.task.error ?? inspection.job?.error
-        throw new Error(problem?.message || '创意任务策略生成失败。')
+        throw new Error(problem?.message || '创意任务规格生成失败。')
       }
       await new Promise(resolve => window.setTimeout(resolve, 1500))
     }
@@ -389,7 +400,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
     return <section className="creative-planner-empty">
       <Sparkles size={26}/>
       <h2>先确认 Brief，再选择创意业务</h2>
-      <p>业务推荐只读取不可变 BriefVersion；未确认的草稿不会被拿来生成任务策略。</p>
+      <p>业务推荐只读取不可变 BriefVersion；未确认的草稿不会被拿来生成任务级规格。</p>
     </section>
   }
 
@@ -423,14 +434,16 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
   return <section className="creative-task-planner">
     <header className="creative-planner-heading">
       <div>
-        <span className="section-label">CREATIVE TASK STRATEGY</span>
-        <h2>选择业务，确认路线，再交接创作</h2>
-        <p>推荐是辅助，不是限制。品牌广告可从已审批策略包直接交接；任务级策略仅在确有增量约束时按需生成，不代替 Creative 写脚本或分镜。</p>
+        <span className="section-label">CREATIVE HANDOFF</span>
+        <h2>从已发布策略包编排创意任务</h2>
+        <p>上游策略在这里始终只读。你可以选择冻结 Route、补充任务级 Overlay 并交接创作，但不会改写 Strategy Revision 或 Package。</p>
       </div>
-      <button className="icon-button" aria-label="刷新创意任务策略" disabled={Boolean(busy)} onClick={() => void load()}>
+      <button className="icon-button" aria-label="刷新创意交接" disabled={Boolean(busy)} onClick={() => void load()}>
         <RefreshCw size={15}/>
       </button>
     </header>
+
+    <CreativeHandoffPackageSummary draft={draft} handoff={creativeHandoff} strategyPackage={strategyPackage}/>
 
     {error ? <div className="kanon-strategy-alert" role="alert"><AlertCircle size={15}/><span>{error}</span></div> : null}
 
@@ -465,7 +478,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
       type="button"
     >
       <span><b>{showSetup
-        ? isDirectBrandPlan ? '收起高级任务调整' : '收起任务策略设置'
+        ? isDirectBrandPlan ? '收起高级任务调整' : '收起任务级规格设置'
         : isDirectBrandPlan ? '需要任务级调整？（可选）' : '需要调整业务或任务输入？'}</b><small>{isDirectBrandPlan
         ? '默认可直接交接；仅在确有任务级差异时补充问题并生成 Overlay。'
         : '当前结果已冻结；修改会创建新的计划或版本。'}</small></span>
@@ -524,7 +537,7 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
                 {creativeRouteLabel(route)} · {route.reason}
               </option>)}
             </select>
-            : routeState ? <div className="creative-route-state" role="status"><AlertCircle size={16}/><span><b>{routeState.title}</b><small>{routeState.detail}</small>{routeBlockers.length > 1 ? <small>另有 {routeBlockers.length - 1} 项需补齐</small> : null}</span><button className="text-button" disabled={Boolean(busy)} onClick={() => void createRouteRevision()} type="button">{busy === 'route-repair' ? '正在创建…' : routeRevision?.changed ? '创建 Route 修订' : '去策略创建修订'}</button></div> : null}
+            : routeState ? <div className="creative-route-state" role="status"><AlertCircle size={16}/><span><b>{routeState.title}</b><small>{routeState.detail}</small>{routeBlockers.length > 1 ? <small>另有 {routeBlockers.length - 1} 项需补齐</small> : null}</span><button className="text-button" onClick={onOpenStrategy} type="button">返回策略查看修复建议</button></div> : null}
         </div> : null}
         {!activePlan ? <button className="primary-button creative-plan-create" disabled={!selectedCode || !strategyPackage || !selectedRouteId || Boolean(busy)} onClick={() => void createPlan()}>
           {busy === 'create' ? <LoaderCircle className="spin" size={15}/> : <Check size={15}/>}
@@ -591,13 +604,13 @@ export function CreativeTaskPlanner({ briefVersion, draft, onCreateRouteRevision
         <div>
           {activePlan.completeness.blockers.map(item => <span key={`${item.field}-${item.reason}`}><AlertCircle size={13}/>{item.reason}</span>)}
           {activePlan.completeness.warnings.map(item => <span className="warning" key={`${item.field}-${item.reason}`}>{item.reason}</span>)}
-          {hasUnsavedAnswers ? <span className="unsaved">回答尚未保存；保存后会重新判断是否可以生成。</span> : null}
+          {hasUnsavedAnswers ? <span className="unsaved">回答尚未保存；切换阶段时会在当前浏览器会话保留，保存后会重新判断是否可以生成。</span> : null}
         </div>
         <button className="secondary-button" disabled={Boolean(busy) || !hasUnsavedAnswers} onClick={() => void saveAnswers()}>
           {busy === 'save' ? '保存中…' : '保存并重新校验'}
         </button>
         <button className="primary-button" disabled={!activePlan.completeness.ready || hasUnsavedAnswers || Boolean(busy) || activePlan.status === 'generated'} onClick={() => void generate()}>
-          {busy === 'generate' ? <><LoaderCircle className="spin" size={15}/>生成中…</> : activePlan.status === 'generated' ? '已生成' : isDirectBrandPlan ? '生成可选任务策略' : '生成任务策略'}
+          {busy === 'generate' ? <><LoaderCircle className="spin" size={15}/>生成中…</> : activePlan.status === 'generated' ? '已生成' : isDirectBrandPlan ? '生成可选任务规格' : '生成任务规格'}
         </button>
       </div>
     </div> : null}
@@ -756,7 +769,7 @@ function SelectedBusinessPreview({ profile, recommendation }: {
           '当前 Brief 没有足够依据自动推荐，但你仍可基于实际业务判断选择。'}</p>
     </div>
     <div>
-      <span>生成策略前</span>
+      <span>生成任务规格前</span>
       <ul>{profile.requirements.strategy.map(item => <li key={item}>{item}</li>)}</ul>
     </div>
     <div>
@@ -814,7 +827,7 @@ function BaseBrandHandoff({ busy, capability, handoff, onHandoff, onRepair, plan
     </div>
     <div className={`creative-handoff-status ${handoffAvailable ? 'available' : 'unavailable'}`}>
       <div>
-        <b>{handoffAvailable ? '无需先填增量表或生成任务策略' : '暂时无法创建品牌广告输入'}</b>
+        <b>{handoffAvailable ? '无需先填增量表或生成任务规格' : '暂时无法创建品牌广告输入'}</b>
         <span>{handoffAvailable
           ? '只交接目标、受众、核心信息、约束和 Route；不替 Creative 编造 CTA、创意概念或视觉关键词。'
           : handoffLimitation}</span>
@@ -863,7 +876,7 @@ function StrategyResult({ busy, capability, handoff, onHandoff, onRepair, plan, 
       <div>
         <span className="section-label">READY FOR CREATIVE</span>
         <b>{document.core_message}</b>
-        <small>{profile.display_name} · 任务策略 v{strategy.version}</small>
+        <small>{profile.display_name} · 任务规格 v{strategy.version}</small>
       </div>
       <div>
         <span className="creative-result-status"><ShieldCheck size={13}/>已冻结并可追溯</span>
@@ -887,7 +900,7 @@ function StrategyResult({ busy, capability, handoff, onHandoff, onRepair, plan, 
     </div>
     <div className={`creative-handoff-status ${handoffAvailable ? 'available' : 'unavailable'}`}>
       <div>
-        <b>{handoffAvailable ? '已可交接到创意工作台' : hasFrozenLineage ? '任务策略已冻结，但交接条件未完成' : '历史计划仅供查看'}</b>
+        <b>{handoffAvailable ? '已可交接到创意工作台' : hasFrozenLineage ? '任务规格已冻结，但交接条件未完成' : '历史计划仅供查看'}</b>
         <span>{handoffAvailable
           ? '交接后会继承目标、受众、业务专属判断、约束、素材引用和版本血缘。'
           : handoffLimitation}</span>
@@ -1071,13 +1084,30 @@ function hasDisplayValue(value: unknown) {
   return value !== null && value !== undefined
 }
 
+function handoffAnswersSessionKey(baseKey: string, planId: string) {
+  return `${baseKey}:${encodeURIComponent(planId)}`
+}
+
+function answersWithSessionDraft(plan: CreativeTaskPlan, baseKey: string) {
+  const storageKey = handoffAnswersSessionKey(baseKey, plan.id)
+  const value = readWorkspaceSessionValue<Partial<HandoffAnswersSessionDraft>>(storageKey)
+  const validAnswers = value?.answers && typeof value.answers === 'object' && !Array.isArray(value.answers)
+    ? value.answers
+    : null
+  if (!validAnswers || value?.baseRevision !== plan.current_revision) {
+    if (value) clearWorkspaceSessionValue(storageKey)
+    return plan.answers
+  }
+  return { ...plan.answers, ...validAnswers }
+}
+
 function profileName(profiles: CreativeBusinessProfile[], businessCode: string) {
   return profiles.find(profile => profile.business_code === businessCode)?.display_name ?? businessCode
 }
 
 function messageOf(cause: unknown) {
   if (cause instanceof BackendApiError && cause.code === 'FEATURE_DISABLED') {
-    return '创意任务策略功能尚未在当前环境开放。'
+    return '创意任务规格功能尚未在当前环境开放。'
   }
   if (cause instanceof BackendApiError && cause.code === 'CATALOG_CHANGED') {
     return '业务能力目录已经更新，页面已刷新，请重新确认选择。'
@@ -1085,7 +1115,7 @@ function messageOf(cause: unknown) {
   if (cause instanceof BackendApiError && cause.code === 'TASK_PLAN_BLOCKED') {
     return '还有生成前必填信息未完成。'
   }
-  return cause instanceof Error ? cause.message : '创意任务策略操作失败。'
+  return cause instanceof Error ? cause.message : '创意任务规格操作失败。'
 }
 
 function routeIssueMessage(issue: { code: string; message: string }) {

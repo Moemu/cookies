@@ -182,7 +182,8 @@ func (s Service) loadChunkCandidates(
 		  ON d.organization_id = c.organization_id
 		 AND d.project_id = c.project_id
 		 AND d.id = c.document_id
-		WHERE c.organization_id = ? AND c.project_id = ? AND d.status = 'ready'`
+		WHERE c.organization_id = ? AND c.project_id = ?
+		  AND (d.status IN ('ready', 'partial') OR d.chunk_count > 0)`
 	args := []any{organizationID, projectID}
 	if len(documentIDs) > 0 {
 		query += ` AND c.document_id IN (` + strings.TrimRight(strings.Repeat("?,", len(documentIDs)), ",") + `)`

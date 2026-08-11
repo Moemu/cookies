@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1643,6 +1644,206 @@ func (s *Server) getKnowledgeDocument(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) previewKnowledgeDocument(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetDocumentPreview(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writerHeaderNoStore(w)
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) knowledgeDocumentContent(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	reader, info, filename, err := s.knowledge.OpenDocumentContent(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	defer reader.Close()
+	writerHeaderNoStore(w)
+	w.Header().Set("Content-Type", info.MIMEType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.SizeBytes, 10))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, reader)
+}
+
+func (s *Server) getKnowledgeDocumentVisionFallbackCapability(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetDocumentVisionFallbackCapability(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writerHeaderNoStore(w)
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) cancelKnowledgeDocumentParse(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.CancelDocumentParse(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if value.ExecutionStatus == contract.JobRunning {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, value)
+}
+
+func (s *Server) retryKnowledgeDocumentParse(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.RetryDocumentParse(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	value.ExtractedText = ""
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) runKnowledgeDocumentVisionFallback(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var request knowledge.RunDocumentVisionFallbackRequest
+	if r.ContentLength > 0 {
+		if err := decodeJSON(w, r, &request); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.RunDocumentVisionFallback(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"), request,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	value.ExtractedText = ""
+	writeJSON(w, http.StatusAccepted, value)
+}
+
+func (s *Server) proposeKnowledgeDocumentVisionReconciliation(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var request knowledge.ProposeDocumentVisionReconciliationRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ProposeDocumentVisionReconciliation(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"), request,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) listKnowledgeDocumentVisionReconciliationCandidates(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	limit, ok := boundedLimit(w, r, 50, 100)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.knowledge.ListDocumentVisionReconciliationCandidates(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), limit,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getKnowledgeDocumentVisionReconciliation(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetDocumentVisionReconciliation(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("reconciliation_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) confirmKnowledgeDocumentVisionReconciliation(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var request knowledge.ConfirmDocumentVisionReconciliationRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ConfirmDocumentVisionReconciliation(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("reconciliation_id"), request,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if request.Approve != nil && *request.Approve && value.Status == "applied" && value.Decision == "accepted" && value.ScheduledAt == nil {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, value)
+}
+
 func (s *Server) searchKnowledge(w http.ResponseWriter, r *http.Request) {
 	if s.knowledge == nil {
 		s.notImplemented(w, r)
@@ -1711,6 +1912,76 @@ func (s *Server) getKnowledgeResearchRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listKnowledgeResearchFindings(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.ListResearchFindings(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("research_run_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": value})
+}
+
+func (s *Server) getKnowledgeResearchReport(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.GetResearchReport(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("research_run_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) cancelKnowledgeResearch(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.CancelResearch(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("research_run_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if value.ExecutionStatus == contract.JobRunning {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, value)
+}
+
+func (s *Server) retryKnowledgeResearch(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.knowledge.RetryResearch(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("research_run_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, value)
 }
 
 func (s *Server) listKnowledgeResearchArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -1818,6 +2089,26 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, "The idempotency key conflicts with an earlier request.", false
 	case errors.Is(err, assets.ErrInvalidState):
 		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The resource is not in a valid state for this operation.", false
+	case errors.Is(err, knowledge.ErrKnowledgeInvalidState):
+		status, code, message, retryable = http.StatusConflict, "KNOWLEDGE_INVALID_STATE", "当前资料或研究任务不处于可取消或重试状态。", false
+	case errors.Is(err, knowledge.ErrKnowledgeControlUnavailable):
+		status, code, message, retryable = http.StatusServiceUnavailable, "KNOWLEDGE_CONTROL_UNAVAILABLE", "资料任务控制服务暂时不可用。", true
+	case errors.Is(err, knowledge.ErrDocumentVisionUnavailable):
+		status, code, message, retryable = http.StatusServiceUnavailable, "DOCUMENT_VISION_UNAVAILABLE", "视觉解析能力尚未配置，当前文本解析结果仍可继续使用。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionIneligible):
+		status, code, message, retryable = http.StatusConflict, "DOCUMENT_VISION_INELIGIBLE", "仅低质量的 PDF/PPT 文本解析结果可手动进入视觉解析。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionPageSelectionRequired):
+		status, code, message, retryable = http.StatusUnprocessableEntity, "DOCUMENT_VISION_PAGE_SELECTION_REQUIRED", "页数未知或超过 24 页时，请明确选择最多 24 个页面。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionReconciliationRequired):
+		status, code, message, retryable = http.StatusConflict, "DOCUMENT_VISION_RECONCILIATION_REQUIRED", "上一次外部解析是否已提交尚未确认；为避免重复计费，请先完成人工对账。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionReconciliationForbidden):
+		status, code, message, retryable = http.StatusForbidden, "DOCUMENT_VISION_RECONCILIATION_FORBIDDEN", "仅获授权的人工管理员可以处理外部视觉任务对账。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionReconciliationInvalid):
+		status, code, message, retryable = http.StatusBadRequest, "INVALID_DOCUMENT_VISION_RECONCILIATION", "对账请求不符合安全契约。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionReconciliationSameActor):
+		status, code, message, retryable = http.StatusConflict, "DOCUMENT_VISION_RECONCILIATION_SECOND_OPERATOR_REQUIRED", "确认人必须与提议人是不同的管理员。", false
+	case errors.Is(err, knowledge.ErrDocumentVisionReconciliationConflict):
+		status, code, message, retryable = http.StatusConflict, "DOCUMENT_VISION_RECONCILIATION_CONFLICT", "对账记录、任务意图或外部任务绑定已发生变化。", false
 	case errors.Is(err, agent.ErrInvalidState):
 		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "The agent run is not in a valid state for this operation.", false
 	case errors.Is(err, assets.ErrOutputMetadataMismatch):

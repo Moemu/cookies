@@ -33,6 +33,16 @@ func (FakeSyncAdapter) InspectTextRoute(_ context.Context, _ contract.Organizati
 	}, nil
 }
 
+func (FakeSyncAdapter) InspectVisionRoute(_ context.Context, _ contract.OrganizationID, modelAlias string) (CapabilityRouteInspection, error) {
+	if strings.TrimSpace(modelAlias) == "" {
+		return CapabilityRouteInspection{}, fmt.Errorf("fake vision model alias is required")
+	}
+	return CapabilityRouteInspection{
+		ModelAlias: modelAlias, UpstreamModel: fakeVisionModelVersion,
+		RouteRevisionID: "fake-vision-route-v1", Ready: true,
+	}, nil
+}
+
 func (FakeSyncAdapter) UnderstandVision(_ context.Context, request VisionAdapterRequest) (SynchronousResult, error) {
 	if request.OrganizationID == "" || strings.TrimSpace(request.ModelAlias) == "" || len(request.Input.SourceAssets) == 0 || len(request.Sources) != len(request.Input.SourceAssets) {
 		return SynchronousResult{}, fmt.Errorf("fake vision request is invalid")

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -71,6 +72,77 @@ func TestUploadCreatesImmutableProjectAsset(t *testing.T) {
 	}
 	if err := service.Remove(context.Background(), rc.Actor, "project_1", result.ProjectAssetRef.AssetVersion); err != nil {
 		t.Fatalf("idempotent remove: %v", err)
+	}
+}
+
+func TestUploadRemovesDurableObjectWhenDatabaseCommitFails(t *testing.T) {
+	now := time.Date(2026, 8, 11, 8, 10, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	blobs := NewMemoryBlobStore()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: blobs, Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testPNG(t)
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "upload-db-failure", CreateUploadRequest{
+		Filename: "hero.png", DeclaredMIMEType: "image/png", DeclaredSizeBytes: int64(len(data)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	repo.completeUploadErr = errors.New("fault-injected database commit failure")
+	if _, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID); err == nil || !strings.Contains(err.Error(), "database commit failure") {
+		t.Fatalf("Finalize() error = %v", err)
+	}
+	durable := ObjectLocation{Bucket: "assets", Key: "assets/org_1/project_1/" + string(created.Session.TargetAssetID) + "/versions/1/original"}
+	if _, err := blobs.Head(context.Background(), durable); err == nil {
+		t.Fatal("database failure left an unowned durable asset object")
+	}
+	if _, err := blobs.Head(context.Background(), created.Session.Quarantine); err != nil {
+		t.Fatalf("recoverable quarantine source was deleted: %v", err)
+	}
+	stored, err := repo.GetUpload(context.Background(), "org_1", "project_1", created.Session.ID)
+	if err != nil || stored.Status != UploadProcessing || stored.ProjectAssetRef != nil {
+		t.Fatalf("upload state after database failure = %#v, err=%v", stored, err)
+	}
+}
+
+func TestUploadKeepsCommittedAssetWhenQuarantineCleanupFails(t *testing.T) {
+	now := time.Date(2026, 8, 11, 8, 15, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	memory := NewMemoryBlobStore()
+	blobs := &deleteFailBlobStore{MemoryBlobStore: memory}
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: blobs, Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testPNG(t)
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "upload-cleanup-failure", CreateUploadRequest{
+		Filename: "hero.png", DeclaredMIMEType: "image/png", DeclaredSizeBytes: int64(len(data)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs.failDelete = created.Session.Quarantine
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID)
+	if err != nil || result.Status != UploadSucceeded || result.ProjectAssetRef == nil {
+		t.Fatalf("Finalize() result=%#v err=%v", result, err)
+	}
+	if _, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", result.ProjectAssetRef.AssetVersion); err != nil {
+		t.Fatalf("cleanup failure rolled back committed asset: %v", err)
+	}
+	if _, err := memory.Head(context.Background(), created.Session.Quarantine); err != nil {
+		t.Fatalf("fault injection did not preserve quarantine object: %v", err)
 	}
 }
 
@@ -776,14 +848,15 @@ func (transientFetcherError) Error() string   { return "temporary fetch failure"
 func (transientFetcherError) Retryable() bool { return true }
 
 type fakeRepository struct {
-	mu         sync.Mutex
-	uploads    map[string]UploadSession
-	uploadKeys map[string]string
-	intakes    map[string]GeneratedIntake
-	intakeKeys map[string]string
-	assets     map[string]ProjectAsset
-	relations  map[string][]AssetRelation
-	features   map[string]AssetFeature
+	mu                sync.Mutex
+	uploads           map[string]UploadSession
+	uploadKeys        map[string]string
+	intakes           map[string]GeneratedIntake
+	intakeKeys        map[string]string
+	assets            map[string]ProjectAsset
+	relations         map[string][]AssetRelation
+	features          map[string]AssetFeature
+	completeUploadErr error
 }
 
 func newFakeRepository() *fakeRepository {
@@ -834,6 +907,9 @@ func (r *fakeRepository) setUploadStatus(o contract.OrganizationID, p contract.P
 func (r *fakeRepository) CompleteUpload(_ context.Context, id string, c AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.completeUploadErr != nil {
+		return contract.ProjectAssetRef{}, r.completeUploadErr
+	}
 	v, ok := r.uploads[id]
 	if !ok {
 		return contract.ProjectAssetRef{}, ErrNotFound
@@ -843,6 +919,18 @@ func (r *fakeRepository) CompleteUpload(_ context.Context, id string, c AssetCom
 	v.ProjectAssetRef = &ref
 	r.uploads[id] = v
 	return ref, nil
+}
+
+type deleteFailBlobStore struct {
+	*MemoryBlobStore
+	failDelete ObjectLocation
+}
+
+func (s *deleteFailBlobStore) Delete(ctx context.Context, location ObjectLocation) error {
+	if location.Bucket == s.failDelete.Bucket && location.Key == s.failDelete.Key {
+		return errors.New("fault-injected quarantine cleanup failure")
+	}
+	return s.MemoryBlobStore.Delete(ctx, location)
 }
 func (r *fakeRepository) FailUpload(_ context.Context, o contract.OrganizationID, p contract.ProjectID, id, code string, now time.Time) error {
 	r.mu.Lock()

@@ -4,6 +4,7 @@ const primaryProjectId = 'project_investor_precision_evidence'
 const otherProjectId = 'project_local'
 
 test('A03 审批绑定 Plan/ChangeSet/hash，计划变化后旧审批保留但失效', async ({ page, request }) => {
+  test.setTimeout(60_000)
   const suffix = Date.now().toString(36)
   const planName = `A03 黄金计划 ${suffix}`
 

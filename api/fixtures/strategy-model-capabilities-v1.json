@@ -1,0 +1,11 @@
+{
+  "contract_version": "strategy-model-capabilities/v1",
+  "items": [
+    {"capability": "assistant.simple", "model_alias": "cookies.text.lite", "available": false, "reason_code": "MODEL_ROUTE_NOT_FOUND"},
+    {"capability": "assistant.standard", "model_alias": "cookies.text.standard", "available": true, "upstream_model": "configured-standard-model", "route_revision_id": "route_text_standard_01"},
+    {"capability": "strategy.generate", "model_alias": "cookies.text.standard", "available": true, "upstream_model": "configured-standard-model", "route_revision_id": "route_text_standard_01"},
+    {"capability": "strategy.deep_review", "model_alias": "cookies.text.deep_review", "available": true, "upstream_model": "configured-review-model", "route_revision_id": "route_text_review_01"},
+    {"capability": "research.web", "model_alias": "cookies.research.web.standard", "available": true, "upstream_model": "configured-research-model", "route_revision_id": "route_research_01"},
+    {"capability": "document.vision", "model_alias": "cookies.document.vision.standard", "available": false, "reason_code": "VISION_PROVIDER_DISABLED"}
+  ]
+}

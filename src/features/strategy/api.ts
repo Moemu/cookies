@@ -2,9 +2,12 @@ import { BackendApiError, apiRequest } from '../../backend/platform'
 import type {
   AgentTask,
   AgentTaskInspection,
+  ApplyArtifactProposalResult,
+  ArtifactProposal,
   BriefCenterDetail,
   BriefCenterSummary,
   BriefDraft,
+	BriefPatchOperation,
   BriefVersion,
   ConversationBundle,
   ConversationCapabilities,
@@ -21,11 +24,15 @@ import type {
   GenerationMetadata,
   GenerationProbe,
   GenerationReadiness,
-  KnowledgeDocument,
+	KnowledgeDocument,
+	DocumentVisionFallbackCapability,
+	DocumentPreview,
+  KnowledgeJobControl,
   MediaUnderstandingArtifact,
   Message,
   MessageCreateV2,
   PackageVersion,
+  ProjectContextManifest,
   StrategyCreativeHandoff,
   ResearchRun,
   ResearchArtifact,
@@ -40,6 +47,7 @@ import type {
   StrategyTask,
   StrategyTaskBundle,
   StrategyTaskListItem,
+  TaskActivitySnapshot,
   Workspace,
   WorkspaceDetail,
 } from './types'
@@ -61,6 +69,15 @@ export const strategyApi = {
 
   listWorkspaces: (projectId: string, signal?: AbortSignal) =>
     apiRequest<{ items: Workspace[] }>(`${root}/projects/${encodeURIComponent(projectId)}/workspaces`, { signal }),
+
+  listActivities: (projectId: string, workspaceId = '', signal?: AbortSignal) => {
+    const query = new URLSearchParams({ limit: '50' })
+    if (workspaceId) query.set('workspace_id', workspaceId)
+    return apiRequest<TaskActivitySnapshot>(
+      `${root}/projects/${encodeURIComponent(projectId)}/activities?${query.toString()}`,
+      { signal },
+    )
+  },
 
   getP0Metrics: (projectId: string, days = 30, signal?: AbortSignal) =>
     apiRequest<StrategyP0Metrics>(
@@ -212,7 +229,7 @@ export const strategyApi = {
     mutationKey?: string,
   ) => {
     if (!plan.package_ref || !plan.selected_route_id) {
-      throw new Error('任务策略缺少策略包、Handoff 或 Route 血缘')
+      throw new Error('任务规格缺少策略包、Handoff 或 Route 血缘')
     }
     return apiRequest<CreativeIntakeV3>(
       `/api/creative/v1/projects/${encodeURIComponent(projectId)}/creative-intakes`,
@@ -335,13 +352,48 @@ export const strategyApi = {
   getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
     apiRequest<WorkspaceDetail>(`${root}/workspaces/${encodeURIComponent(workspaceId)}`, { signal }),
 
+  getWorkspaceContextManifest: (workspaceId: string, stage: ProjectContextManifest['stage'], signal?: AbortSignal) =>
+    apiRequest<ProjectContextManifest>(
+      `${root}/workspaces/${encodeURIComponent(workspaceId)}/context-manifest?stage=${encodeURIComponent(stage)}`,
+      { signal },
+    ),
+
+  listAssistantProposals: (workspaceId: string, status = 'proposed', signal?: AbortSignal) =>
+    apiRequest<{ items: ArtifactProposal[] }>(
+      `${root}/workspaces/${encodeURIComponent(workspaceId)}/assistant-proposals?status=${encodeURIComponent(status)}`,
+      { signal },
+    ),
+
+  applyAssistantProposal: (
+    proposal: ArtifactProposal,
+    operations = proposal.operations,
+    mutationKey?: string,
+  ) => apiRequest<ApplyArtifactProposalResult>(
+    `${root}/assistant-proposals/${encodeURIComponent(proposal.id)}:apply`,
+    {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({
+        expected_version: proposal.version,
+        ...(operations === proposal.operations ? {} : { operations }),
+      }),
+    },
+  ),
+
+  ignoreAssistantProposal: (proposal: ArtifactProposal, mutationKey?: string) =>
+    apiRequest<ArtifactProposal>(`${root}/assistant-proposals/${encodeURIComponent(proposal.id)}:ignore`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({ expected_version: proposal.version }),
+    }),
+
   probeGeneration: (projectId: string, profile?: 'deep_review') =>
     apiRequest<GenerationProbe>(`${root}/projects/${encodeURIComponent(projectId)}/generation-probe${profile ? `?profile=${profile}` : ''}`, {
       method: 'POST',
     }),
 
   getDeepReview: (reviewId: string, signal?: AbortSignal) =>
-    apiRequest<DeepReviewAnalysis>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}/deep-analysis`, { signal }),
+    apiRequest<DeepReviewAnalysis | null>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}/deep-analysis?optional=1`, { signal }),
 
   startDeepReview: (reviewId: string, expectedReviewStatus: string, mutationKey?: string) =>
     apiRequest<{ analysis: DeepReviewAnalysis; agent_task: AgentTask }>(
@@ -352,6 +404,24 @@ export const strategyApi = {
         body: JSON.stringify({ expected_review_status: expectedReviewStatus }),
       },
     ),
+
+  getStrategyPerspective: (strategyId: string, signal?: AbortSignal) =>
+    apiRequest<DeepReviewAnalysis | null>(`${root}/strategy-drafts/${encodeURIComponent(strategyId)}/perspective-analysis?optional=1`, { signal }),
+
+  startStrategyPerspective: (draft: StrategyDraft, mutationKey?: string) => {
+    if (!draft.revision) throw new Error('策略没有可分析的 Revision。')
+    return apiRequest<{ analysis: DeepReviewAnalysis; agent_task: AgentTask }>(
+      `${root}/strategy-drafts/${encodeURIComponent(draft.id)}/perspective-analysis`,
+      {
+        method: 'POST',
+        headers: mutationHeaders(mutationKey),
+        body: JSON.stringify({
+          expected_revision: draft.current_revision,
+          expected_content_hash: draft.revision.content_hash,
+        }),
+      },
+    )
+  },
 
   createConversation: (projectId: string, workspaceId: string, mutationKey?: string) =>
     apiRequest<ConversationBundle>(`${root}/conversations`, {
@@ -366,21 +436,53 @@ export const strategyApi = {
   getConversationMemory: (conversationId: string, signal?: AbortSignal) =>
     apiRequest<ConversationMemory>(`${root}/conversations/${encodeURIComponent(conversationId)}/memory`, { signal }),
 
+  compactConversationMemory: (conversationId: string) =>
+    apiRequest<ConversationMemory>(`${root}/conversations/${encodeURIComponent(conversationId)}/memory:compact`, {
+      method: 'POST',
+    }),
+
   getConversationCapabilities: (signal?: AbortSignal) =>
     apiRequest<ConversationCapabilities>(`${root}/conversation-capabilities`, { signal }),
 
-  sendMessage: (conversationId: string, content: string | MessageCreateV2, mutationKey?: string) =>
+  sendMessage: (
+    conversationId: string,
+    content: string | MessageCreateV2,
+    mutationKey?: string,
+    contextStage: ProjectContextManifest['stage'] = 'intake',
+    contextSurface: 'workspace' | 'assistant' = 'workspace',
+    excludedSourceIds: string[] = [],
+  ) =>
     apiRequest<{ message: Message; agent_task: AgentTask }>(
       `${root}/conversations/${encodeURIComponent(conversationId)}/messages`,
       {
         method: 'POST',
-        headers: mutationHeaders(mutationKey),
-        body: JSON.stringify(typeof content === 'string' ? { content } : content),
+        headers: {
+          ...mutationHeaders(mutationKey),
+          'X-Strategy-Stage': contextStage,
+          'X-Strategy-Surface': contextSurface,
+          ...(excludedSourceIds.length
+            ? { 'X-Strategy-Excluded-Source-Ids': JSON.stringify(excludedSourceIds) }
+            : {}),
+        },
+        body: JSON.stringify(typeof content === 'string'
+          ? contextSurface === 'assistant'
+            ? {
+                contract_version: 'strategy-conversation-message-create/v2',
+                content: [{ type: 'text', text: content }],
+              }
+            : { content }
+          : content),
       },
     ),
 
   getAgentTask: (agentTaskId: string, signal?: AbortSignal) =>
     apiRequest<AgentTaskInspection>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}`, { signal }),
+
+  cancelAgentTask: (agentTaskId: string, expectedVersion: number) =>
+    apiRequest<AgentTask>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}:cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
 
   listSkillRuns: (agentTaskId: string, signal?: AbortSignal) =>
     apiRequest<{ items: SkillRun[] }>(`${root}/agent-tasks/${encodeURIComponent(agentTaskId)}/skill-runs`, { signal }),
@@ -393,12 +495,14 @@ export const strategyApi = {
     draft: BriefDraft,
     operations: Array<{ fieldPath: string; value: unknown }>,
     mutationKey?: string,
+    confirmationMode: 'draft' | 'confirm' = 'confirm',
   ) =>
     apiRequest<BriefDraft>(`${root}/tasks/${encodeURIComponent(taskId)}/brief-draft`, {
       method: 'PATCH',
       headers: { ...mutationHeaders(mutationKey), 'If-Match': `"v${draft.version}"` },
       body: JSON.stringify({
         expected_version: draft.version,
+        confirmation_mode: confirmationMode,
         operations: operations.map(operation => ({
           op: 'set',
           field_path: operation.fieldPath,
@@ -407,8 +511,14 @@ export const strategyApi = {
       }),
     }),
 
-  patchBriefField: (taskId: string, draft: BriefDraft, fieldPath: string, value: unknown, mutationKey?: string) =>
-    strategyApi.patchBriefFields(taskId, draft, [{ fieldPath, value }], mutationKey),
+  patchBriefField: (
+    taskId: string,
+    draft: BriefDraft,
+    fieldPath: string,
+    value: unknown,
+    mutationKey?: string,
+    confirmationMode: 'draft' | 'confirm' = 'confirm',
+  ) => strategyApi.patchBriefFields(taskId, draft, [{ fieldPath, value }], mutationKey, confirmationMode),
 
   confirmBrief: (taskId: string, expectedVersion: number, mutationKey?: string) =>
     apiRequest<BriefVersion>(`${root}/tasks/${encodeURIComponent(taskId)}/brief:confirm`, {
@@ -515,6 +625,16 @@ export const strategyApi = {
       }),
     }),
 
+  confirmStrategy: (draft: StrategyDraft, mutationKey?: string) =>
+    apiRequest<PackageVersion>(`${root}/strategy-drafts/${encodeURIComponent(draft.id)}:confirm`, {
+      method: 'POST',
+      headers: mutationHeaders(mutationKey),
+      body: JSON.stringify({
+        expected_version: draft.version,
+        candidate_revision: draft.current_revision,
+      }),
+    }),
+
   getReview: (reviewId: string, signal?: AbortSignal) =>
     apiRequest<Review>(`${root}/strategy-reviews/${encodeURIComponent(reviewId)}`, { signal }),
 
@@ -611,6 +731,39 @@ export const strategyApi = {
     )
   },
 
+  cancelDocumentParse: (projectId: string, documentId: string) =>
+    apiRequest<KnowledgeJobControl>(
+      `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/cancel`,
+      { method: 'POST' },
+    ),
+
+  retryDocumentParse: (projectId: string, documentId: string) =>
+    apiRequest<KnowledgeDocument>(
+      `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/retry`,
+      { method: 'POST' },
+    ),
+
+  getDocumentVisionFallbackCapability: (projectId: string, documentId: string, signal?: AbortSignal) =>
+	apiRequest<DocumentVisionFallbackCapability>(
+		`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/visual-fallback-capability`,
+		{ signal },
+	),
+
+  runDocumentVisionFallback: (projectId: string, documentId: string, pageNumbers: number[] = []) =>
+	apiRequest<KnowledgeDocument>(
+		`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/run-visual-fallback`,
+		{ method: 'POST', body: JSON.stringify({ page_numbers: pageNumbers }) },
+	),
+
+  getDocumentPreview: (projectId: string, documentId: string, signal?: AbortSignal) =>
+	apiRequest<DocumentPreview>(
+		`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/preview`,
+		{ signal },
+	),
+
+  documentContentUrl: (projectId: string, documentId: string) =>
+	`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/content`,
+
   uploadMediaForUnderstanding: async (projectId: string, file: File) => {
     if (!['image/jpeg', 'image/png', 'video/mp4'].includes(file.type)) {
       throw new Error('仅支持 JPG、PNG 图片或 MP4 视频。')
@@ -672,6 +825,9 @@ export const strategyApi = {
       category?: ResearchArtifact['category']
       purpose?: ResearchRun['purpose']
       source_ref?: ResearchRun['source_ref']
+	  run_mode?: ResearchRun['run_mode']
+	  input_snapshot_ref?: string
+	  input_snapshot?: ProjectContextManifest
       query: string
       document_ids: string[]
       disclosed_fields: string[]
@@ -700,6 +856,69 @@ export const strategyApi = {
       `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs/${encodeURIComponent(researchRunId)}`,
       { signal },
     ),
+
+	listResearchFindings: (projectId: string, researchRunId: string, signal?: AbortSignal) =>
+		apiRequest<{ items: ResearchRun['findings'] }>(
+			`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs/${encodeURIComponent(researchRunId)}/findings`,
+			{ signal },
+		),
+
+	getResearchReport: (projectId: string, researchRunId: string, signal?: AbortSignal) =>
+		apiRequest<ResearchArtifact>(
+			`/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs/${encodeURIComponent(researchRunId)}/report`,
+			{ signal },
+		),
+
+  cancelResearchRun: (projectId: string, researchRunId: string) =>
+    apiRequest<KnowledgeJobControl>(
+      `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs/${encodeURIComponent(researchRunId)}/cancel`,
+      { method: 'POST' },
+    ),
+
+  retryResearchRun: (projectId: string, researchRunId: string) =>
+    apiRequest<ResearchRun>(
+      `/platform/v1/projects/${encodeURIComponent(projectId)}/knowledge/research-runs/${encodeURIComponent(researchRunId)}/retry`,
+      { method: 'POST' },
+    ),
+
+	listResearchAdoptionProposals: (workspaceId: string, researchRunId: string, signal?: AbortSignal) =>
+		apiRequest<{ items: ArtifactProposal[] }>(
+			`/api/strategy/v1/workspaces/${encodeURIComponent(workspaceId)}/research-adoption-proposals?run_id=${encodeURIComponent(researchRunId)}`,
+			{ signal },
+		),
+
+	applyResearchAdoptionProposal: (
+		proposalId: string,
+		expectedVersion: number,
+		operations?: BriefPatchOperation[],
+	) => apiRequest<{ proposal: ArtifactProposal; brief_draft?: BriefDraft; strategy_draft?: StrategyDraft }>(
+		`/api/strategy/v1/research-adoption-proposals/${encodeURIComponent(proposalId)}:apply`,
+		{
+			method: 'POST',
+			headers: { 'Idempotency-Key': createMutationKey('research-proposal-apply') },
+			body: JSON.stringify({ expected_version: expectedVersion, operations }),
+		},
+	),
+
+	remapResearchAdoptionProposal: (proposalId: string, expectedVersion: number) =>
+		apiRequest<ArtifactProposal>(
+			`/api/strategy/v1/research-adoption-proposals/${encodeURIComponent(proposalId)}:remap`,
+			{
+				method: 'POST',
+				headers: { 'Idempotency-Key': createMutationKey('research-proposal-remap') },
+				body: JSON.stringify({ expected_version: expectedVersion }),
+			},
+		),
+
+	ignoreResearchAdoptionProposal: (proposalId: string, expectedVersion: number) =>
+		apiRequest<ArtifactProposal>(
+			`/api/strategy/v1/research-adoption-proposals/${encodeURIComponent(proposalId)}:ignore`,
+			{
+				method: 'POST',
+				headers: { 'Idempotency-Key': createMutationKey('research-proposal-ignore') },
+				body: JSON.stringify({ expected_version: expectedVersion }),
+			},
+		),
 }
 
 async function sha256Hex(blob: Blob) {
