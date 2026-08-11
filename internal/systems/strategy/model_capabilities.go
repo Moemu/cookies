@@ -111,6 +111,26 @@ func (s Service) inspectVisionCapability(ctx context.Context, organizationID con
 		result.ReasonCode = "MODEL_ALIAS_NOT_CONFIGURED"
 		return result
 	}
+	if s.DocumentVisionRoutes != nil {
+		inspection, err := s.DocumentVisionRoutes.Inspect(ctx, organizationID, alias)
+		if err != nil {
+			result.ReasonCode = strings.TrimSpace(inspection.ReasonCode)
+			if result.ReasonCode == "" {
+				result.ReasonCode = "DOCUMENT_VISION_ROUTE_UNAVAILABLE"
+			}
+			return result
+		}
+		result.Available = inspection.Available
+		result.UpstreamModel = inspection.UpstreamModel
+		result.RouteRevisionID = inspection.RouteRevisionID
+		if !result.Available {
+			result.ReasonCode = strings.TrimSpace(inspection.ReasonCode)
+			if result.ReasonCode == "" {
+				result.ReasonCode = "MODEL_ROUTE_NOT_READY"
+			}
+		}
+		return result
+	}
 	if s.Text == nil || s.Text.VisionAdapter == nil {
 		result.ReasonCode = "VISION_PROVIDER_DISABLED"
 		return result

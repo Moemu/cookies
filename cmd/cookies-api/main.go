@@ -518,8 +518,9 @@ func main() {
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, ConversationKnowledge: knowledgeService,
 			ConversationResearch: knowledgeService, ResearchRoutes: researchRouteInspector,
-			ConversationMedia: mediaUnderstandingService,
-			CreativeAssets:    uploadService, Agents: agentStore,
+			DocumentVisionRoutes: knowledgeService.DocumentVision,
+			ConversationMedia:    mediaUnderstandingService,
+			CreativeAssets:       uploadService, Agents: agentStore,
 			ProductEvents: productEventWriter, Text: textProvider,
 			TextModelAlias: cfg.Strategy.TextModelAlias, LiteTextModelAlias: cfg.Strategy.LiteTextModelAlias,
 			DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,

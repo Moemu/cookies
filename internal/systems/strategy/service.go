@@ -53,6 +53,10 @@ type ResearchRouteInspector interface {
 	InspectResearchRoute(context.Context, contract.OrganizationID, string) (provider.CapabilityRouteInspection, error)
 }
 
+type DocumentVisionRouteInspector interface {
+	Inspect(context.Context, contract.OrganizationID, string) (knowledge.DocumentVisionCapability, error)
+}
+
 type ConversationMediaReader interface {
 	GetLatestForAsset(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (mediaunderstanding.Artifact, error)
 }
@@ -70,6 +74,7 @@ type Service struct {
 	ConversationKnowledge        ConversationKnowledgeReader
 	ConversationResearch         ConversationResearchRunner
 	ResearchRoutes               ResearchRouteInspector
+	DocumentVisionRoutes         DocumentVisionRouteInspector
 	ConversationMedia            ConversationMediaReader
 	CreativeAssets               CreativeAssetReader
 	MessageReferences            MessageReferenceValidator
