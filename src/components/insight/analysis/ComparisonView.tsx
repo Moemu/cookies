@@ -27,6 +27,17 @@ const verdictTone: Record<ApiVariantVerdict, string> = {
   no_features: 'muted',
 }
 
+/**
+ * 这组差异里有没有不能进结论的变量。
+ *
+ * 只要有一个变量是模型推断出来的（admissible 为假），整条对比就不给记一笔——
+ * 记进复盘之后，下一轮就会有人拿一个猜出来的变量当依据。抽成函数是为了能单独测：
+ * 这条约束靠人肉看渲染结果太容易漏。
+ */
+export function hasInadmissibleFeature(features?: Array<{ admissible: boolean }>): boolean {
+  return (features ?? []).some(diff => !diff.admissible)
+}
+
 export function ComparisonView({ analysis, onPin, pinned, pinning }: ViewProps) {
   return <div className="insight-analysis-list" role="list" aria-label="素材对比">
     {(analysis.comparisons ?? []).map(item => {
@@ -37,9 +48,7 @@ export function ComparisonView({ analysis, onPin, pinned, pinning }: ViewProps) 
         source_ref: item.variant_asset_id,
         variable: (item.changed_features ?? [])[0]?.key,
       }
-      // 归因不可用的变量不给记一笔：这条差异里有模型推断出来的东西，
-      // 把它记进复盘，下一轮就会有人拿一个猜出来的变量当依据。
-      const inadmissible = (item.changed_features ?? []).some(diff => !diff.admissible)
+      const inadmissible = hasInadmissibleFeature(item.changed_features)
       return <article className="insight-analysis-card" role="listitem"
         key={`${item.baseline_asset_id}-${item.variant_asset_id}`}>
         <header>
