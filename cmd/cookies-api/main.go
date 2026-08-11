@@ -288,6 +288,7 @@ func main() {
 		Connectors:     insights.MySQLRepository{DB: db},
 		Runs:           insights.MySQLRepository{DB: db},
 		Experiments:    insights.MySQLRepository{DB: db},
+		Thresholds:     insights.MySQLRepository{DB: db},
 		Projects:       projectService,
 		Delivery:       deliveryinsights.Reader{Service: deliveryService},
 	}

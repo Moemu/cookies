@@ -543,8 +543,12 @@ type Service struct {
 	TextModelAlias string
 	// Skills 为 nil 时用内嵌的默认注册表；测试可以换成自己的。
 	Skills *skills.Registry
-	NewID  ids.Generator
-	Now    func() time.Time
+	// Thresholds 存判定阈值的历史版本。为 nil 时判定跑代码里的出厂设定——
+	// 阈值仓储没配好不该让整个分析链路瘫掉，跑默认值至少还能出结论，
+	// 而版本号 0 会在页面上如实显示成「出厂设定」。
+	Thresholds ThresholdRepository
+	NewID      ids.Generator
+	Now        func() time.Time
 }
 
 func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreateReportRequest) (InsightReport, error) {
