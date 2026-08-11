@@ -57,6 +57,9 @@ type Application interface {
 	RetireAsset(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AssetTransitionRequest) (insights.Asset, error)
 	GetFeatureMatrix(context.Context, contract.ActorContext, contract.ProjectID, []string) (insights.FeatureMatrix, error)
 
+	// 找相似素材：某个变量在本轮样本不够时，从库里把同样取值的素材拉过来。
+	FindSimilarAssets(context.Context, contract.ActorContext, contract.ProjectID, insights.SimilarAssetRequest) (insights.SimilarAssetResult, error)
+
 	// AI 提特征（03 §9 AM-005）。只有人点按钮才会走到这里：
 	// 登记素材时自动排队会把复核队列灌满没人要看的结果，而复核是唯一的质量闸门。
 	AnalyzeAsset(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AnalyzeAssetRequest) (insights.AnalyzeAssetResult, error)

@@ -603,6 +603,40 @@ paths:
                       $ref: '#/components/schemas/InsightAsset'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/similar:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Find similar assets by feature overlap
+      description: >-
+        Two ways to ask: pass `asset_id` for "what else looks like this one", or
+        pass `features` for "what else has 时长=15s". The second is the escape
+        hatch for a ❓ verdict — when this round has too few assets on a variable,
+        pulling in library assets with the same value makes the sample thick
+        enough to judge.
+
+
+        Similarity is feature overlap, never a vector score: every hit must be
+        able to state *where* it is similar. A recommendation nobody can explain
+        is a recommendation nobody dares use in a review meeting. Each reason
+        carries its `source`, and `admissible_overlap` counts only the
+        `derived`/`human` variables — the ones allowed into attribution.
+      operationId: findSimilarInsightAssets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimilarAssetRequest'
+      responses:
+        '200':
+          description: Ranked matches, most attributable overlap first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarAssetResult'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/assets/{asset_id}/features:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -2424,6 +2458,85 @@ components:
           description: >-
             States which keys were compared and why others were left out, so a
             mixed-type comparison never looks more complete than it is.
+    SimilarAssetRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        At least one of `asset_id` or `features` is required; supplying neither
+        would list the whole library, which is the asset list, not a similarity
+        search. When both are given the explicit `features` win — that is what
+        the person actually asked about.
+      properties:
+        asset_id: { type: string }
+        features:
+          type: object
+          maxProperties: 20
+          additionalProperties: { type: string }
+          description: >-
+            Variable key to value. More than 20 degenerates into "find that one
+            asset again".
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+    SimilarityReason:
+      type: object
+      required: [key, label, value, source]
+      description: >-
+        One statement of *where* two assets are similar. Without this a hit is
+        just a number, and the assets behind it cannot be grouped for attribution.
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value: { type: string }
+        source:
+          $ref: '#/components/schemas/FeatureSource'
+    SimilarAsset:
+      type: object
+      required: [asset_id, title, overlap, admissible_overlap, score, reasons]
+      properties:
+        asset_id: { type: string }
+        title: { type: string }
+        overlap:
+          type: integer
+          description: How many probe variables matched.
+        admissible_overlap:
+          type: integer
+          description: >-
+            How many of those may enter attribution (`derived`/`human` only).
+            Overlap answers "is it alike"; this answers "can I actually conclude
+            anything after pulling it in".
+        score:
+          type: number
+          format: double
+          description: Matched variables over probe size, for display only.
+        reasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimilarityReason'
+    SimilarAssetResult:
+      type: object
+      required: [probe, items, note]
+      properties:
+        probe:
+          type: array
+          description: >-
+            The variables the search actually ran on. Returned so a person can
+            see why an odd-looking result set came back.
+          items:
+            $ref: '#/components/schemas/SimilarityReason'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimilarAsset'
+        note:
+          type: string
+          description: >-
+            Empty when the results stand on their own. Non-empty when the caller
+            must be told something: nothing was found, the asset has no usable
+            variables yet, or every match rests solely on model inference and so
+            may be looked at but not used for attribution.
     IndexAsset:
       type: object
       additionalProperties: false

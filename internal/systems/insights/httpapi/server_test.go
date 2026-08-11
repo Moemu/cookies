@@ -295,6 +295,10 @@ func TestInsightsHTTPExposesAssetAnalysisSurface(t *testing.T) {
 		{http.MethodPost, "/api/insights/v1/projects/project_1/asset-mappings/insightassetmapping_1:unknown", `{}`, 404, ""},
 		{http.MethodGet, "/api/insights/v1/projects/project_1/feature-schemas", "", 200, "wechat_article"},
 		{http.MethodGet, "/api/insights/v1/projects/project_1/feature-matrix?asset_ids=insightasset_1", "", 200, "共同特征"},
+		// similar 是字面量段，不能被 {asset_action} 吃掉：吃掉的话它会被当成
+		// 一条叫 similar 的素材的未知动作，返回 404。
+		{http.MethodPost, "/api/insights/v1/projects/project_1/assets/similar",
+			`{"features":{"duration":"15s"}}`, 200, "insightasset_2"},
 	}
 	for _, test := range tests {
 		response := httptest.NewRecorder()
@@ -405,6 +409,7 @@ type applicationStub struct {
 	assetFilter    insights.AssetFilter
 	mappingFilter  insights.AssetMappingFilter
 	matrixAssetIDs []string
+	similarRequest insights.SimilarAssetRequest
 
 	analysisRun     insights.AnalysisRun
 	analyzeRequest  insights.AnalyzeAssetRequest
@@ -571,6 +576,13 @@ func (s *applicationStub) GetFeatureMatrix(_ context.Context, _ contract.ActorCo
 		assets = append(assets, insights.Asset{ID: assetID})
 	}
 	return insights.FeatureMatrix{Assets: assets, Disclosure: "仅比较各类型都有的共同特征。"}, nil
+}
+func (s *applicationStub) FindSimilarAssets(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.SimilarAssetRequest) (insights.SimilarAssetResult, error) {
+	s.similarRequest = request
+	return insights.SimilarAssetResult{
+		Probe: []insights.SimilarityReason{{Key: "duration", Label: "时长", Value: "15s", Source: insights.SourceHuman}},
+		Items: []insights.SimilarAsset{{AssetID: "insightasset_2", Overlap: 1, AdmissibleOverlap: 1}},
+	}, nil
 }
 func (s *applicationStub) RegisterDataSource(context.Context, contract.ActorContext, contract.ProjectID, insights.RegisterDataSourceRequest) (insights.DataSource, error) {
 	return s.dataSource, s.registerErr

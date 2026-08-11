@@ -21,6 +21,9 @@ func (s *Server) registerAssetRoutes() {
 
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets", s.listAssets)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/assets", s.indexAsset)
+	// 这一条必须写在 {asset_action} 之前读得懂：Go 1.22 的 ServeMux 按精确度匹配，
+	// 字面量段胜过通配段，所以 /assets/similar 不会被当成一条素材的动作。
+	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/assets/similar", s.findSimilarAssets)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/assets/{asset_action}", s.assetAction)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets/{asset_id}", s.getAsset)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets/{asset_id}/lineage", s.listAssetLineage)
@@ -152,6 +155,21 @@ func analysisRunFilter(request *http.Request) insights.AnalysisRunFilter {
 
 // assetAction carries the 分析状态链 verbs of PRD §11.1. Each is an explicit
 // decision with an expected version, so two people cannot confirm past each other.
+// findSimilarAssets 回答「和这条像的还有哪些」或「这个取值的还有哪些」。
+// 它是 ❓「算不出来」的升级通道：本轮样本不够时，从库里把同样取值的素材拉过来。
+func (s *Server) findSimilarAssets(writer http.ResponseWriter, request *http.Request) {
+	var body insights.SimilarAssetRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.FindSimilarAssets(request.Context(), mustActor(request), projectID(request), body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
 func (s *Server) assetAction(writer http.ResponseWriter, request *http.Request) {
 	action := request.PathValue("asset_action")
 	actor, project := mustActor(request), projectID(request)

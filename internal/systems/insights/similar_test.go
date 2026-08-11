@@ -132,6 +132,108 @@ func TestRankDropsZeroOverlap(t *testing.T) {
 	}
 }
 
+// 被人否掉的推断不算重叠。人看过、说了「不是这样」，它就不该再把两条素材
+// 凑成一组——素材对比那边也是这么办的。
+func TestEffectiveFeaturesDropRejectedRows(t *testing.T) {
+	t.Parallel()
+
+	rejected := probeFeature("opening", "face", SourceHuman)
+	rejected.AssetID, rejected.ReviewState = "a", ReviewRejected
+
+	byAsset := effectiveAssetFeatures([]AssetFeature{rejected})
+	if _, present := byAsset["a"]["opening"]; present {
+		t.Error("被否掉的标注不该进有效变量")
+	}
+}
+
+// 人复核认可过的 AI 推断，从此按人工标注算——有人为它背书了。
+// 不这么办的话，「人工复核」这道工序对归因毫无意义：复核完了还是进不了结论。
+func TestEffectiveFeaturesUpgradeConfirmedInference(t *testing.T) {
+	t.Parallel()
+
+	inferred := probeFeature("opening", "face", SourceAI)
+	inferred.AssetID, inferred.ReviewState = "a", ReviewConfirmed
+
+	got := effectiveAssetFeatures([]AssetFeature{inferred})["a"]["opening"]
+	if !got.Source.AdmissibleForAttribution() {
+		t.Errorf("认可过的推断应该能进归因，得到 source=%s", got.Source)
+	}
+}
+
+// 同一个变量人标过也 AI 猜过，以人标的为准。
+func TestEffectiveFeaturesPreferTheHumanLayer(t *testing.T) {
+	t.Parallel()
+
+	inferred := probeFeature("opening", "face", SourceAI)
+	inferred.AssetID, inferred.ReviewState = "a", ReviewPending
+	authored := probeFeature("opening", "product", SourceHuman)
+	authored.AssetID, authored.ReviewState = "a", ReviewAuthored
+
+	got := effectiveAssetFeatures([]AssetFeature{inferred, authored})["a"]["opening"]
+	if featureValueText(got.Value) != "product" {
+		t.Errorf("人标的应该盖过推断，得到 %q", featureValueText(got.Value))
+	}
+}
+
+func TestSimilarAssetRequestValidation(t *testing.T) {
+	t.Parallel()
+
+	byAsset := SimilarAssetRequest{AssetID: "asset_1"}
+	if err := byAsset.Validate(); err != nil {
+		t.Fatalf("按素材找相似应该合法：%v", err)
+	}
+
+	byFeature := SimilarAssetRequest{Features: map[string]string{"duration": "15s"}}
+	if err := byFeature.Validate(); err != nil {
+		t.Fatalf("按变量找相似应该合法：%v", err)
+	}
+
+	// 两个都不给就等于「把库里所有素材列出来」——那是素材列表，不是找相似。
+	if err := (SimilarAssetRequest{}).Validate(); err == nil {
+		t.Error("既没有素材也没有变量的请求应该被拒")
+	}
+
+	// 变量太多会退化成「找那一条素材自己」，没有意义。
+	tooMany := SimilarAssetRequest{Features: map[string]string{}}
+	for index := 0; index < maxProbeFeatures+1; index++ {
+		tooMany.Features[string(rune('a'+index))] = "x"
+	}
+	if err := tooMany.Validate(); err == nil {
+		t.Error("变量超过 20 个应该被拒")
+	}
+}
+
+// 默认条数要有上限。不限的话一个常见取值能拉回几百条，人在界面上根本挑不过来，
+// 而且这批素材是要被拿去重算归因的，几百条会让那次计算变得很慢。
+func TestSimilarAssetRequestDefaultsTheLimit(t *testing.T) {
+	t.Parallel()
+
+	request := SimilarAssetRequest{AssetID: "asset_1"}
+	if got := request.effectiveLimit(); got != defaultSimilarLimit {
+		t.Errorf("默认条数应该是 %d，得到 %d", defaultSimilarLimit, got)
+	}
+	over := SimilarAssetRequest{AssetID: "asset_1", Limit: 500}
+	if got := over.effectiveLimit(); got != maxSimilarLimit {
+		t.Errorf("超上限应该压到 %d，得到 %d", maxSimilarLimit, got)
+	}
+}
+
+// 一条相似都建立在模型推断上时，必须说出来。不说的话，人会把它们当成和
+// 人工标注一样可靠的样本，然后拿去撑一个结论。
+func TestSimilarNoteWarnsWhenNothingIsAdmissible(t *testing.T) {
+	t.Parallel()
+
+	if note := similarNote([]SimilarAsset{{AssetID: "a", Overlap: 2}}); note == "" {
+		t.Error("全靠模型推断的结果必须带一句提醒")
+	}
+	if note := similarNote([]SimilarAsset{{AssetID: "a", Overlap: 2, AdmissibleOverlap: 1}}); note != "" {
+		t.Errorf("有可归因重叠时不该再提醒，得到 %q", note)
+	}
+	if note := similarNote(nil); note == "" {
+		t.Error("一条都没找到时要说清是「没有」，不是界面坏了")
+	}
+}
+
 func TestRankRespectsLimit(t *testing.T) {
 	t.Parallel()
 
