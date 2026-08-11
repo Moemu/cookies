@@ -20,11 +20,9 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/integrations/crawler"
-	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
 	"github.com/shikanon/cookies/internal/integrations/productsource"
-	"github.com/shikanon/cookies/internal/integrations/projectdelivery"
 	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
@@ -389,8 +387,6 @@ func main() {
 	deliveryService := &delivery.Service{
 		Repository: delivery.MySQLRepository{DB: db},
 		Projects:   projectService,
-		Packages:   creativedelivery.Reader{Service: creativeService},
-		References: projectdelivery.Reader{Service: projectService},
 		// The Connector is not configured in this environment. Normalize the
 		// deterministic OutcomeSimulation records through the Delivery consumer
 		// port until its future adapter publishes a stable contract.

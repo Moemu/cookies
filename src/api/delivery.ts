@@ -181,44 +181,10 @@ export type DeliveryPlanVersion = DeliveryPlanDraft & {
   scenario: DeliveryScenario
   createdBy: { kind: 'user' | 'service'; id: string }
   createdAt: string
-  /** Server-compiled, three-tier mock configuration. */
-  threeTierConfiguration?: DeliveryThreeTierConfiguration
+  /** Frozen historical payload exists; its internal tree is intentionally not exposed. */
+  legacyConfiguration?: true
   deliveryIntent?: DeliveryIntent
   platformConfiguration?: PlatformConfiguration
-}
-
-export type DeliveryFieldValue = string | number | boolean | null | string[]
-
-export type DeliveryThreeTierField = {
-  key: string
-  label: string
-  recommendedValue?: DeliveryFieldValue
-  manualValue?: DeliveryFieldValue
-  effectiveValue?: DeliveryFieldValue
-  valueType: string
-  effectiveSource: string
-  sourceRefs: string[]
-  dependencyRefs: string[]
-  riskRefs: string[]
-  evidenceRefs: string[]
-  mockRequired: boolean
-  platformRequired: boolean
-  platformStatus: string
-  editable: boolean
-  confirmation?: { required: boolean; label?: string; confirmed?: boolean }
-}
-
-export type DeliveryThreeTierCreative = { id: string; label: string; fields: DeliveryThreeTierField[] }
-export type DeliveryThreeTierPlan = { id: string; label: string; fields: DeliveryThreeTierField[]; creatives: DeliveryThreeTierCreative[] }
-export type DeliveryThreeTierGroup = { id: string; label: string; fields: DeliveryThreeTierField[]; plans: DeliveryThreeTierPlan[] }
-
-export type DeliveryThreeTierConfiguration = {
-  schema: string
-  source: DeliverySource
-  scenario: string
-  generatedAt: string
-  evidenceRefs: string[]
-  groups: DeliveryThreeTierGroup[]
 }
 
 export type DeliveryRecommendation = {
@@ -239,24 +205,10 @@ export type DeliveryRecommendation = {
   targetConfiguration?: PlatformConfiguration
   baseSnapshotHash?: string
   targetSnapshotHash?: string
+  runtimeStatus?: 'active' | 'capability_pending' | 'legacy_unsupported'
+  readOnly?: boolean
   createdAt?: string
   updatedAt?: string
-}
-
-export type ManualActionPackage = {
-  id: string
-  changeSetId: string
-  planId: string
-  source: DeliverySource
-  scenario: string
-  generatedAt: string
-  optimizedPlanVersion: number
-  optimizedPlanHash: string
-  configuration?: { schemaVersion: string; id: string; version: number; platform: DeliveryPlatform; profileVersion: string; canonicalHash: string }
-  intent?: { schemaVersion: string; id: string; version: number; canonicalHash: string }
-  instructions: Array<{ fieldKey: string; effectiveValue: DeliveryFieldValue; source: string; confirmationRequired: boolean; expectedResult: string; evidenceRefs: string[] }>
-  forbiddenActions: string[]
-  evidenceRefs: string[]
 }
 
 export type DeliveryPlan = {
@@ -279,7 +231,7 @@ export type DeliveryPlan = {
 }
 
 export type DeliveryPreflightCheck = {
-  code: 'advertiser_available' | 'budget_positive' | 'schedule_valid' | 'creative_present' | 'creative_confirmed' | 'tracking_complete' | 'upstream_references_resolved' | 'three_tier_structure' | 'three_tier_required_fields' | 'three_tier_dependencies' | 'three_tier_confirmation' | 'three_tier_platform_pending' | 'delivery_intent_valid' | 'platform_configuration_valid' | 'INVALID_STABLE_REFERENCE' | 'CANONICAL_HASH_MISMATCH' | 'CAPABILITY_PENDING' | 'platform_pending' | 'blocked_by_event_asset' | 'write_validation_pending'
+  code: 'delivery_intent_valid' | 'platform_configuration_valid' | 'INVALID_STABLE_REFERENCE' | 'CANONICAL_HASH_MISMATCH' | 'CAPABILITY_PENDING' | 'platform_pending' | 'blocked_by_event_asset' | 'write_validation_pending'
   severity: 'error' | 'warning'
   passed: boolean
   message: string
@@ -334,8 +286,10 @@ export type DeliveryControlChangeSet = {
   planVersion: number
   planCanonicalHash: string
   targetSnapshot?: PlatformConfiguration
-  legacyTargetSnapshot?: DeliveryThreeTierConfiguration
+  legacySnapshot?: true
   targetSnapshotHash?: string
+  runtimeStatus?: 'active' | 'capability_pending' | 'legacy_unsupported'
+  readOnly?: boolean
   recommendationId?: string
   budgetLimit: { totalMinor: number; currency: 'CNY' }
   status: 'draft' | 'preflight_passed' | 'preflight_failed' | 'approved' | 'rejected' | 'executed' | 'rolled_back'
@@ -450,7 +404,7 @@ type WireDeliveryPlanVersion = Partial<WireDeliveryPlanDraft> & {
   scenario: DeliveryScenario
   created_by: { kind: 'user' | 'service'; id: string }
   created_at: string
-  three_tier_configuration?: WireDeliveryThreeTierConfiguration | null
+  three_tier_configuration?: unknown
   intent?: DeliveryIntent | null
   platform_configuration?: PlatformConfiguration | null
 }
@@ -555,51 +509,17 @@ type WireDeliveryOutcomeSimulation = {
   replay: boolean
 }
 
-type WireDeliveryThreeTierField = {
-  key: string
-  label?: string
-  recommended: { type: string; value: DeliveryFieldValue }
-  manual?: { type: string; value: DeliveryFieldValue } | null
-  effective: { type: string; value: DeliveryFieldValue }
-  source: string
-  effective_source?: string
-  source_refs?: string[] | null
-  dependency?: string
-  dependency_refs?: string[] | null
-  risk?: string
-  risk_refs?: string[] | null
-  evidence_refs: string[]
-  mock_required: boolean
-  platform_required: boolean
-  platform_status: string
-  editable: boolean
-  confirmation: boolean
-}
-
-type WireDeliveryThreeTierCreative = { id: string; name: string; fields: WireDeliveryThreeTierField[] }
-type WireDeliveryThreeTierPlan = { id: string; name: string; fields?: WireDeliveryThreeTierField[] | null; creatives: WireDeliveryThreeTierCreative[] }
-type WireDeliveryThreeTierGroup = { id: string; name: string; fields?: WireDeliveryThreeTierField[] | null; plans: WireDeliveryThreeTierPlan[] }
-type WireDeliveryThreeTierConfiguration = {
-  schema?: string
-  contract_version?: string
-  source: DeliverySource
-  scenario: string
-  fixture_scenario?: string
-  generated_at?: string
-  evidence?: string[] | null
-  evidence_refs?: string[] | null
-  groups: WireDeliveryThreeTierGroup[]
-}
-
 type WireDeliveryRecommendation = {
   id: string
   plan_id: string
   plan_version: number
-  target_snapshot?: WireDeliveryThreeTierConfiguration | null
+  target_snapshot?: unknown
   base_configuration?: PlatformConfiguration | null
   target_configuration?: PlatformConfiguration | null
   base_snapshot_hash?: string
   target_snapshot_hash?: string
+  runtime_status?: 'active' | 'capability_pending' | 'legacy_unsupported'
+  read_only?: boolean
   status?: string
   state?: string
   version: number
@@ -617,31 +537,6 @@ type WireDeliveryRecommendation = {
   scenario?: string
   created_at?: string
   updated_at?: string
-}
-
-type WireManualActionPackage = {
-  id: string
-  change_set_id: string
-  instructions?: Array<{ field_key: string; effective: { type: string; value: DeliveryFieldValue }; source: string; confirmation_required: boolean; expected_result: string; evidence_refs?: string[] | null }> | null
-  layers?: Array<{ fields: Array<{ field_key: string; value: { type: string; value: DeliveryFieldValue }; source: string; confirmation: { required: boolean; confirmed: boolean }; expected_result: string; evidence_refs?: string[] | null }> }> | null
-  source?: DeliverySource
-  scenario?: string
-  evidence?: string[] | null
-  evidence_refs?: string[] | null
-  forbidden_actions?: string[] | null
-  created_at: string
-  optimized_plan_version: number
-  optimized_plan_hash: string
-  configuration_schema_version?: string
-  configuration_id?: string
-  configuration_version?: number
-  configuration_platform?: DeliveryPlatform
-  configuration_profile_version?: string
-  configuration_canonical_hash?: string
-  intent_schema_version?: string
-  intent_id?: string
-  intent_version?: number
-  intent_canonical_hash?: string
 }
 
 type WireDeliveryPlan = {
@@ -721,8 +616,10 @@ type WireDeliveryControlChangeSet = {
   plan_version: number
   plan_canonical_hash: string
   target_snapshot?: PlatformConfiguration
-  legacy_target_snapshot?: WireDeliveryThreeTierConfiguration
+  legacy_target_snapshot?: unknown
   target_snapshot_hash?: string
+  runtime_status?: 'active' | 'capability_pending' | 'legacy_unsupported'
+  read_only?: boolean
   recommendation_id?: string
   budget_limit: { total_minor: number; currency: 'CNY' }
   status: DeliveryControlChangeSet['status']
@@ -863,22 +760,8 @@ export const deliveryPlanApi = {
   },
 }
 
-/** Three-tier configuration compilation and recommendation lifecycle; all records remain mock-only. */
-export const deliveryConfigurationApi = {
-  async compile(_projectId: string, _planId: string, _expectedVersion: number, _fixture: string): Promise<DeliveryPlan> {
-    throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '旧版 ThreeTier 配置仅支持只读访问。')
-  },
-  async override(_projectId: string, _planId: string, _input: {
-    expectedVersion: number
-    groupId: string
-    planId: string
-    creativeId: string
-    fieldKey: string
-    value: { type: string; value: DeliveryFieldValue }
-    confirmed: boolean
-  }): Promise<DeliveryPlan> {
-    throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '旧版 ThreeTier 配置仅支持只读访问。')
-  },
+/** Recommendation lifecycle for the authoritative platform configuration runtime. */
+export const deliveryOptimizationApi = {
   async generateRecommendations(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryRecommendation> {
     const response = await deliveryPlanRequest<WireDeliveryRecommendation>(
       projectId,
@@ -910,19 +793,6 @@ export const deliveryConfigurationApi = {
       projectId,
       `/recommendations/${encodeURIComponent(recommendationId)}:reject`,
       { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
-    ))
-  },
-  async compileManualActionPackage(projectId: string, changeSetId: string, expectedVersion: number): Promise<ManualActionPackage> {
-    return toManualActionPackage(await deliveryPlanRequest<WireManualActionPackage>(
-      projectId,
-      `/change-sets/${encodeURIComponent(changeSetId)}/manual-action-package`,
-      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
-    ))
-  },
-  async getManualActionPackage(projectId: string, changeSetId: string): Promise<ManualActionPackage> {
-    return toManualActionPackage(await deliveryPlanRequest<WireManualActionPackage>(
-      projectId,
-      `/change-sets/${encodeURIComponent(changeSetId)}/manual-action-package`,
     ))
   },
 }
@@ -1590,55 +1460,9 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     scenario: version.scenario,
     createdBy: version.created_by,
     createdAt: version.created_at,
-    threeTierConfiguration: version.three_tier_configuration ? toThreeTierConfiguration(version.three_tier_configuration, version.created_at) : undefined,
+    legacyConfiguration: version.three_tier_configuration ? true : undefined,
     deliveryIntent: intent,
     platformConfiguration: configuration,
-  }
-}
-
-function toThreeTierField(value: WireDeliveryThreeTierField): DeliveryThreeTierField {
-  return {
-    key: value.key,
-    label: value.label ?? '未标注字段',
-    recommendedValue: value.recommended.value,
-    manualValue: value.manual?.value,
-    effectiveValue: value.effective.value,
-    valueType: value.effective.type,
-    effectiveSource: value.effective_source ?? value.source,
-    sourceRefs: value.source_refs ?? [],
-    dependencyRefs: value.dependency_refs ?? (value.dependency ? [value.dependency] : []),
-    riskRefs: value.risk_refs ?? (value.risk ? [value.risk] : []),
-    evidenceRefs: value.evidence_refs ?? [],
-    mockRequired: value.mock_required,
-    platformRequired: value.platform_required,
-    platformStatus: value.platform_status,
-    editable: value.editable,
-    confirmation: { required: !value.confirmation, confirmed: value.confirmation },
-  }
-}
-
-function toThreeTierConfiguration(value: WireDeliveryThreeTierConfiguration, versionCreatedAt: string): DeliveryThreeTierConfiguration {
-  return {
-    schema: value.schema ?? value.contract_version ?? 'delivery-three-tier/v1',
-    source: value.source,
-    scenario: value.fixture_scenario ?? value.scenario,
-    generatedAt: value.generated_at ?? versionCreatedAt,
-    evidenceRefs: value.evidence_refs ?? value.evidence ?? [],
-    groups: value.groups.map(group => ({
-      id: group.id,
-      label: group.name,
-      fields: (group.fields ?? []).map(toThreeTierField),
-      plans: group.plans.map(plan => ({
-        id: plan.id,
-        label: plan.name,
-        fields: (plan.fields ?? []).map(toThreeTierField),
-        creatives: plan.creatives.map(creative => ({
-          id: creative.id,
-          label: creative.name,
-          fields: creative.fields.map(toThreeTierField),
-        })),
-      })),
-    })),
   }
 }
 
@@ -1655,12 +1479,14 @@ function toDeliveryRecommendation(value: WireDeliveryRecommendation): DeliveryRe
     risks: (value.risks ?? []).map(stringValue),
     observation: stringValue(value.observation_window ?? value.observation),
     cooldown: value.cooldown_until ?? (value.cooldown === undefined ? undefined : stringValue(value.cooldown)),
-    source: value.source ?? value.target_snapshot?.source ?? 'mock',
-    scenario: value.scenario ?? value.target_snapshot?.scenario ?? (value.target_configuration ? 'platform_configuration' : 'golden_path'),
+    source: value.source ?? 'mock',
+    scenario: value.scenario ?? (value.target_configuration ? 'platform_configuration' : 'legacy_unsupported'),
     baseConfiguration: value.base_configuration ?? undefined,
     targetConfiguration: value.target_configuration ?? undefined,
     baseSnapshotHash: value.base_snapshot_hash,
     targetSnapshotHash: value.target_snapshot_hash,
+    runtimeStatus: value.runtime_status,
+    readOnly: value.read_only,
     createdAt: value.created_at,
     updatedAt: value.updated_at,
   }
@@ -1670,44 +1496,6 @@ function stringValue(value: unknown) {
   if (typeof value === 'string') return value
   if (value === undefined || value === null) return '未提供'
   return JSON.stringify(value)
-}
-
-function toManualActionPackage(value: WireManualActionPackage): ManualActionPackage {
-  const layerInstructions = (value.layers ?? []).flatMap(layer => layer.fields.map(field => ({
-    fieldKey: field.field_key,
-    effectiveValue: field.value.value,
-    source: field.source,
-    confirmationRequired: field.confirmation.required && !field.confirmation.confirmed,
-    expectedResult: field.expected_result,
-    evidenceRefs: field.evidence_refs ?? [],
-  })))
-  return {
-    id: value.id,
-    changeSetId: value.change_set_id,
-    planId: '',
-    source: value.source ?? 'mock',
-    scenario: value.scenario ?? 'manual_action_package',
-    generatedAt: value.created_at,
-    optimizedPlanVersion: value.optimized_plan_version,
-    optimizedPlanHash: value.optimized_plan_hash,
-    configuration: value.configuration_id && value.configuration_version && value.configuration_platform && value.configuration_schema_version && value.configuration_profile_version && value.configuration_canonical_hash ? {
-      schemaVersion: value.configuration_schema_version, id: value.configuration_id, version: value.configuration_version,
-      platform: value.configuration_platform, profileVersion: value.configuration_profile_version, canonicalHash: value.configuration_canonical_hash,
-    } : undefined,
-    intent: value.intent_id && value.intent_version && value.intent_schema_version && value.intent_canonical_hash ? {
-      schemaVersion: value.intent_schema_version, id: value.intent_id, version: value.intent_version, canonicalHash: value.intent_canonical_hash,
-    } : undefined,
-    instructions: layerInstructions.length ? layerInstructions : (value.instructions ?? []).map(instruction => ({
-      fieldKey: instruction.field_key,
-      effectiveValue: instruction.effective.value,
-      source: instruction.source,
-      confirmationRequired: instruction.confirmation_required,
-      expectedResult: instruction.expected_result,
-      evidenceRefs: instruction.evidence_refs ?? [],
-    })),
-    forbiddenActions: value.forbidden_actions ?? [],
-    evidenceRefs: value.evidence_refs ?? value.evidence ?? [],
-  }
 }
 
 function toDeliveryControlChangeSet(value: WireDeliveryControlChangeSet): DeliveryControlChangeSet {
@@ -1720,8 +1508,10 @@ function toDeliveryControlChangeSet(value: WireDeliveryControlChangeSet): Delive
     planVersion: value.plan_version,
     planCanonicalHash: value.plan_canonical_hash,
     targetSnapshot: value.target_snapshot,
-    legacyTargetSnapshot: value.legacy_target_snapshot ? toThreeTierConfiguration(value.legacy_target_snapshot, value.created_at) : undefined,
+    legacySnapshot: value.legacy_target_snapshot ? true : undefined,
     targetSnapshotHash: value.target_snapshot_hash,
+    runtimeStatus: value.runtime_status,
+    readOnly: value.read_only,
     recommendationId: value.recommendation_id,
     budgetLimit: {
       totalMinor: value.budget_limit.total_minor,

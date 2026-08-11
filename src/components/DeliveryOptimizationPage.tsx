@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, ArrowRight, CheckCircle2, CircleAlert, Clock3, RefreshCw, Send, XCircle } from 'lucide-react'
 import {
   DeliveryApiError,
-  deliveryConfigurationApi,
+  deliveryOptimizationApi,
   deliveryPlanApi,
   type DeliveryControlChangeSet,
   type DeliveryPlan,
@@ -148,7 +148,7 @@ export function DeliveryOptimizationPage({ state, activeView, tourRunId, tourCas
     try {
       const [nextPlans, nextRecommendations, nextChangeSets] = await Promise.all([
         deliveryPlanApi.list(projectId),
-        deliveryConfigurationApi.listRecommendations(projectId),
+        deliveryOptimizationApi.listRecommendations(projectId),
         deliveryPlanApi.listChangeSets(projectId),
       ])
       if (generation !== refreshGeneration.current) return
@@ -207,7 +207,7 @@ export function DeliveryOptimizationPage({ state, activeView, tourRunId, tourCas
     setBusy(true)
     setNotice('')
     try {
-      const generated = await deliveryConfigurationApi.generateRecommendations(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
+      const generated = await deliveryOptimizationApi.generateRecommendations(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
       setRecommendations(current => [generated, ...current.filter(item => item.id !== generated.id)])
       setNotice('已依据同一 SimulationRun 的指标与告警生成建议；当前仍等待人工决策。')
     } catch (error) {
@@ -219,7 +219,7 @@ export function DeliveryOptimizationPage({ state, activeView, tourRunId, tourCas
     setBusy(true)
     setNotice('')
     try {
-      const accepted = await deliveryConfigurationApi.acceptRecommendation(projectId, item.id, item.version, `optimization-${item.id}-${item.version}`)
+      const accepted = await deliveryOptimizationApi.acceptRecommendation(projectId, item.id, item.version, `optimization-${item.id}-${item.version}`)
       setRecommendations(current => current.map(value => value.id === item.id ? accepted.recommendation : value))
       setChangeSets(current => [accepted.changeSet, ...current.filter(value => value.id !== accepted.changeSet.id)])
       setNotice('建议已采纳并生成一个优化草稿；请前往内部配置编排检查并提交审批。')
@@ -232,7 +232,7 @@ export function DeliveryOptimizationPage({ state, activeView, tourRunId, tourCas
     setBusy(true)
     setNotice('')
     try {
-      const rejected = await deliveryConfigurationApi.rejectRecommendation(projectId, item.id, item.version)
+      const rejected = await deliveryOptimizationApi.rejectRecommendation(projectId, item.id, item.version)
       setRecommendations(current => current.map(value => value.id === item.id ? rejected : value))
       setNotice('建议已拒绝，没有创建优化草稿或变更申请。')
     } catch (error) {

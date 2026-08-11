@@ -274,12 +274,6 @@ func (s *applicationStub) Rollback(context.Context, contract.ActorContext, contr
 	return s.changeSet, nil
 }
 
-func (s *applicationStub) CompileThreeTierConfiguration(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileThreeTierRequest) (delivery.DeliveryPlan, error) {
-	return delivery.DeliveryPlan{}, nil
-}
-func (s *applicationStub) OverrideThreeTierField(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ThreeTierOverrideRequest) (delivery.DeliveryPlan, error) {
-	return delivery.DeliveryPlan{}, nil
-}
 func (s *applicationStub) GenerateRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryRecommendation, error) {
 	return delivery.DeliveryRecommendation{}, nil
 }
@@ -294,9 +288,6 @@ func (s *applicationStub) AcceptRecommendation(context.Context, contract.ActorCo
 }
 func (s *applicationStub) RejectRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.DeliveryRecommendation, error) {
 	return delivery.DeliveryRecommendation{}, nil
-}
-func (s *applicationStub) CompileManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ManualActionPackage, bool, error) {
-	return delivery.ManualActionPackage{}, false, nil
 }
 func (s *applicationStub) GetManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ManualActionPackage, error) {
 	return delivery.ManualActionPackage{}, nil

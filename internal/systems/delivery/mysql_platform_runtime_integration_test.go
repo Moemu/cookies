@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -152,11 +153,24 @@ func TestMySQLPlatformRuntimeRoundTripAndLegacyUpgradeCompatibility(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	var legacyBytesBefore []byte
+	var legacyHashBefore string
+	if err = db.QueryRowContext(ctx, `SELECT config_json,canonical_hash FROM delivery_plan_versions WHERE organization_id=? AND project_id=? AND plan_id=? AND version_number=1`, organizationID, projectID, legacyPlanID).Scan(&legacyBytesBefore, &legacyHashBefore); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = BackfillPlanCanonicalHashes(ctx, db); err != nil {
 		t.Fatalf("first standard backfill: %v", err)
 	}
 	if updated, err := BackfillPlanCanonicalHashes(ctx, db); err != nil || updated != 0 {
 		t.Fatalf("second standard backfill updated=%d err=%v", updated, err)
+	}
+	var legacyBytesAfter []byte
+	var legacyHashAfter string
+	if err = db.QueryRowContext(ctx, `SELECT config_json,canonical_hash FROM delivery_plan_versions WHERE organization_id=? AND project_id=? AND plan_id=? AND version_number=1`, organizationID, projectID, legacyPlanID).Scan(&legacyBytesAfter, &legacyHashAfter); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(legacyBytesBefore, legacyBytesAfter) || legacyHashBefore != legacyHashAfter {
+		t.Fatal("legacy config_json bytes or canonical hash changed during idempotent backfill")
 	}
 	legacyLoaded, err := repository.GetPlan(ctx, organizationID, projectID, legacyPlanID)
 	if err != nil {

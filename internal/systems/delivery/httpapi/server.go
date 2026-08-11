@@ -42,14 +42,11 @@ type Application interface {
 	EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error)
 	ListAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.AlertFilter) ([]delivery.DeliveryAlert, error)
 	UpdateAlert(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdateAlertRequest) (delivery.DeliveryAlert, error)
-	CompileThreeTierConfiguration(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileThreeTierRequest) (delivery.DeliveryPlan, error)
-	OverrideThreeTierField(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ThreeTierOverrideRequest) (delivery.DeliveryPlan, error)
 	GenerateRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryRecommendation, error)
 	ListRecommendations(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryRecommendation, error)
 	GetRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryRecommendation, error)
 	AcceptRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, string, int64) (delivery.RecommendationAcceptance, bool, error)
 	RejectRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.DeliveryRecommendation, error)
-	CompileManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ManualActionPackage, bool, error)
 	GetManualActionPackage(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ManualActionPackage, error)
 	PrepareTourRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryTourRun, bool, error)
 	GetTourRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryTourRun, error)
@@ -135,9 +132,11 @@ func (s *Server) getTourRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) compileConfiguration(w http.ResponseWriter, r *http.Request) {
 	writeError(w, r, delivery.ErrLegacyConfigurationUnsupported)
 }
+
 func (s *Server) overrideConfiguration(w http.ResponseWriter, r *http.Request) {
 	writeError(w, r, delivery.ErrLegacyConfigurationUnsupported)
 }
+
 func (s *Server) generateRecommendation(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ExpectedVersion int `json:"expected_version"`
@@ -206,23 +205,9 @@ func (s *Server) recommendationAction(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 func (s *Server) compileManualActionPackage(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ExpectedVersion int64 `json:"expected_version"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	v, replay, err := s.app.CompileManualActionPackage(r.Context(), mustActor(r), projectID(r), r.PathValue("change_set_id"), body.ExpectedVersion)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if replay {
-		writeJSON(w, http.StatusOK, v)
-	} else {
-		writeJSON(w, http.StatusCreated, v)
-	}
+	writeError(w, r, delivery.ErrLegacyConfigurationUnsupported)
 }
+
 func (s *Server) getManualActionPackage(w http.ResponseWriter, r *http.Request) {
 	v, err := s.app.GetManualActionPackage(r.Context(), mustActor(r), projectID(r), r.PathValue("change_set_id"))
 	if err != nil {

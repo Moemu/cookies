@@ -133,16 +133,8 @@ paths:
       operationId: compileDeliveryPlanConfiguration
       summary: Rejected legacy ThreeTier write endpoint
       description: Always returns LEGACY_CONFIGURATION_UNSUPPORTED. Legacy ThreeTier snapshots remain readable but immutable.
-      requestBody: { $ref: '#/components/requestBodies/CompileDeliveryConfiguration' }
       responses:
-        '201':
-          description: A new immutable PlanVersion containing the server-authored three-tier snapshot.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/DeliveryPlan' }
         '409': { $ref: '#/components/responses/Problem' }
-        '412': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/plans/{plan_id}/configuration:override:
     parameters:
@@ -153,17 +145,8 @@ paths:
       operationId: overrideDeliveryPlanConfigurationField
       summary: Rejected legacy ThreeTier write endpoint
       description: Always returns LEGACY_CONFIGURATION_UNSUPPORTED. Create a new DeliveryIntent and PlatformConfiguration version instead.
-      requestBody: { $ref: '#/components/requestBodies/OverrideDeliveryConfigurationField' }
       responses:
-        '200':
-          description: Updated current projection with a newly immutable three-tier PlanVersion.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/DeliveryPlan' }
-        '400': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
-        '412': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/plans/{plan_id}/recommendations:generate:
     parameters:
@@ -340,38 +323,24 @@ paths:
       - $ref: '#/components/parameters/ProjectID'
       - $ref: '#/components/parameters/ChangeSetID'
     get:
+      deprecated: true
       operationId: getDeliveryManualActionPackage
-      summary: Read an immutable approved-only manual action package
+      summary: Read a historical immutable manual action package for audit
       responses:
         '200':
           description: Immutable manual action package. Its content never implies a platform write.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ManualActionPackage' }
+              schema: { $ref: '#/components/schemas/LegacyManualActionPackage' }
         '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
     post:
+      deprecated: true
       operationId: compileDeliveryManualActionPackage
-      summary: Compile or idempotently replay the approved ChangeSet manual action package
-      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
+      summary: Rejected legacy manual action package write endpoint
+      description: Always returns LEGACY_CONFIGURATION_UNSUPPORTED and performs no business operation.
       responses:
-        '201':
-          description: New immutable manual action package compiled from an approved ChangeSet.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ManualActionPackage' }
-        '200':
-          description: Idempotent replay of the already compiled package.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ManualActionPackage' }
-        '409':
-          description: APPROVAL_REQUIRED, INVALID_STATE, or VERSION_CONFLICT.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Problem' }
-        '412': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:approve:
     parameters:
@@ -836,33 +805,6 @@ components:
             properties:
               expected_version: { type: integer, minimum: 1 }
               scenario: { $ref: '#/components/schemas/ExecutionScenario' }
-    CompileDeliveryConfiguration:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            additionalProperties: false
-            required: [expected_version, fixture]
-            properties:
-              expected_version: { type: integer, minimum: 1 }
-              fixture: { $ref: '#/components/schemas/DeliveryConfigurationFixture' }
-    OverrideDeliveryConfigurationField:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            additionalProperties: false
-            required: [expected_version, group_id, plan_id, creative_id, field_key, value, confirmed]
-            properties:
-              expected_version: { type: integer, minimum: 1 }
-              group_id: { type: string, minLength: 1 }
-              plan_id: { type: string, minLength: 1 }
-              creative_id: { type: string, minLength: 1 }
-              field_key: { type: string, minLength: 1 }
-              value: { $ref: '#/components/schemas/DeliveryFieldValue' }
-              confirmed: { type: boolean }
   responses:
     ChangeSet:
       description: Updated ChangeSet.
@@ -904,7 +846,7 @@ components:
       properties:
         key:
           type: string
-          enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval, manual_action_package]
+          enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval]
         title: { type: string }
         completion_condition: { type: string }
         complete: { type: boolean }
@@ -942,12 +884,12 @@ components:
           items: { $ref: '#/components/schemas/DeliveryTourCase' }
         steps:
           type: array
-          minItems: 9
-          maxItems: 9
+          minItems: 8
+          maxItems: 8
           items: { $ref: '#/components/schemas/DeliveryTourStep' }
         current_step:
           type: string
-          enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval, manual_action_package, complete]
+          enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval, complete]
         suggested_next_url: { type: string }
     DeliveryTourResetResult:
       type: object
@@ -1191,7 +1133,7 @@ components:
             project_id: { type: string }
             version_number: { type: integer, minimum: 1 }
             canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
-            three_tier_configuration: { $ref: '#/components/schemas/DeliveryConfigurationSnapshot' }
+            three_tier_configuration: { $ref: '#/components/schemas/LegacyThreeTierSnapshot', deprecated: true, readOnly: true }
             platform: { type: string, const: ocean_engine_mock }
             source: { type: string, const: mock }
             scenario: { $ref: '#/components/schemas/Scenario' }
@@ -1239,7 +1181,7 @@ components:
         updated_at: { type: string, format: date-time }
     Scenario:
       type: string
-      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list, approval_queue, missing_required_field, orphan_dependency, missing_confirmation, platform_fields_pending, platform_configuration, capability_pending, recommendation_generated, recommendation_accepted, recommendation_rejected, manual_action_package, preflight_failure, approval_expired, plan_stale, partial_execution, result_unknown, review_rejected_alert]
+      enum: [golden_path, budget_zero, creative_unconfirmed, tracking_missing, incomplete_draft, project_plan_list, approval_queue, platform_configuration, capability_pending, recommendation_generated, recommendation_accepted, recommendation_rejected, preflight_failure, approval_expired, plan_stale, partial_execution, result_unknown, review_rejected_alert]
     PlanList:
       type: object
       required: [items, source, scenario]
@@ -1271,7 +1213,7 @@ components:
       properties:
         code:
           type: string
-          enum: [advertiser_available, budget_positive, schedule_valid, creative_present, creative_confirmed, tracking_complete, delivery_intent_valid, platform_configuration_valid, INVALID_STABLE_REFERENCE, CANONICAL_HASH_MISMATCH, CAPABILITY_PENDING, platform_pending, blocked_by_event_asset, write_validation_pending, three_tier_structure, three_tier_required_fields, three_tier_dependencies, three_tier_confirmation, three_tier_platform_pending]
+          enum: [delivery_intent_valid, platform_configuration_valid, INVALID_STABLE_REFERENCE, CANONICAL_HASH_MISMATCH, CAPABILITY_PENDING, platform_pending, blocked_by_event_asset, write_validation_pending]
         severity: { type: string, enum: [error, warning] }
         passed: { type: boolean }
         message: { type: string }
@@ -1293,9 +1235,11 @@ components:
         source: { type: string, const: mock }
         scenario: { $ref: '#/components/schemas/Scenario' }
         checked_at: { type: string, format: date-time }
-    DeliveryConfigurationFixture:
+    LegacyThreeTierFixture:
       type: string
-      description: Server-authored deterministic three-tier fixture; real-platform values and constraints are intentionally not modeled.
+      deprecated: true
+      readOnly: true
+      description: Frozen discriminator retained only to decode historical snapshots.
       enum: [golden_path, missing_required_field, orphan_dependency, missing_confirmation, platform_fields_pending]
     DeliveryFieldValue:
       type: object
@@ -1310,7 +1254,7 @@ components:
       required: [source, scenario, evidence_refs]
       properties:
         source: { type: string, const: mock }
-        scenario: { $ref: '#/components/schemas/DeliveryConfigurationFixture' }
+        scenario: { $ref: '#/components/schemas/LegacyThreeTierFixture' }
         evidence_refs:
           type: array
           items: { type: string }
@@ -1400,15 +1344,18 @@ components:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/DeliveryPlanConfiguration' }
-    DeliveryConfigurationSnapshot:
+    LegacyThreeTierSnapshot:
       type: object
+      deprecated: true
+      readOnly: true
+      description: Frozen historical payload. It is never accepted by a write operation.
       additionalProperties: false
       required: [schema, source, scenario, fixture_scenario, generated_at, evidence, groups]
       properties:
         schema: { type: string, const: delivery-three-tier/v1 }
         source: { type: string, const: mock }
-        scenario: { $ref: '#/components/schemas/DeliveryConfigurationFixture' }
-        fixture_scenario: { $ref: '#/components/schemas/DeliveryConfigurationFixture' }
+        scenario: { $ref: '#/components/schemas/LegacyThreeTierFixture' }
+        fixture_scenario: { $ref: '#/components/schemas/LegacyThreeTierFixture' }
         generated_at: { type: string, format: date-time }
         evidence:
           type: array
@@ -1433,12 +1380,14 @@ components:
         simulation_run_id: { type: string }
         fingerprint: { type: string, minLength: 1 }
         status: { $ref: '#/components/schemas/RecommendationStatus' }
-        base_snapshot: { $ref: '#/components/schemas/DeliveryConfigurationSnapshot' }
+        base_snapshot: { $ref: '#/components/schemas/LegacyThreeTierSnapshot', deprecated: true, readOnly: true }
         base_configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
         base_snapshot_hash: { $ref: '#/components/schemas/CanonicalHash' }
-        target_snapshot: { $ref: '#/components/schemas/DeliveryConfigurationSnapshot' }
+        target_snapshot: { $ref: '#/components/schemas/LegacyThreeTierSnapshot', deprecated: true, readOnly: true }
         target_configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
         target_snapshot_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        runtime_status: { type: string, enum: [active, capability_pending, legacy_unsupported] }
+        read_only: { type: boolean }
         evidence:
           type: array
           items: { type: string }
@@ -1485,8 +1434,10 @@ components:
         plan_version: { type: integer, minimum: 1 }
         plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
         target_snapshot: { $ref: '#/components/schemas/PlatformConfiguration' }
-        legacy_target_snapshot: { $ref: '#/components/schemas/DeliveryConfigurationSnapshot', deprecated: true, readOnly: true }
+        legacy_target_snapshot: { $ref: '#/components/schemas/LegacyThreeTierSnapshot', deprecated: true, readOnly: true }
         target_snapshot_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        runtime_status: { type: string, enum: [active, capability_pending, legacy_unsupported] }
+        read_only: { type: boolean }
         recommendation_id: { type: string }
         budget_limit: { $ref: '#/components/schemas/Budget' }
         status: { type: string, enum: [draft, preflight_passed, preflight_failed, approved, rejected, executed, rolled_back] }
@@ -1532,6 +1483,8 @@ components:
         change_set_version: { type: integer, minimum: 1 }
         plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
         target_snapshot_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        runtime_status: { type: string, enum: [active, capability_pending, legacy_unsupported] }
+        read_only: { type: boolean }
         configuration_schema_version: { type: string, const: delivery-platform-configuration/v2 }
         configuration_id: { type: string }
         configuration_version: { type: integer, minimum: 1 }
@@ -1575,8 +1528,11 @@ components:
         evidence_refs:
           type: array
           items: { type: string }
-    ManualActionPackage:
+    LegacyManualActionPackage:
       type: object
+      deprecated: true
+      readOnly: true
+      description: Frozen historical audit payload. No write operation creates this object.
       additionalProperties: false
       required: [id, organization_id, project_id, change_set_id, target_snapshot_hash, content_hash, instructions, forbidden_actions, evidence, provenance, optimized_plan_version, optimized_plan_hash, source, scenario, created_at]
       properties:
@@ -2040,7 +1996,7 @@ components:
           type: object
           required: [code, message, request_id, retryable, details]
           properties:
-            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, PROJECT_ACCESS_DENIED, INVALID_STATE, VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, STALE_PLAN_VERSION, APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, TOUR_OWNER_MISMATCH, SCOPE_REQUIRED, INTERNAL] }
+            code: { type: string, enum: [INVALID_REQUEST, RESOURCE_NOT_FOUND, PROJECT_ACCESS_DENIED, INVALID_STATE, VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, STALE_PLAN_VERSION, APPROVAL_REQUIRED, APPROVAL_EXPIRED, APPROVAL_CONTENT_MISMATCH, APPROVAL_SCOPE_EXCEEDED, LEGACY_CONFIGURATION_UNSUPPORTED, TOUR_OWNER_MISMATCH, SCOPE_REQUIRED, INTERNAL] }
             message: { type: string }
             request_id: { type: string }
             retryable: { type: boolean }

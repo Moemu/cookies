@@ -128,7 +128,7 @@ func TestOpenAPIContractCoversOwnerScopedDeliveryTour(t *testing.T) {
 		"isolation_key:",
 		"observed_at:",
 		"suggested_next_url:",
-		"enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval, manual_action_package]",
+		"enum: [plan_creation, configuration, first_approval, execution, monitoring, recommendation, new_change_set, second_approval]",
 	}
 	for _, expected := range required {
 		if !strings.Contains(contract, expected) {
