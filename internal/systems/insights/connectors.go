@@ -1137,7 +1137,17 @@ func (s Service) GetMetricOverview(ctx context.Context, actor contract.ActorCont
 const maxWindowDays = 400
 
 func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sources []DataSource, now time.Time) MetricOverview {
-	overview := MetricOverview{Window: window, Comparable: true}
+	// insights-v1.yaml 把这四个字段列为 required 的数组。nil slice 会序列化成
+	// null，而前端按契约当数组用（overview.sources.length）——空窗口下就会崩在
+	// 渲染里。「这个窗口里没有数据源」的正确表达是 []，不是 null。
+	overview := MetricOverview{
+		Window:     window,
+		Comparable: true,
+		Series:     []PerformancePoint{},
+		Assets:     []AssetPerformance{},
+		Sources:    []SourceHealth{},
+		Platforms:  []PlatformTotal{},
+	}
 
 	byDate := map[string]MetricCounts{}
 	byAsset := map[string]*AssetPerformance{}

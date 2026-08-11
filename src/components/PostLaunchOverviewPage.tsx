@@ -249,7 +249,9 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
           </span></div>}
         </> : <div className="panel-empty">左侧选一个素材版本，查看它的账和这个数字能用来做什么。</div>}
 
-        {overview?.sources.length ? <div className="feature-stack">
+        {/* 契约说 sources 是必填数组，但后端历史上会在空窗口下发 null。这里不信任
+            契约，因为这一句崩掉的代价是整页白屏，而防御的代价是一个问号。 */}
+        {overview?.sources?.length ? <div className="feature-stack">
           <span>数据从哪来（{overview.sources.length} 个数据源）</span>
           {overview.sources.map(source => <b key={source.data_source_id}>
             {source.label} · {qualityLabels[source.quality_status]}
@@ -259,7 +261,7 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
           </b>)}
         </div> : null}
 
-        {overview && overview.platforms.length > 1 ? <div className="feature-stack">
+        {overview && (overview.platforms?.length ?? 0) > 1 ? <div className="feature-stack">
           <span>分平台</span>
           {overview.platforms.map(item => <b key={item.platform}>
             {item.label} · {formatMoney(item.counts.spend_cents)} · 点击率 {formatRate(item.rates.ctr)}

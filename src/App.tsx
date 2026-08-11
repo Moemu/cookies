@@ -5,6 +5,7 @@ import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
 import { LoginPage } from './components/LoginPage'
+import { RenderErrorBoundary } from './components/RenderErrorBoundary'
 import { StateBoundary } from './components/StateBoundary'
 import { useAuth } from './context/AuthContext'
 import { useProject } from './context/ProjectContext'
@@ -61,7 +62,11 @@ export default function App() {
     : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} contextId={route.contextId} objectId={route.objectId} routeView={route.view} onOpenProject={openProject}/>
 
   return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={id => navigate(projectPath(activeProjectId, system.key, id))}>
-    {content}
+    {/* 页面级错误边界：某一页渲染炸了，只让它那一块显示成错误，Shell 的导航、
+        Project 切换、系统切换都还能用。切换路由时 resetKey 变化会自动清掉错误。 */}
+    <RenderErrorBoundary contextLabel={navItem.label} resetKey={`${activeProjectId}-${system.key}-${navItem.id}-${route.view ?? ''}`}>
+      {content}
+    </RenderErrorBoundary>
   </Shell>
 }
 
