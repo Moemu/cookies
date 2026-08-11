@@ -255,6 +255,9 @@ func cleanupWorkflowOrganization(t *testing.T, db *sql.DB, organizationID contra
 		"DELETE FROM project_context_versions WHERE organization_id=?",
 		"DELETE FROM project_products WHERE organization_id=?",
 		"DELETE FROM project_memberships WHERE organization_id=?",
+		// 建项目时会顺手写一行运行时，它外键指向 projects。不先删它，后面每一条
+		// 清理都连环失败，测试跑一次就往开发库里留一份脏数据。
+		"DELETE FROM platform_project_runtimes WHERE organization_id=?",
 		"DELETE FROM projects WHERE organization_id=?",
 		"DELETE FROM brand_guideline_versions WHERE organization_id=?",
 		"DELETE FROM products WHERE organization_id=?",

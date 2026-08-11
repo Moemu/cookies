@@ -198,6 +198,14 @@ type FeatureFieldUsage struct {
 	// 写入时校验会拦掉词表外的值（ValidateFeatureValue），所以这里的行只可能
 	// 来自「先写了值、后发布词表」。它们不是脏数据，是词表发布时没被清理的存量。
 	OffVocabulary []string `json:"off_vocabulary,omitempty"`
+
+	// SourceCounts 是这个字段现在生效的取值分别由谁写下的：量出来的 / 人标的 /
+	// 模型猜的，各有几条素材。
+	//
+	// 摆在字段这一层，是因为「能不能拿它去归因」是字段级的判断而不是单条素材级的：
+	// 一个八成取值都是模型猜的字段，拿它分组比出来的差异说明不了问题，
+	// 而只看「填了多少条」看不出这一点——填得越满反而越像可信。
+	SourceCounts map[FeatureSource]int `json:"source_counts,omitempty"`
 }
 
 // FeatureSystemHealth 是一个素材类型的特征体系现状。
@@ -460,6 +468,9 @@ func buildFeatureSystems(assets []Asset, features []AssetFeature) []FeatureSyste
 
 	// (类型, 字段键, 取值文本) → 用过它的素材数。
 	usage := map[AssetType]map[string]map[string]int{}
+	// (类型, 字段键, 来源) → 这么写的素材数。和 usage 同一趟数出来，
+	// 分两趟的话「填了几条」和「谁填的」会在同一屏上加不出同一个总数。
+	sources := map[AssetType]map[string]map[FeatureSource]int{}
 	for assetID, keys := range effective {
 		assetType, ok := assetTypeOf[assetID]
 		if !ok || !assetType.valid() {
@@ -469,6 +480,11 @@ func buildFeatureSystems(assets []Asset, features []AssetFeature) []FeatureSyste
 		if !ok {
 			fields = map[string]map[string]int{}
 			usage[assetType] = fields
+		}
+		fieldSources, ok := sources[assetType]
+		if !ok {
+			fieldSources = map[string]map[FeatureSource]int{}
+			sources[assetType] = fieldSources
 		}
 		for key, feature := range keys {
 			text := featureValueText(feature.Value)
@@ -481,6 +497,12 @@ func buildFeatureSystems(assets []Asset, features []AssetFeature) []FeatureSyste
 				fields[key] = values
 			}
 			values[text]++
+			counts, ok := fieldSources[key]
+			if !ok {
+				counts = map[FeatureSource]int{}
+				fieldSources[key] = counts
+			}
+			counts[feature.Source]++
 		}
 	}
 
@@ -539,6 +561,9 @@ func buildFeatureSystems(assets []Asset, features []AssetFeature) []FeatureSyste
 				ordered = ordered[:maxFeatureValuesPerField]
 			}
 			entry.Values = ordered
+			if counts := sources[schema.AssetType][field.Key]; len(counts) > 0 {
+				entry.SourceCounts = counts
+			}
 			sort.Strings(entry.MergeCandidates)
 			entry.OffVocabulary = dedupeSorted(entry.OffVocabulary)
 			health.Fields = append(health.Fields, entry)

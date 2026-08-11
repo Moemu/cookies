@@ -19,7 +19,7 @@ func TestMetricOverviewRequiredArraysAreNeverNullOnEmptyWindow(t *testing.T) {
 	window := MetricWindow{Start: now.AddDate(0, 0, -30), End: now}
 
 	// 新部署的服务器就是这个状态：接了数据源，但窗口里没有任何指标事实。
-	overview := buildMetricOverview(window, nil, []DataSource{{ID: "ds-1"}}, now)
+	overview := buildMetricOverview(window, nil, []DataSource{{ID: "ds-1"}}, now, ResolvedThresholds{})
 
 	raw, err := json.Marshal(overview)
 	if err != nil {

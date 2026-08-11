@@ -8,13 +8,16 @@ import {
   type ApiReviewState,
   type ApiFeatureInput,
   type ApiFeatureMatrix,
+  type ApiFeatureMatrixCell,
   type ApiFeatureSchema,
+  type ApiFeatureSource,
   type ApiFeatureValue,
   type ApiFeatureValueKind,
   type ApiInsightAsset,
   type ApiInsightAssetFeature,
   type ApiInsightAssetType,
 } from '../data/api'
+import { admissibleForAttribution, featureSourceLabel } from '../data/featureSource'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -53,6 +56,9 @@ const assetTypeOrder: ApiInsightAssetType[] = [
 ]
 
 const confidenceLabels: Record<ApiConfidence, string> = { low: '低', medium: '中', high: '高' }
+
+// 一格里同时有多种来源时的显示顺序。归因只认前两种，所以它们排在前面。
+const sourceOrder: ApiFeatureSource[] = ['derived', 'human', 'ai']
 
 // 人工那一行的措辞。authored 不能写成「推翻 AI」——AI 根本没提过这一项，
 // 没有东西可推翻；也不能写成「认可」，人并没有认可过任何机器结论。
@@ -338,8 +344,15 @@ export function ContentAnalysisPage({ state, activeView }: { state: DataState; a
               : selectedAsset.asset_type_source === 'human' ? '（人工判定）' : ''}
           </b></span></div>
           <div className="prelaunch-fact"><Sparkles size={17}/><span><small>已提取</small><b>
-            AI {features.filter(feature => feature.source === 'ai').length} 项 · 人工 {features.filter(feature => feature.source === 'human').length} 项
+            {sourceOrder.map(source =>
+              `${featureSourceLabel[source]} ${features.filter(feature => feature.source === source).length} 项`).join(' · ')}
             {typeSchema ? ` · 这类素材共 ${typeSchema.fields.length} 个变量` : ''}
+          </b></span></div>
+          {/* 能进归因的有几项，要单独说一句。前面那行三个数并排，人会把它们加起来
+              当成「提取了多少」，而其中模型猜的那部分是不能拿去做归因的。 */}
+          <div className="prelaunch-fact"><UserCheck size={17}/><span><small>其中能进归因的</small><b>
+            {features.filter(feature => admissibleForAttribution(feature.source)).length} 项。
+            模型猜的那些只能参考——要让它们算数，得有人看过并确认。
           </b></span></div>
           {selectedAsset.analysis_status_reason
             ? <div className="prelaunch-fact"><Lightbulb size={17}/><span><small>最近一次状态说明</small><b>{selectedAsset.analysis_status_reason}</b></span></div>
@@ -391,13 +404,18 @@ function FeatureMatrixTable({ matrix }: { matrix: ApiFeatureMatrix }) {
       {matrix.rows.filter(row => row.group === group).map(row => <div className="content-matrix-row" key={row.key}>
         <span><b>{row.label}</b><small>{row.key}</small></span>
         {matrix.assets.map(asset => {
-          const cells = (row.cells ?? []).filter(cell => cell.asset_id === asset.id)
-          const ai = cells.find(cell => cell.source === 'ai')
-          const human = cells.find(cell => cell.source === 'human')
+          // 三种来源都要显示，顺序固定成「量出来的 → 人标的 → 模型猜的」：
+          // 归因只认前两种，把能归因的排在前面，人一眼就知道这一格能不能用。
+          // 少列 derived 那一种的话，一个量出来的取值会显示成「—」，被读成「没提取」。
+          const cells = sourceOrder
+            .map(source => (row.cells ?? []).find(cell => cell.asset_id === asset.id && cell.source === source))
+            .filter((cell): cell is ApiFeatureMatrixCell => Boolean(cell))
           return <span key={asset.id}>
-            {human ? <b className="content-layer human">人工 · {formatValue(human.value)}</b> : null}
-            {ai ? <b className="content-layer ai">AI · {formatValue(ai.value)} · 置信{confidenceLabels[ai.confidence ?? 'low']}</b> : null}
-            {!ai && !human ? <b className="content-layer">—</b> : null}
+            {cells.map(cell => <b key={cell.source} className={`content-layer ${cell.source}`}>
+              {featureSourceLabel[cell.source]} · {formatValue(cell.value)}
+              {cell.source === 'ai' ? ` · 置信${confidenceLabels[cell.confidence ?? 'low']}` : ''}
+            </b>)}
+            {cells.length ? null : <b className="content-layer">—</b>}
           </span>
         })}
       </div>)}
@@ -427,12 +445,15 @@ function FeatureBreakdown({ schema, features, editingKey, draft, onDraft, onEdit
       {schema.fields.filter(field => field.group === group).map(field => {
         const ai = features.find(feature => feature.source === 'ai' && feature.key === field.key)
         const human = features.find(feature => feature.source === 'human' && feature.key === field.key)
+        // 量出来的那一层是只读的：它是算出来的，改它等于改算法，不该在这里改。
+        const derived = features.find(feature => feature.source === 'derived' && feature.key === field.key)
         const editing = editingKey === field.key
         return <div className="content-breakdown-row" key={field.key}>
           <span><b>{field.label}</b><small>{field.key} · {kindLabels[field.kind] ?? field.kind}{field.unit ? ` · ${field.unit}` : ''}</small></span>
           <span>
-            {ai ? <b className="content-layer ai">AI · {formatValue(ai.value)} · 置信{confidenceLabels[ai.confidence ?? 'low']}</b> : <b className="content-layer">AI 还没提取这一项</b>}
-            {human ? <b className="content-layer human">人工 · {formatValue(human.value)} · {reviewLabels[human.review_state] ?? human.review_state}</b> : null}
+            {derived ? <b className="content-layer derived">{featureSourceLabel.derived} · {formatValue(derived.value)}</b> : null}
+            {ai ? <b className="content-layer ai">{featureSourceLabel.ai} · {formatValue(ai.value)} · 置信{confidenceLabels[ai.confidence ?? 'low']}</b> : <b className="content-layer">模型还没提取这一项</b>}
+            {human ? <b className="content-layer human">{featureSourceLabel.human} · {formatValue(human.value)} · {reviewLabels[human.review_state] ?? human.review_state}</b> : null}
             {editing ? <input
               autoFocus
               aria-label={`改写 ${field.label}`}

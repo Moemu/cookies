@@ -282,13 +282,15 @@ func main() {
 		textProvider = &provider.Service{TextAdapter: textAdapter}
 	}
 	insightsService := &insights.Service{
-		Repository:  insights.MySQLRepository{DB: db},
-		Assets:      insights.MySQLRepository{DB: db},
-		Connectors:  insights.MySQLRepository{DB: db},
-		Runs:        insights.MySQLRepository{DB: db},
-		Experiments: insights.MySQLRepository{DB: db},
-		Projects:    projectService,
-		Delivery:    deliveryinsights.Reader{Service: deliveryService},
+		Repository:     insights.MySQLRepository{DB: db},
+		Assets:         insights.MySQLRepository{DB: db},
+		ExternalAssets: insights.MySQLRepository{DB: db},
+		Connectors:     insights.MySQLRepository{DB: db},
+		Runs:           insights.MySQLRepository{DB: db},
+		Experiments:    insights.MySQLRepository{DB: db},
+		Thresholds:     insights.MySQLRepository{DB: db},
+		Projects:       projectService,
+		Delivery:       deliveryinsights.Reader{Service: deliveryService},
 	}
 	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
 	// 库里一条编造的特征，代价远大于一次失败的提取。

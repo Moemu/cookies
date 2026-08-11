@@ -77,6 +77,79 @@ func TestCreateReportWindowMustBeWholeOrAbsent(t *testing.T) {
 	}
 }
 
+// 记一笔的窗口必填，且按天解析。窗口缺一头就不知道往哪份复盘草稿记，
+// 这时候挑一个默认窗口，记下来的那条会挂在人根本没看过的一段数据上。
+func TestPinFindingRequiresAWholeDayWindow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		window string
+		status int
+		start  string
+	}{
+		{"两头都有", `{"start":"2026-07-01","end":"2026-07-14"}`, 200, "2026-07-01"},
+		{"只有开头", `{"start":"2026-07-01","end":""}`, 400, ""},
+		{"完全没有", `{}`, 400, ""},
+		{"日期写错", `{"start":"2026/07/01","end":"2026-07-14"}`, 400, ""},
+	}
+	for _, test := range tests {
+		app := &applicationStub{report: insights.InsightReport{ID: "insightreport_1", Version: 1}}
+		server := New(app)
+		response := httptest.NewRecorder()
+		body := `{"dimension":"drivers","variable":"duration","window":` + test.window + `}`
+		server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/findings", body))
+		if response.Code != test.status {
+			t.Fatalf("%s status=%d，想要 %d，body=%s", test.name, response.Code, test.status, response.Body.String())
+		}
+		var got string
+		if !app.pinned.Window.Start.IsZero() {
+			got = app.pinned.Window.Start.Format("2006-01-02")
+		}
+		if got != test.start {
+			t.Fatalf("%s 窗口起点=%q，想要 %q", test.name, got, test.start)
+		}
+	}
+}
+
+// 判定不能从请求里穿过去。请求体里带 verdict 直接退回 400（解码器不认多余字段），
+// 而不是静默忽略：静默忽略的话，前端可以一直传着，谁也不知道它没生效。
+func TestPinFindingRejectsAVerdictInTheRequestBody(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{report: insights.InsightReport{ID: "insightreport_1", Version: 1}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	body := `{"dimension":"drivers","variable":"duration","verdict":"explained",` +
+		`"window":{"start":"2026-07-01","end":"2026-07-14"}}`
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/findings", body))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("带 verdict 的请求 status=%d，想要 400，body=%s", response.Code, response.Body.String())
+	}
+	if app.pinned.Dimension != "" {
+		t.Fatalf("被拒的请求不该到达服务层：%+v", app.pinned)
+	}
+}
+
+// 提交复盘走独立路径，报告 ID 从路径里取，执行和版本从请求体里取。三个值任何一个
+// 串位，提交的都是另一份复盘或另一次投放，而返回的 200 看起来一切正常。
+func TestSubmitReviewTakesReportIDFromPathAndBodyFromJSON(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{report: insights.InsightReport{ID: "insightreport_7", Version: 3}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/reports/insightreport_7/submit",
+		`{"execution_id":"insightexecution_2","expected_version":3}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d，想要 200，body=%s", response.Code, response.Body.String())
+	}
+	if app.submittedReportID != "insightreport_7" {
+		t.Errorf("报告 ID=%q，想要 insightreport_7", app.submittedReportID)
+	}
+	if app.submitted.ExecutionID != "insightexecution_2" || app.submitted.ExpectedVersion != 3 {
+		t.Errorf("请求体没原样传下去：%+v", app.submitted)
+	}
+}
+
 // 人工删减走 :drop-finding。索引和 dropped 都要原样传到后面——
 // 传错一个索引，删掉的就是另一条发现，而人看不出来。
 func TestDropReportFindingPassesIndexAndFlag(t *testing.T) {
@@ -184,6 +257,27 @@ func TestListExperiencesForwardsStatusFilter(t *testing.T) {
 	}
 }
 
+// lookup 和「{id}:动词」共用同一段路径，很容易被通配符那条路由吃掉——
+// 吃掉的表现是 404，不是编译错，所以这里钉一下路由确实分得开、条件确实传到了服务层。
+func TestExperienceLookupIsNotSwallowedByTheActionRoute(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{experience: insights.Experience{ID: "experience_1"}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/experiences/lookup",
+		`{"channel":"抖音","include_observed":true}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if app.lookup.Channel != "抖音" || !app.lookup.IncludeObserved {
+		t.Fatalf("条件没传到服务层：%#v", app.lookup)
+	}
+	if !strings.Contains(response.Body.String(), `"matched"`) {
+		t.Fatalf("命中理由要一起给出去：%s", response.Body.String())
+	}
+}
+
 func TestInsightsHTTPExposesAssetAnalysisSurface(t *testing.T) {
 	t.Parallel()
 	app := &applicationStub{
@@ -222,6 +316,18 @@ func TestInsightsHTTPExposesAssetAnalysisSurface(t *testing.T) {
 		{http.MethodPost, "/api/insights/v1/projects/project_1/asset-mappings/insightassetmapping_1:unknown", `{}`, 404, ""},
 		{http.MethodGet, "/api/insights/v1/projects/project_1/feature-schemas", "", 200, "wechat_article"},
 		{http.MethodGet, "/api/insights/v1/projects/project_1/feature-matrix?asset_ids=insightasset_1", "", 200, "共同特征"},
+		// similar 是字面量段，不能被 {asset_action} 吃掉：吃掉的话它会被当成
+		// 一条叫 similar 的素材的未知动作，返回 404。
+		{http.MethodPost, "/api/insights/v1/projects/project_1/assets/similar",
+			`{"features":{"duration":"15s"}}`, 200, "insightasset_2"},
+		// 外部素材走自己的路径，和 /assets 不共用任何一段。
+		{http.MethodPost, "/api/insights/v1/projects/project_1/external-assets",
+			`{"title":"同行的一条 15 秒竖版","purpose":"benchmark","source_note":"公开投放素材","window_end":"2026-07-30"}`,
+			201, "externalasset_1"},
+		// 没有 window_end 就算不出留存期限，直接 400——不许用默认值蒙混过去。
+		{http.MethodPost, "/api/insights/v1/projects/project_1/external-assets",
+			`{"title":"同行的一条 15 秒竖版","purpose":"benchmark"}`, 400, ""},
+		{http.MethodGet, "/api/insights/v1/projects/project_1/external-assets", "", 200, "externalasset_1"},
 	}
 	for _, test := range tests {
 		response := httptest.NewRecorder()
@@ -324,6 +430,7 @@ type applicationStub struct {
 	report          insights.InsightReport
 	experience      insights.Experience
 	listedStatus    insights.ExperienceStatus
+	lookup          insights.ExperienceLookup
 	preLaunchFilter insights.PreLaunchFilter
 
 	asset          insights.Asset
@@ -332,6 +439,10 @@ type applicationStub struct {
 	assetFilter    insights.AssetFilter
 	mappingFilter  insights.AssetMappingFilter
 	matrixAssetIDs []string
+	similarRequest insights.SimilarAssetRequest
+
+	externalRequest insights.ImportExternalAssetRequest
+	externalLimit   int
 
 	analysisRun     insights.AnalysisRun
 	analyzeRequest  insights.AnalyzeAssetRequest
@@ -350,6 +461,9 @@ type applicationStub struct {
 
 	capabilityOperations insights.CapabilityOperations
 	settings             insights.InsightSettings
+	thresholds           insights.ResolvedThresholds
+	thresholdRequest     insights.SaveThresholdsRequest
+	thresholdHistory     []insights.ThresholdSet
 
 	experiment        insights.Experiment
 	readout           insights.ExperimentReadout
@@ -361,14 +475,21 @@ type applicationStub struct {
 	attachedAssetID   string
 	interpretation    string
 	reportWindow      insights.MetricWindow
+	pinned            insights.PinFindingRequest
 	droppedIndex      int
 	droppedFlag       bool
+	submitted         insights.SubmitReviewRequest
+	submittedReportID string
 
 	registerErr error
 }
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {
 	s.reportWindow = request.Window
+	return s.report, nil
+}
+func (s *applicationStub) PinFinding(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.PinFindingRequest) (insights.InsightReport, error) {
+	s.pinned = request
 	return s.report, nil
 }
 func (s *applicationStub) DropReportFinding(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, _ int64, index int, dropped bool) (insights.InsightReport, error) {
@@ -382,12 +503,20 @@ func (s *applicationStub) ListReports(context.Context, contract.ActorContext, co
 func (s *applicationStub) ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error) {
 	return s.report, nil
 }
+func (s *applicationStub) SubmitReview(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, reportID string, request insights.SubmitReviewRequest) (insights.InsightReport, error) {
+	s.submittedReportID, s.submitted = reportID, request
+	return s.report, nil
+}
 func (s *applicationStub) CreateExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64, insights.CreateExperienceRequest) (insights.Experience, error) {
 	return s.experience, nil
 }
 func (s *applicationStub) ListExperiences(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, status insights.ExperienceStatus, _ int) ([]insights.Experience, error) {
 	s.listedStatus = status
 	return []insights.Experience{s.experience}, nil
+}
+func (s *applicationStub) LookupExperiences(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, lookup insights.ExperienceLookup) ([]insights.ExperienceMatch, error) {
+	s.lookup = lookup
+	return []insights.ExperienceMatch{{Experience: s.experience, Matched: []string{"渠道"}, Default: true}}, nil
 }
 func (s *applicationStub) ConfirmExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experience, error) {
 	return s.experience, nil
@@ -488,6 +617,24 @@ func (s *applicationStub) GetFeatureMatrix(_ context.Context, _ contract.ActorCo
 	}
 	return insights.FeatureMatrix{Assets: assets, Disclosure: "仅比较各类型都有的共同特征。"}, nil
 }
+func (s *applicationStub) FindSimilarAssets(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.SimilarAssetRequest) (insights.SimilarAssetResult, error) {
+	s.similarRequest = request
+	return insights.SimilarAssetResult{
+		Probe: []insights.SimilarityReason{{Key: "duration", Label: "时长", Value: "15s", Source: insights.SourceHuman}},
+		Items: []insights.SimilarAsset{{AssetID: "insightasset_2", Overlap: 1, AdmissibleOverlap: 1}},
+	}, nil
+}
+func (s *applicationStub) ImportExternalAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.ImportExternalAssetRequest) (insights.ExternalAsset, error) {
+	s.externalRequest = request
+	return insights.ExternalAsset{
+		ID: "externalasset_1", Title: request.Title, Purpose: request.Purpose,
+		RetentionUntil: request.WindowEnd,
+	}, nil
+}
+func (s *applicationStub) ListExternalAssets(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, limit int) ([]insights.ExternalAsset, error) {
+	s.externalLimit = limit
+	return []insights.ExternalAsset{{ID: "externalasset_1", Title: "同行的一条 15 秒竖版", Purpose: insights.PurposeBenchmark}}, nil
+}
 func (s *applicationStub) RegisterDataSource(context.Context, contract.ActorContext, contract.ProjectID, insights.RegisterDataSourceRequest) (insights.DataSource, error) {
 	return s.dataSource, s.registerErr
 }
@@ -514,8 +661,8 @@ func (s *applicationStub) ListImportBatches(_ context.Context, _ contract.ActorC
 }
 func (s *applicationStub) GetMetricOverview(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, window insights.MetricWindow) (insights.MetricOverview, error) {
 	s.window = window
-	return insights.MetricOverview{Window: window, Confidence: insights.ConfidenceLowSample,
-		ConfidenceNote: "窗口内样本不足，只能当作观察。"}, nil
+	return insights.MetricOverview{Window: window,
+		Judgement: insights.NewJudgement(insights.ConfidenceLowSample, "窗口内样本不足，只能当作观察。")}, nil
 }
 
 func (s *applicationStub) GetPerformanceAnalysis(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, window insights.MetricWindow) (insights.PerformanceAnalysis, error) {
@@ -536,6 +683,17 @@ func (s *applicationStub) GetCapabilityOperations(_ context.Context, _ contract.
 }
 func (s *applicationStub) GetInsightSettings(_ context.Context, _ contract.ActorContext, _ contract.ProjectID) (insights.InsightSettings, error) {
 	return s.settings, nil
+}
+func (s *applicationStub) GetThresholds(_ context.Context, _ contract.ActorContext, _ contract.ProjectID) (insights.ResolvedThresholds, error) {
+	return s.thresholds, nil
+}
+func (s *applicationStub) SaveThresholds(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.SaveThresholdsRequest) (insights.ResolvedThresholds, error) {
+	s.thresholdRequest = request
+	s.thresholds.Version++
+	return s.thresholds, nil
+}
+func (s *applicationStub) ListThresholdHistory(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ int) ([]insights.ThresholdSet, error) {
+	return s.thresholdHistory, nil
 }
 func (s *applicationStub) CreateExperiment(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateExperimentRequest) (insights.Experiment, error) {
 	s.experimentRequest = request
@@ -821,5 +979,45 @@ func TestInsightsHTTPExposesExperimentSurface(t *testing.T) {
 	// 判定不在入参里：能传判定，事先定的门槛就形同虚设。
 	if app.interpretation != "露脸开场确实更好" {
 		t.Fatalf("解读没有透传：%q", app.interpretation)
+	}
+}
+
+// 阈值三条路由：读当前生效的一份、追加一版、看改动史。
+//
+// 保存用 PUT——从调用方看这是「把阈值设成这样」。POST 到同一路径会被 404，
+// 而不是被当成「再追加一版」：只增版本是服务层的事，接口上不该有两种写法。
+func TestThresholdRoutes(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{
+		thresholds:       insights.ResolvedThresholds{Version: 2, SufficientImpressions: 10000},
+		thresholdHistory: []insights.ThresholdSet{{ID: "thresholdset_1", Version: 1, Reason: "本项目曝光量普遍偏小"}},
+	}
+	server := New(app)
+	tests := []struct {
+		method string
+		path   string
+		body   string
+		status int
+		want   string
+	}{
+		{http.MethodGet, "/api/insights/v1/projects/project_1/thresholds", "", 200, `"version":2`},
+		{http.MethodPut, "/api/insights/v1/projects/project_1/thresholds",
+			`{"values":{"sufficient_impressions":2000},"reason":"本项目单条素材曝光量普遍在 3000 上下"}`, 200, `"version":3`},
+		{http.MethodGet, "/api/insights/v1/projects/project_1/thresholds/history", "", 200, "thresholdset_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/thresholds", `{}`, 405, ""},
+	}
+	for _, test := range tests {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, authenticatedRequest(test.method, test.path, test.body))
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
+			t.Fatalf("%s %s status=%d body=%s", test.method, test.path, response.Code, response.Body.String())
+		}
+	}
+	if app.thresholdRequest.Reason == "" {
+		t.Error("理由没有传到服务层——它是这次改动唯一的说明")
+	}
+	if app.thresholdRequest.Values.SufficientImpressions == nil ||
+		*app.thresholdRequest.Values.SufficientImpressions != 2000 {
+		t.Error("要改的那一格没传到服务层")
 	}
 }

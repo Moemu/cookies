@@ -30,9 +30,9 @@ type GroupComparison struct {
 
 	// CovaryingFeatures 是「组内整齐一致、且与组外整齐不同」的其他特征。
 	// 它们和目标变量绑在一起变化，是这条结论最直接的混杂来源。空切片而非 nil。
-	CovaryingFeatures []string        `json:"covarying_features"`
-	Confidence        ConfidenceLevel `json:"confidence"`
-	Note              string          `json:"note"`
+	CovaryingFeatures []string `json:"covarying_features"`
+	// Judgement 内嵌而不是摆两个字段：档位和它的理由必须一起产生、一起搬运。
+	Judgement
 }
 
 // groupCompareInput 把「比什么」和「怎么措辞」分开传，算法部分对两个调用方是同一套。
@@ -51,9 +51,15 @@ type groupCompareInput struct {
 	// PreRegistered 为 true 表示分组在看到结果之前就定死了（实验）。
 	// false 表示是事后按特征凑的（驱动因素），结论只能说到相关。
 	PreRegistered bool
+
+	// Thresholds 是这次判定用的那一套。零值表示调用方没传，
+	// compareGroups 会退回出厂设定——判定是公共函数，调用点很多，
+	// 漏传一处就拿 0 去比的话，任何样本量都会被判成充分，那是最坏的一种错。
+	Thresholds ResolvedThresholds
 }
 
 func compareGroups(input groupCompareInput) GroupComparison {
+	thresholds := input.Thresholds.orDefaults()
 	result := GroupComparison{CovaryingFeatures: make([]string, 0, 2)}
 	for _, slice := range input.InGroup {
 		result.Counts = result.Counts.add(slice.total)
@@ -80,25 +86,21 @@ func compareGroups(input groupCompareInput) GroupComparison {
 	// 先卡样本，因为样本不够时后面几项都算不出有意义的东西；混杂排在区间前面，
 	// 因为区间不重叠但存在协变特征时，结论仍然归不到目标变量上。
 	switch {
-	case minImpressions < directionalSampleImpressions:
-		result.Confidence = ConfidenceLowSample
-		result.Note = fmt.Sprintf("样本较少的一侧只有 %s 次展示，这个分组还比不出东西。", countText(minImpressions))
+	case minImpressions < int64(thresholds.DirectionalImpressions):
+		result.Judgement = judgeAt(thresholds, ConfidenceLowSample,
+			fmt.Sprintf("样本较少的一侧只有 %s 次展示，这个分组还比不出东西。", countText(minImpressions)))
 	case len(result.CovaryingFeatures) > 0:
-		result.Confidence = ConfidenceConfounded
-		result.Note = fmt.Sprintf("这一组素材在「%s」上也整齐地和其他素材不同，差异不能只算到「%s」头上。",
-			strings.Join(result.CovaryingFeatures, "」「"), input.SubjectLabel)
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
+			fmt.Sprintf("这一组素材在「%s」上也整齐地和其他素材不同，差异不能只算到「%s」头上。",
+				strings.Join(result.CovaryingFeatures, "」「"), input.SubjectLabel))
 	case result.IntervalsOverlap:
-		result.Confidence = ConfidenceDirectional
-		result.Note = "两组的点击率置信区间重叠，差异可能只是波动。"
+		result.Judgement = judgeAt(thresholds, ConfidenceDirectional, "两组的点击率置信区间重叠，差异可能只是波动。")
 	case !input.Comparable:
-		result.Confidence = ConfidenceConfounded
-		result.Note = "窗口内口径不一致，两组之间的差异可能来自口径而不是内容。"
-	case minImpressions < sufficientSampleImpressions:
-		result.Confidence = ConfidenceDirectional
-		result.Note = directionalNote(input.PreRegistered)
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded, "窗口内口径不一致，两组之间的差异可能来自口径而不是内容。")
+	case minImpressions < int64(thresholds.SufficientImpressions):
+		result.Judgement = judgeAt(thresholds, ConfidenceDirectional, directionalNote(input.PreRegistered))
 	default:
-		result.Confidence = ConfidenceSufficient
-		result.Note = sufficientNote(input.PreRegistered)
+		result.Judgement = judgeAt(thresholds, ConfidenceSufficient, sufficientNote(input.PreRegistered))
 	}
 	return result
 }
