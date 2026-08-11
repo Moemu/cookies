@@ -108,6 +108,21 @@ func (f ReportFinding) dedupeKey() string {
 	return f.Dimension + "\x00" + f.Variable
 }
 
+// pinKey 是「人记的这一笔说的到底是哪一条」，比去重键多一个出处。
+//
+// 两个键管的是两件事，不能合成一个：
+//   - dedupeKey 管「人记过的，系统不再补」——人在素材对比里记过时长，系统就不该
+//     再补一条素材对比 · 时长，哪怕它说的是另一个素材，因为那还是同一个变量；
+//   - pinKey 管「人第二次记的是不是刚才那一笔」——趋势和疲劳没有变量（说的是素材
+//     本身），拿 dedupeKey 比的话 A 版和 B 版的趋势就是同一条，记完 A 版再记 B 版，
+//     A 版会被无声顶掉。前端按 (维度, 变量, 出处) 点亮按钮，两边必须是同一把尺。
+func (f ReportFinding) pinKey() string {
+	if f.Dimension == "" && f.Variable == "" && f.SourceRef == "" {
+		return ""
+	}
+	return f.Dimension + "\x00" + f.Variable + "\x00" + f.SourceRef
+}
+
 // strengthRank 决定发现在报告里的先后。报告是给人扫一眼的，最强的证据必须在最上面
 // ——排在后面的会被跳过，所以排序本身就是一次编辑决定。
 //

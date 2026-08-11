@@ -587,30 +587,73 @@ func (s Service) PinFinding(ctx context.Context, actor contract.ActorContext,
 	windowStart := request.Window.Start.Format("2006-01-02")
 	windowEnd := request.Window.End.Format("2006-01-02")
 
-	draft, err := s.Repository.FindDraftByWindow(ctx, actor.OrganizationID, projectID, windowStart, windowEnd)
-	if errors.Is(err, ErrNotFound) {
-		return s.createDraftWithFinding(ctx, actor, projectID, windowStart, windowEnd, finding, now)
-	}
-	if err != nil {
-		return InsightReport{}, err
-	}
+	// 这一段是读-改-写，而写要带读到的版本号。记一笔的请求里没有版本号可带——
+	// 人按按钮的时候屏幕上根本没有「草稿」这个东西，草稿是这一下按出来的。所以
+	// 版本对不上不是「两个人对着同一份报告各改各的」，是同一个人手快连按了两下，
+	// 后一下读到了前一下写进去之前的版本。这种情况重读一次再写就对了；直接报错
+	// 的话，人看到的是「记一笔失败」，而他什么也没做错。
+	return retryContendedWrite(func() (InsightReport, error) {
+		draft, err := s.Repository.FindDraftByWindow(ctx, actor.OrganizationID, projectID, windowStart, windowEnd)
+		if errors.Is(err, ErrNotFound) {
+			return s.createDraftWithFinding(ctx, actor, projectID, windowStart, windowEnd, finding, now)
+		}
+		if err != nil {
+			return InsightReport{}, err
+		}
+		return s.Repository.UpdateReportDigest(ctx, actor.OrganizationID, projectID, draft.ID,
+			draft.Version, mergePinnedFinding(draft.Digest, finding), now)
+	})
+}
 
-	// 同一条记两次是常见的误操作（换了个视图又看到同一个结论）。
-	// 覆盖而不是追加：人第二次记的时候补的那句话，应该是他现在想说的那句。
-	digest := make([]ReportFinding, 0, len(draft.Digest)+1)
+// pinAttempts 是记一笔最多读-改-写几次。三次足够盖住一个人连按几下按钮；
+// 再多就不是手快了，是写路径本身坏了，那时候报错比挂住更好查。
+const pinAttempts = 3
+
+// errDraftRaced 说的是「这个窗口的草稿刚被另一次记一笔建走了」。它不往外抛，
+// 只用来告诉重试再读一次——外面看到它没有意义，人按的是记一笔，不是建报告。
+var errDraftRaced = errors.New("insights: 这个窗口的草稿被另一次记一笔抢先建了")
+
+func retryContendedWrite(attempt func() (InsightReport, error)) (InsightReport, error) {
+	var err error
+	for i := 0; i < pinAttempts; i++ {
+		var value InsightReport
+		value, err = attempt()
+		if err == nil {
+			return value, nil
+		}
+		if !errors.Is(err, ErrVersionConflict) && !errors.Is(err, errDraftRaced) {
+			return value, err
+		}
+	}
+	// 试满了还在抢。这时候只能让人再按一次，但得报一个他看得懂、前端也认识的错——
+	// errDraftRaced 是内部约定，漏出去会变成一个 500。
+	return InsightReport{}, ErrVersionConflict
+}
+
+// mergePinnedFinding 把这一笔并进草稿已有的发现里。
+//
+// 同一条记两次是常见的误操作（换了个视图又看到同一个结论）。覆盖而不是追加：
+// 人第二次记的时候补的那句话，应该是他现在想说的那句。覆盖也是原地覆盖，
+// 复盘页上那几行的先后是人自己记出来的，不该因为补了一句话就跳到最后一行。
+//
+// 按 pinKey 比而不是 dedupeKey：趋势和疲劳没有变量，拿 dedupeKey 比的话
+// A 版和 B 版的趋势会被当成同一条，记完 A 版再记 B 版，A 版无声消失，
+// 而两个按钮上都写着「已记一笔」。
+func mergePinnedFinding(digest []ReportFinding, finding ReportFinding) []ReportFinding {
+	merged := make([]ReportFinding, 0, len(digest)+1)
 	replaced := false
-	for _, existing := range draft.Digest {
-		if existing.Origin == OriginPinned && existing.dedupeKey() != "" &&
-			existing.dedupeKey() == finding.dedupeKey() {
-			digest, replaced = append(digest, finding), true
+	for _, existing := range digest {
+		if existing.Origin == OriginPinned && existing.pinKey() != "" &&
+			existing.pinKey() == finding.pinKey() {
+			merged, replaced = append(merged, finding), true
 			continue
 		}
-		digest = append(digest, existing)
+		merged = append(merged, existing)
 	}
 	if !replaced {
-		digest = append(digest, finding)
+		merged = append(merged, finding)
 	}
-	return s.Repository.UpdateReportDigest(ctx, actor.OrganizationID, projectID, draft.ID, draft.Version, digest, now)
+	return merged
 }
 
 // createDraftWithFinding 建一份只有这一条发现的空草稿。
@@ -625,7 +668,7 @@ func (s Service) createDraftWithFinding(ctx context.Context, actor contract.Acto
 	if err != nil {
 		return InsightReport{}, err
 	}
-	return s.Repository.CreateReport(ctx, InsightReport{
+	value, err := s.Repository.CreateReport(ctx, InsightReport{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		Status: ReportDraft, Digest: []ReportFinding{finding},
 		WindowStart: windowStart, WindowEnd: windowEnd,
@@ -633,6 +676,14 @@ func (s Service) createDraftWithFinding(ctx context.Context, actor contract.Acto
 		Version:   1,
 		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	})
+	if errors.Is(err, ErrInvalidState) {
+		// (项目 + 窗口) 上有唯一键，撞上它说明这个窗口的草稿刚被建走了。
+		// 记一笔这条路上只有一种可能：同一个人连按了两下，前一下先落地。
+		// 退回去重读一次，把这一笔追加进那份草稿，而不是把「已经定格过一份报告」
+		// 甩到人脸上——他按的是记一笔，压根没打算建报告。
+		return InsightReport{}, errDraftRaced
+	}
+	return value, err
 }
 
 // concludedExperimentsInWindow 取观察窗口和报告窗口有重叠的、已结论的实验。
