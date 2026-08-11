@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -44,6 +45,11 @@ type DirectionCandidate struct {
 	MessagePlan       []string `json:"message_plan"`
 	ExecutionOutline  []string `json:"execution_outline"`
 	GuardrailTrace    []string `json:"guardrail_trace"`
+	DirectionMode     string   `json:"direction_mode,omitempty"`
+	EmotionalArc      string   `json:"emotional_arc,omitempty"`
+	VisualGrammar     string   `json:"visual_grammar,omitempty"`
+	BrandMemoryDevice string   `json:"brand_memory_device,omitempty"`
+	HumanMoment       string   `json:"human_moment,omitempty"`
 }
 
 func (value DirectionCandidate) Validate() error {
@@ -76,6 +82,11 @@ type CreativeDirectionVersion struct {
 	MessagePlan       []string                `json:"message_plan"`
 	ExecutionOutline  []string                `json:"execution_outline"`
 	GuardrailTrace    []string                `json:"guardrail_trace"`
+	DirectionMode     string                  `json:"direction_mode,omitempty"`
+	EmotionalArc      string                  `json:"emotional_arc,omitempty"`
+	VisualGrammar     string                  `json:"visual_grammar,omitempty"`
+	BrandMemoryDevice string                  `json:"brand_memory_device,omitempty"`
+	HumanMoment       string                  `json:"human_moment,omitempty"`
 	Status            CreativeDirectionStatus `json:"status"`
 	Version           int64                   `json:"version"`
 	ContentHash       string                  `json:"content_hash"`
@@ -144,9 +155,9 @@ func (s Service) GenerateDirectionCandidates(
 	if err != nil {
 		return CreativeDirectionBatch{}, err
 	}
-	if intake.Source != IntakeSourceStrategyPackage || intake.Status != IntakeReady ||
+	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.Status != IntakeReady ||
 		intake.InputIdentityHash == "" || intake.Request.SelectedRouteID == "" {
-		return CreativeDirectionBatch{}, fmt.Errorf("a ready v3 strategy intake is required")
+		return CreativeDirectionBatch{}, fmt.Errorf("a ready v3 creative intake is required")
 	}
 	route, err := selectedPlanningRoute(intake.Request.CreativeRoutes, intake.Request.SelectedRouteID)
 	if err != nil {
@@ -194,6 +205,9 @@ func (s Service) GenerateDirectionCandidates(
 		if err := candidate.Validate(); err != nil {
 			return CreativeDirectionBatch{}, err
 		}
+		if err := validateDirectionCandidateClaims(candidate); err != nil {
+			return CreativeDirectionBatch{}, err
+		}
 		conceptKey := strings.ToLower(strings.TrimSpace(candidate.Concept))
 		if seenConcepts[conceptKey] {
 			return CreativeDirectionBatch{}, fmt.Errorf("creative direction candidates must have distinct concepts")
@@ -211,7 +225,10 @@ func (s Service) GenerateDirectionCandidates(
 			MessagePlan:      append([]string{}, candidate.MessagePlan...),
 			ExecutionOutline: append([]string{}, candidate.ExecutionOutline...),
 			GuardrailTrace:   append([]string{}, candidate.GuardrailTrace...),
-			Status:           DirectionStatusCandidate, Version: 1, CreatedAt: now,
+			DirectionMode:    candidate.DirectionMode, EmotionalArc: candidate.EmotionalArc,
+			VisualGrammar: candidate.VisualGrammar, BrandMemoryDevice: candidate.BrandMemoryDevice,
+			HumanMoment: candidate.HumanMoment,
+			Status:      DirectionStatusCandidate, Version: 1, CreatedAt: now,
 		}
 		contentHash, hashErr := contract.NewContentHash(value)
 		if hashErr != nil {
@@ -219,6 +236,9 @@ func (s Service) GenerateDirectionCandidates(
 		}
 		value.ContentHash = string(contentHash)
 		directions = append(directions, value)
+	}
+	if err := validateDirectionBatchQuality(planningContext, result.Candidates); err != nil {
+		return CreativeDirectionBatch{}, err
 	}
 	batch := CreativeDirectionBatch{
 		ContractVersion: CreativeDirectionBatchV1, ID: batchID,
@@ -228,6 +248,148 @@ func (s Service) GenerateDirectionCandidates(
 		CreatedBy: actor.Principal.ID, CreatedAt: now,
 	}
 	return s.Directions.CreateDirectionBatch(ctx, batch)
+}
+
+func validateDirectionBatchQuality(planningContext CreativePlanningContext, candidates []DirectionCandidate) error {
+	for left := 0; left < len(candidates); left++ {
+		for right := left + 1; right < len(candidates); right++ {
+			if directionConceptSimilarity(candidates[left].Concept, candidates[right].Concept) >= 0.72 {
+				return fmt.Errorf("creative direction candidates are too similar")
+			}
+		}
+	}
+	if planningContext.SelectedRoute.RouteType != CreativeRouteBrandVideo {
+		return nil
+	}
+	utilityCount := 0
+	brandLedCount := 0
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.EmotionalArc) == "" || strings.TrimSpace(candidate.VisualGrammar) == "" ||
+			strings.TrimSpace(candidate.BrandMemoryDevice) == "" || strings.TrimSpace(candidate.HumanMoment) == "" {
+			return fmt.Errorf("brand-video direction must define emotional_arc, visual_grammar, brand_memory_device, and human_moment")
+		}
+		mode := strings.ToLower(strings.TrimSpace(candidate.DirectionMode))
+		if mode != "emotional" && mode != "cinematic" && mode != "utility" {
+			return fmt.Errorf("brand-video direction_mode must be emotional, cinematic, or utility")
+		}
+		utilityLed := isUtilityLedDirection(candidate)
+		if mode != "utility" && utilityLed {
+			return fmt.Errorf("brand-video emotional or cinematic direction cannot be led by a guide, checklist, steps, or tool")
+		}
+		if phrase := firstBrandPerformanceCue(candidate); phrase != "" {
+			return fmt.Errorf("brand-video direction contains performance CTA or unsupported production spec: %s", phrase)
+		}
+		if mode == "utility" || utilityLed {
+			utilityCount++
+		} else {
+			brandLedCount++
+		}
+	}
+	if utilityCount > 1 || brandLedCount < 2 {
+		return fmt.Errorf("brand-video batch must contain at least two emotional or cinematic directions and at most one utility-led direction")
+	}
+	return nil
+}
+
+func firstBrandPerformanceCue(candidate DirectionCandidate) string {
+	text := strings.ToLower(strings.Join(append(
+		[]string{candidate.Concept, candidate.CreativeRationale, candidate.VisualGrammar, candidate.HumanMoment},
+		candidate.ExecutionOutline...,
+	), "\n"))
+	for _, phrase := range []string{"点击", "评论区", "私信", "扣1", "扣 1", "领取", "领完整", "立即咨询", "获取专属", "4k", "8k"} {
+		if strings.Contains(text, phrase) {
+			return phrase
+		}
+	}
+	return ""
+}
+
+func isUtilityLedDirection(candidate DirectionCandidate) bool {
+	text := strings.ToLower(strings.Join(append(
+		[]string{candidate.Concept, candidate.CreativeRationale},
+		candidate.MessagePlan...,
+	), "\n"))
+	for _, phrase := range []string{"指南", "清单", "三步", "步骤", "避坑", "工具", "教程", "科普", "方法论", "checklist", "how-to", "how to"} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func directionConceptSimilarity(left string, right string) float64 {
+	leftTokens := directionBigrams(left)
+	rightTokens := directionBigrams(right)
+	if len(leftTokens) == 0 || len(rightTokens) == 0 {
+		return 0
+	}
+	intersection := 0
+	union := make(map[string]struct{}, len(leftTokens)+len(rightTokens))
+	for token := range leftTokens {
+		union[token] = struct{}{}
+		if _, ok := rightTokens[token]; ok {
+			intersection++
+		}
+	}
+	for token := range rightTokens {
+		union[token] = struct{}{}
+	}
+	return float64(intersection) / float64(len(union))
+}
+
+func directionBigrams(value string) map[string]struct{} {
+	runes := []rune(strings.ToLower(strings.TrimSpace(value)))
+	filtered := make([]rune, 0, len(runes))
+	for _, current := range runes {
+		if current == ' ' || current == '-' || current == '—' || current == '：' || current == ':' || current == '·' {
+			continue
+		}
+		filtered = append(filtered, current)
+	}
+	tokens := map[string]struct{}{}
+	for index := 0; index+1 < len(filtered); index++ {
+		tokens[string(filtered[index:index+2])] = struct{}{}
+	}
+	return tokens
+}
+
+func validateDirectionCandidateClaims(candidate DirectionCandidate) error {
+	claimFields := append(
+		[]string{candidate.Concept, candidate.CreativeRationale},
+		append(append([]string{}, candidate.MessagePlan...), candidate.ExecutionOutline...)...,
+	)
+	if phrase := firstHighRiskOutboundClaim(claimFields...); phrase != "" {
+		return fmt.Errorf("creative direction contains a high-risk claim: %s", phrase)
+	}
+	return nil
+}
+
+func firstHighRiskOutboundClaim(fields ...string) string {
+	claimText := strings.ToLower(strings.Join(fields, "\n"))
+	for _, phrase := range []string{
+		"100%", "行业第一", "品类第一", "销量第一", "市场第一", "排名第一", "全网第一",
+		"全国第一", "世界第一", "适配度第一", "最好", "最优", "首选", "必囤", "必买",
+		"必看", "不踩雷", "神器", "神仙", "都爱", "大家都问", "保证", "绝对", "永久",
+		"顶级", "零风险", "治愈", "药到病除", "完全没负担", "毫无负担", "放心入",
+		"无额外负担", "放心喝", "全适配", "接受度超高", "能力拉满", "不会有负罪感",
+		"零负罪感", "适合多数人", "多数人的喜好", "口味适配度高",
+	} {
+		if strings.Contains(claimText, strings.ToLower(phrase)) {
+			return phrase
+		}
+	}
+	for _, pattern := range []struct {
+		label string
+		expr  string
+	}{
+		{label: "群体普适性表述", expr: `(适合|适配).{0,6}(多数|所有|全部).{0,10}(人|用户|偏好|喜好|场景)`},
+		{label: "无证据群体评价", expr: `大家.{0,6}(夸|喜欢|认可|爱)`},
+	} {
+		if regexp.MustCompile(pattern.expr).MatchString(claimText) {
+			return pattern.label
+		}
+	}
+	return ""
 }
 
 func (s Service) ConfirmDirection(

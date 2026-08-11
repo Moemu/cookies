@@ -1840,17 +1840,21 @@ func deterministicStrategy(brief BriefVersion, draft Draft) StrategyDocument {
 		ContractVersion: contractVersion, Objective: brief.Snapshot.Campaign.Objective,
 		Audience:    StrategyAudience{Primary: brief.Snapshot.Audience.Primary, Insights: []string{"围绕真实使用场景提供可验证信息"}},
 		Proposition: brief.Snapshot.Proposition, ChannelStrategy: channels,
-		CreativeRecommendations: []string{"用首屏问题直击目标人群", "正文用证据和场景支撑核心卖点", "结尾设置低门槛互动"},
-		Constraints:             brief.Snapshot.Constraints,
-		BudgetAndCadence:        BudgetAndCadence{Budget: brief.Snapshot.Budget.Total, Cadence: "首期 2 周验证，按周复盘"},
-		ExperimentMatrix:        []Experiment{{Hypothesis: "场景痛点开篇可提高有效阅读", Variable: "首屏表达", Metric: "阅读完成率"}},
-		Measurement:             measurement,
-		AssumptionsAndGaps:      gaps,
-		Lineage:                 StrategyLineage{BriefID: brief.BriefID, BriefVersion: brief.Version, ProjectContextVersion: draft.ProjectContextVersion, SkillVersions: draft.SkillVersions},
-		ExecutiveSummary:        fmt.Sprintf("围绕%s，以%s为核心主张，在所选平台形成认知、考虑与转化协同。", brief.Snapshot.Campaign.Objective, brief.Snapshot.Proposition),
-		CrossPlatformRole:       "各平台承担差异化触达与承接角色，使用统一主张和可比较指标进行复盘。",
-		PlatformPlans:           plans,
-		EvidenceRefs:            append([]string(nil), brief.Snapshot.ReferenceIDs...),
+		CreativeRecommendations: []string{
+			"痛点提问｜目标人群进入决策场景时｜首屏问题直击当前阻力｜使用已确认 Brief 与现有证据，缺口明确标注｜继续阅读",
+			"证据拆解｜目标人群比较方案时｜正文用场景与证据说明核心主张｜仅引用已确认资料，缺口进入待验证项｜保存参考",
+			"行动承接｜目标人群准备进一步验证时｜结尾用低门槛互动承接疑问｜沿用已确认主张并提示证据边界｜发起咨询",
+		},
+		Constraints:        brief.Snapshot.Constraints,
+		BudgetAndCadence:   BudgetAndCadence{Budget: brief.Snapshot.Budget.Total, Cadence: "首期 2 周验证，按周复盘"},
+		ExperimentMatrix:   []Experiment{{Hypothesis: "场景痛点开篇可提高有效阅读", Variable: "首屏表达", Metric: "阅读完成率"}},
+		Measurement:        measurement,
+		AssumptionsAndGaps: gaps,
+		Lineage:            StrategyLineage{BriefID: brief.BriefID, BriefVersion: brief.Version, ProjectContextVersion: draft.ProjectContextVersion, SkillVersions: draft.SkillVersions},
+		ExecutiveSummary:   fmt.Sprintf("围绕%s，以%s为核心主张，在所选平台形成认知、考虑与转化协同。", brief.Snapshot.Campaign.Objective, brief.Snapshot.Proposition),
+		CrossPlatformRole:  "各平台承担差异化触达与承接角色，使用统一主张和可比较指标进行复盘。",
+		PlatformPlans:      plans,
+		EvidenceRefs:       append([]string(nil), brief.Snapshot.ReferenceIDs...),
 	}
 }
 
@@ -1922,12 +1926,40 @@ func setStrategySection(document *StrategyDocument, section string, value json.R
 	switch section {
 	case "objective":
 		return decodeString(value, &document.Objective, section)
+	case "audience":
+		var audience StrategyAudience
+		if err := json.Unmarshal(value, &audience); err != nil {
+			return fmt.Errorf("%w: audience must be a valid audience object", ErrInvalidRequest)
+		}
+		document.Audience = audience
+		return nil
 	case "proposition":
 		return decodeString(value, &document.Proposition, section)
+	case "channel_strategy":
+		var channels []ChannelStrategy
+		if err := json.Unmarshal(value, &channels); err != nil {
+			return fmt.Errorf("%w: channel_strategy must be a valid channel strategy array", ErrInvalidRequest)
+		}
+		document.ChannelStrategy = channels
+		return nil
 	case "creative_recommendations":
 		return decodeStringSlice(value, &document.CreativeRecommendations, section)
 	case "constraints":
 		return decodeStringSlice(value, &document.Constraints, section)
+	case "budget_and_cadence":
+		var budgetAndCadence BudgetAndCadence
+		if err := json.Unmarshal(value, &budgetAndCadence); err != nil {
+			return fmt.Errorf("%w: budget_and_cadence must be a valid budget and cadence object", ErrInvalidRequest)
+		}
+		document.BudgetAndCadence = budgetAndCadence
+		return nil
+	case "experiment_matrix":
+		var experiments []Experiment
+		if err := json.Unmarshal(value, &experiments); err != nil {
+			return fmt.Errorf("%w: experiment_matrix must be a valid experiment array", ErrInvalidRequest)
+		}
+		document.ExperimentMatrix = experiments
+		return nil
 	case "measurement":
 		return decodeStringSlice(value, &document.Measurement, section)
 	case "assumptions_and_gaps":

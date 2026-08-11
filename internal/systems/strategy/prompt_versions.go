@@ -17,7 +17,7 @@ func (s Service) generatePromptVersion() string {
 	if value := strings.TrimSpace(s.PromptVersion); value != "" {
 		return value
 	}
-	return promptkit.GenerateV3
+	return promptkit.GenerateV4
 }
 
 func (s Service) revisePromptVersion() string {

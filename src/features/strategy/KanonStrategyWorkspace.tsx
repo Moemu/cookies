@@ -82,7 +82,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
   }
 
   const lifecycleLocked = Boolean(state.detail.current_task.discarded_at || state.draft?.archived_at)
-  const showSummaryRail = activeView === '概览' || activeView === '评审'
+  const showSummaryRail = activeView === '评审'
   const hasEvidence = Boolean(
     state.documents.length ||
     state.brief?.document.reference_ids?.length ||
@@ -114,7 +114,16 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
     <div className={`kanon-strategy-workspace ${railMode}`}>
       <main className="kanon-strategy-main" ref={mainRef}>
         <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
-        {activeView === '概览' ? <OverviewPane state={state}/> : null}
+        {activeView === '概览' ? <OverviewPane
+          state={state}
+          onNavigate={view => onOpenProject(
+            currentProject.id,
+            'strategy',
+            'workspaces',
+            state.detail?.workspace.id,
+            view,
+          )}
+        /> : null}
         {activeView === '对话' ? <ConversationPane
           brief={state.brief}
           busy={state.busy === 'message' || Boolean(state.pendingAgentTaskId)}
@@ -146,6 +155,14 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
         {activeView === '创意任务策略' ? <CreativeTaskPlanner
           briefVersion={state.briefVersion}
           draft={state.draft}
+          onCreateRouteRevision={value => actions.patchStrategySection('channel_strategy', value)}
+          onOpenStrategy={() => onOpenProject(
+            currentProject.id,
+            'strategy',
+            'workspaces',
+            state.detail?.workspace.id,
+            '策略',
+          )}
           onOpenProject={onOpenProject}
           projectId={currentProject.id}
         /> : null}
@@ -153,6 +170,7 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
           busy={state.busy}
           comments={state.comments}
           deepReview={state.deepReview}
+          deepReviewError={state.deepReviewError}
           draft={state.draft}
           review={state.review}
           revisions={state.revisions}
@@ -160,6 +178,13 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
           onApprove={actions.approveReview}
           onDeepReview={actions.startDeepReview}
           onReturn={actions.returnReview}
+          onOpenCreative={() => onOpenProject(
+            currentProject.id,
+            'strategy',
+            'workspaces',
+            state.detail?.workspace.id,
+            '创意任务策略',
+          )}
         /> : null}
         {activeView === '研究' ? <ResearchPane
           brief={state.brief}
@@ -200,54 +225,136 @@ export function KanonStrategyWorkspace({ activeView, workspaceId, onOpenProject 
 
 type WorkspaceState = ReturnType<typeof useStrategyWorkspace>['state']
 
-function OverviewPane({ state }: { state: WorkspaceState }) {
+type StrategyWorkspaceView = '对话' | 'Brief' | '研究' | '策略' | '评审' | '创意任务策略'
+
+function OverviewPane({ state, onNavigate }: { state: WorkspaceState; onNavigate: (view: StrategyWorkspaceView) => void }) {
+  const document = state.draft?.revision?.document
+  const hasConversation = state.messages.some(message => message.role === 'assistant')
+  const briefConfirmed = state.brief?.status === 'confirmed'
+  const strategyReady = Boolean(state.draft?.current_revision)
+  const reviewApproved = state.review?.status === 'approved'
+  const packagePublished = Boolean(state.published)
   const stages = [
     {
       label: '需求对话',
-      complete: state.messages.some(message => message.role === 'assistant'),
+      view: '对话' as const,
+      complete: hasConversation,
       detail: `${state.messages.length} 条消息`,
     },
     {
       label: 'Brief',
-      complete: state.brief?.status === 'confirmed',
-      detail: state.brief?.status === 'confirmed'
-        ? `已冻结 v${state.briefVersion?.version ?? state.brief.version}`
+      view: 'Brief' as const,
+      complete: briefConfirmed,
+      detail: briefConfirmed
+        ? `已冻结 v${state.briefVersion?.version ?? state.brief?.version ?? 1}`
         : state.brief?.completeness.ready ? '可以确认' : `${state.brief?.completeness.blockers.length ?? 0} 个阻断项`,
     },
     {
       label: '策略',
-      complete: Boolean(state.draft?.current_revision),
+      view: '策略' as const,
+      complete: strategyReady,
       detail: state.draft ? `Revision ${state.draft.current_revision} · ${statusLabel(state.draft.status)}` : '等待生成',
     },
     {
       label: '评审',
-      complete: state.review?.status === 'approved',
+      view: '评审' as const,
+      complete: reviewApproved,
       detail: state.review ? statusLabel(state.review.status) : '尚未提交',
     },
     {
-      label: '策略包',
-      complete: Boolean(state.published),
-      detail: state.published ? `已发布 v${state.published.version}` : '等待批准',
+      label: '创意交接',
+      view: '创意任务策略' as const,
+      complete: false,
+      available: packagePublished,
+      detail: packagePublished ? `策略包 v${state.published?.version} 已就绪` : '等待策略包发布',
     },
   ]
 
+  const next = !hasConversation
+    ? { view: '对话' as const, eyebrow: '从这里开始', title: '把业务问题说清楚', detail: '先通过对话补齐目标、受众和边界，再形成可冻结 Brief。', action: '开始策略对话' }
+    : !briefConfirmed
+      ? { view: 'Brief' as const, eyebrow: '需要你的判断', title: '确认策略输入', detail: '核对目标、人群、渠道与限制条件，冻结后再进入策略生成。', action: '检查并确认 Brief' }
+      : !strategyReady || ['draft', 'returned', 'failed'].includes(state.draft?.status ?? '')
+        ? { view: '策略' as const, eyebrow: '下一步', title: strategyReady ? '完善当前策略 Revision' : '生成第一版策略', detail: '聚焦核心主张、渠道分工、创意方向和可验证指标。', action: strategyReady ? '继续完善策略' : '进入策略生成' }
+        : !reviewApproved
+          ? { view: '评审' as const, eyebrow: '等待决策', title: '完成策略评审', detail: '先看核心判断与风险，再决定批准发布或退回修订。', action: '进入策略评审' }
+          : { view: '创意任务策略' as const, eyebrow: '策略已就绪', title: '把策略变成可执行创意', detail: '选择业务 Route，补齐任务级约束，并一键进入图文或品牌广告生产。', action: '开始创意交接' }
+
+  const evidenceCount = document?.evidence_refs?.length ?? state.brief?.document.reference_ids?.length ?? 0
+  const primaryChannel = document?.channel_strategy?.[0]
+  const progress = Math.round((stages.filter(stage => stage.complete).length / (stages.length - 1)) * 100)
+  const qualityReport = state.metadata?.quality_report
+  const usesDecisionQualityGate = state.metadata?.prompt_version === 'strategy.generate.v4'
+
   return <section className="kanon-strategy-overview">
-    <div className="kanon-strategy-heading">
-      <div><span className="section-label">真实后端状态</span><h2>从需求共识推进到可交付策略</h2><p>页面只展示当前 Project 已持久化的数据。</p></div>
-      <span className={`source-chip ${state.readiness?.generation_mode === 'provider' ? '' : 'alert'}`}>
-        {state.readiness?.generation_mode === 'provider' ? '真实模型' : 'Deterministic 模式'}
-      </span>
+    <div className="kanon-command-hero">
+      <div className="kanon-command-copy">
+        <span className="kanon-command-eyebrow">{next.eyebrow} · {String(Math.min(stages.findIndex(stage => !stage.complete) + 1 || stages.length, stages.length)).padStart(2, '0')}</span>
+        <h2>{next.title}</h2>
+        <p>{next.detail}</p>
+        <button className="primary-button kanon-command-cta" onClick={() => onNavigate(next.view)}>
+          <span>{next.action}</span><i><ChevronRight size={15} strokeWidth={1.6}/></i>
+        </button>
+      </div>
+      <div className="kanon-command-progress" aria-label={`策略完成度 ${progress}%`}>
+        <span>STRATEGY<br/>READINESS</span>
+        <strong>{progress}<small>%</small></strong>
+        <div><i style={{ width: `${progress}%` }}/></div>
+        <small>{packagePublished ? '策略包已发布，可以交接创意' : '每一步均使用真实持久化状态'}</small>
+        <footer className={`kanon-command-quality${usesDecisionQualityGate ? '' : ' legacy'}`}>
+          <span>{usesDecisionQualityGate ? 'V4 决策质量门' : qualityReport ? '旧版基础校验' : '等待质量校验'}</span>
+          <b>{qualityReport ? `${qualityReport.score}/100` : '—'}</b>
+        </footer>
+      </div>
     </div>
-    <div className="kanon-stage-list">
-      {stages.map((stage, index) => <article className={stage.complete ? 'complete' : ''} key={stage.label}>
-        <span>{stage.complete ? <Check size={16}/> : String(index + 1).padStart(2, '0')}</span>
-        <div><b>{stage.label}</b><small>{stage.detail}</small></div>
-        <ChevronRight size={15}/>
-      </article>)}
+
+    <nav className="kanon-journey" aria-label="策略到创意决策旅程">
+      {stages.map((stage, index) => <button
+        className={`${stage.complete ? 'complete' : ''}${stage.view === next.view ? ' current' : ''}`}
+        key={stage.label}
+        onClick={() => onNavigate(stage.view)}
+        type="button"
+      >
+        <span>{stage.complete ? <Check size={14} strokeWidth={1.8}/> : String(index + 1).padStart(2, '0')}</span>
+        <b>{stage.label}</b>
+        <small>{stage.detail}</small>
+      </button>)}
+    </nav>
+
+    <div className="kanon-decision-grid">
+      <article className="kanon-decision-card primary">
+        <span className="section-label">核心判断</span>
+        <h3>{document?.proposition || document?.executive_summary || '策略生成后，这里会沉淀唯一核心判断。'}</h3>
+        <p>{document?.executive_summary || '把复杂输入收敛为团队可以共同执行的一句话。'}</p>
+        <button className="text-button" onClick={() => onNavigate('策略')} type="button">查看完整策略 <ChevronRight size={13}/></button>
+      </article>
+      <article className="kanon-decision-card audience">
+        <span className="section-label">为谁而做</span>
+        <h3>{document?.audience.primary || state.brief?.document.audience.primary || '待明确核心人群'}</h3>
+        <ul>{document?.audience.insights?.slice(0, 3).map(insight => <li key={insight}>{insight}</li>) ?? <li>完成策略后显示关键人群洞察</li>}</ul>
+      </article>
+      <article className="kanon-decision-card channel">
+        <span className="section-label">从哪里切入</span>
+        <h3>{primaryChannel ? `${primaryChannel.platform} · ${primaryChannel.role}` : '待明确首要渠道角色'}</h3>
+        <p>{primaryChannel?.formats?.length ? primaryChannel.formats.join(' / ') : '策略会明确内容形式、渠道分工与交付目的。'}</p>
+      </article>
+      <article className="kanon-decision-card evidence">
+        <span className="section-label">为什么可信</span>
+        <div className="kanon-evidence-number"><strong>{evidenceCount}</strong><small>条已绑定证据</small></div>
+        <p>{document?.constraints?.[0] || '证据、约束和开放问题共同定义策略边界。'}</p>
+        <button className="text-button" onClick={() => onNavigate('研究')} type="button">查看证据 <ChevronRight size={13}/></button>
+      </article>
+      <article className="kanon-decision-card ideas">
+        <span className="section-label">可进入创意的方向</span>
+        {document?.creative_recommendations?.length
+          ? <ol>{document.creative_recommendations.slice(0, 3).map((idea, index) => <li key={idea}><span>{String(index + 1).padStart(2, '0')}</span><p>{idea}</p></li>)}</ol>
+          : <p>策略确认后，将在这里展示最值得进入创意生产的三个方向。</p>}
+      </article>
     </div>
-    <div className="kanon-strategy-note">
+
+    <div className="kanon-strategy-note" role="status">
       <ShieldCheck size={18}/>
-      <div><b>{state.probe?.ready ? `真实模型已验证：${state.probe.model_version}` : '真实模型由服务端路由管理'}</b><p>{state.probe?.ready ? `结构化输出通过，耗时 ${state.probe.latency_ms} ms；路由与用量均已记录。` : '在“策略”步骤运行真实模型探针，可验证当前路由、结构化输出与凭据状态。'}</p></div>
+      <div><b>{packagePublished ? `策略包 v${state.published?.version} 已冻结并可追溯` : state.probe?.ready ? `真实模型已验证：${state.probe.model_version}` : '真实模型由服务端路由管理'}</b><p>{packagePublished ? '后续创意只继承已发布版本；任何修改都会创建新 Revision，不会悄悄覆盖当前交付。' : state.probe?.ready ? `结构化输出通过，耗时 ${state.probe.latency_ms} ms；路由与用量均已记录。` : '在“策略”步骤运行真实模型探针，可验证当前路由、结构化输出与凭据状态。'}</p></div>
     </div>
   </section>
 }
@@ -478,10 +585,12 @@ function StrategyPane({ briefReady, busy, draft, onGenerate, onPatch, onProbe, o
     return <UnavailablePane title="策略没有可用 Revision" detail={`当前状态：${statusLabel(draft.status)}。请重新加载或检查 AgentTask。`}/>
   }
 
-  const sections = Object.keys(document).filter(key => !['contract_version', 'compliance'].includes(key))
+  const sections = Object.keys(document).filter(key => !['contract_version', 'compliance', 'lineage'].includes(key))
   const original = (document as unknown as Record<string, unknown>)[section]
   const changed = JSON.stringify(sectionValue) !== JSON.stringify(original)
-  const canEdit = draft.status === 'draft' || draft.status === 'returned'
+  // Editing an approved draft creates a new revision and leaves the published
+  // StrategyPackage immutable. The backend already enforces that boundary.
+  const canEdit = draft.status === 'draft' || draft.status === 'returned' || draft.status === 'approved'
 
   return <section className="kanon-strategy-editor-pane">
     <div className="kanon-strategy-heading kanon-strategy-document-heading">
@@ -566,14 +675,16 @@ function strategyArrayTemplate(section: string): unknown {
   return ''
 }
 
-function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove, onDeepReview, onReturn, review, revisions }: {
+function ReviewPane({ busy, comments, deepReview, deepReviewError, draft, onAddComment, onApprove, onDeepReview, onOpenCreative, onReturn, review, revisions }: {
   busy: string
   comments: WorkspaceState['comments']
   deepReview: WorkspaceState['deepReview']
+  deepReviewError: string
   draft: StrategyDraft | null
   onAddComment: (body: string) => Promise<boolean>
   onApprove: () => Promise<boolean>
   onDeepReview: () => Promise<boolean>
+  onOpenCreative: () => void
   onReturn: (reason: string) => Promise<boolean>
   review: Review | null
   revisions: DraftRevision[]
@@ -583,6 +694,7 @@ function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove
   const candidate = revisions.find(item => item.revision === review?.candidate_revision) ?? draft?.revision
   const previous = revisions.find(item => item.revision === (review?.candidate_revision ?? 1) - 1)
   const diffs = useMemo(() => strategyDiff(previous, candidate), [candidate, previous])
+  const document = candidate?.document
 
   if (!review) return <UnavailablePane title="尚未提交评审" detail="在“策略”页签完成候选 Revision 后提交评审。"/>
 
@@ -591,16 +703,16 @@ function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove
       <div><span className="section-label">REVIEW {review.id.slice(0, 12)}</span><h2>Revision {review.candidate_revision} 评审</h2><p>决策绑定候选内容哈希，过期版本不能批准。</p></div>
       <span className={`source-chip ${review.status === 'returned' ? 'alert' : ''}`}>{statusLabel(review.status)}</span>
     </div>
-    <div className="kanon-review-proof"><span>候选哈希</span><code>{review.candidate_content_hash}</code></div>
+    {document ? <StrategyDecisionBrief document={document} review={review}/> : null}
     <section className="kanon-deep-review">
-      <div className="surface-toolbar"><div><h3>GPT‑5.5 Pro 深度评审</h3><small>Responses · 后台运行 · 仅提供决策辅助</small></div>{deepReview?.status === 'succeeded' ? <span className="source-chip">{deepReview.model_version}</span> : null}</div>
-      {!deepReview ? <div className="kanon-deep-review-empty"><p>从证据、渠道协同、可衡量性与执行风险对候选 Revision 做第二视角检查。</p><button className="secondary-button" disabled={Boolean(busy) || review.status !== 'open'} onClick={() => void onDeepReview()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '启动深度评审'}</button></div> : deepReview.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>深度评审正在后台运行</b><small>可以离开页面，AgentTask 完成后会自动恢复结果。</small></span></div> : deepReview.status === 'failed' ? <div className="kanon-deep-review-empty"><p>本次深度评审未完成，人工评审不受影响。</p><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onDeepReview()}><RefreshCw size={14}/>重新运行</button></div> : <><p className="kanon-deep-review-summary">{deepReview.summary}</p><div className="kanon-deep-findings">{deepReview.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><small className="kanon-deep-review-meta">{deepReview.api_mode} · background={String(deepReview.background)} · {deepReview.latency_ms ?? 0} ms{deepReview.usage ? ` · ${deepReview.usage.total_tokens} tokens` : ''}</small></>}
+      <div className="surface-toolbar"><div><h3>第二视角检查</h3><small>模型辅助检查证据、渠道协同、衡量方式与执行风险</small></div>{deepReview?.status === 'succeeded' ? <span className="source-chip">已完成 · {deepReview.model_version}</span> : null}</div>
+      {deepReviewError && !deepReview ? <DeepReviewFailure busy={busy} message={deepReviewError} onRetry={onDeepReview} reviewOpen={review.status === 'open'}/> : !deepReview ? <div className="kanon-deep-review-empty"><p>这一步是可选辅助，不会阻断人工确认。运行后会把问题整理为可执行建议。</p><button className="secondary-button" disabled={Boolean(busy) || review.status !== 'open'} onClick={() => void onDeepReview()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '运行第二视角检查'}</button></div> : deepReview.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>第二视角正在后台检查</b><small>可以离开页面；完成后会自动恢复结果，不影响人工评审。</small></span></div> : deepReview.status === 'failed' ? <DeepReviewFailure busy={busy} message={deepReviewError || '本次模型任务未完成，请稍后重试。'} onRetry={onDeepReview} reviewOpen={review.status === 'open'}/> : <><p className="kanon-deep-review-summary">{deepReview.summary}</p><div className="kanon-deep-findings">{deepReview.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><details className="kanon-technical-details"><summary>查看运行信息</summary><code>{deepReview.api_mode} · background={String(deepReview.background)} · {deepReview.latency_ms ?? 0} ms{deepReview.usage ? ` · ${deepReview.usage.total_tokens} tokens` : ''}</code></details></>}
     </section>
     <div className="kanon-review-content">
       <div className="kanon-review-diffs">
-        {!diffs.length && candidate ? <pre>{JSON.stringify(candidate.document, null, 2)}</pre> : diffs.map(diff => <article key={diff.section}>
+        {!diffs.length && candidate ? <details className="kanon-review-full kanon-review-details"><summary>查看完整候选策略</summary><ReviewValue value={candidate.document}/></details> : diffs.map(diff => <article key={diff.section}>
           <h3>{strategySectionLabel(diff.section)}</h3>
-          <div><section><small>之前</small><pre>{diff.before}</pre></section><section><small>候选</small><pre>{diff.after}</pre></section></div>
+          <div><section><small>之前</small><ReviewValue emptyLabel="暂无上一版本" value={diff.before}/></section><section><small>候选</small><ReviewValue value={diff.after}/></section></div>
         </article>)}
       </div>
       <aside className="kanon-review-comments">
@@ -614,10 +726,43 @@ function ReviewPane({ busy, comments, deepReview, draft, onAddComment, onApprove
           <button className="primary-button full" disabled={Boolean(busy)} onClick={() => void onApprove()}><BadgeCheck size={15}/>{busy === 'approve-review' ? '处理中…' : review.review_mode === 'self_confirmation' ? '确认并发布策略包' : '批准并发布策略包'}</button>
           <textarea disabled={Boolean(busy)} rows={2} value={reason} onChange={event => setReason(event.target.value)} placeholder="退回原因（必填）"/>
           <button className="secondary-button full" disabled={Boolean(busy) || !reason.trim()} onClick={() => void onReturn(reason)}>退回修改</button>
-        </> : <div className="kanon-review-decision"><CircleCheck size={17}/><span>{review.status === 'approved' ? '该候选已批准并发布' : review.decision_reason || '该评审已结束'}</span></div>}
+        </> : review.status === 'approved' ? <div className="kanon-review-approved">
+          <CircleCheck size={18}/>
+          <span><b>策略已确认并发布</b><small>下一步将冻结的判断转换成可执行创意任务。</small></span>
+          <button className="primary-button full" onClick={onOpenCreative}>开始创意交接 <ChevronRight size={14}/></button>
+        </div> : <div className="kanon-review-decision"><AlertCircle size={17}/><span>{review.decision_reason || '该评审已结束'}</span></div>}
       </aside>
     </div>
+    <details className="kanon-technical-details kanon-review-proof"><summary>版本与完整性校验</summary><code>{review.candidate_content_hash}</code></details>
   </section>
+}
+
+function StrategyDecisionBrief({ document, review }: { document: StrategyDocument; review: Review }) {
+  const evidenceCount = document.evidence_refs?.length ?? 0
+  const riskCount = document.assumptions_and_gaps.length + (document.compliance?.issues.length ?? 0)
+  return <section className="kanon-review-brief" aria-label="本次评审的核心决策">
+    <div>
+      <span className="section-label">一句话决策</span>
+      <h3>{document.proposition}</h3>
+      <p>{document.executive_summary || '围绕这一核心主张检查人群、渠道、证据和执行边界。'}</p>
+    </div>
+    <dl>
+      <div><dt>核心人群</dt><dd>{document.audience.primary}</dd></div>
+      <div><dt>渠道方案</dt><dd>{document.channel_strategy.length} 个</dd></div>
+      <div><dt>证据引用</dt><dd>{evidenceCount} 条</dd></div>
+      <div><dt>待关注</dt><dd className={riskCount ? 'warn' : ''}>{riskCount} 项</dd></div>
+    </dl>
+    <small>{review.review_mode === 'self_confirmation' ? '你的确认将发布不可变策略包' : '批准后将发布不可变策略包'}</small>
+  </section>
+}
+
+function DeepReviewFailure({ busy, message, onRetry, reviewOpen }: {
+  busy: string
+  message: string
+  onRetry: () => Promise<boolean>
+  reviewOpen: boolean
+}) {
+  return <div className="kanon-deep-review-failed" role="status"><AlertCircle size={17}/><span><b>第二视角暂时没有完成</b><small>策略和已有评审内容均已保留，你仍可人工确认，或稍后重试。</small><details className="kanon-technical-details"><summary>查看技术原因</summary><code>{message}</code></details></span><button className="secondary-button" disabled={Boolean(busy) || !reviewOpen} onClick={() => void onRetry()}><RefreshCw size={14}/>重新运行</button></div>
 }
 
 function ResearchPane({ brief, busy, documents, onAdoption, onResearch, onUpload, researchRun }: {
@@ -793,18 +938,36 @@ function strategyDiff(base?: DraftRevision, candidate?: DraftRevision) {
     : candidate.changed_sections
   return sections.map(section => ({
     section,
-    before: pretty((before as unknown as Record<string, unknown>)[section]),
-    after: pretty((candidate.document as unknown as Record<string, unknown>)[section]),
-  })).filter(item => item.before !== item.after)
+    before: (before as unknown as Record<string, unknown>)[section],
+    after: (candidate.document as unknown as Record<string, unknown>)[section],
+  })).filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after))
 }
 
 function splitValues(value: string) {
   return value.split(/[\n,，、]/).map(item => item.trim()).filter(Boolean)
 }
 
-function pretty(value: unknown) {
-  if (value === undefined) return '—'
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+function ReviewValue({ emptyLabel = '—', value }: { emptyLabel?: string; value: unknown }) {
+  if (value === undefined || value === null || value === '') {
+    return <p className="kanon-review-empty-value">{emptyLabel}</p>
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return <p className="kanon-review-empty-value">{emptyLabel}</p>
+    return <ul className="kanon-review-value-list">{value.map((item, index) => <li key={reviewValueKey(item, index)}><ReviewValue value={item}/></li>)}</ul>
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== 'contract_version')
+    if (!entries.length) return <p className="kanon-review-empty-value">{emptyLabel}</p>
+    return <dl className="kanon-review-value-object">{entries.map(([key, fieldValue]) => <div key={key}><dt>{strategyFieldLabel(key)}</dt><dd><ReviewValue value={fieldValue}/></dd></div>)}</dl>
+  }
+  if (typeof value === 'boolean') return <p className="kanon-review-value-text">{value ? '是' : '否'}</p>
+  return <p className="kanon-review-value-text">{String(value)}</p>
+}
+
+function reviewValueKey(value: unknown, index: number) {
+  if (typeof value === 'string' || typeof value === 'number') return `${index}-${String(value).slice(0, 32)}`
+  return String(index)
 }
 
 function strategySectionLabel(value: string) {
@@ -824,6 +987,7 @@ function strategySectionLabel(value: string) {
     platform_plans: '分平台方案',
     evidence_refs: '证据引用',
     compliance: '合规报告',
+    lineage: '生成追溯',
   }
   return labels[value] ?? value
 }
@@ -835,6 +999,9 @@ function strategyFieldLabel(value: string) {
     conversion_path: '转化路径', cadence: '内容节奏', primary_kpi: '核心 KPI',
     creative_ideas: '创意方向', hypothesis: '实验假设', variable: '实验变量',
     metric: '衡量指标', budget: '预算',
+    brief_id: 'Brief ID', brief_version: 'Brief 版本', project_context_version: 'Project 上下文版本',
+    skill_versions: '技能版本', passed: '是否通过', issues: '检查项', rule_id: '规则',
+    severity: '级别', message: '说明', checked_at: '检查时间',
   }
   return labels[value] ?? strategySectionLabel(value)
 }

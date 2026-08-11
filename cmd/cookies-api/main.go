@@ -135,10 +135,32 @@ func main() {
 			Text:       &provider.Service{TextAdapter: textAdapter},
 			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
 		}
+		creativeService.ImageTextDraftPlanner = creative.ModelImageTextDraftPlanner{
+			Text:       &provider.Service{TextAdapter: textAdapter},
+			ModelAlias: cfg.Creative.DirectionPlannerModelAlias,
+		}
 		log.Printf(
 			"CreativeDirection planning configured: model_alias=%s routes=xiaohongshu_image_text",
 			cfg.Creative.DirectionPlannerModelAlias,
 		)
+	}
+	if fontPath := cfg.Creative.ImageFontPath; fontPath != "" {
+		fontBytes, fontErr := os.ReadFile(fontPath)
+		if fontErr != nil {
+			log.Fatalf("read Creative image renderer font: %v", fontErr)
+		}
+		fontChecksum := cfg.Creative.ImageFontSHA256
+		renderer := &creative.ImageTextRenderer{
+			FontBytes: fontBytes, FontRef: fontPath + "@sha256:" + fontChecksum,
+			ExpectedSHA256: fontChecksum,
+		}
+		if readyErr := renderer.Ready(); readyErr != nil {
+			log.Fatalf("configure Creative image renderer: %v", readyErr)
+		}
+		creativeService.ImageRenderer = renderer
+		creativeService.ImageBaseAssets = creativeImageAssetIO{uploads: uploadService}
+		creativeService.RenderedImages = creativeRenderedImageWriter{uploads: uploadService}
+		log.Printf("Creative image renderer configured: font_ref=%s renderer=%s", fontPath, creative.ImageRendererV2)
 	}
 	if cfg.Creative.ShortDramaModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -415,6 +437,11 @@ func main() {
 			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher}
 		}
 		dependencies.ProviderJobs = providerService
+		imageTextReconciler := creative.ImageTextReconciler{
+			Service: creativeService, Repository: creativeRepository,
+			Provider: providerService, Limit: 100,
+		}
+		startWorker(workerContext, "creative-image-text-reconcile", imageTextReconciler.ProcessOnce)
 		for kind, handler := range provider.NewRuntimeWorker(runtimeStore, providerService).Handlers {
 			runtimeHandlers[kind] = handler
 		}
@@ -590,11 +617,49 @@ func (s creativeMediaSource) OpenVideo(ctx context.Context, organizationID contr
 
 type creativeRenderedAssetWriter struct{ uploads *assets.UploadService }
 
+type creativeImageAssetIO struct{ uploads *assets.UploadService }
+
+type creativeRenderedImageWriter struct{ uploads *assets.UploadService }
+
 func (w creativeRenderedAssetWriter) IngestRenderedVideo(ctx context.Context, requestContext contract.RequestContext, projectID contract.ProjectID, renderJobID string, content io.Reader, sizeBytes int64) (contract.ProjectAssetRef, error) {
 	if w.uploads == nil {
 		return contract.ProjectAssetRef{}, fmt.Errorf("rendered asset intake is unavailable")
 	}
 	return w.uploads.IngestRenderedVideo(ctx, requestContext, projectID, renderJobID, content, sizeBytes)
+}
+
+func (r creativeImageAssetIO) OpenImage(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {
+	if r.uploads == nil {
+		return nil, fmt.Errorf("image asset reader is unavailable")
+	}
+	reader, info, err := r.uploads.OpenPreview(ctx, actor, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	if info.MIMEType != "image/png" && info.MIMEType != "image/jpeg" {
+		reader.Close()
+		return nil, fmt.Errorf("image asset is not a supported image")
+	}
+	return reader, nil
+}
+
+func (w creativeRenderedImageWriter) IngestRenderedImage(
+	ctx context.Context,
+	requestContext contract.RequestContext,
+	projectID contract.ProjectID,
+	renderJobID string,
+	content io.Reader,
+	sizeBytes int64,
+	sourceAssets []contract.AssetVersionRef,
+	sourceResources []contract.ResourceRef,
+) (contract.ProjectAssetRef, error) {
+	if w.uploads == nil {
+		return contract.ProjectAssetRef{}, fmt.Errorf("rendered image intake is unavailable")
+	}
+	return w.uploads.IngestRenderedImage(
+		ctx, requestContext, projectID, renderJobID, content, sizeBytes,
+		sourceAssets, sourceResources,
+	)
 }
 
 func (r creativeAssetReader) ReadForCreative(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (creative.CreativeAssetSnapshot, error) {

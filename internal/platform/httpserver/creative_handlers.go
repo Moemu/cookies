@@ -17,6 +17,205 @@ type creativeDirectionManager interface {
 	ConfirmDirection(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.CreativeDirectionVersion, error)
 }
 
+type creativeImageTextManager interface {
+	GetImageTextWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.ImageTextWorkspace, error)
+	GenerateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateImageTextDraftRequest) (creative.ImageTextDraft, error)
+	UpdateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateImageTextDraftRequest) (creative.ImageTextDraft, error)
+	PrepareImageSlotGeneration(context.Context, contract.RequestContext, contract.ProjectID, string, int, creative.PrepareImageSlotRequest, contract.IdempotencyKey) (creative.ImagePromptPackage, creative.ImageGenerationAttempt, bool, error)
+	AttachImageProviderJob(context.Context, contract.ActorContext, contract.ProjectID, string, string) (creative.ImageGenerationAttempt, error)
+	FailImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, string, string) (creative.ImageGenerationAttempt, error)
+	AdoptImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, int, string, creative.AdoptImageAttemptRequest) (creative.ImageSlotSelection, error)
+}
+
+func (s *Server) imageTextManager(w http.ResponseWriter, r *http.Request) (creativeImageTextManager, bool) {
+	manager, ok := s.creative.(creativeImageTextManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return nil, false
+	}
+	return manager, true
+}
+
+func (s *Server) getCreativeImageTextWorkspace(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.imageTextManager(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.GetImageTextWorkspace(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) generateCreativeImageTextDraft(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.imageTextManager(w, r)
+	if !ok {
+		return
+	}
+	var body creative.GenerateImageTextDraftRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.GenerateImageTextDraft(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateCreativeImageTextDraft(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.imageTextManager(w, r)
+	if !ok {
+		return
+	}
+	var body creative.UpdateImageTextDraftRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.UpdateImageTextDraft(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("task_id"), body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) generateCreativeImageTextSlot(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.imageTextManager(w, r)
+	if !ok || s.providerJobs == nil || s.projects == nil {
+		if ok {
+			s.notImplemented(w, r)
+		}
+		return
+	}
+	slotAction := r.PathValue("slot_action")
+	actionIndex := strings.LastIndex(slotAction, ":")
+	if actionIndex < 1 || (slotAction[actionIndex:] != ":generate" && slotAction[actionIndex:] != ":retry") {
+		s.notFound(w, r)
+		return
+	}
+	order, err := strconv.Atoi(slotAction[:actionIndex])
+	if err != nil || order < 1 || order > 3 {
+		s.badRequest(w, r, fmt.Errorf("image slot order must be between 1 and 3"))
+		return
+	}
+	var body creative.PrepareImageSlotRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	projectID := contract.ProjectID(r.PathValue("project_id"))
+	taskID := r.PathValue("task_id")
+	prompt, attempt, _, err := manager.PrepareImageSlotGeneration(
+		r.Context(), rc, projectID, taskID, order, body, key,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	project, err := s.projects.GetContext(r.Context(), rc.Actor, projectID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	draftRevision := attempt.DraftRevision
+	sourceAssets := make([]contract.ProjectAssetRef, 0, len(prompt.SourceAssetRefs))
+	for _, ref := range prompt.SourceAssetRefs {
+		sourceAssets = append(sourceAssets, contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: ref})
+	}
+	operation := "image.generate"
+	if len(sourceAssets) > 0 {
+		operation = "image.edit"
+	}
+	job, _, err := s.providerJobs.CreateImageJob(r.Context(), provider.CreateImageJobRequest{
+		Actor: rc.Actor, Project: project, IdempotencyKey: key, RequestHash: attempt.RequestHash,
+		ModelAlias: attempt.GenerationSpec.ModelAlias, SourceSystem: "creative", SourceTaskID: taskID,
+		Operation: operation,
+		Input: provider.ImageGenerationInput{
+			Prompt: prompt.CompiledPrompt, Width: attempt.GenerationSpec.Width, Height: attempt.GenerationSpec.Height,
+			SourceAssets: sourceAssets,
+			PromptRef: &contract.ResourceRef{
+				Type: "creative_image_prompt_package", ID: prompt.ID,
+			},
+			SourceResourceRefs: []contract.ResourceRef{
+				{Type: "creative_task", ID: taskID},
+				{Type: "creative_image_text_draft", ID: taskID, Version: &draftRevision},
+				{Type: "creative_direction", ID: prompt.DirectionID},
+			},
+		},
+	})
+	if err != nil {
+		_, _ = manager.FailImageGenerationAttempt(
+			r.Context(), rc.Actor, projectID, attempt.ID,
+			"PROVIDER_JOB_CREATE_FAILED", err.Error(),
+		)
+		s.writeServiceError(w, r, err)
+		return
+	}
+	attempt, err = manager.AttachImageProviderJob(r.Context(), rc.Actor, projectID, attempt.ID, job.ID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"attempt": attempt, "provider_job": job})
+}
+
+func (s *Server) adoptCreativeImageTextSlot(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.imageTextManager(w, r)
+	if !ok {
+		return
+	}
+	order, err := strconv.Atoi(r.PathValue("order"))
+	if err != nil || order < 1 || order > 3 {
+		s.badRequest(w, r, fmt.Errorf("image slot order must be between 1 and 3"))
+		return
+	}
+	var body creative.AdoptImageAttemptRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	attemptAction := r.PathValue("attempt_action")
+	if !strings.HasSuffix(attemptAction, ":adopt") {
+		s.notFound(w, r)
+		return
+	}
+	attemptID := strings.TrimSuffix(attemptAction, ":adopt")
+	if attemptID == "" {
+		s.notFound(w, r)
+		return
+	}
+	value, err := manager.AdoptImageGenerationAttempt(
+		r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")),
+		r.PathValue("task_id"), order, attemptID, body,
+	)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) listCommercePrerollSources(w http.ResponseWriter, r *http.Request) {
 	if s.creative == nil {
 		s.notImplemented(w, r)

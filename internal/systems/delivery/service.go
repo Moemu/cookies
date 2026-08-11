@@ -22,12 +22,16 @@ const (
 )
 
 var (
-	ErrNotFound            = errors.New("delivery resource not found")
-	ErrInvalidRequest      = errors.New("delivery request is invalid")
-	ErrInvalidState        = errors.New("delivery resource is not in a state that allows this action")
-	ErrVersionConflict     = errors.New("delivery resource version conflict")
-	ErrPlanVersionConflict = errors.New("delivery plan version conflict")
-	ErrStalePlanVersion    = errors.New("delivery change set references a stale plan version")
+	ErrNotFound                = errors.New("delivery resource not found")
+	ErrInvalidRequest          = errors.New("delivery request is invalid")
+	ErrInvalidState            = errors.New("delivery resource is not in a state that allows this action")
+	ErrVersionConflict         = errors.New("delivery resource version conflict")
+	ErrPlanVersionConflict     = errors.New("delivery plan version conflict")
+	ErrStalePlanVersion        = errors.New("delivery change set references a stale plan version")
+	ErrApprovalRequired        = errors.New("delivery approval is required")
+	ErrApprovalExpired         = errors.New("delivery approval has expired")
+	ErrApprovalContentMismatch = errors.New("delivery approval content does not match")
+	ErrApprovalScopeExceeded   = errors.New("delivery approval scope or budget was exceeded")
 )
 
 type DeliveryPlanStatus string
@@ -117,20 +121,26 @@ type DeliveryPlan struct {
 }
 
 type ChangeSet struct {
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	PlanID         string                  `json:"plan_id"`
-	PlanVersion    int64                   `json:"plan_version"`
-	Status         ChangeSetStatus         `json:"status"`
-	RiskLevel      string                  `json:"risk_level"`
-	PreflightNotes []string                `json:"preflight_notes"`
-	ApprovedBy     string                  `json:"approved_by,omitempty"`
-	ApprovedAt     *time.Time              `json:"approved_at,omitempty"`
-	Version        int64                   `json:"version"`
-	CreatedBy      string                  `json:"created_by"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	ID                string                  `json:"id"`
+	OrganizationID    contract.OrganizationID `json:"organization_id"`
+	ProjectID         contract.ProjectID      `json:"project_id"`
+	PlanID            string                  `json:"plan_id"`
+	PlanName          string                  `json:"plan_name"`
+	PlanVersion       int64                   `json:"plan_version"`
+	PlanCanonicalHash string                  `json:"plan_canonical_hash"`
+	BudgetLimit       Budget                  `json:"budget_limit"`
+	Status            ChangeSetStatus         `json:"status"`
+	RiskLevel         string                  `json:"risk_level"`
+	PreflightNotes    []string                `json:"preflight_notes"`
+	ApprovedBy        string                  `json:"approved_by,omitempty"`
+	ApprovedAt        *time.Time              `json:"approved_at,omitempty"`
+	Approval          *ApprovalView           `json:"approval,omitempty"`
+	Source            Source                  `json:"source"`
+	Scenario          Scenario                `json:"scenario"`
+	Version           int64                   `json:"version"`
+	CreatedBy         string                  `json:"created_by"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
 }
 
 type Execution struct {
@@ -223,7 +233,9 @@ type Repository interface {
 	ListChangeSets(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ChangeSet, error)
 	GetChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ChangeSet, error)
 	TransitionChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, ChangeSetStatus, string, time.Time) (ChangeSet, error)
-	RecordExecution(context.Context, ChangeSet, Execution, Evidence) (ExecutionResult, error)
+	ApproveChangeSet(context.Context, ChangeSet, DeliveryApproval) (ChangeSet, error)
+	GetApproval(context.Context, contract.OrganizationID, contract.ProjectID, string) (DeliveryApproval, error)
+	RecordExecution(context.Context, ChangeSet, DeliveryApproval, Execution, Evidence) (ExecutionResult, error)
 	ListExecutions(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ExecutionResult, error)
 	CreateMetricSnapshot(context.Context, DeliveryMetricSnapshot) (DeliveryMetricSnapshot, bool, error)
 	ListMetricSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]DeliveryMetricSnapshot, error)
@@ -265,7 +277,10 @@ func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, pr
 		Scenario: scenarioFor(draft), CurrentVersionNumber: 1,
 		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	}
-	version := versionFromDraft(plan, 1, draft, actor.Principal, now)
+	version, err := versionFromDraft(plan, 1, draft, actor.Principal, now)
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
 	return s.Repository.CreatePlan(ctx, plan, version)
 }
 
@@ -317,7 +332,10 @@ func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, pr
 	if plan.Status != DeliveryPlanDraft {
 		return DeliveryPlan{}, ErrInvalidState
 	}
-	version := versionFromDraft(plan, request.ExpectedVersion+1, request.PlanDraft, actor.Principal, s.now())
+	version, err := versionFromDraft(plan, request.ExpectedVersion+1, request.PlanDraft, actor.Principal, s.now())
+	if err != nil {
+		return DeliveryPlan{}, err
+	}
 	return s.Repository.UpdatePlan(ctx, actor.OrganizationID, projectID, planID, request.ExpectedVersion, version)
 }
 
@@ -387,12 +405,128 @@ func preflightResult(planID string, version DeliveryPlanVersion, checks []Prefli
 	}
 }
 
+func (s Service) ListChangeSets(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ChangeSet, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	values, err := s.Repository.ListChangeSets(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index], err = s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, values[index])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+func (s Service) GetChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string) (ChangeSet, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return ChangeSet{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ChangeSet{}, err
+	}
+	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, value)
+}
+
+func (s Service) hydrateChangeSet(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, value ChangeSet) (ChangeSet, error) {
+	version, err := s.Repository.GetPlanVersion(ctx, organizationID, projectID, value.PlanID, int(value.PlanVersion))
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	value.PlanName = version.Name
+	value.Source, value.Scenario = version.Source, version.Scenario
+	value.PlanCanonicalHash = version.CanonicalHash
+	value.BudgetLimit = version.Budget
+	approval, err := s.Repository.GetApproval(ctx, organizationID, projectID, value.ID)
+	if errors.Is(err, ErrNotFound) {
+		value.Approval = nil
+		return value, nil
+	}
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	plan, err := s.Repository.GetPlan(ctx, organizationID, projectID, value.PlanID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	view, err := s.approvalView(value, plan, version, approval)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	value.Approval = &view
+	value.ApprovedBy = approval.ApprovedBy
+	approvedAt := approval.ApprovedAt
+	value.ApprovedAt = &approvedAt
+	return value, nil
+}
+
+func (s Service) approvalView(changeSet ChangeSet, plan DeliveryPlan, version DeliveryPlanVersion, approval DeliveryApproval) (ApprovalView, error) {
+	view := ApprovalView{
+		DeliveryApproval: approval,
+		Valid:            true,
+		HashSummary:      hashSummary(approval.PlanCanonicalHash),
+		BudgetLimit:      Budget{TotalMinor: approval.BudgetLimitMinor, Currency: approval.Currency},
+	}
+	if !s.now().Before(approval.ExpiresAt) {
+		view.Valid, view.InvalidReason = false, ApprovalInvalidExpired
+		return view, nil
+	}
+	if plan.Version != approval.PlanVersion {
+		view.Valid, view.InvalidReason = false, ApprovalInvalidStalePlan
+		return view, nil
+	}
+	approvedChangeSetVersion, validLifecycleState := approvalVersionForChangeSetState(changeSet.Status, changeSet.Version)
+	if approval.OrganizationID != changeSet.OrganizationID ||
+		approval.ProjectID != changeSet.ProjectID ||
+		approval.PlanID != changeSet.PlanID ||
+		approval.PlanVersion != changeSet.PlanVersion ||
+		approval.ChangeSetID != changeSet.ID ||
+		!validLifecycleState ||
+		approval.ChangeSetVersion != approvedChangeSetVersion ||
+		approval.PlanCanonicalHash != version.CanonicalHash ||
+		approval.Source != SourceMock ||
+		approval.Scenario != version.Scenario {
+		view.Valid, view.InvalidReason = false, ApprovalInvalidContentMismatch
+		return view, nil
+	}
+	if err := validatePlanCanonicalHash(version); err != nil {
+		view.Valid, view.InvalidReason = false, ApprovalInvalidContentMismatch
+		return view, nil
+	}
+	actionHash, err := ApprovalActionHash(approval)
+	if err != nil {
+		return ApprovalView{}, err
+	}
+	if actionHash != approval.ActionHash {
+		view.Valid, view.InvalidReason = false, ApprovalInvalidContentMismatch
+		return view, nil
+	}
+	if approval.Action != ApprovalActionExecute ||
+		approval.Scope != ApprovalScopeExecuteMock ||
+		version.Budget.TotalMinor > approval.BudgetLimitMinor ||
+		version.Budget.Currency != approval.Currency {
+		view.Valid, view.InvalidReason = false, ApprovalInvalidScopeExceeded
+	}
+	return view, nil
+}
+
 func (s Service) GetPlanDetail(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string) (PlanDetail, error) {
 	plan, err := s.GetPlan(ctx, actor, projectID, planID)
 	if err != nil {
 		return PlanDetail{}, err
 	}
-	changeSets, err := s.Repository.ListChangeSets(ctx, actor.OrganizationID, projectID, 100)
+	changeSets, err := s.ListChangeSets(ctx, actor, projectID, 100)
 	if err != nil {
 		return PlanDetail{}, err
 	}
@@ -402,7 +536,7 @@ func (s Service) GetPlanDetail(ctx context.Context, actor contract.ActorContext,
 			filtered = append(filtered, value)
 		}
 	}
-	executions, err := s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, 100)
+	executions, err := s.ListExecutions(ctx, actor, projectID, 100)
 	if err != nil {
 		return PlanDetail{}, err
 	}
@@ -421,12 +555,18 @@ func (s Service) CreateChangeSet(ctx context.Context, actor contract.ActorContex
 	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
 		return ChangeSet{}, err
 	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ChangeSet{}, err
+	}
 	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, planID)
 	if err != nil {
 		return ChangeSet{}, err
 	}
 	if plan.Version != expectedPlanVersion {
 		return ChangeSet{}, ErrVersionConflict
+	}
+	if err := validatePlanCanonicalHash(plan.CurrentVersion); err != nil {
+		return ChangeSet{}, err
 	}
 	id, err := s.idGenerator()("deliverychangeset")
 	if err != nil {
@@ -435,13 +575,18 @@ func (s Service) CreateChangeSet(ctx context.Context, actor contract.ActorContex
 	now := s.now()
 	return s.Repository.CreateChangeSet(ctx, ChangeSet{
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, PlanID: plan.ID,
-		PlanVersion: plan.Version, Status: ChangeSetDraft, RiskLevel: "low",
-		PreflightNotes: []string{}, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+		PlanName: plan.CurrentVersion.Name, PlanVersion: plan.Version, PlanCanonicalHash: plan.CurrentVersion.CanonicalHash,
+		BudgetLimit: plan.CurrentVersion.Budget, Status: ChangeSetDraft, RiskLevel: "low",
+		PreflightNotes: []string{}, Source: plan.Source, Scenario: plan.Scenario,
+		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	})
 }
 
 func (s Service) Preflight(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ChangeSet, error) {
 	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return ChangeSet{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return ChangeSet{}, err
 	}
 	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
@@ -469,11 +614,18 @@ func (s Service) Preflight(ctx context.Context, actor contract.ActorContext, pro
 			break
 		}
 	}
-	return s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion, next, actor.Principal.ID, s.now())
+	transitioned, err := s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion, next, actor.Principal.ID, s.now())
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, transitioned)
 }
 
 func (s Service) Approve(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ChangeSet, error) {
 	if err := s.ready(actor, projectID, ScopeApprove); err != nil {
+		return ChangeSet{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return ChangeSet{}, err
 	}
 	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
@@ -483,11 +635,54 @@ func (s Service) Approve(ctx context.Context, actor contract.ActorContext, proje
 	if value.Status != ChangeSetPreflightPassed {
 		return ChangeSet{}, ErrInvalidState
 	}
-	return s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion, ChangeSetApproved, actor.Principal.ID, s.now())
+	if value.Version != expectedVersion {
+		return ChangeSet{}, ErrVersionConflict
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, value.PlanID)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if plan.Version != value.PlanVersion {
+		return ChangeSet{}, ErrStalePlanVersion
+	}
+	version, err := s.Repository.GetPlanVersion(ctx, actor.OrganizationID, projectID, value.PlanID, int(value.PlanVersion))
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	if err := validatePlanCanonicalHash(version); err != nil {
+		return ChangeSet{}, err
+	}
+	approvalID, err := s.idGenerator()("deliveryapproval")
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	now := s.now()
+	approval := DeliveryApproval{
+		ApprovalID: approvalID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		PlanID: value.PlanID, PlanVersion: value.PlanVersion,
+		ChangeSetID: value.ID, ChangeSetVersion: value.Version + 1,
+		PlanCanonicalHash: version.CanonicalHash,
+		Action:            ApprovalActionExecute, Scope: ApprovalScopeExecuteMock,
+		BudgetLimitMinor: version.Budget.TotalMinor, Currency: version.Budget.Currency,
+		ApprovedBy: actor.Principal.ID, ApprovedAt: now, ExpiresAt: now.Add(ApprovalTTL),
+		Source: SourceMock, Scenario: version.Scenario,
+	}
+	approval.ActionHash, err = ApprovalActionHash(approval)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	approved, err := s.Repository.ApproveChangeSet(ctx, value, approval)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, approved)
 }
 
 func (s Service) Execute(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ExecutionResult, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
+		return ExecutionResult{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return ExecutionResult{}, err
 	}
 	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
@@ -506,6 +701,36 @@ func (s Service) Execute(ctx context.Context, actor contract.ActorContext, proje
 	}
 	if plan.Version != value.PlanVersion {
 		return ExecutionResult{}, ErrStalePlanVersion
+	}
+	version, err := s.Repository.GetPlanVersion(ctx, actor.OrganizationID, projectID, value.PlanID, int(value.PlanVersion))
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	value.PlanName = version.Name
+	value.Source, value.Scenario = version.Source, version.Scenario
+	value.PlanCanonicalHash, value.BudgetLimit = version.CanonicalHash, version.Budget
+	approval, err := s.Repository.GetApproval(ctx, actor.OrganizationID, projectID, value.ID)
+	if errors.Is(err, ErrNotFound) {
+		return ExecutionResult{}, ErrApprovalRequired
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	view, err := s.approvalView(value, plan, version, approval)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if !view.Valid {
+		switch view.InvalidReason {
+		case ApprovalInvalidExpired:
+			return ExecutionResult{}, ErrApprovalExpired
+		case ApprovalInvalidStalePlan:
+			return ExecutionResult{}, ErrStalePlanVersion
+		case ApprovalInvalidScopeExceeded:
+			return ExecutionResult{}, ErrApprovalScopeExceeded
+		default:
+			return ExecutionResult{}, ErrApprovalContentMismatch
+		}
 	}
 	executionID, err := s.idGenerator()("deliveryexecution")
 	if err != nil {
@@ -526,11 +751,15 @@ func (s Service) Execute(ctx context.Context, actor contract.ActorContext, proje
 		ExecutionID: execution.ID, Summary: "本地模拟执行完成，无真实广告平台写入。",
 		Mode: ExecutionModeLocalSimulation, Reversible: true, CreatedAt: now,
 	}
-	return s.Repository.RecordExecution(ctx, value, execution, evidence)
+	value.Approval = &view
+	return s.Repository.RecordExecution(ctx, value, approval, execution, evidence)
 }
 
 func (s Service) Rollback(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, changeSetID string, expectedVersion int64) (ChangeSet, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
+		return ChangeSet{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return ChangeSet{}, err
 	}
 	value, err := s.Repository.GetChangeSet(ctx, actor.OrganizationID, projectID, changeSetID)
@@ -540,7 +769,14 @@ func (s Service) Rollback(ctx context.Context, actor contract.ActorContext, proj
 	if value.Status != ChangeSetExecuted {
 		return ChangeSet{}, ErrInvalidState
 	}
-	return s.Repository.TransitionChangeSet(ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion, ChangeSetRolledBack, actor.Principal.ID, s.now())
+	transitioned, err := s.Repository.TransitionChangeSet(
+		ctx, actor.OrganizationID, projectID, changeSetID, expectedVersion,
+		ChangeSetRolledBack, actor.Principal.ID, s.now(),
+	)
+	if err != nil {
+		return ChangeSet{}, err
+	}
+	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, transitioned)
 }
 
 func (s Service) ListExecutions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ExecutionResult, error) {
@@ -550,7 +786,17 @@ func (s Service) ListExecutions(ctx context.Context, actor contract.ActorContext
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
-	return s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	values, err := s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].ChangeSet, err = s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, values[index].ChangeSet)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
 }
 
 func (s Service) CreateDemoMetricSnapshot(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, request CreateMetricSnapshotRequest) (DeliveryMetricSnapshot, error) {
@@ -654,6 +900,10 @@ func (s Service) findExecution(ctx context.Context, organizationID contract.Orga
 	}
 	for _, value := range values {
 		if value.Execution.ID == executionID {
+			value.ChangeSet, err = s.hydrateChangeSet(ctx, organizationID, projectID, value.ChangeSet)
+			if err != nil {
+				return ExecutionResult{}, err
+			}
 			return value, nil
 		}
 	}

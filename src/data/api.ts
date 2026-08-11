@@ -457,6 +457,181 @@ export type ApiCreativeTaskHandoffDetail = {
   intake: ApiTaskStrategyCreativeIntake
 }
 
+export type ApiImageTextAttemptStatus =
+  | 'queued'
+  | 'running'
+  | 'base_asset_ready'
+  | 'rendering'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'stale'
+
+export type ApiImageTextAttempt = {
+  contract_version: 'creative-image-generation-attempt/v1'
+  id: string
+  draft_revision: number
+  image_plan_order: number
+  attempt_no: number
+  provider_job_id?: string
+  status: ApiImageTextAttemptStatus
+  final_asset_ref?: ApiAssetVersionRef
+  error_code?: string
+  error_message?: string
+  created_at: string
+}
+
+export type ApiImageTextWorkspace = {
+  contract_version: 'creative-image-text-workspace/v1'
+  task: {
+    id: string
+    version: number
+    status: CreativeTaskStatus
+    direction: {
+      direction_version_id: string
+      focus: string
+      audience: string
+      core_message: string
+      call_to_action: string
+    }
+  }
+  intake: ApiTaskStrategyCreativeIntake
+  direction: {
+    direction_id: string
+    concept: string
+    creative_rationale: string
+  }
+  draft: {
+    contract_version?: string
+    version: number
+    generation_source_version?: number
+    selected_title?: string
+    title_candidates: string[]
+    body: string
+    topics: string[]
+    image_plan: Array<{
+      order: number
+      role?: 'cover' | 'proof' | 'cta'
+      purpose: string
+      visual_brief: string
+      caption: string
+      overlay_copy?: string
+      layout_preset?: string
+      asset_ref?: ApiAssetVersionRef
+    }>
+  }
+  slots: Array<{
+    order: number
+    role: 'cover' | 'proof' | 'cta'
+    status?: ApiImageTextAttemptStatus
+    adopted_attempt_id?: string
+    selection_version: number
+    attempts: ApiImageTextAttempt[]
+  }>
+  readiness: {
+    draft_generation_ready: boolean
+    image_generation_ready: boolean
+    review_ready: boolean
+    blocking_reasons: string[]
+  }
+}
+
+export type ApiCreativeDirection = {
+  contract_version: 'creative-direction/v1'
+  direction_id: string
+  concept: string
+  creative_rationale: string
+  message_plan: string[]
+  execution_outline: string[]
+  guardrail_trace: string[]
+  direction_mode?: 'emotional' | 'cinematic' | 'utility'
+  emotional_arc?: string
+  visual_grammar?: string
+  brand_memory_device?: string
+  human_moment?: string
+  status: 'candidate' | 'confirmed' | 'superseded'
+}
+
+export type ApiCreativeDirectionBatch = {
+  contract_version: 'creative-direction-candidate-batch/v1'
+  batch_id: string
+  intake_id: string
+  status: string
+  candidates: ApiCreativeDirection[]
+}
+
+export type ApiCreativeIntakeBootstrap = {
+  id: string
+  source: string
+  status: string
+  request?: {
+    objective?: string
+    audience?: string
+    core_message?: string
+    concept?: string
+  }
+  base_handoff?: {
+    creative_view?: {
+      objective?: { statement?: string }
+      communication?: { single_minded_proposition?: string }
+    }
+  }
+}
+
+export type ApiCreativeTaskSummary = {
+  id: string
+  organization_id: string
+  project_id: string
+  intake_id: string
+  format: 'image_text' | 'video'
+  channel: string
+  video_purpose?: string
+  performance_mode?: string
+  status: string
+  direction: {
+    direction_version_id?: string
+    input_identity_hash?: string
+    content_type?: string
+    focus: string
+    audience: string
+    core_message: string
+    call_to_action: string
+    concept: string
+    tone: string[]
+    visual_keywords: string[]
+  }
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export type ApiCreateManualImageTextInput = {
+  objective: string
+  audience: string
+  coreMessage: string
+  callToAction: string
+  tone: string[]
+  visualKeywords: string[]
+  mandatoryElements: string[]
+  prohibitedClaims: string[]
+}
+
+export type ApiCreativeVersion = {
+  id: string
+  creative_task_id: string
+  draft_version: number
+  status: 'created' | 'checked' | 'approved' | 'delivered'
+  check?: { passed: boolean; blockers: string[]; warnings: string[] }
+}
+
+export type ApiCreativePackage = {
+  id: string
+  creative_version_id: string
+  format: 'image_text' | 'video'
+  content_hash: string
+  created_at: string
+}
+
 export type ApiPreparedCommercePreroll = {
   contract_version: 'creative-commerce-preroll-preparation/v1'
   source_ref: ApiCreativeSourceRef
@@ -3127,6 +3302,220 @@ function getCreativeTaskHandoffDetail(projectId: string, taskId: string) {
   )
 }
 
+function getImageTextWorkspace(projectId: string, taskId: string) {
+  return creativeRequest<ApiImageTextWorkspace>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/image-text-workspace`,
+  )
+}
+
+function getCreativeIntake(projectId: string, intakeId: string) {
+  return creativeRequest<ApiCreativeIntakeBootstrap>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}`,
+  )
+}
+
+function listCreativeTasks(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativeTaskSummary[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks?limit=${limit}`,
+  )
+}
+
+function createManualImageTextIntake(
+  projectId: string,
+  input: ApiCreateManualImageTextInput,
+) {
+  return creativeRequest<ApiCreativeIntakeBootstrap>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes`,
+    'POST',
+    {
+      contract_version: 'creative-intake-create/v3',
+      source: 'manual',
+      channel: 'xiaohongshu',
+      objective: input.objective.trim(),
+      audience: input.audience.trim(),
+      core_message: input.coreMessage.trim(),
+      call_to_action: input.callToAction.trim(),
+      concept: '',
+      tone: input.tone,
+      visual_keywords: input.visualKeywords,
+      mandatory_elements: input.mandatoryElements,
+      prohibited_claims: input.prohibitedClaims,
+    },
+    { 'Idempotency-Key': `manual-image-text-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+  )
+}
+
+function generateCreativeDirections(projectId: string, intakeId: string) {
+  return creativeRequest<ApiCreativeDirectionBatch>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/direction-candidate-batches`,
+    'POST',
+    { candidate_count: 3 },
+  )
+}
+
+function confirmCreativeDirection(projectId: string, directionId: string) {
+  return creativeRequest<ApiCreativeDirection>(
+    `/projects/${encodeURIComponent(projectId)}/creative-directions/${encodeURIComponent(directionId)}/confirm`,
+    'POST',
+  )
+}
+
+function createImageTextTaskFromDirection(
+  projectId: string,
+  intakeId: string,
+  directionId: string,
+) {
+  return creativeRequest<{ id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-task`,
+    'POST',
+    { content_type: 'custom', direction_id: directionId },
+  )
+}
+
+function createBrandVideoTaskFromDirection(
+  projectId: string,
+  intakeId: string,
+  directionId: string,
+) {
+  return creativeRequest<ApiCreativeTaskSummary>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}:create-video-task`,
+    'POST',
+    {
+      selected_route_id: 'route_brand_video',
+      direction_id: directionId,
+      channel: 'douyin',
+      mandatory_elements: [],
+      prohibited_claims: [],
+      confirm_route: true,
+    },
+  )
+}
+
+function generateImageTextDraft(projectId: string, taskId: string, expectedTaskVersion: number, expectedDirectionId: string) {
+  return creativeRequest<ApiImageTextWorkspace['draft']>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/image-text-draft:generate`,
+    'POST',
+    { expected_task_version: expectedTaskVersion, expected_direction_id: expectedDirectionId },
+  )
+}
+
+function updateImageTextDraft(
+  projectId: string,
+  taskId: string,
+  workspace: ApiImageTextWorkspace,
+  input: {
+    selectedTitle: string
+    body: string
+    overlayCopy: Record<number, string>
+    visualBrief?: Record<number, string>
+    caption?: Record<number, string>
+  },
+) {
+  return creativeRequest<ApiImageTextWorkspace['draft']>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/image-text-draft`,
+    'PATCH',
+    {
+      expected_task_version: workspace.task.version,
+      expected_draft_revision: workspace.draft.version,
+      title_candidates: workspace.draft.title_candidates.map(title =>
+        title === workspace.draft.selected_title ? input.selectedTitle : title
+      ),
+      selected_title: input.selectedTitle,
+      body: input.body,
+      topics: workspace.draft.topics,
+      image_plan: workspace.draft.image_plan.map(item => ({
+        ...item,
+        overlay_copy: input.overlayCopy[item.order] ?? item.overlay_copy,
+        visual_brief: input.visualBrief?.[item.order] ?? item.visual_brief,
+        caption: input.caption?.[item.order] ?? item.caption,
+      })),
+    },
+  )
+}
+
+function generateImageTextSlot(
+  projectId: string,
+  taskId: string,
+  order: number,
+  expectedTaskVersion: number,
+  draftRevision: number,
+  retry = false,
+) {
+  return creativeRequest<{ attempt: ApiImageTextAttempt }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/image-slots/${order}:${retry ? 'retry' : 'generate'}`,
+    'POST',
+    { expected_task_version: expectedTaskVersion, draft_revision: draftRevision },
+    { 'Idempotency-Key': `image-slot-${taskId}-${draftRevision}-${order}-${Date.now()}` },
+  )
+}
+
+function adoptImageTextAttempt(
+  projectId: string,
+  taskId: string,
+  order: number,
+  attemptId: string,
+  expectedTaskVersion: number,
+  expectedSelectionVersion: number,
+) {
+  return creativeRequest(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/image-slots/${order}/attempts/${encodeURIComponent(attemptId)}:adopt`,
+    'POST',
+    {
+      expected_task_version: expectedTaskVersion,
+      expected_selection_version: expectedSelectionVersion,
+    },
+  )
+}
+
+async function getProjectAssetPreview(projectId: string, ref: ApiAssetVersionRef) {
+  const value = await platformRequest<{ url: string; headers?: Record<string, string> }>(
+    `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(ref.asset_id)}/versions/${ref.version}/preview`,
+  )
+  return value.url.startsWith('/') ? `${backendOrigin}${value.url}` : value.url
+}
+
+function listImageTextVersions(projectId: string, taskId: string) {
+  return creativeRequest<{ items: ApiCreativeVersion[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-versions?task_id=${encodeURIComponent(taskId)}`,
+  )
+}
+
+function listCreativePackages(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativePackage[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-packages?limit=${limit}`,
+  )
+}
+
+function freezeImageTextVersion(projectId: string, taskId: string, draftVersion: number) {
+  return creativeRequest<ApiCreativeVersion>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}:freeze-version`,
+    'POST',
+    { draft_version: draftVersion },
+    { 'Idempotency-Key': `image-text-freeze-${taskId}-${draftVersion}` },
+  )
+}
+
+function checkImageTextVersion(projectId: string, versionId: string) {
+  return creativeRequest<ApiCreativeVersion>(
+    `/projects/${encodeURIComponent(projectId)}/creative-versions/${encodeURIComponent(versionId)}:check`,
+    'POST',
+  )
+}
+
+function approveImageTextVersion(projectId: string, versionId: string) {
+  return creativeRequest<ApiCreativeVersion>(
+    `/projects/${encodeURIComponent(projectId)}/creative-versions/${encodeURIComponent(versionId)}:approve`,
+    'POST',
+  )
+}
+
+function deliverImageTextVersion(projectId: string, versionId: string) {
+  return creativeRequest<ApiCreativePackage>(
+    `/projects/${encodeURIComponent(projectId)}/creative-versions/${encodeURIComponent(versionId)}:deliver`,
+    'POST',
+  )
+}
+
 async function putUploadedAsset(url: string, headers: Record<string, string>, file: File) {
   const requestHeaders = new Headers()
   for (const [name, value] of Object.entries(headers)) {
@@ -4234,6 +4623,25 @@ export const api = {
   createManualShortDramaPrerollWorkspace,
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
+  listCreativeTasks,
+  getImageTextWorkspace,
+  getCreativeIntake,
+  createManualImageTextIntake,
+  generateCreativeDirections,
+  confirmCreativeDirection,
+  createImageTextTaskFromDirection,
+  createBrandVideoTaskFromDirection,
+  generateImageTextDraft,
+  updateImageTextDraft,
+  generateImageTextSlot,
+  adoptImageTextAttempt,
+  getProjectAssetPreview,
+  listImageTextVersions,
+  listCreativePackages,
+  freezeImageTextVersion,
+  checkImageTextVersion,
+  approveImageTextVersion,
+  deliverImageTextVersion,
   selectShortDramaPrerollCandidate,
   regenerateShortDramaPrerollCandidates,
   createShortDramaPrerollVideoJob,

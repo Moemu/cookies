@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-image-text-draft-v2.schema.json",
+  "title": "Creative image-text draft v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "task_id", "version", "direction_ref", "input_identity_hash", "status", "title_candidates", "selected_title", "body", "topics", "cover_copy", "image_plan", "created_at"],
+  "properties": {
+    "contract_version": {"const": "creative-image-text-draft/v2"},
+    "task_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "version": {"type": "integer", "minimum": 1},
+    "generation_source_version": {"type": ["integer", "null"], "minimum": 1},
+    "direction_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction_id", "content_hash"],
+      "properties": {
+        "direction_id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "input_identity_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "status": {"enum": ["draft", "ready_for_review"]},
+    "title_candidates": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"type": "string", "minLength": 1, "maxLength": 80}
+    },
+    "selected_title": {"type": "string", "minLength": 1, "maxLength": 80},
+    "body": {"type": "string", "minLength": 1, "maxLength": 5000},
+    "cover_copy": {"type": "string", "minLength": 1, "maxLength": 120},
+    "topics": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 12,
+      "items": {"type": "string", "minLength": 1, "maxLength": 80}
+    },
+    "image_plan": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"$ref": "#/$defs/cover"},
+        {"$ref": "#/$defs/proof"},
+        {"$ref": "#/$defs/cta"}
+      ],
+      "items": false
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "assetRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "version"],
+      "properties": {
+        "asset_id": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1}
+      }
+    },
+    "slotBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "role", "purpose", "visual_brief", "caption", "overlay_copy", "layout_preset"],
+      "properties": {
+        "order": {"type": "integer"},
+        "role": {"type": "string"},
+        "purpose": {"type": "string", "minLength": 1, "maxLength": 300},
+        "visual_brief": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "caption": {"type": "string", "minLength": 1, "maxLength": 120},
+        "overlay_copy": {"type": "string", "minLength": 1, "maxLength": 120},
+        "layout_preset": {"type": "string"},
+        "asset_ref": {"oneOf": [{"$ref": "#/$defs/assetRef"}, {"type": "null"}]}
+      }
+    },
+    "cover": {
+      "allOf": [
+        {"$ref": "#/$defs/slotBase"},
+        {"type": "object", "properties": {"order": {"const": 1}, "role": {"const": "cover"}, "layout_preset": {"const": "cover_center_v1"}}}
+      ]
+    },
+    "proof": {
+      "allOf": [
+        {"$ref": "#/$defs/slotBase"},
+        {"type": "object", "properties": {"order": {"const": 2}, "role": {"const": "proof"}, "layout_preset": {"const": "proof_lower_left_v1"}}}
+      ]
+    },
+    "cta": {
+      "allOf": [
+        {"$ref": "#/$defs/slotBase"},
+        {"type": "object", "properties": {"order": {"const": 3}, "role": {"const": "cta"}, "layout_preset": {"const": "cta_bottom_v1"}}}
+      ]
+    }
+  }
+}

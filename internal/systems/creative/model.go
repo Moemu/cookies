@@ -116,6 +116,7 @@ type CreativeRouteSnapshot struct {
 	Reason                    string                     `json:"reason"`
 	TargetDurationSeconds     int                        `json:"target_duration_seconds"`
 	AspectRatio               string                     `json:"aspect_ratio"`
+	Resolution                string                     `json:"resolution,omitempty"`
 	SourceAssetRefs           []contract.AssetVersionRef `json:"source_asset_refs"`
 	EvidenceRefs              []string                   `json:"evidence_refs"`
 	RequiresHumanConfirmation bool                       `json:"requires_human_confirmation"`
@@ -131,7 +132,8 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == CreativeRouteImageText {
 		if len(r.Channels) != 1 || r.Channels[0] != string(ChannelXiaohongshu) ||
 			r.AspectRatio != "3:4" || strings.TrimSpace(r.RouteID) == "" ||
-			strings.TrimSpace(r.Reason) == "" {
+			strings.TrimSpace(r.Reason) == "" || r.VideoPurpose != "" ||
+			r.TargetDurationSeconds != 0 {
 			return fmt.Errorf("creative image-text route is incomplete")
 		}
 		return nil
@@ -243,7 +245,7 @@ func (r CreateIntakeRequest) Validate() error {
 		if r.ManualCommercePreroll != nil {
 			return r.validateManualCommercePreroll()
 		}
-		if len(r.CreativeRoutes) != 0 || r.Format == FormatVideo || r.PerformanceMode != "" {
+		if len(r.CreativeRoutes) != 0 || r.SelectedRouteID != "" || r.Format == FormatVideo || r.PerformanceMode != "" {
 			return fmt.Errorf("manual image intake must not include video routing")
 		}
 	case IntakeSourceStrategyPackage:
@@ -465,6 +467,7 @@ type CreativeTask struct {
 
 type CreateVideoTaskRequest struct {
 	SelectedRouteID string                   `json:"selected_route_id,omitempty"`
+	DirectionID     string                   `json:"direction_id,omitempty"`
 	RouteIndex      int                      `json:"route_index"`
 	Channel         CreativeChannel          `json:"channel"`
 	SourceVideo     contract.AssetVersionRef `json:"source_video,omitempty"`
@@ -481,12 +484,8 @@ func (r CreateVideoTaskRequest) Validate() error {
 		(r.Channel != ChannelDouyin && r.Channel != ChannelKuaishou) || !r.ConfirmRoute {
 		return fmt.Errorf("selected_route_id (or legacy route_index), supported video channel, and explicit route confirmation are required")
 	}
-	if r.SelectedRouteID != ManualShortDramaPrerollRouteID {
-		if err := r.SourceVideo.Validate(); err != nil {
-			return fmt.Errorf("source_video: %w", err)
-		}
-	}
-	if strings.TrimSpace(r.Concept) == "" || len(r.Concept) > 500 || strings.TrimSpace(r.Prompt) == "" || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
+	if (strings.TrimSpace(r.DirectionID) == "" && (strings.TrimSpace(r.Concept) == "" || strings.TrimSpace(r.Prompt) == "")) ||
+		len(r.DirectionID) > 96 || len(r.Concept) > 500 || len(r.Prompt) > 4000 || len(r.CallToAction) > 300 {
 		return fmt.Errorf("video concept/prompt is required or exceeds its maximum length")
 	}
 	if err := validateStringList("mandatory_elements", r.Mandatory, 20, 200); err != nil {
@@ -504,6 +503,7 @@ type VideoDraft struct {
 	DurationSeconds   int                      `json:"duration_seconds"`
 	AspectRatio       string                   `json:"aspect_ratio"`
 	Resolution        string                   `json:"resolution"`
+	VideoPurpose      string                   `json:"video_purpose,omitempty"`
 	SourceVideo       contract.AssetVersionRef `json:"source_video,omitempty"`
 	Mandatory         []string                 `json:"mandatory_elements"`
 	Prohibited        []string                 `json:"prohibited_claims"`
@@ -518,10 +518,10 @@ type VideoDraft struct {
 func (d VideoDraft) Validate() error {
 	if d.ContractVersion != "creative-video-draft/v1" || strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 ||
 		strings.TrimSpace(d.Concept) == "" || strings.TrimSpace(d.Prompt) == "" || d.DurationSeconds < 4 || d.DurationSeconds > 60 ||
-		d.AspectRatio != "9:16" || d.Resolution != "720p" || d.CreatedAt.IsZero() {
+		strings.TrimSpace(d.AspectRatio) == "" || strings.TrimSpace(d.Resolution) == "" || d.CreatedAt.IsZero() {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
-	if d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
+	if d.VideoPurpose != "brand" && d.ShortDramaPreroll == nil && d.CommercePreroll == nil && d.SourceVideo.Validate() != nil {
 		return fmt.Errorf("creative video draft is incomplete")
 	}
 	if d.ViralRemake != nil && d.ViralRemake.Validate() != nil {
@@ -589,15 +589,20 @@ type CreativeDirection struct {
 }
 
 type ImageTextDraft struct {
-	TaskID          string          `json:"task_id"`
-	Version         int64           `json:"version"`
-	Status          string          `json:"status"`
-	TitleCandidates []string        `json:"title_candidates"`
-	Body            string          `json:"body"`
-	Topics          []string        `json:"topics"`
-	CoverCopy       string          `json:"cover_copy"`
-	ImagePlan       []ImagePlanItem `json:"image_plan"`
-	CreatedAt       time.Time       `json:"created_at"`
+	ContractVersion         string                 `json:"contract_version,omitempty"`
+	TaskID                  string                 `json:"task_id"`
+	Version                 int64                  `json:"version"`
+	GenerationSourceVersion *int64                 `json:"generation_source_version,omitempty"`
+	DirectionRef            *ImageTextDirectionRef `json:"direction_ref,omitempty"`
+	InputIdentityHash       string                 `json:"input_identity_hash,omitempty"`
+	Status                  string                 `json:"status"`
+	TitleCandidates         []string               `json:"title_candidates"`
+	SelectedTitle           string                 `json:"selected_title,omitempty"`
+	Body                    string                 `json:"body"`
+	Topics                  []string               `json:"topics"`
+	CoverCopy               string                 `json:"cover_copy"`
+	ImagePlan               []ImagePlanItem        `json:"image_plan"`
+	CreatedAt               time.Time              `json:"created_at"`
 }
 
 // ReviseDraftRequest replaces the editable content of the current draft. The
@@ -842,11 +847,19 @@ func (v CreativeVersion) Validate() error {
 }
 
 type ImagePlanItem struct {
-	Order       int                       `json:"order"`
-	Purpose     string                    `json:"purpose"`
-	VisualBrief string                    `json:"visual_brief"`
-	Caption     string                    `json:"caption"`
-	AssetRef    *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+	Order        int                       `json:"order"`
+	Role         string                    `json:"role,omitempty"`
+	Purpose      string                    `json:"purpose"`
+	VisualBrief  string                    `json:"visual_brief"`
+	Caption      string                    `json:"caption"`
+	OverlayCopy  string                    `json:"overlay_copy,omitempty"`
+	LayoutPreset string                    `json:"layout_preset,omitempty"`
+	AssetRef     *contract.AssetVersionRef `json:"asset_ref,omitempty"`
+}
+
+type ImageTextDirectionRef struct {
+	DirectionID string `json:"direction_id"`
+	ContentHash string `json:"content_hash"`
 }
 
 type ProductionJob struct {

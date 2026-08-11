@@ -1256,6 +1256,65 @@ func TestCreateImageJobRejectsStaleProjectContext(t *testing.T) {
 	}
 }
 
+func TestCreativeImageTextSlotGenerationUsesFrozenPromptAndPortraitProfile(t *testing.T) {
+	t.Parallel()
+	resolver, err := identity.NewStaticResolver(contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeWrite, provider.ScopeJobCreate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brandID := contract.BrandID("brand_1")
+	jobs := &providerJobStub{job: providerJobForHTTPTest()}
+	manager := &creativeManagerStub{
+		imagePrompt: creative.ImagePromptPackage{
+			ID: "prompt_1", CompiledPrompt: "frozen portrait prompt",
+			SourceAssetRefs: []contract.AssetVersionRef{{AssetID: "asset_product", Version: 2}},
+		},
+		imageAttempt: creative.ImageGenerationAttempt{
+			ID: "attempt_1", TaskID: "task_1", DraftRevision: 4, RequestHash: "sha256:request",
+			GenerationSpec: creative.DefaultImageGenerationSpec("cookies.image.standard"),
+			Status:         creative.ImageAttemptQueued,
+		},
+	}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Projects: staticProjectManager{context: contract.ProjectContext{
+			OrganizationID: "org_1", ProjectID: "project_1", BrandID: &brandID,
+			ProductIDs: []contract.ProductID{}, ProjectContextVersion: 7,
+		}},
+		Creative: manager, ProviderJobs: jobs,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/creative/v1/projects/project_1/creative-tasks/task_1/image-slots/2:generate",
+		bytes.NewBufferString(`{"expected_task_version":3,"draft_revision":4}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "image-slot-http-1")
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if manager.preparedImageOrder != 2 || manager.attachedImageProviderJobID != jobs.job.ID {
+		t.Fatalf("Creative image calls were not linked: manager=%+v", manager)
+	}
+	if jobs.request.Input.Width != creative.ImageTextSourceWidth ||
+		jobs.request.Input.Height != creative.ImageTextSourceHeight ||
+		jobs.request.Operation != "image.edit" ||
+		jobs.request.Input.Prompt != "frozen portrait prompt" ||
+		len(jobs.request.Input.SourceAssets) != 1 ||
+		jobs.request.Input.PromptRef == nil ||
+		jobs.request.Input.PromptRef.ID != "prompt_1" {
+		t.Fatalf("unexpected Provider image input: %+v", jobs.request.Input)
+	}
+}
+
 func TestCreateVideoJobUsesProviderVideoSeam(t *testing.T) {
 	t.Parallel()
 	resolver, err := identity.NewStaticResolver(contract.ActorContext{
@@ -2195,6 +2254,12 @@ type creativeManagerStub struct {
 	selectedGameTaskID                 string
 	selectedGameRequest                creative.SelectGamePrerollCandidateRequest
 	createdIntakeRequest               creative.CreateIntakeRequest
+	imageWorkspace                     creative.ImageTextWorkspace
+	imagePrompt                        creative.ImagePromptPackage
+	imageAttempt                       creative.ImageGenerationAttempt
+	preparedImageOrder                 int
+	attachedImageProviderJobID         string
+	failedImageAttemptID               string
 }
 
 func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {
@@ -2361,6 +2426,60 @@ func (s *creativeManagerStub) DeliverVersion(context.Context, contract.ActorCont
 }
 func (s *creativeManagerStub) ListPackages(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativePackage, error) {
 	return s.packages, nil
+}
+
+func (s *creativeManagerStub) GetImageTextWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.ImageTextWorkspace, error) {
+	return s.imageWorkspace, nil
+}
+
+func (s *creativeManagerStub) GenerateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateImageTextDraftRequest) (creative.ImageTextDraft, error) {
+	return s.imageWorkspace.Draft, nil
+}
+
+func (s *creativeManagerStub) UpdateImageTextDraft(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateImageTextDraftRequest) (creative.ImageTextDraft, error) {
+	return s.imageWorkspace.Draft, nil
+}
+
+func (s *creativeManagerStub) PrepareImageSlotGeneration(
+	_ context.Context,
+	_ contract.RequestContext,
+	_ contract.ProjectID,
+	_ string,
+	order int,
+	_ creative.PrepareImageSlotRequest,
+	_ contract.IdempotencyKey,
+) (creative.ImagePromptPackage, creative.ImageGenerationAttempt, bool, error) {
+	s.preparedImageOrder = order
+	return s.imagePrompt, s.imageAttempt, false, nil
+}
+
+func (s *creativeManagerStub) AttachImageProviderJob(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	_ string,
+	providerJobID string,
+) (creative.ImageGenerationAttempt, error) {
+	s.attachedImageProviderJobID = providerJobID
+	s.imageAttempt.ProviderJobID = providerJobID
+	return s.imageAttempt, nil
+}
+
+func (s *creativeManagerStub) FailImageGenerationAttempt(
+	_ context.Context,
+	_ contract.ActorContext,
+	_ contract.ProjectID,
+	attemptID string,
+	_ string,
+	_ string,
+) (creative.ImageGenerationAttempt, error) {
+	s.failedImageAttemptID = attemptID
+	s.imageAttempt.Status = creative.ImageAttemptFailed
+	return s.imageAttempt, nil
+}
+
+func (s *creativeManagerStub) AdoptImageGenerationAttempt(context.Context, contract.ActorContext, contract.ProjectID, string, int, string, creative.AdoptImageAttemptRequest) (creative.ImageSlotSelection, error) {
+	return creative.ImageSlotSelection{}, nil
 }
 
 func (s *providerJobStub) CreateImageJob(_ context.Context, request provider.CreateImageJobRequest) (contract.ProviderJob, bool, error) {

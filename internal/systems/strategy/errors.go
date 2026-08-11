@@ -12,6 +12,7 @@ var (
 	ErrVersionConflict        = errors.New("strategy version conflict")
 	ErrIdempotencyConflict    = errors.New("strategy idempotency conflict")
 	ErrBriefBlocked           = errors.New("brief is blocked")
+	ErrStrategyPublishBlocked = errors.New("strategy publish is blocked")
 	ErrReviewStale            = errors.New("strategy review is stale")
 	ErrReviewAssignment       = errors.New("strategy review assignment required")
 	ErrConcurrencyLimit       = errors.New("strategy task concurrency limit")
@@ -36,6 +37,13 @@ type BlockedError struct {
 
 func (e BlockedError) Error() string { return ErrBriefBlocked.Error() }
 func (e BlockedError) Unwrap() error { return ErrBriefBlocked }
+
+type StrategyPublishBlockedError struct {
+	Problems []ValidationError
+}
+
+func (e StrategyPublishBlockedError) Error() string { return ErrStrategyPublishBlocked.Error() }
+func (e StrategyPublishBlockedError) Unwrap() error { return ErrStrategyPublishBlocked }
 
 type TaskPlanBlockedError struct {
 	Problems []ValidationError

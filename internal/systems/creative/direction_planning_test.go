@@ -72,6 +72,56 @@ func TestGenerateDirectionCandidatesStartsCreativeAuthorship(t *testing.T) {
 	}
 }
 
+func TestManualV3ImageTextIntakeStartsDirectionPlanning(t *testing.T) {
+	service := testService()
+	planner := &directionPlannerStub{result: DirectionPlannerResult{
+		Model: "test-model", PromptVersion: "creative-direction/xhs-v1",
+		Candidates: []DirectionCandidate{
+			{Concept: "通勤场景记录", CreativeRationale: "从用户输入的通勤场景展开", MessagePlan: []string{"先场景后信息"}, ExecutionOutline: []string{"通勤插画"}, GuardrailTrace: []string{"不补造产品功效"}},
+			{Concept: "三类场景清单", CreativeRationale: "把用户输入整理成场景清单", MessagePlan: []string{"场景分组"}, ExecutionOutline: []string{"三栏信息图"}, GuardrailTrace: []string{"不虚构用户体验"}},
+		},
+	}}
+	service.DirectionPlanner = planner
+	service.Directions = &directionRepositoryStub{}
+
+	intake, err := service.CreateIntake(
+		context.Background(), testRequestContext(), "project_1", "manual-v3-image-text",
+		CreateIntakeRequest{
+			ContractVersion: CreativeIntakeCreateV3ContractVersion,
+			Source:          IntakeSourceManual, Channel: ChannelXiaohongshu,
+			Objective: "建立新品认知", Audience: "关注通勤饮品的年轻用户",
+			CoreMessage:  "0糖青柠气泡水适合用场景化内容介绍",
+			CallToAction: "搜索品牌了解更多", Tone: []string{"清爽", "克制"},
+			VisualKeywords: []string{"青柠绿", "生活方式"},
+			Mandatory:      []string{},
+			Prohibited:     []string{"不得虚构产品功效"},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intake.ContractVersion != CreativeIntakeV3ContractVersion || intake.InputIdentityHash == "" ||
+		intake.Request.SelectedRouteID != ManualImageTextRouteID || len(intake.Request.CreativeRoutes) != 1 {
+		t.Fatalf("manual intake did not freeze v3 planning lineage: %+v", intake)
+	}
+	view, err := intake.V3View()
+	if err != nil || !view.Readiness.PlanningReady || !view.Readiness.GenerationReady {
+		t.Fatalf("manual intake did not expose a ready v3 view: view=%+v err=%v", view, err)
+	}
+
+	batch, err := service.GenerateDirectionCandidates(
+		context.Background(), testRequestContext().Actor, "project_1", intake.ID,
+		GenerateDirectionRequest{CandidateCount: 2},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Candidates) != 2 || planner.context.SelectedRoute.RouteID != ManualImageTextRouteID ||
+		planner.context.Proposition != intake.Request.CoreMessage {
+		t.Fatalf("manual planning context was not preserved: batch=%+v context=%+v", batch, planner.context)
+	}
+}
+
 func TestGenerateDirectionCandidatesHasNoProviderFallback(t *testing.T) {
 	service := testService()
 	intake := CreativeIntake{
@@ -99,6 +149,53 @@ func TestGenerateDirectionCandidatesHasNoProviderFallback(t *testing.T) {
 	}
 }
 
+func TestValidateDirectionCandidateClaimsRejectsUnsafeCopyButAllowsPerspective(t *testing.T) {
+	t.Parallel()
+	unsafe := DirectionCandidate{
+		Concept: "夏季适配度第一", CreativeRationale: "大家都爱的神仙饮品",
+		MessagePlan: []string{"先场景后产品"}, ExecutionOutline: []string{"通勤实拍"},
+		GuardrailTrace: []string{"避免绝对化表达"},
+	}
+	if err := validateDirectionCandidateClaims(unsafe); err == nil {
+		t.Fatal("unsafe customer-facing claims must be rejected")
+	}
+	safe := DirectionCandidate{
+		Concept: "通勤清爽时刻", CreativeRationale: "用第一视角记录真实场景",
+		MessagePlan: []string{"先场景后证据"}, ExecutionOutline: []string{"通勤实拍"},
+		GuardrailTrace: []string{"避免绝对化表达"},
+	}
+	if err := validateDirectionCandidateClaims(safe); err != nil {
+		t.Fatalf("first-person perspective is not a ranking claim: %v", err)
+	}
+}
+
+func TestValidateDirectionBatchQualityRejectsUtilityDisguisedAsEmotionalBrandDirection(t *testing.T) {
+	t.Parallel()
+	candidates := []DirectionCandidate{
+		{Concept: "焦虑消解后的风险核验清单", CreativeRationale: "以人物故事承载清单", DirectionMode: "emotional", MessagePlan: []string{"先人物后清单"}, ExecutionOutline: []string{"人物打开清单"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从焦虑到安心", VisualGrammar: "克制近景", BrandMemoryDevice: "蓝色校准线", HumanMoment: "工程师回传标注"},
+		{Concept: "毫米之间，有人回答", CreativeRationale: "以人物接力建立工程伙伴认知", DirectionMode: "cinematic", MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从悬而未决到获得回应", VisualGrammar: "工业微距", BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认"},
+		{Concept: "供应商判断工具", CreativeRationale: "提供参考框架", DirectionMode: "utility", MessagePlan: []string{"三个步骤"}, ExecutionOutline: []string{"信息卡片"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从迷茫到清晰", VisualGrammar: "卡片排版", BrandMemoryDevice: "蓝色印记", HumanMoment: "采购做出标注"},
+	}
+	err := validateDirectionBatchQuality(CreativePlanningContext{
+		SelectedRoute: CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo},
+	}, candidates)
+	if err == nil {
+		t.Fatal("utility-led emotional disguise must make the brand batch fail")
+	}
+}
+
+func TestValidateDirectionBatchQualityRejectsPerformanceCTAInBrandVideo(t *testing.T) {
+	t.Parallel()
+	candidates := []DirectionCandidate{
+		{Concept: "图纸沉默之后", CreativeRationale: "让焦虑被工程回应", DirectionMode: "emotional", MessagePlan: []string{"焦虑到笃定"}, ExecutionOutline: []string{"结尾评论区领取核验表"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从焦虑到笃定", VisualGrammar: "低照度长镜头", BrandMemoryDevice: "蓝色校准线", HumanMoment: "工程师回传标注"},
+		{Concept: "毫米之间，有人回答", CreativeRationale: "以人物接力建立伙伴认知", DirectionMode: "cinematic", MessagePlan: []string{"问题被接住"}, ExecutionOutline: []string{"动作匹配剪辑"}, GuardrailTrace: []string{"不虚构"}, EmotionalArc: "从未知到确认", VisualGrammar: "工业微距", BrandMemoryDevice: "银色光带", HumanMoment: "隔屏共同确认"},
+	}
+	err := validateDirectionBatchQuality(CreativePlanningContext{SelectedRoute: CreativeRouteSnapshot{RouteType: CreativeRouteBrandVideo}}, candidates)
+	if err == nil {
+		t.Fatal("performance CTA must make the brand batch fail")
+	}
+}
+
 func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) {
 	service := testService()
 	intake := CreativeIntake{
@@ -121,8 +218,8 @@ func TestGenerateDirectionCandidatesSupportsFrozenBrandVideoRoute(t *testing.T) 
 	service.DirectionPlanner = &directionPlannerStub{result: DirectionPlannerResult{
 		Model: "test-model", PromptVersion: "creative-direction/brand-video-v1",
 		Candidates: []DirectionCandidate{
-			{Concept: "让精度被看见", CreativeRationale: "用工序证据建立信任", MessagePlan: []string{"承诺到证据"}, ExecutionOutline: []string{"工序与检测"}, GuardrailTrace: []string{"不虚构检测结论"}},
-			{Concept: "每一微米都有来路", CreativeRationale: "把过程透明转为品牌记忆", MessagePlan: []string{"细节到全局"}, ExecutionOutline: []string{"微距到交付"}, GuardrailTrace: []string{"保护客户图纸"}},
+			{Concept: "让精度被看见", CreativeRationale: "用工序证据建立信任", MessagePlan: []string{"承诺到证据"}, ExecutionOutline: []string{"工序与检测"}, GuardrailTrace: []string{"不虚构检测结论"}, DirectionMode: "emotional", EmotionalArc: "从忐忑到笃定", VisualGrammar: "微距与长镜头", BrandMemoryDevice: "蓝色校准线", HumanMoment: "工程师确认图纸"},
+			{Concept: "每一微米都有来路", CreativeRationale: "把过程透明转为品牌记忆", MessagePlan: []string{"细节到全局"}, ExecutionOutline: []string{"微距到交付"}, GuardrailTrace: []string{"保护客户图纸"}, DirectionMode: "cinematic", EmotionalArc: "从未知到可见", VisualGrammar: "银色光带转场", BrandMemoryDevice: "清脆归零声", HumanMoment: "采购收到确认"},
 		},
 	}}
 	service.Directions = &directionRepositoryStub{}

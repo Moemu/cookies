@@ -170,20 +170,7 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 	}
 	routes := make([]creative.CreativeRouteSnapshot, 0, len(handoff.Routes))
 	for _, route := range handoff.Routes {
-		routeType := route.PerformanceMode
-		if route.DeliverableType == "image_text" {
-			routeType = "image_text"
-		} else if routeType == "" {
-			routeType = "pre_roll"
-		}
-		routes = append(routes, creative.CreativeRouteSnapshot{
-			RouteID: route.RouteID, RouteType: routeType, VideoPurpose: route.Purpose,
-			Channels: append([]string{}, route.Channels...), Reason: route.Reason,
-			TargetDurationSeconds: route.Spec.TargetDurationSeconds, AspectRatio: route.Spec.AspectRatio,
-			EvidenceRefs:              append([]string{}, route.ClaimRefs...),
-			RequiresHumanConfirmation: route.DeliverableType == "video",
-			ReadinessStatus:           route.RouteReadiness.Status,
-		})
+		routes = append(routes, creativeRouteSnapshotFromHandoff(route))
 	}
 	handoffSnapshot, err := json.Marshal(handoff)
 	if err != nil {
@@ -200,6 +187,28 @@ func (r Reader) ReadForCreative(ctx context.Context, actor contract.ActorContext
 		Mandatory: appendUnique(mandatory), Prohibited: appendUnique(prohibited),
 		CreativeRoutes: routes, HandoffSnapshot: handoffSnapshot,
 	}, nil
+}
+
+func creativeRouteSnapshotFromHandoff(route strategy.CreativeHandoffRoute) creative.CreativeRouteSnapshot {
+	routeType := route.PerformanceMode
+	videoPurpose := ""
+	if route.DeliverableType == "image_text" {
+		routeType = "image_text"
+	} else {
+		videoPurpose = route.Purpose
+		if routeType == "" {
+			routeType = "pre_roll"
+		}
+	}
+	return creative.CreativeRouteSnapshot{
+		RouteID: route.RouteID, RouteType: routeType, VideoPurpose: videoPurpose,
+		Channels: append([]string{}, route.Channels...), Reason: route.Reason,
+		TargetDurationSeconds: route.Spec.TargetDurationSeconds, AspectRatio: route.Spec.AspectRatio,
+		Resolution:                route.Spec.Resolution,
+		EvidenceRefs:              append([]string{}, route.ClaimRefs...),
+		RequiresHumanConfirmation: route.DeliverableType == "video",
+		ReadinessStatus:           route.RouteReadiness.Status,
+	}
 }
 
 // readPackageProjectionLegacy is retained temporarily for migration tests and

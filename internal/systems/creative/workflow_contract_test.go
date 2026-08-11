@@ -98,6 +98,11 @@ func TestFrozenRouteProfilesSupportImageTextAndBrandVideo(t *testing.T) {
 	if err := imageText.Validate(); err != nil {
 		t.Fatalf("image-text route: %v", err)
 	}
+	imageText.VideoPurpose = "brand"
+	imageText.TargetDurationSeconds = 30
+	if err := imageText.Validate(); err == nil {
+		t.Fatal("image-text route accepted brand-video-only fields")
+	}
 	brandVideo := CreativeRouteSnapshot{
 		RouteID: "route_brand_video", RouteType: CreativeRouteBrandVideo,
 		VideoPurpose: "brand", Channels: []string{"douyin", "wechat_official_account"},

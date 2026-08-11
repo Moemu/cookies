@@ -1,6 +1,9 @@
 package promptkit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRegistryResolvesEverySupportedStage(t *testing.T) {
 	t.Parallel()
@@ -11,6 +14,7 @@ func TestRegistryResolvesEverySupportedStage(t *testing.T) {
 		{StageConversation, ConversationV4},
 		{StageConversation, ConversationV5},
 		{StageGenerate, GenerateV3},
+		{StageGenerate, GenerateV4},
 		{StageRevise, ReviseV3},
 		{StageReview, ReviewV2},
 		{StageRepair, RepairV2},
@@ -22,6 +26,25 @@ func TestRegistryResolvesEverySupportedStage(t *testing.T) {
 		}
 		if definition.System == "" || definition.Version != value.version {
 			t.Fatalf("definition = %#v", definition)
+		}
+	}
+}
+
+func TestGenerateV4DemandsDecisionReadyCreativeDirections(t *testing.T) {
+	t.Parallel()
+	definition, err := Resolve(StageGenerate, GenerateV4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"方向名｜触发场景｜内容机制｜证据或缺口｜预期动作",
+		"禁止把同一想法换词重复",
+		"每项只允许一个主要变量",
+		"80–180 个汉字",
+		"精确数字都必须逐字存在于证据上下文",
+	} {
+		if !strings.Contains(definition.System, expected) {
+			t.Fatalf("GenerateV4 prompt omitted %q", expected)
 		}
 	}
 }

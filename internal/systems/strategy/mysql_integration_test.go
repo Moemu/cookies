@@ -344,7 +344,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatalf("get generation metadata: %v", err)
 	}
 	if metadata.GenerationMode != "deterministic" ||
-		metadata.PromptVersion != "strategy.generate.v3" ||
+		metadata.PromptVersion != "strategy.generate.v4" ||
 		len(metadata.SkillVersions) < 3 ||
 		len(metadata.SkillSnapshotHashes) < 2 ||
 		len(metadata.GenerationContextHash) != 64 ||
@@ -697,6 +697,25 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || handoffV2.PackageRef.PackageVersion != 2 ||
 		handoffV2.HandoffContentHash.Equal(handoffV1.HandoffContentHash) {
 		t.Fatalf("isolated handoff v2: %#v err=%v", handoffV2, err)
+	}
+	approvedV2Draft, err := service.GetDraft(ctx, actor, readyV2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels := append([]strategy.ChannelStrategy(nil), approvedV2Draft.Revision.Document.ChannelStrategy...)
+	channels[0].Formats = append(channels[0].Formats, "小红书图文笔记")
+	channelPayload, err := json.Marshal(channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeRevisionDraft, duplicate, err := service.PatchStrategy(ctx, actor, contract.IdempotencyKey("strategy_patch_route_revision_"+suffix), approvedV2Draft.ID, strategy.StrategySectionPatch{
+		ExpectedVersion: approvedV2Draft.Version, BaseRevision: approvedV2Draft.CurrentRevision,
+		Section: "channel_strategy", Value: channelPayload,
+	})
+	if err != nil || duplicate || routeRevisionDraft.Status != "draft" ||
+		routeRevisionDraft.CurrentRevision != approvedV2Draft.CurrentRevision+1 ||
+		!strings.Contains(strings.Join(routeRevisionDraft.Revision.Document.ChannelStrategy[0].Formats, " "), "小红书图文笔记") {
+		t.Fatalf("create route revision from approved strategy: draft=%#v duplicate=%v err=%v", routeRevisionDraft, duplicate, err)
 	}
 	var outboxCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_outbox WHERE organization_id = ?

@@ -34,11 +34,36 @@ type CreativeIntakeV3 struct {
 }
 
 func (value CreativeIntake) V3View() (CreativeIntakeV3, error) {
-	if value.ContractVersion != CreativeIntakeV3ContractVersion ||
-		value.Request.StrategyPackage == nil ||
-		len(value.Request.StrategyHandoffInput) == 0 ||
-		value.Request.SelectedRouteID == "" {
+	if value.ContractVersion != CreativeIntakeV3ContractVersion || value.Request.SelectedRouteID == "" {
 		return CreativeIntakeV3{}, fmt.Errorf("creative intake is not a complete v3 snapshot")
+	}
+	if value.Source == IntakeSourceManual {
+		generationReady := false
+		for _, route := range value.Request.CreativeRoutes {
+			if route.RouteID == value.Request.SelectedRouteID {
+				generationReady = route.ReadinessStatus == "ready"
+				break
+			}
+		}
+		return CreativeIntakeV3{
+			ContractVersion: CreativeIntakeV3ContractVersion, ID: value.ID,
+			OrganizationID: string(value.OrganizationID), ProjectID: string(value.ProjectID),
+			Source: value.Source, Status: value.Status,
+			SelectedRouteID:   value.Request.SelectedRouteID,
+			InputIdentityHash: value.InputIdentityHash,
+			Readiness: CreativeIntakeReadinessV3{
+				PlanningReady:   value.Status == IntakeReady,
+				GenerationReady: value.Status == IntakeReady && generationReady,
+				ProductionReady: false,
+			},
+			Blockers: []json.RawMessage{}, Warnings: []json.RawMessage{}, Assumptions: []string{},
+			ConfirmedBy: value.ConfirmedBy, Version: value.Version,
+			CreatedAt: value.CreatedAt.Format(timeFormatRFC3339),
+			UpdatedAt: value.UpdatedAt.Format(timeFormatRFC3339),
+		}, nil
+	}
+	if value.Request.StrategyPackage == nil || len(value.Request.StrategyHandoffInput) == 0 {
+		return CreativeIntakeV3{}, fmt.Errorf("creative intake is not a complete v3 strategy snapshot")
 	}
 	var handoff struct {
 		Routes []struct {
