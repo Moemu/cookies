@@ -461,6 +461,9 @@ type applicationStub struct {
 
 	capabilityOperations insights.CapabilityOperations
 	settings             insights.InsightSettings
+	thresholds           insights.ResolvedThresholds
+	thresholdRequest     insights.SaveThresholdsRequest
+	thresholdHistory     []insights.ThresholdSet
 
 	experiment        insights.Experiment
 	readout           insights.ExperimentReadout
@@ -680,6 +683,17 @@ func (s *applicationStub) GetCapabilityOperations(_ context.Context, _ contract.
 }
 func (s *applicationStub) GetInsightSettings(_ context.Context, _ contract.ActorContext, _ contract.ProjectID) (insights.InsightSettings, error) {
 	return s.settings, nil
+}
+func (s *applicationStub) GetThresholds(_ context.Context, _ contract.ActorContext, _ contract.ProjectID) (insights.ResolvedThresholds, error) {
+	return s.thresholds, nil
+}
+func (s *applicationStub) SaveThresholds(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.SaveThresholdsRequest) (insights.ResolvedThresholds, error) {
+	s.thresholdRequest = request
+	s.thresholds.Version++
+	return s.thresholds, nil
+}
+func (s *applicationStub) ListThresholdHistory(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ int) ([]insights.ThresholdSet, error) {
+	return s.thresholdHistory, nil
 }
 func (s *applicationStub) CreateExperiment(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateExperimentRequest) (insights.Experiment, error) {
 	s.experimentRequest = request
@@ -965,5 +979,45 @@ func TestInsightsHTTPExposesExperimentSurface(t *testing.T) {
 	// 判定不在入参里：能传判定，事先定的门槛就形同虚设。
 	if app.interpretation != "露脸开场确实更好" {
 		t.Fatalf("解读没有透传：%q", app.interpretation)
+	}
+}
+
+// 阈值三条路由：读当前生效的一份、追加一版、看改动史。
+//
+// 保存用 PUT——从调用方看这是「把阈值设成这样」。POST 到同一路径会被 404，
+// 而不是被当成「再追加一版」：只增版本是服务层的事，接口上不该有两种写法。
+func TestThresholdRoutes(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{
+		thresholds:       insights.ResolvedThresholds{Version: 2, SufficientImpressions: 10000},
+		thresholdHistory: []insights.ThresholdSet{{ID: "thresholdset_1", Version: 1, Reason: "本项目曝光量普遍偏小"}},
+	}
+	server := New(app)
+	tests := []struct {
+		method string
+		path   string
+		body   string
+		status int
+		want   string
+	}{
+		{http.MethodGet, "/api/insights/v1/projects/project_1/thresholds", "", 200, `"version":2`},
+		{http.MethodPut, "/api/insights/v1/projects/project_1/thresholds",
+			`{"values":{"sufficient_impressions":2000},"reason":"本项目单条素材曝光量普遍在 3000 上下"}`, 200, `"version":3`},
+		{http.MethodGet, "/api/insights/v1/projects/project_1/thresholds/history", "", 200, "thresholdset_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/thresholds", `{}`, 405, ""},
+	}
+	for _, test := range tests {
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, authenticatedRequest(test.method, test.path, test.body))
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
+			t.Fatalf("%s %s status=%d body=%s", test.method, test.path, response.Code, response.Body.String())
+		}
+	}
+	if app.thresholdRequest.Reason == "" {
+		t.Error("理由没有传到服务层——它是这次改动唯一的说明")
+	}
+	if app.thresholdRequest.Values.SufficientImpressions == nil ||
+		*app.thresholdRequest.Values.SufficientImpressions != 2000 {
+		t.Error("要改的那一格没传到服务层")
 	}
 }

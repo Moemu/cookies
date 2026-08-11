@@ -4038,6 +4038,23 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 /* 阈值标注是给「这按什么标准算的」这个问题准备的备注，不是结论本身：
    压到 11px + muted，让它挨着判定徽章但不跟它抢眼睛。 */
 .threshold-stamp { margin-left: 6px; font-size: 11px; line-height: 18px; color: var(--muted); white-space: nowrap; cursor: help; }
+/* 判定阈值那一屏。单列分组表单，不是仪表盘：输入框跟在标签那一行右侧，
+   「现在生效的是多少」紧贴着它——两个数字隔开摆的话，人会把出厂推荐当成现值。 */
+.threshold-input { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.threshold-input input { width: 190px; height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.threshold-input input:focus { outline: none; border-color: var(--cobalt); }
+.threshold-input .setting-value { font-size: 10px; font-weight: 500; color: var(--muted); }
+/* 被调过的那一格标出来。左边一道竖线就够——整行换底色会让人以为它出了问题。 */
+.setting-row.tuned { border-left: 2px solid var(--warning); }
+.setting-recommended .link-button { margin-left: 8px; }
+.threshold-save { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); background: var(--surface); }
+.threshold-save label { display: grid; gap: 5px; font-size: 11px; font-weight: 650; }
+.threshold-save textarea { min-height: 68px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 11px; line-height: 1.6; resize: vertical; }
+.threshold-save-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 4px; }
+.threshold-save .inline-notice { margin: 4px 0 0; }
+.form-hint.error { color: var(--danger); }
+/* 设置页四组共用的开场白：说清这一屏和相邻那一屏的关系，人才知道自己该待在哪一屏。 */
+.settings-intro { padding: 14px 24px 0; color: var(--muted); font-size: 11px; line-height: 1.75; }
 .evidence-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 90vw); background: var(--surface); box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; z-index: 40; }
 .evidence-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .evidence-drawer-head h3 { margin: 0; font-size: 14px; }

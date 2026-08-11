@@ -1371,18 +1371,21 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
     get:
-      summary: Insight system settings (read-only)
+      summary: Insight settings
       description: |
-        系统设置的五个二级视图（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）
-        共用这一个响应。20 §121 给 MVP 的定位是「可采用保守默认值」，并要求
-        「重要阈值显示影响说明和默认推荐；不使用仪表盘布局」；22 §239 记的问题
-        正是「缺少实际阈值影响说明」。
+        「设置」入口下各组共用这一个响应。20 §121 要求「重要阈值显示影响说明和
+        默认推荐；不使用仪表盘布局」；22 §239 记的问题正是「缺少实际阈值影响说明」。
 
 
-        **这个端点只读，没有配对的写接口，也不读库。** 返回的每个值都是代码常量本身，
-        不是抄过来的副本——抄一份迟早会和代码对不上，那时候这一页就从说明变成误导。
-        改阈值要走代码评审：03 §17.3 把「最低样本由全局规则还是行业模板配置」列为
-        待确认，在那条定下来之前开放写接口，等于先替它选了答案。
+        **这个端点本身只读。** 决定三档结论的那七个阈值可以改，改法是
+        `PUT /thresholds`——响应里带 `editable_key` 的格子就是那七个。
+        其余的值仍然是代码常量，一律只读：它们里面有一批是保护性上限
+        （导入行数、最长窗口这类），做成可配置等于把防呆做成了可关闭。
+
+
+        不管可写不可写，返回的数字都取自**正在生效的那份**（没人调过时逐格退回
+        代码常量），而不是另抄一份——抄一份迟早会和代码对不上，那时候这一页
+        就从说明变成误导。
 
 
         路径上带 `project_id` 只为沿用同一套鉴权（需要 `insights.read`）。
@@ -1402,6 +1405,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InsightSettings'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/thresholds:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Judgement thresholds in effect
+      description: |
+        现在生效的那一份判定阈值，每格都有值，且带 `version`。没人调过时
+        `version` 为 0，各格取代码里的出厂设定。
+
+
+        这些数字决定三档结论怎么判：多少曝光算「充分」、几天才给趋势、
+        几条素材才谈驱动因素。每条结论都盖着它用的那一版号
+        （`Judgement.threshold_version`），所以改完阈值之后回头看一条老结论，
+        仍然查得到它是按什么标准算的。
+      operationId: getThresholds
+      responses:
+        '200':
+          description: The resolved thresholds currently in effect.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedThresholds'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      summary: Save judgement thresholds (appends a version)
+      description: |
+        **只增版本，从不原地改。** 服务端追加一版并返回解析后的新一份；
+        已经判出去的结论保持原样，从此刻起判出来的按新版本算。
+
+
+        用 `PUT` 而不是 `POST`：从调用方看这是「把阈值设成这样」，幂等语义对得上；
+        内部追加一版是实现细节。
+
+
+        `values` 里只填要改的格子，**没填的格子表示「没人调过」，跟着代码默认值走**，
+        不是 0。存成 0 的话，将来改了代码默认值，那些从没被调过的部署不会跟着走，
+        而它们本来应该跟着走。
+
+
+        `reason` 必填（1~1000 字）。改判定标准是一件要负责的事；写不出理由的改动
+        多半是试出来的，而试出来的阈值三个月后没人说得清为什么是这个数。
+
+
+        需要 `insights.confirm`，不是 `insights.write`：改的是全组织的判定标准，
+        影响面比写一条数据大得多，应该和「确认经验」同一个门槛。
+
+
+        400 的情形：理由为空或过长；任何一格 ≤ 0；趋势天数低于 3 或异常天数低于 4
+        （再低就等于把「拒绝下结论」这条规则关掉）；充分门槛低于方向门槛
+        （那样一个样本量会同时满足两档，谁生效取决于代码里 if 的先后）。
+      operationId: saveThresholds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveThresholdsRequest'
+      responses:
+        '200':
+          description: The newly appended version, resolved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedThresholds'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/thresholds/history:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Threshold change history
+      description: >-
+        阈值的改动史，版本号从大到小。它和「只增版本」是一件事的两面：只增版本让
+        历史存得下来，这个端点让历史看得见——看不见的话，一条盖着「第 3 版」的结论，
+        人查不到第 3 版当时是什么数、为什么改，那个版本号也就等于没有。
+      operationId: listThresholdHistory
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Threshold sets, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ThresholdSet'
         default:
           $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/data-quality:
@@ -3808,6 +3907,14 @@ components:
           type: array
           items: { type: string }
           description: 词表发布之前存下来的、不在词表内的存量取值。
+        source_counts:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          description: >-
+            这个字段生效的取值分别由谁写下的，键是 FeatureSource (derived / human / ai)，
+            值是素材条数。归因只认 derived 和 human——一个八成取值都是 ai 写的字段，
+            拿它分组比出来的差异说明不了问题，而只看 asset_count 看不出这一点。
+            没有任何素材填过这个字段时缺省。
     FeatureSystemHealth:
       type: object
       required: [asset_type, label, source, asset_count, field_count, used_field_count, open_enum_count, fields]
@@ -3924,6 +4031,68 @@ components:
           description: >-
             词表待办只覆盖**已经有人用过**的开放枚举字段。把六套 schema 里所有没发布词表
             的字段都列进来，真正在散的那几个会被埋掉。
+    Thresholds:
+      type: object
+      description: >-
+        有人调过的那些格子。**缺省表示「没人调过这一格」，跟着代码默认值走**，不是 0。
+      properties:
+        sufficient_impressions: { type: integer, minimum: 1, description: 达到这个曝光量才把置信标成「充分」。 }
+        directional_impressions: { type: integer, minimum: 1, description: 低于这个曝光量连方向都不给，直接判「样本不足」。 }
+        min_trend_days: { type: integer, minimum: 3, description: 有数据的天数少于这个，趋势判「看不出走势」、疲劳不给结论。 }
+        min_anomaly_days: { type: integer, minimum: 4, description: 少于这么多天就没有「常态」可言，一条异常都不报。 }
+        min_driver_assets: { type: integer, minimum: 1, description: 某个取值下不足这么多条素材，就不参与驱动因素比较。 }
+        max_comparison_assets: { type: integer, minimum: 1, description: 素材对比一次最多并排几条，超出的按花费截断。 }
+        quality_window_days: { type: integer, minimum: 1, description: 投前洞察判断「引用的经验背后有没有数据问题」时回看多少天。 }
+    ResolvedThresholds:
+      type: object
+      required:
+        - version
+        - sufficient_impressions
+        - directional_impressions
+        - min_trend_days
+        - min_anomaly_days
+        - min_driver_assets
+        - max_comparison_assets
+        - quality_window_days
+      description: 判定真正拿去用的那份：每格都有值，且带着版本号。
+      properties:
+        version:
+          type: integer
+          format: int64
+          description: 0 表示没人调过，各格是代码里的出厂设定。
+        sufficient_impressions: { type: integer }
+        directional_impressions: { type: integer }
+        min_trend_days: { type: integer }
+        min_anomaly_days: { type: integer }
+        min_driver_assets: { type: integer }
+        max_comparison_assets: { type: integer }
+        quality_window_days: { type: integer }
+    SaveThresholdsRequest:
+      type: object
+      required: [values, reason]
+      properties:
+        values:
+          $ref: '#/components/schemas/Thresholds'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: >-
+            为什么改。跟着这一版一起存下来——三个月后有人问「为什么门槛是这个数」，
+            这一栏就是答案。
+    ThresholdSet:
+      type: object
+      required: [id, organization_id, version, values, reason, changed_by, changed_at]
+      description: 落库的一版。已经存下来的行永远不改，改动只会追加新的一版。
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        version: { type: integer, format: int64 }
+        values:
+          $ref: '#/components/schemas/Thresholds'
+        reason: { type: string }
+        changed_by: { type: string }
+        changed_at: { type: string, format: date-time }
     SettingItem:
       type: object
       required: [key, label, value, effect, recommended, deviates, source, basis]
@@ -3956,12 +4125,32 @@ components:
           description: >-
             文档依据。没有依据的阈值会显式写「无文档指定值」——那本身就是个待办，
             留空则看不出是没依据还是忘了写。
+        editable_key:
+          type: string
+          description: >-
+            非空表示这一条可以改，值是它在 `PUT /thresholds` 请求体 `values` 里的键名。
+            缺省表示只读。可写与否标在**条**上而不是标在组上：样本门槛那一组里五个
+            判定阈值可以改、「异常判定倍数」不能改（它是统计口径，不是业务标准），
+            观察窗口那一组里对比条数和体检窗口可以改、导入行数上限不能改（那是防呆，
+            做成可配置等于做成可关闭）。
     SettingGroup:
       type: object
-      required: [key, label, state, summary, missing, items]
+      required: [key, label, state, view, editable, summary, missing, items]
       properties:
         key: { type: string }
         label: { type: string }
+        view:
+          type: string
+          enum: ['', thresholds, health, dictionary, permission]
+          description: >-
+            这一组落在「设置」入口四组里的哪一组。组和二级视图不再一一对应：
+            判定阈值那一屏由样本门槛 + 观察窗口两组拼出来（窗口天数本来就是判定标准的
+            一部分），名词表并进变量字典。空字符串表示不在设置页上单开一段——
+            只有还没做的组（`not_built`）才允许为空，做了却不展示，就是一组在生效、
+            但没人看得见的设置。
+        editable:
+          type: boolean
+          description: 这一组里有格子可以改。由 items 里的 editable_key 汇总而来。
         state:
           type: string
           enum: [in_effect, not_built]
@@ -3985,11 +4174,12 @@ components:
         editable:
           type: boolean
           description: >-
-            恒为 false。前端据此决定不渲染任何输入框——渲染一个改不动的输入框，
-            比直接说「这里改不了」更让人恼火。
+            这一页上有东西可以改。**逐格的可写与否看 `SettingItem.editable_key`**——
+            前端只在有 editable_key 的格子上渲染输入框，其余照旧只读。
+            渲染一个改不动的输入框，比直接说「这里改不了」更让人恼火。
         editable_note:
           type: string
-          description: 为什么只读、想改要走什么路径。
+          description: 哪些能改、改了会怎样、哪些不能改以及为什么。
         project_scoped:
           type: boolean
           description: 恒为 false。这些值对整个部署生效，路径上的 project_id 只用于鉴权。
@@ -3997,7 +4187,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SettingGroup'
-          description: 顺序与导航上的五个二级视图一致（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）。
+          description: >-
+            每一组带 `view`，说明它落在设置页四组（判定阈值 · 数据体检 · 变量字典 ·
+            确认权限）的哪一组。数据体检那一屏的内容来自 data-quality 端点，
+            不出现在这里。
     CapabilityOperations:
       type: object
       required: [window, generated_at, feature_systems, metrics, caliber_conflicts, skills, evaluations, dashboard]

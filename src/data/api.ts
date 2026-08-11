@@ -2044,6 +2044,13 @@ export type ApiFeatureFieldUsage = ApiFeatureField & {
   /** 全项目只有一条素材用过的取值。是候选不是结论——系统不做语义猜测。 */
   merge_candidates?: string[]
   off_vocabulary?: string[]
+  /**
+   * 生效取值分别由谁写的，键是来源，值是素材条数。没人填过这个字段时缺省。
+   *
+   * 归因只认量出来的和人标的。一个八成取值都是模型猜的字段，拿它分组比出来的差异
+   * 说明不了问题，而只看 asset_count 看不出这一点——填得越满反而越像可信。
+   */
+  source_counts?: Partial<Record<ApiFeatureSource, number>>
 }
 
 export type ApiFeatureSystemHealth = {
@@ -2161,6 +2168,14 @@ export type ApiSettingItem = {
   source: string
   /** 文档依据；没有依据会显式写「无文档指定值」，不会留空。 */
   basis: string
+  /**
+   * 非空表示这一条可以改，值是它在保存请求 values 里的键名。
+   *
+   * 可写与否标在**条**上而不是标在组上：同一组里既有能改的判定阈值，也有不能改的
+   * 保护性上限（导入行数、异常判定倍数这类）。标在组上只能整组开或整组关——
+   * 要么把防呆开关暴露出去，要么把该调的锁死。
+   */
+  editable_key?: string
 }
 
 /**
@@ -2317,11 +2332,24 @@ export type ApiAttachExperimentAssetResult = {
   warnings: string[]
 }
 
+/**
+ * 这一组落在设置页的哪一段。空串表示不单开一段（后端只有 not_built 的组才允许为空）。
+ *
+ * 后端六个组和页面四个视图不是一一对应：样本门槛和观察窗口都归「判定阈值」，
+ * 通知和报告模板还没建设，不上页面。由后端给而不是前端映射，是因为「哪一组该出现在
+ * 哪一段」是设置本身的属性——前端另写一张表，加一个组就要改两处，漏改的那一处
+ * 会让新组在页面上凭空消失。
+ */
+export type ApiSettingsView = '' | 'thresholds' | 'health' | 'dictionary' | 'permission'
+
 export type ApiSettingGroup = {
   key: string
   label: string
   /** in_effect 现在真的在生效；not_built 还没有任何东西，此时 items 为空。 */
   state: 'in_effect' | 'not_built'
+  view: ApiSettingsView
+  /** 这一组里有至少一条 editable_key 非空。由后端汇总，前端不要自己数。 */
+  editable: boolean
   summary: string
   /** 只在 not_built 时有内容。 */
   missing: string[]
@@ -2330,12 +2358,40 @@ export type ApiSettingGroup = {
 
 export type ApiInsightSettings = {
   generated_at: string
-  /** 恒为 false。不要因此渲染禁用输入框——改不动的输入框比一句「这里改不了」更恼人。 */
+  /** 有东西可改。为 false 时整页只读，不要渲染禁用输入框。 */
   editable: boolean
   editable_note: string
-  /** 恒为 false：这些值对整个部署生效，路径上的 project 只用于鉴权。 */
+  /** 恒为 false：这些值对整个组织生效，路径上的 project 只用于鉴权。 */
   project_scoped: boolean
   groups: ApiSettingGroup[]
+}
+
+/**
+ * 现在生效的那一份阈值：每格都有值，且带着版本号。
+ *
+ * version 0 = 一版都没存过，跑的是代码里的出厂设定。
+ */
+export type ApiResolvedThresholds = {
+  version: number
+  sufficient_impressions: number
+  directional_impressions: number
+  min_trend_days: number
+  min_anomaly_days: number
+  min_driver_assets: number
+  max_comparison_assets: number
+  quality_window_days: number
+}
+
+/** 落库的一版。改动史用它，看的是「谁在什么时候、为什么改的」。 */
+export type ApiThresholdSet = {
+  id: string
+  organization_id: string
+  version: number
+  /** 只有被调过的格子有值；没有的格子跑出厂设定。 */
+  values: Partial<Omit<ApiResolvedThresholds, 'version'>>
+  reason: string
+  changed_by: string
+  changed_at: string
 }
 
 /** 一行 canonical 日指标。stat_date 是数据源时区下的当地日期 YYYY-MM-DD。 */
@@ -4585,10 +4641,24 @@ export const api = {
       `${insightProjectPath(projectId)}/capability-operations${query ? `?${query}` : ''}`,
     )
   },
-  // 系统设置整页只读，所以只有 get 没有 put。这些值不来自数据库，全部是代码常量本身，
-  // 每次请求现算——中间隔一层存储，就会有页面和代码对不上的那一天。
+  // 设置页的说明文本全部由后端现算：判定阈值那几条取当前生效的值，其余仍是代码常量本身。
+  // 前端抄一份的话，改了 Go 忘了改这里，这一页就从说明变成误导——那比不做更糟。
   getInsightSettings: (projectId: string) =>
     request<ApiInsightSettings>(`${insightProjectPath(projectId)}/settings`),
+  getThresholds: (projectId: string) =>
+    request<ApiResolvedThresholds>(`${insightProjectPath(projectId)}/thresholds`),
+  // 用 PUT 而不是 POST：从调用方看这是「把阈值设成这样」。落库仍是追加一版，
+  // 不改任何已有的行——已经判过的结论保持它当初按的那一版。
+  //
+  // values 里的 null 表示「这一格改回出厂设定」，不是 0；reason 必填。
+  saveThresholds: (projectId: string, body: {
+    values: Record<string, number | null>
+    reason: string
+  }) => request<ApiResolvedThresholds>(`${insightProjectPath(projectId)}/thresholds`, 'PUT', body),
+  listThresholdHistory: (projectId: string, limit = 20) =>
+    request<{ items: ApiThresholdSet[] }>(
+      `${insightProjectPath(projectId)}/thresholds/history?limit=${limit}`,
+    ),
   // observed_through 要回传界面上那条问题的 last_observed_at，不要用当前时间：
   // 「你处置的是你看到的那个版本」靠它成立，中间问题若又恶化不会被一并盖掉。
   resolveQualityIssue: (

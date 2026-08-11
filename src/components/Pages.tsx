@@ -10,15 +10,14 @@ import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { shortId } from '../data/shortId'
 // 原「分析素材库」「内容分析」「数据接入」三个页面不再直接挂在导航上，
-// 它们现在由 insight/assets 下的视图委托使用，这里不再 import。
-import { CapabilityOperationsPage } from './CapabilityOperationsPage'
+// 它们现在由 insight/assets 下的视图委托使用；「数据质量」「能力运营」同理，
+// 由 insight/settings 下的体检与字典两屏委托，这里都不再 import。
 import { ExperimentCenterPage } from './ExperimentCenterPage'
 import { AnalysisPage, type AnalysisView } from './insight/analysis'
 import { AssetsPage, type AssetsView } from './insight/assets'
 import { ReviewPage, type ReviewView } from './insight/review'
 import { ExperiencePage, type ExperienceView } from './insight/experience'
-import { InsightSettingsPage } from './InsightSettingsPage'
-import { DataQualityPage } from './DataQualityPage'
+import { SettingsPage, type SettingsView } from './insight/settings'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
 import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
@@ -1480,6 +1479,15 @@ const experienceViews: Record<string, ExperienceView> = {
   管经验: 'manage',
 }
 
+// 设置入口的四组。认不出来的落到「判定阈值」——那是这一版唯一新增的能力，
+// 也是四组里唯一能改东西的一屏。
+const settingsViews: Record<string, SettingsView> = {
+  判定阈值: 'thresholds',
+  数据体检: 'health',
+  变量字典: 'dictionary',
+  确认权限: 'permission',
+}
+
 export function ModulePage({ system, item, contextId, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; contextId?: string; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
   const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
@@ -1535,11 +1543,9 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
       onOpenLibrary={() => onOpenProject(currentProject.id, 'creative', 'production', undefined, '源素材')}
       onOpenAnalysis={() => onOpenProject(currentProject.id, 'insight', 'analysis')}/>
     : system.key === 'insight' && item.id === 'experience' ? <ExperiencePage state={dataState} view={experienceViews[activeView] ?? 'lookup'}/>
-    : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'review' ? <ReviewPage state={dataState} view={reviewViews[activeView] ?? 'current'} objectId={objectId}/>
     : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'settings' ? <SettingsPage state={dataState} view={settingsViews[activeView] ?? 'thresholds'}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>

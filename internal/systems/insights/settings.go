@@ -13,20 +13,18 @@ import (
 // 20 §121「**MVP 可采用保守默认值**」「单列分组表单，重要阈值显示影响说明和默认推荐；
 // 不使用仪表盘布局」；22 §239 记的问题是「缺少实际阈值影响说明」）。
 //
-// 这一整页只读，一张表都不建。
+// 这一页首先要做到的不是「让人改阈值」，而是**让人知道现在生效的阈值是多少、
+// 调它会动到什么**。它们决定了页面上什么时候说「充分」、什么时候说「样本不足」、
+// 什么时候干脆不给结论——一个看不见的阈值和一个错的阈值，在使用者那里是同一种东西。
 //
-// 它要解决的不是「让人改阈值」，而是**让人知道现在生效的阈值是多少、调它会动到什么**。
-// 眼下所有阈值都是代码常量，散在 connectors.go / performance.go / operations.go /
-// quality.go / prelaunch.go 五个文件里。它们决定了页面上什么时候说「充分」、什么时候说
-// 「样本不足」、什么时候干脆不给结论——但除了读源码，没有任何地方能看到这些数字。
-// 一个看不见的阈值和一个错的阈值，在使用者那里是同一种东西。
+// 在此之上，决定三档结论的那七个现在**可以改**（thresholds.go）：改动按组织生效、
+// 只增版本，每条结论都盖着它用的那一版号。其余的值仍然是代码常量，一律只读——
+// 它们里面有一批是保护性上限（导入行数、最长窗口），把它们做成可配置等于把
+// 「防呆」做成了「可关闭」。
 //
-// 所以这里直接引用那些常量本身，而不是抄一份数字过来。抄一份迟早会和代码对不上，
+// 不管可写不可写，页面上的数字都取自**正在生效的那份**（ResolvedThresholds，
+// 没人调过时逐格退回代码常量），而不是另抄一份。抄一份迟早会和代码对不上，
 // 那时候这一页就从「说明」变成了「误导」——比不做更糟。
-//
-// 反过来，这也意味着改阈值要走代码评审。这在 MVP 是有意的：03 §17.3 把「最低样本由
-// 全局规则还是行业模板配置」列为**待确认**，在那条定下来之前，做一套可视化配置等于
-// 先替它选了「全局规则」这个答案。
 
 // SettingGroupState 说明这一组设置现在是什么处境。
 type SettingGroupState string
@@ -63,13 +61,44 @@ type SettingItem struct {
 	Source string `json:"source"`
 	// Basis 是文档依据。没有依据的阈值要显式写「无文档依据」，那本身就是个待办。
 	Basis string `json:"basis"`
+	// EditableKey 非空表示这一条可以改，值是它在保存请求 values 里的键名。
+	//
+	// 可写与否标在**条**上而不是标在组上：样本门槛那一组里，五个判定阈值可以改，
+	// 「异常判定倍数」不能改（它是统计口径，不是业务标准）；观察窗口那一组里，
+	// 对比条数和体检窗口可以改，导入行数上限不能改。标在组上的话，这两组只能
+	// 整组可写或整组只读——要么把防呆开关暴露出去，要么把该调的锁死。
+	EditableKey string `json:"editable_key,omitempty"`
 }
 
-// SettingGroup 对应导航上的一个二级视图。
+// SettingsView 是「设置」入口下的四组。
+//
+// 一个 SettingGroup 对应设置页上的一段，而不再是一个二级视图：判定阈值那一屏
+// 由样本门槛 + 观察窗口两组拼出来（窗口天数本来就是判定标准的一部分），
+// 名词表并进变量字典。
+type SettingsView string
+
+const (
+	ViewThresholds SettingsView = "thresholds"
+	ViewHealth     SettingsView = "health"
+	ViewDictionary SettingsView = "dictionary"
+	ViewPermission SettingsView = "permission"
+	// ViewNone 表示这一组不在设置页上单开一段。
+	//
+	// 通知和报告模板都是这种：一张表都没建、一个开关都不生效，做成两个空抽屉
+	// 只会让人以为设得上。定义原样留着、状态照旧写「没做」，等真做了再进来。
+	ViewNone SettingsView = ""
+)
+
+// SettingGroup 是设置页上的一段。
 type SettingGroup struct {
 	Key   string            `json:"key"`
 	Label string            `json:"label"`
 	State SettingGroupState `json:"state"`
+	// View 是这一组落在四组里的哪一组。为空表示不展示。
+	View SettingsView `json:"view"`
+	// Editable 表示这一组里有格子可以改。由 Items 里的 EditableKey 汇总而来，
+	// 不单独维护——两处各写一份，迟早出现「组说可写、每一格都只读」。
+	Editable bool `json:"editable"`
 	// Summary 一句话说明这一组管什么。
 	Summary string `json:"summary"`
 	// Missing 只在 State 为 not_built 时有内容：缺的到底是什么、现在怎么替代。
@@ -80,10 +109,11 @@ type SettingGroup struct {
 // InsightSettings 是整页的返回值。
 type InsightSettings struct {
 	GeneratedAt time.Time `json:"generated_at"`
-	// Editable 恒为 false。前端据此决定不渲染任何输入框——渲染一个改不动的输入框，
-	// 比直接说「这里改不了」更让人恼火。
+	// Editable 表示这一页上有东西可以改。逐格的可写与否看 SettingItem.EditableKey——
+	// 前端只在有 EditableKey 的那些格子上渲染输入框，其余照旧只读。
+	// 渲染一个改不动的输入框，比直接说「这里改不了」更让人恼火。
 	Editable bool `json:"editable"`
-	// EditableNote 说明为什么改不了、想改要走什么路径。
+	// EditableNote 说明哪些能改、改了会怎样、哪些不能改以及为什么。
 	EditableNote string `json:"editable_note"`
 	// ProjectScoped 恒为 false：这些值对整个部署生效，不分 Project。
 	// 路径上带 project_id 只是为了沿用同一套鉴权，不代表值会因项目而不同。
@@ -93,40 +123,60 @@ type InsightSettings struct {
 
 // GetInsightSettings 汇总当前生效的阈值与规则。
 //
-// 不读库：这里没有一个值来自数据，全部来自代码常量。要的就是「代码里是什么，
-// 页面上就是什么」——中间隔一层存储，就会有对不上的那一天。
-func (s Service) GetInsightSettings(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (InsightSettings, error) {
+// 数值取自**正在生效的那份**：有人调过就是调过的值，没人调过就逐格退回代码常量。
+// 要的是「判定按什么算，页面上就写什么」——中间隔一层抄写，就会有对不上的那一天。
+func (s Service) GetInsightSettings(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (InsightSettings, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
 		return InsightSettings{}, err
 	}
+	thresholds := s.currentThresholds(ctx, actor.OrganizationID)
+	groups := []SettingGroup{
+		sampleThresholdSettings(thresholds),
+		windowSettings(thresholds),
+		notificationSettings(),
+		confirmationSettings(),
+		reportTemplateSettings(),
+		glossarySettings(),
+	}
+	editable := false
+	for index := range groups {
+		groups[index].Editable = groupIsEditable(groups[index])
+		editable = editable || groups[index].Editable
+	}
 	return InsightSettings{
 		GeneratedAt:   s.now(),
-		Editable:      false,
+		Editable:      editable,
 		ProjectScoped: false,
-		EditableNote: "这一页只读。所有阈值都是代码常量，改动要走代码评审——" +
-			"03 §17.3 把「最低样本由全局规则还是行业模板配置」列为待确认，" +
-			"在那条定下来之前做成可配置，等于先替它选了答案。",
-		Groups: []SettingGroup{
-			sampleThresholdSettings(),
-			windowSettings(),
-			notificationSettings(),
-			confirmationSettings(),
-			reportTemplateSettings(),
-			glossarySettings(),
-		},
+		EditableNote: "判定阈值现在可以改，改动按组织生效、只增版本，每条结论都记下它用的是哪一版；" +
+			"改完之后判出来的结论按新的算，之前的结论保持原样。" +
+			"没标可改的那些是保护性上限（导入行数、最长窗口这类），它们防的是系统被撑爆，" +
+			"不是判定标准——做成可配置等于把防呆做成了可关闭。" +
+			"行业模板级的阈值（同一组织下不同行业用不同门槛）没有做——" +
+			"需要先有一份行业分类口径，那是变量字典的事。",
+		Groups: groups,
 	}, nil
+}
+
+func groupIsEditable(group SettingGroup) bool {
+	for _, item := range group.Items {
+		if item.EditableKey != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // --- 样本门槛 ---
 
-func sampleThresholdSettings() SettingGroup {
+func sampleThresholdSettings(thresholds ResolvedThresholds) SettingGroup {
 	return SettingGroup{
-		Key: "sample", Label: "样本门槛", State: SettingInEffect,
+		Key: "sample", Label: "样本门槛", State: SettingInEffect, View: ViewThresholds,
 		Summary: "决定一个数字什么时候可以被当成结论。低于门槛时系统说「样本不足」，而不是给一个看起来很确定的比率。",
 		Missing: []string{},
 		Items: markDeviations([]SettingItem{{
 			Key: "sufficient_sample_impressions", Label: "充分样本（曝光）",
-			Value: fmt.Sprintf("%d 次曝光", sufficientSampleImpressions),
+			EditableKey: "sufficient_impressions",
+			Value:       fmt.Sprintf("%d 次曝光", thresholds.SufficientImpressions),
 			Effect: "达到这个量才把置信标成「充分」。调低会让小样本的随机波动被当成结论——" +
 				"两条素材的 CTR 差一倍，在几百次曝光下是常事，和素材本身没关系。",
 			Recommended: "10000 次曝光",
@@ -134,7 +184,8 @@ func sampleThresholdSettings() SettingGroup {
 			Basis:       "03 §17.3 列为待确认，现取保守值",
 		}, {
 			Key: "directional_sample_impressions", Label: "方向性样本（曝光）",
-			Value: fmt.Sprintf("%d 次曝光", directionalSampleImpressions),
+			EditableKey: "directional_impressions",
+			Value:       fmt.Sprintf("%d 次曝光", thresholds.DirectionalImpressions),
 			Effect: "低于这个量连方向都不给，直接判「样本不足」。介于两者之间时给「方向性」，" +
 				"意思是可以据此决定下一步测什么，但不能写进结论。",
 			Recommended: "1000 次曝光",
@@ -142,7 +193,8 @@ func sampleThresholdSettings() SettingGroup {
 			Basis:       "03 §17.3 列为待确认，现取保守值",
 		}, {
 			Key: "min_driver_assets", Label: "驱动因素每组最少素材数",
-			Value: fmt.Sprintf("%d 条素材", minDriverAssets),
+			EditableKey: "min_driver_assets",
+			Value:       fmt.Sprintf("%d 条素材", thresholds.MinDriverAssets),
 			Effect: "某个特征取值下不足这么多条素材，就不参与驱动因素比较。" +
 				"设成 1 会让「某一条素材恰好表现好」被读成「这个取值有效」。",
 			Recommended: "2 条素材",
@@ -150,16 +202,20 @@ func sampleThresholdSettings() SettingGroup {
 			Basis:       "03 §7.5 驱动因素为相关性分析",
 		}, {
 			Key: "min_trend_days", Label: "趋势与疲劳最少天数",
-			Value: fmt.Sprintf("%d 天", minTrendDays),
+			EditableKey: "min_trend_days",
+			Value:       fmt.Sprintf("%d 天", thresholds.MinTrendDays),
 			Effect: "窗口内有数据的天数少于这个，趋势判「看不出走势」、疲劳不给结论。" +
-				"疲劳本来就是个趋势判断，两三天看不出趋势，只能看出波动。",
+				"疲劳本来就是个趋势判断，两三天看不出趋势，只能看出波动。" +
+				fmt.Sprintf("不能低于 %d 天：再低就等于把「拒绝下结论」这条规则关掉。", floorTrendDays),
 			Recommended: "4 天",
 			Source:      "internal/systems/insights/performance.go:213",
 			Basis:       "03 §7.4 疲劳识别",
 		}, {
 			Key: "min_anomaly_days", Label: "异常检测最少天数",
-			Value:       fmt.Sprintf("%d 天", minAnomalyDays),
-			Effect:      "少于这么多天就没有「常态」可言，此时算出来的异常全是噪声，所以一条都不报。",
+			EditableKey: "min_anomaly_days",
+			Value:       fmt.Sprintf("%d 天", thresholds.MinAnomalyDays),
+			Effect: "少于这么多天就没有「常态」可言，此时算出来的异常全是噪声，所以一条都不报。" +
+				fmt.Sprintf("不能低于 %d 天，理由同上。", floorAnomalyDays),
 			Recommended: "5 天",
 			Source:      "internal/systems/insights/performance.go:216",
 			Basis:       "03 §7.4 异常识别",
@@ -209,9 +265,9 @@ func markDeviations(items []SettingItem) []SettingItem {
 
 // --- 观察窗口 ---
 
-func windowSettings() SettingGroup {
+func windowSettings(thresholds ResolvedThresholds) SettingGroup {
 	return SettingGroup{
-		Key: "window", Label: "观察窗口", State: SettingInEffect,
+		Key: "window", Label: "观察窗口", State: SettingInEffect, View: ViewThresholds,
 		Summary: "一次分析回看多久、一次请求最多处理多少。这些是上限不是默认值：调大不会让结论更准，只会让请求更慢。",
 		Missing: []string{},
 		Items: markDeviations([]SettingItem{{
@@ -224,7 +280,8 @@ func windowSettings() SettingGroup {
 			Basis:       "无文档指定值，按一年零余量取",
 		}, {
 			Key: "prelaunch_quality_window_days", Label: "投前洞察数据质量回看窗口",
-			Value: fmt.Sprintf("%d 天", preLaunchQualityWindowDays),
+			EditableKey: "quality_window_days",
+			Value:       fmt.Sprintf("%d 天", thresholds.QualityWindowDays),
 			Effect: "投前洞察判断「引用的经验背后有没有数据问题」时回看这么多天。" +
 				"调短会漏掉更早发生但还没修的问题，调长会把早已修复的旧问题一直挂在提示里。",
 			Recommended: "30 天",
@@ -240,7 +297,8 @@ func windowSettings() SettingGroup {
 			Basis:       "doc10 §11 任何洞察必须展示数据截止时间",
 		}, {
 			Key: "max_comparison_assets", Label: "素材对比一次最多几条",
-			Value: fmt.Sprintf("%d 条素材", maxComparisonAssets),
+			EditableKey: "max_comparison_assets",
+			Value:       fmt.Sprintf("%d 条素材", thresholds.MaxComparisonAssets),
 			Effect: "超出的按花费截断。这条更多是可读性约束：一次并排二十条，人看不出哪两条只差一个变量，" +
 				"而「只差一个变量」正是对比能不能归因的前提。",
 			Recommended: "8 条素材",
@@ -269,7 +327,7 @@ func windowSettings() SettingGroup {
 
 func notificationSettings() SettingGroup {
 	return SettingGroup{
-		Key: "notification", Label: "通知", State: SettingNotBuilt,
+		Key: "notification", Label: "通知", State: SettingNotBuilt, View: ViewNone,
 		Summary: "还没有任何通知机制。所有需要人注意的事，现在都只能靠人主动打开对应页面才看得到。",
 		Missing: []string{
 			"没有通知对象，也没有触发规则。代码里没有一处会主动往外发消息。",
@@ -284,7 +342,7 @@ func notificationSettings() SettingGroup {
 
 func confirmationSettings() SettingGroup {
 	return SettingGroup{
-		Key: "confirmation", Label: "确认权限", State: SettingInEffect,
+		Key: "confirmation", Label: "确认权限", State: SettingInEffect, View: ViewPermission,
 		Summary: "谁能把一条结论从「机器说的」变成「我们认的」。这三个权限已经在每个接口上生效，但目前只能按账号授予，不能按角色配。",
 		Missing: []string{},
 		Items: []SettingItem{{
@@ -326,7 +384,7 @@ func confirmationSettings() SettingGroup {
 
 func reportTemplateSettings() SettingGroup {
 	return SettingGroup{
-		Key: "report_template", Label: "报告模板", State: SettingNotBuilt,
+		Key: "report_template", Label: "报告模板", State: SettingNotBuilt, View: ViewNone,
 		Summary: "还没有模板对象。现在只有一种报告：一轮投放的复盘，它的结构写死在代码里。",
 		Missing: []string{
 			"没有模板、没有调度、没有导出产物三类对象，所以「周期报告」「自定义报告」「版本与导出」都无从配置。",
@@ -362,7 +420,7 @@ func glossarySettings() SettingGroup {
 		})
 	}
 	return SettingGroup{
-		Key: "glossary", Label: "名词表", State: SettingInEffect,
+		Key: "glossary", Label: "名词表", State: SettingInEffect, View: ViewDictionary,
 		Summary: "这个模块里每件事只有一个叫法。表上「不要再叫」的说法不许再出现在任何页面文案里，有测试拦着。",
 		Missing: []string{},
 		Items:   items,

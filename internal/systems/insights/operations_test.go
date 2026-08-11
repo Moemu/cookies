@@ -140,6 +140,53 @@ func TestGovernedFieldWithInVocabularyValuesHasNoBacklog(t *testing.T) {
 	}
 }
 
+// 字段这一层要说得出「这些取值是谁写的」，而且数的是**生效值**。
+//
+// 「填了 10 条」和「其中 8 条是模型猜的」在治理面上是两个完全不同的结论：前者看上去
+// 这个字段可以拿去归因，后者说明不行。只给前者，字段填得越满越像可信。
+func TestFieldUsageSaysWhoWroteTheValues(t *testing.T) {
+	assets := []Asset{
+		typedAsset("asset_a", "前贴 A", AssetTypePrerollAd),
+		typedAsset("asset_b", "前贴 B", AssetTypePrerollAd),
+		typedAsset("asset_c", "前贴 C", AssetTypePrerollAd),
+	}
+	features := []AssetFeature{
+		layeredFeature("asset_a", AssetTypePrerollAd, "opening_structure", "悬念开场", SourceAI, ReviewPending),
+		layeredFeature("asset_b", AssetTypePrerollAd, "opening_structure", "利益开场", SourceAI, ReviewPending),
+		// 这一条上人推翻了机器：生效的是人写的那个，所以来源应当记在「人标的」头上，
+		// 机器那一笔不能同时也算进去——算进去的话三条素材会数出四个来源。
+		layeredFeature("asset_c", AssetTypePrerollAd, "opening_structure", "悬念开场", SourceAI, ReviewPending),
+		layeredFeature("asset_c", AssetTypePrerollAd, "opening_structure", "利益开场", SourceHuman, ReviewConfirmed),
+	}
+	report := buildCapabilityOperations(operationsWindow(7), assets, features, nil, nil, time.Now())
+	field := fieldUsage(t, report.FeatureSystems, AssetTypePrerollAd, "opening_structure")
+	if field.SourceCounts[SourceAI] != 2 {
+		t.Errorf("两条素材的生效值是模型写的，实际数出 %d", field.SourceCounts[SourceAI])
+	}
+	if field.SourceCounts[SourceHuman] != 1 {
+		t.Errorf("一条素材的生效值是人写的，实际数出 %d", field.SourceCounts[SourceHuman])
+	}
+	total := 0
+	for _, count := range field.SourceCounts {
+		total += count
+	}
+	if total != field.AssetCount {
+		t.Errorf("按来源分开数出来的总数 %d 和填过这个字段的素材数 %d 对不上", total, field.AssetCount)
+	}
+}
+
+// 没人填过的字段不给 source_counts。给一个全零的 map，页面上会出现
+// 「量出来的 0 · 人标的 0 · 模型猜的 0」这样一行——它看起来像统计结果，
+// 实际只是「这个字段没人用过」。
+func TestUnusedFieldHasNoSourceCounts(t *testing.T) {
+	assets := []Asset{typedAsset("asset_a", "前贴 A", AssetTypePrerollAd)}
+	report := buildCapabilityOperations(operationsWindow(7), assets, nil, nil, nil, time.Now())
+	field := fieldUsage(t, report.FeatureSystems, AssetTypePrerollAd, "opening_structure")
+	if field.SourceCounts != nil {
+		t.Errorf("没人填过的字段不该带来源统计，实际 %+v", field.SourceCounts)
+	}
+}
+
 // 样本不足时不给准确率，并且明说为什么。
 func TestEvaluationWithFewSamplesRefusesToReportAccuracy(t *testing.T) {
 	assets := []Asset{typedAsset("asset_a", "前贴 A", AssetTypePrerollAd)}

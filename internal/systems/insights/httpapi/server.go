@@ -100,9 +100,14 @@ type Application interface {
 	StartExperiment(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experiment, error)
 	ConcludeExperiment(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ConcludeExperimentRequest) (insights.Experiment, error)
 
-	// 系统设置（03 §78；20 §121）。只读且不读库：返回的每个值都是代码常量本身，
-	// 不是抄过来的副本——抄一份迟早和代码对不上，那时候这一页就从说明变成误导。
+	// 设置（03 §78；20 §121）。整页的值取自正在生效的那份阈值，
+	// 抄一份迟早和代码对不上，那时候这一页就从说明变成误导。
 	GetInsightSettings(context.Context, contract.ActorContext, contract.ProjectID) (insights.InsightSettings, error)
+
+	// 判定阈值。只增版本，所以没有「改第 3 版」这种方法——保存就是追加一版。
+	GetThresholds(context.Context, contract.ActorContext, contract.ProjectID) (insights.ResolvedThresholds, error)
+	SaveThresholds(context.Context, contract.ActorContext, contract.ProjectID, insights.SaveThresholdsRequest) (insights.ResolvedThresholds, error)
+	ListThresholdHistory(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.ThresholdSet, error)
 }
 
 type Server struct {
@@ -131,6 +136,13 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/performance", server.performance)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/capability-operations", server.capabilityOperations)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/settings", server.settings)
+	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/thresholds", server.getThresholds)
+	// 用 PUT 而不是 POST：从调用方看这是「把阈值设成这样」，幂等语义对得上。
+	// 服务端内部追加一版，那是实现细节。
+	server.mux.HandleFunc("PUT /api/insights/v1/projects/{project_id}/thresholds", server.saveThresholds)
+	// 改动史要看得见。看不见的话，一条盖着「第 3 版」的结论，人查不到第 3 版
+	// 当时是什么数、为什么改——那个版本号也就等于没有。
+	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/thresholds/history", server.thresholdHistory)
 	server.registerAssetRoutes()
 	server.registerConnectorRoutes()
 	server.registerExperimentRoutes()
@@ -486,11 +498,10 @@ func (s *Server) capabilityOperations(writer http.ResponseWriter, request *http.
 	writeJSON(writer, http.StatusOK, value)
 }
 
-// settings 返回五组当前生效的阈值与规则。没有 PUT/PATCH 配对：整页只读，
-// 改阈值要走代码评审（03 §17.3 把「最低样本由谁配置」列为待确认，在那条定下来
-// 之前开放写接口，等于先替它选了答案）。
+// settings 返回各组当前生效的阈值与规则，含每一条的影响说明与出厂推荐。
+// 判定阈值那几条带 editable_key，改它们走 PUT /thresholds。
 //
-// 路径上带 project_id 只为沿用同一套鉴权，值本身对整个部署生效，不分 Project。
+// 路径上带 project_id 只为沿用同一套鉴权，值本身按组织生效，不分 Project。
 func (s *Server) settings(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.app.GetInsightSettings(request.Context(), mustActor(request), projectID(request))
 	if err != nil {
@@ -498,6 +509,39 @@ func (s *Server) settings(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) getThresholds(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.app.GetThresholds(request.Context(), mustActor(request), projectID(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+// saveThresholds 追加一版。理由必填，服务层会拦——改判定标准是要负责的事，
+// 写不出理由的改动三个月后没人说得清为什么是这个数。
+func (s *Server) saveThresholds(writer http.ResponseWriter, request *http.Request) {
+	var body insights.SaveThresholdsRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.SaveThresholds(request.Context(), mustActor(request), projectID(request), body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) thresholdHistory(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.app.ListThresholdHistory(request.Context(), mustActor(request), projectID(request), queryLimit(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func mustActor(request *http.Request) contract.ActorContext {

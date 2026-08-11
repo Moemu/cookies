@@ -127,35 +127,145 @@ func TestUnbuiltGroupsSayWhatIsMissingInsteadOfShowingAnEmptyForm(t *testing.T) 
 	}
 }
 
-// 分组要和导航上的二级视图一一对应，顺序也一致（03 §78、19 §289）。
-// 少一个就会有一个标签点开是空的，多一个就会有一组设置没有入口。
+// 每一组都要有去处：落在设置页四组之一，或者明写「不展示」。
 //
-// 名词表是重构时加的第六个：设计把「这个模块每件事只有一个叫法」当成一条生效中的
-// 规则，规则就该和阈值摆在同一页，理由也一样——你改不了，但你有权知道。
-func TestGroupsMatchTheNavigationViews(t *testing.T) {
+// 收敛成一个「设置」入口之后，组和二级视图不再一一对应——判定阈值那一屏由
+// 样本门槛 + 观察窗口拼出来（窗口天数本来就是判定标准的一部分），名词表并进
+// 变量字典。所以这条测试盯的不再是顺序，而是**没有一组是孤儿**：漏标 View
+// 的组会从页面上悄悄消失，而它的值还在生效。
+func TestEveryGroupLandsInOneOfTheFourViews(t *testing.T) {
 	settings := mustSettings(t)
-	want := []string{"样本门槛", "观察窗口", "通知", "确认权限", "报告模板", "名词表"}
-	if len(settings.Groups) != len(want) {
-		t.Fatalf("分组数 %d，导航上是 %d 个二级视图", len(settings.Groups), len(want))
+	allowed := map[SettingsView]bool{
+		ViewThresholds: true, ViewHealth: true, ViewDictionary: true, ViewPermission: true,
 	}
-	for index, label := range want {
-		if settings.Groups[index].Label != label {
-			t.Errorf("第 %d 组是 %q，导航上是 %q", index+1, settings.Groups[index].Label, label)
+	seen := map[SettingsView]bool{}
+	for _, group := range settings.Groups {
+		if group.View == ViewNone {
+			// 不展示只有一个正当理由：这一组根本还没做。做了却不展示，
+			// 就是一组在生效、但没人看得见的设置。
+			if group.State != SettingNotBuilt {
+				t.Errorf("分组 %s 在生效却不在设置页上任何一组里", group.Key)
+			}
+			continue
+		}
+		if !allowed[group.View] {
+			t.Errorf("分组 %s 落在 %q，不是四组之一", group.Key, group.View)
+		}
+		seen[group.View] = true
+	}
+	// 数据体检那一屏的内容来自质量报告接口，不出现在这里，所以不查它。
+	for _, view := range []SettingsView{ViewThresholds, ViewDictionary, ViewPermission} {
+		if !seen[view] {
+			t.Errorf("%q 这一组在后端一条设置都没有，页面上会是空的", view)
 		}
 	}
 }
 
-// 整页只读是有意的（03 §17.3 未定「最低样本由谁配置」）。Editable 一旦为 true，
-// 前端会渲染出改不动的输入框。同时空切片不能序列化成 null——前端取 .length 会白屏，
-// 这个坑在能力运营那批已经踩过一次。
-func TestPageIsReadOnlyAndNeverSerializesNullLists(t *testing.T) {
+// 可写与否要标在**条**上：整组可写会把「异常判定倍数」这种统计口径、
+// 「导入行数上限」这种防呆开关一起放出去。同时空切片不能序列化成 null——
+// 前端取 .length 会白屏，这个坑在能力运营那批已经踩过一次。
+func TestOnlyTheJudgementThresholdsAreEditable(t *testing.T) {
 	settings := mustSettings(t)
-	if settings.Editable {
-		t.Error("整页必须只读")
+	if !settings.Editable {
+		t.Error("判定阈值已经可以改了，整页不该再标成只读")
 	}
 	if strings.TrimSpace(settings.EditableNote) == "" {
-		t.Error("只读就要说明为什么只读、想改走什么路径")
+		t.Error("要说清哪些能改、改了会怎样、哪些不能改以及为什么")
 	}
+	locked := []string{"anomaly_mad_multiple", "max_import_rows", "max_window_days", "min_evaluation_samples"}
+	editable := map[string]bool{}
+	for _, group := range settings.Groups {
+		for _, item := range group.Items {
+			if item.EditableKey != "" {
+				editable[item.Key] = true
+			}
+		}
+	}
+	for _, key := range locked {
+		if editable[key] {
+			t.Errorf("%s 不该可写：它要么是统计口径，要么是防呆上限，做成可配置等于做成可关闭", key)
+		}
+	}
+	if len(editable) != 7 {
+		t.Errorf("可写的格子有 %d 个，判定阈值一共 7 个", len(editable))
+	}
+}
+
+// EditableKey 是前端保存时用的键名。写错一个字母，页面上照样渲染出输入框、
+// 照样能点保存，后端收到一个不认识的键，静默丢掉——人以为改了，实际没改。
+// 所以这些键必须逐个对得上 Thresholds 的 JSON 字段。
+func TestEditableKeysAreRealThresholdFields(t *testing.T) {
+	sample := 1
+	raw, err := json.Marshal(Thresholds{
+		SufficientImpressions: &sample, DirectionalImpressions: &sample,
+		MinTrendDays: &sample, MinAnomalyDays: &sample, MinDriverAssets: &sample,
+		MaxComparisonAssets: &sample, QualityWindowDays: &sample,
+	})
+	if err != nil {
+		t.Fatalf("序列化失败：%v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("反序列化失败：%v", err)
+	}
+	for _, group := range mustSettings(t).Groups {
+		for _, item := range group.Items {
+			if item.EditableKey == "" {
+				continue
+			}
+			if _, ok := fields[item.EditableKey]; !ok {
+				t.Errorf("%s 的 editable_key=%q 在 Thresholds 里没有这个字段——存下去会被静默丢掉",
+					item.Key, item.EditableKey)
+			}
+		}
+	}
+}
+
+// 有人调过之后，页面上要显示调过的值，并标出它偏离了出厂推荐。
+// 这一页写的要是判定真正在用的那份，否则人按着页面上的数字去理解结论，会理解错。
+func TestSettingsShowTheThresholdsInEffectNotTheConstants(t *testing.T) {
+	tuned := 2000
+	service := testService()
+	service.Thresholds = stubThresholds{set: ThresholdSet{
+		Version: 5, Values: Thresholds{SufficientImpressions: &tuned},
+	}}
+	settings, err := service.GetInsightSettings(context.Background(), testActor(), "k_project_1")
+	if err != nil {
+		t.Fatalf("读取设置失败：%v", err)
+	}
+	for _, group := range settings.Groups {
+		for _, item := range group.Items {
+			if item.Key != "sufficient_sample_impressions" {
+				continue
+			}
+			if !strings.Contains(item.Value, "2000") {
+				t.Errorf("充分门槛显示 %q，实际生效的是 2000", item.Value)
+			}
+			if !item.Deviates {
+				t.Error("调过的格子要标出来，否则没人知道它和出厂推荐不一样了")
+			}
+			return
+		}
+	}
+	t.Fatal("设置页上找不到充分门槛")
+}
+
+type stubThresholds struct{ set ThresholdSet }
+
+func (s stubThresholds) LatestThresholdSet(context.Context, contract.OrganizationID) (ThresholdSet, error) {
+	return s.set, nil
+}
+
+func (s stubThresholds) AppendThresholdSet(_ context.Context, value ThresholdSet) (ThresholdSet, error) {
+	return value, nil
+}
+
+func (s stubThresholds) ListThresholdSets(context.Context, contract.OrganizationID, int) ([]ThresholdSet, error) {
+	return []ThresholdSet{s.set}, nil
+}
+
+func TestSettingsNeverSerializeNullLists(t *testing.T) {
+	settings := mustSettings(t)
 	if settings.ProjectScoped {
 		t.Error("这些值对整个部署生效，不分 Project")
 	}
