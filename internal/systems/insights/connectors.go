@@ -246,6 +246,16 @@ const (
 	ConfidenceConfounded  ConfidenceLevel = "confounded"  // 存在混杂
 )
 
+// allConfidenceLevels 是这个枚举的完整清单。verdict.go 把四个档位收敛成三个，
+// 收敛表写在测试里；有了这份清单，新增档位却忘了给它三档归属会直接测试失败，
+// 而不是静默落进默认分支。
+var allConfidenceLevels = []ConfidenceLevel{
+	ConfidenceSufficient,
+	ConfidenceDirectional,
+	ConfidenceLowSample,
+	ConfidenceConfounded,
+}
+
 func (c ConfidenceLevel) Label() string {
 	switch c {
 	case ConfidenceSufficient:
