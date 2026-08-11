@@ -28,8 +28,14 @@ services:
       COOKIES_ENV: local
       COOKIES_HTTP_ADDR: :18080
       COOKIES_MYSQL_DSN: cookies:${COOKIES_MYSQL_PASSWORD}@tcp(mysql:3306)/cookies?parseTime=true&multiStatements=true
-      COOKIES_BLOB_PROVIDER: filesystem
+      COOKIES_BLOB_PROVIDER: ${COOKIES_BLOB_PROVIDER:-filesystem}
       COOKIES_FILESYSTEM_BLOB_ROOT: /var/lib/cookies/blobs
+      COOKIES_TOS_ENDPOINT: ${COOKIES_TOS_ENDPOINT:-}
+      COOKIES_TOS_REGION: ${COOKIES_TOS_REGION:-}
+      COOKIES_TOS_ACCESS_KEY: ${COOKIES_TOS_ACCESS_KEY:-}
+      COOKIES_TOS_SECRET_KEY: ${COOKIES_TOS_SECRET_KEY:-}
+      COOKIES_TOS_SECURITY_TOKEN: ${COOKIES_TOS_SECURITY_TOKEN:-}
+      COOKIES_TOS_BUCKET: ${COOKIES_TOS_BUCKET:-}
       COOKIES_SCANNER_MODE: noop
       COOKIES_PASSWORD_AUTH_ENABLED: "true"
       COOKIES_ADMIN_USERNAME: ${COOKIES_ADMIN_USERNAME:-Admin}
@@ -41,6 +47,7 @@ services:
       COOKIES_LOCAL_PROJECT_ID: project_local
       COOKIES_LOCAL_SCOPES: project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand,creative.read,creative.write,strategy.read,strategy.write,strategy.confirm,strategy.review,strategy.approve,strategy.package.read,delivery.read,delivery.write,delivery.approve,delivery.execute,insights.read,insights.write,insights.confirm
       COOKIES_PROVIDER_IMAGE_ADAPTER: ${COOKIES_PROVIDER_IMAGE_ADAPTER:-fake}
+      COOKIES_PROVIDER_VIDEO_ADAPTER: ${COOKIES_PROVIDER_VIDEO_ADAPTER:-fake}
       COOKIES_PROVIDER_TEXT_ADAPTER: ${COOKIES_PROVIDER_TEXT_ADAPTER:-fake}
       COOKIES_PROVIDER_MASTER_KEY: ${COOKIES_PROVIDER_MASTER_KEY:-}
       COOKIES_PROVIDER_MASTER_KEY_VERSION: ${COOKIES_PROVIDER_MASTER_KEY_VERSION:-v1}
@@ -52,6 +59,7 @@ services:
       COOKIES_STRATEGY_APPROVE_ENABLED: "true"
       COOKIES_STRATEGY_PACKAGE_TO_CREATIVE_ENABLED: "true"
       COOKIES_STRATEGY_TEXT_MODEL_ALIAS: ${COOKIES_STRATEGY_TEXT_MODEL_ALIAS:-cookies.text.standard}
+      COOKIES_STRATEGY_LITE_TEXT_MODEL_ALIAS: ${COOKIES_STRATEGY_LITE_TEXT_MODEL_ALIAS:-cookies.text.lite}
       COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS: ${COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS:-cookies.text.deep_review}
       COOKIES_STRATEGY_PROMPT_VERSION: strategy.generate.v4
       COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION: strategy.conversation.v4
@@ -60,6 +68,16 @@ services:
       COOKIES_STRATEGY_REPAIR_PROMPT_VERSION: strategy.repair.v2
       COOKIES_STRATEGY_CRITIC_ENABLED: "false"
       COOKIES_STRATEGY_CONTEXT_SELECTION_ENABLED: "true"
+      COOKIES_RESEARCH_SEED_ENABLED: ${COOKIES_RESEARCH_SEED_ENABLED:-false}
+      COOKIES_RESEARCH_SEED_MODEL_ALIAS: ${COOKIES_RESEARCH_SEED_MODEL_ALIAS:-cookies.research.web.standard}
+      COOKIES_RESEARCH_TIKA_ENABLED: ${COOKIES_RESEARCH_TIKA_ENABLED:-false}
+      COOKIES_RESEARCH_TIKA_BASE_URL: ${COOKIES_RESEARCH_TIKA_BASE_URL:-http://tika:9998}
+      COOKIES_RESEARCH_TIKA_VERSION: ${COOKIES_RESEARCH_TIKA_VERSION:-3.2.3.0}
+      COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS: ${COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS:-120}
+      COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES: ${COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES:-20971520}
+      COOKIES_DOCUMENT_VISION_ENABLED: ${COOKIES_DOCUMENT_VISION_ENABLED:-false}
+      COOKIES_DOCUMENT_VISION_MODEL_ALIAS: ${COOKIES_DOCUMENT_VISION_MODEL_ALIAS:-cookies.document.vision.standard}
+      COOKIES_DOCUMENT_CONVERTER_ENABLED: ${COOKIES_DOCUMENT_CONVERTER_ENABLED:-false}
     expose:
       - "18080"
     volumes:
@@ -67,11 +85,17 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      tika:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
+
+  tika:
+    image: apache/tika:3.2.3.0
     restart: unless-stopped
 
   web:
