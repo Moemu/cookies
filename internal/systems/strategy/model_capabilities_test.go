@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
@@ -20,6 +21,23 @@ func (modelCapabilityProjectReader) GetContext(
 	return contract.ProjectContext{
 		OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		BrandID: &brandID, ProductIDs: []contract.ProductID{}, ProjectContextVersion: 1,
+	}, nil
+}
+
+type modelCapabilityDocumentVisionInspector struct {
+	err error
+}
+
+func (i modelCapabilityDocumentVisionInspector) Inspect(
+	_ context.Context,
+	_ contract.OrganizationID,
+	alias string,
+) (knowledge.DocumentVisionCapability, error) {
+	if i.err != nil {
+		return knowledge.DocumentVisionCapability{ModelAlias: alias, ReasonCode: "DOCUMENT_VISION_ROUTE_UNAVAILABLE"}, i.err
+	}
+	return knowledge.DocumentVisionCapability{
+		Available: true, ModelAlias: alias, UpstreamModel: "las-pdf-parser-v1", RouteRevisionID: "route_las_1",
 	}, nil
 }
 
@@ -44,8 +62,9 @@ func TestModelCapabilitiesUseFixedAliasesAndInspectEveryRoute(t *testing.T) {
 	t.Parallel()
 	service := Service{
 		Projects:                 modelCapabilityProjectReader{},
-		Text:                     &provider.Service{TextAdapter: provider.FakeSyncAdapter{}, VisionAdapter: provider.FakeSyncAdapter{}},
+		Text:                     &provider.Service{TextAdapter: provider.FakeSyncAdapter{}},
 		ResearchRoutes:           modelCapabilityResearchInspector{},
+		DocumentVisionRoutes:     modelCapabilityDocumentVisionInspector{},
 		TextModelAlias:           "cookies.text.standard",
 		LiteTextModelAlias:       "cookies.text.lite",
 		DeepReviewModelAlias:     "cookies.text.deep_review",
@@ -76,6 +95,35 @@ func TestModelCapabilitiesUseFixedAliasesAndInspectEveryRoute(t *testing.T) {
 			t.Fatalf("capability did not use its fixed ready route: %#v", item)
 		}
 	}
+}
+
+func TestModelCapabilitiesUseDedicatedDocumentVisionRoute(t *testing.T) {
+	t.Parallel()
+	service := Service{
+		Projects:                 modelCapabilityProjectReader{},
+		Text:                     &provider.Service{TextAdapter: provider.FakeSyncAdapter{}},
+		ResearchRoutes:           modelCapabilityResearchInspector{},
+		DocumentVisionRoutes:     modelCapabilityDocumentVisionInspector{},
+		TextModelAlias:           "cookies.text.standard",
+		LiteTextModelAlias:       "cookies.text.lite",
+		DeepReviewModelAlias:     "cookies.text.deep_review",
+		ResearchModelAlias:       "cookies.research.web.standard",
+		DocumentVisionModelAlias: "cookies.document.vision.standard",
+	}
+	actor := contract.ActorContext{OrganizationID: "org_1", Scopes: []contract.Scope{ScopeRead}}
+	manifest, err := service.GetModelCapabilities(context.Background(), actor, "project_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range manifest.Items {
+		if item.Capability == ModelCapabilityDocumentVision {
+			if !item.Available || item.UpstreamModel != "las-pdf-parser-v1" || item.RouteRevisionID != "route_las_1" {
+				t.Fatalf("document vision capability=%#v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("document vision capability is missing")
 }
 
 func TestModelCapabilitiesFailClosedWithoutFallback(t *testing.T) {

@@ -11,6 +11,7 @@ export function StrategyWorkspaceShell({ assistant, assistantExpanded = false, a
 }) {
   const style = { '--strategy-assistant-width': `${assistantWidth}px` } as CSSProperties
   return <section
+    aria-label="策略工作区"
     className="strategy-v2-shell"
     data-assistant-expanded={assistantOpen && assistantExpanded ? 'true' : 'false'}
     data-assistant-open={assistantOpen ? 'true' : 'false'}

@@ -363,37 +363,13 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
   overflow: hidden;
   padding-bottom: 36px;
 }
-.strategy-workspace-page > .page-header {
-  min-height: 54px;
-  flex: none;
-  align-items: center;
-  padding: 0;
-}
-.strategy-workspace-page > .page-header > div:first-child {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-}
-.strategy-workspace-page > .page-header h1 {
-  flex: none;
-  font-size: 20px;
-  line-height: 1;
-}
-.strategy-workspace-page > .page-header p {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .strategy-workspace-shell {
   min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  margin-top: 4px;
+  margin-top: 0;
   background: transparent;
 }
 .strategy-workspace-shell > .tabs {
@@ -4829,28 +4805,6 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
     height: auto;
     min-height: calc(100dvh - 56px);
     overflow: visible;
-  }
-
-  .strategy-workspace-page > .page-header {
-    min-height: 76px;
-    align-items: flex-start;
-    padding: 13px 0 10px;
-  }
-
-  .strategy-workspace-page > .page-header > div:first-child {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 5px;
-  }
-
-  .strategy-workspace-page > .page-header p {
-    max-width: 100%;
-    white-space: normal;
-    line-height: 1.45;
-  }
-
-  .strategy-workspace-page > .page-header .page-context-label {
-    display: none;
   }
 
   .strategy-workspace-shell {
