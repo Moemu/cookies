@@ -118,9 +118,15 @@ func TestMiyunHandoffExportRequiresAndForwardsFlatPackageKind(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
 			"/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/export?package="+string(packageKind), ""))
-		if response.Code != http.StatusOK || app.miyunExportPackage != packageKind || !strings.Contains(response.Header().Get("Content-Disposition"), filenamePart) {
+		if response.Code != http.StatusOK || response.Body.String() != "zip" || response.Header().Get("Content-Length") != "3" || app.miyunExportPackage != packageKind || !strings.Contains(response.Header().Get("Content-Disposition"), filenamePart) {
 			t.Fatalf("package=%s status=%d forwarded=%s disposition=%q", packageKind, response.Code, app.miyunExportPackage, response.Header().Get("Content-Disposition"))
 		}
+	}
+	failingApp := &applicationStub{miyunHandoff: insights.MiyunHandoff{ID: "handoff_1"}, miyunExportErr: errors.New("export failed")}
+	failingResponse := httptest.NewRecorder()
+	New(failingApp).ServeHTTP(failingResponse, authenticatedRequest(http.MethodGet, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/export?package=sources", ""))
+	if failingResponse.Code != http.StatusInternalServerError || failingResponse.Body.String() == "zip" || failingResponse.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("failed export status=%d body=%q disposition=%q", failingResponse.Code, failingResponse.Body.String(), failingResponse.Header().Get("Content-Disposition"))
 	}
 }
 
@@ -533,6 +539,7 @@ type applicationStub struct {
 	miyunExportPackage   insights.MiyunHandoffPackageKind
 	miyunMaterialOptions insights.MiyunMaterialListOptions
 	miyunErr             error
+	miyunExportErr       error
 	report               insights.InsightReport
 	experience           insights.Experience
 	listedStatus         insights.ExperienceStatus
@@ -682,7 +689,7 @@ func (s *applicationStub) MarkMiyunHandoffDelivered(context.Context, contract.Ac
 func (s *applicationStub) ExportMiyunHandoff(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, packageKind insights.MiyunHandoffPackageKind, output io.Writer) error {
 	s.miyunExportPackage = packageKind
 	_, _ = output.Write([]byte("zip"))
-	return s.miyunErr
+	return s.miyunExportErr
 }
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {

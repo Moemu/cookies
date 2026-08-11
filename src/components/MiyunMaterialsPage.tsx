@@ -8,6 +8,7 @@ import {
   type ApiMiyunConnection,
   type ApiMiyunCrawlJob,
   type ApiMiyunHandoff,
+  type ApiMiyunHandoffReturn,
   type ApiMiyunMaterial,
   type ApiMiyunMaterialSnapshot,
   type ApiMiyunProductProfile,
@@ -1640,6 +1641,74 @@ export function MiyunMaterialsPage({
     </StateBoundary>
   );
 }
+
+const miyunReturnStatusCopy: Record<ApiMiyunHandoffReturn["status"], string> = {
+  created: "待上传",
+  uploaded: "已上传",
+  failed: "回传失败",
+  returned: "已回传",
+};
+
+const miyunReturnAssociationCopy: Record<ApiMiyunHandoffReturn["association_source"], string> = {
+  crawl_job: "任务级关联",
+  filename: "文件名映射",
+  manifest_xlsx: "清单映射",
+};
+
+function compactMiyunIdentity(value: string) {
+  return value.length > 14 ? `…${value.slice(-12)}` : value;
+}
+
+function compactMiyunHash(value: string) {
+  return value.length > 24 ? `${value.slice(0, 12)}…${value.slice(-8)}` : value;
+}
+
+function MiyunReturnHistory({
+  returns,
+  crawlJobId,
+}: {
+  returns: ApiMiyunHandoffReturn[];
+  crawlJobId?: string;
+}) {
+  return (
+    <section className="miyun-return-history" aria-label="回传历史">
+      <header>
+        <b>回传记录</b>
+        <span>{returns.length} 个结果</span>
+      </header>
+      <ul>
+        {returns.map((item, index) => {
+          const sourceMaterialId = item.source_material_id;
+          const associationTarget = sourceMaterialId ?? item.crawl_job_id ?? crawlJobId;
+          return (
+            <li key={item.id} className={`miyun-return-history-item ${item.status}`}>
+              <div className="miyun-return-history-heading">
+                <span className={`miyun-status-badge ${item.status}`}>{miyunReturnStatusCopy[item.status]}</span>
+                <time dateTime={item.returned_at ?? item.uploaded_at ?? item.updated_at}>
+                  {formatServerTime(item.returned_at ?? item.uploaded_at ?? item.updated_at)}
+                </time>
+              </div>
+              <strong title={item.filename}>{item.filename ?? `回传结果 ${index + 1}`}</strong>
+              <div className="miyun-return-history-tags">
+                <span title={associationTarget}>
+                  {sourceMaterialId ? "源素材" : "采集任务"} · {associationTarget ? compactMiyunIdentity(associationTarget) : "当前批次"}
+                </span>
+                <span>{miyunReturnAssociationCopy[item.association_source]}</span>
+              </div>
+              {item.sha256 ? (
+                <code className="miyun-return-hash" title={`SHA-256 ${item.sha256}`}>
+                  SHA-256 · {compactMiyunHash(item.sha256)}
+                </code>
+              ) : item.failure_code ? (
+                <small className="miyun-return-failure">错误码 · {item.failure_code}</small>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 function CrawlContextBar({
   jobs,
   profiles,
@@ -1862,7 +1931,7 @@ function FissionTask({
                 <small>已有裂变素材回传；仍可继续为当前采集任务补充 MP4 或 ZIP。</small>
               </div>
             ) : null}
-            {handoff.returns?.length ? <small>回传历史：{handoff.returns.map((item) => `${item.status}${item.filename ? ` · ${item.filename}` : ""} · ${item.source_material_id ? `源素材 ${item.source_material_id}` : `采集任务 ${item.crawl_job_id ?? handoff.crawl_job_id ?? "当前批次"}`}${item.sha256 ? ` · SHA-256 ${item.sha256}` : ""}`).join("；")}</small> : null}
+            {handoff.returns?.length ? <MiyunReturnHistory returns={handoff.returns} crawlJobId={handoff.crawl_job_id} /> : null}
             <details className="miyun-lineage-details">
               <summary>查看版本与输入血缘</summary>
               <small>manifest {handoff.manifest_version} · 参数 {handoff.parameter_version}</small>

@@ -1,6 +1,7 @@
 package insights
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -639,6 +640,10 @@ func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
 	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID, MiyunHandoffPackageSources, &output); err != nil || output.Len() == 0 {
 		t.Fatalf("export error=%v size=%d", err, output.Len())
 	}
+	archive, err := zip.NewReader(bytes.NewReader(output.Bytes()), int64(output.Len()))
+	if err != nil || len(archive.File) != 1 || archive.File[0].Name != "miyun_"+material.ID+".mp4" {
+		t.Fatalf("source archive identity=%#v err=%v", archive, err)
+	}
 	exported, _ := service.GetMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID)
 	if exported.Status != MiyunHandoffExported {
 		t.Fatalf("status after export=%s", exported.Status)
@@ -652,6 +657,13 @@ func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
 	}
 	if repeated, err := service.MarkMiyunHandoffDelivered(context.Background(), miyunTestActor(), "project_1", handoff.ID, delivered.Version); err != nil || repeated.ID != delivered.ID {
 		t.Fatalf("delivery replay=%#v err=%v", repeated, err)
+	}
+	returned := delivered
+	returned.Status = MiyunHandoffReturned
+	repository.handoffs[returned.ID] = returned
+	output.Reset()
+	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", returned.ID, MiyunHandoffPackageSources, &output); err != nil || output.Len() == 0 {
+		t.Fatalf("returned handoff re-export error=%v size=%d", err, output.Len())
 	}
 	profile.ProductName = "second frozen profile"
 	repository.profiles[profile.ID] = profile

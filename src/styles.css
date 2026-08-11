@@ -7484,6 +7484,103 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   font-size: 9px;
 }
 
+.miyun-return-history {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+}
+
+.miyun-return-history > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.miyun-return-history > header b {
+  font-size: 10px;
+}
+
+.miyun-return-history > header span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.miyun-return-history > ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.miyun-return-history-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.miyun-return-history-item.returned { border-left-color: var(--success); }
+.miyun-return-history-item.failed { border-left-color: var(--danger); }
+
+.miyun-return-history-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.miyun-return-history-heading time {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.miyun-return-history-item > strong {
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.miyun-return-history-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.miyun-return-history-tags > span {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miyun-return-hash {
+  background: var(--subtle);
+  color: var(--muted);
+  display: block;
+  font-size: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 5px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miyun-return-failure {
+  color: var(--danger);
+  font-size: 8px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1050px) {
   .miyun-jobs-layout {
     grid-template-columns: 1fr;

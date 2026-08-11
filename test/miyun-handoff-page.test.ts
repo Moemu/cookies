@@ -77,3 +77,12 @@ test("回传错误不会渲染服务端响应或存储路径", () => {
   assert.doesNotMatch(page, /request\.responseText/);
   assert.match(page, /回传未完成，请检查 MP4 \/ ZIP 格式、文件大小和素材映射后重试/);
 });
+
+test("回传历史使用结构化卡片，而非拼接技术文本", () => {
+  assert.match(page, /function MiyunReturnHistory/);
+  assert.match(page, /className="miyun-return-history"/);
+  assert.match(page, /miyun-return-history-item \$\{item\.status\}/);
+  assert.match(page, /miyun-return-history-tags/);
+  assert.match(page, /compactMiyunHash/);
+  assert.doesNotMatch(page, /回传历史：\{handoff\.returns\.map/);
+});

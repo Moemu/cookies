@@ -323,7 +323,7 @@ func (s Service) ExportMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		}
 		transitionVersion = value.Version
 	}
-	if value.Status != MiyunHandoffExporting && value.Status != MiyunHandoffExported && value.Status != MiyunHandoffDelivered {
+	if value.Status != MiyunHandoffExporting && value.Status != MiyunHandoffExported && value.Status != MiyunHandoffDelivered && value.Status != MiyunHandoffReturned {
 		return fmt.Errorf("%w: handoff cannot be exported", ErrInvalidState)
 	}
 	var sourceValues miyunHandoffSourcesSnapshot
@@ -346,7 +346,7 @@ func (s Service) ExportMiyunHandoff(ctx context.Context, actor contract.ActorCon
 	}
 	sourceMaterialIDs := make([]string, 0, len(sourceValues.Sources))
 	for _, source := range sourceValues.Sources {
-		sourceMaterialIDs = append(sourceMaterialIDs, source.Material.MiyunMaterialID)
+		sourceMaterialIDs = append(sourceMaterialIDs, source.Material.ID)
 	}
 	snapshot := MiyunHandoffExportSnapshot{ManifestVersion: value.ManifestVersion, Manifest: MiyunHandoffManifest{HandoffID: value.ID, HandoffVersion: fmt.Sprint(value.Version), SourceMaterialName: manifestSources.names, MiyunMaterialID: manifestSources.materialIDs, SourceMaterialIDs: sourceMaterialIDs, SourceURL: manifestSources.urls, Source: "miyun", DeliveryDays: manifestSources.deliveryDays, CumulativeImpressions: manifestSources.impressions, RelatedAds: manifestSources.relatedAds, RelatedCreators: manifestSources.relatedCreators, TargetProduct: profile.Profile.ProductName, TargetCategory: profile.Profile.CategoryName, ParameterVersion: value.ParameterVersion, InputHash: value.InputHash}, Sources: sources, ProductMedia: files.Media, ProductDocs: files.Documents}
 	writeErr := ExportMiyunHandoffPackageZIP(ctx, output, snapshot, packageKind, miyunHandoffContentReader{opener: s.MiyunHandoffContent, actor: actor, projectID: projectID})

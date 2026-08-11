@@ -119,7 +119,10 @@ func writeMiyunHandoffFile(ctx context.Context, archive *zip.Writer, entryName s
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	entry, err := archive.CreateHeader(&zip.FileHeader{Name: entryName, Method: zip.Deflate})
+	// Handoff payloads are already-compressed media and document formats. Store
+	// them directly so the preflight ZIP can complete quickly before HTTP sends
+	// attachment headers; the ZIP CRC still protects transport integrity.
+	entry, err := archive.CreateHeader(&zip.FileHeader{Name: entryName, Method: zip.Store})
 	if err != nil {
 		return err
 	}

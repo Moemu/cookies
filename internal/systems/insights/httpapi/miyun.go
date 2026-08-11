@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -212,11 +213,35 @@ func (s *Server) exportMiyunHandoff(writer http.ResponseWriter, request *http.Re
 		writeMiyunError(writer, request, err)
 		return
 	}
+	temporary, err := os.CreateTemp("", "cookies-miyun-handoff-*.zip")
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	name := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		_ = os.Remove(name)
+	}()
+	if err := s.app.ExportMiyunHandoff(request.Context(), mustActor(request), projectID(request), id, packageKind, temporary); err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	stat, err := temporary.Stat()
+	if err != nil || stat.Size() < 1 {
+		writeMiyunError(writer, request, fmt.Errorf("Miyun handoff export produced no content"))
+		return
+	}
+	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
 	writer.Header().Set("Content-Type", "application/zip")
 	writer.Header().Set("Cache-Control", "private, no-store")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
 	writer.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "miyun-handoff-" + id + "-" + filenameSuffix + ".zip"}))
-	_ = s.app.ExportMiyunHandoff(request.Context(), mustActor(request), projectID(request), id, packageKind, writer)
+	writer.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	_, _ = io.Copy(writer, temporary)
 }
 func (s *Server) miyunHandoffAction(writer http.ResponseWriter, request *http.Request) {
 	action := request.PathValue("handoff_action")
