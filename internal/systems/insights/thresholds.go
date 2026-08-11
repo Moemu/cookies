@@ -99,6 +99,33 @@ type ResolvedThresholds struct {
 	QualityWindowDays      int `json:"quality_window_days"`
 }
 
+// orDefaults 把没填的格子补成出厂设定。
+//
+// 判定链路上的函数很多，漏传一处就会拿 0 去比——那样任何样本量都算充分、
+// 任何天数都够画趋势，是最坏的一种错：错得悄无声息，而且错向「更敢下结论」。
+//
+// 逐格兜底而不是整份替换：一份只填了两格的阈值，剩下几格也该是默认值，
+// 不该因为其中一格没填就把填了的那几格一起丢掉。
+func (t ResolvedThresholds) orDefaults() ResolvedThresholds {
+	value := defaultThresholds()
+	value.Version = t.Version
+	value.SufficientImpressions = positiveOr(t.SufficientImpressions, value.SufficientImpressions)
+	value.DirectionalImpressions = positiveOr(t.DirectionalImpressions, value.DirectionalImpressions)
+	value.MinTrendDays = positiveOr(t.MinTrendDays, value.MinTrendDays)
+	value.MinAnomalyDays = positiveOr(t.MinAnomalyDays, value.MinAnomalyDays)
+	value.MinDriverAssets = positiveOr(t.MinDriverAssets, value.MinDriverAssets)
+	value.MaxComparisonAssets = positiveOr(t.MaxComparisonAssets, value.MaxComparisonAssets)
+	value.QualityWindowDays = positiveOr(t.QualityWindowDays, value.QualityWindowDays)
+	return value
+}
+
+func positiveOr(value, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
 func pickInt(value *int, fallback int) int {
 	if value == nil {
 		return fallback

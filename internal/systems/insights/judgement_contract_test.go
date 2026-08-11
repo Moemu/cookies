@@ -15,8 +15,8 @@ func TestEveryConfidenceCarriesAVerdict(t *testing.T) {
 	now := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 	window := MetricWindow{Start: now.AddDate(0, 0, -30), End: now}
 
-	overview := buildMetricOverview(window, nil, []DataSource{{ID: "ds-1"}}, now)
-	analysis := buildPerformanceAnalysis(window, nil, nil)
+	overview := buildMetricOverview(window, nil, []DataSource{{ID: "ds-1"}}, now, ResolvedThresholds{})
+	analysis := buildPerformanceAnalysis(window, nil, nil, ResolvedThresholds{})
 
 	for name, value := range map[string]any{"MetricOverview": overview, "PerformanceAnalysis": analysis} {
 		raw, err := json.Marshal(value)
@@ -74,7 +74,7 @@ func TestVerdictKeyOnlyEverHoldsTheThreeVerdicts(t *testing.T) {
 		enumFeature("asset_b", AssetTypePrerollAd, "cta_type", "立即购买"),
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(10), facts, features)
+	analysis := buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{})
 	if len(analysis.Comparisons) == 0 {
 		t.Fatal("这组数据应该产出对比行，否则这条测试什么也没检查")
 	}
@@ -119,7 +119,7 @@ func TestEmptyWindowScreenVerdictIsUnclear(t *testing.T) {
 	now := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 	window := MetricWindow{Start: now.AddDate(0, 0, -30), End: now}
 
-	analysis := buildPerformanceAnalysis(window, nil, nil)
+	analysis := buildPerformanceAnalysis(window, nil, nil, ResolvedThresholds{})
 	if analysis.Judgement.Verdict != VerdictUnclear {
 		t.Errorf("空窗口的屏级档位是 %s，期望 %s", analysis.Judgement.Verdict, VerdictUnclear)
 	}
@@ -133,7 +133,7 @@ func TestMetricOverviewUsesTheSharedNoteKey(t *testing.T) {
 	now := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 	window := MetricWindow{Start: now.AddDate(0, 0, -30), End: now}
 
-	raw, err := json.Marshal(buildMetricOverview(window, nil, []DataSource{{ID: "ds-1"}}, now))
+	raw, err := json.Marshal(buildMetricOverview(window, nil, []DataSource{{ID: "ds-1"}}, now, ResolvedThresholds{}))
 	if err != nil {
 		t.Fatalf("序列化失败：%v", err)
 	}

@@ -51,9 +51,15 @@ type groupCompareInput struct {
 	// PreRegistered 为 true 表示分组在看到结果之前就定死了（实验）。
 	// false 表示是事后按特征凑的（驱动因素），结论只能说到相关。
 	PreRegistered bool
+
+	// Thresholds 是这次判定用的那一套。零值表示调用方没传，
+	// compareGroups 会退回出厂设定——判定是公共函数，调用点很多，
+	// 漏传一处就拿 0 去比的话，任何样本量都会被判成充分，那是最坏的一种错。
+	Thresholds ResolvedThresholds
 }
 
 func compareGroups(input groupCompareInput) GroupComparison {
+	thresholds := input.Thresholds.orDefaults()
 	result := GroupComparison{CovaryingFeatures: make([]string, 0, 2)}
 	for _, slice := range input.InGroup {
 		result.Counts = result.Counts.add(slice.total)
@@ -80,7 +86,7 @@ func compareGroups(input groupCompareInput) GroupComparison {
 	// 先卡样本，因为样本不够时后面几项都算不出有意义的东西；混杂排在区间前面，
 	// 因为区间不重叠但存在协变特征时，结论仍然归不到目标变量上。
 	switch {
-	case minImpressions < directionalSampleImpressions:
+	case minImpressions < int64(thresholds.DirectionalImpressions):
 		result.Judgement = judge(ConfidenceLowSample,
 			fmt.Sprintf("样本较少的一侧只有 %s 次展示，这个分组还比不出东西。", countText(minImpressions)))
 	case len(result.CovaryingFeatures) > 0:
@@ -91,7 +97,7 @@ func compareGroups(input groupCompareInput) GroupComparison {
 		result.Judgement = judge(ConfidenceDirectional, "两组的点击率置信区间重叠，差异可能只是波动。")
 	case !input.Comparable:
 		result.Judgement = judge(ConfidenceConfounded, "窗口内口径不一致，两组之间的差异可能来自口径而不是内容。")
-	case minImpressions < sufficientSampleImpressions:
+	case minImpressions < int64(thresholds.SufficientImpressions):
 		result.Judgement = judge(ConfidenceDirectional, directionalNote(input.PreRegistered))
 	default:
 		result.Judgement = judge(ConfidenceSufficient, sufficientNote(input.PreRegistered))

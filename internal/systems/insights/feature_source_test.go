@@ -119,7 +119,7 @@ func TestComparisonDoesNotAttributeToModelGuessedVariable(t *testing.T) {
 	right := &assetSlice{assetID: "a2", title: "B", kind: AssetTypePrerollAd,
 		total: MetricCounts{Impressions: 60000, Clicks: 1200}, features: guessed("陈述")}
 
-	result := compareAssets(left, right, true)
+	result := compareAssets(left, right, true, ResolvedThresholds{})
 
 	if len(result.ChangedFeatures) != 1 {
 		t.Fatalf("差异要照常列出来给人看，实际 %d 条", len(result.ChangedFeatures))

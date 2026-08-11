@@ -68,7 +68,7 @@ func TestVariantComparisonAttributableOnlyWhenSingleVariable(t *testing.T) {
 		enumFeature("asset_b", AssetTypePrerollAd, "cta_type", "立即购买"),
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(10), facts, features)
+	analysis := buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{})
 	comparison := findComparison(t, analysis, "asset_a", "asset_b")
 
 	if comparison.VariantVerdict != VerdictAttributable {
@@ -95,7 +95,7 @@ func TestVariantComparisonConfoundedWhenTwoVariablesChange(t *testing.T) {
 		enumFeature("asset_b", AssetTypePrerollAd, "cta_type", "了解更多"),
 	}
 
-	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features), "asset_a", "asset_b")
+	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{}), "asset_a", "asset_b")
 	if comparison.VariantVerdict != VerdictConfounded {
 		t.Fatalf("两个变量同时变化时必须判为混杂，实际 %q", comparison.VariantVerdict)
 	}
@@ -115,7 +115,7 @@ func TestVariantComparisonLowSampleBeatsSingleVariable(t *testing.T) {
 		enumFeature("asset_b", AssetTypePrerollAd, "preroll_hook_type", "不露脸"),
 	}
 
-	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(5), facts, features), "asset_a", "asset_b")
+	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(5), facts, features, ResolvedThresholds{}), "asset_a", "asset_b")
 	if comparison.VariantVerdict != VerdictLowSample {
 		t.Fatalf("样本不足时必须先判低样本，实际 %q", comparison.VariantVerdict)
 	}
@@ -128,7 +128,7 @@ func TestVariantComparisonWithoutFeaturesIsNotAttributable(t *testing.T) {
 		factsFor("asset_b", "B", AssetTypePrerollAd, "obj_b", 10, MetricCounts{Impressions: 40000, Clicks: 400})...,
 	)
 
-	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, nil), "asset_a", "asset_b")
+	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, nil, ResolvedThresholds{}), "asset_a", "asset_b")
 	if comparison.VariantVerdict != VerdictNoFeatures {
 		t.Fatalf("无特征时应判为 no_features，实际 %q", comparison.VariantVerdict)
 	}
@@ -149,7 +149,7 @@ func TestFreeTextFeatureIsNotTreatedAsVariable(t *testing.T) {
 			Value: FeatureValue{Kind: FeatureKindText, Text: "开头是产品空镜"}, Source: SourceAI, ReviewState: ReviewConfirmed},
 	}
 
-	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features), "asset_a", "asset_b")
+	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{}), "asset_a", "asset_b")
 	if len(comparison.ChangedFeatures) != 1 {
 		t.Fatalf("自由文本不应计入变量，实际变量 %d 个", len(comparison.ChangedFeatures))
 	}
@@ -170,7 +170,7 @@ func TestRejectedFeatureIsIgnored(t *testing.T) {
 		enumFeature("asset_b", AssetTypePrerollAd, "cta_type", "了解更多"),
 	}
 
-	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features), "asset_a", "asset_b")
+	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{}), "asset_a", "asset_b")
 	for _, changed := range comparison.ChangedFeatures {
 		if changed.Key == "cta_type" && changed.Baseline != "（未记录）" {
 			t.Fatalf("被拒绝的 AI 特征不该出现在变量里：%+v", changed)
@@ -190,7 +190,7 @@ func TestCaliberConflictDowngradesAttribution(t *testing.T) {
 		enumFeature("asset_b", AssetTypePrerollAd, "preroll_hook_type", "不露脸"),
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(10), facts, features)
+	analysis := buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{})
 	if analysis.Comparable {
 		t.Fatal("混了两种币种时 Comparable 应为 false")
 	}
@@ -220,7 +220,7 @@ func TestFatigueAlwaysListsAudienceAsUnexcluded(t *testing.T) {
 		})
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(10), facts, nil)
+	analysis := buildPerformanceAnalysis(testWindow(10), facts, nil, ResolvedThresholds{})
 	if len(analysis.Fatigue) != 1 {
 		t.Fatalf("应有一条疲劳记录，实际 %d", len(analysis.Fatigue))
 	}
@@ -244,7 +244,7 @@ func TestFatigueWithoutEnoughDaysIsLowSample(t *testing.T) {
 	facts := factsFor("asset_a", "A", AssetTypePrerollAd, "obj_a", 3,
 		MetricCounts{Impressions: 40000, Clicks: 2000, SpendCents: 100000, Conversions: 100})
 
-	analysis := buildPerformanceAnalysis(testWindow(3), facts, nil)
+	analysis := buildPerformanceAnalysis(testWindow(3), facts, nil, ResolvedThresholds{})
 	if len(analysis.Fatigue) != 1 {
 		t.Fatalf("应有一条疲劳记录，实际 %d", len(analysis.Fatigue))
 	}
@@ -279,7 +279,7 @@ func TestDriverReportsCovaryingFeatures(t *testing.T) {
 		enumFeature("asset_d", AssetTypePrerollAd, "cta_type", "了解更多"),
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(10), facts, features)
+	analysis := buildPerformanceAnalysis(testWindow(10), facts, features, ResolvedThresholds{})
 	var checked int
 	for _, driver := range analysis.Drivers {
 		if driver.Key != "preroll_hook_type" {
@@ -337,7 +337,7 @@ func TestAssetLevelSpikeIsReportedEvenWhenProjectTotalLooksNormal(t *testing.T) 
 	small[12].Counts.Impressions = 18000
 	facts := append(append([]MetricFactWithMapping{}, big...), small...)
 
-	analysis := buildPerformanceAnalysis(testWindow(20), facts, nil)
+	analysis := buildPerformanceAnalysis(testWindow(20), facts, nil, ResolvedThresholds{})
 
 	var found *MetricAnomaly
 	for index := range analysis.Anomalies {
@@ -367,7 +367,7 @@ func TestFlatAssetSeriesProducesNoSpike(t *testing.T) {
 		MetricCounts{Impressions: 5000, Clicks: 150, SpendCents: 35000, Conversions: 8})
 	facts[7].Counts.Impressions = 25000
 
-	analysis := buildPerformanceAnalysis(testWindow(20), facts, nil)
+	analysis := buildPerformanceAnalysis(testWindow(20), facts, nil, ResolvedThresholds{})
 	for _, item := range analysis.Anomalies {
 		if item.Kind == AnomalySpike || item.Kind == AnomalyDrop {
 			t.Fatalf("常态零波动时不应产出突变异常，实际 %+v", item)
@@ -388,7 +388,7 @@ func TestLevelShiftCollapsesIntoOneAnomalyWithAnExplanation(t *testing.T) {
 		}
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(20), facts, nil)
+	analysis := buildPerformanceAnalysis(testWindow(20), facts, nil, ResolvedThresholds{})
 
 	drops := make([]MetricAnomaly, 0, 4)
 	for _, item := range analysis.Anomalies {
@@ -424,7 +424,7 @@ func TestTwoValuedFeatureProducesOneDriverRow(t *testing.T) {
 		features = append(features, enumFeature(spec.id, AssetTypePrerollAd, "hook_type", spec.hook))
 	}
 
-	analysis := buildPerformanceAnalysis(testWindow(14), facts, features)
+	analysis := buildPerformanceAnalysis(testWindow(14), facts, features, ResolvedThresholds{})
 
 	rows := make([]FeatureDriver, 0, 2)
 	for _, driver := range analysis.Drivers {
@@ -482,7 +482,7 @@ func TestComparisonChangedFeaturesSerializesAsArray(t *testing.T) {
 	right := &assetSlice{assetID: "a2", title: "B", kind: AssetTypePrerollAd,
 		total: MetricCounts{Impressions: 9000, Clicks: 280}, features: map[string]featureCell{"hook_type": {value: "问题", source: SourceHuman}}}
 
-	encoded, err := json.Marshal(compareAssets(left, right, true))
+	encoded, err := json.Marshal(compareAssets(left, right, true, ResolvedThresholds{}))
 	if err != nil {
 		t.Fatalf("序列化失败：%v", err)
 	}

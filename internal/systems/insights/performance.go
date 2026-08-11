@@ -251,11 +251,17 @@ type FeatureDriver struct {
 
 // maxComparisonAssets 限制两两配对的规模。取花费最高的若干个素材配对，
 // 其余的会在 Notes 里说清楚被排除了多少个——静默截断等于谎报覆盖面。
+//
+// 这是**出厂设定**：判定读的是 ResolvedThresholds.MaxComparisonAssets，
+// 这个常量经由 defaultThresholds() 进去，没人调过时才生效。
 const maxComparisonAssets = 8
 
-// 趋势与异常的天数门槛。这几个数决定页面上什么时候给判定、什么时候说「看不出来」，
-// 所以它们必须有名字：系统设置 · 样本门槛 直接引用这里，改了值那一页会跟着变。
-// 写成裸数字的时候，那一页只能抄一份，迟早对不上。
+// 趋势与异常的天数门槛的**出厂设定**。这几个数决定页面上什么时候给判定、
+// 什么时候说「看不出来」。判定读的是 ResolvedThresholds，不再直接读这里；
+// 这几个常量经由 defaultThresholds() 进去，没人在设置里调过时才生效。
+//
+// anomalyMADMultiple 不可配：它是判定方法本身的一部分（多少个 MAD 算离群），
+// 不是「这个行业的合理门槛」。开放它等于让人调统计口径，而不是调业务标准。
 const (
 	// minTrendDays 少于这么多天就没有走势可言，趋势判 unknown、疲劳不给结论。
 	minTrendDays = 4
@@ -294,7 +300,8 @@ func (s Service) GetPerformanceAnalysis(ctx context.Context, actor contract.Acto
 			return PerformanceAnalysis{}, err
 		}
 	}
-	return buildPerformanceAnalysis(window, facts, features), nil
+	return buildPerformanceAnalysis(window, facts, features,
+		s.currentThresholds(ctx, actor.OrganizationID)), nil
 }
 
 func attributableAssetIDs(facts []MetricFactWithMapping) []string {
@@ -361,7 +368,13 @@ func (a *assetSlice) dates() []string {
 	return values
 }
 
-func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping, features []AssetFeature) PerformanceAnalysis {
+// thresholds 从服务层传下来，一次请求只读一次，然后一路传给五个视图。
+// 每个视图各读一次的话，一次请求里如果有人正好保存了新阈值，同一屏上
+// 对比和趋势会按两套标准判，而页面上只会盖一个版本号。
+// 零值时逐格退回出厂设定（orDefaults），测试可以直接传 ResolvedThresholds{}。
+func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping,
+	features []AssetFeature, thresholds ResolvedThresholds) PerformanceAnalysis {
+	thresholds = thresholds.orDefaults()
 	analysis := PerformanceAnalysis{Window: window, Comparable: true}
 
 	slices := map[string]*assetSlice{}
@@ -439,11 +452,11 @@ func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping
 		}
 	}
 
-	analysis.Comparisons = buildComparisons(ordered, analysis.Comparable, &analysis.Notes)
-	analysis.Trends = buildTrends(ordered)
-	analysis.Fatigue = buildFatigue(ordered, window)
-	analysis.Anomalies = buildAnomalies(projectByDate, ordered)
-	analysis.Drivers = buildDrivers(ordered, analysis.Comparable)
+	analysis.Comparisons = buildComparisons(ordered, analysis.Comparable, &analysis.Notes, thresholds)
+	analysis.Trends = buildTrends(ordered, thresholds)
+	analysis.Fatigue = buildFatigue(ordered, window, thresholds)
+	analysis.Anomalies = buildAnomalies(projectByDate, ordered, thresholds)
+	analysis.Drivers = buildDrivers(ordered, analysis.Comparable, thresholds)
 
 	if analysis.AssetsInWindow == 0 {
 		analysis.Notes = append(analysis.Notes, "窗口内没有任何能归到素材上的投放数据，五个视图都无从算起。先去数据接入把平台对象和素材对应起来。")
@@ -615,13 +628,15 @@ func fieldOf(kind AssetType, key string) FeatureField {
 
 // --- 素材对比 / 变体分析（AM-008、AM-009，03 §7.2 §7.3）---
 
-func buildComparisons(ordered []*assetSlice, comparable bool, notes *[]string) []VariantComparison {
+func buildComparisons(ordered []*assetSlice, comparable bool, notes *[]string,
+	thresholds ResolvedThresholds) []VariantComparison {
+	thresholds = thresholds.orDefaults()
 	pool := ordered
-	if len(pool) > maxComparisonAssets {
-		pool = pool[:maxComparisonAssets]
+	if len(pool) > thresholds.MaxComparisonAssets {
+		pool = pool[:thresholds.MaxComparisonAssets]
 		*notes = append(*notes, fmt.Sprintf(
 			"素材对比只配对了花费最高的 %d 个素材，窗口内另有 %d 个素材没有参与配对。",
-			maxComparisonAssets, len(ordered)-maxComparisonAssets))
+			thresholds.MaxComparisonAssets, len(ordered)-thresholds.MaxComparisonAssets))
 	}
 	comparisons := make([]VariantComparison, 0, len(pool)*(len(pool)-1)/2)
 	for i := 0; i < len(pool); i++ {
@@ -631,7 +646,7 @@ func buildComparisons(ordered []*assetSlice, comparable bool, notes *[]string) [
 			if left.kind != right.kind {
 				continue
 			}
-			comparisons = append(comparisons, compareAssets(left, right, comparable))
+			comparisons = append(comparisons, compareAssets(left, right, comparable, thresholds))
 		}
 	}
 	sort.Slice(comparisons, func(i, j int) bool {
@@ -656,7 +671,9 @@ func verdictRank(verdict VariantVerdict) int {
 	}
 }
 
-func compareAssets(baseline, variant *assetSlice, comparable bool) VariantComparison {
+func compareAssets(baseline, variant *assetSlice, comparable bool,
+	thresholds ResolvedThresholds) VariantComparison {
+	thresholds = thresholds.orDefaults()
 	result := VariantComparison{
 		BaselineAssetID: baseline.assetID, BaselineTitle: baseline.title,
 		VariantAssetID: variant.assetID, VariantTitle: variant.title,
@@ -716,11 +733,11 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 		result.VariantVerdict = VerdictNoFeatures
 		result.Judgement = judge(ConfidenceConfounded,
 			"至少一边没有内容特征，两个素材之间到底改了什么无从判断。数字上的差异不能算到任何变量头上。")
-	case minImpressions < directionalSampleImpressions:
+	case minImpressions < int64(thresholds.DirectionalImpressions):
 		result.VariantVerdict = VerdictLowSample
 		result.Judgement = judge(ConfidenceLowSample,
 			fmt.Sprintf("样本较少的一边只有 %s 次展示，不到 %s 次的方向性门槛，先不谈差异。",
-				countText(minImpressions), countText(directionalSampleImpressions)))
+				countText(minImpressions), countText(int64(thresholds.DirectionalImpressions))))
 	case len(result.ChangedFeatures) == 0:
 		result.VariantVerdict = VerdictConfounded
 		result.Judgement = judge(ConfidenceConfounded,
@@ -740,11 +757,11 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 		result.Judgement = judge(ConfidenceDirectional,
 			fmt.Sprintf("只改了「%s」，但两边的点击率置信区间重叠，差异可能只是波动。方向可以参考，不能当结论。",
 				admissible[0].Label))
-	case minImpressions < sufficientSampleImpressions:
+	case minImpressions < int64(thresholds.SufficientImpressions):
 		result.VariantVerdict = VerdictDirectional
 		result.Judgement = judge(ConfidenceDirectional,
 			fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %s 次展示的充分门槛。",
-				admissible[0].Label, countText(sufficientSampleImpressions)))
+				admissible[0].Label, countText(int64(thresholds.SufficientImpressions))))
 	default:
 		result.VariantVerdict = VerdictAttributable
 		result.Judgement = judge(ConfidenceSufficient,
@@ -798,7 +815,8 @@ func relativeChange(before, after *float64) *float64 {
 
 // --- 趋势（03 §7.4 的前半）---
 
-func buildTrends(ordered []*assetSlice) []AssetTrend {
+func buildTrends(ordered []*assetSlice, thresholds ResolvedThresholds) []AssetTrend {
+	thresholds = thresholds.orDefaults()
 	trends := make([]AssetTrend, 0, len(ordered))
 	for _, slice := range ordered {
 		dates := slice.dates()
@@ -814,10 +832,10 @@ func buildTrends(ordered []*assetSlice) []AssetTrend {
 		}
 		first, second := splitHalves(slice)
 		trend.CTRChange = relativeChange(RatesOf(first).CTR, RatesOf(second).CTR)
-		confidence := confidenceOf(slice.total, true, len(slice.objects))
+		confidence := confidenceOf(slice.total, true, len(slice.objects), thresholds)
 		var note string
 		switch {
-		case len(dates) < minTrendDays:
+		case len(dates) < thresholds.MinTrendDays:
 			trend.Direction, note = "unknown", fmt.Sprintf("窗口内只有 %d 天有数据，看不出走势。", len(dates))
 			// 同疲劳那边：天数不够就没有走势可言，曝光量再大也换不来天数。
 			// 不压档位的话，页面上会出现「看不出走势 · 置信充分」。
@@ -856,7 +874,9 @@ func splitHalves(slice *assetSlice) (MetricCounts, MetricCounts) {
 
 // --- 疲劳（03 §7.4）---
 
-func buildFatigue(ordered []*assetSlice, window MetricWindow) []FatigueSignal {
+func buildFatigue(ordered []*assetSlice, window MetricWindow,
+	thresholds ResolvedThresholds) []FatigueSignal {
+	thresholds = thresholds.orDefaults()
 	signals := make([]FatigueSignal, 0, len(ordered))
 	for _, slice := range ordered {
 		first, second := splitHalves(slice)
@@ -875,10 +895,10 @@ func buildFatigue(ordered []*assetSlice, window MetricWindow) []FatigueSignal {
 		cpaUp := signal.CPAChange != nil && *signal.CPAChange >= 0.2
 		impressionsUp := signal.ImpressionChange != nil && *signal.ImpressionChange >= 0.1
 
-		confidence := confidenceOf(slice.total, true, len(slice.objects))
+		confidence := confidenceOf(slice.total, true, len(slice.objects), thresholds)
 		var note string
 		switch {
-		case len(slice.dates()) < minTrendDays:
+		case len(slice.dates()) < thresholds.MinTrendDays:
 			note = fmt.Sprintf("只有 %d 天数据，疲劳要看趋势，天数不够就没有趋势可看。", len(slice.dates()))
 			// 曝光量再大也换不来天数。这里必须把置信压到 low_sample，否则页面上会
 			// 出现「没有疲劳迹象 · 置信充分」——那是在说「查过了，没问题」，
@@ -954,7 +974,9 @@ func floatOf(value int64) *float64 {
 
 // --- 异常（20 §4.1「错误与延迟置顶」）---
 
-func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice) []MetricAnomaly {
+func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice,
+	thresholds ResolvedThresholds) []MetricAnomaly {
+	thresholds = thresholds.orDefaults()
 	anomalies := make([]MetricAnomaly, 0, 8)
 	dates := make([]string, 0, len(projectByDate))
 	for date := range projectByDate {
@@ -967,8 +989,8 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 		spends = append(spends, float64(projectByDate[date].SpendCents))
 	}
 	median, mad := medianAndMAD(spends)
-	// 少于 minAnomalyDays 天没有「常态」可言，算出来的异常全是噪声。
-	if len(dates) >= minAnomalyDays && mad > 0 {
+	// 少于这么多天没有「常态」可言，算出来的异常全是噪声。
+	if len(dates) >= thresholds.MinAnomalyDays && mad > 0 {
 		for index, date := range dates {
 			deviation := math.Abs(spends[index]-median) / mad
 			if deviation < anomalyMADMultiple {
@@ -997,7 +1019,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 	// 换个阈值只会让两处的「异常」不是同一个意思。
 	for _, slice := range ordered {
 		dates := slice.dates()
-		if len(dates) < minAnomalyDays {
+		if len(dates) < thresholds.MinAnomalyDays {
 			continue
 		}
 		impressions := make([]float64, 0, len(dates))
@@ -1150,7 +1172,8 @@ func missingDates(dates []string) []string {
 // 一个取值只对应一个素材时，比的是那个素材，不是那个特征。
 const minDriverAssets = 2
 
-func buildDrivers(ordered []*assetSlice, comparable bool) []FeatureDriver {
+func buildDrivers(ordered []*assetSlice, comparable bool, thresholds ResolvedThresholds) []FeatureDriver {
+	thresholds = thresholds.orDefaults()
 	byType := map[AssetType][]*assetSlice{}
 	for _, slice := range ordered {
 		if len(slice.features) == 0 {
@@ -1161,7 +1184,7 @@ func buildDrivers(ordered []*assetSlice, comparable bool) []FeatureDriver {
 
 	drivers := make([]FeatureDriver, 0, 16)
 	for kind, group := range byType {
-		if len(group) < minDriverAssets*2 {
+		if len(group) < thresholds.MinDriverAssets*2 {
 			// 同类型素材不足 4 个时，任何分组都会退化成「一个对一个」。
 			continue
 		}
@@ -1203,7 +1226,7 @@ func buildDrivers(ordered []*assetSlice, comparable bool) []FeatureDriver {
 			}
 			for _, value := range sortedValues {
 				inGroup := buckets[value]
-				if len(inGroup) < minDriverAssets {
+				if len(inGroup) < thresholds.MinDriverAssets {
 					continue
 				}
 				rest := make([]*assetSlice, 0, len(group))
@@ -1212,10 +1235,10 @@ func buildDrivers(ordered []*assetSlice, comparable bool) []FeatureDriver {
 						rest = append(rest, slice)
 					}
 				}
-				if len(rest) < minDriverAssets {
+				if len(rest) < thresholds.MinDriverAssets {
 					continue
 				}
-				drivers = append(drivers, buildDriver(kind, key, value, inGroup, rest, comparable))
+				drivers = append(drivers, buildDriver(kind, key, value, inGroup, rest, comparable, thresholds))
 			}
 		}
 	}
@@ -1236,7 +1259,8 @@ func driverRank(driver FeatureDriver) int {
 	}
 }
 
-func buildDriver(kind AssetType, key, value string, inGroup, rest []*assetSlice, comparable bool) FeatureDriver {
+func buildDriver(kind AssetType, key, value string, inGroup, rest []*assetSlice, comparable bool,
+	thresholds ResolvedThresholds) FeatureDriver {
 	field := fieldOf(kind, key)
 	driver := FeatureDriver{
 		AssetType: kind, Key: key, Label: field.Label, Group: field.Group, Value: value,
@@ -1250,6 +1274,7 @@ func buildDriver(kind AssetType, key, value string, inGroup, rest []*assetSlice,
 		CovaryKey:    key,
 		SubjectLabel: field.Label,
 		Comparable:   comparable,
+		Thresholds:   thresholds,
 	})
 	driver.Counts, driver.RestCounts = comparison.Counts, comparison.RestCounts
 	driver.Rates, driver.RestRates = comparison.Rates, comparison.RestRates

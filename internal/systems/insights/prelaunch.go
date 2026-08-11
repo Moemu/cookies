@@ -308,6 +308,9 @@ type PreLaunchInsight struct {
 	Disclosure string `json:"disclosure"`
 }
 
+// preLaunchQualityWindowDays 是体检窗口的**出厂设定**。取值经由
+// defaultThresholds() 进入 ResolvedThresholds.QualityWindowDays，
+// 人在设置里调过之后以调过的为准。
 const preLaunchQualityWindowDays = 30
 
 // GetPreLaunch 把已确认经验投影成可以摆上决策桌的洞察卡。
@@ -377,7 +380,8 @@ func (s Service) GetPreLaunch(ctx context.Context, actor contract.ActorContext, 
 	// 强结论闸门。质量算不出来时如实说「没查」，而不是假装通过。
 	if s.Connectors != nil {
 		end := s.now()
-		window := MetricWindow{Start: end.AddDate(0, 0, -preLaunchQualityWindowDays), End: end}
+		days := s.currentThresholds(ctx, actor.OrganizationID).QualityWindowDays
+		window := MetricWindow{Start: end.AddDate(0, 0, -days), End: end}
 		report, qualityErr := s.GetDataQuality(ctx, actor, projectID, window)
 		if qualityErr == nil {
 			insight.QualityChecked = true
