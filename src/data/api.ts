@@ -21,7 +21,7 @@ import {
 import type { CreativeIntakeStatus, CreativeTaskStatus } from '../contracts/creative'
 // 纯类型的循环引用：verdict.ts 反过来从这里取 ApiConfidenceLevel。
 // import type 会被 TS 完全擦除，运行时不成环。
-import type { Judgement } from './verdict'
+import type { Judgement, UpgradePath, Verdict } from './verdict'
 import { platformClient } from './platformClient.js'
 
 export type ApiProject = {
@@ -1084,11 +1084,25 @@ export type ApiReportSectionKind = 'asset_performance' | 'experiment' | 'experie
 export type ApiReportFinding = {
   kind: ApiReportSectionKind
   text: string
+  // pinned 是人在分析页记的，system 是复盘时按规则补的。复盘页要把两者分开标
+  // （● 我记的 / ○ 系统补的）：混在一起，人就分不清哪几条是自己挑的。
+  origin: 'system' | 'pinned'
   // 出自素材对比的发现才有。可归因的排在方向性前面。
   strength?: ApiVariantVerdict
   confidence?: ApiConfidenceLevel
-  // 这条发现的来源 ID（实验或经验），供人跳回去核对。
+  // 三档判定平铺在这里（后端是内嵌结构体）。档位文案由后端给，前端不自己翻译。
+  verdict?: Verdict
+  verdict_label?: string
+  upgrade?: UpgradePath
+  note?: string
+  // 这条出自哪个视图、说的哪个变量。两者构成去重键：人记过的，系统不再补一条。
+  dimension?: string
+  variable?: string
+  // 这条发现的来源 ID（素材、实验或经验），供人跳回去核对。
   source_ref?: string
+  // 记这一笔的人和时刻。origin 是 pinned 才有。
+  pinned_by?: string
+  pinned_at?: string
   // 被人工删掉的条目留在数组里，只是标记为 true——报告要能说清
   // 「系统给了什么、人拿掉了哪几条」。
   dropped: boolean
@@ -4154,8 +4168,22 @@ export const api = {
   // 人看到什么就定格什么，不让后端另挑一个窗口。
   createReport: (projectId: string, body: { execution_id: string; window: { start: string; end: string } }) =>
     request<ApiInsightReport>(`${insightProjectPath(projectId)}/reports`, 'POST', body),
-  // 人工删减。加不了新的一条：写进报告的每条发现都得能回溯到某次对比、
-  // 某个实验或某条经验，手打一条就断了这个链子。
+  // 记一笔：把分析页上的一条结论钉进本轮复盘草稿。
+  //
+  // 请求里**没有** confidence / verdict——判定由后端拿 (window, dimension,
+  // source_ref, variable) 回到那次分析结果里找回来。能从这里传的话，页面上标的
+  // 三档就是装饰：改一个字段就能把「算不出来」记成「能归因」。
+  //
+  // 目标草稿按 (项目 + 窗口) 自动 find-or-create，不需要先建复盘。
+  pinFinding: (projectId: string, body: {
+    window: { start: string; end: string }
+    dimension: string
+    source_ref?: string
+    variable?: string
+    text?: string
+  }) => request<ApiInsightReport>(`${insightProjectPath(projectId)}/findings`, 'POST', body),
+  // 人工删减。报告页上加不了新的一条：写进报告的每条发现都得能回溯到某次对比、
+  // 某个实验或某条经验，手打一条就断了这个链子。要加只能回分析页记一笔。
   dropReportFinding: (
     projectId: string,
     reportId: string,
