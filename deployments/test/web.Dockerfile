@@ -7,6 +7,7 @@ RUN npm ci
 COPY index.html tsconfig.app.json tsconfig.json tsconfig.node.json vite.config.ts ./
 COPY public/ ./public/
 COPY src/ ./src/
+COPY scripts/check-frontend-bundle-budget.mjs ./scripts/check-frontend-bundle-budget.mjs
 RUN npm run build
 
 FROM nginx:1.29-alpine
