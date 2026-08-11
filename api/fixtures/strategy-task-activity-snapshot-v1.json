@@ -1,0 +1,25 @@
+{
+  "contract_version": "strategy-task-activity-snapshot/v1",
+  "snapshot_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "captured_at": "2026-08-10T00:03:00Z",
+  "items": [
+    {
+      "contract_version": "strategy-task-activity/v1",
+      "id": "activity_01",
+      "kind": "deep_research",
+      "status": "running",
+      "phase": "cross_checking",
+      "round": {"current": 3, "max": 6},
+      "progress": {"kind": "milestone", "value": 58, "message": "正在核对两个冲突来源"},
+      "summary": "已覆盖受众与竞品，正在补齐渠道时效性。",
+      "confirmed_conclusions": [],
+      "source_scope": {"project_id": "project_01", "workspace_id": "workspace_01", "conversation_id": "conversation_01"},
+      "resource_ref": {"type": "knowledge_research_run", "id": "researchrun_01"},
+      "execution_ref": {"type": "platform_job", "id": "researchjob_01", "version": 4},
+      "actions": ["open", "cancel"],
+      "cancel_requested": false,
+      "heartbeat_at": "2026-08-10T00:03:00Z",
+      "updated_at": "2026-08-10T00:03:00Z"
+    }
+  ]
+}

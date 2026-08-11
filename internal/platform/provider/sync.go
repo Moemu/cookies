@@ -213,12 +213,31 @@ type TextRouteInspector interface {
 	InspectTextRoute(context.Context, contract.OrganizationID, string) (TextRouteInspection, error)
 }
 
+type CapabilityRouteInspection struct {
+	ModelAlias      string `json:"model_alias"`
+	UpstreamModel   string `json:"upstream_model"`
+	RouteRevisionID string `json:"route_revision_id"`
+	Ready           bool   `json:"ready"`
+}
+
+type VisionRouteInspector interface {
+	InspectVisionRoute(context.Context, contract.OrganizationID, string) (CapabilityRouteInspection, error)
+}
+
 func (s Service) InspectTextRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (TextRouteInspection, error) {
 	inspector, ok := s.TextAdapter.(TextRouteInspector)
 	if !ok {
 		return TextRouteInspection{}, fmt.Errorf("text provider does not expose route inspection")
 	}
 	return inspector.InspectTextRoute(ctx, organizationID, modelAlias)
+}
+
+func (s Service) InspectVisionRoute(ctx context.Context, organizationID contract.OrganizationID, modelAlias string) (CapabilityRouteInspection, error) {
+	inspector, ok := s.VisionAdapter.(VisionRouteInspector)
+	if !ok {
+		return CapabilityRouteInspection{}, fmt.Errorf("vision provider does not expose route inspection")
+	}
+	return inspector.InspectVisionRoute(ctx, organizationID, modelAlias)
 }
 
 func (s Service) GenerateText(ctx context.Context, request TextGenerateRequest) (SynchronousResponse, error) {

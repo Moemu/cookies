@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS platform_knowledge_document_vision_input_conversions;

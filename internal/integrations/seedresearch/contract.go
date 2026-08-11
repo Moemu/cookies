@@ -125,10 +125,42 @@ func decodeSeedResponse(body []byte, input knowledge.ExternalResearchInput) (kno
 		InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
 		TotalTokens: response.Usage.TotalTokens,
 	}
+	findings := []knowledge.ExternalResearchFinding{}
+	coverage := map[string]bool{}
+	openGaps := []string{}
+	actionSummary := ""
+	recommendedStop := false
+	if input.RunMode == "deep" {
+		var envelope struct {
+			Report          string                              `json:"report"`
+			ActionSummary   string                              `json:"action_summary"`
+			Coverage        map[string]bool                     `json:"coverage"`
+			OpenGaps        []string                            `json:"open_gaps"`
+			RecommendedStop bool                                `json:"recommended_stop"`
+			Findings        []knowledge.ExternalResearchFinding `json:"findings"`
+		}
+		candidate := strings.TrimSpace(text)
+		candidate = strings.TrimPrefix(candidate, "```json")
+		candidate = strings.TrimPrefix(candidate, "```")
+		candidate = strings.TrimSuffix(candidate, "```")
+		if err := json.Unmarshal([]byte(strings.TrimSpace(candidate)), &envelope); err == nil && strings.TrimSpace(envelope.Report) != "" {
+			text = strings.TrimSpace(envelope.Report)
+			findings = envelope.Findings
+			coverage = envelope.Coverage
+			openGaps = envelope.OpenGaps
+			actionSummary = strings.TrimSpace(envelope.ActionSummary)
+			recommendedStop = envelope.RecommendedStop
+		} else {
+			openGaps = []string{"本轮模型输出未满足结构化 finding 契约，需要重新检索或人工检查"}
+			actionSummary = "已完成联网搜索，但结构化发现校验未通过"
+		}
+	}
 	return knowledge.ExternalResearchResult{
 		Title: title, SourceURL: sources[0].URL, Content: text, Citations: citations,
 		Sources: sources, ProviderCode: "ark", ModelVersion: strings.TrimSpace(response.Model),
-		ProviderResponse: strings.TrimSpace(response.ID), Usage: usage,
+		ProviderResponse: strings.TrimSpace(response.ID), Usage: usage, Findings: findings,
+		Coverage: coverage, OpenGaps: openGaps, ActionSummary: actionSummary,
+		RecommendedStop: recommendedStop,
 	}, nil
 }
 

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-conversation-memory-v2.schema.json",
+  "title": "Strategy Conversation Memory v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["conversation_id", "organization_id", "project_id", "summary", "summary_kind", "summary_content_hash", "open_questions", "last_message_id", "artifact_manifest", "version", "updated_at"],
+  "properties": {
+    "conversation_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "organization_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "project_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "summary": {"type": "string", "maxLength": 16000},
+    "summary_kind": {"enum": ["deterministic", "model"]},
+    "summary_model_alias": {"type": "string", "minLength": 1, "maxLength": 96},
+    "summary_prompt_version": {"type": "string", "minLength": 1, "maxLength": 96},
+    "summary_content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "open_questions": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+    "last_message_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "recent_window_start_message_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "artifact_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brief_ref", "selected_source_ids"],
+      "properties": {
+        "brief_ref": {"$ref": "#/$defs/snapshotRef"},
+        "selected_source_ids": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 96}, "uniqueItems": true}
+      }
+    },
+    "last_compacted_at": {"type": "string", "format": "date-time"},
+    "version": {"type": "integer", "minimum": 1},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "snapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "content_hash"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1, "maxLength": 48},
+        "id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "version": {"type": "integer", "minimum": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"summary_kind": {"const": "deterministic"}}},
+      "then": {"not": {"anyOf": [{"required": ["summary_model_alias"]}, {"required": ["summary_prompt_version"]}]}},
+      "else": {"required": ["summary_model_alias", "summary_prompt_version"]}
+    }
+  ]
+}

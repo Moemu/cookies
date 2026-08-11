@@ -1,0 +1,13 @@
+{
+  "contract_version": "strategy-project-context-manifest/v1",
+  "workspace_ref": {"type": "strategy_workspace", "id": "workspace_01", "version": 3},
+  "project_context_ref": {"type": "project_context", "id": "project_01", "version": 7},
+  "stage": "brief",
+  "brief_ref": {"type": "brief_draft", "id": "briefdraft_01", "version": 4, "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "strategy_ref": null,
+  "selected_source_refs": [
+    {"type": "knowledge_document", "id": "document_01", "version": 2, "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+  ],
+  "memory_version": 2,
+  "generated_at": "2026-08-10T00:00:00Z"
+}

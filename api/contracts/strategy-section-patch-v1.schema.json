@@ -10,14 +10,60 @@
     "section": {
       "enum": [
         "objective",
+        "audience",
         "proposition",
-        "creative_recommendations",
+        "channel_strategy",
+        "creative_strategy",
         "constraints",
+        "budget_and_cadence",
+        "experiment_matrix",
         "measurement",
-        "assumptions_and_gaps"
+        "assumptions_and_gaps",
+        "executive_summary",
+        "cross_platform_role",
+        "platform_plans",
+        "evidence_refs"
       ]
     },
     "value": {}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"section": {"enum": ["objective", "proposition", "executive_summary", "cross_platform_role"]}}},
+      "then": {"properties": {"value": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "audience"}}},
+      "then": {"properties": {"value": {"type": "object", "additionalProperties": false, "required": ["primary", "insights"], "properties": {"primary": {"type": "string", "minLength": 1}, "insights": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "channel_strategy"}}},
+      "then": {"properties": {"value": {"type": "array", "minItems": 1, "items": {"$ref": "./strategy-draft-v3.schema.json#/$defs/channel"}}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "creative_strategy"}}},
+      "then": {"properties": {"value": {"$ref": "./strategy-draft-v3.schema.json#/$defs/creativeStrategy"}}}
+    },
+    {
+      "if": {"properties": {"section": {"enum": ["constraints", "assumptions_and_gaps", "evidence_refs"]}}},
+      "then": {"properties": {"value": {"type": "array", "items": {"type": "string"}}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "measurement"}}},
+      "then": {"properties": {"value": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "budget_and_cadence"}}},
+      "then": {"properties": {"value": {"type": "object", "additionalProperties": false, "required": ["budget", "cadence"], "properties": {"budget": {"type": "string"}, "cadence": {"type": "string"}}}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "experiment_matrix"}}},
+      "then": {"properties": {"value": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["hypothesis", "variable", "metric"], "properties": {"hypothesis": {"type": "string", "minLength": 1}, "variable": {"type": "string", "minLength": 1}, "metric": {"type": "string", "minLength": 1}}}}}}
+    },
+    {
+      "if": {"properties": {"section": {"const": "platform_plans"}}},
+      "then": {"properties": {"value": {"type": "array", "minItems": 1, "items": {"$ref": "./strategy-draft-v3.schema.json#/$defs/platformPlan"}}}}
+    }
+  ],
   "additionalProperties": false
 }

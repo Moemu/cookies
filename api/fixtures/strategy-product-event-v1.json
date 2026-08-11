@@ -1,0 +1,16 @@
+{
+  "contract_version": "strategy-product-event/v1",
+  "id": "productevent_01",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "workspace_id": "workspace_01",
+  "event_type": "assistant.first_ack",
+  "stage": "brief",
+  "actor_kind": "user",
+  "actor_id_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resource": {"type": "agent_task", "id": "agenttask_01", "version": 1},
+  "duration_ms": 823,
+  "outcome": "accepted",
+  "attributes": {"mode": "standard"},
+  "occurred_at": "2026-08-10T00:00:00Z"
+}

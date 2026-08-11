@@ -22,6 +22,11 @@ import {
   conversationSourceDocuments,
   intakeMissingLabel,
 } from './strategyConversationModel'
+import {
+  clearWorkspaceSessionValue,
+  readWorkspaceSessionValue,
+  writeWorkspaceSessionValue,
+} from './workspace/workspaceSessionState'
 import type {
   BriefDraft,
   BriefVersion,
@@ -42,6 +47,7 @@ type Props = {
   briefVersion: BriefVersion | null
   busy: string
   conversationCapabilities: ConversationCapabilities | null
+  draftStorageKey: string
   documents: KnowledgeDocument[]
   mediaArtifacts: MediaUnderstandingArtifact[]
   messages: Message[]
@@ -63,6 +69,14 @@ type Props = {
   onUploadMedia: (file: File) => Promise<MediaUnderstandingArtifact | null>
 }
 
+type ConversationComposerDraft = {
+  attachedDocumentIds: string[]
+  attachedMediaIds: string[]
+  content: string
+  deepReasoning: boolean
+  webSearch: boolean
+}
+
 const starterPrompts = [
   '我有一条参考视频，想保留节奏结构但做成原创版本',
   '我们要推广一个新品，目标是先让核心人群理解它的价值',
@@ -74,6 +88,7 @@ export function StrategyConversationPane({
   briefVersion,
   busy,
   conversationCapabilities,
+  draftStorageKey,
   documents,
   mediaArtifacts,
   messages,
@@ -89,12 +104,19 @@ export function StrategyConversationPane({
   pending,
   researchRuns = [],
 }: Props) {
-  const [content, setContent] = useState('')
+  const [restoredDraft] = useState<ConversationComposerDraft>(() => readConversationComposerDraft(draftStorageKey) ?? {
+    attachedDocumentIds: [],
+    attachedMediaIds: [],
+    content: '',
+    deepReasoning: false,
+    webSearch: false,
+  })
+  const [content, setContent] = useState(restoredDraft.content)
   const [feedback, setFeedback] = useState('')
-  const [deepReasoning, setDeepReasoning] = useState(false)
-  const [webSearch, setWebSearch] = useState(false)
-  const [attachedDocumentIds, setAttachedDocumentIds] = useState<string[]>([])
-  const [attachedMediaIds, setAttachedMediaIds] = useState<string[]>([])
+  const [deepReasoning, setDeepReasoning] = useState(restoredDraft.deepReasoning)
+  const [webSearch, setWebSearch] = useState(restoredDraft.webSearch)
+  const [attachedDocumentIds, setAttachedDocumentIds] = useState<string[]>(restoredDraft.attachedDocumentIds)
+  const [attachedMediaIds, setAttachedMediaIds] = useState<string[]>(restoredDraft.attachedMediaIds)
   const [streamingAssistantIds, setStreamingAssistantIds] = useState<Set<string>>(() => new Set())
   const listRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -114,7 +136,7 @@ export function StrategyConversationPane({
     const artifact = mediaArtifacts.find(value => value.id === id)
     return artifact ? [artifact] : []
   })
-  const documentsReady = attachedDocuments.every(document => document.status === 'ready')
+  const documentsReady = attachedDocuments.every(document => document.status === 'ready' || document.status === 'partial')
   const mediaReady = attachedMedia.every(artifact => artifact.status === 'ready' || artifact.status === 'partial')
   const attachmentsReady = documentsReady && mediaReady
   const pendingPolicy = [...messages].reverse().find(message => message.role === 'user')?.requested_policy
@@ -162,6 +184,21 @@ export function StrategyConversationPane({
   }, [content])
 
   useEffect(() => {
+    const value: ConversationComposerDraft = {
+      attachedDocumentIds,
+      attachedMediaIds,
+      content,
+      deepReasoning,
+      webSearch,
+    }
+    if (!content && !attachedDocumentIds.length && !attachedMediaIds.length && !deepReasoning && !webSearch) {
+      clearWorkspaceSessionValue(draftStorageKey)
+      return
+    }
+    writeWorkspaceSessionValue(draftStorageKey, value)
+  }, [attachedDocumentIds, attachedMediaIds, content, deepReasoning, draftStorageKey, webSearch])
+
+  useEffect(() => {
     if (!conversationCapabilities?.deep_reasoning.available) setDeepReasoning(false)
     if (!conversationCapabilities?.web_search.available) setWebSearch(false)
   }, [conversationCapabilities])
@@ -183,6 +220,7 @@ export function StrategyConversationPane({
       : undefined
     const sent = await onSend(value, attachedDocuments, attachedMedia, requestedPolicy)
     if (sent) {
+      clearWorkspaceSessionValue(draftStorageKey)
       setContent('')
       setAttachedDocumentIds([])
       setAttachedMediaIds([])
@@ -350,7 +388,7 @@ export function StrategyConversationPane({
                   <span>{busy === 'upload-document' ? '正在上传' : '添加资料'}</span>
                 </label>
                 <input
-                  accept=".pdf,.docx,.md"
+                  accept=".pdf,.docx,.pptx,.md,.txt,.html,.htm"
                   disabled={Boolean(busy)}
                   id="kanon-conversation-document"
                   onChange={event => {
@@ -378,7 +416,7 @@ export function StrategyConversationPane({
                 </> : null}
                 <span id="kanon-strategy-message-help">Enter 发送 · Shift + Enter 换行</span>
               </div>
-              <div><small>{content.length} / 4000</small><button aria-label="发送需求消息" disabled={Boolean(busy) || pending || (!content.trim() && !attachedDocuments.length && !attachedMedia.length) || !attachmentsReady} type="submit"><Send size={15}/></button></div>
+              <div><small>{content.length} / 4000{content ? ' · 未发送内容仅在当前浏览器会话保留' : ''}</small><button aria-label="发送需求消息" disabled={Boolean(busy) || pending || (!content.trim() && !attachedDocuments.length && !attachedMedia.length) || !attachmentsReady} type="submit"><Send size={15}/></button></div>
             </footer>
           </div>
         </form>
@@ -446,6 +484,20 @@ export function StrategyConversationPane({
   </section>
 }
 
+function readConversationComposerDraft(key: string): ConversationComposerDraft | null {
+  const value = readWorkspaceSessionValue<Partial<ConversationComposerDraft>>(key)
+  if (!value || typeof value.content !== 'string' || typeof value.deepReasoning !== 'boolean' || typeof value.webSearch !== 'boolean') return null
+  if (!Array.isArray(value.attachedDocumentIds) || !value.attachedDocumentIds.every(id => typeof id === 'string')) return null
+  if (!Array.isArray(value.attachedMediaIds) || !value.attachedMediaIds.every(id => typeof id === 'string')) return null
+  return {
+    attachedDocumentIds: value.attachedDocumentIds,
+    attachedMediaIds: value.attachedMediaIds,
+    content: value.content,
+    deepReasoning: value.deepReasoning,
+    webSearch: value.webSearch,
+  }
+}
+
 function ConversationMessage({
   animate,
   message,
@@ -506,12 +558,12 @@ function StreamingAssistantText({ text }: { text: string }) {
 }
 
 function ConversationWebSearch({ run }: { run: ResearchRun }) {
-  if (run.status === 'running') {
+	if (['queued', 'planning', 'searching', 'reading', 'cross_checking', 'drafting', 'auditing'].includes(run.status)) {
     return <div className="kanon-conversation-web-search running" role="status">
       <LoaderCircle className="spin" size={13}/><span><b>正在联网搜索</b><small>搜索完成后，Strategy 助手才会基于这些来源回答。</small></span>
     </div>
   }
-  if (run.status !== 'succeeded' || !run.artifacts.length) {
+	if (run.status !== 'completed' || !run.artifacts.length) {
     return <div className="kanon-conversation-web-search unavailable" role="status">
       <Globe2 size={13}/><span><b>本轮联网搜索未完成</b><small>没有生成无来源回答；可以重试，或关闭联网搜索后重新发送。</small></span>
     </div>

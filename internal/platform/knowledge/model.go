@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	ScopeRead  contract.Scope = "assets.read"
-	ScopeWrite contract.Scope = "assets.write"
+	ScopeRead                    contract.Scope = "assets.read"
+	ScopeWrite                   contract.Scope = "assets.write"
+	ScopeDocumentVisionReconcile contract.Scope = "knowledge.document_vision.reconcile"
 )
 
 type Chunk struct {

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-task-activity-snapshot-v1.schema.json",
+  "title": "Strategy Task Activity Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "snapshot_id", "captured_at", "items"],
+  "properties": {
+    "contract_version": {"const": "strategy-task-activity-snapshot/v1"},
+    "snapshot_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {"$ref": "strategy-task-activity-v1.schema.json"}
+    }
+  }
+}

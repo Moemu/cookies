@@ -17,6 +17,7 @@ func TestActionRoutesUseFrozenColonSyntax(t *testing.T) {
 	tests := []string{
 		"/api/strategy/v1/strategy-drafts/strategy_1:revise",
 		"/api/strategy/v1/strategy-drafts/strategy_1:submit",
+		"/api/strategy/v1/strategy-drafts/strategy_1:confirm",
 		"/api/strategy/v1/strategy-drafts/strategy_1:approve",
 		"/api/strategy/v1/strategy-drafts/strategy_1:archive",
 		"/api/strategy/v1/strategy-drafts/strategy_1:restore",
@@ -32,6 +33,24 @@ func TestActionRoutesUseFrozenColonSyntax(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestExcludedAssistantSourceHeaderIsStrictAndBounded(t *testing.T) {
+	t.Parallel()
+	request := httptest.NewRequest(http.MethodPost, "/api/strategy/v1/conversations/conversation_1/messages", nil)
+	request.Header.Set("X-Strategy-Excluded-Source-Ids", `["document_2","document_1"]`)
+	values, err := decodeExcludedSourceIDsHeader(request)
+	if err != nil || len(values) != 2 || values[0] != "document_2" {
+		t.Fatalf("decoded excluded sources=%#v err=%v", values, err)
+	}
+	request.Header.Set("X-Strategy-Excluded-Source-Ids", `{"document_id":"document_1"}`)
+	if _, err := decodeExcludedSourceIDsHeader(request); err == nil {
+		t.Fatal("object-shaped source exclusions were accepted")
+	}
+	request.Header.Set("X-Strategy-Excluded-Source-Ids", `[`+strings.Repeat(`"document_1",`, 600)+`"document_1"]`)
+	if _, err := decodeExcludedSourceIDsHeader(request); err == nil {
+		t.Fatal("oversized source exclusion header was accepted")
 	}
 }
 
@@ -65,6 +84,7 @@ func TestTaskAndDeepReviewRoutesRejectInvalidBodies(t *testing.T) {
 	for _, path := range []string{
 		"/api/strategy/v1/projects/project_1/tasks",
 		"/api/strategy/v1/strategy-reviews/review_1/deep-analysis",
+		"/api/strategy/v1/strategy-drafts/strategy_1/perspective-analysis",
 	} {
 		response := httptest.NewRecorder()
 		server.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{")))
@@ -108,9 +128,14 @@ func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
 	for _, path := range []string{
 		"/api/strategy/v1/conversation-capabilities",
 		"/api/strategy/v1/projects/project_1/p0-metrics",
+		"/api/strategy/v1/projects/project_1/workspace-ux-metrics",
+		"/api/strategy/v1/projects/project_1/model-capabilities",
+		"/api/strategy/v1/projects/project_1/activities",
+		"/api/strategy/v1/projects/project_1/activities/events",
 		"/api/strategy/v1/projects/project_1/briefs",
 		"/api/strategy/v1/projects/project_1/briefs/brief_1",
 		"/api/strategy/v1/projects/project_1/strategy-drafts",
+		"/api/strategy/v1/strategy-drafts/strategy_1/perspective-analysis",
 		"/api/strategy/v1/projects/project_1/evidence-references",
 	} {
 		response := httptest.NewRecorder()
@@ -121,6 +146,16 @@ func TestStrategyCenterReadRoutesAreMounted(t *testing.T) {
 	}
 }
 
+func TestOptionalReadReturnsNoContentWhenResourceDoesNotExist(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/optional?optional=1", nil)
+	writeOptionalResult(response, request, struct{}{}, strategy.ErrNotFound)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestP0MetricsRejectsInvalidWindowBeforeService(t *testing.T) {
 	t.Parallel()
 	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
@@ -128,6 +163,20 @@ func TestP0MetricsRejectsInvalidWindowBeforeService(t *testing.T) {
 	server.ServeHTTP(response, httptest.NewRequest(
 		http.MethodGet,
 		"/api/strategy/v1/projects/project_1/p0-metrics?days=forever",
+		nil,
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkspaceUXMetricsRejectsInvalidWindowBeforeService(t *testing.T) {
+	t.Parallel()
+	server := New(strategy.Service{}, agent.MySQLStore{}, jobruntime.MySQLStore{})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet,
+		"/api/strategy/v1/projects/project_1/workspace-ux-metrics?days=forever",
 		nil,
 	))
 	if response.Code != http.StatusBadRequest {

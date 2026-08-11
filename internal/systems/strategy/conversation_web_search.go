@@ -39,7 +39,7 @@ func (s Service) prepareConversationWebSearch(ctx context.Context, task agent.Ta
 	run, err := s.ConversationResearch.RunConversationWebSearch(
 		ctx, actor, task.ProjectID, message.ID, query,
 	)
-	if err != nil || run.Status != "succeeded" || len(run.Artifacts) == 0 {
+	if err != nil || run.Status != "completed" || len(run.Artifacts) == 0 {
 		return Message{}, conversationWebSearchError("conversation web search did not complete")
 	}
 	prepared := message

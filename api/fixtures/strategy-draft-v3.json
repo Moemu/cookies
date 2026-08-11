@@ -1,0 +1,43 @@
+{
+  "contract_version": "strategy-draft/v3",
+  "objective": "获取制造企业销售线索",
+  "audience": {"primary": "制造企业研发负责人", "insights": ["重视可核验的数据与真实落地案例"]},
+  "proposition": "用可验证的流程协作缩短研发周期",
+  "channel_strategy": [
+    {"platform": "xiaohongshu", "role": "专业认知", "formats": ["图文笔记"]},
+    {"platform": "douyin", "role": "兴趣激发", "formats": ["短视频"]}
+  ],
+  "creative_strategy": {
+    "objective": "把抽象的研发协作效率转化为可看见、可核验的工作现场变化",
+    "message_hierarchy": ["协作问题正在消耗研发时间", "过程证据比口号更可信", "下一步可以从一次流程诊断开始"],
+    "territories": [
+      {
+        "name": "被会议偷走的研发时间",
+        "audience_tension": "负责人知道协作低效，却缺少可以向团队解释的共同证据。",
+        "core_idea": "把一天中的返工、等待和重复确认画成一张可核验的时间账单。",
+        "proof": ["匿名化流程节点对比", "实施前后采用相同口径的耗时记录"],
+        "channel_adaptations": [
+          {"platform": "xiaohongshu", "role": "专业认知", "adaptation": "用流程账单图文解释问题与证据边界", "formats": ["图文笔记"]},
+          {"platform": "douyin", "role": "兴趣激发", "adaptation": "用一次重复确认作为三秒冲突开场", "formats": ["短视频"]}
+        ]
+      }
+    ],
+    "tone": ["克制", "具体", "可验证"],
+    "mandatories": ["明确数据口径和时间范围"],
+    "avoidances": ["不承诺无法核验的效率提升比例"]
+  },
+  "constraints": ["不得承诺无法验证的结果"],
+  "budget_and_cadence": {"budget": "CNY 100000", "cadence": "两周验证"},
+  "experiment_matrix": [{"hypothesis": "案例证据提高咨询意愿", "variable": "证据形式", "metric": "有效咨询率"}],
+  "measurement": ["有效线索数"],
+  "assumptions_and_gaps": ["各平台预算分配待确认"],
+  "executive_summary": "小红书建立专业认知，抖音用工作现场冲突激发兴趣，并统一承接有效线索。",
+  "cross_platform_role": "两个渠道共享同一证据口径，分别承担解释和激发。",
+  "platform_plans": [
+    {"platform": "xiaohongshu", "role": "专业认知", "audience_angle": "研发流程效率", "content_pillars": ["场景问题", "案例证据"], "formats": ["图文笔记"], "conversion_path": "搜索到表单", "cadence": "每周三篇", "primary_kpi": "有效咨询", "creative_ideas": ["研发时间账单"], "constraints": ["不使用绝对化承诺"]},
+    {"platform": "douyin", "role": "兴趣激发", "audience_angle": "协作冲突", "content_pillars": ["前三秒问题", "案例证明"], "formats": ["短视频"], "conversion_path": "视频到落地页", "cadence": "每周三条", "primary_kpi": "有效线索", "creative_ideas": ["一次重复确认的代价"], "constraints": ["不承诺播放量"]}
+  ],
+  "evidence_refs": ["finding_01"],
+  "lineage": {"brief_id": "brief_01", "brief_version": 1, "project_context_version": 3, "skill_versions": {"strategy.strategy.generate": "v3.0.0"}},
+  "compliance": {"contract_version": "strategy-compliance-report/v1", "passed": true, "issues": [], "checked_at": "2026-08-10T00:00:00Z"}
+}

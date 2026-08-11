@@ -25,6 +25,15 @@ export type PlatformProject = {
   updated_at: string;
 };
 
+export type PlatformBrand = {
+  id: string;
+  organization_id: string;
+  name: string;
+  status: "active" | "archived";
+  created_at: string;
+  updated_at: string;
+};
+
 export type PlatformProjectRuntime = {
   code: string;
   brand: string;
@@ -243,12 +252,20 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
   return {
     listProjects: async () => {
       const projects = asArray((await request<ItemsResponse<PlatformProject>>("/projects")).items);
-      return Promise.all(projects.map(async project => toApiProject(await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(project.id)}`))));
+      // The application workbench can only operate on active, brand-bound
+      // Projects. Drafts remain available through the platform API, but must
+      // not make loading every usable Project fail at the active-context gate.
+      const operationalProjects = projects.filter(project => project.status === "active" && project.primary_brand_id !== null);
+      return operationalProjects.map(toApiProjectSummary);
     },
     createProject: async (input: Pick<ApiProject, "name" | "brand" | "objective" | "industry">) => {
+      const brand = await request<PlatformBrand>("/brands", {
+        method: "POST",
+        body: JSON.stringify({ name: input.brand }),
+      });
       const project = await request<PlatformProject>("/projects", {
         method: "POST",
-        body: JSON.stringify({ name: input.name, brand: input.brand, goal: input.objective, industry: input.industry, primary_brand_id: null, product_ids: [], activate: false }),
+        body: JSON.stringify({ name: input.name, brand: input.brand, goal: input.objective, industry: input.industry, primary_brand_id: brand.id, product_ids: [], activate: true }),
       });
       return toApiProject(await request<PlatformProjectDetail>(`/projects/${encodeURIComponent(project.id)}`));
     },
@@ -424,6 +441,30 @@ export function toApiProject(input: PlatformProjectDetail): ApiProject {
     version: project.project_context_version,
     createdAt: project.created_at,
     updatedAt,
+  };
+}
+
+export function toApiProjectSummary(project: PlatformProject): ApiProject {
+  return {
+    id: project.id,
+    name: project.name,
+    industry: project.industry ?? "ecommerce",
+    brand: project.primary_brand_id ?? "尚未绑定品牌",
+    objective: "",
+    runtime: {
+      code: project.id,
+      product: "项目产品",
+      stage: "intake",
+      progress: 0,
+      status: "active",
+      owner: "服务端项目",
+      budget: 0,
+      currency: "CNY",
+      timezone: "Asia/Shanghai",
+    },
+    version: project.project_context_version,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
   };
 }
 

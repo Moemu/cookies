@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -91,6 +92,88 @@ func TestMySQLGatewayConfigStoreResolvesVersionedEncryptedRoute(t *testing.T) {
 	}
 	token, err := store.ResolveGatewayCredential(t.Context(), snapshot.CredentialID, snapshot.CredentialVersion)
 	if err != nil || token != "adapter-integration-token" {
+		t.Fatalf("ResolveGatewayCredential() = %q, %v", token, err)
+	}
+}
+
+func TestMySQLGatewayConfigStoreResolvesLASDocumentRoute(t *testing.T) {
+	dsn := os.Getenv("COOKIES_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("COOKIES_TEST_MYSQL_DSN is not configured")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000"), ".", "")
+	connectionID, connectionRevisionID := "connection_las_"+suffix, "connection_las_revision_"+suffix
+	credentialID, routeID, routeRevisionID := "credential_las_"+suffix, "route_las_"+suffix, "route_las_revision_"+suffix
+	modelAlias := "cookies.document.vision.integration." + suffix
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x45}, 32))
+	cipher, err := NewAESGCMCredentialCipher(key, "integration-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, nonce, keyVersion, err := cipher.Encrypt([]byte("las-integration-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_connections
+		(id, connection_code, connection_type, current_revision_id, status)
+		VALUES (?, ?, 'las_operator', NULL, 'enabled')`, connectionID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec("UPDATE provider_model_routes SET current_revision_id = NULL WHERE id = ?", routeID)
+		_, _ = db.Exec("DELETE FROM provider_model_route_revisions WHERE id = ?", routeRevisionID)
+		_, _ = db.Exec("DELETE FROM provider_model_routes WHERE id = ?", routeID)
+		_, _ = db.Exec("DELETE FROM provider_credentials WHERE id = ?", credentialID)
+		_, _ = db.Exec("UPDATE provider_connections SET current_revision_id = NULL WHERE id = ?", connectionID)
+		_, _ = db.Exec("DELETE FROM provider_connection_revisions WHERE id = ?", connectionRevisionID)
+		_, _ = db.Exec("DELETE FROM provider_connections WHERE id = ?", connectionID)
+	})
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_connection_revisions
+		(id, connection_id, revision_number, base_url, timeout_seconds, max_response_bytes)
+		VALUES (?, ?, 1, 'https://operator.las.cn-beijing.volces.com/api/v1', 900, 8388608)`,
+		connectionRevisionID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `UPDATE provider_connections SET current_revision_id = ? WHERE id = ?`, connectionRevisionID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_credentials
+		(id, connection_id, credential_version, ciphertext, nonce, key_version, status, active_from)
+		VALUES (?, ?, 1, ?, ?, ?, 'active', UTC_TIMESTAMP(6))`,
+		credentialID, connectionID, ciphertext, nonce, keyVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_model_routes
+		(id, organization_id, capability, model_alias, current_revision_id, status)
+		VALUES (?, NULL, 'document.vision.parse', ?, NULL, 'enabled')`, routeID, modelAlias); err != nil {
+		t.Fatal(err)
+	}
+	constraints := json.RawMessage(`{
+		"endpoint":"/submit","poll_endpoint":"/poll","operator_version":"v1",
+		"parse_mode":"detail","full_result":true,"aspect_ratio_threshold":0.334,"poll_interval_ms":2000
+	}`)
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO provider_model_route_revisions
+		(id, route_id, revision_number, connection_id, connection_revision_id, upstream_model, constraints_json)
+		VALUES (?, ?, 1, ?, ?, 'las_pdf_parse_doubao', ?)`,
+		routeRevisionID, routeID, connectionID, connectionRevisionID, constraints); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `UPDATE provider_model_routes SET current_revision_id = ? WHERE id = ?`, routeRevisionID, routeID); err != nil {
+		t.Fatal(err)
+	}
+	store := MySQLGatewayConfigStore{DB: db, Cipher: cipher}
+	snapshot, err := store.ResolveDocumentVisionRoute(t.Context(), "org_integration", modelAlias)
+	if err != nil || snapshot.ConnectionType != "las_operator" || snapshot.DocumentParseMode != "detail" ||
+		snapshot.DocumentSubmitPath != "/submit" || snapshot.DocumentPollPath != "/poll" {
+		t.Fatalf("ResolveDocumentVisionRoute() = %+v, %v", snapshot, err)
+	}
+	token, err := store.ResolveGatewayCredential(t.Context(), snapshot.CredentialID, snapshot.CredentialVersion)
+	if err != nil || token != "las-integration-token" {
 		t.Fatalf("ResolveGatewayCredential() = %q, %v", token, err)
 	}
 }

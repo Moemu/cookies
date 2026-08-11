@@ -93,6 +93,7 @@ type Strategy struct {
 	CreativeTaskPlanningEnabled bool
 	QuickViralRemakeEnabled     bool
 	TextModelAlias              string
+	LiteTextModelAlias          string
 	DeepReviewModelAlias        string
 	PromptVersion               string
 	ConversationPromptVersion   string
@@ -122,21 +123,29 @@ type Creative struct {
 // Research configures backend-owned web research. MCP fields are retained only
 // for decoding older local configuration and are not used by the API process.
 type Research struct {
-	SeedEnabled        bool
-	SeedModelAlias     string
-	MaxConcurrent      int
-	TikaEnabled        bool
-	TikaBaseURL        string
-	TikaVersion        string
-	TikaTimeoutSeconds int
-	TikaMaxOutputBytes int
-	MCPStdioCommand    string
-	MCPStdioArgs       []string
-	MCPToolName        string
-	MCPProtocolVersion string
-	MCPEnvAllowlist    []string
-	TimeoutSeconds     int
-	MaxOutputBytes     int
+	SeedEnabled                  bool
+	SeedModelAlias               string
+	DocumentVisionEnabled        bool
+	DocumentVisionModelAlias     string
+	DocumentConverterEnabled     bool
+	DocumentConverterBaseURL     string
+	DocumentConverterVersion     string
+	DocumentConverterTimeout     int
+	DocumentConverterMaxPDFBytes int
+	DocumentConverterAllowHTTP   bool
+	MaxConcurrent                int
+	TikaEnabled                  bool
+	TikaBaseURL                  string
+	TikaVersion                  string
+	TikaTimeoutSeconds           int
+	TikaMaxOutputBytes           int
+	MCPStdioCommand              string
+	MCPStdioArgs                 []string
+	MCPToolName                  string
+	MCPProtocolVersion           string
+	MCPEnvAllowlist              []string
+	TimeoutSeconds               int
+	MaxOutputBytes               int
 }
 
 // Provider contains only local composition choices. Credentials are read from
@@ -382,6 +391,18 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	documentVisionEnabled, err := strictBoolValueOr(lookup, "COOKIES_DOCUMENT_VISION_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	documentConverterEnabled, err := strictBoolValueOr(lookup, "COOKIES_DOCUMENT_CONVERTER_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	documentConverterAllowHTTP, err := strictBoolValueOr(lookup, "COOKIES_DOCUMENT_CONVERTER_ALLOW_INSECURE_HTTP", false)
+	if err != nil {
+		return Config{}, err
+	}
 	generatePromptDefault := "strategy.generate.v2"
 	conversationPromptDefault := "strategy.conversation.v3"
 	revisePromptDefault := "strategy.revise.v2"
@@ -393,6 +414,15 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		revisePromptDefault = "strategy.revise.v3"
 		reviewPromptDefault = "strategy.review.deep.v2"
 		repairPromptDefault = "strategy.repair.v2"
+	}
+	tosBucket := valueOrCompatibility(lookup, "COOKIES_TOS_BUCKET", "OBJECT_STORAGE_BUCKET_NAME", "")
+	quarantineBucket := valueOrCompatibility(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "OBJECT_STORAGE_QUARANTINE_BUCKET", "cookies-quarantine")
+	assetsBucket := valueOrCompatibility(lookup, "COOKIES_TOS_ASSETS_BUCKET", "OBJECT_STORAGE_ASSETS_BUCKET", "cookies-assets")
+	providerOutputBucket := valueOr(lookup, "COOKIES_PROVIDER_OUTPUT_BUCKET", "cookies-provider-output")
+	if tosBucket != "" {
+		quarantineBucket = tosBucket
+		assetsBucket = tosBucket
+		providerOutputBucket = tosBucket
 	}
 	config := Config{
 		Environment: environment,
@@ -416,8 +446,8 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			AccessKey:        valueOrCompatibility(lookup, "COOKIES_TOS_ACCESS_KEY", "OBJECT_STORAGE_ACCESS_KEY", "OBJECT_STORAGE_ACCESS_KEY_ID", ""),
 			SecretKey:        valueOrCompatibility(lookup, "COOKIES_TOS_SECRET_KEY", "OBJECT_STORAGE_SECRET_KEY", "OBJECT_STORAGE_ACCESS_KEY_SECRET", ""),
 			SecurityToken:    valueOrCompatibility(lookup, "COOKIES_TOS_SECURITY_TOKEN", "OBJECT_STORAGE_SECURITY_TOKEN", ""),
-			QuarantineBucket: valueOrCompatibility(lookup, "COOKIES_TOS_QUARANTINE_BUCKET", "OBJECT_STORAGE_QUARANTINE_BUCKET", "cookies-quarantine"),
-			AssetsBucket:     valueOrCompatibility(lookup, "COOKIES_TOS_ASSETS_BUCKET", "OBJECT_STORAGE_ASSETS_BUCKET", "OBJECT_STORAGE_BUCKET_NAME", "cookies-assets"),
+			QuarantineBucket: quarantineBucket,
+			AssetsBucket:     assetsBucket,
 		},
 		Scanner: Scanner{Mode: valueOr(lookup, "COOKIES_SCANNER_MODE", "noop"), Address: valueOr(lookup, "COOKIES_CLAMAV_ADDRESS", "")},
 		Media: Media{
@@ -447,6 +477,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			CreativeTaskPlanningEnabled: strategyCreativeTaskPlanningEnabled,
 			QuickViralRemakeEnabled:     strategyQuickViralRemakeEnabled,
 			TextModelAlias:              valueOr(lookup, "COOKIES_STRATEGY_TEXT_MODEL_ALIAS", "cookies.text.standard"),
+			LiteTextModelAlias:          valueOr(lookup, "COOKIES_STRATEGY_LITE_TEXT_MODEL_ALIAS", "cookies.text.lite"),
 			DeepReviewModelAlias:        valueOr(lookup, "COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS", "cookies.text.deep_review"),
 			PromptVersion:               valueOr(lookup, "COOKIES_STRATEGY_PROMPT_VERSION", generatePromptDefault),
 			ConversationPromptVersion:   valueOr(lookup, "COOKIES_STRATEGY_CONVERSATION_PROMPT_VERSION", conversationPromptDefault),
@@ -459,20 +490,28 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			OrganizationAllowlist:       splitCSV(valueOr(lookup, "COOKIES_STRATEGY_ORGANIZATION_ALLOWLIST", "")),
 		},
 		Research: Research{
-			SeedEnabled:        researchSeedEnabled,
-			SeedModelAlias:     valueOr(lookup, "COOKIES_RESEARCH_SEED_MODEL_ALIAS", "cookies.research.web.standard"),
-			MaxConcurrent:      intValueOr(lookup, "COOKIES_RESEARCH_MAX_CONCURRENT", 3),
-			TikaEnabled:        researchTikaEnabled,
-			TikaBaseURL:        valueOr(lookup, "COOKIES_RESEARCH_TIKA_BASE_URL", "http://127.0.0.1:9998"),
-			TikaVersion:        valueOr(lookup, "COOKIES_RESEARCH_TIKA_VERSION", "3.2.3.0"),
-			TikaTimeoutSeconds: intValueOr(lookup, "COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS", 120),
-			TikaMaxOutputBytes: intValueOr(lookup, "COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES", 20*1024*1024),
-			MCPStdioCommand:    strings.TrimSpace(valueOr(lookup, "COOKIES_RESEARCH_MCP_STDIO_COMMAND", "")),
-			MCPToolName:        valueOr(lookup, "COOKIES_RESEARCH_MCP_TOOL_NAME", "research"),
-			MCPProtocolVersion: valueOr(lookup, "COOKIES_RESEARCH_MCP_PROTOCOL_VERSION", "2025-11-25"),
-			MCPEnvAllowlist:    splitCSV(valueOr(lookup, "COOKIES_RESEARCH_MCP_ENV_ALLOWLIST", "PATH,PATHEXT,SystemRoot,TEMP,TMP,ComSpec")),
-			TimeoutSeconds:     intValueOr(lookup, "COOKIES_RESEARCH_TIMEOUT_SECONDS", 120),
-			MaxOutputBytes:     intValueOr(lookup, "COOKIES_RESEARCH_MAX_OUTPUT_BYTES", 4*1024*1024),
+			SeedEnabled:                  researchSeedEnabled,
+			SeedModelAlias:               valueOr(lookup, "COOKIES_RESEARCH_SEED_MODEL_ALIAS", "cookies.research.web.standard"),
+			DocumentVisionEnabled:        documentVisionEnabled,
+			DocumentVisionModelAlias:     valueOr(lookup, "COOKIES_DOCUMENT_VISION_MODEL_ALIAS", "cookies.document.vision.standard"),
+			DocumentConverterEnabled:     documentConverterEnabled,
+			DocumentConverterBaseURL:     valueOr(lookup, "COOKIES_DOCUMENT_CONVERTER_BASE_URL", "http://127.0.0.1:3000"),
+			DocumentConverterVersion:     valueOr(lookup, "COOKIES_DOCUMENT_CONVERTER_VERSION", "gotenberg-8.34.0"),
+			DocumentConverterTimeout:     intValueOr(lookup, "COOKIES_DOCUMENT_CONVERTER_TIMEOUT_SECONDS", 120),
+			DocumentConverterMaxPDFBytes: intValueOr(lookup, "COOKIES_DOCUMENT_CONVERTER_MAX_PDF_BYTES", 32*1024*1024),
+			DocumentConverterAllowHTTP:   documentConverterAllowHTTP,
+			MaxConcurrent:                intValueOr(lookup, "COOKIES_RESEARCH_MAX_CONCURRENT", 3),
+			TikaEnabled:                  researchTikaEnabled,
+			TikaBaseURL:                  valueOr(lookup, "COOKIES_RESEARCH_TIKA_BASE_URL", "http://127.0.0.1:9998"),
+			TikaVersion:                  valueOr(lookup, "COOKIES_RESEARCH_TIKA_VERSION", "3.2.3.0"),
+			TikaTimeoutSeconds:           intValueOr(lookup, "COOKIES_RESEARCH_TIKA_TIMEOUT_SECONDS", 120),
+			TikaMaxOutputBytes:           intValueOr(lookup, "COOKIES_RESEARCH_TIKA_MAX_OUTPUT_BYTES", 20*1024*1024),
+			MCPStdioCommand:              strings.TrimSpace(valueOr(lookup, "COOKIES_RESEARCH_MCP_STDIO_COMMAND", "")),
+			MCPToolName:                  valueOr(lookup, "COOKIES_RESEARCH_MCP_TOOL_NAME", "research"),
+			MCPProtocolVersion:           valueOr(lookup, "COOKIES_RESEARCH_MCP_PROTOCOL_VERSION", "2025-11-25"),
+			MCPEnvAllowlist:              splitCSV(valueOr(lookup, "COOKIES_RESEARCH_MCP_ENV_ALLOWLIST", "PATH,PATHEXT,SystemRoot,TEMP,TMP,ComSpec")),
+			TimeoutSeconds:               intValueOr(lookup, "COOKIES_RESEARCH_TIMEOUT_SECONDS", 120),
+			MaxOutputBytes:               intValueOr(lookup, "COOKIES_RESEARCH_MAX_OUTPUT_BYTES", 4*1024*1024),
 		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
@@ -482,7 +521,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			SpeechAdapter:     valueOr(lookup, "COOKIES_PROVIDER_SPEECH_ADAPTER", "fake"),
 			MasterKey:         valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY", ""),
 			MasterKeyVersion:  valueOr(lookup, "COOKIES_PROVIDER_MASTER_KEY_VERSION", "v1"),
-			OutputBucket:      valueOr(lookup, "COOKIES_PROVIDER_OUTPUT_BUCKET", "cookies-provider-output"),
+			OutputBucket:      providerOutputBucket,
 			AllowInsecureHTTP: boolValueOr(lookup, "COOKIES_PROVIDER_ALLOW_INSECURE_HTTP", false),
 			ArkImage: ArkImage{
 				APIKey:  valueOr(lookup, "COOKIES_ARK_IMAGE_API_KEY", ""),
@@ -576,8 +615,8 @@ func (c Config) Validate() error {
 	if c.ObjectStorage.Provider != "memory" && c.ObjectStorage.Provider != "filesystem" && c.ObjectStorage.Provider != "tos" {
 		return fmt.Errorf("COOKIES_BLOB_PROVIDER must be memory, filesystem, or tos")
 	}
-	if strings.TrimSpace(c.ObjectStorage.QuarantineBucket) == "" || strings.TrimSpace(c.ObjectStorage.AssetsBucket) == "" || c.ObjectStorage.QuarantineBucket == c.ObjectStorage.AssetsBucket {
-		return fmt.Errorf("object storage requires distinct quarantine and assets buckets")
+	if strings.TrimSpace(c.ObjectStorage.QuarantineBucket) == "" || strings.TrimSpace(c.ObjectStorage.AssetsBucket) == "" {
+		return fmt.Errorf("object storage requires quarantine and assets bucket names")
 	}
 	if c.ObjectStorage.Provider == "tos" && (c.ObjectStorage.Endpoint == "" || c.ObjectStorage.Region == "" || c.ObjectStorage.AccessKey == "" || c.ObjectStorage.SecretKey == "") {
 		return fmt.Errorf("TOS storage requires endpoint, region, access key, and secret key")
@@ -614,6 +653,43 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Research.SeedModelAlias) == "" {
 		return fmt.Errorf("COOKIES_RESEARCH_SEED_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Research.DocumentVisionModelAlias) == "" {
+		return fmt.Errorf("COOKIES_DOCUMENT_VISION_MODEL_ALIAS must not be empty")
+	}
+	if c.Research.DocumentVisionEnabled {
+		if c.ObjectStorage.Provider != "tos" {
+			return fmt.Errorf("COOKIES_DOCUMENT_VISION_ENABLED requires TOS object storage")
+		}
+		if c.ObjectStorage.AssetsBucket != c.ObjectStorage.QuarantineBucket ||
+			c.ObjectStorage.AssetsBucket != c.Provider.OutputBucket {
+			return fmt.Errorf("document vision requires one shared TOS bucket for quarantine, assets, and provider output")
+		}
+		if strings.TrimSpace(c.Provider.MasterKey) == "" {
+			return fmt.Errorf("document vision requires COOKIES_PROVIDER_MASTER_KEY for encrypted LAS credentials")
+		}
+	}
+	if c.Research.DocumentConverterEnabled {
+		if !c.Research.DocumentVisionEnabled {
+			return fmt.Errorf("COOKIES_DOCUMENT_CONVERTER_ENABLED requires COOKIES_DOCUMENT_VISION_ENABLED")
+		}
+		converterURL, err := url.Parse(strings.TrimSpace(c.Research.DocumentConverterBaseURL))
+		if err != nil || converterURL.Host == "" || (converterURL.Scheme != "http" && converterURL.Scheme != "https") ||
+			converterURL.User != nil || converterURL.RawQuery != "" || converterURL.Fragment != "" {
+			return fmt.Errorf("COOKIES_DOCUMENT_CONVERTER_BASE_URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
+		}
+		if converterURL.Scheme == "http" && !c.Research.DocumentConverterAllowHTTP {
+			return fmt.Errorf("HTTP document converter requires COOKIES_DOCUMENT_CONVERTER_ALLOW_INSECURE_HTTP=true")
+		}
+		if strings.TrimSpace(c.Research.DocumentConverterVersion) == "" {
+			return fmt.Errorf("COOKIES_DOCUMENT_CONVERTER_VERSION must not be empty")
+		}
+		if c.Research.DocumentConverterTimeout < 10 || c.Research.DocumentConverterTimeout > 600 {
+			return fmt.Errorf("COOKIES_DOCUMENT_CONVERTER_TIMEOUT_SECONDS must be between 10 and 600")
+		}
+		if c.Research.DocumentConverterMaxPDFBytes < 1024*1024 || c.Research.DocumentConverterMaxPDFBytes > 64*1024*1024 {
+			return fmt.Errorf("COOKIES_DOCUMENT_CONVERTER_MAX_PDF_BYTES must be between 1048576 and 67108864")
+		}
 	}
 	if c.Research.MaxConcurrent < 1 || c.Research.MaxConcurrent > 4 {
 		return fmt.Errorf("COOKIES_RESEARCH_MAX_CONCURRENT must be between 1 and 4")
@@ -657,6 +733,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Strategy.TextModelAlias) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_TEXT_MODEL_ALIAS must not be empty")
+	}
+	if strings.TrimSpace(c.Strategy.LiteTextModelAlias) == "" {
+		return fmt.Errorf("COOKIES_STRATEGY_LITE_TEXT_MODEL_ALIAS must not be empty")
 	}
 	if strings.TrimSpace(c.Strategy.DeepReviewModelAlias) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_DEEP_REVIEW_MODEL_ALIAS must not be empty")
@@ -756,11 +835,8 @@ func (c Config) Validate() error {
 		if err != nil || len(key) != 32 {
 			return fmt.Errorf("COOKIES_PROVIDER_MASTER_KEY must be base64-encoded 32 bytes")
 		}
-		if usesGenerationBroker &&
-			(strings.TrimSpace(c.Provider.OutputBucket) == "" ||
-				c.Provider.OutputBucket == c.ObjectStorage.AssetsBucket ||
-				c.Provider.OutputBucket == c.ObjectStorage.QuarantineBucket) {
-			return fmt.Errorf("adapter_gateway requires a distinct COOKIES_PROVIDER_OUTPUT_BUCKET")
+		if usesGenerationBroker && strings.TrimSpace(c.Provider.OutputBucket) == "" {
+			return fmt.Errorf("adapter_gateway requires an output bucket")
 		}
 		if c.Provider.AllowInsecureHTTP && c.Environment != EnvironmentLocal {
 			return fmt.Errorf("COOKIES_PROVIDER_ALLOW_INSECURE_HTTP is permitted only when COOKIES_ENV=local")

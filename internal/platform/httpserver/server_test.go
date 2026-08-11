@@ -15,6 +15,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/platform/remix"
@@ -210,6 +211,11 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 		{name: "viral source unavailable", err: creative.ErrViralAnalysisSourceUnavailable, wantStatus: http.StatusUnprocessableEntity, wantCode: "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE"},
 		{name: "viral provider unavailable", err: creative.ErrViralAnalysisProviderUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", wantRetryable: true},
 		{name: "viral invalid response", err: creative.ErrViralAnalysisResponseInvalid, wantStatus: http.StatusBadGateway, wantCode: "VIRAL_ANALYSIS_RESPONSE_INVALID", wantRetryable: true},
+		{name: "document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationRequired, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_REQUIRED"},
+		{name: "document vision reconciliation forbidden", err: knowledge.ErrDocumentVisionReconciliationForbidden, wantStatus: http.StatusForbidden, wantCode: "DOCUMENT_VISION_RECONCILIATION_FORBIDDEN"},
+		{name: "invalid document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationInvalid, wantStatus: http.StatusBadRequest, wantCode: "INVALID_DOCUMENT_VISION_RECONCILIATION"},
+		{name: "same document vision operator", err: knowledge.ErrDocumentVisionReconciliationSameActor, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_SECOND_OPERATOR_REQUIRED"},
+		{name: "document vision reconciliation conflict", err: knowledge.ErrDocumentVisionReconciliationConflict, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_CONFLICT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -235,6 +241,44 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDocumentVisionReconciliationConfirmationRequiresExplicitDecision(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "admin_2"},
+		Scopes:         []contract.Scope{knowledge.ScopeDocumentVisionReconcile},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &knowledge.Service{}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: allowingProjectAuthorizer{}, Knowledge: service,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/platform/v1/projects/project_1/knowledge/document-vision-reconciliations/reconciliation_1/confirm",
+		strings.NewReader(`{}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_DOCUMENT_VISION_RECONCILIATION") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type allowingProjectAuthorizer struct{}
+
+func (allowingProjectAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
+	return nil
+}
+
+func (allowingProjectAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
 }
 
 func TestAuthenticatedDomainMountReceivesTrustedRequestContext(t *testing.T) {

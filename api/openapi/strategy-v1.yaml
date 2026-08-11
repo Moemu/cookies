@@ -11,6 +11,54 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/strategy/v1/projects/{project_id}/activities:
+    get:
+      operationId: listStrategyTaskActivities
+      summary: Read the rebuildable Activity projection for existing Strategy, Research, Document, and Job facts.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: workspace_id
+          in: query
+          schema: {type: string, minLength: 1, maxLength: 96}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Complete content-addressed Activity snapshot. Activity is a read model, not a task authority.
+          headers:
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-task-activity-snapshot-v1.schema.json'}
+        '304':
+          description: The caller already has the current snapshot.
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/activities/events:
+    get:
+      operationId: streamStrategyTaskActivities
+      summary: Stream complete Activity snapshots whenever their content-addressed ID changes.
+      description: Reconnection never depends on replaying deltas; clients reconcile one complete snapshot before continuing.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: workspace_id
+          in: query
+          schema: {type: string, minLength: 1, maxLength: 96}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: Last-Event-ID
+          in: header
+          schema: {type: string}
+      responses:
+        '200':
+          description: SSE stream of activity.snapshot events whose data is one complete TaskActivitySnapshot.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/projects/{project_id}/creative-businesses:
     get:
       operationId: listStrategyCreativeBusinesses
@@ -265,6 +313,18 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/model-capabilities:
+    get:
+      operationId: getStrategyModelCapabilities
+      summary: Inspect the fixed Strategy capability-to-model map without invoking a model.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Fixed aliases and their effective route readiness; unavailable capabilities never silently fall back.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-model-capabilities-v1.schema.json'}
+        '403': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/projects/{project_id}/brief-versions:
     get:
       operationId: listProjectStrategyBriefVersions
@@ -281,6 +341,194 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/workspaces/{workspace_id}/context-manifest:
+    get:
+      operationId: getStrategyWorkspaceContextManifest
+      summary: Rebuild the bounded, version-pinned context supplied to Strategy AI tasks.
+      parameters:
+        - {$ref: '#/components/parameters/WorkspaceID'}
+        - name: stage
+          in: query
+          required: true
+          schema: {enum: [intake, brief, strategy, review, handoff]}
+      responses:
+        '200':
+          description: Reconstructible context references; no provider credentials, raw blobs, or model reasoning.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-project-context-manifest-v1.schema.json'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/workspaces/{workspace_id}/assistant-proposals:
+    get:
+      operationId: listStrategyAssistantProposals
+      summary: List reviewable AI proposals without mutating authoritative artifacts.
+      parameters:
+        - {$ref: '#/components/parameters/WorkspaceID'}
+        - name: status
+          in: query
+          required: false
+          schema: {enum: [proposed, applied, edited, ignored, stale]}
+      responses:
+        '200':
+          description: Newest proposals first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ArtifactProposal'}}
+                additionalProperties: false
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/assistant-proposals/{proposal_id}:apply':
+    post:
+      operationId: applyStrategyAssistantProposal
+      summary: Apply an unchanged or user-edited proposal after target version and content-hash validation.
+      parameters:
+        - {$ref: '#/components/parameters/ProposalID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                operations:
+                  type: array
+                  minItems: 1
+                  maxItems: 32
+                  items: {$ref: '#/components/schemas/BriefPatchOperation'}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Applied proposal and updated Brief draft.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposal, brief_draft]
+                properties:
+                  proposal: {$ref: '#/components/schemas/ArtifactProposal'}
+                  brief_draft: {type: object}
+                additionalProperties: false
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/assistant-proposals/{proposal_id}:ignore':
+    post:
+      operationId: ignoreStrategyAssistantProposal
+      summary: Dismiss a proposal without changing its target artifact.
+      parameters:
+        - {$ref: '#/components/parameters/ProposalID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '200':
+          description: Ignored proposal.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArtifactProposal'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/workspaces/{workspace_id}/research-adoption-proposals:
+    get:
+      operationId: listStrategyResearchAdoptionProposals
+      summary: List finding-level Brief or Strategy changes proposed by completed deep research.
+      parameters:
+        - {$ref: '#/components/parameters/WorkspaceID'}
+        - name: run_id
+          in: query
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 96}
+      responses:
+        '200':
+          description: Proposals preserve stale and supersession history; listing never mutates an artifact.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ArtifactProposal'}}
+                additionalProperties: false
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/research-adoption-proposals/{proposal_id}:apply':
+    post:
+      operationId: applyStrategyResearchAdoptionProposal
+      summary: Apply or edit one mapped finding after validating the exact current target version and content hash.
+      parameters:
+        - {$ref: '#/components/parameters/ProposalID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                operations:
+                  type: array
+                  minItems: 1
+                  maxItems: 32
+                  items: {$ref: '#/components/schemas/BriefPatchOperation'}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Proposal plus exactly one updated Brief draft or Strategy draft.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposal]
+                properties:
+                  proposal: {$ref: '#/components/schemas/ArtifactProposal'}
+                  brief_draft: {type: object}
+                  strategy_draft: {type: object}
+                oneOf:
+                  - required: [brief_draft]
+                  - required: [strategy_draft]
+                additionalProperties: false
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/research-adoption-proposals/{proposal_id}:remap':
+    post:
+      operationId: remapStrategyResearchAdoptionProposal
+      summary: Create a new proposal against the current target while leaving the stale evidence chain immutable.
+      parameters:
+        - {$ref: '#/components/parameters/ProposalID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '201':
+          description: New proposal whose supersedes_proposal_id points to the stale proposal.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArtifactProposal'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/research-adoption-proposals/{proposal_id}:ignore':
+    post:
+      operationId: ignoreStrategyResearchAdoptionProposal
+      summary: Ignore one research proposal without changing its target artifact or evidence.
+      parameters:
+        - {$ref: '#/components/parameters/ProposalID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '200':
+          description: Ignored proposal.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArtifactProposal'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/conversations:
     post:
       operationId: createStrategyConversation
@@ -336,14 +584,48 @@ paths:
               schema: {$ref: '../contracts/strategy-p0-metrics-v1.schema.json'}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/projects/{project_id}/workspace-ux-metrics:
+    get:
+      operationId: getStrategyWorkspaceUXMetrics
+      summary: Read privacy-bounded workflow latency, recovery, research adoption, and document parsing evidence.
+      parameters:
+        - {$ref: '#/components/parameters/ProjectID'}
+        - name: days
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 90, default: 30}
+      responses:
+        '200':
+          description: Observed workflow evidence; time saving remains unmeasured until a human-correction baseline exists.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-workspace-ux-metrics-v1.schema.json'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/conversations/{conversation_id}/memory:
     get:
       operationId: getStrategyConversationMemory
       summary: Read the persisted summary and unresolved high-impact questions.
       parameters: [{$ref: '#/components/parameters/ConversationID'}]
       responses:
-        '200': {$ref: '#/components/responses/JSONResource'}
+        '200':
+          description: Bounded memory whose structured artifact manifest remains authoritative over its summary.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-conversation-memory-v2.schema.json'}
         '400': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/conversations/{conversation_id}/memory:compact':
+    post:
+      operationId: compactStrategyConversationMemory
+      summary: Rebuild deterministic memory and advance the recent raw-message window.
+      parameters: [{$ref: '#/components/parameters/ConversationID'}]
+      responses:
+        '200':
+          description: Rebuilt deterministic memory.
+          content:
+            application/json:
+              schema: {$ref: '../contracts/strategy-conversation-memory-v2.schema.json'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/conversations/{conversation_id}/messages:
     get:
       operationId: listStrategyMessages
@@ -358,6 +640,21 @@ paths:
       parameters:
         - {$ref: '#/components/parameters/ConversationID'}
         - {$ref: '#/components/parameters/IdempotencyKey'}
+        - name: X-Strategy-Stage
+          in: header
+          required: false
+          description: Visible workspace stage used only to build the server-authoritative context manifest.
+          schema: {enum: [intake, brief, strategy, review, handoff], default: intake}
+        - name: X-Strategy-Surface
+          in: header
+          required: false
+          description: Distinguishes direct intake editing from the cross-stage assistant proposal surface.
+          schema: {enum: [workspace, assistant], default: workspace}
+        - name: X-Strategy-Excluded-Source-Ids
+          in: header
+          required: false
+          description: Bounded JSON array of source resource IDs omitted from this assistant turn only; invalid on the direct workspace surface.
+          schema: {type: string, maxLength: 4096}
       requestBody:
         required: true
         content:
@@ -512,13 +809,15 @@ paths:
     get:
       operationId: getStrategyDraft
       summary: Read a Strategy draft and its current revision.
+      description: Returns frozen v1/v2 revisions for read compatibility and v3 for current writers. Reading a legacy revision never rewrites its snapshot.
       parameters: [{$ref: '#/components/parameters/StrategyID'}]
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
     patch:
       operationId: patchStrategyDraft
-      summary: Create a revision from an allowlisted section patch.
+      summary: Create a v3 revision from an allowlisted section patch.
+      description: The writer accepts strategy-draft/v3 only. Legacy v1/v2 drafts return STRATEGY_UPGRADE_REQUIRED and must receive a successor revision before editing.
       parameters:
         - {$ref: '#/components/parameters/StrategyID'}
         - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -530,6 +829,38 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /api/strategy/v1/strategy-drafts/{strategy_id}/perspective-analysis:
+    get:
+      operationId: getStrategyPerspectiveAnalysis
+      summary: Read the latest AI second-perspective analysis for the current Strategy revision.
+      description: The result is revision-bound and independent from human review status.
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: startStrategyPerspectiveAnalysis
+      summary: Queue a non-blocking AI second-perspective analysis for one immutable Strategy revision.
+      description: This operation never creates, approves, returns, or invalidates a human review.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, expected_content_hash]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                expected_content_hash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /api/strategy/v1/agent-tasks/{agent_task_id}/skill-runs:
     get:
       operationId: listStrategySkillRuns
@@ -567,7 +898,8 @@ paths:
   '/api/strategy/v1/strategy-drafts/{strategy_id}:revise':
     post:
       operationId: reviseStrategyDraft
-      summary: Queue a natural-language revision.
+      summary: Queue a natural-language v3 revision.
+      description: Natural-language revision is v3-only; legacy snapshots remain readable but require a successor revision before mutation.
       parameters:
         - {$ref: '#/components/parameters/StrategyID'}
         - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -586,10 +918,11 @@ paths:
       responses:
         '202': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   '/api/strategy/v1/strategy-drafts/{strategy_id}:submit':
     post:
       operationId: submitStrategyDraft
-      summary: Freeze a review candidate.
+      summary: Freeze a formal-review candidate for leader or designated approvers.
       parameters:
         - {$ref: '#/components/parameters/StrategyID'}
         - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -607,6 +940,30 @@ paths:
       responses:
         '201': {$ref: '#/components/responses/JSONResource'}
         '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  '/api/strategy/v1/strategy-drafts/{strategy_id}:confirm':
+    post:
+      operationId: confirmStrategyDraft
+      summary: Atomically self-confirm a Strategy revision and publish its immutable package.
+      description: Available only while the Project review policy is self_confirmation. The audit Review and Assignment are created and approved in the same transaction; no user-visible submit-to-self state is created.
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, candidate_revision]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                candidate_revision: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '201': {$ref: '#/components/responses/JSONResource'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   '/api/strategy/v1/strategy-drafts/{strategy_id}:approve':
     post:
       operationId: approveStrategyDraft
@@ -806,6 +1163,7 @@ components:
     PackageID: {name: package_id, in: path, required: true, schema: {type: string, minLength: 1}}
     BusinessCode: {name: business_code, in: path, required: true, schema: {type: string, minLength: 1}}
     PlanID: {name: plan_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    ProposalID: {name: proposal_id, in: path, required: true, schema: {type: string, minLength: 1}}
     Version: {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
     Revision: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}}
   requestBodies:
@@ -854,6 +1212,67 @@ components:
                   details: {type: array, items: {type: object}}
             additionalProperties: false
   schemas:
+    BriefPatchOperation:
+      type: object
+      additionalProperties: false
+      required: [op, field_path, value]
+      properties:
+        op: {const: set}
+        field_path: {type: string, minLength: 1}
+        value: {}
+        source: {type: object}
+        confidence: {type: string}
+        confirmation: {type: string}
+    ArtifactProposal:
+      type: object
+      additionalProperties: false
+      required: [contract_version, id, organization_id, project_id, workspace_id, conversation_id, proposal_kind, target_type, target_id, target_version, base_content_hash, operations, rationale, risk, status, stale_reason, created_by, version, created_at, updated_at]
+      properties:
+        contract_version: {enum: [strategy-artifact-proposal/v1, strategy-research-adoption-proposal/v1]}
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        workspace_id: {type: string}
+        conversation_id: {type: string}
+        proposal_kind: {enum: [assistant, research]}
+        target_type: {enum: [brief_draft, strategy_revision]}
+        target_id: {type: string}
+        target_version: {type: integer, minimum: 1}
+        base_content_hash: {$ref: '#/components/schemas/SHA256'}
+        operations: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/BriefPatchOperation'}}
+        rationale: {type: string, maxLength: 2000}
+        risk: {enum: [low, medium, high]}
+        status: {enum: [proposed, applied, edited, ignored, stale]}
+        source_message_id: {type: string}
+        finding_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 96}
+        source_research_run_id: {type: string, minLength: 1, maxLength: 96}
+        stale_reason: {type: string, maxLength: 500}
+        supersedes_proposal_id: {type: string, minLength: 1, maxLength: 96}
+        created_by: {type: string}
+        applied_by: {type: string}
+        applied_at: {type: string, format: date-time}
+        ignored_by: {type: string}
+        ignored_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      allOf:
+        - if: {properties: {proposal_kind: {const: research}}}
+          then:
+            required: [finding_ids, source_research_run_id]
+            properties: {contract_version: {const: strategy-research-adoption-proposal/v1}}
+        - if: {properties: {proposal_kind: {const: assistant}}}
+          then:
+            required: [source_message_id]
+            properties: {contract_version: {const: strategy-artifact-proposal/v1}}
+        - if: {properties: {status: {const: stale}}}
+          then: {properties: {stale_reason: {type: string, minLength: 1}}}
+        - if: {properties: {status: {enum: [proposed, applied, edited, ignored]}}}
+          then: {properties: {stale_reason: {type: string, maxLength: 0}}}
     BriefDocumentV3:
       $ref: '../contracts/strategy-brief-version-v3.schema.json'
     SHA256:

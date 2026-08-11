@@ -5,6 +5,7 @@ import { api, CreativeApiError, type ApiProjectMediaAsset, type ApiShortDramaV2T
 import { editingApi } from '../video-editing/api'
 import { canOpenShortDramaStep, initialShortDramaPrerollState, shortDramaPrerollReducer } from './reducer'
 import { createAsyncActionGate } from './asyncActionGate'
+import { findAuthoritativeVideo, requireAuthoritativeVideo, sourceUnavailableMessage } from './sourceAuthority'
 import type { FirstFrameCandidate, PrerollDuration, ShortDramaPrerollState, ShortDramaStep } from './types'
 import './short-drama-preroll-v2.css'
 
@@ -58,7 +59,7 @@ function sameAsset(left?: { asset_version: { asset_id: string; version: number }
   return Boolean(left && right && left.asset_version.asset_id === right.asset_version.asset_id && left.asset_version.version === right.asset_version.version)
 }
 
-async function restoreState(projectId: string, detail: ApiShortDramaV2TaskDetail, source: ApiProjectMediaAsset | null, session: ShortDramaSession | null): Promise<ShortDramaPrerollState> {
+async function restoreState(projectId: string, detail: ApiShortDramaV2TaskDetail, source: ApiProjectMediaAsset, session: ShortDramaSession | null): Promise<ShortDramaPrerollState> {
   const workspace = detail.video_draft.short_drama_preroll_v2
   const analysisReady = workspace.analysis.status === 'ready'
   const hooks = hookDirections(detail)
@@ -201,7 +202,8 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
           const restored = await api.getShortDramaPrerollV2Workspace(currentProject.id, session.taskId)
           if (cancelled) return
           const sourceRef = restored.video_draft.short_drama_preroll_v2.source_video.asset_version
-          const source = videos.find(item => item.id === sourceRef.asset_id && item.version === sourceRef.version) ?? null
+          const source = findAuthoritativeVideo(videos, sourceRef)
+          if (!source) throw new Error(sourceUnavailableMessage)
           const restoredState = await restoreState(currentProject.id, restored, source, session)
           if (cancelled) return
           setWorkspace(restored)
@@ -220,9 +222,18 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
               if (!cancelled) dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '恢复生成任务失败' })
             })
           }
-        } catch {
+        } catch (cause) {
           window.localStorage.removeItem(storageKey(currentProject.id))
-          if (videos[0]) dispatch({ type: 'source-selected', source: videos[0] })
+          setWorkspace(null)
+          dispatch({
+            type: 'restore',
+            state: {
+              ...initialShortDramaPrerollState,
+              error: cause instanceof Error && cause.message === sourceUnavailableMessage
+                ? sourceUnavailableMessage
+                : '短剧前贴草稿无法恢复，请重新选择源视频。',
+            },
+          })
         }
       } else if (videos[0]) dispatch({ type: 'source-selected', source: videos[0] })
       hydratedProject.current = currentProject.id
@@ -271,16 +282,15 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
     setUploading(true)
     try {
       const ref = await api.uploadProjectAsset(currentProject.id, file)
+      await api.getProjectAssetPreview(currentProject.id, ref)
       const videos = (await api.listProjectMediaAssets(currentProject.id)).filter(item => item.kind === 'video')
       setAssets(videos)
-      const uploaded = videos.find(item => item.id === ref.asset_id && item.version === ref.version) ?? {
-        id: ref.asset_id, projectId: currentProject.id, version: ref.version, kind: 'video' as const,
-        sourceType: 'upload' as const, mimeType: file.type || 'video/mp4', sizeBytes: file.size,
-        createdAt: new Date().toISOString(), contentUrl: url,
-      }
+      const uploaded = requireAuthoritativeVideo(videos, ref)
       setWorkspace(null)
       window.localStorage.removeItem(storageKey(currentProject.id))
       dispatch({ type: 'source-selected', source: uploaded })
+      URL.revokeObjectURL(url)
+      setLocalPreviewUrl('')
       onNotice('视频已上传为项目素材，可以开始真实内容理解。')
     } catch (cause) {
       setLocalPreviewUrl('')
@@ -294,16 +304,25 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
     if (!state.source) return
     dispatch({ type: 'analysis-started' })
     try {
+      const videos = (await api.listProjectMediaAssets(currentProject.id)).filter(item => item.kind === 'video')
+      const source = requireAuthoritativeVideo(videos, { asset_id: state.source.id, version: state.source.version })
+      setAssets(videos)
       let current = workspace
       const sourceRef = current?.video_draft.short_drama_preroll_v2.source_video.asset_version
-      if (!current || sourceRef?.asset_id !== state.source.id || sourceRef.version !== state.source.version) {
-        current = await api.createManualShortDramaPrerollV2Workspace(currentProject.id, { asset_id: state.source.id, version: state.source.version })
+      if (!current || sourceRef?.asset_id !== source.id || sourceRef.version !== source.version) {
+        current = await api.createManualShortDramaPrerollV2Workspace(currentProject.id, { asset_id: source.id, version: source.version })
       }
       const analyzed = await api.analyzeShortDramaV2Source(currentProject.id, current.task.id, current.video_draft.revision)
       setWorkspace(analyzed)
       dispatch({ type: 'analysis-ready', analysis: storyAnalysis(analyzed) })
       onNotice('已根据当前上传视频完成真实内容理解。')
     } catch (cause) {
+      if (cause instanceof Error && cause.message.includes('后端尚未确认该视频素材')) {
+        setWorkspace(null)
+        window.localStorage.removeItem(storageKey(currentProject.id))
+        dispatch({ type: 'restore', state: { ...initialShortDramaPrerollState, error: sourceUnavailableMessage } })
+        return
+      }
       dispatch({ type: 'operation-failed', message: cause instanceof Error ? cause.message : '视频理解失败' })
     }
   }
@@ -342,6 +361,7 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
           try {
             const latest = await api.getShortDramaPrerollV2Workspace(currentProject.id, workspace.task.id)
             const latestWorkspace = latest.video_draft.short_drama_preroll_v2
+            if (!state.source) throw new Error(sourceUnavailableMessage)
             const restored = await restoreState(currentProject.id, latest, state.source, readSession(currentProject.id))
             setWorkspace(latest)
             dispatch({ type: 'restore', state: restored })
@@ -364,7 +384,7 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
     if (state.selectedHookId) void selectHook(state.selectedHookId, duration)
   }
   const synchronizeWorkspace = async () => {
-    if (!workspace) throw new Error('当前创作任务不存在，请重新选择视频。')
+    if (!workspace || !state.source) throw new Error(sourceUnavailableMessage)
     const latest = await api.getShortDramaPrerollV2Workspace(currentProject.id, workspace.task.id)
     const resumed = await resumeWorkspaceJobs(currentProject.id, latest)
     const restored = await restoreState(currentProject.id, resumed.detail, state.source, readSession(currentProject.id))

@@ -370,7 +370,7 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
     post:
       operationId: createKnowledgeDocument
-      summary: Scan, store, and parse one Markdown, DOCX, or PDF document.
+      summary: Scan, store, and parse one Markdown, text, HTML, DOCX, PDF, PPT, or PPTX document.
       parameters:
       - $ref: '#/components/parameters/ProjectID'
       requestBody:
@@ -420,6 +420,256 @@ paths:
           $ref: '#/components/responses/ProjectAccessDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/preview:
+    get:
+      operationId: previewKnowledgeDocument
+      summary: Return a bounded text and locator preview without exposing object storage coordinates.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Bounded document preview.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeDocumentPreview'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/content:
+    get:
+      operationId: getKnowledgeDocumentContent
+      summary: Stream the original project-scoped document through an authorized no-store proxy.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Original document bytes.
+          content:
+            application/octet-stream:
+              schema: {type: string, contentEncoding: binary}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/visual-fallback-capability:
+    get:
+      operationId: getKnowledgeDocumentVisualFallbackCapability
+      summary: Inspect manual visual-fallback eligibility and route availability without invoking a model.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Document-scoped visual fallback capability.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contract_version, document_id, eligible, recommended, available, model_alias, conversion_required, max_pages_per_request, requires_page_selection]
+                properties:
+                  contract_version: {type: string, const: platform-document-vision-fallback/v1}
+                  document_id: {type: string}
+                  eligible: {type: boolean}
+                  recommended: {type: boolean}
+                  available: {type: boolean}
+                  reason_code: {type: string}
+                  model_alias: {type: string}
+                  route_revision_id: {type: string}
+                  conversion_required: {type: boolean}
+                  converter_code: {type: string, maxLength: 64}
+                  converter_version: {type: string, maxLength: 160}
+                  max_pages_per_request: {type: integer, const: 24}
+                  requires_page_selection: {type: boolean}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/cancel:
+    post:
+      operationId: cancelKnowledgeDocumentParse
+      summary: Request cancellation of the active document parse Job.
+      description: Queued Jobs cancel immediately. Running Jobs acknowledge the request and remain running until the worker reaches a safe terminal boundary.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: The queued parse Job was cancelled.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeJobControl'}
+        '202':
+          description: Cancellation was requested for a running parse Job.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeJobControl'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/retry:
+    post:
+      operationId: retryKnowledgeDocumentParse
+      summary: Queue a fresh parse Job for the same failed document.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '202':
+          description: A fresh parse attempt was queued without replacing the document.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeDocument'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/run-visual-fallback:
+    post:
+      operationId: runKnowledgeDocumentVisualFallback
+      summary: Manually queue visual parsing for selected pages of a low-quality PDF or PPT result.
+      description: This endpoint never enables automatic fallback. It requires an inspected document-vision route and preserves the existing text chunks if visual parsing fails.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page_numbers:
+                  type: array
+                  maxItems: 24
+                  uniqueItems: true
+                  items: {type: integer, minimum: 1}
+              additionalProperties: false
+      responses:
+        '202':
+          description: The manual visual fallback was queued.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeDocument'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422':
+          description: The request requires an explicit bounded page selection.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503':
+          description: The inspected document-vision capability is unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliation-candidates:
+    get:
+      operationId: listKnowledgeDocumentVisionReconciliationCandidates
+      summary: List uncertain document-vision tasks that require administrator reconciliation.
+      description: Returns bounded task intent and route lineage only. It excludes object-storage coordinates, credentials, checkpoint bodies, provider raw responses, and document content.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Project-scoped uncertain submission candidates.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentVisionReconciliationCandidateList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+  /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/vision-reconciliations:
+    post:
+      operationId: proposeKnowledgeDocumentVisionReconciliation
+      summary: Propose an administrator reconciliation for an uncertain external vision submission.
+      description: Requires an authenticated human with the administrator-only knowledge.document_vision.reconcile scope. Evidence is an opaque ticket reference; URLs, credentials, and copied provider output are not accepted.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: document_id
+        in: path
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProposeDocumentVisionReconciliationRequest'}
+      responses:
+        '201':
+          description: Reconciliation proposal recorded; a different administrator must confirm it.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentVisionReconciliation'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliations/{reconciliation_id}:
+    get:
+      operationId: getKnowledgeDocumentVisionReconciliation
+      summary: Read one administrator reconciliation proposal before confirming it.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: reconciliation_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Reconciliation proposal and its two-operator audit state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentVisionReconciliation'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliations/{reconciliation_id}/confirm:
+    post:
+      operationId: confirmKnowledgeDocumentVisionReconciliation
+      summary: Independently approve or reject a document-vision reconciliation proposal.
+      description: The confirming administrator must be a different authenticated human. Approving an accepted decision resumes polling the existing external task; approving not_accepted preserves text and permits a later explicit user retry.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: reconciliation_id
+        in: path
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConfirmDocumentVisionReconciliationRequest'}
+      responses:
+        '200':
+          description: Proposal rejected, or approved and applied with its accepted task scheduled for polling.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentVisionReconciliation'}
+        '202':
+          description: The accepted decision was applied but scheduling is awaiting automatic reconciliation recovery.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentVisionReconciliation'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/projects/{project_id}/workbench:
     get:
       operationId: getProjectWorkbench
@@ -512,6 +762,21 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/projects/{project_id}/knowledge/research-runs:
+    get:
+      operationId: listKnowledgeResearchRuns
+      summary: List Project research runs and their persisted artifacts.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Project research run list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeResearchRunList'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
     post:
       operationId: createExternalResearchRun
       summary: Queue one explicitly confirmed Seed web-search research run.
@@ -525,14 +790,22 @@ paths:
               type: object
               required:
               - query
+              - run_mode
               - document_ids
               - disclosed_fields
               - confirmed
+              - purpose
+              - source_ref
               properties:
                 mode:
                   enum:
                   - web
                   default: web
+                run_mode:
+                  enum:
+                  - quick
+                  - deep
+                  description: Deep runs execute asynchronously with persisted rounds and server-owned stopping conditions.
                 category:
                   type: string
                   enum:
@@ -545,6 +818,19 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 2000
+                purpose:
+                  enum:
+                  - conversation_web_search
+                  - deep_research
+                  description: Deep runs must use deep_research; conversation searches must use quick mode.
+                source_ref:
+                  type: object
+                  required: [type, id]
+                  properties:
+                    type: {type: string, minLength: 1, maxLength: 64}
+                    id: {type: string, minLength: 1, maxLength: 96}
+                    version: {type: integer, format: int64, minimum: 1}
+                  additionalProperties: false
                 document_ids:
                   type: array
                   maxItems: 20
@@ -561,12 +847,162 @@ paths:
                     - document_content
                 confirmed:
                   const: true
+                input_snapshot_ref:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                input_snapshot:
+                  type: object
+                  description: Bounded, version-pinned Strategy context supplied only for deep research; never returned by the API.
+              allOf:
+              - if:
+                  properties: {run_mode: {const: deep}}
+                  required: [run_mode]
+                then:
+                  required: [input_snapshot_ref, input_snapshot]
+                  properties:
+                    purpose: {const: deep_research}
+                    source_ref:
+                      type: object
+                      required: [type, id]
+                      properties:
+                        type: {const: strategy_workspace}
+                        id: {type: string, minLength: 1, maxLength: 96}
+                        version: {type: integer, format: int64, minimum: 1}
+                      additionalProperties: false
+              - if:
+                  properties: {run_mode: {const: quick}}
+                  required: [run_mode]
+                then:
+                  properties:
+                    purpose: {const: conversation_web_search}
+                    source_ref:
+                      type: object
+                      required: [type, id]
+                      properties:
+                        type: {const: strategy_message}
+                        id: {type: string, minLength: 1, maxLength: 96}
+                        version: {type: integer, format: int64, minimum: 1}
+                      additionalProperties: false
               additionalProperties: false
       responses:
         '201':
           description: Research run and any ResearchArtifacts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeResearchRun'}
+        '202':
+          description: Research run queued for asynchronous execution.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeResearchRun'}
         '400':
           $ref: '#/components/responses/BadRequest'
+  /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}:
+    get:
+      operationId: getKnowledgeResearchRun
+      summary: Get one Project research run and its persisted artifacts.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: research_run_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Research run detail.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeResearchRun'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/findings:
+    get:
+      operationId: listKnowledgeResearchFindings
+      summary: List persisted findings and their Brief or Strategy target mappings.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: research_run_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Findings remain tentative until source excerpts pass independent content verification.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/KnowledgeResearchFinding'}
+                additionalProperties: false
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/report:
+    get:
+      operationId: getKnowledgeResearchReport
+      summary: Return the immutable final report artifact for a terminal deep research run.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: research_run_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Report with persisted citations and explicit source verification status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeResearchArtifact'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/cancel:
+    post:
+      operationId: cancelKnowledgeResearchRun
+      summary: Request cancellation of the active research Job.
+      description: Running provider calls are not reported as cancelled until the worker reaches a safe terminal boundary.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: research_run_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: The queued research Job was cancelled.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeJobControl'}
+        '202':
+          description: Cancellation was requested for a running research Job.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeJobControl'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/retry:
+    post:
+      operationId: retryKnowledgeResearchRun
+      summary: Queue a fresh Job attempt for the same failed or cancelled research run.
+      parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: research_run_id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '202':
+          description: A fresh research attempt was queued without replacing the ResearchRun.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeResearchRun'}
+        '403': {$ref: '#/components/responses/ProjectAccessDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/projects/{project_id}/assets/uploads:
     post:
       operationId: createAssetUpload
@@ -2362,6 +2798,9 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    SHA256:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
     RequestContext:
       type: object
       required:
@@ -5765,6 +6204,7 @@ components:
     KnowledgeDocument:
       type: object
       required:
+      - contract_version
       - id
       - organization_id
       - project_id
@@ -5778,9 +6218,26 @@ components:
       - content_sha256
       - text_sha256
       - status
+      - parse_strategy
+      - parse_phase
+      - parse_progress
+      - progress_kind
+      - processed_pages
+      - total_pages
+      - quality_score
+      - quality_tier
+      - fallback_reason
+      - preview_status
+      - heartbeat_at
+      - vision_fallback_status
+      - vision_selected_pages
+      - vision_completed_pages
       - created_at
       - updated_at
       properties:
+        contract_version:
+          type: string
+          const: platform-document-parse/v2
         id:
           type: string
         organization_id:
@@ -5818,7 +6275,64 @@ components:
           - parse_queued
           - parsing
           - ready
+          - partial
           - parse_failed
+        parse_strategy:
+          type: string
+          enum: [text_native, tika_text, hybrid, visual]
+        parse_phase:
+          type: string
+          enum: [queued, scanning, extracting, quality_checking, visual_conversion, visual_fallback, chunking, ready, partial, failed]
+        parse_progress:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 100
+        progress_kind:
+          type: string
+          enum: [milestone, pages, indeterminate]
+        processed_pages:
+          type: [integer, 'null']
+          minimum: 0
+        total_pages:
+          type: [integer, 'null']
+          minimum: 1
+        quality_score:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+        quality_tier:
+          type: string
+          enum: [unknown, high, medium, low]
+        fallback_reason:
+          type: string
+          maxLength: 500
+        preview_status:
+          type: string
+          enum: [unavailable, building, ready, partial, failed]
+        page_quality_summary:
+          type: object
+          additionalProperties: true
+        heartbeat_at:
+          type: [string, 'null']
+          format: date-time
+        vision_fallback_status:
+          type: string
+          enum: [not_requested, queued, running, partial, succeeded, failed]
+        vision_selected_pages:
+          type: array
+          maxItems: 24
+          items: {type: integer, minimum: 1}
+        vision_completed_pages:
+          type: array
+          maxItems: 24
+          items: {type: integer, minimum: 1}
+        vision_model_alias: {type: string, maxLength: 160}
+        vision_route_revision_id: {type: string, maxLength: 96}
+        vision_model_version: {type: string, maxLength: 160}
+        vision_error_code: {type: string, maxLength: 96}
+        vision_error_message: {type: string, maxLength: 1024}
+        vision_started_at: {type: string, format: date-time}
+        vision_completed_at: {type: string, format: date-time}
         parser_code:
           type: string
         parser_version:
@@ -5827,6 +6341,9 @@ components:
           type: string
         parse_error_message:
           type: string
+        parse_metadata:
+          type: object
+          additionalProperties: true
         parsed_at:
           type: string
           format: date-time
@@ -5837,6 +6354,49 @@ components:
           type: string
           format: date-time
       additionalProperties: false
+    KnowledgeDocumentPreview:
+      type: object
+      required: [contract_version, document_id, filename, mime_type, status, text, text_truncated, total_characters, chunk_count, original_available, chunks, parse_strategy, parse_phase, parse_progress, progress_kind, processed_pages, total_pages, quality_score, quality_tier, fallback_reason, preview_status, heartbeat_at]
+      properties:
+        contract_version: {type: string, const: platform-document-preview/v1}
+        document_id: {type: string}
+        filename: {type: string}
+        mime_type: {type: string}
+        status: {type: string, enum: [parse_queued, parsing, ready, partial, parse_failed]}
+        text: {type: string, maxLength: 40000}
+        text_truncated: {type: boolean}
+        total_characters: {type: integer, minimum: 0}
+        chunk_count: {type: integer, minimum: 0}
+        original_available: {type: boolean}
+        parse_strategy: {type: string, enum: [text_native, tika_text, hybrid, visual]}
+        parse_phase: {type: string, enum: [queued, scanning, extracting, quality_checking, visual_fallback, chunking, ready, partial, failed]}
+        parse_progress: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        progress_kind: {type: string, enum: [milestone, pages, indeterminate]}
+        processed_pages: {type: [integer, 'null'], minimum: 0}
+        total_pages: {type: [integer, 'null'], minimum: 1}
+        quality_score: {type: [number, 'null'], minimum: 0, maximum: 1}
+        quality_tier: {type: string, enum: [unknown, high, medium, low]}
+        fallback_reason: {type: string, maxLength: 500}
+        preview_status: {type: string, enum: [unavailable, building, ready, partial, failed]}
+        page_quality_summary: {type: object, additionalProperties: true}
+        heartbeat_at: {type: [string, 'null'], format: date-time}
+        chunks:
+          type: array
+          maxItems: 24
+          items:
+            type: object
+            required: [id, index, section, start_line, end_line, snippet, locator]
+            properties:
+              id: {type: string}
+              index: {type: integer, minimum: 0}
+              section: {type: string}
+              page_number: {type: integer, minimum: 1}
+              start_line: {type: integer, minimum: 0}
+              end_line: {type: integer, minimum: 0}
+              snippet: {type: string, maxLength: 500}
+              locator: {type: object, additionalProperties: true}
+            additionalProperties: false
+      additionalProperties: false
     KnowledgeDocumentList:
       type: object
       required:
@@ -5846,6 +6406,336 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/KnowledgeDocument'
+      additionalProperties: false
+    KnowledgeJobControl:
+      type: object
+      required:
+      - resource_type
+      - resource_id
+      - execution_id
+      - execution_status
+      - cancel_requested
+      - accepted_at
+      properties:
+        resource_type:
+          enum: [knowledge_document, knowledge_research_run]
+        resource_id:
+          type: string
+        execution_id:
+          type: string
+        execution_status:
+          enum: [queued, running, cancelled]
+        cancel_requested:
+          const: true
+        accepted_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ProposeDocumentVisionReconciliationRequest:
+      type: object
+      required: [task_index, expected_intent_id, decision, evidence_ref]
+      properties:
+        task_index: {type: integer, minimum: 0}
+        expected_intent_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        decision: {enum: [accepted, not_accepted]}
+        external_task_id: {type: string, minLength: 1, maxLength: 160, pattern: '^[!-~]+$'}
+        evidence_ref: {type: string, minLength: 3, maxLength: 512, pattern: '^[^\r\n]+:[^\r\n]+$'}
+      allOf:
+      - if:
+          properties: {decision: {const: accepted}}
+          required: [decision]
+        then:
+          required: [external_task_id]
+        else:
+          not: {required: [external_task_id]}
+      additionalProperties: false
+    ConfirmDocumentVisionReconciliationRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: {type: boolean}
+      additionalProperties: false
+    DocumentVisionReconciliation:
+      type: object
+      required: [contract_version, id, organization_id, project_id, document_id, attempt_id, task_index, intent_id, decision, evidence_ref, status, proposed_by, proposed_at, created_at, updated_at]
+      properties:
+        contract_version: {const: platform-document-vision-reconciliation/v1}
+        id: {type: string, minLength: 1, maxLength: 96}
+        organization_id: {type: string, minLength: 1, maxLength: 96}
+        project_id: {type: string, minLength: 1, maxLength: 96}
+        document_id: {type: string, minLength: 1, maxLength: 96}
+        attempt_id: {type: string, minLength: 1, maxLength: 96}
+        task_index: {type: integer, minimum: 0}
+        intent_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        decision: {enum: [accepted, not_accepted]}
+        external_task_id: {type: string, minLength: 1, maxLength: 160, pattern: '^[!-~]+$'}
+        evidence_ref: {type: string, minLength: 3, maxLength: 512}
+        status: {enum: [proposed, rejected, applied]}
+        proposed_by: {type: string, minLength: 1, maxLength: 96}
+        proposed_at: {type: string, format: date-time}
+        confirmed_by: {type: string, minLength: 1, maxLength: 96}
+        confirmed_at: {type: string, format: date-time}
+        applied_at: {type: string, format: date-time}
+        scheduled_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    DocumentVisionReconciliationCandidate:
+      type: object
+      required: [contract_version, organization_id, project_id, document_id, document_title, filename, attempt_id, task_index, page_numbers, status, intent_id, provider_code, model_alias, model_version, route_revision_id, error_code, updated_at]
+      properties:
+        contract_version: {const: platform-document-vision-reconciliation-candidate/v1}
+        organization_id: {type: string, minLength: 1, maxLength: 96}
+        project_id: {type: string, minLength: 1, maxLength: 96}
+        document_id: {type: string, minLength: 1, maxLength: 96}
+        document_title: {type: string, maxLength: 160}
+        filename: {type: string, maxLength: 255}
+        attempt_id: {type: string, minLength: 1, maxLength: 96}
+        task_index: {type: integer, minimum: 0}
+        page_numbers:
+          type: array
+          minItems: 1
+          maxItems: 24
+          uniqueItems: true
+          items: {type: integer, minimum: 1}
+        status: {enum: [submitting, unknown]}
+        intent_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        provider_code: {type: string, minLength: 1, maxLength: 64}
+        model_alias: {type: string, minLength: 1, maxLength: 160}
+        model_version: {type: string, minLength: 1, maxLength: 160}
+        route_revision_id: {type: string, minLength: 1, maxLength: 96}
+        error_code: {type: string, maxLength: 96}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    DocumentVisionReconciliationCandidateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/DocumentVisionReconciliationCandidate'}
+      additionalProperties: false
+    KnowledgeResearchRun:
+      type: object
+      required:
+      - id
+      - contract_version
+      - organization_id
+      - project_id
+      - mode
+      - run_mode
+      - category
+      - purpose
+      - query
+      - document_ids
+      - disclosed_fields
+      - disclosed_chunk_ids
+      - status
+      - current_round
+      - max_rounds
+      - time_budget_seconds
+      - token_budget
+      - input_snapshot_ref
+      - input_snapshot_hash
+      - coverage
+      - open_gaps
+      - stop_reason
+      - heartbeat_at
+      - report_artifact_id
+      - confirmed_by
+      - confirmed_at
+      - artifacts
+      - iterations
+      - findings
+      - created_at
+      - updated_at
+      properties:
+        id: {type: string}
+        contract_version: {const: strategy-research-run/v2}
+        organization_id: {type: string}
+        project_id: {type: string}
+        mode: {const: web}
+        run_mode: {enum: [quick, deep]}
+        category: {enum: [general, audience, competitor, industry]}
+        purpose: {enum: [conversation_web_search, deep_research]}
+        source_ref:
+          type: object
+          required: [type, id]
+          properties:
+            type: {type: string}
+            id: {type: string}
+            version: {type: integer, format: int64, minimum: 1}
+          additionalProperties: false
+        query: {type: string}
+        document_ids:
+          type: array
+          items: {type: string}
+        disclosed_fields:
+          type: array
+          items: {type: string}
+        disclosed_chunk_ids:
+          type: array
+          items: {type: string}
+        status:
+          enum: [queued, planning, searching, reading, cross_checking, drafting, auditing, completed, partially_completed, failed, cancelled]
+        current_round: {type: integer, minimum: 0, maximum: 20}
+        max_rounds: {type: integer, minimum: 1, maximum: 20}
+        time_budget_seconds: {type: integer, minimum: 1, maximum: 86400}
+        token_budget: {type: integer, format: int64, minimum: 1}
+        input_snapshot_ref: {type: string, minLength: 1, maxLength: 160}
+        input_snapshot_hash: {$ref: '#/components/schemas/SHA256'}
+        coverage:
+          type: object
+          maxProperties: 32
+          additionalProperties: {type: boolean}
+        open_gaps:
+          type: array
+          maxItems: 32
+          items: {type: string, minLength: 1, maxLength: 300}
+        stop_reason: {type: string, maxLength: 96}
+        heartbeat_at:
+          oneOf:
+          - {type: 'null'}
+          - {type: string, format: date-time}
+        report_artifact_id:
+          oneOf:
+          - {type: 'null'}
+          - {type: string, minLength: 1, maxLength: 96}
+        started_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+        confirmed_by: {type: string}
+        confirmed_at: {type: string, format: date-time}
+        error_code: {type: string}
+        error_message: {type: string}
+        provider_code: {type: string}
+        model_version: {type: string}
+        provider_response_id: {type: string}
+        usage:
+          type: object
+          required: [input_tokens, output_tokens, total_tokens]
+          properties:
+            input_tokens: {type: integer, format: int64, minimum: 0}
+            output_tokens: {type: integer, format: int64, minimum: 0}
+            total_tokens: {type: integer, format: int64, minimum: 0}
+          additionalProperties: false
+        artifacts:
+          type: array
+          items: {$ref: '#/components/schemas/KnowledgeResearchArtifact'}
+        iterations:
+          type: array
+          items: {$ref: '#/components/schemas/KnowledgeResearchIteration'}
+        findings:
+          type: array
+          items: {$ref: '#/components/schemas/KnowledgeResearchFinding'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: false
+    KnowledgeResearchRunList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/KnowledgeResearchRun'}
+      additionalProperties: false
+    KnowledgeResearchIteration:
+      type: object
+      required: [id, research_run_id, round, status, objective, query, action_summary, source_ids, artifact_ids, finding_ids, coverage, open_gaps, input_hash, output_hash, started_at]
+      properties:
+        id: {type: string}
+        research_run_id: {type: string}
+        round: {type: integer, minimum: 1, maximum: 20}
+        status: {enum: [running, completed, failed, cancelled]}
+        objective: {type: string, maxLength: 2000}
+        query: {type: string, maxLength: 2000}
+        action_summary: {type: string, maxLength: 2000}
+        source_ids: {type: array, items: {type: string}}
+        artifact_ids: {type: array, items: {type: string}}
+        finding_ids: {type: array, items: {type: string}}
+        coverage: {type: object, additionalProperties: {type: boolean}}
+        open_gaps: {type: array, items: {type: string}}
+        usage: {$ref: '#/components/schemas/KnowledgeResearchUsage'}
+        input_hash: {$ref: '#/components/schemas/SHA256'}
+        output_hash: {$ref: '#/components/schemas/SHA256'}
+        error_code: {type: string}
+        error_message: {type: string}
+        started_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+      additionalProperties: false
+    KnowledgeResearchFinding:
+      type: object
+      required: [contract_version, id, claim, status, time_scope, confidence, supporting_source_ids, conflicting_source_ids, target, implication, round, content_hash]
+      properties:
+        contract_version: {const: strategy-research-finding/v1}
+        id: {type: string}
+        research_run_id: {type: string}
+        claim: {type: string, minLength: 1, maxLength: 2000}
+        status: {enum: [tentative, verified, conflicting, invalid]}
+        time_scope: {type: string, minLength: 1, maxLength: 96}
+        confidence: {enum: [low, medium, high]}
+        supporting_source_ids: {type: array, uniqueItems: true, items: {type: string}}
+        conflicting_source_ids: {type: array, uniqueItems: true, items: {type: string}}
+        target:
+          type: object
+          required: [artifact, field_path]
+          properties:
+            artifact: {enum: [brief, strategy]}
+            field_path: {type: string, minLength: 1, maxLength: 160}
+          additionalProperties: false
+        implication: {type: string, minLength: 1, maxLength: 2000}
+        proposed_value: {}
+        round: {type: integer, minimum: 1, maximum: 20}
+        content_hash: {$ref: '#/components/schemas/SHA256'}
+      additionalProperties: false
+    KnowledgeResearchArtifact:
+      type: object
+      required: [id, organization_id, project_id, research_run_id, source_type, category, title, content, citations, sources, content_hash, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        research_run_id: {type: string}
+        source_type: {type: string}
+        category: {type: string}
+        title: {type: string}
+        source_url: {type: string, format: uri}
+        content: {type: string}
+        citations: {type: array, items: {type: string, format: uri}}
+        sources: {type: array, items: {$ref: '#/components/schemas/KnowledgeResearchSource'}}
+        content_hash: {$ref: '#/components/schemas/SHA256'}
+        created_at: {type: string, format: date-time}
+      additionalProperties: false
+    KnowledgeResearchSource:
+      type: object
+      required: [id, organization_id, project_id, research_run_id, source_class, media_type, title, url, canonical_url, domain, retrieved_at, verification_status, content_hash, start_index, end_index, support_level]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        research_run_id: {type: string}
+        source_class: {enum: [web, toutiao, douyin, weather, unknown]}
+        media_type: {enum: [article, video, data, unknown]}
+        title: {type: string}
+        url: {type: string, format: uri}
+        canonical_url: {type: string, format: uri}
+        domain: {type: string}
+        published_at: {type: string, format: date-time}
+        retrieved_at: {type: string, format: date-time}
+        verification_status: {enum: [model_cited, content_verified, conflicted, invalid]}
+        content_hash: {type: string}
+        start_index: {type: integer, minimum: 0}
+        end_index: {type: integer, minimum: 0}
+        support_level: {enum: [model_cited, content_verified, conflicted, invalid]}
+        provider_locator: {}
+      additionalProperties: false
+    KnowledgeResearchUsage:
+      type: object
+      required: [input_tokens, output_tokens, total_tokens]
+      properties:
+        input_tokens: {type: integer, format: int64, minimum: 0}
+        output_tokens: {type: integer, format: int64, minimum: 0}
+        total_tokens: {type: integer, format: int64, minimum: 0}
       additionalProperties: false
     KnowledgeChunk:
       type: object
