@@ -67,6 +67,32 @@ paths:
                 $ref: '#/components/schemas/InsightReport'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/findings:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: 记一笔——把分析页上的一条结论钉进本轮复盘草稿
+      description: |
+        分析页唯一的写操作。请求体里**没有** confidence / verdict：判定由后端拿
+        (window, dimension, source_ref, variable) 回到那次分析结果里找回来。
+        目标复盘草稿按 (项目 + 窗口) 自动 find-or-create，不需要先建复盘。
+        屏幕上不存在这一条时返回 400。
+      operationId: pinInsightFinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinFinding'
+      responses:
+        '200':
+          description: 记入后的复盘草稿全文
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/reports/{report_id}:drop-finding:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -74,9 +100,9 @@ paths:
     post:
       summary: Drop or restore one auto-filled finding
       description: |
-        报告里的发现是系统自动带入的，人只做删减——加不了新的一条。
-        写进去的每条发现都得能回溯到某次对比、某个实验或某条经验，
-        手打一条就断了这个链子。只有草稿能改。
+        报告页上人只做删减——加不了新的一条。写进去的每条发现都得能回溯到某次对比、
+        某个实验或某条经验，在报告页手打一条就断了这个链子。要加只能回分析页记一笔
+        （`POST /findings`），那条路上判定是后端回查的，出处照样留得住。只有草稿能改。
       operationId: dropInsightReportFinding
       requestBody:
         required: true
@@ -1700,26 +1726,84 @@ components:
           description: |
             true 是删掉，false 是撤销删掉。条目不会被物理移除——报告要能说清
             「系统给了什么、人拿掉了哪几条」。
+    PinFinding:
+      type: object
+      additionalProperties: false
+      description: |
+        「记一笔」的入参。**不收** confidence / verdict：多带一个判定字段，
+        页面上标的三档就成了装饰——前端改一个值就能把「算不出来」记成「能归因」。
+      required: [window, dimension]
+      properties:
+        window:
+          type: object
+          additionalProperties: false
+          required: [start, end]
+          description: 人当时看的那个窗口，按天传。判定就是从这个窗口的分析结果里回查的。
+          properties:
+            start: { type: string, example: '2026-07-01' }
+            end: { type: string, example: '2026-07-30' }
+        dimension:
+          type: string
+          enum: [overview, comparisons, trends, fatigue, anomalies, drivers]
+          description: 六个视图之一。记在别处，复盘页不知道该把它归到哪一块。
+        source_ref:
+          type: string
+          description: 素材 ID 或异常日期。与 variable 至少给一个（overview 除外）。
+        variable:
+          type: string
+          description: 特征键。与 source_ref 至少给一个（overview 除外）。
+        text:
+          type: string
+          maxLength: 500
+          description: 人自己补的一句话。留空则用系统给这一条的措辞。
     ReportFinding:
       type: object
       description: |
         报告里的一条发现。四块（素材表现 / 实验结论 / 相关经验 / 下一轮建议）
         按 `kind` 分组，顺序即 `ReportSectionKind` 的枚举顺序。
-      required: [kind, text, dropped]
+        `Judgement` 的四个字段（confidence / verdict / verdict_label / note）平铺在这里。
+      required: [kind, text, dropped, origin, confidence, verdict, verdict_label]
       properties:
         kind:
           type: string
           enum: [asset_performance, experiment, experience, recommendation]
         text: { type: string }
+        origin:
+          type: string
+          enum: [system, pinned]
+          description: |
+            `pinned` 是人在分析页记的，`system` 是复盘时按规则补的。复盘页要把两者
+            分开标（● 我记的 / ○ 系统补的）：混在一起，人就分不清哪几条是自己挑的。
+            旧报告里没有这个字段，读出来时按 `system` 补齐。
         strength:
           allOf:
             - $ref: '#/components/schemas/VariantVerdict'
           description: 出自素材对比的发现才有。用来排序：可归因的排在方向性前面。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话说明为什么是这个档位。' }
+        dimension:
+          type: string
+          enum: [overview, comparisons, trends, fatigue, anomalies, drivers]
+          description: 这条出自哪个视图。和 variable 一起构成去重键。
+        variable:
+          type: string
+          description: 这条说的是哪个变量。和 dimension 一起构成去重键。
         source_ref:
           type: string
-          description: 这条发现的来源 ID（实验或经验），供前端跳回去核对。
+          description: 这条发现的来源 ID（素材、实验或经验），供前端跳回去核对。
+        pinned_by:
+          type: string
+          description: 记这一笔的人。origin=pinned 才有。
+        pinned_at:
+          type: string
+          format: date-time
+          description: 记这一笔的时刻。origin=pinned 才有。
         dropped:
           type: boolean
           description: 被人工删掉的条目留在数组里，只是标记为 true。

@@ -18,6 +18,8 @@ import (
 
 type Application interface {
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
+	// 记一笔（分析页唯一的写操作）。判定不在入参里：能传的话页面上标的三档就是装饰。
+	PinFinding(context.Context, contract.ActorContext, contract.ProjectID, insights.PinFindingRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)
 	ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error)
 	DropReportFinding(context.Context, contract.ActorContext, contract.ProjectID, string, int64, int, bool) (insights.InsightReport, error)
@@ -102,6 +104,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/reports", server.listReports)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports", server.createReport)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports/{report_action}", server.reportAction)
+	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/findings", server.pinFinding)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experiences", server.listExperiences)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/experiences/{experience_action}", server.experienceAction)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experience-references", server.listProjectExperienceReferences)
@@ -166,6 +169,41 @@ func (s *Server) createReport(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) pinFinding(writer http.ResponseWriter, request *http.Request) {
+	// 窗口和 createReport 用同一套解码：人看到的是两个日期，记下来的必须是同两个日期。
+	// 中间过一道时区换算就会差一天，而两边显示的还是同一个区间。
+	// 和 createReport 不同的是这里窗口必填——不知道窗口就不知道往哪份复盘草稿记。
+	var body struct {
+		insights.PinFindingRequest
+		Window struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"window"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	payload := body.PinFindingRequest
+	start, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(body.Window.Start), time.UTC)
+	if err != nil {
+		writeError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	end, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(body.Window.End), time.UTC)
+	if err != nil {
+		writeError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	payload.Window = insights.MetricWindow{Start: start, End: end}
+
+	value, err := s.app.PinFinding(request.Context(), mustActor(request), projectID(request), payload)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) listReports(writer http.ResponseWriter, request *http.Request) {

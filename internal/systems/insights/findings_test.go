@@ -1,6 +1,9 @@
 package insights
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // 旧报告的 digest 是 JSON 存的，里面只有 confidence 没有 verdict，也没有 origin。
 // 读出来直接用会让复盘页上一半的发现没有档位、全部显示成「系统补的」都判断不了。
@@ -66,5 +69,73 @@ func TestDedupeKeyIsDimensionPlusVariable(t *testing.T) {
 	// 拿空键去重会把它们全部折成一条。
 	if (ReportFinding{}).dedupeKey() != "" {
 		t.Error("没有维度和变量的发现不该参与去重")
+	}
+}
+
+// 判定不能从请求里传。能传的话，页面上那个 ❓ 就是装饰——前端改一个字段
+// 就能把「算不出来」记成「能归因」，而复盘会上没人会回去核。
+func TestPinFindingRecomputesTheVerdictFromTheAnalysis(t *testing.T) {
+	t.Parallel()
+
+	analysis := PerformanceAnalysis{
+		Drivers: []FeatureDriver{{
+			Key:       "duration",
+			Label:     "时长",
+			Value:     "15s",
+			Judgement: judge(ConfidenceLowSample, "样本较少的一侧只有 300 次展示。"),
+		}},
+	}
+	got, text, ok := findJudgement(analysis, "drivers", "", "duration")
+	if !ok {
+		t.Fatal("应该能在驱动因素里找回这一条")
+	}
+	if got.Verdict != VerdictUnclear {
+		t.Errorf("回查到的档位是 %s，期望 %s", got.Verdict, VerdictUnclear)
+	}
+	if text == "" {
+		t.Error("回查应该同时给出这条自己的措辞，让人不用自己编")
+	}
+}
+
+// 请求指到一条分析里不存在的结论时，必须拒绝，而不是记一条没有判定的发现。
+// 记下去的话，复盘页上会出现一条既没有档位也没有出处的文字，谁也说不清它从哪来。
+func TestPinFindingRejectsAConclusionThatIsNotOnTheScreen(t *testing.T) {
+	t.Parallel()
+
+	analysis := PerformanceAnalysis{}
+	if _, _, ok := findJudgement(analysis, "drivers", "", "duration"); ok {
+		t.Error("分析结果里没有这一条，不该回查成功")
+	}
+}
+
+func TestPinFindingRequestValidation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	valid := PinFindingRequest{
+		Window:    MetricWindow{Start: now.AddDate(0, 0, -30), End: now},
+		Dimension: "drivers",
+		Variable:  "duration",
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("合法请求被拒了：%v", err)
+	}
+
+	noWindow := valid
+	noWindow.Window = MetricWindow{}
+	if err := noWindow.Validate(); err == nil {
+		t.Error("没有窗口的记一笔应该被拒——不知道往哪份复盘草稿记")
+	}
+
+	badDimension := valid
+	badDimension.Dimension = "whatever"
+	if err := badDimension.Validate(); err == nil {
+		t.Error("维度必须是六个视图之一")
+	}
+
+	noSubject := valid
+	noSubject.Variable, noSubject.SourceRef = "", ""
+	if err := noSubject.Validate(); err == nil {
+		t.Error("变量和来源引用至少要有一个——两个都没有就回查不到任何一条")
 	}
 }

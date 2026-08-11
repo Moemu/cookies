@@ -77,6 +77,58 @@ func TestCreateReportWindowMustBeWholeOrAbsent(t *testing.T) {
 	}
 }
 
+// 记一笔的窗口必填，且按天解析。窗口缺一头就不知道往哪份复盘草稿记，
+// 这时候挑一个默认窗口，记下来的那条会挂在人根本没看过的一段数据上。
+func TestPinFindingRequiresAWholeDayWindow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		window string
+		status int
+		start  string
+	}{
+		{"两头都有", `{"start":"2026-07-01","end":"2026-07-14"}`, 200, "2026-07-01"},
+		{"只有开头", `{"start":"2026-07-01","end":""}`, 400, ""},
+		{"完全没有", `{}`, 400, ""},
+		{"日期写错", `{"start":"2026/07/01","end":"2026-07-14"}`, 400, ""},
+	}
+	for _, test := range tests {
+		app := &applicationStub{report: insights.InsightReport{ID: "insightreport_1", Version: 1}}
+		server := New(app)
+		response := httptest.NewRecorder()
+		body := `{"dimension":"drivers","variable":"duration","window":` + test.window + `}`
+		server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/findings", body))
+		if response.Code != test.status {
+			t.Fatalf("%s status=%d，想要 %d，body=%s", test.name, response.Code, test.status, response.Body.String())
+		}
+		var got string
+		if !app.pinned.Window.Start.IsZero() {
+			got = app.pinned.Window.Start.Format("2006-01-02")
+		}
+		if got != test.start {
+			t.Fatalf("%s 窗口起点=%q，想要 %q", test.name, got, test.start)
+		}
+	}
+}
+
+// 判定不能从请求里穿过去。请求体里带 verdict 直接退回 400（解码器不认多余字段），
+// 而不是静默忽略：静默忽略的话，前端可以一直传着，谁也不知道它没生效。
+func TestPinFindingRejectsAVerdictInTheRequestBody(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{report: insights.InsightReport{ID: "insightreport_1", Version: 1}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	body := `{"dimension":"drivers","variable":"duration","verdict":"explained",` +
+		`"window":{"start":"2026-07-01","end":"2026-07-14"}}`
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/findings", body))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("带 verdict 的请求 status=%d，想要 400，body=%s", response.Code, response.Body.String())
+	}
+	if app.pinned.Dimension != "" {
+		t.Fatalf("被拒的请求不该到达服务层：%+v", app.pinned)
+	}
+}
+
 // 人工删减走 :drop-finding。索引和 dropped 都要原样传到后面——
 // 传错一个索引，删掉的就是另一条发现，而人看不出来。
 func TestDropReportFindingPassesIndexAndFlag(t *testing.T) {
@@ -361,6 +413,7 @@ type applicationStub struct {
 	attachedAssetID   string
 	interpretation    string
 	reportWindow      insights.MetricWindow
+	pinned            insights.PinFindingRequest
 	droppedIndex      int
 	droppedFlag       bool
 
@@ -369,6 +422,10 @@ type applicationStub struct {
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {
 	s.reportWindow = request.Window
+	return s.report, nil
+}
+func (s *applicationStub) PinFinding(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.PinFindingRequest) (insights.InsightReport, error) {
+	s.pinned = request
 	return s.report, nil
 }
 func (s *applicationStub) DropReportFinding(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, _ int64, index int, dropped bool) (insights.InsightReport, error) {

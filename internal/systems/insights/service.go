@@ -120,6 +120,38 @@ func (r CreateReportRequest) Validate() error {
 	return nil
 }
 
+// PinFindingRequest 是「记一笔」的入参。
+//
+// 注意这里**没有** confidence 也没有 verdict：判定是后端回查出来的。
+// Text 也是可选的——人可以补一句自己的话，但不补的话用系统给的措辞，
+// 而不是让前端把屏幕上的字传上来。
+type PinFindingRequest struct {
+	Window    MetricWindow `json:"window"`
+	Dimension string       `json:"dimension"`
+	SourceRef string       `json:"source_ref,omitempty"`
+	Variable  string       `json:"variable,omitempty"`
+	// Text 是人自己补的一句话，最多 500 字。留空则用系统给这一条的措辞。
+	Text string `json:"text,omitempty"`
+}
+
+func (r PinFindingRequest) Validate() error {
+	if r.Window.Start.IsZero() || r.Window.End.IsZero() || r.Window.End.Before(r.Window.Start) {
+		return ErrInvalidRequest
+	}
+	if _, ok := analysisDimensions[r.Dimension]; !ok {
+		return ErrInvalidRequest
+	}
+	// 两个主语都空就回查不到任何一条，只会记下一条没有出处的文字。
+	if strings.TrimSpace(r.SourceRef) == "" && strings.TrimSpace(r.Variable) == "" &&
+		r.Dimension != "overview" {
+		return ErrInvalidRequest
+	}
+	if len(r.Text) > 500 {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 type InsightReport struct {
 	ID                string                  `json:"id"`
 	OrganizationID    contract.OrganizationID `json:"organization_id"`
@@ -497,6 +529,100 @@ func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, 
 		Summary: summary, Findings: findings,
 		Digest: digest, WindowStart: windowStart, WindowEnd: windowEnd,
 		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+// PinFinding 把分析页上的一条结论钉进本轮复盘草稿。
+//
+// 草稿是自动建的：不问人「要往哪份复盘记」。问了等于要求人在看数据之前先声明意图
+// ——而记一笔的价值恰恰在于人是看到了才决定要留的。
+func (s Service) PinFinding(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, request PinFindingRequest) (InsightReport, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return InsightReport{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return InsightReport{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return InsightReport{}, err
+	}
+
+	analysis, err := s.GetPerformanceAnalysis(ctx, actor, projectID, request.Window)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	judgement, text, ok := findJudgement(analysis, request.Dimension, request.SourceRef, request.Variable)
+	if !ok {
+		// 屏幕上没有这一条，说明前端传的主语和当前窗口对不上——多半是窗口换了
+		// 但按钮没重渲染。宁可报错，也不记一条没有判定的发现。
+		return InsightReport{}, ErrInvalidRequest
+	}
+	if custom := strings.TrimSpace(request.Text); custom != "" {
+		text = custom
+	}
+
+	now := s.now()
+	finding := ReportFinding{
+		Kind:      analysisDimensions[request.Dimension],
+		Text:      text,
+		Judgement: judgement,
+		Origin:    OriginPinned,
+		Dimension: request.Dimension,
+		Variable:  request.Variable,
+		SourceRef: request.SourceRef,
+		PinnedBy:  actor.Principal.ID,
+		PinnedAt:  &now,
+	}
+
+	windowStart := request.Window.Start.Format("2006-01-02")
+	windowEnd := request.Window.End.Format("2006-01-02")
+
+	draft, err := s.Repository.FindDraftByWindow(ctx, actor.OrganizationID, projectID, windowStart, windowEnd)
+	if errors.Is(err, ErrNotFound) {
+		return s.createDraftWithFinding(ctx, actor, projectID, windowStart, windowEnd, finding, now)
+	}
+	if err != nil {
+		return InsightReport{}, err
+	}
+
+	// 同一条记两次是常见的误操作（换了个视图又看到同一个结论）。
+	// 覆盖而不是追加：人第二次记的时候补的那句话，应该是他现在想说的那句。
+	digest := make([]ReportFinding, 0, len(draft.Digest)+1)
+	replaced := false
+	for _, existing := range draft.Digest {
+		if existing.Origin == OriginPinned && existing.dedupeKey() != "" &&
+			existing.dedupeKey() == finding.dedupeKey() {
+			digest, replaced = append(digest, finding), true
+			continue
+		}
+		digest = append(digest, existing)
+	}
+	if !replaced {
+		digest = append(digest, finding)
+	}
+	return s.Repository.UpdateReportDigest(ctx, actor.OrganizationID, projectID, draft.ID, draft.Version, digest, now)
+}
+
+// createDraftWithFinding 建一份只有这一条发现的空草稿。
+//
+// 它不走 CreateReport：CreateReport 必须挂一次投放执行，而记一笔发生在人还在看
+// 数据的时候，那时候还没到「这份复盘算哪次投放」这个问题。执行 ID 在复盘页提交
+// 之前补上。
+func (s Service) createDraftWithFinding(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, windowStart, windowEnd string,
+	finding ReportFinding, now time.Time) (InsightReport, error) {
+	id, err := s.idGenerator()("insightreport")
+	if err != nil {
+		return InsightReport{}, err
+	}
+	return s.Repository.CreateReport(ctx, InsightReport{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		Status: ReportDraft, Digest: []ReportFinding{finding},
+		WindowStart: windowStart, WindowEnd: windowEnd,
+		Findings:  []string{},
+		Version:   1,
+		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
 	})
 }
 
