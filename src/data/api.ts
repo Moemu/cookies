@@ -1194,6 +1194,9 @@ export type ApiExperienceMatch = {
   experience: ApiExperience
   matched: string[]
   default: boolean
+  // 抄到别处时的完整说法（结论 + 适用条件 + 来源）。后端拼好发过来，
+  // 前端不自己再拼一遍——两处拼法迟早对不上，而对不上的时候没人知道该信哪个。
+  citation_text: string
 }
 
 // 「查」的条件。每一格空着表示不限。字段名跟后端 ExperienceLookup 逐字对齐。

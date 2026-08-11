@@ -4201,6 +4201,10 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .evidence-trail .panel-empty { padding: 0; text-align: left; font-size: 10px; }
 /* 反例给一点底色：填了这一格的经验才是真被人推敲过的，不能和别的段落一样平。 */
 .evidence-counterexamples { padding: 8px 10px; background: var(--subtle); }
+/* 「抄到别处」把要抄走的那句话原样摆出来。摆出来而不是只给一个按钮：
+   人得先看见抄走的是什么，才敢按。 */
+.evidence-citation p { padding: 7px 9px; background: var(--subtle); border-radius: 4px; color: var(--muted); }
+.evidence-citation .text-button { font-size: 10px; }
 .evidence-references { list-style: none; padding-left: 0; }
 .evidence-references li { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .evidence-references small { flex: 1 1 100%; color: var(--muted); font-size: 9px; }

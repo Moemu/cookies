@@ -16,10 +16,18 @@ import { shortId } from '../../../data/shortId'
  * 的第五个视图，人得先在那一页里找到这条经验，才能看它被谁用过——找的过程比看
  * 的过程还长。
  */
-export function EvidenceTrail({ experience }: { experience: ApiExperience }) {
+export function EvidenceTrail({ experience, citation }: {
+  experience: ApiExperience
+  /**
+   * 抄到别处时的完整说法，由后端拼好（`ExperienceMatch.citation_text`）。
+   * 「管」模式没有它——那一屏是来处理待办的，不是来往外抄的。
+   */
+  citation?: string
+}) {
   const { currentProject } = useProject()
   const [references, setReferences] = useState<ApiExperienceReference[]>([])
   const [referenceState, setReferenceState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   useEffect(() => {
     let alive = true
@@ -93,6 +101,23 @@ export function EvidenceTrail({ experience }: { experience: ApiExperience }) {
         : <p className="panel-empty">还没人给它找到反例。这不代表没有——只代表还没人试过推翻它。</p>}
     </section>
 
+    {/* 抄走的时候把边界一起抄走。只复制结论的话，落到别处就是一句没有边界的
+        断言——在什么渠道、基于哪次投放，全丢了，而用它的人没有任何线索能发现
+        这一点。文本由后端拼（citation_text），前端不另写一套：拼法有两处，
+        界面上看到的适用范围和抄出去的那句话迟早对不上。 */}
+    {citation ? <section className="evidence-citation">
+      <h5>抄到别处</h5>
+      <p>{citation}</p>
+      {/* 剪贴板会被浏览器拒（页面没聚焦、权限没给都算），拒了要说出来。
+          按了没反应的话，人会以为复制成功了，粘出去才发现是上一次的内容。 */}
+      <button type="button" className="text-button" onClick={() => {
+        navigator.clipboard.writeText(citation).then(
+          () => setCopyState('copied'),
+          () => setCopyState('failed'),
+        ).finally(() => setTimeout(() => setCopyState('idle'), 2500))
+      }}>{copyLabels[copyState]}</button>
+    </section> : null}
+
     <section>
       <h5>引用记录</h5>
       {referenceState === 'loading' ? <p className="panel-empty">读取中…</p> : null}
@@ -121,3 +146,10 @@ const referenceOutcomeLabel: Record<string, string> = {
   modified: '改了之后用的',
   rejected: '没采纳',
 }
+
+const copyLabels = {
+  idle: '复制引用',
+  copied: '已复制',
+  // 复制不了的时候把出路一起说了：文本就在按钮上方，手动选中一样能抄走。
+  failed: '复制不了，手动选上面那段',
+} as const

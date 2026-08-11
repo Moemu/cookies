@@ -2184,7 +2184,7 @@ components:
         limit: { type: integer, minimum: 1, maximum: 100 }
     ExperienceMatch:
       type: object
-      required: [experience, matched, default]
+      required: [experience, matched, default, citation_text]
       properties:
         experience:
           $ref: '#/components/schemas/Experience'
@@ -2200,6 +2200,12 @@ components:
           description: >
             能不能直接照着做。两道闸都过（状态在用 + 判定 ✅ 能归因）才是 true；
             只是观察的经验即使被查出来，也标 false。
+        citation_text:
+          type: string
+          description: >
+            把这条经验抄到别处时的完整说法：结论 + 适用条件 + 来源复盘，只是观察的
+            还会带上那句提醒。由服务端拼好发出来，调用方不要自己再拼一遍——拼法有
+            两处，界面上看到的适用范围和抄出去的那句话迟早对不上。
     ExperienceAudit:
       type: object
       required: [id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at]

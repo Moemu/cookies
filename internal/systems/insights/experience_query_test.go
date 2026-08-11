@@ -1,6 +1,9 @@
 package insights
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // 判定只能由 judge() 从置信度收敛出来，测试里也不例外：
 // 手拼一个 Verdict 能造出「置信充分但只是观察」这种现实中不存在的组合，
@@ -137,5 +140,73 @@ func TestFeatureLookupSearchesEverywhereTheWordCouldLive(t *testing.T) {
 		Conclusion: "字幕加粗能提升完播。"}
 	if _, ok := matchApplicability(none, ExperienceLookup{Feature: "开场"}); ok {
 		t.Error("哪都没提到「开场」的经验不该被找出来")
+	}
+}
+
+// 引用一条经验时必须带上适用条件和来源。
+//
+// 只把结论抄走，下游拿到的是一句没有边界的断言：「痛点开场点击率高 38%」
+// ——在什么渠道？什么广告类型？基于哪次投放？答不上来的话，这句话会被用到
+// 它根本不成立的地方去，而用它的人没有任何线索能发现这一点。
+func TestCitationCarriesScopeAndSource(t *testing.T) {
+	t.Parallel()
+
+	value := usable(Applicability{
+		Channels: []string{"抖音"}, CreativeTypes: []string{"效果广告"},
+	}, ConfidenceSufficient)
+	value.Conclusion = "痛点开场比产品开场点击率高 38%"
+	value.ReportID = "report_1"
+
+	text := ExperienceMatch{Experience: value, Default: true}.CitationText()
+	for _, want := range []string{"痛点开场", "抖音", "效果广告", "report_1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("引用文本里少了 %q：%s", want, text)
+		}
+	}
+}
+
+// 只是观察的经验被引用时，那句提醒必须跟着走。
+// 它留在界面上而没进引用文本的话，抄到下游就变成了一条看起来同样可靠的结论。
+func TestCitationOfObservedCarriesTheCaveat(t *testing.T) {
+	t.Parallel()
+
+	value := usable(Applicability{Channels: []string{"抖音"}}, ConfidenceDirectional)
+	value.Conclusion = "15 秒整体好过 30 秒"
+	text := ExperienceMatch{Experience: value, Default: false}.CitationText()
+	if !strings.Contains(text, "只是观察") {
+		t.Errorf("提醒没跟着引用走：%s", text)
+	}
+}
+
+// 适用条件摆成一行文本的规则必须和前端 formatScope 一致：同一格的多个取值
+// 用「/」连，格与格之间用「·」隔。都用同一个分隔符的话，
+// 「抖音 · 小红书 · 效果广告」读起来像三个并列的限制，实际上是两格。
+func TestApplicabilitySummaryMatchesTheFrontendRule(t *testing.T) {
+	t.Parallel()
+
+	summary := Applicability{
+		Channels: []string{"抖音", "小红书"}, CreativeTypes: []string{"效果广告"},
+	}.Summary()
+	if summary != "抖音/小红书 · 效果广告" {
+		t.Errorf("适用条件拼法和前端对不上：%s", summary)
+	}
+	if empty := (Applicability{}).Summary(); empty != "不限" {
+		t.Errorf("一格都没写就是不限，得到：%s", empty)
+	}
+}
+
+// 命中结果里要直接带着引用文本。下游拿到 JSON 就能原样抄走，
+// 不用自己再拼一遍——各拼各的，迟早出现界面上和抄出去的不是一句话。
+func TestMatchCarriesCitationText(t *testing.T) {
+	t.Parallel()
+
+	value := usable(Applicability{Channels: []string{"抖音"}}, ConfidenceSufficient)
+	value.Conclusion = "痛点开场更好"
+	match, ok := matchApplicability(value, ExperienceLookup{Channel: "抖音"})
+	if !ok {
+		t.Fatal("应该匹配上")
+	}
+	if match.Citation != match.CitationText() {
+		t.Errorf("命中结果里的引用文本和方法算出来的不一致：%q / %q", match.Citation, match.CitationText())
 	}
 }

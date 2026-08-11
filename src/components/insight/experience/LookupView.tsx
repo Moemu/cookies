@@ -116,7 +116,7 @@ export function LookupView() {
     {listState === 'ready' && !matches.length ? <p className="panel-empty">{emptyHint}</p> : null}
 
     {matches.map(match => <ExperienceCard key={match.experience.id}
-      experience={match.experience} matched={match.matched}/>)}
+      experience={match.experience} matched={match.matched} citation={match.citation_text}/>)}
   </div>
 }
 

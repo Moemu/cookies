@@ -32,6 +32,10 @@ func TestConfirmedReportBecomesReusableExperienceAndPreLaunchReference(t *testin
 		Conclusion:      "面对新品种草时，首图保持单一利益点。",
 		Conditions:      []string{"小红书图文", "新品首发"},
 		Counterexamples: []string{"复杂参数对比内容"},
+		// 「统计观察 + 充分」收敛出 ✅ 能归因，才过得了下游默认引用集的第二道闸。
+		CardType:   CardStatistic,
+		Confidence: ConfidenceSufficient,
+		DataBasis:  DataBasis{AssetCount: 6, SampleSize: 42000, Metrics: []string{"点击率"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -159,6 +163,12 @@ func TestRevisionSupersedesPredecessorOnlyAfterItIsConfirmed(t *testing.T) {
 		Conditions:      []string{"小红书图文", "新品首发"},
 		Counterexamples: []string{"复杂参数对比内容"},
 		Reason:          "补充标题层面的适用条件。",
+		// 修订不重述依据的话，档位会掉回默认的「假设 + 方向性」——那是有意的，
+		// 改了说法却没说清凭什么，本来就不该继续顶着 ✅。这条测的是版本接替，
+		// 所以把依据照抄过来，让前后两版停在同一档。
+		CardType:   CardStatistic,
+		Confidence: ConfidenceSufficient,
+		DataBasis:  DataBasis{AssetCount: 6, SampleSize: 42000, Metrics: []string{"点击率"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -446,10 +456,17 @@ func confirmedExperience(t *testing.T, service Service, actor contract.ActorCont
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 写死「统计观察 + 充分」而不是用默认值：默认落在「假设 + 方向性」，
+	// 那一档收敛出来是 👁 只是观察，进不了下游的默认引用集。用它做夹具的话，
+	// 这些测的是状态流转的用例会因为判定档位不够而失败，读的人会以为
+	// 是状态流转坏了。
 	experience, err := service.CreateExperience(context.Background(), actor, "project_1", report.ID, report.Version, CreateExperienceRequest{
 		Conclusion:      "面对新品种草时，首图保持单一利益点。",
 		Conditions:      []string{"小红书图文"},
 		Counterexamples: []string{"复杂参数对比内容"},
+		CardType:        CardStatistic,
+		Confidence:      ConfidenceSufficient,
+		DataBasis:       DataBasis{AssetCount: 6, SampleSize: 42000, Metrics: []string{"点击率"}},
 	})
 	if err != nil {
 		t.Fatal(err)

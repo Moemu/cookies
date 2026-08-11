@@ -15,7 +15,7 @@ import { EvidenceTrail } from './EvidenceTrail'
  * 时候有 matched 说得出「凭什么推给你」。同一条经验在两屏上长成两个样子的话，
  * 人会以为那是两条不同的经验。
  */
-export function ExperienceCard({ experience, matched, status, actions }: {
+export function ExperienceCard({ experience, matched, citation, status, actions }: {
   experience: ApiExperience
   /**
    * 命中了哪几格适用条件，由后端给。undefined 表示这一屏根本没按条件筛
@@ -23,6 +23,8 @@ export function ExperienceCard({ experience, matched, status, actions }: {
    * 不一样，所以不能合成一个。
    */
   matched?: string[]
+  /** 抄到别处时的完整说法，由后端拼好（`ExperienceMatch.citation_text`）。 */
+  citation?: string
   /** 状态标签。「查」模式不给：那一屏里的经验全是在用的，每张卡上挂一遍是噪音。 */
   status?: ReactNode
   actions?: ReactNode
@@ -56,7 +58,7 @@ export function ExperienceCard({ experience, matched, status, actions }: {
       凭什么
     </button>
 
-    {open ? <EvidenceTrail experience={experience}/> : null}
+    {open ? <EvidenceTrail experience={experience} citation={citation}/> : null}
     {actions ? <footer className="experience-actions">{actions}</footer> : null}
   </article>
 }

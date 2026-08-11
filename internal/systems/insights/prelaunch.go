@@ -100,6 +100,30 @@ type Applicability struct {
 	TimeRangeNote string   `json:"time_range_note,omitempty"`
 }
 
+// Summary 把适用条件摆成一行文本。
+//
+// 同一格的多个取值用「/」连，格与格之间用「·」隔。都用同一个分隔符的话，
+// 「抖音 · 小红书 · 效果广告」读起来像三个并列的限制，实际上是两格
+// （渠道两个值 + 广告类型一个值），读的人会以为这条经验只在同时满足
+// 三件事时才成立。
+//
+// 这段规则和前端 ExperienceCard.tsx 的 formatScope 必须一模一样：
+// 界面上看到的适用范围，和引用时抄出去的那句话，得是同一句。
+func (a Applicability) Summary() string {
+	groups := [][]string{a.Brands, a.Products, a.Channels, a.CreativeTypes, a.Objectives, a.Audiences}
+	parts := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if len(group) == 0 {
+			continue
+		}
+		parts = append(parts, strings.Join(group, "/"))
+	}
+	if len(parts) == 0 {
+		return "不限"
+	}
+	return strings.Join(parts, " · ")
+}
+
 func (a Applicability) empty() bool {
 	return len(a.Brands) == 0 && len(a.Products) == 0 && len(a.Channels) == 0 &&
 		len(a.CreativeTypes) == 0 && len(a.Objectives) == 0 && len(a.Audiences) == 0 &&
@@ -290,9 +314,20 @@ const preLaunchQualityWindowDays = 30
 // 只取已确认且未失效的（03 §8.2 / MVP⑩），并且带着数据质量闸门一起返回——
 // 数据本身有阻断问题时，这一页给出的任何结论都不该被当成强结论。
 func (s Service) GetPreLaunch(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, filter PreLaunchFilter) (PreLaunchInsight, error) {
-	values, err := s.ListExperiences(ctx, actor, projectID, ExperienceConfirmed, 200)
+	confirmed, err := s.ListExperiences(ctx, actor, projectID, ExperienceConfirmed, 200)
 	if err != nil {
 		return PreLaunchInsight{}, err
+	}
+	// 两道闸：状态在用**且**判定能归因，缺一不可。这一页是下游的默认引用集，
+	// 「在用」只说明有人认可它值得记下来，「能归因」才说明这个因果排除过混杂。
+	// 只过第一道的话，一条 👁 只是观察的经验会和 ✅ 能归因的并排摆在决策桌上，
+	// 看的人分不出哪条能照着做。👁 的经验仍然存在、仍然能在「查」里点开
+	// 「连只是观察的也看」找到、仍然能被人工点名引用——只是不进默认集。
+	values := make([]Experience, 0, len(confirmed))
+	for _, value := range confirmed {
+		if value.Reusable() {
+			values = append(values, value)
+		}
 	}
 	references, err := s.ListProjectExperienceReferences(ctx, actor, projectID, 500)
 	if err != nil {
@@ -309,7 +344,7 @@ func (s Service) GetPreLaunch(ctx context.Context, actor contract.ActorContext, 
 		CrossChannelComparison: filter.CrossChannel,
 		Cards:                  []InsightCard{},
 		Patterns:               []FeaturePattern{},
-		Disclosure:             "仅引用已确认且未失效的经验；是否适用于本次投放仍需人工判断。",
+		Disclosure:             "仅引用状态在用、且判定为「✅ 能归因」的经验；是否适用于本次投放仍需人工判断。",
 	}
 
 	facetSets := [3]map[string]struct{}{{}, {}, {}}

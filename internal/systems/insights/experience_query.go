@@ -37,6 +37,29 @@ type ExperienceMatch struct {
 	Experience Experience `json:"experience"`
 	Matched    []string   `json:"matched"`
 	Default    bool       `json:"default"`
+	// Citation 是 CitationText() 的结果，跟着 JSON 一起发出去。
+	// 留一个字段而不是让前端自己拼：拼法一旦有两处，界面上看到的适用范围
+	// 和抄出去的那句话迟早对不上，而对不上的时候没人知道该信哪个。
+	Citation string `json:"citation_text"`
+}
+
+// CitationText 是这条经验被抄到下游时的完整说法。
+//
+// 只抄结论的话，下游拿到的是一句没有边界的断言——「痛点开场点击率高 38%」，
+// 在什么渠道、什么广告类型、基于哪次投放，全丢了。这句话于是会被用到它根本
+// 不成立的地方去，而用它的人没有任何线索能发现这一点。
+func (m ExperienceMatch) CitationText() string {
+	parts := []string{m.Experience.Conclusion}
+	if scope := m.Experience.Applicability.Summary(); scope != "" && scope != "不限" {
+		parts = append(parts, "适用："+scope)
+	}
+	if !m.Default {
+		parts = append(parts, "（只是观察，没排除掉别的变量，别当成照着做就会这样）")
+	}
+	if m.Experience.ReportID != "" {
+		parts = append(parts, "来源："+m.Experience.ReportID)
+	}
+	return strings.Join(parts, "　")
 }
 
 // conditionHit 判断一格。经验没写这一格 = 不限，能匹配任何取值；写了就必须对上。
@@ -105,7 +128,9 @@ func matchApplicability(value Experience, lookup ExperienceLookup) (ExperienceMa
 		}
 		matched = append(matched, "内容特征")
 	}
-	return ExperienceMatch{Experience: value, Matched: matched, Default: reusable}, true
+	match := ExperienceMatch{Experience: value, Matched: matched, Default: reusable}
+	match.Citation = match.CitationText()
+	return match, true
 }
 
 // mentions 是子串匹配，不是相等。按特征找的人输的是「开场」，
