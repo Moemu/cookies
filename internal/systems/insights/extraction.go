@@ -233,7 +233,12 @@ func (s Service) generateFeatures(ctx context.Context, actor contract.ActorConte
 		return nil, nil, generationTrace{mode: GenerationModeTemplate}, fmt.Errorf("%w: 还没有配置可用的文本模型，无法提取特征", ErrInvalidState)
 	}
 	textActor := actor
-	textActor.Scopes = append(append([]contract.Scope(nil), actor.Scopes...), provider.ScopeTextGenerate)
+	// 先拷一份再改，别在调用方的切片上追加。已经有这个 scope 就不再加一次——
+	// ActorContext.Validate 见到重复的 scope 会直接拒，请求根本发不出去。
+	textActor.Scopes = append([]contract.Scope{}, actor.Scopes...)
+	if !textActor.HasScope(provider.ScopeTextGenerate) {
+		textActor.Scopes = append(textActor.Scopes, provider.ScopeTextGenerate)
+	}
 	response, err := s.Text.GenerateText(ctx, provider.TextGenerateRequest{
 		Actor: textActor, Project: projectContext, ModelAlias: s.textModelAlias(),
 		// 同一条素材重复点按钮时命中同一个 InvocationKey，避免连点付两次钱。
