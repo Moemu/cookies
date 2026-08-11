@@ -3,7 +3,7 @@ import {
   Boxes, BrainCircuit, ChartNoAxesCombined, CircleGauge, ClipboardCheck,
   Database, FileCheck2, FileSearch, Film, FlaskConical, FolderKanban,
   GalleryHorizontalEnd, Library, ListChecks,
-  Megaphone, MonitorCog, PackageCheck, PanelTop, PlaySquare, Rocket,
+  Megaphone, MonitorCog, PackageCheck, PlaySquare, Rocket,
   SearchCheck, Send, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
   TableProperties, Target, TrendingUp, UsersRound, Video, WandSparkles,
 } from 'lucide-react'
@@ -69,8 +69,19 @@ export const systems: SystemDefinition[] = [
       { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['候选经验', '已确认', '待复审', '已失效', '引用记录'] },
       // 只留有数据模型的三个视图。「周期报告 / 自定义报告 / 协作 / 版本与导出」写在
       // 03 §5 和 19 §5.2 的二级功能表里，但 03 §9 的功能需求表里没有任何一条 FR 支撑，
-      // 后端也没有对应模型——报告中心目前唯一的 P0 需求是 AM-015 任务复盘（基线文档 §5 冲突 9）。
-      { id: 'reports', label: '报告中心', icon: PanelTop, group: '经验与输出', layout: 'editor', description: '按任务汇总素材表现、实验结论与下一轮建议，确认后沉淀成经验。', views: ['全部复盘', '待确认', '已沉淀经验'] },
+      // 后端也没有对应模型——这里唯一的 P0 需求是 AM-015 任务复盘（基线文档 §5 冲突 9）。
+      //
+      // 「复盘」= 原报告中心。改名不是换皮：报告中心听起来是个存档的地方，
+      // 而这里是一轮投放收尾时人真正要做事的地方——决定这一轮留下什么。
+      // 位置也从「经验与输出」挪到「工作」，紧跟「分析」：记一笔发生在分析页，
+      // 收尾发生在这里，两步是同一件事的前后半段，分在两个组里人会以为是两码事。
+      {
+        // layout 跟「分析」一样用 analysis：这一页也是左边列表右边详情的两栏，
+        // 而 layout 只决定没有专用页面时的兜底外观和 .layout-* 那个 CSS 钩子。
+        id: 'review', label: '复盘', icon: BookOpenCheck, group: '工作', layout: 'analysis',
+        description: '一轮投放收尾。看你一路记的那几笔，系统把漏的补齐，逐条决定留不留，提交，把值得复用的沉淀成经验。',
+        views: ['本轮', '全部复盘', '已沉淀经验'],
+      },
       { id: 'quality', label: '数据质量', icon: ShieldCheck, group: '治理', layout: 'operations', description: '监控新鲜度、缺失、口径、异常和修复队列。', views: ['新鲜度', '缺失', '异常', '口径', '对账', '修复队列'] },
       // 第五个视图原来写「版本与质量」，03 §一级导航和 19 §288 都写「质量看板」，
       // 这里对齐文档（基线文档 §5 冲突 11）。

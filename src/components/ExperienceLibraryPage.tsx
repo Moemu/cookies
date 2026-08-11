@@ -31,7 +31,7 @@ const statusLabels: Record<ApiExperienceStatus, string> = {
 }
 
 const emptyHints: Record<ViewTarget, string> = {
-  pending: '当前 Project 暂无待确认的候选经验。经验由「报告中心」确认报告后沉淀产生。',
+  pending: '当前 Project 暂无待确认的候选经验。经验在「复盘」里提交一轮复盘之后沉淀产生。',
   confirmed: '当前 Project 暂无已确认经验。只有已确认的结论才允许被下游引用。',
   needs_review: '当前 Project 暂无待复审经验。已确认结论出现反例时可申请复审。',
   retired: '当前 Project 暂无已失效经验。失效是逻辑删除，记录仍可追溯。',

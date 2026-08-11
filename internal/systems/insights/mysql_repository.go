@@ -36,7 +36,7 @@ func (r MySQLRepository) CreateReport(ctx context.Context, value InsightReport) 
 		digest, value.WindowStart, value.WindowEnd,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if isDuplicateKey(err) {
-		return InsightReport{}, fmt.Errorf("%w: 这次投放的这个数据窗口已经定格过一份报告了，去报告中心看那一份", ErrInvalidState)
+		return InsightReport{}, fmt.Errorf("%w: 这次投放的这个数据窗口已经有一份复盘了，去「复盘」看那一份", ErrInvalidState)
 	}
 	if err != nil {
 		return InsightReport{}, err

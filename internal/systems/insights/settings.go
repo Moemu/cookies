@@ -327,10 +327,10 @@ func confirmationSettings() SettingGroup {
 func reportTemplateSettings() SettingGroup {
 	return SettingGroup{
 		Key: "report_template", Label: "报告模板", State: SettingNotBuilt,
-		Summary: "还没有模板对象。报告中心现在只有一种报告：任务复盘，它的结构写死在代码里。",
+		Summary: "还没有模板对象。现在只有一种报告：一轮投放的复盘，它的结构写死在代码里。",
 		Missing: []string{
 			"没有模板、没有调度、没有导出产物三类对象，所以「周期报告」「自定义报告」「版本与导出」都无从配置。",
-			"03 §9 的功能需求表里，报告中心只有 AM-015 任务复盘一条有需求编号，其余几项写在导航表里但没有需求支撑（基线文档冲突 10，待你确认是补需求还是删视图）。",
+			"03 §9 的功能需求表里，复盘只有 AM-015 任务复盘一条有需求编号，其余几项写在导航表里但没有需求支撑（基线文档冲突 10，待你确认是补需求还是删视图）。",
 			"复盘报告本身是能用的：投后分析结论 → 复盘 → 确认后沉淀成经验，这条链路已经跑通，只是它的版式不可配置。",
 		},
 		Items: []SettingItem{},

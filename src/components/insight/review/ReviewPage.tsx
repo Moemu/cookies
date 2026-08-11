@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BookOpenCheck, CalendarRange, CircleAlert, CircleCheck, Database, RefreshCw } from 'lucide-react'
+import { CalendarRange, CircleAlert, CircleCheck, Database, RefreshCw } from 'lucide-react'
 import { useProject } from '../../../context/ProjectContext'
 import { api, type ApiExperience, type ApiInsightReport } from '../../../data/api'
 import type { DataState } from '../../../types'
@@ -197,13 +197,10 @@ export function ReviewPage({ state, view, objectId }: {
             </b></span>
           </div> : null}
 
+          {/* 经验条数这一行由沉淀区自己给——它就在「沉淀为待确认经验」那个按钮下面，
+              说的是刚刚按下去会发生什么。草稿态还没法沉淀，这里再挂一个永远是 0 的
+              计数只会让人以为哪里出了问题。 */}
           <DraftPanel report={selected} projectId={currentProject.id} onChanged={() => { void load() }}/>
-
-          <div className="reference-count">
-            <BookOpenCheck size={15}/>
-            <span><b>{harvested.get(selected.id)?.length ?? 0} 条经验来自这份复盘</b>
-              <small>沉淀出来还要确认，确认后才会进入投前洞察</small></span>
-          </div>
         </> : <div className="panel-empty">左边选一份复盘，看这一轮记了什么、系统补了什么。</div>}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </aside>

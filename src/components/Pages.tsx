@@ -9,7 +9,6 @@ import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, pr
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { PreLaunchInsightPage } from './PreLaunchInsightPage'
-import { ReportCenterPage } from './ReportCenterPage'
 import { shortId } from '../data/shortId'
 import { AssetLibraryPage } from './AssetLibraryPage'
 import { ContentAnalysisPage } from './ContentAnalysisPage'
@@ -17,6 +16,7 @@ import { DataConnectionsPage } from './DataConnectionsPage'
 import { CapabilityOperationsPage } from './CapabilityOperationsPage'
 import { ExperimentCenterPage } from './ExperimentCenterPage'
 import { AnalysisPage, type AnalysisView } from './insight/analysis'
+import { ReviewPage, type ReviewView } from './insight/review'
 import { InsightSettingsPage } from './InsightSettingsPage'
 import { DataQualityPage } from './DataQualityPage'
 import { ExperienceLibraryPage } from './ExperienceLibraryPage'
@@ -1456,6 +1456,13 @@ const analysisViews: Record<string, AnalysisView> = {
   驱动因素: 'drivers',
 }
 
+// 同理，认不出来的名字落到「本轮」——日常最常进的那一屏。
+const reviewViews: Record<string, ReviewView> = {
+  本轮: 'current',
+  全部复盘: 'all',
+  已沉淀经验: 'harvest',
+}
+
 export function ModulePage({ system, item, contextId, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; contextId?: string; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
   const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
@@ -1511,7 +1518,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'review' ? <ReviewPage state={dataState} view={reviewViews[activeView] ?? 'current'} objectId={objectId}/>
     : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
