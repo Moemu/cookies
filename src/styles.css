@@ -1410,6 +1410,26 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .report-dropped { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .report-dropped > .text-button { color: var(--muted); font-size: 9px; }
 
+/* 复盘正文：「这一轮我记的」和「系统补的」两段，中间靠间距分开，不加框
+   ——两个框会让人以为是两份东西，而它们是同一份复盘的两个来源。 */
+.review-body > section { margin-top: 16px; }
+.review-body > section > .section-label { display: block; margin-bottom: 7px; }
+.finding-list { display: block; margin: 0; padding: 0; list-style: none; }
+/* 一条发现三格：来源点 / 正文 / 删除。来源点占固定宽度，正文再长也不会把它挤走。 */
+.finding-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.finding-row.dropped { opacity: .45; }
+.finding-row.dropped .finding-body > p { text-decoration: line-through; }
+/* ● 是人记的，○ 是系统补的。人记的那几笔用主色，一眼能扫出来。 */
+.finding-origin { color: var(--muted); font-size: 9px; line-height: 1.7; }
+.finding-origin.pinned { color: var(--cobalt); }
+.finding-body { min-width: 0; display: block; }
+.finding-body > p { margin: 0 0 5px; font-size: 10px; line-height: 1.6; }
+.finding-note { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.finding-row > button { padding: 2px 4px; color: var(--muted); }
+.finding-row > button:hover:not(:disabled) { color: var(--danger); }
+/* 提交之后这一句常驻在正文末尾：不是提示条，是这份复盘现在的状态。 */
+.review-sealed { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); color: var(--success); font-size: 10px; }
+
 /* 定格报告时挑投放执行。只有下拉，没有输入框：ID 打错了两边都不会报错。 */
 .freeze-pick { display: block; margin-top: 10px; }
 .freeze-pick small { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }

@@ -4192,6 +4192,15 @@ export const api = {
     request<ApiInsightReport>(
       `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:drop-finding`, 'POST', body,
     ),
+  // 提交这一轮复盘：补上「算哪次投放」、把系统发现定格进去、置为已确认，后端一次做完。
+  // 和 confirmReport 的区别是它带 execution_id——草稿是记一笔时自动建的，那会儿
+  // 还没到「这算哪次投放」这个问题，提交才是全流程唯一必须回答它的地方。
+  submitReview: (projectId: string, reportId: string, body: {
+    execution_id: string
+    expected_version: number
+  }) => request<ApiInsightReport>(
+    `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}/submit`, 'POST', body,
+  ),
   confirmReport: (projectId: string, reportId: string, expectedVersion: number) =>
     request<ApiInsightReport>(
       `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:confirm`, 'POST',
