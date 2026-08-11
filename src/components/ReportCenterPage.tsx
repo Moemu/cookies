@@ -283,7 +283,7 @@ export function ReportCenterPage({ state, activeView, objectId, onOpenProject }:
         {selected
           ? <ReportDetail report={selected} harvested={harvested.get(selected.id) ?? []}
             busy={busy} onConfirm={confirm} onHarvest={harvest} onDropFinding={dropFinding}
-            onOpenExperience={() => onOpenProject(currentProject.id, 'insight', 'knowledge', '', '候选经验')}/>
+            onOpenExperience={() => onOpenProject(currentProject.id, 'insight', 'experience', '', '管经验')}/>
           : <div className="panel-empty">左边选一份复盘，查看它的证据、发现和沉淀出的经验。</div>}
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </aside>

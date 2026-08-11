@@ -101,7 +101,7 @@ export function ProjectFlowDashboard({ onOpenProject, onManageProject }: { onOpe
     </section>
 
     <section className="workflow-insight-support" aria-label="素材洞察支持链">
-      <button onClick={() => onOpenProject(currentProject.id, 'insight', 'prelaunch')}>
+      <button onClick={() => onOpenProject(currentProject.id, 'insight', 'experience')}>
         <SearchCheck size={18}/>
         <span><small>投前支持阶段 01 至 04</small><b>历史素材、经验与证据进入 Brief、策略和创意</b></span>
         <ArrowRight size={15}/>
@@ -225,7 +225,7 @@ function deriveWorkflow(project: ProjectRecord): WorkflowStage[] {
       id: 8, title: '经验沉淀', summary: '资产沉淀 · 知识复用', icon: Archive,
       input: '经过样本、置信范围和业务边界验证的洞察', action: '沉淀适用条件、证据和不可复用边界',
       output: '可供下一轮调用的经验资产', gate: '至少一条经验已写入项目知识资产',
-      owner: '策略 / 素材分析', system: 'insight', navId: 'knowledge', cta: '进入经验沉淀',
+      owner: '策略 / 素材分析', system: 'insight', navId: 'experience', cta: '进入经验沉淀',
       rawComplete: knowledgeReady,
       evidence: knowledgeReady ? `${project.knowledgeCount} 条经验已沉淀，可供下一轮策略复用。` : '等待把复盘结论确认为带证据和边界的经验。',
     },

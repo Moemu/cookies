@@ -8,7 +8,6 @@ import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectR
 import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
-import { PreLaunchInsightPage } from './PreLaunchInsightPage'
 import { shortId } from '../data/shortId'
 // 原「分析素材库」「内容分析」「数据接入」三个页面不再直接挂在导航上，
 // 它们现在由 insight/assets 下的视图委托使用，这里不再 import。
@@ -17,9 +16,9 @@ import { ExperimentCenterPage } from './ExperimentCenterPage'
 import { AnalysisPage, type AnalysisView } from './insight/analysis'
 import { AssetsPage, type AssetsView } from './insight/assets'
 import { ReviewPage, type ReviewView } from './insight/review'
+import { ExperiencePage, type ExperienceView } from './insight/experience'
 import { InsightSettingsPage } from './InsightSettingsPage'
 import { DataQualityPage } from './DataQualityPage'
-import { ExperienceLibraryPage } from './ExperienceLibraryPage'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
 import { KanonStrategyWorkspace } from '../features/strategy/KanonStrategyWorkspace'
@@ -53,10 +52,10 @@ const dashboardJourneys: Record<SystemKey, Array<{ label: string; detail: string
     { label: '生产与评审', detail: '跟踪生成、失败恢复和交付版本', navId: 'production' },
   ],
   insight: [
-    { label: '投前洞察', detail: '为 Brief、策略与创意引用证据', navId: 'prelaunch' },
     { label: '分析', detail: '一轮投放跑完，为什么是这个结果', navId: 'analysis' },
-    { label: '素材管理', detail: '统一管理视频、图片与授权来源', navId: 'assets' },
-    { label: '经验沉淀', detail: '把验证结论转成可复用策略证据', navId: 'knowledge' },
+    { label: '复盘', detail: '这一轮收尾，决定留下什么', navId: 'review' },
+    { label: '经验', detail: '以前什么有效、在什么条件下成立', navId: 'experience' },
+    { label: '素材', detail: '能拿来分析的素材有哪些、还差什么', navId: 'assets' },
   ],
   delivery: [
     { label: '投放计划', detail: '选择创意组合、预算和排期', navId: 'plans' },
@@ -930,7 +929,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
     <section className="focus-band">
       <div className="focus-number">01</div>
       <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{projectProgress.available ? `${projectProgress.stageLabel}已推进至 ${progressPercentLabel(projectProgress)}，下一步需要确认关键决策与证据边界。` : progressReasonLabel(projectProgress)}</p><div className="focus-meta">{currentItem ? <><Status value={currentItem.status} /><span>负责人 {operationField(currentItem, 'owner')}</span></> : <span>暂无服务端工作项</span>}<span>更新于 {currentProject.updatedAt}</span></div></div>
-      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${projectProgress.available && projectProgress.taskPercent !== null ? projectProgress.taskPercent * 3.6 : 0}deg`} as CSSProperties}><span>{projectProgress.available && projectProgress.taskPercent !== null ? <>{projectProgress.taskPercent}<small>%</small></> : <small>无法计算</small>}</span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'knowledge' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
+      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${projectProgress.available && projectProgress.taskPercent !== null ? projectProgress.taskPercent * 3.6 : 0}deg`} as CSSProperties}><span>{projectProgress.available && projectProgress.taskPercent !== null ? <>{projectProgress.taskPercent}<small>%</small></> : <small>无法计算</small>}</span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'experience' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
     </section>
     <div className="dashboard-grid">
       <section className="open-section workstream">
@@ -1474,6 +1473,13 @@ const reviewViews: Record<string, ReviewView> = {
   已沉淀经验: 'harvest',
 }
 
+// 经验入口的两个模式。认不出来的落到「查」：那是高频的一屏，
+// 而「管」会摆出一排能改状态的按钮，不该在人没主动要求时出现。
+const experienceViews: Record<string, ExperienceView> = {
+  查经验: 'lookup',
+  管经验: 'manage',
+}
+
 export function ModulePage({ system, item, contextId, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; contextId?: string; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
   const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
@@ -1521,7 +1527,6 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'creative' && item.id === 'image-text' ? <ImageTextCreationPage state={dataState} activeTaskId={contextId ?? objectId}/>
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'analysis' ? <AnalysisPage state={dataState} view={analysisViews[activeView] ?? 'overview'} onOpenExperiments={() => onOpenProject(currentProject.id, 'insight', 'experiments')}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetsPage
       state={dataState}
@@ -1529,7 +1534,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
       onOpenView={setActiveView}
       onOpenLibrary={() => onOpenProject(currentProject.id, 'creative', 'production', undefined, '源素材')}
       onOpenAnalysis={() => onOpenProject(currentProject.id, 'insight', 'analysis')}/>
-    : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'experience' ? <ExperiencePage state={dataState} view={experienceViews[activeView] ?? 'lookup'}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'review' ? <ReviewPage state={dataState} view={reviewViews[activeView] ?? 'current'} objectId={objectId}/>

@@ -2,9 +2,9 @@ import {
   Activity, Aperture, Archive, BadgeCheck, BarChart3, BookOpenCheck, Bot,
   Boxes, BrainCircuit, ChartNoAxesCombined, CircleGauge, ClipboardCheck,
   FileCheck2, FileSearch, FlaskConical, FolderKanban,
-  GalleryHorizontalEnd, Library, ListChecks,
+  GalleryHorizontalEnd, Library, Lightbulb, ListChecks,
   Megaphone, MonitorCog, PackageCheck, PlaySquare, Rocket,
-  SearchCheck, Send, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
+  Send, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
   TableProperties, Target, TrendingUp, UsersRound, Video, WandSparkles,
 } from 'lucide-react'
 import type { SystemDefinition } from '../types'
@@ -38,9 +38,6 @@ export const systems: SystemDefinition[] = [
     key: 'insight', label: '素材洞察', shortLabel: '洞察', icon: ChartNoAxesCombined,
     statement: '投前支持策略与创意，投后解释效果并沉淀经验。',
     nav: [
-      // 五个视图取自 03 §8；原来只有一个「策略与创意证据」，把证据、建议、模式和
-      // 风险压成一张表，等于让人自己从混在一起的卡里挑出哪条能当证据（基线文档 §5 冲突 6）。
-      { id: 'prelaunch', label: '投前洞察', icon: SearchCheck, group: '工作', layout: 'analysis', description: '按当前 Project 组合历史素材、经验与证据，支持 Brief、策略和创意决策。', views: ['策略证据', '创意建议', '历史模式', '风险与反例', '引用记录'] },
       // 「分析」= 原「投后分析」（六个视图）+ 原「实验中心」（作为 👁 的升级通道）。
       // 合并的理由：实验不是一个独立的地方，它是「只是观察」升成「能归因」的那一步。
       // 摆成独立入口，人得先意识到自己需要一个实验，才会想到点进去。
@@ -54,19 +51,6 @@ export const systems: SystemDefinition[] = [
         description: '一轮投放跑完，为什么是这个结果。六个视图自由看，每一屏标清能不能归因；看到值得留的按「记一笔」。',
         views: ['指标总览', '素材对比', '趋势', '疲劳', '异常', '驱动因素'],
       },
-      // 「素材」= 原「数据接入」+ 原「分析素材库」+ 原「内容分析」。
-      //
-      // 三个入口原来各管一段，但人来这里只有一个问题：能拿来分析的素材有哪些、还差
-      // 什么。接数据、看变量、找相似，都是为了回答这一个问题的手段，摆成三个平级
-      // 入口等于让人自己去猜该先点哪个。总览先说清缺什么，另外四个视图是补的地方。
-      //
-      // 内容分析原来的七个视图按素材类型切分（小红书/公众号/…），现在收进「变量」
-      // 里按类型切换——素材类型是筛选条件，不是七个不同的功能。
-      {
-        id: 'assets', label: '素材', icon: Library, group: '工作', layout: 'table',
-        description: '能拿来分析的素材有哪些、还差什么、样本不够时从哪里补。',
-        views: ['总览', '数据接入', '变量', '找相似', '外部素材'],
-      },
       // 03 §73 和 19 §284 都写五个视图（多「A/B 变体」，末位是「实验结论」不是「实验结果」），
       // 代码原为四个（基线文档 §5 冲突 12）。
       //
@@ -74,9 +58,6 @@ export const systems: SystemDefinition[] = [
       // 不是一个人会先想起来去逛的地方。两条进入路径都在分析页上——结论徽章里的
       // 「做个实验」，和工具栏上那个常驻按钮。路由保留，直接删掉的话页面就断了。
       { id: 'experiments', label: '实验中心', icon: FlaskConical, group: '素材与分析', layout: 'analysis', hidden: true, description: '管理 A/B 变量、样本检查和可归因结果。', views: ['实验列表', 'A/B 变体', '变量矩阵', '样本检查', '实验结论'] },
-      // 视图名就是状态名：待定 / 在用 / 停用。「该看一眼」不是第四个状态，是「在用」
-      // 里挂了标记的那一批——它们仍然在用、仍然能被引用，单开一栏只是为了好找。
-      { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['待定', '在用', '该看一眼', '停用', '引用记录'] },
       // 只留有数据模型的三个视图。「周期报告 / 自定义报告 / 协作 / 版本与导出」写在
       // 03 §5 和 19 §5.2 的二级功能表里，但 03 §9 的功能需求表里没有任何一条 FR 支撑，
       // 后端也没有对应模型——这里唯一的 P0 需求是 AM-015 任务复盘（基线文档 §5 冲突 9）。
@@ -91,6 +72,37 @@ export const systems: SystemDefinition[] = [
         id: 'review', label: '复盘', icon: BookOpenCheck, group: '工作', layout: 'analysis',
         description: '一轮投放收尾。看你一路记的那几笔，系统把漏的补齐，逐条决定留不留，提交，把值得复用的沉淀成经验。',
         views: ['本轮', '全部复盘', '已沉淀经验'],
+      },
+      // 「经验」= 原「投前洞察」+ 原「经验库」。
+      //
+      // 合并的理由：这两页是同一批数据的两种读法。投前洞察的五个视图里，前四个只是
+      // 同一批经验按不同条件筛，第五个（引用记录）是每条经验自己的属性——做成独立
+      // 视图，人得先在那一页找到这条经验才能看它的历史，现在收进卡片的展开层里。
+      //
+      // 剩下的两个视图分的是这个人现在要干什么：查是下一轮开工时看以前什么有效，
+      // 管是给这些结论背书。经验库原来的五个视图（待定 / 在用 / 该看一眼 / 停用 /
+      // 引用记录）不再是五栏——「该看一眼」本来就不是第四个状态，是「在用」上的
+      // 一个标记；三个状态一起列、要人做事的排前面，比点三次栏目少绕两步。
+      {
+        id: 'experience', label: '经验', icon: Lightbulb, group: '工作', layout: 'analysis',
+        description: '以前什么有效、在什么条件下成立、凭什么这么说。',
+        views: ['查经验', '管经验'],
+      },
+      // 「素材」= 原「数据接入」+ 原「分析素材库」+ 原「内容分析」。
+      //
+      // 三个入口原来各管一段，但人来这里只有一个问题：能拿来分析的素材有哪些、还差
+      // 什么。接数据、看变量、找相似，都是为了回答这一个问题的手段，摆成三个平级
+      // 入口等于让人自己去猜该先点哪个。总览先说清缺什么，另外四个视图是补的地方。
+      //
+      // 内容分析原来的七个视图按素材类型切分（小红书/公众号/…），现在收进「变量」
+      // 里按类型切换——素材类型是筛选条件，不是七个不同的功能。
+      //
+      // 排在最后：前三个是一轮投放的主线（看结果 → 收尾 → 沉淀），素材是给这条
+      // 主线备料的地方，日常不是每次都要进。
+      {
+        id: 'assets', label: '素材', icon: Library, group: '工作', layout: 'table',
+        description: '能拿来分析的素材有哪些、还差什么、样本不够时从哪里补。',
+        views: ['总览', '数据接入', '变量', '找相似', '外部素材'],
       },
       { id: 'quality', label: '数据质量', icon: ShieldCheck, group: '治理', layout: 'operations', description: '监控新鲜度、缺失、口径、异常和修复队列。', views: ['新鲜度', '缺失', '异常', '口径', '对账', '修复队列'] },
       // 第五个视图原来写「版本与质量」，03 §一级导航和 19 §288 都写「质量看板」，
