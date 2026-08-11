@@ -63,7 +63,7 @@ export const systems: SystemDefinition[] = [
       // 第五个视图原来写「版本与质量」，03 §一级导航和 19 §288 都写「质量看板」，
       // 这里对齐文档（基线文档 §5 冲突 11）。
       { id: 'operations', label: '能力运营', icon: SlidersHorizontal, group: '治理', layout: 'operations', description: '治理特征体系、指标字典、Skills 与评测集。', views: ['特征体系', '指标字典', '分析 Skills', '评测集', '质量看板'] },
-      { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '配置样本、窗口、通知、确认权限与报告模板。', views: ['样本门槛', '观察窗口', '通知', '确认权限', '报告模板'] },
+      { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '查看现在生效的样本门槛、窗口、通知、确认权限、报告模板与名词表。', views: ['样本门槛', '观察窗口', '通知', '确认权限', '报告模板', '名词表'] },
     ],
   },
   {

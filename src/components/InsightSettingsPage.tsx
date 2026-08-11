@@ -25,6 +25,7 @@ const groupByView: Record<string, string> = {
   通知: 'notification',
   确认权限: 'confirmation',
   报告模板: 'report_template',
+  名词表: 'glossary',
 }
 
 export function InsightSettingsPage({ state, activeView }: { state: DataState; activeView: string }) {

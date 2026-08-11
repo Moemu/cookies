@@ -127,11 +127,14 @@ func TestUnbuiltGroupsSayWhatIsMissingInsteadOfShowingAnEmptyForm(t *testing.T) 
 	}
 }
 
-// 五个分组要和导航上的五个二级视图一一对应，顺序也一致（03 §78、19 §289）。
+// 分组要和导航上的二级视图一一对应，顺序也一致（03 §78、19 §289）。
 // 少一个就会有一个标签点开是空的，多一个就会有一组设置没有入口。
-func TestGroupsMatchTheFiveNavigationViews(t *testing.T) {
+//
+// 名词表是重构时加的第六个：设计把「这个模块每件事只有一个叫法」当成一条生效中的
+// 规则，规则就该和阈值摆在同一页，理由也一样——你改不了，但你有权知道。
+func TestGroupsMatchTheNavigationViews(t *testing.T) {
 	settings := mustSettings(t)
-	want := []string{"样本门槛", "观察窗口", "通知", "确认权限", "报告模板"}
+	want := []string{"样本门槛", "观察窗口", "通知", "确认权限", "报告模板", "名词表"}
 	if len(settings.Groups) != len(want) {
 		t.Fatalf("分组数 %d，导航上是 %d 个二级视图", len(settings.Groups), len(want))
 	}

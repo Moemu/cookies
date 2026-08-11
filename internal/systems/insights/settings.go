@@ -3,6 +3,7 @@ package insights
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -111,6 +112,7 @@ func (s Service) GetInsightSettings(_ context.Context, actor contract.ActorConte
 			notificationSettings(),
 			confirmationSettings(),
 			reportTemplateSettings(),
+			glossarySettings(),
 		},
 	}, nil
 }
@@ -332,5 +334,37 @@ func reportTemplateSettings() SettingGroup {
 			"复盘报告本身是能用的：投后分析结论 → 复盘 → 确认后沉淀成经验，这条链路已经跑通，只是它的版式不可配置。",
 		},
 		Items: []SettingItem{},
+	}
+}
+
+// --- 名词表 ---
+
+// glossarySettings 把名词表摆到设置页上。
+//
+// 它和这一页其余几组不太一样：那些是阈值，这是词。放在一起是因为它们的性质相同——
+// 都是「现在生效的规则，你改不了，但你有权知道」。名词表比阈值更容易悄悄失效：
+// 阈值写错了数字会不对，词用错了页面照样能跑，只是每个人读到的意思略有偏差，
+// 半年后谁也说不清「强结论」和「能归因」当初是不是一回事。
+func glossarySettings() SettingGroup {
+	items := make([]SettingItem, 0, len(insightGlossary))
+	for _, term := range insightGlossary {
+		effect := "这个词没有被取代的旧说法。"
+		if len(term.Avoid) > 0 {
+			effect = "不要再叫：" + strings.Join(term.Avoid, "、") + "。"
+		}
+		items = append(items, SettingItem{
+			Key: term.Term, Label: term.Term,
+			Value:       term.Means,
+			Effect:      effect,
+			Recommended: "全模块统一用这个词",
+			Source:      "internal/systems/insights/glossary.go",
+			Basis:       "2026-08-04 素材洞察重构设计 §3.6",
+		})
+	}
+	return SettingGroup{
+		Key: "glossary", Label: "名词表", State: SettingInEffect,
+		Summary: "这个模块里每件事只有一个叫法。表上「不要再叫」的说法不许再出现在任何页面文案里，有测试拦着。",
+		Missing: []string{},
+		Items:   items,
 	}
 }
