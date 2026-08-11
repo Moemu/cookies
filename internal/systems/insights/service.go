@@ -460,6 +460,10 @@ type Service struct {
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.
 	Assets AssetRepository
+	// ExternalAssets 存的是平台外的素材证据，和 Assets 分成两个接口。
+	// 并成一个的话，下一个实现 AssetRepository 的人会以为外部素材是素材的一种，
+	// 而共享素材库里的东西是可以被拿去投放的——外部素材没有那份授权。
+	ExternalAssets ExternalAssetRepository
 	// Connectors backs 数据接入 and the Canonical daily metrics 投后分析 reads.
 	Connectors ConnectorRepository
 	// Runs 记录每次分析任务的输入、方法、模型版本和结果（03 §344 验收 12）。

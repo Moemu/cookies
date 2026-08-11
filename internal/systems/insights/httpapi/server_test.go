@@ -299,6 +299,14 @@ func TestInsightsHTTPExposesAssetAnalysisSurface(t *testing.T) {
 		// 一条叫 similar 的素材的未知动作，返回 404。
 		{http.MethodPost, "/api/insights/v1/projects/project_1/assets/similar",
 			`{"features":{"duration":"15s"}}`, 200, "insightasset_2"},
+		// 外部素材走自己的路径，和 /assets 不共用任何一段。
+		{http.MethodPost, "/api/insights/v1/projects/project_1/external-assets",
+			`{"title":"同行的一条 15 秒竖版","purpose":"benchmark","source_note":"公开投放素材","window_end":"2026-07-30"}`,
+			201, "externalasset_1"},
+		// 没有 window_end 就算不出留存期限，直接 400——不许用默认值蒙混过去。
+		{http.MethodPost, "/api/insights/v1/projects/project_1/external-assets",
+			`{"title":"同行的一条 15 秒竖版","purpose":"benchmark"}`, 400, ""},
+		{http.MethodGet, "/api/insights/v1/projects/project_1/external-assets", "", 200, "externalasset_1"},
 	}
 	for _, test := range tests {
 		response := httptest.NewRecorder()
@@ -410,6 +418,9 @@ type applicationStub struct {
 	mappingFilter  insights.AssetMappingFilter
 	matrixAssetIDs []string
 	similarRequest insights.SimilarAssetRequest
+
+	externalRequest insights.ImportExternalAssetRequest
+	externalLimit   int
 
 	analysisRun     insights.AnalysisRun
 	analyzeRequest  insights.AnalyzeAssetRequest
@@ -583,6 +594,17 @@ func (s *applicationStub) FindSimilarAssets(_ context.Context, _ contract.ActorC
 		Probe: []insights.SimilarityReason{{Key: "duration", Label: "时长", Value: "15s", Source: insights.SourceHuman}},
 		Items: []insights.SimilarAsset{{AssetID: "insightasset_2", Overlap: 1, AdmissibleOverlap: 1}},
 	}, nil
+}
+func (s *applicationStub) ImportExternalAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.ImportExternalAssetRequest) (insights.ExternalAsset, error) {
+	s.externalRequest = request
+	return insights.ExternalAsset{
+		ID: "externalasset_1", Title: request.Title, Purpose: request.Purpose,
+		RetentionUntil: request.WindowEnd,
+	}, nil
+}
+func (s *applicationStub) ListExternalAssets(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, limit int) ([]insights.ExternalAsset, error) {
+	s.externalLimit = limit
+	return []insights.ExternalAsset{{ID: "externalasset_1", Title: "同行的一条 15 秒竖版", Purpose: insights.PurposeBenchmark}}, nil
 }
 func (s *applicationStub) RegisterDataSource(context.Context, contract.ActorContext, contract.ProjectID, insights.RegisterDataSourceRequest) (insights.DataSource, error) {
 	return s.dataSource, s.registerErr

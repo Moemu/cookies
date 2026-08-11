@@ -70,3 +70,35 @@ func TestExternalStorageKeyIsPrefixed(t *testing.T) {
 		t.Errorf("存储路径必须以 %q 开头，得到 %q", externalStoragePrefix, key)
 	}
 }
+
+// 导入的结果必须是只读的形状：没有 Version、没有状态、没有血缘。
+// 这条测试盯的是「有没有人后来给它加了资产的字段」——加了就说明有人开始
+// 把它当资产用了。
+func TestImportedExternalAssetCarriesItsPurposeAndDeadline(t *testing.T) {
+	t.Parallel()
+
+	windowEnd := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	request := ImportExternalAssetRequest{
+		Title: "同行的一条 15 秒竖版", Purpose: PurposeBenchmark,
+		SourceNote: "公开投放素材，2026-07 抓取", WindowEnd: windowEnd,
+		Features: map[string]string{"duration": "15s"},
+	}
+	value := buildExternalAsset("ext_1", request, "user_1",
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC))
+
+	if value.Purpose != PurposeBenchmark {
+		t.Errorf("用途没带上，得到 %q", value.Purpose)
+	}
+	if !value.RetentionUntil.Equal(externalRetentionUntil(windowEnd)) {
+		t.Errorf("留存期限算错了，得到 %s", value.RetentionUntil)
+	}
+	if value.Features["duration"].Text != "15s" {
+		t.Errorf("变量没带上：%+v", value.Features)
+	}
+	if value.OriginalPurged {
+		t.Error("刚导入的原件不该是已删状态")
+	}
+	if got := value.StorageKey; got[:len(externalStoragePrefix)] != externalStoragePrefix {
+		t.Errorf("存储路径没加前缀：%q", got)
+	}
+}

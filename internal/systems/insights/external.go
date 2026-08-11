@@ -1,6 +1,8 @@
 package insights
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -131,4 +133,87 @@ func externalStorageKey(id, ext string) string {
 		return externalStoragePrefix + id
 	}
 	return externalStoragePrefix + id + "." + strings.TrimPrefix(ext, ".")
+}
+
+// ExternalAssetRepository 单独一个接口，不并进 AssetRepository。
+// 并进去的话，下一个实现 AssetRepository 的人会以为外部素材是素材的一种。
+type ExternalAssetRepository interface {
+	CreateExternalAsset(context.Context, ExternalAsset) (ExternalAsset, error)
+	ListExternalAssets(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ExternalAsset, error)
+	// PurgeExpiredOriginals 清掉到期的原件，把行标成 original_purged。
+	// 不删整行：删了的话，引用过它的那份复盘就成了「引用了一个不存在的东西」。
+	PurgeExpiredOriginals(context.Context, time.Time) ([]string, error)
+}
+
+// buildExternalAsset 单独拆出来，让「导入产出什么形状」能被直接测到。
+func buildExternalAsset(id string, request ImportExternalAssetRequest,
+	actorID string, now time.Time) ExternalAsset {
+	features := make(map[string]FeatureValue, len(request.Features))
+	for key, value := range request.Features {
+		// 一律按自由文本存。外部素材是证据，它的变量既不参与归因也不参与
+		// 相似度检索——给它一个能被比较的 kind，只会诱使后来的人拿它去比。
+		features[key] = FeatureValue{Kind: FeatureKindText, Text: value}
+	}
+	return ExternalAsset{
+		ID: id, Title: strings.TrimSpace(request.Title),
+		SourceNote: strings.TrimSpace(request.SourceNote), AssetType: request.AssetType,
+		Purpose: request.Purpose, PurposeNote: strings.TrimSpace(request.PurposeNote),
+		StorageKey:     externalStorageKey(id, request.FileExt),
+		Features:       features,
+		RetentionUntil: externalRetentionUntil(request.WindowEnd),
+		CreatedBy:      actorID, CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+// externalReady 照 assetsReady 的样子写，盯的是外部素材那一路依赖。
+// 不复用 ready()：它查的是 Repository / Delivery，那两个装配齐了也不代表
+// ExternalAssets 装了——没装就走下去，第一次调用直接空接口 panic。
+func (s Service) externalReady(actor contract.ActorContext, projectID contract.ProjectID, scope contract.Scope) error {
+	if s.ExternalAssets == nil || s.Projects == nil {
+		return fmt.Errorf("insights external asset dependencies are incomplete")
+	}
+	if actor.OrganizationID == "" || projectID == "" || !actor.HasScope(scope) {
+		return fmt.Errorf("%s scope is required", scope)
+	}
+	return nil
+}
+
+func (s Service) ImportExternalAsset(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, request ImportExternalAssetRequest) (ExternalAsset, error) {
+	if err := s.externalReady(actor, projectID, ScopeWrite); err != nil {
+		return ExternalAsset{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ExternalAsset{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ExternalAsset{}, err
+	}
+	id, err := s.idGenerator()("externalasset")
+	if err != nil {
+		return ExternalAsset{}, err
+	}
+	value := buildExternalAsset(id, request, actor.Principal.ID, s.now())
+	value.OrganizationID, value.ProjectID = actor.OrganizationID, projectID
+	return s.ExternalAssets.CreateExternalAsset(ctx, value)
+}
+
+func (s Service) ListExternalAssets(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, limit int) ([]ExternalAsset, error) {
+	if err := s.externalReady(actor, projectID, ScopeRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.ExternalAssets.ListExternalAssets(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+}
+
+// PurgeExpiredExternalOriginals 由维护命令调用。返回被清掉原件的存储路径，
+// 让调用方去对象存储上删对应的文件——这里只管数据库那一半。
+func (s Service) PurgeExpiredExternalOriginals(ctx context.Context) ([]string, error) {
+	if s.ExternalAssets == nil {
+		return nil, fmt.Errorf("insights external asset dependencies are incomplete")
+	}
+	return s.ExternalAssets.PurgeExpiredOriginals(ctx, s.now())
 }

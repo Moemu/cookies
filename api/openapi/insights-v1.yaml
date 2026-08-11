@@ -637,6 +637,70 @@ paths:
                 $ref: '#/components/schemas/SimilarAssetResult'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/external-assets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Import an off-platform asset as evidence
+      description: >-
+        **External assets never enter the shared asset library.** The library is
+        owned by 创意创作 and holds only platform assets, because anything in it
+        can be sent out to a live campaign — and an off-platform asset carries no
+        such licence. Nothing here is ever written to `insight_assets`.
+
+
+        Insight still needs these files: "what does the rest of the industry ship
+        for this kind of asset" is unavoidable when explaining a round's result.
+        So they live as *evidence*: read-only, with a declared purpose, and with
+        a retention deadline. Editing is not offered — re-import instead, because
+        editing a piece of evidence is tampering with it.
+
+
+        `window_end` is the end date of the review window this asset was imported
+        to explain. Retention runs from there, not from the import date: the two
+        have the same usefulness, and counting from the import date would keep a
+        mid-campaign import a month longer for no reason. When the deadline
+        passes only the original file is deleted; the row and the human-tagged
+        features stay, so a review that cited this asset still says what was seen.
+      operationId: importExternalInsightAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportExternalAssetRequest'
+      responses:
+        '201':
+          description: The stored evidence row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      summary: List the project's external evidence
+      description: >-
+        Newest first. Rows whose `original_purged` is true have passed their
+        retention deadline: the file is gone, the declared features remain.
+      operationId: listExternalInsightAssets
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: External evidence for this project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalAsset'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/assets/{asset_id}/features:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -2537,6 +2601,97 @@ components:
             must be told something: nothing was found, the asset has no usable
             variables yet, or every match rests solely on model inference and so
             may be looked at but not used for attribution.
+    ImportExternalAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [title, purpose, window_end]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          description: >-
+            Required. Without it the list is a wall of untitled rows and nobody
+            can tell which piece of evidence is which.
+        source_note:
+          type: string
+          maxLength: 512
+          description: >-
+            Where this came from, in the importer's own words. Deliberately not a
+            dropdown: sources vary too widely, and forcing a list only makes
+            everyone pick "other", which turns the column into dead weight.
+        asset_type:
+          type: string
+        purpose:
+          type: string
+          enum: [benchmark, reference]
+          description: >-
+            Required. Not a category label — a record. When someone later asks
+            "why are we still holding this file", this column is the answer.
+            `benchmark` = a yardstick for "what does this kind of asset usually
+            achieve"; `reference` = a positive or negative example backing one of
+            this round's conclusions.
+        purpose_note:
+          type: string
+          maxLength: 512
+        window_end:
+          type: string
+          format: date
+          description: >-
+            End date of the review window this asset explains. Retention counts
+            from here.
+        features:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            Variables a person tagged on it. Stored as free text and never used
+            for attribution or similarity search — this is evidence, not a
+            comparable asset.
+        file_ext:
+          type: string
+          description: Used only to build the storage path.
+    ExternalAsset:
+      type: object
+      required: [id, title, purpose, original_purged, features, retention_until]
+      description: >-
+        One piece of off-platform evidence. **No version, no lineage, no status
+        machine** — those belong to assets. It is read-only.
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        title: { type: string }
+        source_note: { type: string }
+        asset_type: { type: string }
+        purpose:
+          type: string
+          enum: [benchmark, reference]
+        purpose_note: { type: string }
+        storage_key:
+          type: string
+          description: >-
+            Always under the `insights/external/` prefix, physically separate
+            from platform assets. Empty once the original has been purged.
+        original_purged:
+          type: boolean
+          description: >-
+            True once the retention deadline passed and the original file was
+            deleted. The row and its features survive — a review that cited this
+            asset must still say what was seen at the time.
+        features:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FeatureValue'
+        retention_until:
+          type: string
+          format: date-time
+          description: >-
+            Computed at import from `window_end` + 90 days and stored, not
+            recomputed on read: recomputing would move every historical
+            deadline the moment the constant changes, while people acted on the
+            deadline they were told at import time.
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     IndexAsset:
       type: object
       additionalProperties: false

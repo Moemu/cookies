@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/insights"
@@ -31,6 +32,11 @@ func (s *Server) registerAssetRoutes() {
 	s.mux.HandleFunc("PATCH /api/insights/v1/projects/{project_id}/assets/{asset_id}/features", s.patchAssetFeatures)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/assets/{asset_id}/analysis-runs", s.listAssetAnalysisRuns)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/analysis-runs", s.listAnalysisRuns)
+
+	// 外部素材是证据，不是资产：单独的路径、单独的表、只读。
+	// 它永远不会出现在 /assets 下面——那条路径下的东西是可以被拿去投放的。
+	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/external-assets", s.importExternalAsset)
+	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/external-assets", s.listExternalAssets)
 
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/asset-mappings", s.listAssetMappings)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/asset-mappings", s.registerAssetMapping)
@@ -168,6 +174,47 @@ func (s *Server) findSimilarAssets(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, value)
+}
+
+// importExternalAssetBody 单独一个 body 类型，不直接复用服务层的请求结构：
+// WindowEnd 在那边是 `json:"-"`，因为它不该被当成一个普通字段随便传，
+// 必须走和其他窗口一样的日期解析。
+type importExternalAssetBody struct {
+	insights.ImportExternalAssetRequest
+	WindowEnd string `json:"window_end"`
+}
+
+// importExternalAsset 收一条平台外的素材当证据。
+//
+// 收进来的东西**永远不进共享素材库**：那里的素材是可以被拿去投放的，而这一条
+// 没有那份授权。它只读、有用途声明、有留存期限，到期删原件只留派生物。
+func (s *Server) importExternalAsset(writer http.ResponseWriter, request *http.Request) {
+	var body importExternalAssetBody
+	if !decode(writer, request, &body) {
+		return
+	}
+	windowEnd, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(body.WindowEnd), time.UTC)
+	if err != nil {
+		writeError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	payload := body.ImportExternalAssetRequest
+	payload.WindowEnd = windowEnd
+	value, err := s.app.ImportExternalAsset(request.Context(), mustActor(request), projectID(request), payload)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (s *Server) listExternalAssets(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.app.ListExternalAssets(request.Context(), mustActor(request), projectID(request), queryLimit(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) assetAction(writer http.ResponseWriter, request *http.Request) {
