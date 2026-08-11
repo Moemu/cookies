@@ -32,7 +32,7 @@ const moduleDefinitions: Array<{
 }> = [
   { system: 'strategy', navId: 'tasks', label: '需求与策略', responsibility: '定义 Brief、策略任务和研究证据', owner: '品牌负责人 / 策略' },
   { system: 'creative', navId: 'tasks', label: '创意创作', responsibility: '完成脚本、素材生成、剪辑和评审', owner: '创意策划 / AI 制作' },
-  { system: 'insight', navId: 'performance', label: '素材洞察', responsibility: '连接广告数据、复盘结论与经验资产', owner: '素材分析 / 投手' },
+  { system: 'insight', navId: 'analysis', label: '素材洞察', responsibility: '连接广告数据、复盘结论与经验资产', owner: '素材分析 / 投手' },
   { system: 'delivery', navId: 'plans', label: '智能投放', responsibility: '管理计划、ChangeSet、审批与执行', owner: '广告投手 / 审批人' },
 ]
 

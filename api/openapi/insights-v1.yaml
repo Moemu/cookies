@@ -67,6 +67,32 @@ paths:
                 $ref: '#/components/schemas/InsightReport'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/findings:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: 记一笔——把分析页上的一条结论钉进本轮复盘草稿
+      description: |
+        分析页唯一的写操作。请求体里**没有** confidence / verdict：判定由后端拿
+        (window, dimension, source_ref, variable) 回到那次分析结果里找回来。
+        目标复盘草稿按 (项目 + 窗口) 自动 find-or-create，不需要先建复盘。
+        屏幕上不存在这一条时返回 400。
+      operationId: pinInsightFinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinFinding'
+      responses:
+        '200':
+          description: 记入后的复盘草稿全文
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightReport'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/reports/{report_id}:drop-finding:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -74,9 +100,9 @@ paths:
     post:
       summary: Drop or restore one auto-filled finding
       description: |
-        报告里的发现是系统自动带入的，人只做删减——加不了新的一条。
-        写进去的每条发现都得能回溯到某次对比、某个实验或某条经验，
-        手打一条就断了这个链子。只有草稿能改。
+        报告页上人只做删减——加不了新的一条。写进去的每条发现都得能回溯到某次对比、
+        某个实验或某条经验，在报告页手打一条就断了这个链子。要加只能回分析页记一笔
+        （`POST /findings`），那条路上判定是后端回查的，出处照样留得住。只有草稿能改。
       operationId: dropInsightReportFinding
       requestBody:
         required: true
@@ -141,6 +167,38 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Experience'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/experiences/lookup:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Look up experience that applies to the round about to be produced
+      description: >
+        A read that uses POST: the lookup carries seven conditions, several of
+        them free text, which are unreadable and easy to mis-escape in a query
+        string. Only confirmed experience is searched; observed-only entries are
+        withheld unless include_observed is set.
+      operationId: lookupExperiences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceLookup'
+      responses:
+        '200':
+          description: Matching experience with the reason each one matched.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceMatch'
         default:
           $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/experiences/{experience_id}:confirm:
@@ -575,6 +633,104 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/InsightAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/assets/similar:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Find similar assets by feature overlap
+      description: >-
+        Two ways to ask: pass `asset_id` for "what else looks like this one", or
+        pass `features` for "what else has 时长=15s". The second is the escape
+        hatch for a ❓ verdict — when this round has too few assets on a variable,
+        pulling in library assets with the same value makes the sample thick
+        enough to judge.
+
+
+        Similarity is feature overlap, never a vector score: every hit must be
+        able to state *where* it is similar. A recommendation nobody can explain
+        is a recommendation nobody dares use in a review meeting. Each reason
+        carries its `source`, and `admissible_overlap` counts only the
+        `derived`/`human` variables — the ones allowed into attribution.
+      operationId: findSimilarInsightAssets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimilarAssetRequest'
+      responses:
+        '200':
+          description: Ranked matches, most attributable overlap first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarAssetResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/external-assets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Import an off-platform asset as evidence
+      description: >-
+        **External assets never enter the shared asset library.** The library is
+        owned by 创意创作 and holds only platform assets, because anything in it
+        can be sent out to a live campaign — and an off-platform asset carries no
+        such licence. Nothing here is ever written to `insight_assets`.
+
+
+        Insight still needs these files: "what does the rest of the industry ship
+        for this kind of asset" is unavoidable when explaining a round's result.
+        So they live as *evidence*: read-only, with a declared purpose, and with
+        a retention deadline. Editing is not offered — re-import instead, because
+        editing a piece of evidence is tampering with it.
+
+
+        `window_end` is the end date of the review window this asset was imported
+        to explain. Retention runs from there, not from the import date: the two
+        have the same usefulness, and counting from the import date would keep a
+        mid-campaign import a month longer for no reason. When the deadline
+        passes only the original file is deleted; the row and the human-tagged
+        features stay, so a review that cited this asset still says what was seen.
+      operationId: importExternalInsightAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportExternalAssetRequest'
+      responses:
+        '201':
+          description: The stored evidence row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAsset'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      summary: List the project's external evidence
+      description: >-
+        Newest first. Rows whose `original_purged` is true have passed their
+        retention deadline: the file is gone, the declared features remain.
+      operationId: listExternalInsightAssets
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: External evidence for this project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalAsset'
         default:
           $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/assets/{asset_id}/features:
@@ -1215,18 +1371,21 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
     get:
-      summary: Insight system settings (read-only)
+      summary: Insight settings
       description: |
-        系统设置的五个二级视图（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）
-        共用这一个响应。20 §121 给 MVP 的定位是「可采用保守默认值」，并要求
-        「重要阈值显示影响说明和默认推荐；不使用仪表盘布局」；22 §239 记的问题
-        正是「缺少实际阈值影响说明」。
+        「设置」入口下各组共用这一个响应。20 §121 要求「重要阈值显示影响说明和
+        默认推荐；不使用仪表盘布局」；22 §239 记的问题正是「缺少实际阈值影响说明」。
 
 
-        **这个端点只读，没有配对的写接口，也不读库。** 返回的每个值都是代码常量本身，
-        不是抄过来的副本——抄一份迟早会和代码对不上，那时候这一页就从说明变成误导。
-        改阈值要走代码评审：03 §17.3 把「最低样本由全局规则还是行业模板配置」列为
-        待确认，在那条定下来之前开放写接口，等于先替它选了答案。
+        **这个端点本身只读。** 决定三档结论的那七个阈值可以改，改法是
+        `PUT /thresholds`——响应里带 `editable_key` 的格子就是那七个。
+        其余的值仍然是代码常量，一律只读：它们里面有一批是保护性上限
+        （导入行数、最长窗口这类），做成可配置等于把防呆做成了可关闭。
+
+
+        不管可写不可写，返回的数字都取自**正在生效的那份**（没人调过时逐格退回
+        代码常量），而不是另抄一份——抄一份迟早会和代码对不上，那时候这一页
+        就从说明变成误导。
 
 
         路径上带 `project_id` 只为沿用同一套鉴权（需要 `insights.read`）。
@@ -1246,6 +1405,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InsightSettings'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/thresholds:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Judgement thresholds in effect
+      description: |
+        现在生效的那一份判定阈值，每格都有值，且带 `version`。没人调过时
+        `version` 为 0，各格取代码里的出厂设定。
+
+
+        这些数字决定三档结论怎么判：多少曝光算「充分」、几天才给趋势、
+        几条素材才谈驱动因素。每条结论都盖着它用的那一版号
+        （`Judgement.threshold_version`），所以改完阈值之后回头看一条老结论，
+        仍然查得到它是按什么标准算的。
+      operationId: getThresholds
+      responses:
+        '200':
+          description: The resolved thresholds currently in effect.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedThresholds'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      summary: Save judgement thresholds (appends a version)
+      description: |
+        **只增版本，从不原地改。** 服务端追加一版并返回解析后的新一份；
+        已经判出去的结论保持原样，从此刻起判出来的按新版本算。
+
+
+        用 `PUT` 而不是 `POST`：从调用方看这是「把阈值设成这样」，幂等语义对得上；
+        内部追加一版是实现细节。
+
+
+        `values` 里只填要改的格子，**没填的格子表示「没人调过」，跟着代码默认值走**，
+        不是 0。存成 0 的话，将来改了代码默认值，那些从没被调过的部署不会跟着走，
+        而它们本来应该跟着走。
+
+
+        `reason` 必填（1~1000 字）。改判定标准是一件要负责的事；写不出理由的改动
+        多半是试出来的，而试出来的阈值三个月后没人说得清为什么是这个数。
+
+
+        需要 `insights.confirm`，不是 `insights.write`：改的是全组织的判定标准，
+        影响面比写一条数据大得多，应该和「确认经验」同一个门槛。
+
+
+        400 的情形：理由为空或过长；任何一格 ≤ 0；趋势天数低于 3 或异常天数低于 4
+        （再低就等于把「拒绝下结论」这条规则关掉）；充分门槛低于方向门槛
+        （那样一个样本量会同时满足两档，谁生效取决于代码里 if 的先后）。
+      operationId: saveThresholds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveThresholdsRequest'
+      responses:
+        '200':
+          description: The newly appended version, resolved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedThresholds'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/thresholds/history:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Threshold change history
+      description: >-
+        阈值的改动史，版本号从大到小。它和「只增版本」是一件事的两面：只增版本让
+        历史存得下来，这个端点让历史看得见——看不见的话，一条盖着「第 3 版」的结论，
+        人查不到第 3 版当时是什么数、为什么改，那个版本号也就等于没有。
+      operationId: listThresholdHistory
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Threshold sets, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ThresholdSet'
         default:
           $ref: '#/components/responses/Problem'
   /api/insights/v1/projects/{project_id}/data-quality:
@@ -1700,26 +1955,85 @@ components:
           description: |
             true 是删掉，false 是撤销删掉。条目不会被物理移除——报告要能说清
             「系统给了什么、人拿掉了哪几条」。
+    PinFinding:
+      type: object
+      additionalProperties: false
+      description: |
+        「记一笔」的入参。**不收** confidence / verdict：多带一个判定字段，
+        页面上标的三档就成了装饰——前端改一个值就能把「算不出来」记成「能归因」。
+      required: [window, dimension]
+      properties:
+        window:
+          type: object
+          additionalProperties: false
+          required: [start, end]
+          description: 人当时看的那个窗口，按天传。判定就是从这个窗口的分析结果里回查的。
+          properties:
+            start: { type: string, example: '2026-07-01' }
+            end: { type: string, example: '2026-07-30' }
+        dimension:
+          type: string
+          enum: [overview, comparisons, trends, fatigue, anomalies, drivers]
+          description: 六个视图之一。记在别处，复盘页不知道该把它归到哪一块。
+        source_ref:
+          type: string
+          description: 素材 ID 或异常日期。与 variable 至少给一个（overview 除外）。
+        variable:
+          type: string
+          description: 特征键。与 source_ref 至少给一个（overview 除外）。
+        text:
+          type: string
+          maxLength: 500
+          description: 人自己补的一句话。留空则用系统给这一条的措辞。
     ReportFinding:
       type: object
       description: |
         报告里的一条发现。四块（素材表现 / 实验结论 / 相关经验 / 下一轮建议）
         按 `kind` 分组，顺序即 `ReportSectionKind` 的枚举顺序。
-      required: [kind, text, dropped]
+        `Judgement` 的字段（confidence / verdict / verdict_label / note，以及知道时才有的 threshold_version）平铺在这里。
+      required: [kind, text, dropped, origin, confidence, verdict, verdict_label]
       properties:
         kind:
           type: string
           enum: [asset_performance, experiment, experience, recommendation]
         text: { type: string }
+        origin:
+          type: string
+          enum: [system, pinned]
+          description: |
+            `pinned` 是人在分析页记的，`system` 是复盘时按规则补的。复盘页要把两者
+            分开标（● 我记的 / ○ 系统补的）：混在一起，人就分不清哪几条是自己挑的。
+            旧报告里没有这个字段，读出来时按 `system` 补齐。
         strength:
           allOf:
             - $ref: '#/components/schemas/VariantVerdict'
           description: 出自素材对比的发现才有。用来排序：可归因的排在方向性前面。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话说明为什么是这个档位。' }
+        dimension:
+          type: string
+          enum: [overview, comparisons, trends, fatigue, anomalies, drivers]
+          description: 这条出自哪个视图。和 variable 一起构成去重键。
+        variable:
+          type: string
+          description: 这条说的是哪个变量。和 dimension 一起构成去重键。
         source_ref:
           type: string
-          description: 这条发现的来源 ID（实验或经验），供前端跳回去核对。
+          description: 这条发现的来源 ID（素材、实验或经验），供前端跳回去核对。
+        pinned_by:
+          type: string
+          description: 记这一笔的人。origin=pinned 才有。
+        pinned_at:
+          type: string
+          format: date-time
+          description: 记这一笔的时刻。origin=pinned 才有。
         dropped:
           type: boolean
           description: 被人工删掉的条目留在数组里，只是标记为 true。
@@ -1831,7 +2145,11 @@ components:
         Lifecycle of an organisational conclusion. A new conclusion starts as
         pending; only confirmed is quotable downstream; retired is a logical
         delete that keeps the row readable.
-      enum: [pending, confirmed, needs_review, retired]
+
+        「待复审」曾经是第四个状态，现在不是了：它是 confirmed 上的一个标记
+        （见 Experience.needs_review）。做成状态会让一条被质疑的经验当场从所有
+        下游消失——「有人觉得该重新看一眼」和「这条结论不成立」是两回事。
+      enum: [pending, confirmed, retired]
     ReviseExperience:
       type: object
       additionalProperties: false
@@ -1875,7 +2193,7 @@ components:
       enum: [referenced, adopted, modified, rejected]
     Experience:
       type: object
-      required: [id, organization_id, project_id, lineage_id, revision, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, status_reason, status_changed_by, version, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, lineage_id, revision, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, verdict, verdict_label, note, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, needs_review, status_reason, status_changed_by, version, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -1891,8 +2209,17 @@ components:
         conclusion: { type: string }
         card_type:
           $ref: '#/components/schemas/InsightCardType'
+        # 以下四格是内嵌的 Judgement（见 schemas/Judgement），在 JSON 里平铺。
+        # 它们不落库，每次读出来由后端唯一收敛点从 confidence 重算。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string }
         recommended_action: { type: string }
         conditions:
           type: array
@@ -1908,6 +2235,11 @@ components:
           $ref: '#/components/schemas/ContentBasis'
         status:
           $ref: '#/components/schemas/ExperienceStatus'
+        needs_review:
+          type: boolean
+          description: >
+            「该看一眼了」。不影响这条经验能不能用，只是提醒有人重新看一遍依据。
+            被标记的经验仍然是 confirmed，仍然出现在下游默认引用集里。
         status_reason: { type: string }
         status_changed_by: { type: string }
         status_changed_at: { type: string, format: date-time }
@@ -1917,6 +2249,64 @@ components:
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ExperienceLookup:
+      type: object
+      additionalProperties: false
+      description: |
+        「查」的条件。每一格空着表示不限。
+
+        匹配规则：经验没声明某一格适用条件 = 该格不限，能对上任何取值；声明了就
+        必须对上。反过来做（没声明就不匹配）会把绝大多数经验筛没——大部分经验只
+        写了两三格适用条件，而查的人会把当前项目的几格全填上。
+
+        适用条件每一格在经验那边是一组值（一条经验可以同时适用于抖音和小红书），
+        所以命中的判断是「查的这个值在那一组里」，不是相等。
+      properties:
+        brand: { type: string, maxLength: 200 }
+        product: { type: string, maxLength: 200 }
+        channel: { type: string, maxLength: 200 }
+        ad_type:
+          type: string
+          maxLength: 200
+          description: 对应经验适用条件里的 creative_types。
+        objective: { type: string, maxLength: 200 }
+        audience: { type: string, maxLength: 200 }
+        feature:
+          type: string
+          maxLength: 200
+          description: >
+            按内容特征找：「有没有关于开场的经验」。子串匹配，结论、建议动作、
+            内容依据里的特征三处都搜——问的人想不起来那条经验当初写在了哪一栏。
+        include_observed:
+          type: boolean
+          description: >
+            打开之后连「👁 只是观察」的也给，默认关着。查的人多数时候要的是能照着
+            做的东西，混进观察会让他分不清哪条能信。给出来的观察项 default 为 false。
+        limit: { type: integer, minimum: 1, maximum: 100 }
+    ExperienceMatch:
+      type: object
+      required: [experience, matched, default, citation_text]
+      properties:
+        experience:
+          $ref: '#/components/schemas/Experience'
+        matched:
+          type: array
+          description: >
+            凭哪几格推给你（品牌 / 产品 / 渠道 / 广告类型 / 目标 / 受众 / 内容特征）。
+            人看到一条经验被推荐，第一个问题就是「凭什么」。只列真正卡住的格子——
+            经验没声明、或者查的人没填的格子不算。
+          items: { type: string }
+        default:
+          type: boolean
+          description: >
+            能不能直接照着做。两道闸都过（状态在用 + 判定 ✅ 能归因）才是 true；
+            只是观察的经验即使被查出来，也标 false。
+        citation_text:
+          type: string
+          description: >
+            把这条经验抄到别处时的完整说法：结论 + 适用条件 + 来源复盘，只是观察的
+            还会带上那句提醒。由服务端拼好发出来，调用方不要自己再拼一遍——拼法有
+            两处，界面上看到的适用范围和抄出去的那句话迟早对不上。
     ExperienceAudit:
       type: object
       required: [id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at]
@@ -2121,10 +2511,17 @@ components:
     FeatureSource:
       type: string
       description: >-
-        The two data layers 03 §14 keeps apart. An AI inference and a human
+        The data layers 03 §14 keeps apart. An AI inference and a human
         conclusion for the same key are separate rows; neither overwrites the
         other, so re-running extraction cannot erase a person's decision.
-      enum: [ai, human]
+
+
+        三类的可信度不是一回事：derived 客观可测（从文件本身算出来的时长、分辨率、
+        镜头数，同一个文件算两遍结果一样）、human 人工标注（人会错，但人为自己填的
+        东西负责）、ai 模型推断（模型看着素材猜的）。只有前两类能进归因结论；
+        ai 行一旦被人复核认可（review_state=confirmed），从此按 human 算——
+        有人为它背书了。
+      enum: [ai, human, derived]
     Confidence:
       type: string
       description: Required on the AI layer, forbidden on the human layer (03 §5 末).
@@ -2333,6 +2730,176 @@ components:
           description: >-
             States which keys were compared and why others were left out, so a
             mixed-type comparison never looks more complete than it is.
+    SimilarAssetRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        At least one of `asset_id` or `features` is required; supplying neither
+        would list the whole library, which is the asset list, not a similarity
+        search. When both are given the explicit `features` win — that is what
+        the person actually asked about.
+      properties:
+        asset_id: { type: string }
+        features:
+          type: object
+          maxProperties: 20
+          additionalProperties: { type: string }
+          description: >-
+            Variable key to value. More than 20 degenerates into "find that one
+            asset again".
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+    SimilarityReason:
+      type: object
+      required: [key, label, value, source]
+      description: >-
+        One statement of *where* two assets are similar. Without this a hit is
+        just a number, and the assets behind it cannot be grouped for attribution.
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value: { type: string }
+        source:
+          $ref: '#/components/schemas/FeatureSource'
+    SimilarAsset:
+      type: object
+      required: [asset_id, title, overlap, admissible_overlap, score, reasons]
+      properties:
+        asset_id: { type: string }
+        title: { type: string }
+        overlap:
+          type: integer
+          description: How many probe variables matched.
+        admissible_overlap:
+          type: integer
+          description: >-
+            How many of those may enter attribution (`derived`/`human` only).
+            Overlap answers "is it alike"; this answers "can I actually conclude
+            anything after pulling it in".
+        score:
+          type: number
+          format: double
+          description: Matched variables over probe size, for display only.
+        reasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimilarityReason'
+    SimilarAssetResult:
+      type: object
+      required: [probe, items, note]
+      properties:
+        probe:
+          type: array
+          description: >-
+            The variables the search actually ran on. Returned so a person can
+            see why an odd-looking result set came back.
+          items:
+            $ref: '#/components/schemas/SimilarityReason'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimilarAsset'
+        note:
+          type: string
+          description: >-
+            Empty when the results stand on their own. Non-empty when the caller
+            must be told something: nothing was found, the asset has no usable
+            variables yet, or every match rests solely on model inference and so
+            may be looked at but not used for attribution.
+    ImportExternalAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [title, purpose, window_end]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          description: >-
+            Required. Without it the list is a wall of untitled rows and nobody
+            can tell which piece of evidence is which.
+        source_note:
+          type: string
+          maxLength: 512
+          description: >-
+            Where this came from, in the importer's own words. Deliberately not a
+            dropdown: sources vary too widely, and forcing a list only makes
+            everyone pick "other", which turns the column into dead weight.
+        asset_type:
+          type: string
+        purpose:
+          type: string
+          enum: [benchmark, reference]
+          description: >-
+            Required. Not a category label — a record. When someone later asks
+            "why are we still holding this file", this column is the answer.
+            `benchmark` = a yardstick for "what does this kind of asset usually
+            achieve"; `reference` = a positive or negative example backing one of
+            this round's conclusions.
+        purpose_note:
+          type: string
+          maxLength: 512
+        window_end:
+          type: string
+          format: date
+          description: >-
+            End date of the review window this asset explains. Retention counts
+            from here.
+        features:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            Variables a person tagged on it. Stored as free text and never used
+            for attribution or similarity search — this is evidence, not a
+            comparable asset.
+        file_ext:
+          type: string
+          description: Used only to build the storage path.
+    ExternalAsset:
+      type: object
+      required: [id, title, purpose, original_purged, features, retention_until]
+      description: >-
+        One piece of off-platform evidence. **No version, no lineage, no status
+        machine** — those belong to assets. It is read-only.
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        title: { type: string }
+        source_note: { type: string }
+        asset_type: { type: string }
+        purpose:
+          type: string
+          enum: [benchmark, reference]
+        purpose_note: { type: string }
+        storage_key:
+          type: string
+          description: >-
+            Always under the `insights/external/` prefix, physically separate
+            from platform assets. Empty once the original has been purged.
+        original_purged:
+          type: boolean
+          description: >-
+            True once the retention deadline passed and the original file was
+            deleted. The row and its features survive — a review that cited this
+            asset must still say what was seen at the time.
+        features:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FeatureValue'
+        retention_until:
+          type: string
+          format: date-time
+          description: >-
+            Computed at import from `window_end` + 90 days and stored, not
+            recomputed on read: recomputing would move every historical
+            deadline the moment the constant changes, while people acted on the
+            deadline they were told at import time.
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     IndexAsset:
       type: object
       additionalProperties: false
@@ -2565,6 +3132,40 @@ components:
         low_sample 样本不足 / confounded 存在混杂。刻意不是数字——PRD 要的是
         一个非分析师也能读懂的定性提示。
       enum: [sufficient, directional, low_sample, confounded]
+    Verdict:
+      type: string
+      description: |
+        三档结论：explained 能归因 / observed 只是观察 / unclear 算不出来。
+        由 ConfidenceLevel 四档收敛而来（sufficient→explained，directional 与
+        confounded→observed，low_sample→unclear），收敛规则在全模块只有一处实现，
+        见 internal/systems/insights/verdict.go 的 ConfidenceLevel.Verdict()。
+        置信四档说的是「数据有多硬」，三档说的是「你现在能拿它干什么」——前者留给
+        分析口径，后者是屏幕上给人看的那个。
+      enum: [explained, observed, unclear]
+    UpgradePath:
+      type: string
+      description: |
+        这一档要往上走该做什么：observed 缺的是对照，去做个实验；unclear 缺的是
+        样本，去库里找相似素材把样本做厚。explained 已经到顶，不带这个字段。
+        每一条「说不清」都必须配一条出路，否则用户只能干瞪眼。
+      enum: [experiment, similar_assets]
+    Judgement:
+      type: object
+      description: |
+        一条判定的完整口径。除 PerformanceAnalysis.judgement 这个屏幕级汇总之外，
+        其余用到它的地方都是内嵌（Go embedded struct），四个字段在 JSON 里平铺在
+        宿主对象上，而不是套一层 judgement。
+      required: [confidence, verdict, verdict_label, note]
+      properties:
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话说明为什么是这个档位。' }
     MetricCaliber:
       type: object
       description: >-
@@ -2700,7 +3301,7 @@ components:
       description: >-
         素材矩阵的一行。asset_id 为空表示这一行是未匹配对象的汇总——它的花费照样
         计入总盘，但 attributable 为 false，不能承载创意级结论 (doc10 §5)。
-      required: [asset_title, objects, counts, rates, attributable, confidence]
+      required: [asset_title, objects, counts, rates, attributable, confidence, verdict, verdict_label]
       properties:
         asset_id: { type: string }
         asset_title: { type: string }
@@ -2714,6 +3315,13 @@ components:
         attributable: { type: boolean }
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话说明为什么是这个档位。' }
     PerformancePoint:
       type: object
       required: [date, counts, rates]
@@ -2754,7 +3362,7 @@ components:
         投后分析 · 指标总览的载荷，形状照 20 §4.1「一个主图表 + 素材矩阵 + 解释区」。
         四件必须上屏的东西各有归属：数据窗口 = window，样本量 = totals.impressions，
         口径 = caliber，置信范围 = confidence 与 ctr_interval。
-      required: [window, caliber, comparable, totals, rates, confidence, confidence_note, series, assets, unmatched_objects, unmatched_spend_cents, sources, platforms]
+      required: [window, caliber, comparable, totals, rates, confidence, verdict, verdict_label, note, series, assets, unmatched_objects, unmatched_spend_cents, sources, platforms]
       properties:
         window:
           $ref: '#/components/schemas/MetricWindow'
@@ -2776,7 +3384,13 @@ components:
           $ref: '#/components/schemas/RateInterval'
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
-        confidence_note: { type: string, description: '一句话解释为什么是这个置信档位。' }
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话解释为什么是这个档位。原来叫 confidence_note，改名是为了和其余七处内嵌 Judgement 的地方对齐。' }
         series:
           type: array
           items:
@@ -2818,23 +3432,36 @@ components:
     FeatureDiff:
       type: object
       description: 两个素材之间某个特征的取值差异。未记录的一侧写作「（未记录）」而不是空串。
-      required: [key, label, group, baseline, variant, human_only]
+      required: [key, label, group, baseline, variant, source, admissible]
       properties:
         key: { type: string }
         label: { type: string, description: 中文标签，直接可显示 }
         group: { type: string }
         baseline: { type: string }
         variant: { type: string }
-        human_only:
+        source:
+          type: string
+          enum: [ai, human, derived]
+          description: >-
+            变量来源。derived 从文件算出、human 人工标注、ai 模型推断。两侧来源
+            不同时取更弱的那一个——只要有一边是猜的，这条差异就是猜的。
+        admissible:
           type: boolean
-          description: 该特征只能人工判定（AM-006），AI 不产出，缺失属正常。
+          description: >-
+            这条差异能否进入归因结论。ai 来源恒为 false。为 false 的差异照样列出来
+            给人看，只是不参与「改了几个变量」的计数。
     VariantComparison:
       type: object
       description: |
         素材对比 (03 §7.3 / AM-009)。同类型素材两两配对，先识别变量再谈差异。
-        `changed_features` 长度 > 1 时 verdict 一定是 `confounded`——差异归不到其中
-        任何一个变量上，哪怕数字差得很多。
-      required: [baseline_asset_id, baseline_title, variant_asset_id, variant_title, changed_features, controlled_count, baseline_counts, variant_counts, baseline_rates, variant_rates, intervals_overlap, verdict, confidence, note]
+        `changed_features` 长度 > 1 时 variant_verdict 一定是 `confounded`——差异归不到
+        其中任何一个变量上，哪怕数字差得很多。
+
+        这里有两个 verdict，别混：`verdict` 是全模块通用的三档结论，`variant_verdict`
+        是素材对比专有的五档，它比三档多回答一件事——归不了因，是因为变量太多，还是
+        因为压根没有特征数据。后端字段原名 `verdict`，改名是因为它会遮蔽内嵌 Judgement
+        的三档，JSON 里 verdict 键会静默变成 attributable 这类值。
+      required: [baseline_asset_id, baseline_title, variant_asset_id, variant_title, changed_features, controlled_count, baseline_counts, variant_counts, baseline_rates, variant_rates, intervals_overlap, variant_verdict, confidence, verdict, verdict_label, note]
       properties:
         baseline_asset_id: { type: string }
         baseline_title: { type: string }
@@ -2866,15 +3493,21 @@ components:
           type: boolean
           description: 任一侧区间算不出来时按 true 处理——不知道差异是否显著，就不能说它显著。
         ctr_lift: { type: number, description: '相对提升；基线为 0 或缺失时本字段缺失，不退化为 0。' }
-        verdict:
+        variant_verdict:
           $ref: '#/components/schemas/VariantVerdict'
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: 一句话说明为什么是这个判定。 }
     AssetTrend:
       type: object
       description: 单个素材在窗口内的逐日走势。`direction` 为 unknown 表示天数不足或前半段无曝光，不能当成持平。
-      required: [asset_id, asset_title, points, active_days, direction, confidence, note]
+      required: [asset_id, asset_title, points, active_days, direction, confidence, verdict, verdict_label, note]
       properties:
         asset_id: { type: string }
         asset_title: { type: string }
@@ -2891,6 +3524,12 @@ components:
         ctr_change: { type: number, description: 后半段相对前半段的点击率变化；算不出时缺失。 }
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
     FatigueSeverity:
       type: string
@@ -2904,7 +3543,7 @@ components:
         把窗口按「有数据的天数」对半切开后的前后对比。`alternative_explanations` 一定
         非空——其中「受众变化」永远排除不了：当前没有接入受众构成数据，人群变了和素材
         看腻了在数字上长得一样。
-      required: [asset_id, asset_title, first_half, second_half, first_rates, last_rates, severity, confidence, note]
+      required: [asset_id, asset_title, first_half, second_half, first_rates, last_rates, severity, confidence, verdict, verdict_label, note]
       properties:
         asset_id: { type: string }
         asset_title: { type: string }
@@ -2929,6 +3568,12 @@ components:
           description: 没能排除的其他解释。这里列的是「排除不了」，不是「已排除」。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
     AnomalyKind:
       type: string
@@ -2939,7 +3584,7 @@ components:
       description: |
         用中位数与 MAD（而非均值与标准差）判定偏离，阈值 3.5，且要求窗口内至少 5 天
         有数据。用标准差的话，一次大促尖峰会把标准差本身抬高，之后什么都不再异常。
-      required: [date, scope, metric, kind, observed, median, deviation, note]
+      required: [date, scope, metric, kind, observed, median, deviation, confidence, verdict, verdict_label, note]
       properties:
         date: { type: string, format: date }
         scope:
@@ -2953,6 +3598,14 @@ components:
         observed: { type: number }
         median: { type: number }
         deviation: { type: number, description: 偏离中位数多少个 MAD。 }
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
     FeatureDriver:
       type: object
@@ -2960,7 +3613,7 @@ components:
         驱动因素：某个特征取值的素材组，与其余素材的对比。**这不是因果**——
         `covarying_features` 列出组内完全同向变化的其他特征，非空时 confidence 一律
         降为 confounded，因为无法区分是本特征还是它们在起作用。
-      required: [key, label, group, value, assets, rest_assets, counts, rest_counts, rates, rest_rates, intervals_overlap, confidence, note]
+      required: [key, label, group, value, assets, rest_assets, counts, rest_counts, rates, rest_rates, intervals_overlap, confidence, verdict, verdict_label, note]
       properties:
         asset_type:
           $ref: '#/components/schemas/AssetType'
@@ -2990,16 +3643,33 @@ components:
           description: 与本特征完全同向变化的其他特征，分不开谁在起作用。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
-        note: { type: string }
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note:
+          type: string
+          description: >-
+            整块来自它所依据的那条 VariantComparison——档位和理由必须同源，否则会
+            出现档位是这次算的、理由是上次的。
     PerformanceAnalysis:
       type: object
       description: 投后分析五个二级视图的共用载荷。
-      required: [window, caliber, comparable, comparisons, trends, fatigue, anomalies, drivers, assets_in_window, assets_with_features]
+      required: [window, caliber, comparable, judgement, comparisons, trends, fatigue, anomalies, drivers, assets_in_window, assets_with_features]
       properties:
         window:
           $ref: '#/components/schemas/MetricWindow'
         caliber:
           $ref: '#/components/schemas/MetricCaliber'
+        judgement:
+          allOf:
+            - $ref: '#/components/schemas/Judgement'
+          description: >-
+            整屏的档位，取五类结论里最弱的那一档——一屏里只要有一条算不出来，这一屏
+            就不能对外宣称「能归因」。五类全空时为 unclear。这是全模块唯一一处
+            judgement 以嵌套对象出现的地方，其余都是平铺内嵌。
         comparable:
           type: boolean
           description: |
@@ -3237,6 +3907,14 @@ components:
           type: array
           items: { type: string }
           description: 词表发布之前存下来的、不在词表内的存量取值。
+        source_counts:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          description: >-
+            这个字段生效的取值分别由谁写下的，键是 FeatureSource (derived / human / ai)，
+            值是素材条数。归因只认 derived 和 human——一个八成取值都是 ai 写的字段，
+            拿它分组比出来的差异说明不了问题，而只看 asset_count 看不出这一点。
+            没有任何素材填过这个字段时缺省。
     FeatureSystemHealth:
       type: object
       required: [asset_type, label, source, asset_count, field_count, used_field_count, open_enum_count, fields]
@@ -3353,6 +4031,68 @@ components:
           description: >-
             词表待办只覆盖**已经有人用过**的开放枚举字段。把六套 schema 里所有没发布词表
             的字段都列进来，真正在散的那几个会被埋掉。
+    Thresholds:
+      type: object
+      description: >-
+        有人调过的那些格子。**缺省表示「没人调过这一格」，跟着代码默认值走**，不是 0。
+      properties:
+        sufficient_impressions: { type: integer, minimum: 1, description: 达到这个曝光量才把置信标成「充分」。 }
+        directional_impressions: { type: integer, minimum: 1, description: 低于这个曝光量连方向都不给，直接判「样本不足」。 }
+        min_trend_days: { type: integer, minimum: 3, description: 有数据的天数少于这个，趋势判「看不出走势」、疲劳不给结论。 }
+        min_anomaly_days: { type: integer, minimum: 4, description: 少于这么多天就没有「常态」可言，一条异常都不报。 }
+        min_driver_assets: { type: integer, minimum: 1, description: 某个取值下不足这么多条素材，就不参与驱动因素比较。 }
+        max_comparison_assets: { type: integer, minimum: 1, description: 素材对比一次最多并排几条，超出的按花费截断。 }
+        quality_window_days: { type: integer, minimum: 1, description: 投前洞察判断「引用的经验背后有没有数据问题」时回看多少天。 }
+    ResolvedThresholds:
+      type: object
+      required:
+        - version
+        - sufficient_impressions
+        - directional_impressions
+        - min_trend_days
+        - min_anomaly_days
+        - min_driver_assets
+        - max_comparison_assets
+        - quality_window_days
+      description: 判定真正拿去用的那份：每格都有值，且带着版本号。
+      properties:
+        version:
+          type: integer
+          format: int64
+          description: 0 表示没人调过，各格是代码里的出厂设定。
+        sufficient_impressions: { type: integer }
+        directional_impressions: { type: integer }
+        min_trend_days: { type: integer }
+        min_anomaly_days: { type: integer }
+        min_driver_assets: { type: integer }
+        max_comparison_assets: { type: integer }
+        quality_window_days: { type: integer }
+    SaveThresholdsRequest:
+      type: object
+      required: [values, reason]
+      properties:
+        values:
+          $ref: '#/components/schemas/Thresholds'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: >-
+            为什么改。跟着这一版一起存下来——三个月后有人问「为什么门槛是这个数」，
+            这一栏就是答案。
+    ThresholdSet:
+      type: object
+      required: [id, organization_id, version, values, reason, changed_by, changed_at]
+      description: 落库的一版。已经存下来的行永远不改，改动只会追加新的一版。
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        version: { type: integer, format: int64 }
+        values:
+          $ref: '#/components/schemas/Thresholds'
+        reason: { type: string }
+        changed_by: { type: string }
+        changed_at: { type: string, format: date-time }
     SettingItem:
       type: object
       required: [key, label, value, effect, recommended, deviates, source, basis]
@@ -3385,12 +4125,32 @@ components:
           description: >-
             文档依据。没有依据的阈值会显式写「无文档指定值」——那本身就是个待办，
             留空则看不出是没依据还是忘了写。
+        editable_key:
+          type: string
+          description: >-
+            非空表示这一条可以改，值是它在 `PUT /thresholds` 请求体 `values` 里的键名。
+            缺省表示只读。可写与否标在**条**上而不是标在组上：样本门槛那一组里五个
+            判定阈值可以改、「异常判定倍数」不能改（它是统计口径，不是业务标准），
+            观察窗口那一组里对比条数和体检窗口可以改、导入行数上限不能改（那是防呆，
+            做成可配置等于做成可关闭）。
     SettingGroup:
       type: object
-      required: [key, label, state, summary, missing, items]
+      required: [key, label, state, view, editable, summary, missing, items]
       properties:
         key: { type: string }
         label: { type: string }
+        view:
+          type: string
+          enum: ['', thresholds, health, dictionary, permission]
+          description: >-
+            这一组落在「设置」入口四组里的哪一组。组和二级视图不再一一对应：
+            判定阈值那一屏由样本门槛 + 观察窗口两组拼出来（窗口天数本来就是判定标准的
+            一部分），名词表并进变量字典。空字符串表示不在设置页上单开一段——
+            只有还没做的组（`not_built`）才允许为空，做了却不展示，就是一组在生效、
+            但没人看得见的设置。
+        editable:
+          type: boolean
+          description: 这一组里有格子可以改。由 items 里的 editable_key 汇总而来。
         state:
           type: string
           enum: [in_effect, not_built]
@@ -3414,11 +4174,12 @@ components:
         editable:
           type: boolean
           description: >-
-            恒为 false。前端据此决定不渲染任何输入框——渲染一个改不动的输入框，
-            比直接说「这里改不了」更让人恼火。
+            这一页上有东西可以改。**逐格的可写与否看 `SettingItem.editable_key`**——
+            前端只在有 editable_key 的格子上渲染输入框，其余照旧只读。
+            渲染一个改不动的输入框，比直接说「这里改不了」更让人恼火。
         editable_note:
           type: string
-          description: 为什么只读、想改要走什么路径。
+          description: 哪些能改、改了会怎样、哪些不能改以及为什么。
         project_scoped:
           type: boolean
           description: 恒为 false。这些值对整个部署生效，路径上的 project_id 只用于鉴权。
@@ -3426,7 +4187,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SettingGroup'
-          description: 顺序与导航上的五个二级视图一致（样本门槛 · 观察窗口 · 通知 · 确认权限 · 报告模板）。
+          description: >-
+            每一组带 `view`，说明它落在设置页四组（判定阈值 · 数据体检 · 变量字典 ·
+            确认权限）的哪一组。数据体检那一屏的内容来自 data-quality 端点，
+            不出现在这里。
     CapabilityOperations:
       type: object
       required: [window, generated_at, feature_systems, metrics, caliber_conflicts, skills, evaluations, dashboard]
@@ -3591,7 +4355,7 @@ components:
         组间比较结果。**实验中心和投后分析「驱动因素」共用同一套算法**，两者的
         差别只在 note 的措辞：事先登记的分组能说到「归因到这个变量」，事后凑出
         的分组只能说到「相关」。共用一套是为了让这两页永远不会给出互相矛盾的判定。
-      required: [counts, rest_counts, rates, rest_rates, intervals_overlap, covarying_features, confidence, note]
+      required: [counts, rest_counts, rates, rest_rates, intervals_overlap, covarying_features, confidence, verdict, verdict_label, note]
       properties:
         counts:
           $ref: '#/components/schemas/MetricCounts'
@@ -3617,6 +4381,12 @@ components:
             头上。事先登记的实验这里恒为空——混杂由入组那道关把守，不在事后翻账。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '给人读的一句话，说明这条判定为什么是这个强度。' }
     ExperimentVariant:
       type: object

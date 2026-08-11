@@ -8,7 +8,6 @@ import {
   ClipboardCheck,
   Download,
   ExternalLink,
-  FileText,
   Film,
   Image,
   LoaderCircle,
@@ -1887,38 +1886,6 @@ function qualityVerdictText(verdict: ApiQualityReport['verdict']): string {
 
 function qualityStatusClass(verdict: ApiQualityReport['verdict']): 'success' | 'warning' | 'danger' {
   return verdict === 'critical' ? 'danger' : verdict === 'major' ? 'warning' : 'success'
-}
-
-export function ReportCenterPage({ state }: { state: DataState }) {
-  const { currentProject, updateArtifact } = useProject()
-  const [section, setSection] = useState('执行摘要')
-  const [version, setVersion] = useState(4)
-  const [notice, setNotice] = useState('')
-  const sections = ['执行摘要', '发生了什么', '为什么发生', '创意样本', '下一步行动']
-  const evidence = currentProject.operations.filter(record => record.kind === 'evidence')
-  const metric = currentProject.operations.find(record => record.kind === 'metric')
-  const metricField = (key: string, fallback: string) => String(metric?.fields[key] ?? fallback)
-  const save = async () => {
-    const nextVersion = `v1.${version + 1}`
-    try {
-      await updateArtifact('insight', { version: nextVersion, status: '已确认', sourceVersion: `创意 ${currentProject.artifacts.creative.version}`, summary: '证据前置版本点击率较基线提升 18%，95% 置信范围 +12% 至 +23%' })
-      setVersion(value => value + 1)
-      setNotice(`报告 ${nextVersion} 已保存`)
-    } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : '保存报告失败，请重试。')
-    }
-  }
-  return <StateBoundary
-    state={state}
-    contextLabel="素材洞察 / 报告中心"
-    emptyTitle="当前 Project 暂无可保存报告"
-    emptyDetail="生成投后复盘或沉淀经验后，报告中心会展示版本、引用来源和导出动作。"
-    errorDetail="报告版本或引用证据读取失败。请确认服务端可用后重新加载。"
-  ><div className="report-workspace">
-    <aside className="report-outline"><div className="surface-toolbar"><h3>报告结构</h3><button aria-label="新增报告章节"><FileText size={15}/></button></div>{sections.map((item, index) => <button className={section === item ? 'active' : ''} key={item} onClick={() => setSection(item)}><span>{String(index + 1).padStart(2, '0')}</span>{item}</button>)}<div className="version-block"><span>报告版本</span><b>v1.{version}</b><small>数据截止 2026-07-22 16:00</small></div></aside>
-    <article className="report-document"><div className="document-meta"><span>{currentProject.name}</span><span>效果分析报告 v1.{version}</span><button onClick={() => setNotice('PDF 导出任务已创建')}><Download size={14}/>导出 PDF</button></div><h1>{section === '执行摘要' ? metricField('summary', '暂无服务端指标摘要。') : section}</h1><p className="report-lead">{metric?.title ?? '暂无服务端趋势记录。'}</p><div className="report-metric-line"><div><small>当前指标</small><b>{metricField('latest', '—')}</b><span>{metricField('comparison', '暂无对比数据')}</span></div><div><small>样本</small><b>{metricField('sample', '—')}</b><span>服务端已存档</span></div><div><small>置信范围</small><b>{metricField('confidence', '—')}</b><span>{metricField('unit', '—')}</span></div></div><h2>结论与边界</h2><p>{metricField('scope', '暂无服务端适用范围说明。')}</p><div className="report-callout"><b>建议行动</b><p>{metricField('recommendation', '暂无服务端建议动作。')}</p></div></article>
-    <aside className="report-sources"><div className="surface-toolbar"><h3>引用与版本</h3><button aria-label="报告更多操作"><ChevronDown size={15}/></button></div>{evidence.map(item => <button key={item.id}><span>{item.id}</span><div><b>{item.title}</b><small>{String(item.fields.source ?? '—')} · {new Date(item.occurredAt).toLocaleDateString('zh-CN')}</small></div><ExternalLink size={13}/></button>)}{!evidence.length ? <div className="panel-empty">暂无服务端证据记录。</div> : null}<button className="primary-button full" onClick={() => void save()}><Save size={15}/>保存报告版本</button>{notice ? <div className="inline-notice" role="status">{notice}</div> : null}</aside>
-  </div></StateBoundary>
 }
 
 type DeliveryGateCheck = {

@@ -33,21 +33,24 @@ const (
 	ReportConfirmed ReportStatus = "confirmed"
 )
 
-// ExperienceStatus follows the lifecycle in the asset management PRD §11.1:
-// 待确认 -> 已确认 -> 待复审 -> 已失效. Retirement is logical, so a referenced
-// conclusion stays auditable after it stops being reusable.
+// ExperienceStatus 是经验的生命周期：待定 -> 在用 -> 停用。停用是逻辑删除，
+// 引用过它的地方仍然查得到，所以一条不再能用的结论仍然是可审计的。
+//
+// 三态。「待复审」不在这里——它是「在用」上的一个标记（NeedsReview），
+// 不是一个独立状态：被标记的经验仍然在用、仍然能被引用，只是该重新看一眼。
+// 做成状态的话，每个读经验的地方都得判断「confirmed 或者 needs_review」，
+// 漏一处那条经验就在某个页面上凭空消失了。
 type ExperienceStatus string
 
 const (
-	ExperiencePending     ExperienceStatus = "pending"
-	ExperienceConfirmed   ExperienceStatus = "confirmed"
-	ExperienceNeedsReview ExperienceStatus = "needs_review"
-	ExperienceRetired     ExperienceStatus = "retired"
+	ExperiencePending   ExperienceStatus = "pending"
+	ExperienceConfirmed ExperienceStatus = "confirmed"
+	ExperienceRetired   ExperienceStatus = "retired"
 )
 
 func (s ExperienceStatus) valid() bool {
 	switch s {
-	case ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview, ExperienceRetired:
+	case ExperiencePending, ExperienceConfirmed, ExperienceRetired:
 		return true
 	}
 	return false
@@ -115,6 +118,38 @@ func (r CreateReportRequest) Validate() error {
 		return ErrInvalidRequest
 	}
 	if !r.Window.Start.IsZero() && !r.Window.End.IsZero() && r.Window.End.Before(r.Window.Start) {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+// PinFindingRequest 是「记一笔」的入参。
+//
+// 注意这里**没有** confidence 也没有 verdict：判定是后端回查出来的。
+// Text 也是可选的——人可以补一句自己的话，但不补的话用系统给的措辞，
+// 而不是让前端把屏幕上的字传上来。
+type PinFindingRequest struct {
+	Window    MetricWindow `json:"window"`
+	Dimension string       `json:"dimension"`
+	SourceRef string       `json:"source_ref,omitempty"`
+	Variable  string       `json:"variable,omitempty"`
+	// Text 是人自己补的一句话，最多 500 字。留空则用系统给这一条的措辞。
+	Text string `json:"text,omitempty"`
+}
+
+func (r PinFindingRequest) Validate() error {
+	if r.Window.Start.IsZero() || r.Window.End.IsZero() || r.Window.End.Before(r.Window.Start) {
+		return ErrInvalidRequest
+	}
+	if _, ok := analysisDimensions[r.Dimension]; !ok {
+		return ErrInvalidRequest
+	}
+	// 两个主语都空就回查不到任何一条，只会记下一条没有出处的文字。
+	if strings.TrimSpace(r.SourceRef) == "" && strings.TrimSpace(r.Variable) == "" &&
+		r.Dimension != "overview" {
+		return ErrInvalidRequest
+	}
+	if len(r.Text) > 500 {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -216,26 +251,68 @@ type Experience struct {
 	Conditions             []string                `json:"conditions"`
 	Counterexamples        []string                `json:"counterexamples"`
 	CardType               InsightCardType         `json:"card_type"`
-	Confidence             ConfidenceLevel         `json:"confidence"`
-	RecommendedAction      string                  `json:"recommended_action"`
-	Applicability          Applicability           `json:"applicability"`
-	DataBasis              DataBasis               `json:"data_basis"`
-	ContentBasis           ContentBasis            `json:"content_basis"`
-	Status                 ExperienceStatus        `json:"status"`
-	StatusReason           string                  `json:"status_reason"`
-	StatusChangedBy        string                  `json:"status_changed_by"`
-	StatusChangedAt        *time.Time              `json:"status_changed_at,omitempty"`
-	ConfirmedBy            string                  `json:"confirmed_by,omitempty"`
-	ConfirmedAt            *time.Time              `json:"confirmed_at,omitempty"`
-	Version                int64                   `json:"version"`
-	CreatedBy              string                  `json:"created_by"`
-	CreatedAt              time.Time               `json:"created_at"`
-	UpdatedAt              time.Time               `json:"updated_at"`
+	// Judgement 内嵌而不是只留一个 Confidence：一条经验能不能被下游默认引用，
+	// 取决于三档里的哪一档，而三档只能由 judge() 从 Confidence 收敛出来。
+	// 摆一个裸 Confidence 让每个读的地方自己换算，迟早出现两页给出不同档位。
+	Judgement
+	RecommendedAction string           `json:"recommended_action"`
+	Applicability     Applicability    `json:"applicability"`
+	DataBasis         DataBasis        `json:"data_basis"`
+	ContentBasis      ContentBasis     `json:"content_basis"`
+	Status            ExperienceStatus `json:"status"`
+	// NeedsReview 是「该看一眼了」。它不影响这条经验能不能用，只影响界面怎么显示。
+	NeedsReview     bool       `json:"needs_review"`
+	StatusReason    string     `json:"status_reason"`
+	StatusChangedBy string     `json:"status_changed_by"`
+	StatusChangedAt *time.Time `json:"status_changed_at,omitempty"`
+	ConfirmedBy     string     `json:"confirmed_by,omitempty"`
+	ConfirmedAt     *time.Time `json:"confirmed_at,omitempty"`
+	Version         int64      `json:"version"`
+	CreatedBy       string     `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// Reusable reports whether downstream Skills may quote this experience by
-// default (MVP acceptance §15.10): confirmed and not retired.
-func (e Experience) Reusable() bool { return e.Status == ExperienceConfirmed }
+// Reusable 决定下游能不能默认引用这条经验。**两道闸，缺一不可。**
+//
+// 状态在用只说明有人认可它值得记下来；判定能归因才说明这个因果排除过混杂。
+// 一条「👁 只是观察」的经验也可能被确认——确认的是「这个观察值得记」，
+// 不是「照着做会有同样的结果」。放它进默认引用集，下一轮就会有人照着一个
+// 没排除混杂的观察去做素材，而他不会知道自己在赌。
+//
+// 要引用 👁 的经验不是不行，但必须由人显式点名，不能是默认发生的。
+func (e Experience) Reusable() bool {
+	return e.Quotable() && e.Verdict == VerdictExplained
+}
+
+// Quotable 是第一道闸单独拿出来：这条经验能不能被人点名引用。
+//
+// 待定的还没人认可，停用的已经作废，这两种谁都不该往外抄。但一条 👁 只是观察的
+// 在用经验是可以被点名引用的——人看了它的依据，自己决定用，那是他的判断。
+// Quotable 管的是「允不允许人引用」，Reusable 管的是「系统要不要默认替他引用」。
+func (e Experience) Quotable() bool {
+	return e.Status == ExperienceConfirmed
+}
+
+func (e Experience) StatusLabel() string {
+	switch e.Status {
+	case ExperiencePending:
+		return "待定"
+	case ExperienceConfirmed:
+		return "在用"
+	case ExperienceRetired:
+		return "停用"
+	}
+	return string(e.Status)
+}
+
+// ReviewHint 只在界面上用。空串表示不用提示。
+func (e Experience) ReviewHint() string {
+	if e.NeedsReview {
+		return "该看一眼了"
+	}
+	return ""
+}
 
 // ExperienceAudit is the append-only trail behind PRD §11.2. Nothing is
 // physically deleted, so every status change stays attributable.
@@ -367,6 +444,22 @@ type TransitionExperienceInput struct {
 	AuditID         string
 }
 
+// FlagExperienceReviewInput 只动 needs_review 那一格，状态不变。
+//
+// 审计仍然照写一条，from_status 和 to_status 都是 confirmed——状态确实没变，
+// 审计如实记。要在审计里看出发生了什么，看 reason。
+type FlagExperienceReviewInput struct {
+	OrganizationID  contract.OrganizationID
+	ProjectID       contract.ProjectID
+	ID              string
+	ExpectedVersion int64
+	NeedsReview     bool
+	Reason          string
+	ActorID         string
+	Now             time.Time
+	AuditID         string
+}
+
 // ConfirmExperienceInput confirms a revision and, when it supersedes an older
 // one, retires the predecessor atomically so two revisions are never reusable
 // at the same time.
@@ -397,14 +490,27 @@ type Repository interface {
 	CreateReport(context.Context, InsightReport) (InsightReport, error)
 	ListReports(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]InsightReport, error)
 	GetReport(context.Context, contract.OrganizationID, contract.ProjectID, string) (InsightReport, error)
+	// FindDraftByWindow 按 (项目 + 窗口) 找那份还没提交的复盘草稿。
+	// 「记一笔」不问人要往哪记——问了等于要求人在看数据之前先声明意图。
+	FindDraftByWindow(context.Context, contract.OrganizationID, contract.ProjectID, string, string) (InsightReport, error)
 	ConfirmReport(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (InsightReport, error)
+	// SubmitReport 在一条 UPDATE 里补执行 ID、写入定格后的 digest、置为已确认。
+	// 拆成三次调用会留下「已确认但没有系统发现」的报告，而它看起来和正常的一模一样。
+	SubmitReport(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID,
+		reportID string, expectedVersion int64, executionID string, digest []ReportFinding,
+		actorID string, at time.Time) (InsightReport, error)
 	UpdateReportDigest(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, []ReportFinding, time.Time) (InsightReport, error)
+	// PurgeEmptyDrafts 删掉 before 之前建的、一条发现都没有的草稿。
+	// 它们是「记一笔」建了但人什么都没记的残留，不删会一直占着
+	// (项目 + 窗口) 的唯一键。
+	PurgeEmptyDrafts(ctx context.Context, before time.Time) (int64, error)
 	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
 	ReviseExperience(context.Context, ReviseExperienceInput) (Experience, error)
 	ListExperiences(context.Context, contract.OrganizationID, contract.ProjectID, ExperienceStatus, int) ([]Experience, error)
 	GetExperience(context.Context, contract.OrganizationID, contract.ProjectID, string) (Experience, error)
 	ListExperienceLineage(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]Experience, error)
 	TransitionExperience(context.Context, TransitionExperienceInput) (Experience, error)
+	FlagExperienceForReview(context.Context, FlagExperienceReviewInput) (Experience, error)
 	ConfirmExperience(context.Context, ConfirmExperienceInput) (Experience, error)
 	CreateExperienceReference(context.Context, ExperienceReference) (ExperienceReference, error)
 	ListExperienceReferences(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]ExperienceReference, error)
@@ -416,6 +522,10 @@ type Service struct {
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.
 	Assets AssetRepository
+	// ExternalAssets 存的是平台外的素材证据，和 Assets 分成两个接口。
+	// 并成一个的话，下一个实现 AssetRepository 的人会以为外部素材是素材的一种，
+	// 而共享素材库里的东西是可以被拿去投放的——外部素材没有那份授权。
+	ExternalAssets ExternalAssetRepository
 	// Connectors backs 数据接入 and the Canonical daily metrics 投后分析 reads.
 	Connectors ConnectorRepository
 	// Runs 记录每次分析任务的输入、方法、模型版本和结果（03 §344 验收 12）。
@@ -433,8 +543,12 @@ type Service struct {
 	TextModelAlias string
 	// Skills 为 nil 时用内嵌的默认注册表；测试可以换成自己的。
 	Skills *skills.Registry
-	NewID  ids.Generator
-	Now    func() time.Time
+	// Thresholds 存判定阈值的历史版本。为 nil 时判定跑代码里的出厂设定——
+	// 阈值仓储没配好不该让整个分析链路瘫掉，跑默认值至少还能出结论，
+	// 而版本号 0 会在页面上如实显示成「出厂设定」。
+	Thresholds ThresholdRepository
+	NewID      ids.Generator
+	Now        func() time.Time
 }
 
 func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreateReportRequest) (InsightReport, error) {
@@ -497,6 +611,151 @@ func (s Service) CreateReport(ctx context.Context, actor contract.ActorContext, 
 	})
 }
 
+// PinFinding 把分析页上的一条结论钉进本轮复盘草稿。
+//
+// 草稿是自动建的：不问人「要往哪份复盘记」。问了等于要求人在看数据之前先声明意图
+// ——而记一笔的价值恰恰在于人是看到了才决定要留的。
+func (s Service) PinFinding(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, request PinFindingRequest) (InsightReport, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return InsightReport{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return InsightReport{}, err
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return InsightReport{}, err
+	}
+
+	analysis, err := s.GetPerformanceAnalysis(ctx, actor, projectID, request.Window)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	judgement, text, ok := findJudgement(analysis, request.Dimension, request.SourceRef, request.Variable)
+	if !ok {
+		// 屏幕上没有这一条，说明前端传的主语和当前窗口对不上——多半是窗口换了
+		// 但按钮没重渲染。宁可报错，也不记一条没有判定的发现。
+		return InsightReport{}, ErrInvalidRequest
+	}
+	if custom := strings.TrimSpace(request.Text); custom != "" {
+		text = custom
+	}
+
+	now := s.now()
+	finding := ReportFinding{
+		Kind:      analysisDimensions[request.Dimension],
+		Text:      text,
+		Judgement: judgement,
+		Origin:    OriginPinned,
+		Dimension: request.Dimension,
+		Variable:  request.Variable,
+		SourceRef: request.SourceRef,
+		PinnedBy:  actor.Principal.ID,
+		PinnedAt:  &now,
+	}
+
+	windowStart := request.Window.Start.Format("2006-01-02")
+	windowEnd := request.Window.End.Format("2006-01-02")
+
+	// 这一段是读-改-写，而写要带读到的版本号。记一笔的请求里没有版本号可带——
+	// 人按按钮的时候屏幕上根本没有「草稿」这个东西，草稿是这一下按出来的。所以
+	// 版本对不上不是「两个人对着同一份报告各改各的」，是同一个人手快连按了两下，
+	// 后一下读到了前一下写进去之前的版本。这种情况重读一次再写就对了；直接报错
+	// 的话，人看到的是「记一笔失败」，而他什么也没做错。
+	return retryContendedWrite(func() (InsightReport, error) {
+		draft, err := s.Repository.FindDraftByWindow(ctx, actor.OrganizationID, projectID, windowStart, windowEnd)
+		if errors.Is(err, ErrNotFound) {
+			return s.createDraftWithFinding(ctx, actor, projectID, windowStart, windowEnd, finding, now)
+		}
+		if err != nil {
+			return InsightReport{}, err
+		}
+		return s.Repository.UpdateReportDigest(ctx, actor.OrganizationID, projectID, draft.ID,
+			draft.Version, mergePinnedFinding(draft.Digest, finding), now)
+	})
+}
+
+// pinAttempts 是记一笔最多读-改-写几次。三次足够盖住一个人连按几下按钮；
+// 再多就不是手快了，是写路径本身坏了，那时候报错比挂住更好查。
+const pinAttempts = 3
+
+// errDraftRaced 说的是「这个窗口的草稿刚被另一次记一笔建走了」。它不往外抛，
+// 只用来告诉重试再读一次——外面看到它没有意义，人按的是记一笔，不是建报告。
+var errDraftRaced = errors.New("insights: 这个窗口的草稿被另一次记一笔抢先建了")
+
+func retryContendedWrite(attempt func() (InsightReport, error)) (InsightReport, error) {
+	var err error
+	for i := 0; i < pinAttempts; i++ {
+		var value InsightReport
+		value, err = attempt()
+		if err == nil {
+			return value, nil
+		}
+		if !errors.Is(err, ErrVersionConflict) && !errors.Is(err, errDraftRaced) {
+			return value, err
+		}
+	}
+	// 试满了还在抢。这时候只能让人再按一次，但得报一个他看得懂、前端也认识的错——
+	// errDraftRaced 是内部约定，漏出去会变成一个 500。
+	return InsightReport{}, ErrVersionConflict
+}
+
+// mergePinnedFinding 把这一笔并进草稿已有的发现里。
+//
+// 同一条记两次是常见的误操作（换了个视图又看到同一个结论）。覆盖而不是追加：
+// 人第二次记的时候补的那句话，应该是他现在想说的那句。覆盖也是原地覆盖，
+// 复盘页上那几行的先后是人自己记出来的，不该因为补了一句话就跳到最后一行。
+//
+// 按 pinKey 比而不是 dedupeKey：趋势和疲劳没有变量，拿 dedupeKey 比的话
+// A 版和 B 版的趋势会被当成同一条，记完 A 版再记 B 版，A 版无声消失，
+// 而两个按钮上都写着「已记一笔」。
+func mergePinnedFinding(digest []ReportFinding, finding ReportFinding) []ReportFinding {
+	merged := make([]ReportFinding, 0, len(digest)+1)
+	replaced := false
+	for _, existing := range digest {
+		if existing.Origin == OriginPinned && existing.pinKey() != "" &&
+			existing.pinKey() == finding.pinKey() {
+			merged, replaced = append(merged, finding), true
+			continue
+		}
+		merged = append(merged, existing)
+	}
+	if !replaced {
+		merged = append(merged, finding)
+	}
+	return merged
+}
+
+// createDraftWithFinding 建一份只有这一条发现的空草稿。
+//
+// 它不走 CreateReport：CreateReport 必须挂一次投放执行，而记一笔发生在人还在看
+// 数据的时候，那时候还没到「这份复盘算哪次投放」这个问题。执行 ID 在复盘页提交
+// 之前补上。
+func (s Service) createDraftWithFinding(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, windowStart, windowEnd string,
+	finding ReportFinding, now time.Time) (InsightReport, error) {
+	id, err := s.idGenerator()("insightreport")
+	if err != nil {
+		return InsightReport{}, err
+	}
+	value, err := s.Repository.CreateReport(ctx, InsightReport{
+		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		Status: ReportDraft, Digest: []ReportFinding{finding},
+		WindowStart: windowStart, WindowEnd: windowEnd,
+		Findings:  []string{},
+		Version:   1,
+		CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	})
+	if errors.Is(err, ErrInvalidState) {
+		// (项目 + 窗口) 上有唯一键，撞上它说明这个窗口的草稿刚被建走了。
+		// 记一笔这条路上只有一种可能：同一个人连按了两下，前一下先落地。
+		// 退回去重读一次，把这一笔追加进那份草稿，而不是把「已经定格过一份报告」
+		// 甩到人脸上——他按的是记一笔，压根没打算建报告。
+		return InsightReport{}, errDraftRaced
+	}
+	return value, err
+}
+
 // concludedExperimentsInWindow 取观察窗口和报告窗口有重叠的、已结论的实验。
 //
 // 用重叠而不是包含：实验的观察窗口是建实验时定的，报告的窗口是人在投后分析页上当时
@@ -555,7 +814,29 @@ func (s Service) ListReports(ctx context.Context, actor contract.ActorContext, p
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
-	return s.Repository.ListReports(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	values, err := s.Repository.ListReports(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	// 空草稿不列出来。它是「记一笔」自动建了但人什么都没记的残留，
+	// 列出来只会让真正有内容的那几份混在一堆空壳里。
+	visible := make([]InsightReport, 0, len(values))
+	for _, value := range values {
+		if hasContent(value) {
+			visible = append(visible, value)
+		}
+	}
+	return visible, nil
+}
+
+// emptyDraftRetention 是空草稿保留多久。30 天：一个投放周期通常一个月内结束，
+// 超过一个月还没记过任何东西的草稿，人已经不会回来了。
+const emptyDraftRetention = 30 * 24 * time.Hour
+
+// PurgeEmptyDrafts 由维护命令调用，不走 actor 鉴权——它删的是没有内容的残留，
+// 不属于任何人的数据。
+func (s Service) PurgeEmptyDrafts(ctx context.Context) (int64, error) {
+	return s.Repository.PurgeEmptyDrafts(ctx, s.now().Add(-emptyDraftRetention))
 }
 
 func (s Service) ConfirmReport(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reportID string, expectedVersion int64) (InsightReport, error) {
@@ -570,6 +851,66 @@ func (s Service) ConfirmReport(ctx context.Context, actor contract.ActorContext,
 		return InsightReport{}, ErrInvalidState
 	}
 	return s.Repository.ConfirmReport(ctx, actor.OrganizationID, projectID, reportID, expectedVersion, actor.Principal.ID, s.now())
+}
+
+// SubmitReview 提交复盘：补执行、定格系统发现、确认，一次写完。
+func (s Service) SubmitReview(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, reportID string, request SubmitReviewRequest) (InsightReport, error) {
+	if err := s.ready(actor, projectID, ScopeConfirm); err != nil {
+		return InsightReport{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return InsightReport{}, err
+	}
+	report, err := s.Repository.GetReport(ctx, actor.OrganizationID, projectID, reportID)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if err := checkSubmittable(report, request.ExpectedVersion); err != nil {
+		return InsightReport{}, err
+	}
+
+	window, ok := reportMetricWindow(report)
+	if !ok {
+		// 窗口解析不出来就没法算系统发现。宁可只带人记的那几笔提交，
+		// 也不能拿一个猜出来的窗口去算——算出来的数字看起来一样可信。
+		return s.Repository.SubmitReport(ctx, actor.OrganizationID, projectID, reportID,
+			request.ExpectedVersion, request.ExecutionID, report.Digest, actor.Principal.ID, s.now())
+	}
+
+	analysis, err := s.GetPerformanceAnalysis(ctx, actor, projectID, window)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	experiments, err := s.concludedExperimentsInWindow(ctx, actor, projectID, window)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	experiences, err := s.ListExperiences(ctx, actor, projectID, ExperienceConfirmed, 50)
+	if err != nil {
+		return InsightReport{}, err
+	}
+
+	// 人记的那几笔在前，系统补的去重后跟在后面。
+	pinned := make([]ReportFinding, 0, len(report.Digest))
+	for _, finding := range report.Digest {
+		if finding.Origin == OriginPinned {
+			pinned = append(pinned, finding)
+		}
+	}
+	digest := mergeFindings(pinned, buildReportDigest(analysis, experiments, experiences))
+
+	return s.Repository.SubmitReport(ctx, actor.OrganizationID, projectID, reportID,
+		request.ExpectedVersion, request.ExecutionID, digest, actor.Principal.ID, s.now())
+}
+
+// reportMetricWindow 把报告定格的日期串解析回窗口。
+func reportMetricWindow(report InsightReport) (MetricWindow, bool) {
+	start, end := reportWindow(report)
+	if start == nil || end == nil {
+		return MetricWindow{}, false
+	}
+	return MetricWindow{Start: *start, End: *end}, true
 }
 
 func (s Service) CreateExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reportID string, expectedReportVersion int64, request CreateExperienceRequest) (Experience, error) {
@@ -615,7 +956,7 @@ func (s Service) CreateExperience(ctx context.Context, actor contract.ActorConte
 		SourceMetricSnapshotID: report.MetricSnapshotID,
 		Conclusion:             strings.TrimSpace(request.Conclusion), Conditions: append([]string{}, request.Conditions...),
 		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
-		CardType: card.CardType, Confidence: card.Confidence,
+		CardType: card.CardType, Judgement: judge(card.Confidence, ""),
 		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
 		Applicability:     card.Applicability, DataBasis: basis, ContentBasis: card.ContentBasis,
 		StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
@@ -643,8 +984,8 @@ func reportWindow(report InsightReport) (*time.Time, *time.Time) {
 	return &start, &end
 }
 
-// ConfirmExperience promotes 待确认 or 待复审 to 已确认. Confirming a revision
-// retires the predecessor it supersedes in the same transaction.
+// ConfirmExperience 把待定的经验变成在用，也用来「重新看过了，还成立」。
+// 确认一条修订版会在同一个事务里把它取代的那一版停用。
 func (s Service) ConfirmExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, expectedVersion int64) (Experience, error) {
 	if err := s.ready(actor, projectID, ScopeConfirm); err != nil {
 		return Experience{}, err
@@ -653,7 +994,9 @@ func (s Service) ConfirmExperience(ctx context.Context, actor contract.ActorCont
 	if err != nil {
 		return Experience{}, err
 	}
-	if current.Status != ExperiencePending && current.Status != ExperienceNeedsReview {
+	// 待定的确认，是「这条经验成立」；在用且标了复审的确认，是「重新看过了，还成立」。
+	// 后者要顺手把标记摘掉，否则它会一直挂着，下次没人知道到底看过没有。
+	if current.Status != ExperiencePending && !(current.Status == ExperienceConfirmed && current.NeedsReview) {
 		return Experience{}, ErrInvalidState
 	}
 	auditID, err := s.idGenerator()("experienceaudit")
@@ -677,18 +1020,37 @@ func (s Service) RejectExperience(ctx context.Context, actor contract.ActorConte
 		[]ExperienceStatus{ExperiencePending}, ExperienceRetired, request, true)
 }
 
-// RequestExperienceReview flags a confirmed conclusion as 待复审 when new data
-// challenges it, instead of silently overwriting it.
+// RequestExperienceReview 给在用的经验打上「该看一眼了」。
+//
+// **它不改状态**——这条经验还在用、还能被引用，标记只是提醒有人该重新看它的依据。
+// 这正是把「待复审」从状态改成标记的用处：新数据和老结论冲突时，提醒得发出去，
+// 但不能顺手把一条正在被引用的经验从所有页面上撤掉。
 func (s Service) RequestExperienceReview(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
-	return s.transition(ctx, actor, projectID, experienceID, ScopeWrite,
-		[]ExperienceStatus{ExperienceConfirmed}, ExperienceNeedsReview, request, true)
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return Experience{}, err
+	}
+	if err := request.validate(true); err != nil {
+		return Experience{}, err
+	}
+	auditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
+	return s.Repository.FlagExperienceForReview(ctx, FlagExperienceReviewInput{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID, ID: experienceID,
+		ExpectedVersion: request.ExpectedVersion, NeedsReview: true,
+		Reason: strings.TrimSpace(request.Reason), ActorID: actor.Principal.ID,
+		Now: s.now(), AuditID: auditID,
+	})
 }
 
 // RetireExperience is the logical delete in PRD §11.2: the row stays readable
 // and its reference history stays auditable.
+//
+// from 里只有 confirmed：标了复审的经验状态本来就是 confirmed，已经被覆盖。
 func (s Service) RetireExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
 	return s.transition(ctx, actor, projectID, experienceID, ScopeConfirm,
-		[]ExperienceStatus{ExperienceConfirmed, ExperienceNeedsReview}, ExperienceRetired, request, true)
+		[]ExperienceStatus{ExperienceConfirmed}, ExperienceRetired, request, true)
 }
 
 func (s Service) transition(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, scope contract.Scope, from []ExperienceStatus, to ExperienceStatus, request ExperienceTransitionRequest, reasonRequired bool) (Experience, error) {
@@ -771,7 +1133,7 @@ func (s Service) ReviseExperience(ctx context.Context, actor contract.ActorConte
 		SourceMetricSnapshotID: source.SourceMetricSnapshotID,
 		Conclusion:             strings.TrimSpace(request.Conclusion), Conditions: append([]string{}, request.Conditions...),
 		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
-		CardType: card.CardType, Confidence: card.Confidence,
+		CardType: card.CardType, Judgement: judge(card.Confidence, ""),
 		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
 		Applicability:     card.Applicability, DataBasis: basis, ContentBasis: card.ContentBasis,
 		StatusReason: reason, StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
@@ -815,7 +1177,10 @@ func (s Service) RecordExperienceReference(ctx context.Context, actor contract.A
 	if err != nil {
 		return ExperienceReference{}, err
 	}
-	if !experience.Reusable() {
+	// 这里是人点名引用后回填结果，闸只有一道：这条经验得在用。
+	// 卡 Reusable 会让「有人用了一条 👁 的经验」这件事记不下来——事情发生了，
+	// 拒绝记录不会让它没发生，只会让引用记录少一条。
+	if !experience.Quotable() {
 		return ExperienceReference{}, ErrInvalidState
 	}
 	id, err := s.idGenerator()("experienceref")
@@ -895,7 +1260,8 @@ func ratioPercent(numerator, denominator int64) float64 {
 }
 
 // ListExperiences returns every lifecycle state when status is empty, so the
-// experience library can show 待确认 / 已确认 / 待复审 / 已失效 side by side.
+// experience library can show 待定 / 在用 / 停用 side by side.
+// 「该看一眼了」不是这里的一个取值——它是在用经验上的标记，按 NeedsReview 筛。
 func (s Service) ListExperiences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, status ExperienceStatus, limit int) ([]Experience, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
 		return nil, err

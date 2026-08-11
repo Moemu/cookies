@@ -117,7 +117,7 @@ func (s Service) readExperiment(ctx context.Context, actor contract.ActorContext
 	if err != nil {
 		return ExperimentReadout{}, err
 	}
-	return buildExperimentReadout(experiment, facts), nil
+	return buildExperimentReadout(experiment, facts, s.currentThresholds(ctx, actor.OrganizationID)), nil
 }
 
 // AttachExperimentAsset 把一条素材放进某一组。
@@ -341,7 +341,12 @@ func experimentReferenceOutcome(verdict ExperimentVerdict) ExperienceReferenceOu
 
 // --- 读数计算 ---
 
-func buildExperimentReadout(experiment Experiment, facts []MetricFactWithMapping) ExperimentReadout {
+// thresholds 从服务层传下来，一次请求只读一次。实验和驱动因素共用 compareGroups，
+// 两边都得拿同一套阈值——只给其中一边配置的话，同一个变量在实验页和素材对比页
+// 会判出不同的档位，而没人解释得清哪个对。
+// 零值时逐格退回出厂设定（orDefaults），测试可以直接传 ResolvedThresholds{}。
+func buildExperimentReadout(experiment Experiment, facts []MetricFactWithMapping,
+	thresholds ResolvedThresholds) ExperimentReadout {
 	readout := ExperimentReadout{
 		Window: experiment.window(), Comparable: true,
 		Samples: make([]VariantSample, 0, len(experiment.Variants)),
@@ -366,7 +371,7 @@ func buildExperimentReadout(experiment Experiment, facts []MetricFactWithMapping
 			slice = &assetSlice{
 				assetID: fact.AssetID, title: fact.AssetTitle, kind: fact.AssetType,
 				byDate: map[string]MetricCounts{}, objects: map[string]struct{}{},
-				features: map[string]string{},
+				features: map[string]featureCell{},
 			}
 			slices[fact.AssetID] = slice
 		}
@@ -457,6 +462,7 @@ func buildExperimentReadout(experiment Experiment, facts []MetricFactWithMapping
 				InGroup: groups[variant.ID], Rest: groups[baseline.ID],
 				SubjectLabel: experiment.VariableLabel,
 				Comparable:   readout.Comparable, PreRegistered: true,
+				Thresholds: thresholds,
 			})
 			comparison.Result = &result
 			comparison.Verdict = verdictOf(result)

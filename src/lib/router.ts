@@ -71,7 +71,8 @@ export function parseRoute(location = `${window.location.pathname}${window.locat
 }
 
 function defaultNavForSystem(systemKey: SystemKey) {
-  if (systemKey === 'insight') return 'prelaunch'
+  // 洞察的落点是「分析」：日常最常进的就是这一屏。
+  if (systemKey === 'insight') return 'analysis'
   if (systemKey === 'delivery') return 'plans'
   return 'tasks'
 }
