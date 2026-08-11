@@ -58,9 +58,9 @@ const (
 )
 
 type youShuRequest struct {
-	OperationName string      `json:"operationName"`
-	Query         string      `json:"query"`
-	Variables     YouShuQuery `json:"variables"`
+	OperationName string `json:"operationName"`
+	Query         string `json:"query"`
+	Variables     any    `json:"variables"`
 }
 type youShuResponse struct {
 	Data struct {
@@ -129,7 +129,11 @@ func (c *YouShuClient) list(x context.Context, op string, q YouShuQuery) (YouShu
 	}
 	success, graphqlRate := false, false
 	defer func() { g.Done(success, graphqlRate) }()
-	b, e := json.Marshal(youShuRequest{op, strings.Replace(leafletMaterialListSelection, "%s", op, 1), q})
+	variables, e := youShuVariables(op, q)
+	if e != nil {
+		return YouShuPage{}, &YouShuError{Kind: YouShuInvalidRequest, Strategy: YouShuCorrectRequest, Source: "encode"}
+	}
+	b, e := json.Marshal(youShuRequest{op, strings.Replace(leafletMaterialListSelection, "%s", op, 1), variables})
 	if e != nil {
 		return YouShuPage{}, &YouShuError{Kind: YouShuInvalidRequest, Strategy: YouShuCorrectRequest, Source: "encode"}
 	}
@@ -190,6 +194,31 @@ func (c *YouShuClient) list(x context.Context, op string, q YouShuQuery) (YouShu
 	success = true
 	return p, nil
 }
+
+func youShuVariables(operation string, query YouShuQuery) (any, error) {
+	if operation == YouShuCIDOperation {
+		// CID requires the complete variable shape, including explicit nulls.
+		return query, nil
+	}
+	encoded, err := json.Marshal(query)
+	if err != nil {
+		return nil, err
+	}
+	variables := map[string]any{}
+	if err := json.Unmarshal(encoded, &variables); err != nil {
+		return nil, err
+	}
+	for key, value := range variables {
+		if value == nil {
+			delete(variables, key)
+			continue
+		}
+		if values, ok := value.([]any); ok && len(values) == 0 {
+			delete(variables, key)
+		}
+	}
+	return variables, nil
+}
 func graphqlError(c string) *YouShuError {
 	switch c {
 	case "00:400998":
@@ -210,18 +239,16 @@ func transportError(x context.Context, e error) error {
 }
 
 type rawPage struct {
-	Data struct {
-		Material []rawMaterial `json:"material"`
-	} `json:"data"`
+	Data                         json.RawMessage `json:"data"`
 	Total, Limit, MaxTotal, Page int64
 }
 type rawMaterial struct {
 	ID           string          `json:"id"`
 	Channel      json.RawMessage `json:"channel"`
 	IsCID        bool            `json:"isCidMaterial"`
-	MaterialType string          `json:"material_type"`
-	Duration     int64           `json:"duration"`
-	Score        float64         `json:"material_score"`
+	MaterialType json.RawMessage `json:"material_type"`
+	Duration     json.RawMessage `json:"duration"`
+	Score        json.RawMessage `json:"material_score"`
 	First        any             `json:"firstTime"`
 	Last         any             `json:"lastTime"`
 	Platform     json.RawMessage `json:"platform"`
@@ -242,8 +269,26 @@ func normalizePage(b json.RawMessage) (YouShuPage, error) {
 	if len(b) == 0 || json.Unmarshal(b, &r) != nil {
 		return YouShuPage{}, &YouShuError{Kind: YouShuMalformed, Strategy: YouShuRetry, Source: "payload"}
 	}
+	var materials []rawMaterial
+	var wrapped struct {
+		Material []rawMaterial `json:"material"`
+	}
+	if json.Unmarshal(r.Data, &wrapped) == nil {
+		materials = wrapped.Material
+	} else {
+		var rows []struct {
+			Material rawMaterial `json:"material"`
+		}
+		if json.Unmarshal(r.Data, &rows) != nil {
+			return YouShuPage{}, &YouShuError{Kind: YouShuMalformed, Strategy: YouShuRetry, Source: "payload_data"}
+		}
+		materials = make([]rawMaterial, 0, len(rows))
+		for _, row := range rows {
+			materials = append(materials, row.Material)
+		}
+	}
 	o := YouShuPage{Total: r.Total, Limit: r.Limit, MaxTotal: r.MaxTotal, Page: r.Page}
-	for _, m := range r.Data.Material {
+	for _, m := range materials {
 		if m.ID == "" {
 			return YouShuPage{}, &YouShuError{Kind: YouShuMalformed, Strategy: YouShuRetry, Source: "material_id"}
 		}
@@ -256,7 +301,7 @@ func normalizePage(b json.RawMessage) (YouShuPage, error) {
 			return YouShuPage{}, &YouShuError{Kind: YouShuMalformed, Strategy: YouShuRetry, Source: "last_time"}
 		}
 		id, n := named(m.Channel)
-		o.Materials = append(o.Materials, YouShuMaterial{MaterialID: m.ID, IsCID: m.IsCID, ChannelID: id, ChannelName: n, MaterialType: m.MaterialType, Duration: m.Duration, Score: m.Score, FirstSeenAt: f, LastSeenAt: l, PlatformName: namedName(m.Platform), CntAdID: scalarInt(m.Cnt), ImpressionInc2Y: scalarInt(m.Impression), Resource: resourceValue(m.Resource), Slogan: m.Slogan, Social: socialValue(m.Social), BGMTitle: m.BGM.Title, BGMAuthor: m.BGM.Author, FirstLineContent: linesContent(m.Lines)})
+		o.Materials = append(o.Materials, YouShuMaterial{MaterialID: m.ID, IsCID: m.IsCID, ChannelID: id, ChannelName: n, MaterialType: scalarString(m.MaterialType), Duration: scalarInt(m.Duration), Score: scalarFloat(m.Score), FirstSeenAt: f, LastSeenAt: l, PlatformName: namedName(m.Platform), CntAdID: scalarInt(m.Cnt), ImpressionInc2Y: scalarInt(m.Impression), Resource: resourceValue(m.Resource), Slogan: m.Slogan, Social: socialValue(m.Social), BGMTitle: m.BGM.Title, BGMAuthor: m.BGM.Author, FirstLineContent: linesContent(m.Lines)})
 	}
 	sort.Slice(o.Materials, func(i, j int) bool { return o.Materials[i].MaterialID < o.Materials[j].MaterialID })
 	return o, nil
@@ -264,7 +309,7 @@ func normalizePage(b json.RawMessage) (YouShuPage, error) {
 func parseYouShuTime(v any) (time.Time, bool) {
 	switch value := v.(type) {
 	case string:
-		for _, format := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		for _, format := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
 			if parsed, err := time.Parse(format, value); err == nil {
 				return parsed.UTC(), true
 			}
@@ -305,14 +350,31 @@ func scalarInt(b json.RawMessage) int64 {
 	}
 	return n
 }
-func resourceValue(b json.RawMessage) YouShuResource {
-	var many []YouShuResource
-	if json.Unmarshal(b, &many) == nil && len(many) > 0 {
-		return many[0]
+func scalarFloat(b json.RawMessage) float64 {
+	var n float64
+	if json.Unmarshal(b, &n) != nil {
+		var s string
+		if json.Unmarshal(b, &s) == nil {
+			n, _ = strconv.ParseFloat(s, 64)
+		}
 	}
-	var x YouShuResource
+	return n
+}
+func resourceValue(b json.RawMessage) YouShuResource {
+	type rawResource struct {
+		ID, URL, Poster, Type         string
+		Width, Height, Duration, Size json.RawMessage
+	}
+	convert := func(value rawResource) YouShuResource {
+		return YouShuResource{ID: value.ID, URL: value.URL, Poster: value.Poster, Width: scalarInt(value.Width), Height: scalarInt(value.Height), Duration: scalarInt(value.Duration), Type: value.Type, Size: scalarInt(value.Size)}
+	}
+	var many []rawResource
+	if json.Unmarshal(b, &many) == nil && len(many) > 0 {
+		return convert(many[0])
+	}
+	var x rawResource
 	json.Unmarshal(b, &x)
-	return x
+	return convert(x)
 }
 func socialValue(b json.RawMessage) YouShuSocial {
 	var x struct {

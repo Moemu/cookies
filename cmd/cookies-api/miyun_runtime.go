@@ -42,8 +42,8 @@ func (a miyunProtocolAdapter) VerifyMiyunConnection(ctx context.Context, session
 	client.Gate = a.gate
 	now := time.Now().UTC()
 	_, err = client.Product(ctx, crawler.YouShuQuery{
-		MaterialIDs: []string{}, StartDate: now.AddDate(0, 0, -1).Format("2006-01-02"), EndDate: now.Format("2006-01-02"),
-		Keyword: "连接验证", Page: 1, Order: "impression_desc", IsExact: crawler.YouShuBool(false), ProductID: []string{},
+		StartDate: now.AddDate(0, 0, -1).Format("2006-01-02"), EndDate: now.Format("2006-01-02"),
+		Keyword: "连接验证", Page: 1, Order: "_score_desc", IsExact: crawler.YouShuBool(false), ProductID: []string{},
 		Tpl: []string{}, SearchField: "all", SearchDSL: nil, AccountType: []string{}, IsSearchAiScene: crawler.YouShuInt(0),
 	})
 	return err

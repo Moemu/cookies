@@ -171,9 +171,16 @@ func (s Service) VerifyMiyunConnection(ctx context.Context, actor contract.Actor
 		}
 		if upstream.Kind == crawler.YouShuAuthRequired {
 			current.Status = MiyunConnectionAuthRequired
-		} else if upstream.Kind == crawler.YouShuRateLimited {
-			until := now.Add(s.miyunCooldown())
-			current.CooldownUntil = &until
+		} else {
+			// A non-authentication failure must not preserve a stale
+			// auth_required state from an earlier verification attempt.
+			if current.Status == MiyunConnectionAuthRequired {
+				current.Status = MiyunConnectionUnverified
+			}
+			if upstream.Kind == crawler.YouShuRateLimited {
+				until := now.Add(s.miyunCooldown())
+				current.CooldownUntil = &until
+			}
 		}
 	} else {
 		// Never expose an unclassified upstream error (it can include transport
