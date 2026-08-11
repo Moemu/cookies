@@ -71,8 +71,8 @@ func TestVariantComparisonAttributableOnlyWhenSingleVariable(t *testing.T) {
 	analysis := buildPerformanceAnalysis(testWindow(10), facts, features)
 	comparison := findComparison(t, analysis, "asset_a", "asset_b")
 
-	if comparison.Verdict != VerdictAttributable {
-		t.Fatalf("单变量且样本充分时应判为可归因，实际 %q（%s）", comparison.Verdict, comparison.Note)
+	if comparison.VariantVerdict != VerdictAttributable {
+		t.Fatalf("单变量且样本充分时应判为可归因，实际 %q（%s）", comparison.VariantVerdict, comparison.Note)
 	}
 	if len(comparison.ChangedFeatures) != 1 {
 		t.Fatalf("变量应只有一个，实际 %d", len(comparison.ChangedFeatures))
@@ -96,8 +96,8 @@ func TestVariantComparisonConfoundedWhenTwoVariablesChange(t *testing.T) {
 	}
 
 	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, features), "asset_a", "asset_b")
-	if comparison.Verdict != VerdictConfounded {
-		t.Fatalf("两个变量同时变化时必须判为混杂，实际 %q", comparison.Verdict)
+	if comparison.VariantVerdict != VerdictConfounded {
+		t.Fatalf("两个变量同时变化时必须判为混杂，实际 %q", comparison.VariantVerdict)
 	}
 	if comparison.Confidence != ConfidenceConfounded {
 		t.Fatalf("置信应为 confounded，实际 %q", comparison.Confidence)
@@ -116,8 +116,8 @@ func TestVariantComparisonLowSampleBeatsSingleVariable(t *testing.T) {
 	}
 
 	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(5), facts, features), "asset_a", "asset_b")
-	if comparison.Verdict != VerdictLowSample {
-		t.Fatalf("样本不足时必须先判低样本，实际 %q", comparison.Verdict)
+	if comparison.VariantVerdict != VerdictLowSample {
+		t.Fatalf("样本不足时必须先判低样本，实际 %q", comparison.VariantVerdict)
 	}
 }
 
@@ -129,8 +129,8 @@ func TestVariantComparisonWithoutFeaturesIsNotAttributable(t *testing.T) {
 	)
 
 	comparison := findComparison(t, buildPerformanceAnalysis(testWindow(10), facts, nil), "asset_a", "asset_b")
-	if comparison.Verdict != VerdictNoFeatures {
-		t.Fatalf("无特征时应判为 no_features，实际 %q", comparison.Verdict)
+	if comparison.VariantVerdict != VerdictNoFeatures {
+		t.Fatalf("无特征时应判为 no_features，实际 %q", comparison.VariantVerdict)
 	}
 }
 
@@ -195,8 +195,8 @@ func TestCaliberConflictDowngradesAttribution(t *testing.T) {
 		t.Fatal("混了两种币种时 Comparable 应为 false")
 	}
 	comparison := findComparison(t, analysis, "asset_a", "asset_b")
-	if comparison.Verdict == VerdictAttributable {
-		t.Fatalf("口径不一致时不该出现可归因判定，实际 %q", comparison.Verdict)
+	if comparison.VariantVerdict == VerdictAttributable {
+		t.Fatalf("口径不一致时不该出现可归因判定，实际 %q", comparison.VariantVerdict)
 	}
 }
 

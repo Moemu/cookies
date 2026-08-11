@@ -184,7 +184,7 @@ export function PostLaunchOverviewPage({ state, onOpenProject }: {
             <div className="prelaunch-fact">
               {overview.confidence === 'sufficient' ? <CircleCheck size={17}/> : <CircleAlert size={17}/>}
               <span><small>置信 · {confidenceLabels[overview.confidence]}</small><b>
-                {overview.confidence_note || confidenceMeaning[overview.confidence]}
+                {overview.note || confidenceMeaning[overview.confidence]}
               </b></span>
             </div>
 

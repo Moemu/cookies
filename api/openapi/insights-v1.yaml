@@ -2565,6 +2565,39 @@ components:
         low_sample 样本不足 / confounded 存在混杂。刻意不是数字——PRD 要的是
         一个非分析师也能读懂的定性提示。
       enum: [sufficient, directional, low_sample, confounded]
+    Verdict:
+      type: string
+      description: |
+        三档结论：explained 能归因 / observed 只是观察 / unclear 算不出来。
+        由 ConfidenceLevel 四档收敛而来（sufficient→explained，directional 与
+        confounded→observed，low_sample→unclear），收敛规则在全模块只有一处实现，
+        见 internal/systems/insights/verdict.go 的 ConfidenceLevel.Verdict()。
+        置信四档说的是「数据有多硬」，三档说的是「你现在能拿它干什么」——前者留给
+        分析口径，后者是屏幕上给人看的那个。
+      enum: [explained, observed, unclear]
+    UpgradePath:
+      type: string
+      description: |
+        这一档要往上走该做什么：observed 缺的是对照，去做个实验；unclear 缺的是
+        样本，去库里找相似素材把样本做厚。explained 已经到顶，不带这个字段。
+        每一条「说不清」都必须配一条出路，否则用户只能干瞪眼。
+      enum: [experiment, similar_assets]
+    Judgement:
+      type: object
+      description: |
+        一条判定的完整口径。除 PerformanceAnalysis.judgement 这个屏幕级汇总之外，
+        其余用到它的地方都是内嵌（Go embedded struct），四个字段在 JSON 里平铺在
+        宿主对象上，而不是套一层 judgement。
+      required: [confidence, verdict, verdict_label, note]
+      properties:
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话说明为什么是这个档位。' }
     MetricCaliber:
       type: object
       description: >-
@@ -2700,7 +2733,7 @@ components:
       description: >-
         素材矩阵的一行。asset_id 为空表示这一行是未匹配对象的汇总——它的花费照样
         计入总盘，但 attributable 为 false，不能承载创意级结论 (doc10 §5)。
-      required: [asset_title, objects, counts, rates, attributable, confidence]
+      required: [asset_title, objects, counts, rates, attributable, confidence, verdict, verdict_label]
       properties:
         asset_id: { type: string }
         asset_title: { type: string }
@@ -2714,6 +2747,12 @@ components:
         attributable: { type: boolean }
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话说明为什么是这个档位。' }
     PerformancePoint:
       type: object
       required: [date, counts, rates]
@@ -2754,7 +2793,7 @@ components:
         投后分析 · 指标总览的载荷，形状照 20 §4.1「一个主图表 + 素材矩阵 + 解释区」。
         四件必须上屏的东西各有归属：数据窗口 = window，样本量 = totals.impressions，
         口径 = caliber，置信范围 = confidence 与 ctr_interval。
-      required: [window, caliber, comparable, totals, rates, confidence, confidence_note, series, assets, unmatched_objects, unmatched_spend_cents, sources, platforms]
+      required: [window, caliber, comparable, totals, rates, confidence, verdict, verdict_label, note, series, assets, unmatched_objects, unmatched_spend_cents, sources, platforms]
       properties:
         window:
           $ref: '#/components/schemas/MetricWindow'
@@ -2776,7 +2815,12 @@ components:
           $ref: '#/components/schemas/RateInterval'
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
-        confidence_note: { type: string, description: '一句话解释为什么是这个置信档位。' }
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note: { type: string, description: '一句话解释为什么是这个档位。原来叫 confidence_note，改名是为了和其余七处内嵌 Judgement 的地方对齐。' }
         series:
           type: array
           items:
@@ -2832,9 +2876,14 @@ components:
       type: object
       description: |
         素材对比 (03 §7.3 / AM-009)。同类型素材两两配对，先识别变量再谈差异。
-        `changed_features` 长度 > 1 时 verdict 一定是 `confounded`——差异归不到其中
-        任何一个变量上，哪怕数字差得很多。
-      required: [baseline_asset_id, baseline_title, variant_asset_id, variant_title, changed_features, controlled_count, baseline_counts, variant_counts, baseline_rates, variant_rates, intervals_overlap, verdict, confidence, note]
+        `changed_features` 长度 > 1 时 variant_verdict 一定是 `confounded`——差异归不到
+        其中任何一个变量上，哪怕数字差得很多。
+
+        这里有两个 verdict，别混：`verdict` 是全模块通用的三档结论，`variant_verdict`
+        是素材对比专有的五档，它比三档多回答一件事——归不了因，是因为变量太多，还是
+        因为压根没有特征数据。后端字段原名 `verdict`，改名是因为它会遮蔽内嵌 Judgement
+        的三档，JSON 里 verdict 键会静默变成 attributable 这类值。
+      required: [baseline_asset_id, baseline_title, variant_asset_id, variant_title, changed_features, controlled_count, baseline_counts, variant_counts, baseline_rates, variant_rates, intervals_overlap, variant_verdict, confidence, verdict, verdict_label, note]
       properties:
         baseline_asset_id: { type: string }
         baseline_title: { type: string }
@@ -2866,15 +2915,20 @@ components:
           type: boolean
           description: 任一侧区间算不出来时按 true 处理——不知道差异是否显著，就不能说它显著。
         ctr_lift: { type: number, description: '相对提升；基线为 0 或缺失时本字段缺失，不退化为 0。' }
-        verdict:
+        variant_verdict:
           $ref: '#/components/schemas/VariantVerdict'
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: 一句话说明为什么是这个判定。 }
     AssetTrend:
       type: object
       description: 单个素材在窗口内的逐日走势。`direction` 为 unknown 表示天数不足或前半段无曝光，不能当成持平。
-      required: [asset_id, asset_title, points, active_days, direction, confidence, note]
+      required: [asset_id, asset_title, points, active_days, direction, confidence, verdict, verdict_label, note]
       properties:
         asset_id: { type: string }
         asset_title: { type: string }
@@ -2891,6 +2945,11 @@ components:
         ctr_change: { type: number, description: 后半段相对前半段的点击率变化；算不出时缺失。 }
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
     FatigueSeverity:
       type: string
@@ -2904,7 +2963,7 @@ components:
         把窗口按「有数据的天数」对半切开后的前后对比。`alternative_explanations` 一定
         非空——其中「受众变化」永远排除不了：当前没有接入受众构成数据，人群变了和素材
         看腻了在数字上长得一样。
-      required: [asset_id, asset_title, first_half, second_half, first_rates, last_rates, severity, confidence, note]
+      required: [asset_id, asset_title, first_half, second_half, first_rates, last_rates, severity, confidence, verdict, verdict_label, note]
       properties:
         asset_id: { type: string }
         asset_title: { type: string }
@@ -2929,6 +2988,11 @@ components:
           description: 没能排除的其他解释。这里列的是「排除不了」，不是「已排除」。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
     AnomalyKind:
       type: string
@@ -2939,7 +3003,7 @@ components:
       description: |
         用中位数与 MAD（而非均值与标准差）判定偏离，阈值 3.5，且要求窗口内至少 5 天
         有数据。用标准差的话，一次大促尖峰会把标准差本身抬高，之后什么都不再异常。
-      required: [date, scope, metric, kind, observed, median, deviation, note]
+      required: [date, scope, metric, kind, observed, median, deviation, confidence, verdict, verdict_label, note]
       properties:
         date: { type: string, format: date }
         scope:
@@ -2953,6 +3017,13 @@ components:
         observed: { type: number }
         median: { type: number }
         deviation: { type: number, description: 偏离中位数多少个 MAD。 }
+        confidence:
+          $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
     FeatureDriver:
       type: object
@@ -2960,7 +3031,7 @@ components:
         驱动因素：某个特征取值的素材组，与其余素材的对比。**这不是因果**——
         `covarying_features` 列出组内完全同向变化的其他特征，非空时 confidence 一律
         降为 confounded，因为无法区分是本特征还是它们在起作用。
-      required: [key, label, group, value, assets, rest_assets, counts, rest_counts, rates, rest_rates, intervals_overlap, confidence, note]
+      required: [key, label, group, value, assets, rest_assets, counts, rest_counts, rates, rest_rates, intervals_overlap, confidence, verdict, verdict_label, note]
       properties:
         asset_type:
           $ref: '#/components/schemas/AssetType'
@@ -2990,16 +3061,32 @@ components:
           description: 与本特征完全同向变化的其他特征，分不开谁在起作用。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
-        note: { type: string }
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
+        note:
+          type: string
+          description: >-
+            整块来自它所依据的那条 VariantComparison——档位和理由必须同源，否则会
+            出现档位是这次算的、理由是上次的。
     PerformanceAnalysis:
       type: object
       description: 投后分析五个二级视图的共用载荷。
-      required: [window, caliber, comparable, comparisons, trends, fatigue, anomalies, drivers, assets_in_window, assets_with_features]
+      required: [window, caliber, comparable, judgement, comparisons, trends, fatigue, anomalies, drivers, assets_in_window, assets_with_features]
       properties:
         window:
           $ref: '#/components/schemas/MetricWindow'
         caliber:
           $ref: '#/components/schemas/MetricCaliber'
+        judgement:
+          allOf:
+            - $ref: '#/components/schemas/Judgement'
+          description: >-
+            整屏的档位，取五类结论里最弱的那一档——一屏里只要有一条算不出来，这一屏
+            就不能对外宣称「能归因」。五类全空时为 unclear。这是全模块唯一一处
+            judgement 以嵌套对象出现的地方，其余都是平铺内嵌。
         comparable:
           type: boolean
           description: |
@@ -3591,7 +3678,7 @@ components:
         组间比较结果。**实验中心和投后分析「驱动因素」共用同一套算法**，两者的
         差别只在 note 的措辞：事先登记的分组能说到「归因到这个变量」，事后凑出
         的分组只能说到「相关」。共用一套是为了让这两页永远不会给出互相矛盾的判定。
-      required: [counts, rest_counts, rates, rest_rates, intervals_overlap, covarying_features, confidence, note]
+      required: [counts, rest_counts, rates, rest_rates, intervals_overlap, covarying_features, confidence, verdict, verdict_label, note]
       properties:
         counts:
           $ref: '#/components/schemas/MetricCounts'
@@ -3617,6 +3704,11 @@ components:
             头上。事先登记的实验这里恒为空——混杂由入组那道关把守，不在事后翻账。
         confidence:
           $ref: '#/components/schemas/ConfidenceLevel'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        verdict_label: { type: string }
+        upgrade:
+          $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '给人读的一句话，说明这条判定为什么是这个强度。' }
     ExperimentVariant:
       type: object

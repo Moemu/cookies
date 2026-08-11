@@ -1650,7 +1650,8 @@ export type ApiMetricOverview = {
   rates: ApiMetricRates
   ctr_interval?: ApiRateInterval
   confidence: ApiConfidenceLevel
-  confidence_note: string
+  /** 原来叫 confidence_note。同一个意思两个键名，前端要写两套渲染，已统一成 note。 */
+  note: string
   series: ApiPerformancePoint[]
   assets: ApiAssetMetricPerformance[]
   unmatched_objects: number
@@ -1699,7 +1700,12 @@ export type ApiVariantComparison = {
   /** 任一侧区间算不出来时为 true——不知道差异是否显著，就不能说它显著。 */
   intervals_overlap: boolean
   ctr_lift?: number
-  verdict: ApiVariantVerdict
+  /**
+   * 素材对比专有的五档，比三档更细：它还回答「归不了因是因为变量太多，
+   * 还是因为压根没有特征数据」。**键名不是 verdict**——那个键归三档
+   * （见后端 internal/systems/insights/verdict.go）。
+   */
+  variant_verdict: ApiVariantVerdict
   confidence: ApiConfidenceLevel
   note: string
 }

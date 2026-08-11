@@ -116,6 +116,13 @@ func judge(confidence ConfidenceLevel, note string) Judgement {
 	}
 }
 
+// NewJudgement 是 judge 的导出版本，给包外用（HTTP 层的测试替身等）。
+// 包内一律用 judge。有了它，包外也没有理由手拼 Judgement 字面量——手拼就会
+// 出现 confidence 和 verdict 对不上的组合。
+func NewJudgement(confidence ConfidenceLevel, note string) Judgement {
+	return judge(confidence, note)
+}
+
 // verdictStrength 越大越强。
 //
 // 不叫 verdictRank：那个名字归 performance.go 的 VariantVerdict 排序所有，

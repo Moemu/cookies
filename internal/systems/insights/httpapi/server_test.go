@@ -514,8 +514,8 @@ func (s *applicationStub) ListImportBatches(_ context.Context, _ contract.ActorC
 }
 func (s *applicationStub) GetMetricOverview(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, window insights.MetricWindow) (insights.MetricOverview, error) {
 	s.window = window
-	return insights.MetricOverview{Window: window, Confidence: insights.ConfidenceLowSample,
-		ConfidenceNote: "窗口内样本不足，只能当作观察。"}, nil
+	return insights.MetricOverview{Window: window,
+		Judgement: insights.NewJudgement(insights.ConfidenceLowSample, "窗口内样本不足，只能当作观察。")}, nil
 }
 
 func (s *applicationStub) GetPerformanceAnalysis(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, window insights.MetricWindow) (insights.PerformanceAnalysis, error) {

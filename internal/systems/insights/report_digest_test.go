@@ -9,9 +9,9 @@ func TestDigestOrdersByStrength(t *testing.T) {
 	// 可归因的排在方向性前面，方向性排在混杂前面。
 	// 报告是给人扫一眼的，最强的证据必须在最上面。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
-		{VariantTitle: "混", BaselineTitle: "基", Verdict: VerdictConfounded, Note: "混杂的一条"},
-		{VariantTitle: "归", BaselineTitle: "基", Verdict: VerdictAttributable, Note: "可归因的一条"},
-		{VariantTitle: "方", BaselineTitle: "基", Verdict: VerdictDirectional, Note: "方向性的一条"},
+		{VariantTitle: "混", BaselineTitle: "基", VariantVerdict: VerdictConfounded, Judgement: judge(ConfidenceSufficient, "混杂的一条")},
+		{VariantTitle: "归", BaselineTitle: "基", VariantVerdict: VerdictAttributable, Judgement: judge(ConfidenceSufficient, "可归因的一条")},
+		{VariantTitle: "方", BaselineTitle: "基", VariantVerdict: VerdictDirectional, Judgement: judge(ConfidenceSufficient, "方向性的一条")},
 	}}
 	got := buildReportDigest(analysis, nil, nil)
 	if len(got) == 0 {
@@ -25,7 +25,7 @@ func TestDigestOrdersByStrength(t *testing.T) {
 func TestDigestSkipsLowSampleFindings(t *testing.T) {
 	// 样本不足的配对不进报告。带进去等于让人在复盘会上引用一条算不出来的结论。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
-		{VariantTitle: "甲", BaselineTitle: "乙", Verdict: VerdictLowSample, Note: "样本不够"},
+		{VariantTitle: "甲", BaselineTitle: "乙", VariantVerdict: VerdictLowSample, Judgement: judge(ConfidenceSufficient, "样本不够")},
 	}}
 	got := buildReportDigest(analysis, nil, nil)
 	for _, finding := range got {
@@ -38,8 +38,8 @@ func TestDigestSkipsLowSampleFindings(t *testing.T) {
 func TestDigestCountsSkippedFindings(t *testing.T) {
 	// 略过的条数必须写出来。静默截断读起来像「就这么多」，实际不是。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
-		{VariantTitle: "甲", BaselineTitle: "乙", Verdict: VerdictLowSample, Note: "样本不够"},
-		{VariantTitle: "丙", BaselineTitle: "丁", Verdict: VerdictNoFeatures, Note: "没填特征"},
+		{VariantTitle: "甲", BaselineTitle: "乙", VariantVerdict: VerdictLowSample, Judgement: judge(ConfidenceSufficient, "样本不够")},
+		{VariantTitle: "丙", BaselineTitle: "丁", VariantVerdict: VerdictNoFeatures, Judgement: judge(ConfidenceSufficient, "没填特征")},
 	}}
 	got := buildReportDigest(analysis, nil, nil)
 	var mentioned bool
@@ -88,7 +88,7 @@ func TestDigestOnlyRecommendsFromAttributable(t *testing.T) {
 	// 方向性的结论不能推建议。方向性的意思就是「看着像但说不准」，
 	// 拿它指导下一轮等于把一次没验证的观察变成一条要照着做的规定。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{{
-		VariantTitle: "甲", BaselineTitle: "乙", Verdict: VerdictDirectional, Note: "方向性",
+		VariantTitle: "甲", BaselineTitle: "乙", VariantVerdict: VerdictDirectional, Judgement: judge(ConfidenceSufficient, "方向性"),
 		ChangedFeatures: []FeatureDiff{{Label: "开场", Baseline: "产品", Variant: "人脸"}},
 	}}}
 	for _, finding := range buildReportDigest(analysis, nil, nil) {
@@ -102,7 +102,8 @@ func TestDigestKeepsAlternativeExplanations(t *testing.T) {
 	// 疲劳信号排除不了的其他解释要跟着一起进报告。只写「在衰退」，
 	// 下一步就会变成换素材，而真正的原因没人查。
 	analysis := PerformanceAnalysis{Comparable: true, Fatigue: []FatigueSignal{{
-		AssetTitle: "甲素材", Severity: FatigueLikely, Note: "后半段点击率明显下滑",
+		AssetTitle: "甲素材", Severity: FatigueLikely,
+		Judgement:               judge(ConfidenceDirectional, "后半段点击率明显下滑"),
 		AlternativeExplanations: []string{"这段时间预算也调过"},
 	}}}
 	var found bool
@@ -131,11 +132,11 @@ func TestDigestMergesSameDirection(t *testing.T) {
 	// 三对都是 variant 赢，所以归并出来的方向都是「问题 → 利益」。
 	// 点击率不能省：方向是按哪边赢定的，没有点击率就定不出方向。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
-		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff,
+		{VariantTitle: "v2", BaselineTitle: "v1", VariantVerdict: VerdictAttributable, ChangedFeatures: diff,
 			BaselineRates: ratesWithCTR(0.02), VariantRates: ratesWithCTR(0.03)},
-		{VariantTitle: "v3", BaselineTitle: "v1", Verdict: VerdictAttributable, ChangedFeatures: diff,
+		{VariantTitle: "v3", BaselineTitle: "v1", VariantVerdict: VerdictAttributable, ChangedFeatures: diff,
 			BaselineRates: ratesWithCTR(0.02), VariantRates: ratesWithCTR(0.031)},
-		{VariantTitle: "v5", BaselineTitle: "v3", Verdict: VerdictAttributable, ChangedFeatures: diff,
+		{VariantTitle: "v5", BaselineTitle: "v3", VariantVerdict: VerdictAttributable, ChangedFeatures: diff,
 			BaselineRates: ratesWithCTR(0.021), VariantRates: ratesWithCTR(0.033)},
 	}}
 	var recommendations []string
@@ -158,11 +159,11 @@ func TestDigestRefusesToRecommendConflictingDirections(t *testing.T) {
 	// 两对都是 variant 赢，但赢的取值一个是「利益」一个是「问题」——
 	// 归一到「哪边赢」之后方向依然相反，这才是真的打架。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{
-		{VariantTitle: "v2", BaselineTitle: "v1", Verdict: VerdictAttributable,
+		{VariantTitle: "v2", BaselineTitle: "v1", VariantVerdict: VerdictAttributable,
 			BaselineRates:   ratesWithCTR(0.02),
 			VariantRates:    ratesWithCTR(0.03),
 			ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "问题", Variant: "利益"}}},
-		{VariantTitle: "v4", BaselineTitle: "v2", Verdict: VerdictAttributable,
+		{VariantTitle: "v4", BaselineTitle: "v2", VariantVerdict: VerdictAttributable,
 			BaselineRates:   ratesWithCTR(0.02),
 			VariantRates:    ratesWithCTR(0.03),
 			ChangedFeatures: []FeatureDiff{{Key: "hook", Label: "钩子类型", Baseline: "利益", Variant: "问题"}}},
@@ -196,7 +197,7 @@ func TestDigestRecommendsTheWinningDirection(t *testing.T) {
 	// 而 baseline 只是配对时花费更高的那一个，和表现好坏没有关系。
 	// 结果报告写着「继续按（问题 → 利益）这个方向做」，而利益那一版点击率低了 41%。
 	analysis := PerformanceAnalysis{Comparable: true, Comparisons: []VariantComparison{{
-		VariantTitle: "B版", BaselineTitle: "A版", Verdict: VerdictAttributable,
+		VariantTitle: "B版", BaselineTitle: "A版", VariantVerdict: VerdictAttributable,
 		VariantAssetID: "asset_b", BaselineAssetID: "asset_a",
 		BaselineRates:   ratesWithCTR(0.0323),
 		VariantRates:    ratesWithCTR(0.0189),

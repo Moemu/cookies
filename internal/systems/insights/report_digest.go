@@ -122,14 +122,14 @@ func performanceFindings(analysis PerformanceAnalysis) []ReportFinding {
 
 	kept := make([]VariantComparison, 0, len(analysis.Comparisons))
 	for _, item := range analysis.Comparisons {
-		if keepVerdict(item.Verdict) {
+		if keepVerdict(item.VariantVerdict) {
 			kept = append(kept, item)
 		}
 	}
 	// SliceStable：强度相同的两条保持投后分析给的原顺序。用不稳定排序的话，同一份
 	// 数据定格两次可能得到不同的报告，而报告是要被追溯的。
 	sort.SliceStable(kept, func(i, j int) bool {
-		return strengthRank(kept[i].Verdict) < strengthRank(kept[j].Verdict)
+		return strengthRank(kept[i].VariantVerdict) < strengthRank(kept[j].VariantVerdict)
 	})
 	for index, item := range kept {
 		if index >= maxPerCategory {
@@ -142,7 +142,7 @@ func performanceFindings(analysis PerformanceAnalysis) []ReportFinding {
 		findings = append(findings, ReportFinding{
 			Kind:       SectionAssetPerformance,
 			Text:       fmt.Sprintf("「%s」对比「%s」：%s", item.VariantTitle, item.BaselineTitle, item.Note),
-			Strength:   item.Verdict,
+			Strength:   item.VariantVerdict,
 			Confidence: item.Confidence,
 			SourceRef:  item.VariantAssetID,
 		})
@@ -287,7 +287,7 @@ func directionFindings(comparisons []VariantComparison) []ReportFinding {
 	byVariable := make(map[string]*variable, 4)
 
 	for _, item := range comparisons {
-		if item.Verdict != VerdictAttributable || len(item.ChangedFeatures) == 0 {
+		if item.VariantVerdict != VerdictAttributable || len(item.ChangedFeatures) == 0 {
 			continue
 		}
 		// 可归因按定义只有一个变量在动；真出现多个就把它们拼成一个复合变量，

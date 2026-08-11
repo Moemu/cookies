@@ -703,8 +703,9 @@ type MetricOverview struct {
 	// CTRInterval 是主图表旁边要显示的置信范围。
 	CTRInterval *RateInterval `json:"ctr_interval,omitempty"`
 
-	Confidence     ConfidenceLevel `json:"confidence"`
-	ConfidenceNote string          `json:"confidence_note"`
+	// 内嵌而不是摆两个字段：以前这里叫 confidence_note，别处叫 note，
+	// 同一个意思两个键名，前端就得写两套渲染。
+	Judgement
 
 	Series []PerformancePoint `json:"series"`
 	Assets []AssetPerformance `json:"assets"`
@@ -734,8 +735,8 @@ type AssetPerformance struct {
 	Rates      MetricRates  `json:"rates"`
 	// Attributable 为 false 表示这一行是未匹配对象的汇总，doc10 §5 明确
 	// 「未匹配记录不参与需要创意级归因的强结论」。
-	Attributable bool            `json:"attributable"`
-	Confidence   ConfidenceLevel `json:"confidence"`
+	Attributable bool `json:"attributable"`
+	Judgement
 }
 
 type PlatformTotal struct {
@@ -1237,7 +1238,7 @@ func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sou
 	for key, row := range byAsset {
 		row.Objects = len(assetObjects[key])
 		row.Rates = RatesOf(row.Counts)
-		row.Confidence = confidenceOf(row.Counts, row.Attributable, row.Objects)
+		row.Judgement = judge(confidenceOf(row.Counts, row.Attributable, row.Objects), assetRowNote(*row))
 		overview.Assets = append(overview.Assets, *row)
 	}
 	// 花得多的排前面；未匹配那一行永远垫底，它不是一个可比较的素材。
@@ -1288,7 +1289,8 @@ func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sou
 			fmt.Sprintf("有 %d 个平台对象还没匹配到素材，其花费已计入总盘但不参与素材级结论", overview.UnmatchedObjects))
 	}
 
-	overview.Confidence, overview.ConfidenceNote = overallConfidence(overview)
+	level, note := overallConfidence(overview)
+	overview.Judgement = judge(level, note)
 	return overview
 }
 
@@ -1323,6 +1325,24 @@ func overallConfidence(overview MetricOverview) (ConfidenceLevel, string) {
 	default:
 		return ConfidenceSufficient, "样本充分且口径一致，可作为结论依据。"
 	}
+}
+
+// assetRowNote 给素材矩阵的每一行配一句理由。以前这一行只有档位没有理由，
+// 前端只能显示一个「置信存在混杂」，人看不出混杂在哪。
+func assetRowNote(row AssetPerformance) string {
+	if !row.Attributable {
+		return "这一行是未匹配对象的汇总，归不到具体素材上。"
+	}
+	if row.Objects > 1 {
+		return fmt.Sprintf("这个素材投在 %d 个平台对象上，预算与受众差异会混进来。", row.Objects)
+	}
+	if row.Counts.Impressions < directionalSampleImpressions {
+		return fmt.Sprintf("只有 %s 次展示，这一行还比不出东西。", countText(row.Counts.Impressions))
+	}
+	if row.Counts.Impressions < sufficientSampleImpressions {
+		return "样本到了方向性门槛，可作参考，但还不够下确定结论。"
+	}
+	return "样本充分、归因到单一素材，这一行可以当结论用。"
 }
 
 func sourceLabel(source DataSource) string {

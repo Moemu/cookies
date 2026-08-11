@@ -37,9 +37,12 @@ type PerformanceAnalysis struct {
 
 	// FeatureCoverage 说明有多少参与分析的素材真的有特征数据。
 	// 没有特征就没有变量，素材对比会退化成「两个素材谁的数字大」。
-	AssetsInWindow  int      `json:"assets_in_window"`
-	AssetsWithFeats int      `json:"assets_with_features"`
-	Notes           []string `json:"notes,omitempty"`
+	AssetsInWindow  int `json:"assets_in_window"`
+	AssetsWithFeats int `json:"assets_with_features"`
+	// Judgement 是屏级档位：六个视图里最弱的那一条。一屏上有一条算不出来，
+	// 这屏就不能整体标成能归因。
+	Judgement Judgement `json:"judgement"`
+	Notes     []string  `json:"notes,omitempty"`
 }
 
 // FeatureDiff 是两个素材之间一个特征的取值差异，也就是 AM-009 说的「实验变量」。
@@ -91,9 +94,11 @@ type VariantComparison struct {
 	IntervalsOverlap bool     `json:"intervals_overlap"`
 	CTRLift          *float64 `json:"ctr_lift,omitempty"`
 
-	Verdict    VariantVerdict  `json:"verdict"`
-	Confidence ConfidenceLevel `json:"confidence"`
-	Note       string          `json:"note"`
+	// VariantVerdict 是这一对素材专有的五档，比三档更细：它还回答「归不了因是因为
+	// 变量太多，还是因为压根没有特征数据」。字段名不能叫 Verdict——那样会遮蔽内嵌
+	// Judgement 的三档 Verdict，JSON 里 verdict 键会静默变成 attributable 这类值。
+	VariantVerdict VariantVerdict `json:"variant_verdict"`
+	Judgement
 }
 
 // AssetTrend 是一个素材在窗口内的逐日走势。
@@ -106,9 +111,8 @@ type AssetTrend struct {
 	ActiveDays int    `json:"active_days"`
 	Direction  string `json:"direction"`
 	// CTRChange 是后半段相对前半段的相对变化。分母为零时为空，不退化成 0。
-	CTRChange  *float64        `json:"ctr_change,omitempty"`
-	Confidence ConfidenceLevel `json:"confidence"`
-	Note       string          `json:"note"`
+	CTRChange *float64 `json:"ctr_change,omitempty"`
+	Judgement
 }
 
 // FatigueSeverity 分三档，`none` 也会返回：知道「查过了，没有」比看不到这一行有用。
@@ -141,9 +145,8 @@ type FatigueSignal struct {
 	Severity FatigueSeverity `json:"severity"`
 	// AlternativeExplanations 是这次没能排除的其他解释。为空表示确实没有别的解释，
 	// 不是「没检查」——检查项是固定的四类。
-	AlternativeExplanations []string        `json:"alternative_explanations,omitempty"`
-	Confidence              ConfidenceLevel `json:"confidence"`
-	Note                    string          `json:"note"`
+	AlternativeExplanations []string `json:"alternative_explanations,omitempty"`
+	Judgement
 }
 
 // AnomalyKind 说明这一天是怎么不对劲的。
@@ -169,7 +172,9 @@ type MetricAnomaly struct {
 	Median   float64 `json:"median"`
 	// Deviation 是偏离中位数多少个 MAD。
 	Deviation float64 `json:"deviation"`
-	Note      string  `json:"note"`
+	// 异常永远只到 👁：这一天不对劲是事实，为什么不对劲这里答不了。
+	// 所以档位固定 directional，不随样本量变动。
+	Judgement
 }
 
 // FeatureDriver 是「哪一类内容特征伴随更好的表现」。
@@ -196,9 +201,8 @@ type FeatureDriver struct {
 	IntervalsOverlap bool          `json:"intervals_overlap"`
 	CTRLift          *float64      `json:"ctr_lift,omitempty"`
 
-	CovaryingFeatures []string        `json:"covarying_features,omitempty"`
-	Confidence        ConfidenceLevel `json:"confidence"`
-	Note              string          `json:"note"`
+	CovaryingFeatures []string `json:"covarying_features,omitempty"`
+	Judgement
 }
 
 // maxComparisonAssets 限制两两配对的规模。取花费最高的若干个素材配对，
@@ -379,7 +383,85 @@ func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping
 	if !analysis.Comparable {
 		analysis.Notes = append(analysis.Notes, "口径不一致："+analysis.ComparableReason+"。这一页所有对比结论都只能当方向性观察。")
 	}
+
+	// 屏级档位取最弱：六个视图里只要有一个说算不出来，整屏就不能标成能归因。
+	verdicts := make([]Verdict, 0, len(analysis.Comparisons)+len(analysis.Trends)+
+		len(analysis.Fatigue)+len(analysis.Anomalies)+len(analysis.Drivers))
+	for _, item := range analysis.Comparisons {
+		verdicts = append(verdicts, item.Verdict)
+	}
+	for _, item := range analysis.Trends {
+		verdicts = append(verdicts, item.Verdict)
+	}
+	for _, item := range analysis.Fatigue {
+		verdicts = append(verdicts, item.Verdict)
+	}
+	for _, item := range analysis.Anomalies {
+		verdicts = append(verdicts, item.Verdict)
+	}
+	for _, item := range analysis.Drivers {
+		verdicts = append(verdicts, item.Verdict)
+	}
+	weakest := weakestVerdict(verdicts...)
+	analysis.Judgement = Judgement{
+		Confidence:   worstConfidenceOf(analysis),
+		Verdict:      weakest,
+		VerdictLabel: weakest.Label(),
+		Upgrade:      weakest.Upgrade(),
+		Note:         screenNote(weakest, len(verdicts)),
+	}
 	return analysis
+}
+
+// worstConfidenceOf 给屏级档位配一个统计口径值，让 confidence 和 verdict 不打架。
+// 三档是从四档收敛来的，反过来一个 verdict 对应不止一个 confidence，
+// 这里取「最能解释为什么是这一档」的那个。
+func worstConfidenceOf(analysis PerformanceAnalysis) ConfidenceLevel {
+	worst := ConfidenceSufficient
+	rank := map[ConfidenceLevel]int{
+		ConfidenceLowSample:   0,
+		ConfidenceConfounded:  1,
+		ConfidenceDirectional: 2,
+		ConfidenceSufficient:  3,
+	}
+	seen := false
+	visit := func(level ConfidenceLevel) {
+		if !seen || rank[level] < rank[worst] {
+			worst, seen = level, true
+		}
+	}
+	for _, item := range analysis.Comparisons {
+		visit(item.Confidence)
+	}
+	for _, item := range analysis.Trends {
+		visit(item.Confidence)
+	}
+	for _, item := range analysis.Fatigue {
+		visit(item.Confidence)
+	}
+	for _, item := range analysis.Anomalies {
+		visit(item.Confidence)
+	}
+	for _, item := range analysis.Drivers {
+		visit(item.Confidence)
+	}
+	if !seen {
+		return ConfidenceLowSample
+	}
+	return worst
+}
+
+func screenNote(verdict Verdict, items int) string {
+	if items == 0 {
+		return "这个窗口里还没有能出结论的数据。"
+	}
+	switch verdict {
+	case VerdictExplained:
+		return "这一屏的结论都站得住，可以直接用。"
+	case VerdictObserved:
+		return "这一屏里有结论归不到具体变量上，只能当观察看。"
+	}
+	return "这一屏里有结论连差异存不存在都判断不了。"
 }
 
 // assignFeatures 把特征贴到素材上。同一个 key 有 AI 行和人工行时以人工为准
@@ -476,7 +558,7 @@ func buildComparisons(ordered []*assetSlice, comparable bool, notes *[]string) [
 		}
 	}
 	sort.Slice(comparisons, func(i, j int) bool {
-		return verdictRank(comparisons[i].Verdict) < verdictRank(comparisons[j].Verdict)
+		return verdictRank(comparisons[i].VariantVerdict) < verdictRank(comparisons[j].VariantVerdict)
 	})
 	return comparisons
 }
@@ -547,36 +629,44 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 	}
 	switch {
 	case len(baseline.features) == 0 || len(variant.features) == 0:
-		result.Verdict, result.Confidence = VerdictNoFeatures, ConfidenceConfounded
-		result.Note = "至少一边没有内容特征，两个素材之间到底改了什么无从判断。数字上的差异不能算到任何变量头上。"
+		result.VariantVerdict = VerdictNoFeatures
+		result.Judgement = judge(ConfidenceConfounded,
+			"至少一边没有内容特征，两个素材之间到底改了什么无从判断。数字上的差异不能算到任何变量头上。")
 	case minImpressions < directionalSampleImpressions:
-		result.Verdict, result.Confidence = VerdictLowSample, ConfidenceLowSample
-		result.Note = fmt.Sprintf("样本较少的一边只有 %s 次展示，不到 %s 次的方向性门槛，先不谈差异。",
-			countText(minImpressions), countText(directionalSampleImpressions))
+		result.VariantVerdict = VerdictLowSample
+		result.Judgement = judge(ConfidenceLowSample,
+			fmt.Sprintf("样本较少的一边只有 %s 次展示，不到 %s 次的方向性门槛，先不谈差异。",
+				countText(minImpressions), countText(directionalSampleImpressions)))
 	case len(result.ChangedFeatures) == 0:
-		result.Verdict, result.Confidence = VerdictConfounded, ConfidenceConfounded
-		result.Note = "两个素材在已记录的特征上完全一致，差异来自特征体系没覆盖到的地方——可能是投放设置、时段或受众，不是内容。"
+		result.VariantVerdict = VerdictConfounded
+		result.Judgement = judge(ConfidenceConfounded,
+			"两个素材在已记录的特征上完全一致，差异来自特征体系没覆盖到的地方——可能是投放设置、时段或受众，不是内容。")
 	case len(result.ChangedFeatures) > 1:
-		result.Verdict, result.Confidence = VerdictConfounded, ConfidenceConfounded
-		result.Note = fmt.Sprintf("这一对同时改了 %d 个变量（%s），差异归不到其中任何一个上。要归因得再做一组只改一个变量的素材。",
-			len(result.ChangedFeatures), joinFeatureLabels(result.ChangedFeatures))
+		result.VariantVerdict = VerdictConfounded
+		result.Judgement = judge(ConfidenceConfounded,
+			fmt.Sprintf("这一对同时改了 %d 个变量（%s），差异归不到其中任何一个上。要归因得再做一组只改一个变量的素材。",
+				len(result.ChangedFeatures), joinFeatureLabels(result.ChangedFeatures)))
 	case result.IntervalsOverlap:
-		result.Verdict, result.Confidence = VerdictDirectional, ConfidenceDirectional
-		result.Note = fmt.Sprintf("只改了「%s」，但两边的点击率置信区间重叠，差异可能只是波动。方向可以参考，不能当结论。",
-			result.ChangedFeatures[0].Label)
+		result.VariantVerdict = VerdictDirectional
+		result.Judgement = judge(ConfidenceDirectional,
+			fmt.Sprintf("只改了「%s」，但两边的点击率置信区间重叠，差异可能只是波动。方向可以参考，不能当结论。",
+				result.ChangedFeatures[0].Label))
 	case minImpressions < sufficientSampleImpressions:
-		result.Verdict, result.Confidence = VerdictDirectional, ConfidenceDirectional
-		result.Note = fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %s 次展示的充分门槛。",
-			result.ChangedFeatures[0].Label, countText(sufficientSampleImpressions))
+		result.VariantVerdict = VerdictDirectional
+		result.Judgement = judge(ConfidenceDirectional,
+			fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %s 次展示的充分门槛。",
+				result.ChangedFeatures[0].Label, countText(sufficientSampleImpressions)))
 	default:
-		result.Verdict, result.Confidence = VerdictAttributable, ConfidenceSufficient
-		result.Note = fmt.Sprintf("只改了「%s」，其余 %d 个特征取值相同，样本充分且区间不重叠——这个差异可以归到这个变量上。",
-			result.ChangedFeatures[0].Label, result.ControlledCount)
+		result.VariantVerdict = VerdictAttributable
+		result.Judgement = judge(ConfidenceSufficient,
+			fmt.Sprintf("只改了「%s」，其余 %d 个特征取值相同，样本充分且区间不重叠——这个差异可以归到这个变量上。",
+				result.ChangedFeatures[0].Label, result.ControlledCount))
 	}
 	// 口径不一致会把所有归因打回方向性：差异可能全部来自口径本身。
-	if !comparable && result.Verdict == VerdictAttributable {
-		result.Verdict, result.Confidence = VerdictDirectional, ConfidenceConfounded
-		result.Note += "（但窗口内口径不一致，这一条降级为方向性观察。）"
+	if !comparable && result.VariantVerdict == VerdictAttributable {
+		result.VariantVerdict = VerdictDirectional
+		result.Judgement = judge(ConfidenceConfounded,
+			result.Note+"（但窗口内口径不一致，这一条降级为方向性观察。）")
 	}
 	return result
 }
@@ -626,7 +716,6 @@ func buildTrends(ordered []*assetSlice) []AssetTrend {
 		trend := AssetTrend{
 			AssetID: slice.assetID, AssetTitle: slice.title, AssetType: slice.kind,
 			ActiveDays: len(dates),
-			Confidence: confidenceOf(slice.total, true, len(slice.objects)),
 			// 同 ChangedFeatures：空切片要初始化，nil 序列化成 null 会崩掉前端。
 			Points: make([]PerformancePoint, 0, len(dates)),
 		}
@@ -636,18 +725,25 @@ func buildTrends(ordered []*assetSlice) []AssetTrend {
 		}
 		first, second := splitHalves(slice)
 		trend.CTRChange = relativeChange(RatesOf(first).CTR, RatesOf(second).CTR)
+		confidence := confidenceOf(slice.total, true, len(slice.objects))
+		var note string
 		switch {
 		case len(dates) < minTrendDays:
-			trend.Direction, trend.Note = "unknown", fmt.Sprintf("窗口内只有 %d 天有数据，看不出走势。", len(dates))
+			trend.Direction, note = "unknown", fmt.Sprintf("窗口内只有 %d 天有数据，看不出走势。", len(dates))
+			// 同疲劳那边：天数不够就没有走势可言，曝光量再大也换不来天数。
+			// 不压档位的话，页面上会出现「看不出走势 · 置信充分」。
+			confidence = ConfidenceLowSample
 		case trend.CTRChange == nil:
-			trend.Direction, trend.Note = "unknown", "前半段没有展示，算不出变化，不能当成持平。"
+			trend.Direction, note = "unknown", "前半段没有展示，算不出变化，不能当成持平。"
+			confidence = ConfidenceLowSample
 		case *trend.CTRChange <= -0.15:
-			trend.Direction, trend.Note = "declining", "后半段点击率明显低于前半段。"
+			trend.Direction, note = "declining", "后半段点击率明显低于前半段。"
 		case *trend.CTRChange >= 0.15:
-			trend.Direction, trend.Note = "rising", "后半段点击率明显高于前半段。"
+			trend.Direction, note = "rising", "后半段点击率明显高于前半段。"
 		default:
-			trend.Direction, trend.Note = "flat", "前后两段点击率变化在 ±15% 以内。"
+			trend.Direction, note = "flat", "前后两段点击率变化在 ±15% 以内。"
 		}
+		trend.Judgement = judge(confidence, note)
 		trends = append(trends, trend)
 	}
 	return trends
@@ -683,7 +779,6 @@ func buildFatigue(ordered []*assetSlice, window MetricWindow) []FatigueSignal {
 			CTRChange:        relativeChange(firstRates.CTR, secondRates.CTR),
 			CPAChange:        relativeChange(firstRates.CPACents, secondRates.CPACents),
 			ImpressionChange: relativeChange(floatOf(first.Impressions), floatOf(second.Impressions)),
-			Confidence:       confidenceOf(slice.total, true, len(slice.objects)),
 			Severity:         FatigueNone,
 		}
 
@@ -691,26 +786,29 @@ func buildFatigue(ordered []*assetSlice, window MetricWindow) []FatigueSignal {
 		cpaUp := signal.CPAChange != nil && *signal.CPAChange >= 0.2
 		impressionsUp := signal.ImpressionChange != nil && *signal.ImpressionChange >= 0.1
 
+		confidence := confidenceOf(slice.total, true, len(slice.objects))
+		var note string
 		switch {
 		case len(slice.dates()) < minTrendDays:
-			signal.Note = fmt.Sprintf("只有 %d 天数据，疲劳要看趋势，天数不够就没有趋势可看。", len(slice.dates()))
+			note = fmt.Sprintf("只有 %d 天数据，疲劳要看趋势，天数不够就没有趋势可看。", len(slice.dates()))
 			// 曝光量再大也换不来天数。这里必须把置信压到 low_sample，否则页面上会
 			// 出现「没有疲劳迹象 · 置信充分」——那是在说「查过了，没问题」，
 			// 而实际情况是「压根没法查」。这两句话对读者的意义完全相反。
-			signal.Confidence = ConfidenceLowSample
+			confidence = ConfidenceLowSample
 		case ctrDown && impressionsUp:
 			// 03 §7.4 点名的典型形态：曝光继续放大，点击却掉下来。
 			signal.Severity = FatigueLikely
-			signal.Note = "曝光还在放大，点击率却明显下滑——这是素材疲劳最典型的形态。"
+			note = "曝光还在放大，点击率却明显下滑——这是素材疲劳最典型的形态。"
 		case ctrDown && cpaUp:
 			signal.Severity = FatigueLikely
-			signal.Note = "点击率下滑的同时单次转化成本上升，效率在双向恶化。"
+			note = "点击率下滑的同时单次转化成本上升，效率在双向恶化。"
 		case ctrDown || cpaUp:
 			signal.Severity = FatigueWatch
-			signal.Note = "有一项指标在恶化，但另一项没有同向变化，还不足以判定为素材衰退。"
+			note = "有一项指标在恶化，但另一项没有同向变化，还不足以判定为素材衰退。"
 		default:
-			signal.Note = "后半段没有出现点击率下滑或成本上升，这一轮看不到疲劳迹象。"
+			note = "后半段没有出现点击率下滑或成本上升，这一轮看不到疲劳迹象。"
 		}
+		signal.Judgement = judge(confidence, note)
 
 		if signal.Severity != FatigueNone {
 			signal.AlternativeExplanations = fatigueAlternatives(signal, slice, window)
@@ -795,7 +893,8 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 			anomalies = append(anomalies, MetricAnomaly{
 				Date: date, Scope: "project", Metric: "spend_cents", Kind: kind,
 				Observed: spends[index], Median: median, Deviation: deviation,
-				Note: fmt.Sprintf("这一天全项目花费明显%s于窗口内的常态水平，先确认是投放动作还是数据问题，再解释素材表现。", word),
+				Judgement: judge(ConfidenceDirectional,
+					fmt.Sprintf("这一天全项目花费明显%s于窗口内的常态水平，先确认是投放动作还是数据问题，再解释素材表现。", word)),
 			})
 		}
 	}
@@ -871,7 +970,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 				Date: dates[hit.index], Scope: "asset", AssetID: slice.assetID, AssetTitle: slice.title,
 				Metric: "impressions", Kind: kind,
 				Observed: impressions[hit.index], Median: assetMedian, Deviation: hit.deviation,
-				Note: note,
+				Judgement: judge(ConfidenceDirectional, note),
 			})
 		}
 	}
@@ -886,8 +985,9 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 		anomalies = append(anomalies, MetricAnomaly{
 			Date: gaps[0], Scope: "asset", AssetID: slice.assetID, AssetTitle: slice.title,
 			Metric: "impressions", Kind: AnomalyGap,
-			Note: fmt.Sprintf("这个素材在投放期间有 %d 天没有数据（从 %s 起）。断档期间是停投还是没回流，这里分不出来，但趋势和疲劳都会因此算偏。",
-				len(gaps), gaps[0]),
+			Judgement: judge(ConfidenceDirectional,
+				fmt.Sprintf("这个素材在投放期间有 %d 天没有数据（从 %s 起）。断档期间是停投还是没回流，这里分不出来，但趋势和疲劳都会因此算偏。",
+					len(gaps), gaps[0])),
 		})
 	}
 
@@ -1068,8 +1168,9 @@ func buildDriver(kind AssetType, key, value string, inGroup, rest []*assetSlice,
 	driver.IntervalsOverlap = comparison.IntervalsOverlap
 	driver.CTRLift = comparison.CTRLift
 	driver.CovaryingFeatures = comparison.CovaryingFeatures
-	driver.Confidence = comparison.Confidence
-	driver.Note = comparison.Note
+	// 整块搬 Judgement 而不是逐字段拷：档位、理由、升级通道要么一起来自组间判定，
+	// 要么就会出现「档位是这次算的、理由是上次的」。
+	driver.Judgement = comparison.Judgement
 	return driver
 }
 

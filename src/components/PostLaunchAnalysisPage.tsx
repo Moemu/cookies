@@ -305,7 +305,7 @@ function ComparisonList({ items }: { items: ApiVariantComparison[] }) {
       key={`${item.baseline_asset_id}-${item.variant_asset_id}`}>
       <header>
         <b>{item.baseline_title} ↔ {item.variant_title}</b>
-        <em className={verdictTone[item.verdict]}>{verdictLabels[item.verdict]}</em>
+        <em className={verdictTone[item.variant_verdict]}>{verdictLabels[item.variant_verdict]}</em>
       </header>
       <p>{item.note}</p>
 
