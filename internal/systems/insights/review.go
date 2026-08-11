@@ -32,6 +32,18 @@ func (r SubmitReviewRequest) Validate() error {
 	return nil
 }
 
+// hasContent 判断这份复盘要不要出现在列表里。
+//
+// 空草稿是「记一笔」自动建了但人什么都没记的残留。它和「人记了又全删了」不一样：
+// 后者是一个明确的决定——这一轮我看过，什么都不值得留——清掉它等于抹掉那个决定。
+// 所以判据是 digest 长度，不是「有几条没被删」。
+func hasContent(report InsightReport) bool {
+	if report.Status != ReportDraft {
+		return true
+	}
+	return len(report.Digest) > 0
+}
+
 // checkSubmittable 单独拆出来，是为了让「什么样的复盘能提交」这条规则
 // 能被直接测到，不用先造一个仓储。
 func checkSubmittable(report InsightReport, expectedVersion int64) error {

@@ -153,6 +153,20 @@ func (r MySQLRepository) ConfirmReport(ctx context.Context, organizationID contr
 	return r.GetReport(ctx, organizationID, projectID, id)
 }
 
+// PurgeEmptyDrafts 清掉过了保留期还是一条发现都没有的草稿。
+//
+// 只按 created_at 删会连真的复盘草稿一起删掉，所以必须同时看内容：
+// JSON_LENGTH(digest) = 0 才是「记一笔建了但人什么都没记」的残留。
+func (r MySQLRepository) PurgeEmptyDrafts(ctx context.Context, before time.Time) (int64, error) {
+	result, err := r.DB.ExecContext(ctx,
+		`DELETE FROM insight_reports WHERE status = ? AND created_at < ? AND JSON_LENGTH(digest) = 0`,
+		ReportDraft, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // SubmitReport 补执行 ID、写入定格后的 digest、置为已确认——一条 UPDATE 做完。
 //
 // 分成三次写会留下「已确认但没有系统发现」的报告，而它看起来和正常的一模一样，

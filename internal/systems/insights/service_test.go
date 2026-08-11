@@ -670,6 +670,16 @@ func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contr
 	r.reports[id] = value
 	return value, nil
 }
+func (r *memoryRepository) PurgeEmptyDrafts(_ context.Context, before time.Time) (int64, error) {
+	purged := int64(0)
+	for id, value := range r.reports {
+		if value.Status == ReportDraft && len(value.Digest) == 0 && value.CreatedAt.Before(before) {
+			delete(r.reports, id)
+			purged++
+		}
+	}
+	return purged, nil
+}
 func (r *memoryRepository) SubmitReport(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, executionID string, digest []ReportFinding, actorID string, at time.Time) (InsightReport, error) {
 	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
 	if err != nil {

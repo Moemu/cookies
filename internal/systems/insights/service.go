@@ -439,6 +439,10 @@ type Repository interface {
 		reportID string, expectedVersion int64, executionID string, digest []ReportFinding,
 		actorID string, at time.Time) (InsightReport, error)
 	UpdateReportDigest(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, []ReportFinding, time.Time) (InsightReport, error)
+	// PurgeEmptyDrafts 删掉 before 之前建的、一条发现都没有的草稿。
+	// 它们是「记一笔」建了但人什么都没记的残留，不删会一直占着
+	// (项目 + 窗口) 的唯一键。
+	PurgeEmptyDrafts(ctx context.Context, before time.Time) (int64, error)
 	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
 	ReviseExperience(context.Context, ReviseExperienceInput) (Experience, error)
 	ListExperiences(context.Context, contract.OrganizationID, contract.ProjectID, ExperienceStatus, int) ([]Experience, error)
@@ -689,7 +693,29 @@ func (s Service) ListReports(ctx context.Context, actor contract.ActorContext, p
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
-	return s.Repository.ListReports(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	values, err := s.Repository.ListReports(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	// 空草稿不列出来。它是「记一笔」自动建了但人什么都没记的残留，
+	// 列出来只会让真正有内容的那几份混在一堆空壳里。
+	visible := make([]InsightReport, 0, len(values))
+	for _, value := range values {
+		if hasContent(value) {
+			visible = append(visible, value)
+		}
+	}
+	return visible, nil
+}
+
+// emptyDraftRetention 是空草稿保留多久。30 天：一个投放周期通常一个月内结束，
+// 超过一个月还没记过任何东西的草稿，人已经不会回来了。
+const emptyDraftRetention = 30 * 24 * time.Hour
+
+// PurgeEmptyDrafts 由维护命令调用，不走 actor 鉴权——它删的是没有内容的残留，
+// 不属于任何人的数据。
+func (s Service) PurgeEmptyDrafts(ctx context.Context) (int64, error) {
+	return s.Repository.PurgeEmptyDrafts(ctx, s.now().Add(-emptyDraftRetention))
 }
 
 func (s Service) ConfirmReport(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, reportID string, expectedVersion int64) (InsightReport, error) {

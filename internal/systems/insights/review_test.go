@@ -64,6 +64,38 @@ func TestSubmitReviewRejectsAlreadyConfirmedReports(t *testing.T) {
 	}
 }
 
+// 空草稿不该出现在复盘列表里。
+//
+// 草稿是「记一笔」自动建的（P1），人从来不主动建复盘。所以一份没有任何发现的草稿，
+// 意味着人只是打开看了看——把它列出来，复盘列表很快就会被一堆空壳填满，
+// 而真正有内容的那几份混在里面找不着。
+func TestEmptyDraftsAreHiddenFromTheList(t *testing.T) {
+	t.Parallel()
+
+	empty := InsightReport{Status: ReportDraft, Digest: []ReportFinding{}}
+	if hasContent(empty) {
+		t.Error("没有任何发现的草稿应该算没被碰过")
+	}
+
+	touched := InsightReport{Status: ReportDraft, Digest: []ReportFinding{{Text: "记了一笔"}}}
+	if !hasContent(touched) {
+		t.Error("有发现的草稿应该显示")
+	}
+
+	// 人把唯一那条删了，草稿仍然算被碰过：他做过一个明确的决定，
+	// 这份草稿代表「这一轮我看过，什么都不值得留」。清掉它等于抹掉那个决定。
+	emptied := InsightReport{Status: ReportDraft, Digest: []ReportFinding{{Text: "记了一笔", Dropped: true}}}
+	if !hasContent(emptied) {
+		t.Error("删空了的草稿仍然算被碰过")
+	}
+
+	// 已确认的复盘不管有没有发现都要显示——它是这一轮的正式记录。
+	confirmed := InsightReport{Status: ReportConfirmed, Digest: []ReportFinding{}}
+	if !hasContent(confirmed) {
+		t.Error("已确认的复盘永远显示")
+	}
+}
+
 func TestSubmitReviewChecksVersion(t *testing.T) {
 	t.Parallel()
 
