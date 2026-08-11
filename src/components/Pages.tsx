@@ -10,9 +10,8 @@ import { TrendChart } from './Icons'
 import { ApprovalCenterPage, ArtifactFlow, DeliveryPlanPage, ImageTextCreationPage, VideoCreationPage } from './SpecializedPages'
 import { PreLaunchInsightPage } from './PreLaunchInsightPage'
 import { shortId } from '../data/shortId'
-import { AssetLibraryPage } from './AssetLibraryPage'
-import { ContentAnalysisPage } from './ContentAnalysisPage'
-import { DataConnectionsPage } from './DataConnectionsPage'
+// 原「分析素材库」「内容分析」「数据接入」三个页面不再直接挂在导航上，
+// 它们现在由 insight/assets 下的视图委托使用，这里不再 import。
 import { CapabilityOperationsPage } from './CapabilityOperationsPage'
 import { ExperimentCenterPage } from './ExperimentCenterPage'
 import { AnalysisPage, type AnalysisView } from './insight/analysis'
@@ -1524,14 +1523,12 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'analysis' ? <AnalysisPage state={dataState} view={analysisViews[activeView] ?? 'overview'} onOpenExperiments={() => onOpenProject(currentProject.id, 'insight', 'experiments')}/>
-    : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetsPage
       state={dataState}
       view={assetsViews[activeView] ?? 'overview'}
       onOpenView={setActiveView}
       onOpenLibrary={() => onOpenProject(currentProject.id, 'creative', 'production', undefined, '源素材')}
       onOpenAnalysis={() => onOpenProject(currentProject.id, 'insight', 'analysis')}/>
-    : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
