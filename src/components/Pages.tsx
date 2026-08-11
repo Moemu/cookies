@@ -16,6 +16,7 @@ import { DataConnectionsPage } from './DataConnectionsPage'
 import { CapabilityOperationsPage } from './CapabilityOperationsPage'
 import { ExperimentCenterPage } from './ExperimentCenterPage'
 import { AnalysisPage, type AnalysisView } from './insight/analysis'
+import { AssetsPage, type AssetsView } from './insight/assets'
 import { ReviewPage, type ReviewView } from './insight/review'
 import { InsightSettingsPage } from './InsightSettingsPage'
 import { DataQualityPage } from './DataQualityPage'
@@ -1456,6 +1457,17 @@ const analysisViews: Record<string, AnalysisView> = {
   驱动因素: 'drivers',
 }
 
+// 素材入口的五个视图。数据接入和变量这两段是整页委托过去的，它们自己还有分段
+// （数据源/导入任务/…、按素材类型），那些分段名不在这张表里——落到默认值即可，
+// 委托过去的页面认得它们。
+const assetsViews: Record<string, AssetsView> = {
+  总览: 'overview',
+  数据接入: 'intake',
+  变量: 'features',
+  找相似: 'similar',
+  外部素材: 'external',
+}
+
 // 同理，认不出来的名字落到「本轮」——日常最常进的那一屏。
 const reviewViews: Record<string, ReviewView> = {
   本轮: 'current',
@@ -1513,7 +1525,12 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'analysis' ? <AnalysisPage state={dataState} view={analysisViews[activeView] ?? 'overview'} onOpenExperiments={() => onOpenProject(currentProject.id, 'insight', 'experiments')}/>
     : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'assets' ? <AssetsPage
+      state={dataState}
+      view={assetsViews[activeView] ?? 'overview'}
+      onOpenView={setActiveView}
+      onOpenLibrary={() => onOpenProject(currentProject.id, 'creative', 'production', undefined, '源素材')}
+      onOpenAnalysis={() => onOpenProject(currentProject.id, 'insight', 'analysis')}/>
     : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>

@@ -4055,3 +4055,125 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .pin-finding { border: 1px solid var(--line); background: none; border-radius: 6px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
 .pin-finding:disabled { opacity: .45; cursor: default; }
 .pin-finding.pinned { border-color: var(--success); color: var(--success); }
+
+/* 素材洞察 · 「素材」入口（P3）。原来的三个入口合成一屏，样式也只留这一处。 */
+
+/* 委托壳：数据接入和变量是整页委托过去的，上面加一排分段/一个下拉，
+   下面直接是旧页面自己的两栏布局，所以这一层不能再加内边距和边框。 */
+.assets-delegate { display: grid; gap: 0; }
+.assets-subtabs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--line); background: var(--subtle); }
+.assets-subtab { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.assets-subtab:hover { border-color: var(--cobalt); color: var(--text); }
+.assets-subtab.active { border-color: var(--cobalt); background: var(--cobalt-soft); color: var(--cobalt-dark); font-weight: 650; }
+.assets-subtabs label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.assets-subtabs select { height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.assets-subtab-hint { flex: 1 1 260px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+
+/* 总览。左右两栏不只是分类，是两种所有权，所以中间那道竖线要看得见。 */
+.assets-overview { display: grid; gap: 18px; padding: 20px 24px 24px; }
+.assets-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border: 1px solid var(--line); background: var(--surface); }
+.assets-column { min-width: 0; padding: 16px 18px; border-right: 1px solid var(--line); }
+.assets-column:last-child { border-right: 0; }
+.assets-column-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.assets-column-head .section-label { margin-bottom: 0; margin-right: auto; }
+.assets-column-lead { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.assets-mini-list { display: grid; margin: 10px 0 0; padding: 0; list-style: none; }
+.assets-mini-list > li { border-bottom: 1px solid var(--line); }
+.assets-mini-list > li:last-child { border-bottom: 0; }
+.assets-mini-list button, .assets-mini-list > li > span { display: grid; width: 100%; gap: 2px; padding: 8px 6px; background: transparent; text-align: left; }
+.assets-mini-list b { font-size: 10px; }
+.assets-mini-list small { color: var(--muted); font-size: 9px; }
+.assets-mini-list button:hover { background: var(--subtle); }
+.assets-mini-list button.active { background: var(--cobalt-soft); color: var(--cobalt-dark); }
+.assets-column .prelaunch-boundary { margin: 10px 0 0; }
+
+/* 落点行：上面两栏说「有什么」，这一行说「其中能真的拿去解释的有几条」。 */
+.assets-converge { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 13px 18px; border: 1px solid var(--line); background: var(--cobalt-soft); color: var(--cobalt-dark); font-size: 11px; }
+.assets-converge > svg { color: var(--cobalt); }
+.assets-converge > span { margin-right: auto; }
+.assets-converge b { font-size: 15px; }
+
+/* 三个队列。顺序就是优先级，红色那条永远第一。 */
+.assets-queues { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.assets-queue { display: grid; align-content: start; gap: 7px; padding: 14px 15px; border: 1px solid var(--line); border-top: 2px solid var(--line-strong); background: var(--surface); }
+.assets-queue.urgent { border-top-color: var(--danger); background: oklch(.985 .012 25); }
+.assets-queue.urgent strong { color: var(--danger); }
+.assets-queue-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.assets-queue-head strong { font-size: 12px; }
+.assets-queue-head .secondary-button { height: 26px; padding: 0 10px; font-size: 9px; }
+.assets-queue > p { color: var(--muted); font-size: 9px; line-height: 1.65; }
+.assets-queue > small { color: var(--muted); font-size: 9px; line-height: 1.5; }
+
+/* 找相似。 */
+.similar-view { display: grid; padding: 18px 24px 24px; }
+.similar-search { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); background: var(--subtle); }
+.similar-search label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.similar-search select, .similar-search input { height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.similar-search select { max-width: 260px; }
+.similar-search .secondary-button { height: 30px; padding: 0 12px; font-size: 10px; }
+.similar-view .feature-stack b { display: inline-flex; align-items: center; gap: 5px; }
+.similar-view .feature-stack b > button { display: grid; place-items: center; padding: 0; background: transparent; color: inherit; }
+.similar-panel { margin-top: 14px; border: 1px solid var(--line); background: var(--surface); }
+.similar-probe { padding: 11px 15px; border-bottom: 1px solid var(--line); background: var(--subtle); color: var(--text); font-size: 10px; line-height: 1.6; }
+.similar-note { padding: 10px 15px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.6; }
+.similar-list { margin: 0; padding: 0; list-style: none; }
+.similar-list > li { padding: 12px 15px; border-bottom: 1px solid var(--line); }
+.similar-list > li:last-child { border-bottom: 0; }
+.similar-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; }
+.similar-head strong { font-size: 11px; }
+.similar-count { color: var(--cobalt-dark); font-size: 9px; font-weight: 650; }
+.similar-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.similar-reasons > li { padding: 4px 8px; border-radius: 10px; background: var(--subtle); color: var(--text); font-size: 9px; }
+.similar-reasons small { color: var(--muted); }
+
+/* 外部素材。左边是收过的，右边是收一条。 */
+.external-view { display: grid; padding: 18px 24px 24px; }
+.external-columns { display: grid; grid-template-columns: minmax(0, 1fr) 300px; margin-top: 12px; border: 1px solid var(--line); background: var(--surface); }
+.external-list { min-width: 0; border-right: 1px solid var(--line); }
+.external-items { margin: 0; padding: 0; list-style: none; }
+.external-items > li { display: grid; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.external-items > li:last-child { border-bottom: 0; }
+.external-items small { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.external-head { display: flex; flex-wrap: wrap; gap: 9px; align-items: baseline; }
+.external-head strong { font-size: 11px; }
+.external-purpose { padding: 2px 8px; border-radius: 999px; background: var(--cobalt-soft); color: var(--cobalt-dark); font-size: 9px; font-weight: 650; }
+/* 到期日单独一行、不缩成灰字：原件被清掉之前，这是唯一的提醒。 */
+.external-retention { color: var(--warning); font-size: 9px; font-weight: 650; }
+.external-form { display: grid; align-content: start; gap: 11px; padding: 16px; }
+.external-form label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.external-form input, .external-form select, .external-form textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.external-form textarea { min-height: 64px; resize: vertical; line-height: 1.6; }
+.external-form .secondary-button { justify-content: center; height: 32px; font-size: 11px; }
+.external-purpose-field { display: grid; gap: 8px; margin: 0; padding: 11px 12px; border: 1px solid var(--line); background: var(--subtle); }
+.external-purpose-field legend { padding: 0 5px; color: var(--muted); font-size: 9px; font-weight: 650; }
+.external-purpose-field > label { display: grid; grid-template-columns: 16px 1fr; gap: 4px 8px; align-items: center; color: var(--text); font-size: 10px; }
+.external-purpose-field > label > small { grid-column: 2; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.external-purpose-field input { width: 14px; height: 14px; padding: 0; }
+
+/* 单条素材：上下两截视觉上分开，上半截是素材库那边的，下半截才是洞察自己的。 */
+.asset-detail { display: grid; }
+.asset-detail-upper { padding-bottom: 16px; border-bottom: 2px solid var(--line-strong); }
+.asset-detail-upper-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.asset-detail-upper-head .section-label { margin-bottom: 0; }
+.asset-detail-upper-head .secondary-button { height: 26px; padding: 0 10px; font-size: 9px; }
+.asset-detail-upper h3 { margin-top: 8px; font-size: 15px; line-height: 1.4; }
+.asset-detail-upper > p { margin-top: 6px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.asset-detail-lower { padding-top: 16px; }
+.asset-detail-lower .feature-stack { margin: 14px 0; }
+.asset-detail-lower .feature-stack b { display: inline-flex; align-items: baseline; gap: 3px; }
+.asset-detail-lower .feature-stack small { color: var(--muted); font-size: 8px; }
+
+/* 三来源里少的那一档：derived 是量出来的，颜色和人标的分开，但同属可归因。 */
+.content-layer.derived { color: var(--cobalt); font-weight: 650; }
+
+/* 通用小件：文字按钮、表单提示、表单报错。 */
+.link-button { display: inline-flex; align-items: center; gap: 4px; padding: 0; background: transparent; color: var(--cobalt-dark); font-size: 9px; font-weight: 650; }
+.link-button:hover { text-decoration: underline; }
+.form-hint { color: var(--muted); font-size: 9px; line-height: 1.6; }
+.form-error { margin-top: 12px; padding: 9px 12px; border: 1px solid oklch(.85 .09 25); background: oklch(.975 .02 25); color: var(--danger); font-size: 10px; line-height: 1.6; }
+
+@media (max-width: 1180px) {
+  .assets-queues { grid-template-columns: minmax(0, 1fr); }
+  .external-columns { grid-template-columns: minmax(0, 1fr); }
+  .external-list { border-right: 0; border-bottom: 1px solid var(--line); }
+}

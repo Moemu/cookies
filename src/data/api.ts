@@ -1520,6 +1520,57 @@ export type ApiFeatureMatrix = {
   disclosure: string
 }
 
+// 相似素材（internal/systems/insights/similar.go）。
+//
+// 「像在哪」必须说得出来，所以每条结果都带 reasons；带 source 是因为读的人有权
+// 知道这一条相似是量出来的、人标的，还是模型猜的——三者在复盘会上的分量不一样。
+export type ApiSimilarityReason = {
+  key: string
+  label: string
+  value: string
+  source: ApiFeatureSource
+}
+
+export type ApiSimilarAsset = {
+  asset_id: string
+  title: string
+  // overlap 是重叠的变量数，admissible_overlap 是其中能进归因的那些（量出来的 + 人标的）。
+  // 前者回答「像不像」，后者回答「拉进来之后能不能真的做归因」。
+  overlap: number
+  admissible_overlap: number
+  score: number
+  reasons: ApiSimilarityReason[]
+}
+
+export type ApiSimilarAssetResult = {
+  // probe 是这次检索按哪几个变量找的。不给出来，人没法判断结果值不值得信。
+  probe: ApiSimilarityReason[]
+  items: ApiSimilarAsset[]
+  note?: string
+}
+
+// 外部素材（internal/systems/insights/external.go）。没有版本、没有血缘、没有状态。
+export type ApiExternalPurpose = 'benchmark' | 'reference'
+
+export type ApiExternalAsset = {
+  id: string
+  organization_id: string
+  project_id: string
+  title: string
+  source_note?: string
+  asset_type?: ApiInsightAssetType
+  purpose: ApiExternalPurpose
+  purpose_note?: string
+  storage_key?: string
+  // original_purged 为 true 表示原件已按留存期清掉，只剩下人标的变量。
+  original_purged: boolean
+  features: Record<string, ApiFeatureValue>
+  retention_until: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
 export type ApiInsightAssetFilter = {
   statuses?: ApiAnalysisStatus[]
   assetTypes?: ApiInsightAssetType[]
@@ -4351,6 +4402,26 @@ export const api = {
     request<ApiFeatureMatrix>(
       `${insightProjectPath(projectId)}/feature-matrix?asset_ids=${encodeURIComponent(assetIds.join(','))}`,
     ),
+  // 找相似素材。两种问法：给素材 ID 问「和它像的还有哪些」，或者给一组变量取值问
+  // 「时长 15 秒的还有哪些」。后一种是 ❓「算不出来」的升级通道。
+  findSimilarAssets: (projectId: string, body: {
+    asset_id?: string
+    features?: Record<string, string>
+    limit?: number
+  }) => request<ApiSimilarAssetResult>(`${insightProjectPath(projectId)}/assets/similar`, 'POST', body),
+  // 外部素材。它们**永远不进共享素材库**：那里的素材可以被拿去投放，而这些没有
+  // 那份授权。收它们只有一个用处——解释本轮结果时有个参照。
+  importExternalAsset: (projectId: string, body: {
+    title: string
+    source_note: string
+    purpose: 'benchmark' | 'reference'
+    purpose_note?: string
+    asset_type?: string
+    window_end: string
+    features?: Record<string, string>
+  }) => request<ApiExternalAsset>(`${insightProjectPath(projectId)}/external-assets`, 'POST', body),
+  listExternalAssets: (projectId: string, limit = 50) =>
+    request<{ items: ApiExternalAsset[] }>(`${insightProjectPath(projectId)}/external-assets?limit=${limit}`),
   // 数据接入（doc10）。五个视图各自是一次不同的查询：数据源与字段映射读同一批行
   // 但看不同字段，导入任务与同步记录是同一张表按 kind 过滤（22 §8.3）。
   listDataSources: (projectId: string, filter: ApiDataSourceFilter = {}) => {
