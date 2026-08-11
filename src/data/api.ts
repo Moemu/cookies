@@ -1310,8 +1310,14 @@ export type ApiInsightAssetType =
 
 export type ApiAssetSourceKind = 'creative' | 'upload' | 'external'
 
-/** AI 推断与人工结论是两层，互不覆盖（03 §14）。 */
-export type ApiFeatureSource = 'ai' | 'human'
+/**
+ * AI 推断与人工结论是两层，互不覆盖（03 §14）。
+ *
+ * 三类的可信度不是一回事：derived 客观可测（从文件本身算出来的时长、分辨率、镜头数，
+ * 同一个文件算两遍结果一样）、human 人工标注、ai 模型推断。只有前两类能进归因结论；
+ * ai 行被人复核认可之后按 human 算。这条规则由后端执行，前端只读 admissible。
+ */
+export type ApiFeatureSource = 'ai' | 'human' | 'derived'
 
 export type ApiConfidence = 'low' | 'medium' | 'high'
 
@@ -1674,8 +1680,16 @@ export type ApiFeatureDiff = {
   group: string
   baseline: string
   variant: string
-  /** 该特征只能人工判定（AM-006），AI 不产出，缺失属正常。 */
-  human_only: boolean
+  /**
+   * 变量来源。derived 从文件算出、human 人工标注、ai 模型推断。
+   * 两侧来源不同时取更弱的那一个——只要有一边是猜的，这条差异就是猜的。
+   */
+  source: ApiFeatureSource
+  /**
+   * 这条差异能否进入归因结论。ai 来源恒为 false。为 false 的差异照样要显示出来，
+   * 只是不参与「改了几个变量」的计数——准入规则由后端定，前端不要再实现一遍。
+   */
+  admissible: boolean
 }
 
 /**

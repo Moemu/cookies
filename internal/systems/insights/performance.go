@@ -47,12 +47,56 @@ type PerformanceAnalysis struct {
 
 // FeatureDiff 是两个素材之间一个特征的取值差异，也就是 AM-009 说的「实验变量」。
 type FeatureDiff struct {
-	Key       string `json:"key"`
-	Label     string `json:"label"`
-	Group     string `json:"group"`
-	Baseline  string `json:"baseline"`
-	Variant   string `json:"variant"`
-	HumanOnly bool   `json:"human_only"`
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Group    string `json:"group"`
+	Baseline string `json:"baseline"`
+	Variant  string `json:"variant"`
+	// Source 是这个变量的来源。它决定这条差异能不能进结论——摆在结构体里
+	// 而不是让前端去猜，是因为「哪些变量算数」这件事只能有一个说法。
+	Source FeatureSource `json:"source"`
+	// Admissible 是 Source.AdmissibleForAttribution() 的结果，冗余一份给前端，
+	// 免得前端把准入规则再实现一遍。
+	Admissible bool `json:"admissible"`
+}
+
+// admissibleDiffs 挑出能进归因的那些差异。展示要给全，结论只能用这一部分。
+func admissibleDiffs(diffs []FeatureDiff) []FeatureDiff {
+	kept := make([]FeatureDiff, 0, len(diffs))
+	for _, diff := range diffs {
+		if diff.Admissible {
+			kept = append(kept, diff)
+		}
+	}
+	return kept
+}
+
+// weakestSource 取两侧里更弱的那个来源：ai 弱于 human 弱于 derived。只要有一侧
+// 是模型推断，这条差异就不能进归因——两个取值里有一个是猜的，差异本身就是猜的。
+// 只有一侧记了值时（另一侧显示「未记录」），以记了值的那一侧为准。
+func weakestSource(left, right featureCell) FeatureSource {
+	switch {
+	case left.value == "":
+		return right.source
+	case right.value == "":
+		return left.source
+	case sourceStrength(left.source) <= sourceStrength(right.source):
+		return left.source
+	default:
+		return right.source
+	}
+}
+
+func sourceStrength(source FeatureSource) int {
+	switch source {
+	case SourceDerived:
+		return 3
+	case SourceHuman:
+		return 2
+	case SourceAI:
+		return 1
+	}
+	return 0
 }
 
 // VariantVerdict 说明这一对素材的差异能不能归到某个变量上。
@@ -279,7 +323,33 @@ type assetSlice struct {
 	byDate  map[string]MetricCounts
 	objects map[string]struct{}
 	// features 只收「人工确认过的」和「AI 提取但没被拒绝的」，见 pickFeatures。
-	features map[string]string
+	// 带着来源一起存：展示可以用全部三类，归因只能用 derived 和 human。
+	features map[string]featureCell
+}
+
+// featureCell 是一个特征的取值加它的来源。来源不跟着值走，下游就只能假设
+// 「所有特征一样可信」——那是这个模块最贵的一个假设。
+type featureCell struct {
+	value  string
+	source FeatureSource
+}
+
+// featureValue 是展示口：三类来源都给。
+func (a *assetSlice) featureValue(key string) (string, bool) {
+	cell, ok := a.features[key]
+	if !ok || cell.value == "" {
+		return "", false
+	}
+	return cell.value, true
+}
+
+// attributableFeature 是归因口：只给 derived 和 human。
+func (a *assetSlice) attributableFeature(key string) (string, bool) {
+	cell, ok := a.features[key]
+	if !ok || cell.value == "" || !cell.source.AdmissibleForAttribution() {
+		return "", false
+	}
+	return cell.value, true
 }
 
 func (a *assetSlice) dates() []string {
@@ -316,7 +386,7 @@ func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping
 			slice = &assetSlice{
 				assetID: fact.AssetID, title: fact.AssetTitle, kind: fact.AssetType,
 				byDate: map[string]MetricCounts{}, objects: map[string]struct{}{},
-				features: map[string]string{},
+				features: map[string]featureCell{},
 			}
 			slices[fact.AssetID] = slice
 		}
@@ -495,7 +565,14 @@ func assignFeatures(slices map[string]*assetSlice, features []AssetFeature) {
 			}
 			human[feature.AssetID][feature.Key] = struct{}{}
 		}
-		slice.features[feature.Key] = text
+		// 存的是「有效来源」，不是原始来源：AI 提取但人被拉来看过并认可的行，
+		// 从此按人工标注算——有人为它背书了。没人看过的推断仍然是推断。
+		// 不这么做的话，「人工复核」这道工序对归因就毫无意义：复核完了还是进不了结论。
+		source := feature.Source
+		if confirmed {
+			source = SourceHuman
+		}
+		slice.features[feature.Key] = featureCell{value: text, source: source}
 	}
 }
 
@@ -610,8 +687,11 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 	sort.Strings(sorted)
 	for _, key := range sorted {
 		left, right := baseline.features[key], variant.features[key]
-		if left == right {
-			if left != "" {
+		source := weakestSource(left, right)
+		if left.value == right.value {
+			// 受控变量只数能进归因的那些：两边都是模型猜的「情绪一致」，
+			// 并不能让「只改了一个变量」这句话更站得住脚。
+			if left.value != "" && source.AdmissibleForAttribution() {
 				result.ControlledCount++
 			}
 			continue
@@ -619,7 +699,8 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 		field := fieldOf(baseline.kind, key)
 		result.ChangedFeatures = append(result.ChangedFeatures, FeatureDiff{
 			Key: key, Label: field.Label, Group: field.Group,
-			Baseline: orDash(left), Variant: orDash(right),
+			Baseline: orDash(left.value), Variant: orDash(right.value),
+			Source: source, Admissible: source.AdmissibleForAttribution(),
 		})
 	}
 
@@ -627,6 +708,9 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 	if variant.total.Impressions < minImpressions {
 		minImpressions = variant.total.Impressions
 	}
+	// 判定只看能进归因的那部分变量。模型推断的差异照样列在 ChangedFeatures 里给人看，
+	// 但不参与「改了几个变量」的计数——否则一条模型猜出来的差异就能撑起一个归因结论。
+	admissible := admissibleDiffs(result.ChangedFeatures)
 	switch {
 	case len(baseline.features) == 0 || len(variant.features) == 0:
 		result.VariantVerdict = VerdictNoFeatures
@@ -641,26 +725,31 @@ func compareAssets(baseline, variant *assetSlice, comparable bool) VariantCompar
 		result.VariantVerdict = VerdictConfounded
 		result.Judgement = judge(ConfidenceConfounded,
 			"两个素材在已记录的特征上完全一致，差异来自特征体系没覆盖到的地方——可能是投放设置、时段或受众，不是内容。")
-	case len(result.ChangedFeatures) > 1:
+	case len(admissible) == 0:
+		result.VariantVerdict = VerdictNoFeatures
+		result.Judgement = judge(ConfidenceConfounded,
+			fmt.Sprintf("两个素材的差异只出现在模型推断的变量上（%s）。模型推断不进结论——用一个猜测去解释另一个猜测，一层假设都没减少。要归因，先在内容分析里人工确认这几个变量。",
+				joinFeatureLabels(result.ChangedFeatures)))
+	case len(admissible) > 1:
 		result.VariantVerdict = VerdictConfounded
 		result.Judgement = judge(ConfidenceConfounded,
 			fmt.Sprintf("这一对同时改了 %d 个变量（%s），差异归不到其中任何一个上。要归因得再做一组只改一个变量的素材。",
-				len(result.ChangedFeatures), joinFeatureLabels(result.ChangedFeatures)))
+				len(admissible), joinFeatureLabels(admissible)))
 	case result.IntervalsOverlap:
 		result.VariantVerdict = VerdictDirectional
 		result.Judgement = judge(ConfidenceDirectional,
 			fmt.Sprintf("只改了「%s」，但两边的点击率置信区间重叠，差异可能只是波动。方向可以参考，不能当结论。",
-				result.ChangedFeatures[0].Label))
+				admissible[0].Label))
 	case minImpressions < sufficientSampleImpressions:
 		result.VariantVerdict = VerdictDirectional
 		result.Judgement = judge(ConfidenceDirectional,
 			fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %s 次展示的充分门槛。",
-				result.ChangedFeatures[0].Label, countText(sufficientSampleImpressions)))
+				admissible[0].Label, countText(sufficientSampleImpressions)))
 	default:
 		result.VariantVerdict = VerdictAttributable
 		result.Judgement = judge(ConfidenceSufficient,
 			fmt.Sprintf("只改了「%s」，其余 %d 个特征取值相同，样本充分且区间不重叠——这个差异可以归到这个变量上。",
-				result.ChangedFeatures[0].Label, result.ControlledCount))
+				admissible[0].Label, result.ControlledCount))
 	}
 	// 口径不一致会把所有归因打回方向性：差异可能全部来自口径本身。
 	if !comparable && result.VariantVerdict == VerdictAttributable {
@@ -1091,7 +1180,7 @@ func buildDrivers(ordered []*assetSlice, comparable bool) []FeatureDriver {
 		for _, key := range sortedKeys {
 			buckets := map[string][]*assetSlice{}
 			for _, slice := range group {
-				value, ok := slice.features[key]
+				value, ok := slice.attributableFeature(key)
 				if !ok {
 					continue
 				}
@@ -1119,7 +1208,7 @@ func buildDrivers(ordered []*assetSlice, comparable bool) []FeatureDriver {
 				}
 				rest := make([]*assetSlice, 0, len(group))
 				for _, slice := range group {
-					if slice.features[key] != value {
+					if current, _ := slice.attributableFeature(key); current != value {
 						rest = append(rest, slice)
 					}
 				}
@@ -1199,7 +1288,7 @@ func covaryingFeatures(target string, inGroup, rest []*assetSlice) []string {
 		}
 		differs := true
 		for _, slice := range rest {
-			value, ok := slice.features[key]
+			value, ok := slice.attributableFeature(key)
 			if !ok || value == groupValue {
 				differs = false
 				break
@@ -1215,7 +1304,7 @@ func covaryingFeatures(target string, inGroup, rest []*assetSlice) []string {
 func uniformValue(slices []*assetSlice, key string) (string, bool) {
 	var value string
 	for index, slice := range slices {
-		current, ok := slice.features[key]
+		current, ok := slice.attributableFeature(key)
 		if !ok {
 			return "", false
 		}

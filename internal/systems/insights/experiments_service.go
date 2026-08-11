@@ -366,7 +366,7 @@ func buildExperimentReadout(experiment Experiment, facts []MetricFactWithMapping
 			slice = &assetSlice{
 				assetID: fact.AssetID, title: fact.AssetTitle, kind: fact.AssetType,
 				byDate: map[string]MetricCounts{}, objects: map[string]struct{}{},
-				features: map[string]string{},
+				features: map[string]featureCell{},
 			}
 			slices[fact.AssetID] = slice
 		}

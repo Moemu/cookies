@@ -313,7 +313,7 @@ function ComparisonList({ items }: { items: ApiVariantComparison[] }) {
         <span>改动的变量（{(item.changed_features ?? []).length} 个）· 两侧一致的特征 {item.controlled_count} 个</span>
         {(item.changed_features ?? []).length
           ? (item.changed_features ?? []).map(diff => <b key={diff.key}>
-              {diff.label}：{diff.baseline} → {diff.variant}{diff.human_only ? '（只能人工判定）' : ''}
+              {diff.label}：{diff.baseline} → {diff.variant}{diff.admissible ? '' : '（模型推断，不计入结论）'}
             </b>)
           : <b>已记录的特征上两边完全一致。</b>}
       </div>

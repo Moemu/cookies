@@ -2121,10 +2121,17 @@ components:
     FeatureSource:
       type: string
       description: >-
-        The two data layers 03 §14 keeps apart. An AI inference and a human
+        The data layers 03 §14 keeps apart. An AI inference and a human
         conclusion for the same key are separate rows; neither overwrites the
         other, so re-running extraction cannot erase a person's decision.
-      enum: [ai, human]
+
+
+        三类的可信度不是一回事：derived 客观可测（从文件本身算出来的时长、分辨率、
+        镜头数，同一个文件算两遍结果一样）、human 人工标注（人会错，但人为自己填的
+        东西负责）、ai 模型推断（模型看着素材猜的）。只有前两类能进归因结论；
+        ai 行一旦被人复核认可（review_state=confirmed），从此按 human 算——
+        有人为它背书了。
+      enum: [ai, human, derived]
     Confidence:
       type: string
       description: Required on the AI layer, forbidden on the human layer (03 §5 末).
@@ -2862,16 +2869,24 @@ components:
     FeatureDiff:
       type: object
       description: 两个素材之间某个特征的取值差异。未记录的一侧写作「（未记录）」而不是空串。
-      required: [key, label, group, baseline, variant, human_only]
+      required: [key, label, group, baseline, variant, source, admissible]
       properties:
         key: { type: string }
         label: { type: string, description: 中文标签，直接可显示 }
         group: { type: string }
         baseline: { type: string }
         variant: { type: string }
-        human_only:
+        source:
+          type: string
+          enum: [ai, human, derived]
+          description: >-
+            变量来源。derived 从文件算出、human 人工标注、ai 模型推断。两侧来源
+            不同时取更弱的那一个——只要有一边是猜的，这条差异就是猜的。
+        admissible:
           type: boolean
-          description: 该特征只能人工判定（AM-006），AI 不产出，缺失属正常。
+          description: >-
+            这条差异能否进入归因结论。ai 来源恒为 false。为 false 的差异照样列出来
+            给人看，只是不参与「改了几个变量」的计数。
     VariantComparison:
       type: object
       description: |
