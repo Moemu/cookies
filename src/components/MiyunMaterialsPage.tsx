@@ -7,6 +7,7 @@ import {
   type ApiKnowledgeDocument,
   type ApiMiyunConnection,
   type ApiMiyunCrawlJob,
+  type ApiMiyunHandoff,
   type ApiMiyunMaterial,
   type ApiMiyunMaterialSnapshot,
   type ApiMiyunProductProfile,
@@ -86,6 +87,27 @@ export function miyunStateCopy(
   ];
   return { title, action };
 }
+
+export function miyunCrawlErrorCopy(job: {
+  last_error_kind?: string;
+  last_error_code?: string;
+}): string | undefined {
+  const kind = job.last_error_kind?.trim();
+  const code = job.last_error_code?.trim();
+  if (!kind) return undefined;
+  const suffix = code ? `（${code}）` : "";
+  switch (kind) {
+    case "auth_required":
+      return `米云授权已失效${suffix}；请先更新会话并重新验证连接。`;
+    case "rate_limited":
+      return `米云正在限流${suffix}；等待冷却结束后再重试。`;
+    case "invalid_request":
+    case "graphql_error":
+      return `米云未接受冻结的查询条件${suffix}；核对产品关键词、品类和日期窗口后再重试。`;
+    default:
+      return `安全错误码：${kind}${suffix}`;
+  }
+}
 export function latestMiyunCard(item: MaterialDetail) {
   return item.snapshots[0];
 }
@@ -132,6 +154,7 @@ export function MiyunMaterialsPage({
   const [connection, setConnection] = useState<ApiMiyunConnection | null>(null);
   const [profiles, setProfiles] = useState<ApiMiyunProductProfile[]>([]);
   const [jobs, setJobs] = useState<ApiMiyunCrawlJob[]>([]);
+  const [handoffs, setHandoffs] = useState<ApiMiyunHandoff[]>([]);
   const [materials, setMaterials] = useState<MaterialDetail[]>([]);
   const [assets, setAssets] = useState<ApiProjectMediaAsset[]>([]);
   const [documents, setDocuments] = useState<ApiKnowledgeDocument[]>([]);
@@ -150,6 +173,8 @@ export function MiyunMaterialsPage({
   const [categoryName, setCategoryName] = useState("");
   const [draft, setDraft] = useState<ApiMiyunProductProfile | null>(null);
   const [profileId, setProfileId] = useState("");
+  const [handoffMaterialIds, setHandoffMaterialIds] = useState<string[]>([]);
+  const [handoffProfileId, setHandoffProfileId] = useState("");
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<CardField>("material_score");
@@ -179,6 +204,7 @@ export function MiyunMaterialsPage({
         mediaAssets,
         documentPage,
         source,
+        handoffPage,
       ] = await Promise.all([
         api.listMiyunProductProfiles(currentProject.id),
         api.listMiyunCrawlJobs(currentProject.id),
@@ -186,6 +212,7 @@ export function MiyunMaterialsPage({
         api.listProjectMediaAssets(currentProject.id),
         api.listKnowledgeDocuments(currentProject.id),
         api.getMiyunProductSource(currentProject.id),
+        api.listMiyunHandoffs(currentProject.id),
       ]);
       const details = await Promise.all(
         materialPage.items.map(async (item) => {
@@ -210,6 +237,7 @@ export function MiyunMaterialsPage({
       setConnection(nextConnection);
       setProfiles(profilePage.items);
       setJobs(jobPage.items);
+      setHandoffs(handoffPage.items);
       setMaterials(details);
       setAssets(mediaAssets);
       setDocuments(documentPage.items);
@@ -239,6 +267,8 @@ export function MiyunMaterialsPage({
     setSearch("");
     setAssetRefs([]);
     setDocumentIds([]);
+    setHandoffMaterialIds([]);
+    setHandoffProfileId("");
   }, [currentProject.id, view]);
   const run = async (work: () => Promise<unknown>, message: string) => {
     setBusy(true);
@@ -309,6 +339,20 @@ export function MiyunMaterialsPage({
   const selectedDocuments = documents.filter((document) =>
     documentIds.includes(document.id),
   );
+  const handoffMaterials = materials.filter(
+    (material) =>
+      material.selection_status === "confirmed" &&
+      (material.import_status === "imported" ||
+        material.import_status === "deduplicated"),
+  );
+  const handoffProfiles = profiles.filter(
+    (profile) => profile.status === "confirmed",
+  );
+  const selectedHandoffMaterials = handoffMaterials.filter((material) =>
+    handoffMaterialIds.includes(material.id),
+  );
+  const selectedHandoffProfile =
+    handoffProfiles.find((profile) => profile.id === handoffProfileId);
   const toggle = (
     set: React.Dispatch<React.SetStateAction<string[]>>,
     id: string,
@@ -356,21 +400,39 @@ export function MiyunMaterialsPage({
           </button>
         </header>
         {view === "fission" ? (
-          <section className="panel-empty" role="note">
-            <b>裂变任务 · 未启用</b>
-            <small>
-              Goal 5
-              尚未启用。本页不设爆款阈值，不会自动确认、排除或创建裂变任务；请在素材候选中由人工逐项决定。
-            </small>
-          </section>
+          <>
+            <FissionTask
+              busy={busy}
+              loadState={loadState}
+              notice={notice}
+              materials={handoffMaterials}
+              profiles={handoffProfiles}
+              handoffs={handoffs}
+              selectedMaterialIds={selectedHandoffMaterials.map((material) => material.id)}
+              selectedProfileId={selectedHandoffProfile?.id ?? ""}
+              projectId={currentProject.id}
+              onMaterialChange={(id) => toggle(setHandoffMaterialIds, id)}
+              onProfileChange={setHandoffProfileId}
+              onCreate={() =>
+                run(
+                  () => api.createMiyunHandoff(currentProject.id, {
+                    source_material_ids: selectedHandoffMaterials.map((material) => material.id),
+                    product_profile_id: selectedHandoffProfile!.id,
+                  }, idempotencyKey()),
+                  "已创建版本化交接；下载成功后才会显示为已导出，交付仍需人工确认。",
+                )
+              }
+              onMarkDelivered={(handoff) =>
+                run(
+                  () => api.markMiyunHandoffDelivered(currentProject.id, handoff.id, handoff.version),
+                  "已人工标记为已交付。",
+                )
+              }
+              onRetry={() => void load()}
+            />
+          </>
         ) : (
           <>
-            <div className="miyun-fission-notice" role="note">
-              <b>裂变任务 · 未启用</b>
-              <span>
-                Goal 5 尚未启用：不会自动确认、排除素材或固定爆款阈值。
-              </span>
-            </div>
             {loadState === "loading" ? (
               <div className="panel-empty">
                 <b>{miyunStateCopy("loading").title}</b>
@@ -821,6 +883,9 @@ export function MiyunMaterialsPage({
                           {job.failed_count}
                         </small>
                         <small>{miyunStateCopy(job.status).action}</small>
+                        {miyunCrawlErrorCopy(job) ? (
+                          <small>{miyunCrawlErrorCopy(job)}</small>
+                        ) : null}
                         {job.status === "cooling_down" && job.cooldown_until ? (
                           <small>冷却至：{job.cooldown_until}</small>
                         ) : null}
@@ -963,16 +1028,113 @@ export function MiyunMaterialsPage({
     </StateBoundary>
   );
 }
-function profileQuery(profile: ApiMiyunProductProfile): ApiMiyunProfileQuery {
+function FissionTask({
+  busy,
+  loadState,
+  notice,
+  materials,
+  profiles,
+  handoffs,
+  selectedMaterialIds,
+  selectedProfileId,
+  projectId,
+  onMaterialChange,
+  onProfileChange,
+  onCreate,
+  onMarkDelivered,
+  onRetry,
+}: {
+  busy: boolean;
+  loadState: "loading" | "ready" | "error" | "forbidden";
+  notice: string;
+  materials: MaterialDetail[];
+  profiles: ApiMiyunProductProfile[];
+  handoffs: ApiMiyunHandoff[];
+  selectedMaterialIds: string[];
+  selectedProfileId: string;
+  projectId: string;
+  onMaterialChange: (id: string) => void;
+  onProfileChange: (id: string) => void;
+  onCreate: () => Promise<void>;
+  onMarkDelivered: (handoff: ApiMiyunHandoff) => Promise<void>;
+  onRetry: () => void;
+}) {
+  const selectedProfile = profiles.find((item) => item.id === selectedProfileId);
+  // Older persisted profiles can contain JSON null for optional source lists.
+  // Normalize at the UI boundary so a valid confirmed profile never crashes
+  // the handoff selector while its frozen file counts are rendered.
+  const profile = selectedProfile && {
+    ...selectedProfile,
+    product_asset_refs: selectedProfile.product_asset_refs ?? [],
+    knowledge_document_ids: selectedProfile.knowledge_document_ids ?? [],
+  };
+  return (
+    <section className="miyun-grid" aria-label="裂变任务">
+      <article className="surface-card">
+        <span className="section-label">VERSIONED HANDOFF</span>
+        <h3>创建裂变交接</h3>
+        <p>只允许已确认、已入库的本 Project 素材和已确认产品 profile；不会调用外部 AI 或自动交付。</p>
+        {loadState !== "ready" ? (
+          <div className="panel-empty">
+            {notice || miyunStateCopy(loadState).title}
+            {loadState !== "loading" ? <button type="button" onClick={onRetry}>刷新</button> : null}
+          </div>
+        ) : (
+          <>
+            <label>
+              已确认且已入库的爆款素材
+              <span role="group" aria-label="handoff-source-materials">
+                {materials.map((material) => <label key={material.id}><input type="checkbox" checked={selectedMaterialIds.includes(material.id)} onChange={() => onMaterialChange(material.id)} />{material.title ?? material.miyun_material_id} · {material.import_status} · v{material.version}</label>)}
+              </span>
+            </label>
+            <label>
+              已确认产品 profile
+              <select aria-label="选择已确认产品 profile" value={selectedProfileId} onChange={(event) => onProfileChange(event.target.value)}>
+                <option value="">请选择产品 profile</option>
+                {profiles.map((item) => <option key={item.id} value={item.id}>{item.product_name} · confirmed · v{item.version}</option>)}
+              </select>
+            </label>
+            {profile ? <div className="miyun-handoff-profile-files" role="note"><b>将冻结的产品资料</b><small>媒体 {profile.product_asset_refs.length} 项；文档 {profile.knowledge_document_ids.length} 项。资料版本来自已确认 profile，后续修改不会改变此交接。</small></div> : null}
+            {!materials.length || !profiles.length ? <small>{!materials.length ? "暂无已确认且已入库/去重的爆款素材。" : "暂无已确认的产品 profile。"}</small> : null}
+            <button className="primary-button" disabled={busy || !selectedMaterialIds.length || !selectedProfileId} onClick={() => void onCreate()}>创建交接</button>
+          </>
+        )}
+      </article>
+      <article className="surface-card">
+        <h3>交接历史</h3>
+        <p>“已导出”仅表示 zip 已成功生成并流出；“已交付”必须由人明确确认。</p>
+        {!handoffs.length ? <div className="panel-empty">暂无交接记录。</div> : handoffs.map((handoff) => (
+          <div className="miyun-handoff-history-row" key={handoff.id}>
+            <b>{handoff.id}</b>
+            <small>{handoff.status} · manifest {handoff.manifest_version} · 参数 {handoff.parameter_version} · v{handoff.version}</small>
+            <small>输入哈希：{handoff.input_hash}</small>
+            {handoff.status === "exporting" || handoff.status === "exported" || handoff.status === "delivered" ? <a className="secondary-button" href={api.getMiyunHandoffExportUrl(projectId, handoff.id)} download>{handoff.status === "exporting" ? "导出并下载交接 zip" : "下载交接 zip"}</a> : null}
+            {handoff.status === "exported" ? <button type="button" disabled={busy} onClick={() => void onMarkDelivered(handoff)}>人工确认已交付</button> : null}
+            {handoff.status === "exporting" ? <small>等待导出：点击“导出并下载交接 zip”开始流式导出；成功后才可人工确认交付。</small> : null}
+            {handoff.status === "failed" ? <small>导出失败；请重新下载，失败不会标记为已导出或已交付。</small> : null}
+          </div>
+        ))}
+      </article>
+    </section>
+  );
+}
+
+export function profileQuery(profile: ApiMiyunProductProfile): ApiMiyunProfileQuery {
   return {
     product_name: profile.product_name,
     category_id: profile.category_id,
     category_name: profile.category_name,
     keywords: profile.keywords,
     material_content_types: profile.material_content_types,
-    window_start: profile.window_start,
-    window_end: profile.window_end,
+    // Go serializes persisted date-only values as RFC3339 timestamps, while
+    // the confirmation endpoint intentionally accepts calendar dates only.
+    window_start: miyunCalendarDate(profile.window_start),
+    window_end: miyunCalendarDate(profile.window_end),
   };
+}
+function miyunCalendarDate(value: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}/.exec(value.trim());
+  return date?.[0] ?? value.trim();
 }
 function ProfileEditor({
   draft,
@@ -1100,7 +1262,7 @@ function MaterialCard({
         <X size={14} />
         拒绝
       </button>
-      {material.import_status === "failed" ? (
+      {material.selection_status === "confirmed" && ["pending", "failed"].includes(material.import_status) ? (
         <button disabled={busy} onClick={onRetry}>
           重试导入
         </button>

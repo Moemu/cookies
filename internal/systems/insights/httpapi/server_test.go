@@ -423,6 +423,7 @@ type applicationStub struct {
 	miyunIdempotencyKey contract.IdempotencyKey
 	miyunPreview        []byte
 	miyunProductSource  insights.MiyunProductSource
+	miyunHandoff        insights.MiyunHandoff
 	miyunErr            error
 	report              insights.InsightReport
 	experience          insights.Experience
@@ -531,6 +532,21 @@ func (s *applicationStub) DecideMiyunMaterial(context.Context, contract.ActorCon
 }
 func (s *applicationStub) RetryMiyunMaterialImport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunMaterial, error) {
 	return insights.MiyunMaterial{ID: "miyunmaterial_1"}, s.miyunErr
+}
+func (s *applicationStub) CreateMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateMiyunHandoffRequest) (insights.MiyunHandoff, error) {
+	return s.miyunHandoff, s.miyunErr
+}
+func (s *applicationStub) ListMiyunHandoffs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunHandoff, error) {
+	return []insights.MiyunHandoff{s.miyunHandoff}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunHandoff, error) {
+	return s.miyunHandoff, s.miyunErr
+}
+func (s *applicationStub) MarkMiyunHandoffDelivered(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunHandoff, error) {
+	return s.miyunHandoff, s.miyunErr
+}
+func (s *applicationStub) ExportMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string, io.Writer) error {
+	return s.miyunErr
 }
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {

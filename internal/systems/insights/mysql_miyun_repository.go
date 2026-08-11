@@ -35,6 +35,15 @@ type MiyunRepository interface {
 	GetMiyunHandoff(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunHandoff, error)
 }
 
+// MiyunHandoffRepository is intentionally narrow: export state belongs to the
+// handoff workflow without expanding the earlier intake repository contract.
+type MiyunHandoffRepository interface {
+	MiyunRepository
+	ListMiyunHandoffs(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]MiyunHandoff, error)
+	FindMiyunHandoffByInputHash(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunHandoff, error)
+	UpdateMiyunHandoffStatus(context.Context, MiyunHandoff, int64) (MiyunHandoff, error)
+}
+
 const miyunConnectionSelect = `SELECT id, organization_id, project_id, status,
 	session_ciphertext, session_key_version, session_expires_at,
 	last_verified_at, last_successful_request_at, cooldown_until, last_error_kind, last_error_code, last_error_at,
@@ -420,22 +429,22 @@ func scanMiyunMaterialSnapshot(row rowScanner) (MiyunMaterialSnapshot, error) {
 	return value, nil
 }
 
-const miyunHandoffSelect = `SELECT id, organization_id, project_id, source_material_id, product_profile_id,
+const miyunHandoffSelect = `SELECT id, organization_id, project_id, source_material_id, source_material_ids, product_profile_id,
 	status, manifest_version, parameter_version, product_files_snapshot, source_snapshot,
-	version, created_by, created_at, updated_at FROM insight_miyun_handoffs`
+	profile_snapshot, input_hash, version, created_by, created_at, updated_at FROM insight_miyun_handoffs`
 
 func (r MySQLRepository) CreateMiyunHandoff(ctx context.Context, value MiyunHandoff) (MiyunHandoff, error) {
 	if err := value.Validate(); err != nil {
 		return MiyunHandoff{}, err
 	}
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_handoffs (
-		id, organization_id, project_id, source_material_id, product_profile_id, status,
-		manifest_version, parameter_version, product_files_snapshot, source_snapshot,
+		id, organization_id, project_id, source_material_id, source_material_ids, product_profile_id, status,
+		manifest_version, parameter_version, product_files_snapshot, source_snapshot, profile_snapshot, input_hash,
 		version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.OrganizationID, value.ProjectID, value.SourceMaterialID, value.ProductProfileID,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.SourceMaterialID, sourceMaterialIDsJSON(value.SourceMaterialIDs), value.ProductProfileID,
 		value.Status, value.ManifestVersion, value.ParameterVersion, value.ProductFilesSnapshot,
-		value.SourceSnapshot, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+		value.SourceSnapshot, value.ProfileSnapshot, value.InputHash, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if isDuplicateKey(err) {
 		return MiyunHandoff{}, fmt.Errorf("%w: Miyun handoff identity already exists", ErrInvalidState)
 	}
@@ -452,18 +461,71 @@ func (r MySQLRepository) GetMiyunHandoff(ctx context.Context, organizationID con
 	return value, err
 }
 
+func (r MySQLRepository) ListMiyunHandoffs(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]MiyunHandoff, error) {
+	rows, err := r.DB.QueryContext(ctx, miyunHandoffSelect+` WHERE organization_id = ? AND project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, organizationID, projectID, normalizeLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []MiyunHandoff{}
+	for rows.Next() {
+		value, err := scanMiyunHandoff(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (r MySQLRepository) FindMiyunHandoffByInputHash(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, inputHash string) (MiyunHandoff, error) {
+	value, err := scanMiyunHandoff(r.DB.QueryRowContext(ctx, miyunHandoffSelect+` WHERE organization_id = ? AND project_id = ? AND input_hash = ?`, organizationID, projectID, inputHash))
+	if errors.Is(err, sql.ErrNoRows) {
+		return MiyunHandoff{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) UpdateMiyunHandoffStatus(ctx context.Context, value MiyunHandoff, expectedVersion int64) (MiyunHandoff, error) {
+	if err := value.Validate(); err != nil || expectedVersion < 1 {
+		return MiyunHandoff{}, ErrInvalidRequest
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_miyun_handoffs SET status = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ?`, value.Status, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.ID, expectedVersion)
+	if err != nil {
+		return MiyunHandoff{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return MiyunHandoff{}, err
+	}
+	if affected == 0 {
+		return MiyunHandoff{}, ErrVersionConflict
+	}
+	value.Version = expectedVersion + 1
+	return value, nil
+}
+
 func scanMiyunHandoff(row rowScanner) (MiyunHandoff, error) {
 	var value MiyunHandoff
-	var productFilesSnapshot, sourceSnapshot []byte
+	var sourceMaterialIDs, productFilesSnapshot, sourceSnapshot, profileSnapshot []byte
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.SourceMaterialID,
-		&value.ProductProfileID, &value.Status, &value.ManifestVersion, &value.ParameterVersion,
-		&productFilesSnapshot, &sourceSnapshot, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
+		&sourceMaterialIDs, &value.ProductProfileID, &value.Status, &value.ManifestVersion, &value.ParameterVersion,
+		&productFilesSnapshot, &sourceSnapshot, &profileSnapshot, &value.InputHash, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
+		return MiyunHandoff{}, err
+	}
+	if err := json.Unmarshal(sourceMaterialIDs, &value.SourceMaterialIDs); err != nil {
 		return MiyunHandoff{}, err
 	}
 	value.ProductFilesSnapshot = json.RawMessage(productFilesSnapshot)
 	value.SourceSnapshot = json.RawMessage(sourceSnapshot)
+	value.ProfileSnapshot = json.RawMessage(profileSnapshot)
 	return value, nil
+}
+
+func sourceMaterialIDsJSON(values []string) []byte {
+	encoded, _ := json.Marshal(values)
+	return encoded
 }
 
 func nullTimePointer(value sql.NullTime) *time.Time {

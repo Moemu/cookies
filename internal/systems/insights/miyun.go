@@ -501,20 +501,25 @@ func (s MiyunMaterialSnapshot) Validate() error {
 }
 
 type MiyunHandoff struct {
-	ID                   string                  `json:"id"`
-	OrganizationID       contract.OrganizationID `json:"organization_id"`
-	ProjectID            contract.ProjectID      `json:"project_id"`
-	SourceMaterialID     string                  `json:"source_material_id"`
-	ProductProfileID     string                  `json:"product_profile_id"`
-	Status               MiyunHandoffStatus      `json:"status"`
-	ManifestVersion      string                  `json:"manifest_version"`
-	ParameterVersion     string                  `json:"parameter_version"`
-	ProductFilesSnapshot json.RawMessage         `json:"product_files_snapshot"`
-	SourceSnapshot       json.RawMessage         `json:"source_snapshot"`
-	Version              int64                   `json:"version"`
-	CreatedBy            string                  `json:"created_by"`
-	CreatedAt            time.Time               `json:"created_at"`
-	UpdatedAt            time.Time               `json:"updated_at"`
+	ID             string                  `json:"id"`
+	OrganizationID contract.OrganizationID `json:"organization_id"`
+	ProjectID      contract.ProjectID      `json:"project_id"`
+	// SourceMaterialID is retained as the first, stable source for legacy
+	// relational lineage. SourceMaterialIDs is the complete frozen selection.
+	SourceMaterialID     string             `json:"source_material_id"`
+	SourceMaterialIDs    []string           `json:"source_material_ids"`
+	ProductProfileID     string             `json:"product_profile_id"`
+	Status               MiyunHandoffStatus `json:"status"`
+	ManifestVersion      string             `json:"manifest_version"`
+	ParameterVersion     string             `json:"parameter_version"`
+	ProductFilesSnapshot json.RawMessage    `json:"product_files_snapshot"`
+	SourceSnapshot       json.RawMessage    `json:"source_snapshot"`
+	ProfileSnapshot      json.RawMessage    `json:"profile_snapshot"`
+	InputHash            string             `json:"input_hash"`
+	Version              int64              `json:"version"`
+	CreatedBy            string             `json:"created_by"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
 }
 
 func (h MiyunHandoff) Validate() error {
@@ -525,8 +530,11 @@ func (h MiyunHandoff) Validate() error {
 		strings.TrimSpace(h.ManifestVersion) == "" || strings.TrimSpace(h.ParameterVersion) == "" {
 		return fmt.Errorf("%w: handoff status, source, profile, and schema versions are required", ErrInvalidRequest)
 	}
-	if !json.Valid(h.ProductFilesSnapshot) || !json.Valid(h.SourceSnapshot) {
+	if len(h.InputHash) != 64 || !json.Valid(h.ProductFilesSnapshot) || !json.Valid(h.SourceSnapshot) || !json.Valid(h.ProfileSnapshot) {
 		return fmt.Errorf("%w: handoff snapshots must be valid JSON", ErrInvalidRequest)
+	}
+	if err := validateUniqueStrings("source material ID", h.SourceMaterialIDs); err != nil || len(h.SourceMaterialIDs) == 0 || h.SourceMaterialIDs[0] != h.SourceMaterialID {
+		return fmt.Errorf("%w: handoff source material selection is invalid", ErrInvalidRequest)
 	}
 	return nil
 }

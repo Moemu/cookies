@@ -279,7 +279,7 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 
 	handoff := insights.MiyunHandoff{
 		ID: "miyun_handoff_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID,
-		SourceMaterialID: material.ID, ProductProfileID: profile.ID, Status: insights.MiyunHandoffExporting,
+		SourceMaterialID: material.ID, SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, Status: insights.MiyunHandoffExporting,
 		ManifestVersion: "miyun-manifest-v1", ParameterVersion: "parameters-v1",
 		ProductFilesSnapshot: []byte(`[]`), SourceSnapshot: []byte(`{"material_id":"remote-material-test"}`),
 		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,

@@ -1849,6 +1849,37 @@ paths:
         '202': {description: Import retry accepted., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
         '409': {$ref: '#/components/responses/Problem'}
         default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}]
+    get:
+      summary: List versioned Miyun handoffs
+      operationId: listMiyunHandoffs
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {description: Handoffs., content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/MiyunHandoff'}}}}}}}, default: {$ref: '#/components/responses/Problem'}}
+    post:
+      summary: Freeze a confirmed imported Miyun source and confirmed product profile into a draft handoff
+      operationId: createMiyunHandoff
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateMiyunHandoff'}}}}
+      responses: {'201': {description: Created or idempotently replayed handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    get:
+      summary: Get a frozen Miyun handoff
+      operationId: getMiyunHandoff
+      responses: {'200': {description: Handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/export:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    get:
+      summary: Stream a frozen cookies-draft handoff ZIP; successful streaming, not AI receipt, marks exported
+      operationId: exportMiyunHandoff
+      responses: {'200': {description: ZIP stream., content: {application/zip: {schema: {type: string, format: binary}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}:mark-delivered:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    post:
+      summary: Explicitly record human delivery of a successfully exported handoff
+      operationId: markMiyunHandoffDelivered
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses: {'200': {description: Delivered handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes:
     sessionCookie:
@@ -1873,6 +1904,11 @@ components:
       schema: {type: string}
     MiyunMaterialID:
       name: material_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunHandoffID:
+      name: handoff_id
       in: path
       required: true
       schema: {type: string}
@@ -2285,6 +2321,42 @@ components:
         snapshots:
           type: array
           items: {$ref: '#/components/schemas/MiyunMaterialSnapshot'}
+    CreateMiyunHandoff:
+      type: object
+      additionalProperties: false
+      required: [source_material_ids, product_profile_id]
+      properties:
+        source_material_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+        product_profile_id: {type: string, minLength: 1}
+    MiyunHandoff:
+      type: object
+      description: Frozen cookies draft handoff; it does not assert AI-system receipt or any cross-system state.
+      required: [id, organization_id, project_id, source_material_ids, product_profile_id, status, manifest_version, parameter_version, product_files_snapshot, source_snapshot, profile_snapshot, input_hash, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        source_material_id: {type: string, description: Legacy primary source retained for relational lineage.}
+        source_material_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+        product_profile_id: {type: string}
+        status: {type: string, enum: [exporting, exported, delivered, returned, failed]}
+        manifest_version:
+          type: string
+          enum: [miyun-handoff-manifest/cookies-draft-v1, miyun-handoff-manifest/cookies-draft-v2]
+          description: cookies draft only; v1 is retained for frozen historical handoffs and v2 is the current per-source import manifest.
+        parameter_version: {type: string, const: miyun-handoff-parameters/v1}
+        product_files_snapshot: {type: object, additionalProperties: true}
+        source_snapshot: {type: object, additionalProperties: true}
+        profile_snapshot: {type: object, additionalProperties: true}
+        input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     MiyunManualImportResult:
       type: object
       additionalProperties: false

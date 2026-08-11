@@ -153,8 +153,14 @@ func (s Service) CreateMiyunCrawlJob(ctx context.Context, actor contract.ActorCo
 	now := s.now()
 	query := crawler.YouShuQuery{
 		MaterialIDs: []string{}, StartDate: profile.WindowStart.Format("2006-01-02"), EndDate: profile.WindowEnd.Format("2006-01-02"),
-		Keyword: strings.Join(profile.Keywords, " "), Page: 1, Order: "impression_desc", IsExact: crawler.YouShuBool(false),
-		ProductID: []string{string(profile.ProductID)}, Tpl: []string{}, SearchField: "all", SearchDSL: []json.RawMessage{},
+		// `_score_desc` is the verified YouShu MaterialListSort value used by
+		// the connection probe. `impression_desc` is not a valid upstream enum.
+		Keyword: strings.Join(profile.Keywords, " "), Page: 1, Order: "_score_desc", IsExact: crawler.YouShuBool(false),
+		// ProductID identifies a cookies Project product, not a confirmed
+		// YouShu product identifier. Do not project it into the upstream
+		// GraphQL filter; the frozen, operator-confirmed query terms above are
+		// the portable product-driven search contract for this MVP.
+		ProductID: []string{}, Tpl: []string{}, SearchField: "all", SearchDSL: []json.RawMessage{},
 		AccountType: []string{}, IsSearchAiScene: crawler.YouShuInt(0),
 	}
 	snapshot := MiyunQuerySnapshot{
@@ -342,8 +348,15 @@ func (s Service) enqueueMiyunMaterialImport(ctx context.Context, actor contract.
 	if err != nil {
 		return err
 	}
-	payload, _ := json.Marshal(miyunRuntimePayload{material.OrganizationID, material.ProjectID, material.ID, actor.Principal.ID})
-	hash, _ := contract.CanonicalJSONHash(payload)
+	runtimePayload := miyunRuntimePayload{material.OrganizationID, material.ProjectID, material.ID, actor.Principal.ID}
+	payload, err := json.Marshal(runtimePayload)
+	if err != nil {
+		return err
+	}
+	hash, err := contract.CanonicalJSONHash(runtimePayload)
+	if err != nil {
+		return err
+	}
 	key := contract.IdempotencyKey(fmt.Sprintf("miyun_import_%s_%d", material.ID, material.Version))
 	_, _, err = s.MiyunJobs.Enqueue(ctx, jobruntime.CreateRequest{Job: contract.Job{
 		ID: id, Kind: MiyunMaterialImportJobKind, OrganizationID: material.OrganizationID, ProjectID: material.ProjectID,
@@ -552,7 +565,11 @@ func decodeMiyunRuntimePayload(claim jobruntime.Claim, expectedKind string) (miy
 }
 
 func miyunWorkerActor(payload miyunRuntimePayload) contract.ActorContext {
-	return contract.ActorContext{OrganizationID: payload.OrganizationID, Principal: contract.Principal{Kind: contract.PrincipalService, ID: payload.ActorID}, Scopes: []contract.Scope{ScopeRead, ScopeWrite, ScopeConfirm, "assets.write"}}
+	// A material-import job continues the confirmed user's authorized action.
+	// Its actor ID is a user ID captured in the immutable job payload, not a
+	// registered service identity.  Keeping that principal kind is necessary for
+	// the Assets project-scope check before an external-import ledger is opened.
+	return contract.ActorContext{OrganizationID: payload.OrganizationID, Principal: contract.Principal{Kind: contract.PrincipalUser, ID: payload.ActorID}, Scopes: []contract.Scope{ScopeRead, ScopeWrite, ScopeConfirm, "assets.write"}}
 }
 
 func (s Service) miyunCrawlRecord(payload miyunRuntimePayload, job MiyunCrawlJob, sourcePage int64, source crawler.YouShuMaterial, now time.Time) (MiyunCrawlPageRecord, error) {

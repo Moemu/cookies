@@ -36,6 +36,11 @@ type Application interface {
 	OpenMiyunMaterialPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialPreview, error)
 	DecideMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, string, bool, insights.MiyunMaterialDecisionRequest) (insights.MiyunMaterial, error)
 	RetryMiyunMaterialImport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunMaterial, error)
+	CreateMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateMiyunHandoffRequest) (insights.MiyunHandoff, error)
+	ListMiyunHandoffs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunHandoff, error)
+	GetMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunHandoff, error)
+	MarkMiyunHandoffDelivered(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunHandoff, error)
+	ExportMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string, io.Writer) error
 
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)

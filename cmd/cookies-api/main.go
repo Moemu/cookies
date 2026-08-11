@@ -434,26 +434,27 @@ func main() {
 			cfg.Miyun.MaxConcurrent, cfg.Miyun.RequestsPerSecond, cfg.Miyun.CooldownSeconds, len(cfg.Miyun.DownloadAllowedHosts))
 	}
 	insightsService := &insights.Service{
-		Repository:     insights.MySQLRepository{DB: db},
-		Miyun:          insights.MySQLRepository{DB: db},
-		MiyunProjects:  miyunProjectSourceAdapter{projects: projectService},
-		MiyunAssets:    miyunAssetSourceAdapter{uploads: uploadService},
-		MiyunKnowledge: miyunKnowledgeSourceAdapter{knowledge: knowledgeService},
-		MiyunMedia:     miyunMediaEvidenceAdapter{media: mediaUnderstandingService},
-		MiyunCrawl:     insights.MySQLRepository{DB: db},
-		MiyunJobs:      runtimeStore,
-		MiyunPages:     miyunPages,
-		MiyunImports:   miyunImports,
-		MiyunPreviews:  miyunPreviews,
-		MiyunSecrets:   miyunCipher,
-		MiyunVerifier:  miyunVerifier,
-		MiyunCooldown:  time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
-		Assets:         insights.MySQLRepository{DB: db},
-		Connectors:     insights.MySQLRepository{DB: db},
-		Runs:           insights.MySQLRepository{DB: db},
-		Experiments:    insights.MySQLRepository{DB: db},
-		Projects:       projectService,
-		Delivery:       deliveryinsights.Reader{Service: deliveryService},
+		Repository:          insights.MySQLRepository{DB: db},
+		Miyun:               insights.MySQLRepository{DB: db},
+		MiyunProjects:       miyunProjectSourceAdapter{projects: projectService},
+		MiyunAssets:         miyunAssetSourceAdapter{uploads: uploadService},
+		MiyunKnowledge:      miyunKnowledgeSourceAdapter{knowledge: knowledgeService},
+		MiyunHandoffContent: miyunHandoffContentAdapter{uploads: uploadService, knowledge: knowledgeService},
+		MiyunMedia:          miyunMediaEvidenceAdapter{media: mediaUnderstandingService},
+		MiyunCrawl:          insights.MySQLRepository{DB: db},
+		MiyunJobs:           runtimeStore,
+		MiyunPages:          miyunPages,
+		MiyunImports:        miyunImports,
+		MiyunPreviews:       miyunPreviews,
+		MiyunSecrets:        miyunCipher,
+		MiyunVerifier:       miyunVerifier,
+		MiyunCooldown:       time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
+		Assets:              insights.MySQLRepository{DB: db},
+		Connectors:          insights.MySQLRepository{DB: db},
+		Runs:                insights.MySQLRepository{DB: db},
+		Experiments:         insights.MySQLRepository{DB: db},
+		Projects:            projectService,
+		Delivery:            deliveryinsights.Reader{Service: deliveryService},
 	}
 	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
 	// 库里一条编造的特征，代价远大于一次失败的提取。
@@ -845,6 +846,10 @@ type assetVisionSourceResolver struct{ uploads *assets.UploadService }
 type miyunProjectSourceAdapter struct{ projects *project.Service }
 type miyunAssetSourceAdapter struct{ uploads *assets.UploadService }
 type miyunKnowledgeSourceAdapter struct{ knowledge *knowledge.Service }
+type miyunHandoffContentAdapter struct {
+	uploads   *assets.UploadService
+	knowledge *knowledge.Service
+}
 type miyunMediaEvidenceAdapter struct{ media *mediaunderstanding.Service }
 
 func (a miyunProjectSourceAdapter) ReadMiyunProjectSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (insights.MiyunProjectSource, error) {
@@ -894,8 +899,23 @@ func (a miyunKnowledgeSourceAdapter) ReadMiyunKnowledgeSource(ctx context.Contex
 	}
 	return insights.MiyunKnowledgeSource{
 		ID: value.ID, Filename: value.Filename, MIMEType: value.MIMEType,
-		Status: value.Status, Text: value.ExtractedText, TextSHA256: value.TextSHA256,
+		Status: value.Status, Text: value.ExtractedText, TextSHA256: value.TextSHA256, ContentSHA256: value.ContentSHA256,
 	}, nil
+}
+
+func (a miyunHandoffContentAdapter) OpenMiyunHandoffAsset(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {
+	if a.uploads == nil {
+		return nil, fmt.Errorf("Miyun asset content reader is unavailable")
+	}
+	stream, _, err := a.uploads.OpenPreview(ctx, actor, projectID, ref)
+	return stream, err
+}
+func (a miyunHandoffContentAdapter) OpenMiyunHandoffDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (io.ReadCloser, error) {
+	if a.knowledge == nil {
+		return nil, fmt.Errorf("Miyun knowledge content reader is unavailable")
+	}
+	stream, _, err := a.knowledge.OpenDocumentOriginalStream(ctx, actor, projectID, id)
+	return stream, err
 }
 
 func (a miyunMediaEvidenceAdapter) ReadLatestMiyunMediaEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunMediaEvidence, bool, error) {

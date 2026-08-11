@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   latestMiyunCard,
+  miyunCrawlErrorCopy,
   miyunStateCopy,
+  profileQuery,
   sortMiyunMaterials,
 } from "../src/components/MiyunMaterialsPage.tsx";
 import { api } from "../src/data/api.ts";
@@ -110,4 +112,33 @@ test("米云产品身份可选且资料上传按知识文档和项目素材分�
   assert.match(page, /miyun-connection-banner/);
   assert.match(page, /href="\/settings"/);
   assert.doesNotMatch(page, /setSession/);
+});
+
+test("米云确认查询把后端 RFC3339 窗口转换为日期条件", () => {
+  const query = profileQuery({
+    product_name: "Cup", category_id: "cid_1", category_name: "Drinkware",
+    keywords: ["cup"], material_content_types: ["product"],
+    window_start: "2026-08-01T00:00:00Z", window_end: "2026-08-10T23:59:59+08:00",
+  } as any);
+  assert.equal(query.window_start, "2026-08-01");
+  assert.equal(query.window_end, "2026-08-10");
+});
+
+test("米云采集失败仅展示安全分类和代码", () => {
+  assert.match(
+    miyunCrawlErrorCopy({ last_error_kind: "graphql_error", last_error_code: "00:" }) ?? "",
+    /00:/,
+  );
+  assert.match(
+    miyunCrawlErrorCopy({ last_error_kind: "auth_required", last_error_code: "00:403005" }) ?? "",
+    /更新会话/,
+  );
+});
+
+test("已确认但尚未入库的素材可恢复请求导入", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /\["pending", "failed"\]\.includes\(material\.import_status\)/);
 });

@@ -36,6 +36,13 @@ func TestMiyunSecretCipherRoundTripAndKeyVersionIsolation(t *testing.T) {
 	}
 }
 
+func TestMiyunWorkerActorPreservesConfirmedUserPrincipal(t *testing.T) {
+	actor := miyunWorkerActor(miyunRuntimePayload{OrganizationID: "org_1", ActorID: "user_1"})
+	if actor.Principal.Kind != contract.PrincipalUser || actor.Principal.ID != "user_1" || !actor.HasScope("assets.write") {
+		t.Fatalf("worker actor = %#v", actor)
+	}
+}
+
 func TestMiyunConnectionVerificationPersistsSafeUpstreamFailureState(t *testing.T) {
 	service, repository, _, _ := newMiyunCrawlTestService(t)
 	service.MiyunVerifier = miyunVerifierTestDouble{err: errors.New("tls handshake failed")}
@@ -46,6 +53,22 @@ func TestMiyunConnectionVerificationPersistsSafeUpstreamFailureState(t *testing.
 	}
 	if value.LastErrorKind != string(crawler.YouShuTransport) || value.LastErrorCode != "UNCLASSIFIED" || repository.connection.Version != 2 {
 		t.Fatalf("persisted verification state=%#v", value)
+	}
+}
+
+func TestMiyunConnectionVerificationClearsStaleAuthStateOnNonAuthFailure(t *testing.T) {
+	service, repository, _, _ := newMiyunCrawlTestService(t)
+	repository.connection.Status = MiyunConnectionAuthRequired
+	service.MiyunVerifier = miyunVerifierTestDouble{err: &crawler.YouShuError{
+		Kind: crawler.YouShuInvalidRequest, Strategy: crawler.YouShuCorrectRequest, Source: "graphql", Code: "00:400999",
+	}}
+
+	value, err := service.VerifyMiyunConnection(context.Background(), miyunTestActor(), "project_1", VerifyMiyunConnectionRequest{ExpectedVersion: repository.connection.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Status != MiyunConnectionUnverified || value.LastErrorKind != string(crawler.YouShuInvalidRequest) || value.LastErrorCode != "00:400999" {
+		t.Fatalf("verification state=%#v", value)
 	}
 }
 
@@ -65,7 +88,7 @@ func TestMiyunCrawlCreateIsConfirmedAndIdempotent(t *testing.T) {
 		t.Fatalf("idempotent create duplicated state: first=%s second=%s jobs=%d runtime=%d", first.ID, second.ID, len(repository.jobs), len(runtime.byKey))
 	}
 	var snapshot MiyunQuerySnapshot
-	if json.Unmarshal(first.QuerySnapshot, &snapshot) != nil || snapshot.ProfileID != profile.ID || snapshot.Query.Page != 1 || snapshot.SchemaVersion != MiyunQuerySchemaV1 {
+	if json.Unmarshal(first.QuerySnapshot, &snapshot) != nil || snapshot.ProfileID != profile.ID || snapshot.Query.Page != 1 || snapshot.SchemaVersion != MiyunQuerySchemaV1 || len(snapshot.Query.ProductID) != 0 || snapshot.Query.Order != "_score_desc" {
 		t.Fatalf("query snapshot was not frozen: %#v", snapshot)
 	}
 
@@ -301,6 +324,9 @@ type miyunRuntimeTestStore struct {
 }
 
 func (s *miyunRuntimeTestStore) Enqueue(_ context.Context, request jobruntime.CreateRequest) (contract.Job, bool, error) {
+	if err := request.Validate(); err != nil {
+		return contract.Job{}, false, err
+	}
 	key := string(request.Job.OrganizationID) + "/" + string(request.Job.ProjectID) + "/" + string(request.IdempotencyKey)
 	if existing, ok := s.byKey[key]; ok {
 		if existing.RequestHash != request.RequestHash {

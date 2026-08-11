@@ -5347,6 +5347,12 @@ export type ApiMiyunMaterialSnapshot = {
   delivery_days: number; cumulative_impressions: number; cumulative_impressions_raw: string; related_ads: number; related_creators: number; related_creators_raw: string; related_creators_known: boolean; material_score: number; views: number; likes: number; comments: number; shares: number; saves: number; sanitized_raw?: Record<string, unknown>; created_at: string
 }
 export type ApiMiyunMaterialDetail = { material: ApiMiyunMaterial; snapshots: ApiMiyunMaterialSnapshot[] }
+export type ApiMiyunHandoff = {
+  id: string; organization_id: string; project_id: string; source_material_id: string; source_material_ids: string[]; product_profile_id: string
+  status: 'exporting' | 'exported' | 'delivered' | 'returned' | 'failed'; manifest_version: string; parameter_version: string
+  product_files_snapshot: Record<string, unknown>; source_snapshot: Record<string, unknown>; profile_snapshot: Record<string, unknown>; input_hash: string
+  version: number; created_by: string; created_at: string; updated_at: string
+}
 
 export const api = {
   listAgencyWorkbench: async (options: AgencyWorkbenchOptions = {}) => {
@@ -6093,6 +6099,11 @@ export const api = {
   confirmMiyunMaterial: (projectId: string, materialId: string, expectedVersion: number, note?: string) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:confirm`, 'POST', { expected_version: expectedVersion, ...(note === undefined ? {} : { note }) }),
   rejectMiyunMaterial: (projectId: string, materialId: string, expectedVersion: number, note?: string) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:reject`, 'POST', { expected_version: expectedVersion, ...(note === undefined ? {} : { note }) }),
   retryMiyunMaterialImport: (projectId: string, materialId: string, expectedVersion: number) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:retry-import`, 'POST', { expected_version: expectedVersion }),
+  createMiyunHandoff: (projectId: string, body: { source_material_ids: string[]; product_profile_id: string }, idempotencyKey: string) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
+  listMiyunHandoffs: (projectId: string, limit = 50) => request<{ items: ApiMiyunHandoff[] }>(`${miyunProjectPath(projectId)}/handoffs?limit=${limit}`),
+  getMiyunHandoff: (projectId: string, handoffId: string) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}`),
+  getMiyunHandoffExportUrl: (projectId: string, handoffId: string) => `/api${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}/export`,
+  markMiyunHandoffDelivered: (projectId: string, handoffId: string, expectedVersion: number) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}:mark-delivered`, 'POST', { expected_version: expectedVersion }),
   // observed_through 要回传界面上那条问题的 last_observed_at，不要用当前时间：
   // 「你处置的是你看到的那个版本」靠它成立，中间问题若又恶化不会被一并盖掉。
   resolveQualityIssue: (

@@ -61,12 +61,13 @@ type MiyunAssetSourceReader interface {
 }
 
 type MiyunKnowledgeSource struct {
-	ID         string `json:"id"`
-	Filename   string `json:"filename"`
-	MIMEType   string `json:"mime_type"`
-	Status     string `json:"status"`
-	Text       string `json:"-"`
-	TextSHA256 string `json:"text_sha256"`
+	ID            string `json:"id"`
+	Filename      string `json:"filename"`
+	MIMEType      string `json:"mime_type"`
+	Status        string `json:"status"`
+	Text          string `json:"-"`
+	TextSHA256    string `json:"text_sha256"`
+	ContentSHA256 string `json:"content_sha256"`
 }
 
 type MiyunKnowledgeSourceReader interface {

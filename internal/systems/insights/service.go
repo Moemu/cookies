@@ -417,19 +417,20 @@ type Service struct {
 	// Miyun owns the product-profile and material intake state introduced by
 	// the Miyun MVP. The source readers are narrow, authorized projections;
 	// Insights never reaches into another module's tables.
-	Miyun          MiyunRepository
-	MiyunProjects  MiyunProjectSourceReader
-	MiyunAssets    MiyunAssetSourceReader
-	MiyunKnowledge MiyunKnowledgeSourceReader
-	MiyunMedia     MiyunMediaEvidenceReader
-	MiyunCrawl     MiyunCrawlRepository
-	MiyunJobs      MiyunRuntimeJobs
-	MiyunPages     MiyunPageClient
-	MiyunImports   MiyunAuthorizedImporter
-	MiyunPreviews  MiyunAuthorizedPreviewer
-	MiyunSecrets   MiyunSecretCipher
-	MiyunVerifier  MiyunConnectionVerifier
-	MiyunCooldown  time.Duration
+	Miyun               MiyunRepository
+	MiyunProjects       MiyunProjectSourceReader
+	MiyunAssets         MiyunAssetSourceReader
+	MiyunKnowledge      MiyunKnowledgeSourceReader
+	MiyunHandoffContent MiyunHandoffContentOpener
+	MiyunMedia          MiyunMediaEvidenceReader
+	MiyunCrawl          MiyunCrawlRepository
+	MiyunJobs           MiyunRuntimeJobs
+	MiyunPages          MiyunPageClient
+	MiyunImports        MiyunAuthorizedImporter
+	MiyunPreviews       MiyunAuthorizedPreviewer
+	MiyunSecrets        MiyunSecretCipher
+	MiyunVerifier       MiyunConnectionVerifier
+	MiyunCooldown       time.Duration
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.
 	Assets AssetRepository

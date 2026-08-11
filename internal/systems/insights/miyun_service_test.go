@@ -1,9 +1,14 @@
 package insights
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -213,13 +218,16 @@ type memoryMiyunServiceRepository struct {
 	connection MiyunConnection
 	profiles   map[string]MiyunProductProfile
 	manual     map[string]MiyunManualImportResult
+	materials  map[string]MiyunMaterial
+	snapshots  map[string][]MiyunMaterialSnapshot
+	handoffs   map[string]MiyunHandoff
 }
 
 func newMiyunServiceRepository(now time.Time) *memoryMiyunServiceRepository {
 	connection := validMiyunConnection(now)
 	connection.Status = MiyunConnectionReady
 	return &memoryMiyunServiceRepository{
-		connection: connection, profiles: map[string]MiyunProductProfile{}, manual: map[string]MiyunManualImportResult{},
+		connection: connection, profiles: map[string]MiyunProductProfile{}, manual: map[string]MiyunManualImportResult{}, materials: map[string]MiyunMaterial{}, snapshots: map[string][]MiyunMaterialSnapshot{}, handoffs: map[string]MiyunHandoff{},
 	}
 }
 
@@ -314,20 +322,67 @@ func (r *memoryMiyunServiceRepository) GetMiyunCrawlJob(context.Context, contrac
 func (r *memoryMiyunServiceRepository) CreateMiyunMaterial(context.Context, MiyunMaterial) (MiyunMaterial, error) {
 	return MiyunMaterial{}, errors.New("unused")
 }
-func (r *memoryMiyunServiceRepository) GetMiyunMaterial(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunMaterial, error) {
-	return MiyunMaterial{}, errors.New("unused")
+func (r *memoryMiyunServiceRepository) GetMiyunMaterial(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (MiyunMaterial, error) {
+	value, ok := r.materials[id]
+	if !ok || value.OrganizationID != organizationID || value.ProjectID != projectID {
+		return MiyunMaterial{}, ErrNotFound
+	}
+	return value, nil
 }
 func (r *memoryMiyunServiceRepository) AppendMiyunMaterialSnapshot(context.Context, MiyunMaterialSnapshot) (MiyunMaterialSnapshot, error) {
 	return MiyunMaterialSnapshot{}, errors.New("unused")
 }
-func (r *memoryMiyunServiceRepository) ListMiyunMaterialSnapshots(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]MiyunMaterialSnapshot, error) {
-	return nil, errors.New("unused")
+func (r *memoryMiyunServiceRepository) ListMiyunMaterialSnapshots(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, materialID string) ([]MiyunMaterialSnapshot, error) {
+	material, err := r.GetMiyunMaterial(context.Background(), organizationID, projectID, materialID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]MiyunMaterialSnapshot(nil), r.snapshots[material.ID]...), nil
 }
-func (r *memoryMiyunServiceRepository) CreateMiyunHandoff(context.Context, MiyunHandoff) (MiyunHandoff, error) {
-	return MiyunHandoff{}, errors.New("unused")
+func (r *memoryMiyunServiceRepository) CreateMiyunHandoff(_ context.Context, value MiyunHandoff) (MiyunHandoff, error) {
+	for _, existing := range r.handoffs {
+		if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.InputHash == value.InputHash {
+			return MiyunHandoff{}, ErrIdempotencyConflict
+		}
+	}
+	r.handoffs[value.ID] = value
+	return value, nil
 }
-func (r *memoryMiyunServiceRepository) GetMiyunHandoff(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunHandoff, error) {
-	return MiyunHandoff{}, errors.New("unused")
+func (r *memoryMiyunServiceRepository) GetMiyunHandoff(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (MiyunHandoff, error) {
+	value, ok := r.handoffs[id]
+	if !ok || value.OrganizationID != organizationID || value.ProjectID != projectID {
+		return MiyunHandoff{}, ErrNotFound
+	}
+	return value, nil
+}
+func (r *memoryMiyunServiceRepository) ListMiyunHandoffs(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, _ int) ([]MiyunHandoff, error) {
+	result := make([]MiyunHandoff, 0, len(r.handoffs))
+	for _, value := range r.handoffs {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID {
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+func (r *memoryMiyunServiceRepository) FindMiyunHandoffByInputHash(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, inputHash string) (MiyunHandoff, error) {
+	for _, value := range r.handoffs {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.InputHash == inputHash {
+			return value, nil
+		}
+	}
+	return MiyunHandoff{}, ErrNotFound
+}
+func (r *memoryMiyunServiceRepository) UpdateMiyunHandoffStatus(_ context.Context, value MiyunHandoff, expectedVersion int64) (MiyunHandoff, error) {
+	current, ok := r.handoffs[value.ID]
+	if !ok {
+		return MiyunHandoff{}, ErrNotFound
+	}
+	if current.Version != expectedVersion {
+		return MiyunHandoff{}, ErrVersionConflict
+	}
+	value.Version = expectedVersion + 1
+	r.handoffs[value.ID] = value
+	return value, nil
 }
 
 type fakeMiyunProjectReader struct{ source MiyunProjectSource }
@@ -385,3 +440,162 @@ func miyunTestActor() contract.ActorContext {
 }
 
 func miyunBrandID(value contract.BrandID) *contract.BrandID { return &value }
+
+func TestMiyunHandoffCreateFreezesInputAndReplays(t *testing.T) {
+	now := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
+	repository := newMiyunServiceRepository(now)
+	service := newMiyunTestService(repository, now)
+	asset := service.MiyunAssets.(*fakeMiyunAssetReader)
+	asset.source.SHA256 = miyunHandoffTestHash([]byte("video"))
+	material := validMiyunMaterial(now)
+	material.SelectionStatus, material.ImportStatus = MiyunMaterialConfirmed, MiyunMaterialImportImported
+	material.PlatformAssetID, material.PlatformAssetVersion = "asset_1", 1
+	repository.materials[material.ID] = material
+	snapshot := validMiyunMaterialSnapshot(now)
+	snapshot.MaterialID = material.ID
+	repository.snapshots[material.ID] = []MiyunMaterialSnapshot{snapshot}
+	profile := validMiyunProductProfile(now)
+	profile.Status, profile.Version = MiyunProfileConfirmed, 2
+	profile.ProductAssetRefs = []contract.AssetVersionRef{{AssetID: "asset_1", Version: 1}}
+	profile.KnowledgeDocumentIDs = []string{}
+	repository.profiles[profile.ID] = profile
+
+	first, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	if err != nil || first.ID != second.ID || first.Status != MiyunHandoffExporting {
+		t.Fatalf("idempotent create = %#v, %#v, %v", first, second, err)
+	}
+	frozen := append([]byte(nil), first.ProfileSnapshot...)
+	profile.ProductName = "Changed after handoff"
+	repository.profiles[profile.ID] = profile
+	got, err := service.GetMiyunHandoff(context.Background(), miyunTestActor(), "project_1", first.ID)
+	if err != nil || !bytes.Equal(got.ProfileSnapshot, frozen) || got.InputHash != first.InputHash {
+		t.Fatalf("handoff was not frozen: %#v, %v", got, err)
+	}
+	material.SelectionStatus = MiyunMaterialDiscovered
+	repository.materials[material.ID] = material
+	if _, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("unconfirmed material create error=%v", err)
+	}
+}
+
+func TestMiyunHandoffFreezesMultipleSourcesInStableOrder(t *testing.T) {
+	now := time.Date(2026, 8, 11, 1, 30, 0, 0, time.UTC)
+	repository := newMiyunServiceRepository(now)
+	service := newMiyunTestService(repository, now)
+	asset := service.MiyunAssets.(*fakeMiyunAssetReader)
+	asset.source.SHA256 = miyunHandoffTestHash([]byte("video"))
+	profile := validMiyunProductProfile(now)
+	profile.Status = MiyunProfileConfirmed
+	profile.ProductAssetRefs = []contract.AssetVersionRef{{AssetID: "asset_1", Version: 1}}
+	profile.KnowledgeDocumentIDs = []string{}
+	repository.profiles[profile.ID] = profile
+	first := validMiyunMaterial(now)
+	first.ID, first.MiyunMaterialID = "miyunmaterial_b", "remote-b"
+	first.SelectionStatus, first.ImportStatus = MiyunMaterialConfirmed, MiyunMaterialImportImported
+	first.PlatformAssetID, first.PlatformAssetVersion = "asset_1", 1
+	second := first
+	second.ID, second.MiyunMaterialID = "miyunmaterial_a", "remote-a"
+	for _, material := range []MiyunMaterial{first, second} {
+		repository.materials[material.ID] = material
+		snapshot := validMiyunMaterialSnapshot(now)
+		snapshot.MaterialID = material.ID
+		repository.snapshots[material.ID] = []MiyunMaterialSnapshot{snapshot}
+	}
+	created, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{first.ID, second.ID}, ProductProfileID: profile.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := created.SourceMaterialIDs, []string{second.ID, first.ID}; !reflect.DeepEqual(got, want) || created.SourceMaterialID != second.ID {
+		t.Fatalf("frozen sources = %#v, primary=%s", got, created.SourceMaterialID)
+	}
+	var frozen miyunHandoffSourcesSnapshot
+	if err := json.Unmarshal(created.SourceSnapshot, &frozen); err != nil || len(frozen.Sources) != 2 || frozen.Sources[0].Material.ID != second.ID {
+		t.Fatalf("frozen source snapshot = %#v, %v", frozen, err)
+	}
+	replayed, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{second.ID, first.ID}, ProductProfileID: profile.ID})
+	if err != nil || replayed.ID != created.ID {
+		t.Fatalf("unordered replay = %#v, %v", replayed, err)
+	}
+}
+
+func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
+	now := time.Date(2026, 8, 11, 2, 0, 0, 0, time.UTC)
+	repository := newMiyunServiceRepository(now)
+	service := newMiyunTestService(repository, now)
+	asset := service.MiyunAssets.(*fakeMiyunAssetReader)
+	asset.source.SHA256 = miyunHandoffTestHash([]byte("video"))
+	material := validMiyunMaterial(now)
+	material.SelectionStatus, material.ImportStatus = MiyunMaterialConfirmed, MiyunMaterialImportDeduplicated
+	material.PlatformAssetID, material.PlatformAssetVersion = "asset_1", 1
+	repository.materials[material.ID] = material
+	snapshot := validMiyunMaterialSnapshot(now)
+	snapshot.MaterialID = material.ID
+	repository.snapshots[material.ID] = []MiyunMaterialSnapshot{snapshot}
+	profile := validMiyunProductProfile(now)
+	profile.Status, profile.Version = MiyunProfileConfirmed, 2
+	profile.ProductAssetRefs = []contract.AssetVersionRef{{AssetID: "asset_1", Version: 1}}
+	profile.KnowledgeDocumentIDs = []string{}
+	repository.profiles[profile.ID] = profile
+	handoff, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.MiyunHandoffContent = miyunHandoffContentTestDouble{content: map[string][]byte{"asset:asset_1:1": []byte("video")}}
+	if _, err := service.MarkMiyunHandoffDelivered(context.Background(), miyunTestActor(), "project_1", handoff.ID, handoff.Version); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("delivery before export error=%v", err)
+	}
+	var output bytes.Buffer
+	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID, &output); err != nil || output.Len() == 0 {
+		t.Fatalf("export error=%v size=%d", err, output.Len())
+	}
+	exported, _ := service.GetMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID)
+	if exported.Status != MiyunHandoffExported {
+		t.Fatalf("status after export=%s", exported.Status)
+	}
+	if _, err := service.MarkMiyunHandoffDelivered(context.Background(), miyunTestActor(), "project_1", handoff.ID, handoff.Version); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale delivery version error=%v", err)
+	}
+	delivered, err := service.MarkMiyunHandoffDelivered(context.Background(), miyunTestActor(), "project_1", handoff.ID, exported.Version)
+	if err != nil || delivered.Status != MiyunHandoffDelivered {
+		t.Fatalf("delivery=%#v err=%v", delivered, err)
+	}
+	if repeated, err := service.MarkMiyunHandoffDelivered(context.Background(), miyunTestActor(), "project_1", handoff.ID, delivered.Version); err != nil || repeated.ID != delivered.ID {
+		t.Fatalf("delivery replay=%#v err=%v", repeated, err)
+	}
+	profile.ProductName = "second frozen profile"
+	repository.profiles[profile.ID] = profile
+	failing, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	if err != nil || failing.ID == handoff.ID {
+		t.Fatalf("second handoff=%#v err=%v", failing, err)
+	}
+	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", failing.ID, miyunHandoffFailingWriter{}); err == nil {
+		t.Fatal("failed response writer exported a handoff")
+	}
+	failed, _ := service.GetMiyunHandoff(context.Background(), miyunTestActor(), "project_1", failing.ID)
+	if failed.Status != MiyunHandoffFailed {
+		t.Fatalf("failed export status=%s", failed.Status)
+	}
+}
+
+type miyunHandoffContentTestDouble struct{ content map[string][]byte }
+
+type miyunHandoffFailingWriter struct{}
+
+func (miyunHandoffFailingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("client disconnected")
+}
+
+func (d miyunHandoffContentTestDouble) OpenMiyunHandoffAsset(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(d.content["asset:"+string(ref.AssetID)+":"+fmt.Sprint(ref.Version)])), nil
+}
+func (d miyunHandoffContentTestDouble) OpenMiyunHandoffDocument(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(d.content["document:"+id])), nil
+}
+func miyunHandoffTestHash(value []byte) string {
+	digest := sha256.Sum256(value)
+	return hex.EncodeToString(digest[:])
+}
