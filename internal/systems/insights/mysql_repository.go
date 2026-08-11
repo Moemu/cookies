@@ -276,15 +276,15 @@ func insertExperienceTx(ctx context.Context, tx *sql.Tx, value Experience) error
 		report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id,
 		conclusion, card_type, confidence, recommended_action,
 		conditions, counterexamples, applicability, data_basis, content_basis,
-		status, status_reason, status_changed_by, status_changed_at,
+		status, needs_review, status_reason, status_changed_by, status_changed_at,
 		confirmed_by, confirmed_at, version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.LineageID, value.Revision,
 		nullableString(value.SupersedesID),
 		value.ReportID, value.SourceExecutionID, value.SourceEvidenceID, value.SourceMetricSnapshotID,
 		value.Conclusion, value.CardType, value.Confidence, value.RecommendedAction,
 		conditions, counterexamples, applicability, dataBasis, contentBasis,
-		value.Status, value.StatusReason,
+		value.Status, value.NeedsReview, value.StatusReason,
 		value.StatusChangedBy, value.StatusChangedAt,
 		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	return err
@@ -333,6 +333,52 @@ func (r MySQLRepository) TransitionExperience(ctx context.Context, input Transit
 	return value, nil
 }
 
+// FlagExperienceForReview 只翻 needs_review 那一格，状态一动不动。
+//
+// 状态没变，审计照写一条，from_status 和 to_status 都是 confirmed——审计如实记
+// 发生过什么，要看清楚发生的是哪件事，看 reason。少写这条审计的代价是：一条经验
+// 上突然多了个「该看一眼了」，没人查得出是谁在什么时候基于什么加的。
+func (r MySQLRepository) FlagExperienceForReview(ctx context.Context, input FlagExperienceReviewInput) (Experience, error) {
+	var value Experience
+	err := r.inTx(ctx, func(tx *sql.Tx) error {
+		current, txErr := getExperienceForUpdate(ctx, tx, input.OrganizationID, input.ProjectID, input.ID)
+		if txErr != nil {
+			return txErr
+		}
+		if current.Version != input.ExpectedVersion {
+			return ErrVersionConflict
+		}
+		// 只有在用的经验才谈得上复审。待定的还没人认可，停用的已经不在引用集里。
+		if current.Status != ExperienceConfirmed {
+			return ErrInvalidState
+		}
+		if _, txErr = tx.ExecContext(ctx, `UPDATE insight_experiences SET needs_review = ?, status_reason = ?, status_changed_by = ?, status_changed_at = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = 'confirmed'`,
+			input.NeedsReview, input.Reason, input.ActorID, input.Now, input.Now,
+			input.OrganizationID, input.ProjectID, input.ID, input.ExpectedVersion); txErr != nil {
+			return txErr
+		}
+		if txErr = insertExperienceAudit(ctx, tx, ExperienceAudit{
+			ID: input.AuditID, OrganizationID: input.OrganizationID, ProjectID: input.ProjectID,
+			ExperienceID: input.ID, FromStatus: ExperienceConfirmed, ToStatus: ExperienceConfirmed,
+			Reason: input.Reason, ActorID: input.ActorID, CreatedAt: input.Now,
+		}); txErr != nil {
+			return txErr
+		}
+		current.NeedsReview = input.NeedsReview
+		current.StatusReason = input.Reason
+		current.StatusChangedBy = input.ActorID
+		current.StatusChangedAt = &input.Now
+		current.Version++
+		current.UpdatedAt = input.Now
+		value = current
+		return nil
+	})
+	if err != nil {
+		return Experience{}, err
+	}
+	return value, nil
+}
+
 // ConfirmExperience makes a revision quotable and retires the one it supersedes
 // in the same transaction, so a lineage never has two reusable conclusions.
 func (r MySQLRepository) ConfirmExperience(ctx context.Context, input ConfirmExperienceInput) (Experience, error) {
@@ -341,18 +387,21 @@ func (r MySQLRepository) ConfirmExperience(ctx context.Context, input ConfirmExp
 		confirmed, txErr := transitionExperienceTx(ctx, tx, TransitionExperienceInput{
 			OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: input.ID,
 			ExpectedVersion: input.ExpectedVersion,
-			From:            []ExperienceStatus{ExperiencePending, ExperienceNeedsReview},
+			// 在用也能确认：那是「标了复审、重新看过、还成立」这条路径。
+			From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed},
 			To:              ExperienceConfirmed, ActorID: input.ActorID, Now: input.Now, AuditID: input.AuditID,
 		})
 		if txErr != nil {
 			return txErr
 		}
-		if _, txErr = tx.ExecContext(ctx, `UPDATE insight_experiences SET confirmed_by = ?, confirmed_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
+		// 确认就等于看过了，顺手摘掉复审标记；否则它会一直挂着，下次没人知道到底看过没有。
+		if _, txErr = tx.ExecContext(ctx, `UPDATE insight_experiences SET confirmed_by = ?, confirmed_at = ?, needs_review = 0 WHERE organization_id = ? AND project_id = ? AND id = ?`,
 			input.ActorID, input.Now, input.OrganizationID, input.ProjectID, input.ID); txErr != nil {
 			return txErr
 		}
 		confirmed.ConfirmedBy = input.ActorID
 		confirmed.ConfirmedAt = &input.Now
+		confirmed.NeedsReview = false
 		value = confirmed
 		if confirmed.SupersedesID == "" {
 			return nil
@@ -367,7 +416,7 @@ func (r MySQLRepository) ConfirmExperience(ctx context.Context, input ConfirmExp
 		if _, txErr = transitionExperienceTx(ctx, tx, TransitionExperienceInput{
 			OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: previous.ID,
 			ExpectedVersion: previous.Version,
-			From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview},
+			From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed},
 			To:              ExperienceRetired,
 			Reason:          fmt.Sprintf("已被第 %d 版取代。", confirmed.Revision),
 			ActorID:         input.ActorID, Now: input.Now, AuditID: input.SupersedeAuditID,
@@ -554,7 +603,7 @@ func unmarshalNullableJSON(raw []byte, target any) error {
 }
 
 const insightReportSelect = `SELECT id, organization_id, project_id, execution_id, delivery_mode, evidence_id, evidence_summary, metric_snapshot_id, creative_package_id, is_simulated, dataset_version, status, summary, findings, digest, window_start, window_end, version, created_by, confirmed_by, confirmed_at, created_at, updated_at FROM insight_reports`
-const experienceSelect = `SELECT id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, status_reason, status_changed_by, status_changed_at, confirmed_by, confirmed_at, version, created_by, created_at, updated_at FROM insight_experiences`
+const experienceSelect = `SELECT id, organization_id, project_id, lineage_id, revision, supersedes_id, superseded_by_id, report_id, source_execution_id, source_evidence_id, source_metric_snapshot_id, conclusion, card_type, confidence, recommended_action, conditions, counterexamples, applicability, data_basis, content_basis, status, needs_review, status_reason, status_changed_by, status_changed_at, confirmed_by, confirmed_at, version, created_by, created_at, updated_at FROM insight_experiences`
 const experienceAuditSelect = `SELECT id, organization_id, project_id, experience_id, from_status, to_status, reason, actor_id, created_at FROM insight_experience_audits`
 const experienceReferenceSelect = `SELECT id, organization_id, project_id, experience_id, consumer_kind, consumer_id, outcome, note, version, created_by, created_at, updated_at FROM insight_experience_references`
 
@@ -614,11 +663,14 @@ func scanExperience(row rowScanner) (Experience, error) {
 		&value.SourceExecutionID, &value.SourceEvidenceID, &value.SourceMetricSnapshotID, &value.Conclusion,
 		&value.CardType, &value.Confidence, &value.RecommendedAction, &conditions,
 		&counterexamples, &applicability, &dataBasis, &contentBasis,
-		&value.Status, &value.StatusReason, &value.StatusChangedBy, &statusChangedAt,
+		&value.Status, &value.NeedsReview, &value.StatusReason, &value.StatusChangedBy, &statusChangedAt,
 		&confirmedBy, &confirmedAt, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return Experience{}, err
 	}
+	// 库里只存 confidence。三档判定不落库，每次读出来由唯一收敛点重新算——
+	// 存下来的话，收敛规则改了以后老行还带着旧档位，同一条经验在两个页面上会不一样。
+	value.Judgement = judge(value.Confidence, "")
 	if err := json.Unmarshal(conditions, &value.Conditions); err != nil {
 		return Experience{}, fmt.Errorf("decode experience conditions: %w", err)
 	}

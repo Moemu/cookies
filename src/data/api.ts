@@ -1138,7 +1138,11 @@ export type ApiInsightReport = {
   updated_at: string
 }
 
-export type ApiExperienceStatus = 'pending' | 'confirmed' | 'needs_review' | 'retired'
+// 三态：待定 → 在用 → 停用。
+// 「待复审」不在这里，它是「在用」上的一个标记（见 ApiExperience.needs_review）：
+// 被标记的经验仍然在用、仍然能被引用，只是该重新看一眼。做成状态的话，每个读
+// 经验的地方都得判断「confirmed 或者 needs_review」，漏一处它就凭空消失。
+export type ApiExperienceStatus = 'pending' | 'confirmed' | 'retired'
 
 export type ApiExperience = {
   id: string
@@ -1159,11 +1163,18 @@ export type ApiExperience = {
   // 经验库详情要靠这几项判断一条结论该不该确认，缺了就只能看结论一句话点确认。
   card_type: ApiInsightCardType
   confidence: ApiConfidenceLevel
+  // 三档判定平铺在这里（后端是内嵌结构体）。档位文案由后端给，前端不自己翻译。
+  verdict: Verdict
+  verdict_label: string
+  upgrade: UpgradePath
+  note: string
   recommended_action: string
   applicability: ApiApplicability
   data_basis: ApiDataBasis
   content_basis: ApiContentBasis
   status: ApiExperienceStatus
+  // 「该看一眼了」。它不影响这条经验能不能用，只影响界面上要不要挂个提示。
+  needs_review: boolean
   status_reason: string
   status_changed_by: string
   status_changed_at?: string

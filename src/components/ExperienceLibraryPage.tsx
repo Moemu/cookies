@@ -13,28 +13,39 @@ import { shortId } from '../data/shortId'
 import { consumerLabel, outcomeLabel } from '../data/experienceReference'
 import { useInsightAssets } from '../data/useInsightAssets'
 
-type ViewTarget = ApiExperienceStatus | 'references'
+// 'review' 不是状态，是「在用」里的一个筛子：挑出被标了「该看一眼了」的那些。
+// 后端只有三态，这里多出来的这一项是视图，不是数据。
+type ViewTarget = ApiExperienceStatus | 'references' | 'review'
 
 const viewTargets: Record<string, ViewTarget> = {
-  候选经验: 'pending',
-  已确认: 'confirmed',
-  待复审: 'needs_review',
-  已失效: 'retired',
+  待定: 'pending',
+  在用: 'confirmed',
+  该看一眼: 'review',
+  停用: 'retired',
   引用记录: 'references',
 }
 
 const statusLabels: Record<ApiExperienceStatus, string> = {
-  pending: '待确认',
-  confirmed: '已确认',
-  needs_review: '待复审',
-  retired: '已失效',
+  pending: '待定',
+  confirmed: '在用',
+  retired: '停用',
+}
+
+// 列表标题和计数用的词。'review' 挑的是在用里的一部分，说成「在用」会让人
+// 以为这栏和上一栏一样多。
+const targetLabels: Record<ViewTarget, string> = {
+  pending: '待定',
+  confirmed: '在用',
+  review: '该看一眼的',
+  retired: '停用',
+  references: '引用记录',
 }
 
 const emptyHints: Record<ViewTarget, string> = {
-  pending: '当前 Project 暂无待确认的候选经验。经验在「复盘」里提交一轮复盘之后沉淀产生。',
-  confirmed: '当前 Project 暂无已确认经验。只有已确认的结论才允许被下游引用。',
-  needs_review: '当前 Project 暂无待复审经验。已确认结论出现反例时可申请复审。',
-  retired: '当前 Project 暂无已失效经验。失效是逻辑删除，记录仍可追溯。',
+  pending: '当前 Project 暂无待定经验。经验在「复盘」里提交一轮复盘之后沉淀产生。',
+  confirmed: '当前 Project 暂无在用经验。只有在用的结论才允许被下游引用。',
+  review: '当前 Project 没有被标记的经验。在用的结论出现反例时，可以给它挂一个「该看一眼了」——它仍然在用，只是提醒有人重新看一遍依据。',
+  retired: '当前 Project 暂无停用经验。停用是逻辑删除，记录仍可追溯。',
   references: '当前 Project 暂无引用记录。经验被 Brief、创意任务或实验引用后会出现在这里。',
 }
 
@@ -64,7 +75,8 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
         setProjectReferences(next.items)
         setExperiences([])
       } else {
-        const next = await api.listExperiences(currentProject.id, target)
+        // 「该看一眼」查的还是在用的经验——它们本来就是在用的，标记只是筛子。
+        const next = await api.listExperiences(currentProject.id, target === 'review' ? 'confirmed' : target)
         setExperiences(next.items)
         setProjectReferences([])
       }
@@ -83,10 +95,12 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
   // 人很容易以为自己在改右边这条，实际提交到的是刚才那条。
   useEffect(() => { setRevising(false) }, [selectedId])
 
-  const filtered = useMemo(() => experiences.filter(experience =>
-    `${experience.id} ${experience.conclusion} ${experience.conditions.join(' ')} ${experience.counterexamples.join(' ')}`
-      .toLowerCase().includes(query.trim().toLowerCase()),
-  ), [experiences, query])
+  const filtered = useMemo(() => experiences
+    .filter(experience => target !== 'review' || experience.needs_review)
+    .filter(experience =>
+      `${experience.id} ${experience.conclusion} ${experience.conditions.join(' ')} ${experience.counterexamples.join(' ')}`
+        .toLowerCase().includes(query.trim().toLowerCase()),
+    ), [experiences, query, target])
 
   const filteredReferences = useMemo(() => projectReferences.filter(reference =>
     `${reference.id} ${reference.experience_id} ${reference.consumer_kind} ${reference.consumer_id} ${reference.note}`
@@ -158,7 +172,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
       // 前身的去向必须写清楚。退休和「还在用」是两回事，含糊过去，
       // 下次有人找不到旧那条会以为被删了。
       const previous = wasPending
-        ? '原来那一版没确认过，已经退休，在「已退休」里还能查到。'
+        ? '原来那一版没确认过，已经停用，在「停用」里还能查到。'
         : '原来那一版继续可引用，等这一版被确认后才交班。'
       setNotice(next.status === target
         ? `已保存为第 ${next.revision} 次修订。${previous}`
@@ -215,7 +229,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
         </div>
         <div className="prelaunch-filterbar">
           <div className="search-field"><Search size={15}/><input aria-label="搜索经验" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索结论、适用条件或反例"/></div>
-          <span>{filtered.length} 条{statusLabels[target]}经验</span>
+          <span>{filtered.length} 条{targetLabels[target]}经验</span>
         </div>
         <div className="prelaunch-table" role="list" aria-label="经验列表">
           <div className="prelaunch-row header"><span>结论</span><span>状态</span><span>适用条件</span><span>修订</span></div>
@@ -224,7 +238,7 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
           {listState === 'ready' && !filtered.length ? <div className="panel-empty">{emptyHints[target]}</div> : null}
           {filtered.map(experience => <button role="listitem" key={experience.id} className={selectedId === experience.id ? 'prelaunch-row active' : 'prelaunch-row'} onClick={() => setSelectedId(experience.id)}>
             <span><b>{experience.conclusion}</b><small>{cardTypeLabels[experience.card_type]} · 置信{confidenceLabels[experience.confidence]} · {shortId(experience.id)} · 来源报告 {shortId(experience.report_id)} · {formatTime(experience.updated_at)}</small></span>
-            <span>{statusLabels[experience.status]}</span>
+            <span>{statusLabels[experience.status]}{experience.needs_review ? ' · 该看一眼了' : ''}</span>
             <span>{experience.conditions.length ? experience.conditions.join('；') : '未填写适用条件'}</span>
             <span><CircleCheck size={14}/>v{experience.revision}</span>
           </button>)}
@@ -237,6 +251,9 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
           <span className="section-label">{cardTypeLabels[selected.card_type]} · 置信{confidenceLabels[selected.confidence]}</span>
           <h3>{selected.conclusion}</h3>
           <p>{shortId(selected.id)} · 第 {selected.revision} 次修订 · {statusLabels[selected.status]}</p>
+          {/* 标记单独占一行，不混进状态里。它不改变这条经验能不能用，
+              写成「在用（待复审）」会让人以为引用资格出了问题。 */}
+          {selected.needs_review ? <div className="prelaunch-boundary"><CircleAlert size={16}/><span><small>该看一眼了</small>这条经验仍然在用、仍然能被引用，只是有人认为该重新看一遍它的依据。重新确认一次就会摘掉这个标记。</span></div> : null}
           <div className="prelaunch-fact"><Layers3 size={17}/><span><small>这条能被怎么用</small><b>{cardTypeMeaning[selected.card_type]}</b></span></div>
           <div className="prelaunch-fact"><ShieldCheck size={17}/><span><small>置信提示</small><b>{confidenceLabels[selected.confidence]}</b></span></div>
           <div className="prelaunch-fact"><Target size={17}/><span><small>适用范围</small><b>{describeApplicability(selected.applicability)}</b></span></div>
@@ -259,13 +276,13 @@ export function ExperienceLibraryPage({ state, activeView }: { state: DataState;
             busy={busy}
             onCancel={() => setRevising(false)}
             onSubmit={body => { void runRevise(body) }}
-          /> : actionsFor(selected.status).length ? <>
+          /> : actionsFor(selected).length ? <>
             <label className="experience-reason">
               <small>理由（驳回、申请复审、失效必填，会写入审计记录）</small>
               <textarea value={reason} onChange={event => setReason(event.target.value)} rows={3} placeholder="例如：新一批投放出现反例，结论需要重新验证。"/>
             </label>
             <div className="prelaunch-actions">
-              {actionsFor(selected.status).map(action => <button key={action} className={action === 'confirm' ? 'primary-button full' : 'secondary-button full'} disabled={busy} onClick={() => void runAction(action)}>
+              {actionsFor(selected).map(action => <button key={action} className={action === 'confirm' ? 'primary-button full' : 'secondary-button full'} disabled={busy} onClick={() => void runAction(action)}>
                 {action === 'confirm' ? <Check size={15}/> : <ArrowRight size={15}/>}
                 {busy ? '处理中…' : actionLabels[action]}
               </button>)}
@@ -310,10 +327,18 @@ function canRevise(experience: ApiExperience): boolean {
   return experience.status !== 'retired' && !experience.superseded_by_id
 }
 
-function actionsFor(status: ApiExperienceStatus): Array<'confirm' | 'reject' | 'request-review' | 'retire'> {
-  if (status === 'pending') return ['confirm', 'reject']
-  if (status === 'confirmed') return ['request-review', 'retire']
-  if (status === 'needs_review') return ['confirm', 'retire']
+/**
+ * 一条经验此刻能做什么。
+ *
+ * 在用且被标了「该看一眼了」的，多一个「确认」：那是「重新看过，还成立」，
+ * 按下去把标记摘掉。没标记的在用经验不给「确认」——它已经在用了，再确认一次
+ * 什么也不改变，摆在那里只会让人以为自己漏做了一步。
+ */
+function actionsFor(experience: ApiExperience): Array<'confirm' | 'reject' | 'request-review' | 'retire'> {
+  if (experience.status === 'pending') return ['confirm', 'reject']
+  if (experience.status === 'confirmed') {
+    return experience.needs_review ? ['confirm', 'retire'] : ['request-review', 'retire']
+  }
   return []
 }
 

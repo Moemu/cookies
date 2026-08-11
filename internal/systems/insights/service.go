@@ -33,21 +33,24 @@ const (
 	ReportConfirmed ReportStatus = "confirmed"
 )
 
-// ExperienceStatus follows the lifecycle in the asset management PRD §11.1:
-// 待确认 -> 已确认 -> 待复审 -> 已失效. Retirement is logical, so a referenced
-// conclusion stays auditable after it stops being reusable.
+// ExperienceStatus 是经验的生命周期：待定 -> 在用 -> 停用。停用是逻辑删除，
+// 引用过它的地方仍然查得到，所以一条不再能用的结论仍然是可审计的。
+//
+// 三态。「待复审」不在这里——它是「在用」上的一个标记（NeedsReview），
+// 不是一个独立状态：被标记的经验仍然在用、仍然能被引用，只是该重新看一眼。
+// 做成状态的话，每个读经验的地方都得判断「confirmed 或者 needs_review」，
+// 漏一处那条经验就在某个页面上凭空消失了。
 type ExperienceStatus string
 
 const (
-	ExperiencePending     ExperienceStatus = "pending"
-	ExperienceConfirmed   ExperienceStatus = "confirmed"
-	ExperienceNeedsReview ExperienceStatus = "needs_review"
-	ExperienceRetired     ExperienceStatus = "retired"
+	ExperiencePending   ExperienceStatus = "pending"
+	ExperienceConfirmed ExperienceStatus = "confirmed"
+	ExperienceRetired   ExperienceStatus = "retired"
 )
 
 func (s ExperienceStatus) valid() bool {
 	switch s {
-	case ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview, ExperienceRetired:
+	case ExperiencePending, ExperienceConfirmed, ExperienceRetired:
 		return true
 	}
 	return false
@@ -248,26 +251,68 @@ type Experience struct {
 	Conditions             []string                `json:"conditions"`
 	Counterexamples        []string                `json:"counterexamples"`
 	CardType               InsightCardType         `json:"card_type"`
-	Confidence             ConfidenceLevel         `json:"confidence"`
-	RecommendedAction      string                  `json:"recommended_action"`
-	Applicability          Applicability           `json:"applicability"`
-	DataBasis              DataBasis               `json:"data_basis"`
-	ContentBasis           ContentBasis            `json:"content_basis"`
-	Status                 ExperienceStatus        `json:"status"`
-	StatusReason           string                  `json:"status_reason"`
-	StatusChangedBy        string                  `json:"status_changed_by"`
-	StatusChangedAt        *time.Time              `json:"status_changed_at,omitempty"`
-	ConfirmedBy            string                  `json:"confirmed_by,omitempty"`
-	ConfirmedAt            *time.Time              `json:"confirmed_at,omitempty"`
-	Version                int64                   `json:"version"`
-	CreatedBy              string                  `json:"created_by"`
-	CreatedAt              time.Time               `json:"created_at"`
-	UpdatedAt              time.Time               `json:"updated_at"`
+	// Judgement 内嵌而不是只留一个 Confidence：一条经验能不能被下游默认引用，
+	// 取决于三档里的哪一档，而三档只能由 judge() 从 Confidence 收敛出来。
+	// 摆一个裸 Confidence 让每个读的地方自己换算，迟早出现两页给出不同档位。
+	Judgement
+	RecommendedAction string           `json:"recommended_action"`
+	Applicability     Applicability    `json:"applicability"`
+	DataBasis         DataBasis        `json:"data_basis"`
+	ContentBasis      ContentBasis     `json:"content_basis"`
+	Status            ExperienceStatus `json:"status"`
+	// NeedsReview 是「该看一眼了」。它不影响这条经验能不能用，只影响界面怎么显示。
+	NeedsReview     bool       `json:"needs_review"`
+	StatusReason    string     `json:"status_reason"`
+	StatusChangedBy string     `json:"status_changed_by"`
+	StatusChangedAt *time.Time `json:"status_changed_at,omitempty"`
+	ConfirmedBy     string     `json:"confirmed_by,omitempty"`
+	ConfirmedAt     *time.Time `json:"confirmed_at,omitempty"`
+	Version         int64      `json:"version"`
+	CreatedBy       string     `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// Reusable reports whether downstream Skills may quote this experience by
-// default (MVP acceptance §15.10): confirmed and not retired.
-func (e Experience) Reusable() bool { return e.Status == ExperienceConfirmed }
+// Reusable 决定下游能不能默认引用这条经验。**两道闸，缺一不可。**
+//
+// 状态在用只说明有人认可它值得记下来；判定能归因才说明这个因果排除过混杂。
+// 一条「👁 只是观察」的经验也可能被确认——确认的是「这个观察值得记」，
+// 不是「照着做会有同样的结果」。放它进默认引用集，下一轮就会有人照着一个
+// 没排除混杂的观察去做素材，而他不会知道自己在赌。
+//
+// 要引用 👁 的经验不是不行，但必须由人显式点名，不能是默认发生的。
+func (e Experience) Reusable() bool {
+	return e.Quotable() && e.Verdict == VerdictExplained
+}
+
+// Quotable 是第一道闸单独拿出来：这条经验能不能被人点名引用。
+//
+// 待定的还没人认可，停用的已经作废，这两种谁都不该往外抄。但一条 👁 只是观察的
+// 在用经验是可以被点名引用的——人看了它的依据，自己决定用，那是他的判断。
+// Quotable 管的是「允不允许人引用」，Reusable 管的是「系统要不要默认替他引用」。
+func (e Experience) Quotable() bool {
+	return e.Status == ExperienceConfirmed
+}
+
+func (e Experience) StatusLabel() string {
+	switch e.Status {
+	case ExperiencePending:
+		return "待定"
+	case ExperienceConfirmed:
+		return "在用"
+	case ExperienceRetired:
+		return "停用"
+	}
+	return string(e.Status)
+}
+
+// ReviewHint 只在界面上用。空串表示不用提示。
+func (e Experience) ReviewHint() string {
+	if e.NeedsReview {
+		return "该看一眼了"
+	}
+	return ""
+}
 
 // ExperienceAudit is the append-only trail behind PRD §11.2. Nothing is
 // physically deleted, so every status change stays attributable.
@@ -399,6 +444,22 @@ type TransitionExperienceInput struct {
 	AuditID         string
 }
 
+// FlagExperienceReviewInput 只动 needs_review 那一格，状态不变。
+//
+// 审计仍然照写一条，from_status 和 to_status 都是 confirmed——状态确实没变，
+// 审计如实记。要在审计里看出发生了什么，看 reason。
+type FlagExperienceReviewInput struct {
+	OrganizationID  contract.OrganizationID
+	ProjectID       contract.ProjectID
+	ID              string
+	ExpectedVersion int64
+	NeedsReview     bool
+	Reason          string
+	ActorID         string
+	Now             time.Time
+	AuditID         string
+}
+
 // ConfirmExperienceInput confirms a revision and, when it supersedes an older
 // one, retires the predecessor atomically so two revisions are never reusable
 // at the same time.
@@ -449,6 +510,7 @@ type Repository interface {
 	GetExperience(context.Context, contract.OrganizationID, contract.ProjectID, string) (Experience, error)
 	ListExperienceLineage(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]Experience, error)
 	TransitionExperience(context.Context, TransitionExperienceInput) (Experience, error)
+	FlagExperienceForReview(context.Context, FlagExperienceReviewInput) (Experience, error)
 	ConfirmExperience(context.Context, ConfirmExperienceInput) (Experience, error)
 	CreateExperienceReference(context.Context, ExperienceReference) (ExperienceReference, error)
 	ListExperienceReferences(context.Context, contract.OrganizationID, contract.ProjectID, string, int) ([]ExperienceReference, error)
@@ -890,7 +952,7 @@ func (s Service) CreateExperience(ctx context.Context, actor contract.ActorConte
 		SourceMetricSnapshotID: report.MetricSnapshotID,
 		Conclusion:             strings.TrimSpace(request.Conclusion), Conditions: append([]string{}, request.Conditions...),
 		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
-		CardType: card.CardType, Confidence: card.Confidence,
+		CardType: card.CardType, Judgement: judge(card.Confidence, ""),
 		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
 		Applicability:     card.Applicability, DataBasis: basis, ContentBasis: card.ContentBasis,
 		StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
@@ -918,8 +980,8 @@ func reportWindow(report InsightReport) (*time.Time, *time.Time) {
 	return &start, &end
 }
 
-// ConfirmExperience promotes 待确认 or 待复审 to 已确认. Confirming a revision
-// retires the predecessor it supersedes in the same transaction.
+// ConfirmExperience 把待定的经验变成在用，也用来「重新看过了，还成立」。
+// 确认一条修订版会在同一个事务里把它取代的那一版停用。
 func (s Service) ConfirmExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, expectedVersion int64) (Experience, error) {
 	if err := s.ready(actor, projectID, ScopeConfirm); err != nil {
 		return Experience{}, err
@@ -928,7 +990,9 @@ func (s Service) ConfirmExperience(ctx context.Context, actor contract.ActorCont
 	if err != nil {
 		return Experience{}, err
 	}
-	if current.Status != ExperiencePending && current.Status != ExperienceNeedsReview {
+	// 待定的确认，是「这条经验成立」；在用且标了复审的确认，是「重新看过了，还成立」。
+	// 后者要顺手把标记摘掉，否则它会一直挂着，下次没人知道到底看过没有。
+	if current.Status != ExperiencePending && !(current.Status == ExperienceConfirmed && current.NeedsReview) {
 		return Experience{}, ErrInvalidState
 	}
 	auditID, err := s.idGenerator()("experienceaudit")
@@ -952,18 +1016,37 @@ func (s Service) RejectExperience(ctx context.Context, actor contract.ActorConte
 		[]ExperienceStatus{ExperiencePending}, ExperienceRetired, request, true)
 }
 
-// RequestExperienceReview flags a confirmed conclusion as 待复审 when new data
-// challenges it, instead of silently overwriting it.
+// RequestExperienceReview 给在用的经验打上「该看一眼了」。
+//
+// **它不改状态**——这条经验还在用、还能被引用，标记只是提醒有人该重新看它的依据。
+// 这正是把「待复审」从状态改成标记的用处：新数据和老结论冲突时，提醒得发出去，
+// 但不能顺手把一条正在被引用的经验从所有页面上撤掉。
 func (s Service) RequestExperienceReview(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
-	return s.transition(ctx, actor, projectID, experienceID, ScopeWrite,
-		[]ExperienceStatus{ExperienceConfirmed}, ExperienceNeedsReview, request, true)
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return Experience{}, err
+	}
+	if err := request.validate(true); err != nil {
+		return Experience{}, err
+	}
+	auditID, err := s.idGenerator()("experienceaudit")
+	if err != nil {
+		return Experience{}, err
+	}
+	return s.Repository.FlagExperienceForReview(ctx, FlagExperienceReviewInput{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID, ID: experienceID,
+		ExpectedVersion: request.ExpectedVersion, NeedsReview: true,
+		Reason: strings.TrimSpace(request.Reason), ActorID: actor.Principal.ID,
+		Now: s.now(), AuditID: auditID,
+	})
 }
 
 // RetireExperience is the logical delete in PRD §11.2: the row stays readable
 // and its reference history stays auditable.
+//
+// from 里只有 confirmed：标了复审的经验状态本来就是 confirmed，已经被覆盖。
 func (s Service) RetireExperience(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, request ExperienceTransitionRequest) (Experience, error) {
 	return s.transition(ctx, actor, projectID, experienceID, ScopeConfirm,
-		[]ExperienceStatus{ExperienceConfirmed, ExperienceNeedsReview}, ExperienceRetired, request, true)
+		[]ExperienceStatus{ExperienceConfirmed}, ExperienceRetired, request, true)
 }
 
 func (s Service) transition(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, experienceID string, scope contract.Scope, from []ExperienceStatus, to ExperienceStatus, request ExperienceTransitionRequest, reasonRequired bool) (Experience, error) {
@@ -1046,7 +1129,7 @@ func (s Service) ReviseExperience(ctx context.Context, actor contract.ActorConte
 		SourceMetricSnapshotID: source.SourceMetricSnapshotID,
 		Conclusion:             strings.TrimSpace(request.Conclusion), Conditions: append([]string{}, request.Conditions...),
 		Counterexamples: append([]string{}, request.Counterexamples...), Status: ExperiencePending,
-		CardType: card.CardType, Confidence: card.Confidence,
+		CardType: card.CardType, Judgement: judge(card.Confidence, ""),
 		RecommendedAction: strings.TrimSpace(card.RecommendedAction),
 		Applicability:     card.Applicability, DataBasis: basis, ContentBasis: card.ContentBasis,
 		StatusReason: reason, StatusChangedBy: actor.Principal.ID, StatusChangedAt: &now,
@@ -1090,7 +1173,10 @@ func (s Service) RecordExperienceReference(ctx context.Context, actor contract.A
 	if err != nil {
 		return ExperienceReference{}, err
 	}
-	if !experience.Reusable() {
+	// 这里是人点名引用后回填结果，闸只有一道：这条经验得在用。
+	// 卡 Reusable 会让「有人用了一条 👁 的经验」这件事记不下来——事情发生了，
+	// 拒绝记录不会让它没发生，只会让引用记录少一条。
+	if !experience.Quotable() {
 		return ExperienceReference{}, ErrInvalidState
 	}
 	id, err := s.idGenerator()("experienceref")
@@ -1170,7 +1256,8 @@ func ratioPercent(numerator, denominator int64) float64 {
 }
 
 // ListExperiences returns every lifecycle state when status is empty, so the
-// experience library can show 待确认 / 已确认 / 待复审 / 已失效 side by side.
+// experience library can show 待定 / 在用 / 停用 side by side.
+// 「该看一眼了」不是这里的一个取值——它是在用经验上的标记，按 NeedsReview 筛。
 func (s Service) ListExperiences(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, status ExperienceStatus, limit int) ([]Experience, error) {
 	if err := s.ready(actor, projectID, ScopeRead); err != nil {
 		return nil, err

@@ -74,7 +74,9 @@ export const systems: SystemDefinition[] = [
       // 不是一个人会先想起来去逛的地方。两条进入路径都在分析页上——结论徽章里的
       // 「做个实验」，和工具栏上那个常驻按钮。路由保留，直接删掉的话页面就断了。
       { id: 'experiments', label: '实验中心', icon: FlaskConical, group: '素材与分析', layout: 'analysis', hidden: true, description: '管理 A/B 变量、样本检查和可归因结果。', views: ['实验列表', 'A/B 变体', '变量矩阵', '样本检查', '实验结论'] },
-      { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['候选经验', '已确认', '待复审', '已失效', '引用记录'] },
+      // 视图名就是状态名：待定 / 在用 / 停用。「该看一眼」不是第四个状态，是「在用」
+      // 里挂了标记的那一批——它们仍然在用、仍然能被引用，单开一栏只是为了好找。
+      { id: 'knowledge', label: '经验库', icon: BookOpenCheck, group: '经验与输出', layout: 'workspace', description: '沉淀结论、适用条件、反例、复审与跨环节引用。', views: ['待定', '在用', '该看一眼', '停用', '引用记录'] },
       // 只留有数据模型的三个视图。「周期报告 / 自定义报告 / 协作 / 版本与导出」写在
       // 03 §5 和 19 §5.2 的二级功能表里，但 03 §9 的功能需求表里没有任何一条 FR 支撑，
       // 后端也没有对应模型——这里唯一的 P0 需求是 AM-015 任务复盘（基线文档 §5 冲突 9）。
