@@ -16,9 +16,9 @@ import { ContentAnalysisPage } from './ContentAnalysisPage'
 import { DataConnectionsPage } from './DataConnectionsPage'
 import { CapabilityOperationsPage } from './CapabilityOperationsPage'
 import { ExperimentCenterPage } from './ExperimentCenterPage'
+import { AnalysisPage, type AnalysisView } from './insight/analysis'
 import { InsightSettingsPage } from './InsightSettingsPage'
 import { DataQualityPage } from './DataQualityPage'
-import { PostLaunchAnalysisPage } from './PostLaunchAnalysisPage'
 import { ExperienceLibraryPage } from './ExperienceLibraryPage'
 import { TaskCenterPage, TaskCreateDialog } from './BusinessTaskPages'
 import { StateBoundary, StatePreview } from './StateBoundary'
@@ -54,7 +54,7 @@ const dashboardJourneys: Record<SystemKey, Array<{ label: string; detail: string
   ],
   insight: [
     { label: '投前洞察', detail: '为 Brief、策略与创意引用证据', navId: 'prelaunch' },
-    { label: '投后分析', detail: '查看消耗、CTR、转化与素材驱动因素', navId: 'performance' },
+    { label: '分析', detail: '一轮投放跑完，为什么是这个结果', navId: 'analysis' },
     { label: '素材管理', detail: '统一管理视频、图片与授权来源', navId: 'assets' },
     { label: '经验沉淀', detail: '把验证结论转成可复用策略证据', navId: 'knowledge' },
   ],
@@ -909,7 +909,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
   const dashboardAction = system.key === 'strategy' ? '新建策略任务' : system.key === 'creative' ? '新建创意任务' : system.key === 'insight' ? '查看广告数据' : '配置投放计划'
   const runDashboardAction = () => {
     if (system.key === 'strategy' || system.key === 'creative') setTaskDomain(system.key)
-    else onOpenProject(currentProject.id, system.key, system.key === 'insight' ? 'performance' : 'plans')
+    else onOpenProject(currentProject.id, system.key, system.key === 'insight' ? 'analysis' : 'plans')
   }
   const taskCreated = (task: BusinessTaskRecord) => {
     setTaskDomain(null)
@@ -1445,6 +1445,17 @@ function ObjectDetail({ system, item, objectId, onOpenProject }: { system: Syste
   return <aside className="object-detail" aria-label={`${name}详情`}><div><span className="section-label">服务端对象详情</span><h2>{name}</h2><p>{record ? `${operationField(record, 'kind')} · ${record.status} · ${operationField(record, 'owner')}` : `当前 Project：${currentProject.name}`}</p></div><div className="detail-kv"><span>对象 ID</span><b>{objectId}</b></div><div className="detail-kv"><span>来源版本</span><b>{currentProject.artifacts.strategy.version} → {currentProject.artifacts.creative.version}</b></div><button className="primary-button full" onClick={() => onOpenProject(currentProject.id, next[0], next[1], next[2])}>{next[3]}<ArrowRight size={15}/></button><button className="secondary-button full" onClick={() => onOpenProject(currentProject.id, system.key, item.id)}>返回{item.label}列表</button></aside>
 }
 
+// 侧栏的二级视图名 → 分析页的视图键。认不出来的名字落到总览，
+// 不留空白页：视图名改错了应该看到总览，而不是一片空。
+const analysisViews: Record<string, AnalysisView> = {
+  指标总览: 'overview',
+  素材对比: 'comparisons',
+  趋势: 'trends',
+  疲劳: 'fatigue',
+  异常: 'anomalies',
+  驱动因素: 'drivers',
+}
+
 export function ModulePage({ system, item, contextId, objectId, routeView, onOpenProject }: { system: SystemDefinition; item: NavItem; contextId?: string; objectId?: string; routeView?: string; onOpenProject: OpenProject }) {
   const [activeView, setActiveView] = useState(() => routeView && item.views.includes(routeView) ? routeView : item.views[0])
   const [dataState, setDataState] = useState<DataState>('ready')
@@ -1493,7 +1504,7 @@ export function ModulePage({ system, item, contextId, objectId, routeView, onOpe
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)}/>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
+    : system.key === 'insight' && item.id === 'analysis' ? <AnalysisPage state={dataState} view={analysisViews[activeView] ?? 'overview'} onOpenExperiments={() => onOpenProject(currentProject.id, 'insight', 'experiments')}/>
     : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>

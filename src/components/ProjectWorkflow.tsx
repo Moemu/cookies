@@ -106,7 +106,7 @@ export function ProjectFlowDashboard({ onOpenProject, onManageProject }: { onOpe
         <span><small>投前支持阶段 01 至 04</small><b>历史素材、经验与证据进入 Brief、策略和创意</b></span>
         <ArrowRight size={15}/>
       </button>
-      <button onClick={() => onOpenProject(currentProject.id, 'insight', 'performance')}>
+      <button onClick={() => onOpenProject(currentProject.id, 'insight', 'analysis')}>
         <BarChart3 size={18}/>
         <span><small>投后承接阶段 06 至 08</small><b>投放数据形成复盘，再沉淀为下一轮经验</b></span>
         <ArrowRight size={15}/>
@@ -217,7 +217,7 @@ function deriveWorkflow(project: ProjectRecord): WorkflowStage[] {
       id: 7, title: '数据复盘', summary: '数据分析 · 迭代优化', icon: BarChart3,
       input: '平台消耗、曝光、点击、转化和素材表现', action: '分析发生了什么、为什么发生，并形成下一步建议',
       output: '已确认洞察报告', gate: '效果报告已保存并确认',
-      owner: '素材分析 / 投手', system: 'insight', navId: 'performance', cta: '进入数据复盘',
+      owner: '素材分析 / 投手', system: 'insight', navId: 'analysis', cta: '进入数据复盘',
       rawComplete: insightReady,
       evidence: insightReady ? `洞察报告 ${project.artifacts.insight.version} 已确认。` : '广告数据可查看，尚未形成已确认的项目洞察报告。',
     },

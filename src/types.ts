@@ -84,6 +84,14 @@ export interface NavItem {
   description: string
   group: string
   layout?: 'dashboard' | 'workspace' | 'table' | 'editor' | 'analysis' | 'operations' | 'settings'
+  /**
+   * 不在侧栏里列出，但路由照常可达。
+   *
+   * 给「有页面、但不该从侧栏进」的入口用：实验中心是从分析页的结论上跳过去的
+   * ——人是先看到一条只能观察的结论，才需要做实验，而不是先想起有个实验中心。
+   * 直接从 nav 里删掉的话路由也会跟着断，页面就彻底打不开了。
+   */
+  hidden?: boolean
 }
 
 export interface SystemDefinition {

@@ -37,7 +37,7 @@ export default function App() {
   if (isAuthLoading) return <div className="login-page"><div className="page-notice">正在检查登录状态…</div></div>
   if (!session.authenticated) return <LoginPage/>
 
-  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
+  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'analysis', delivery: 'plans' }
   const activeProjectId = route.projectId ?? currentProject.id
   const changeSystem = (next: SystemKey) => navigate(projectPath(activeProjectId, next, systemLanding[next]))
   const openProject = (projectId: string, next?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleAlert, Layers3, RefreshCw, Ruler } from 'lucide-react'
+import { CircleAlert, FlaskConical, Layers3, RefreshCw, Ruler } from 'lucide-react'
 import { useProject } from '../../../context/ProjectContext'
 import { api, type ApiPerformanceAnalysis } from '../../../data/api'
 import { verdictLabel } from '../../../data/verdict'
@@ -88,7 +88,11 @@ const emptyHints: Record<AnalysisView, string> = {
   drivers: '还没有素材记录内容特征，或同一取值下的素材不足 2 个。去「分析素材库 · 特征库」补齐特征后再来看。',
 }
 
-export function AnalysisPage({ state, view }: { state: DataState; view: AnalysisView }) {
+export function AnalysisPage({ state, view, onOpenExperiments }: {
+  state: DataState
+  view: AnalysisView
+  onOpenExperiments: () => void
+}) {
   const { currentProject } = useProject()
   const [rangeLabel, setRangeLabel] = useState('近 30 天')
   const [analysis, setAnalysis] = useState<ApiPerformanceAnalysis | null>(null)
@@ -150,6 +154,12 @@ export function AnalysisPage({ state, view }: { state: DataState; view: Analysis
             </select></label>
             <button className="secondary-button" disabled={listState === 'loading'} onClick={() => { void load() }}>
               <RefreshCw size={15}/>刷新
+            </button>
+            {/* 实验中心没有侧栏入口了。只从 👁 徽章的「做个实验」跳进去的话，
+                一屏里一个 👁 都没出现时这个页面就完全不可达——功能还在，路断了。
+                这个按钮常驻，六个视图下都在。 */}
+            <button type="button" className="secondary-button" onClick={onOpenExperiments}>
+              <FlaskConical size={15}/>实验
             </button>
           </div>
         </div>
