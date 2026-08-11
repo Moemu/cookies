@@ -931,7 +931,10 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .core-flow-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 22px 24px; border-bottom: 1px solid var(--line); }
 .core-flow-toolbar h2 { font-size: 20px; letter-spacing: -.025em; }
 .core-flow-toolbar p { max-width: 620px; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.6; }
-.core-flow-actions { display: flex; align-items: flex-end; gap: 8px; }
+/* flex: none —— 工具栏是 space-between，左边的标题和说明会把这一栏挤扁，
+   按钮里的中文就折成两行溢出 36px 的行高。按钮宽度按文字定，不参与压缩。 */
+.core-flow-actions { display: flex; flex: none; align-items: flex-end; gap: 8px; }
+.core-flow-actions > button { white-space: nowrap; }
 .core-flow-actions label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 9px; }
 .core-flow-actions select, .preroll-config select { min-width: 118px; height: 34px; padding: 0 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; font-size: 10px; }
 .ad-insight-workspace { display: grid; grid-template-columns: minmax(690px, 1fr) 265px; min-height: 610px; background: var(--surface); border: 1px solid var(--line); }
