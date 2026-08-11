@@ -162,6 +162,36 @@ func buildReportDigest(analysis PerformanceAnalysis, experiments []Experiment,
 	return findings
 }
 
+// mergeFindings 把人记的和系统补的合成一份。
+//
+// 人记的全部保留并排在前面——包括他删掉的那些：删掉不等于「这个维度还空着」，
+// 人是看过之后决定不要的，系统再补一条一模一样的回来，等于否决他的决定。
+//
+// 系统补的里，凡是去重键（维度 + 变量）已经出现过的一律丢弃。没有去重键的
+// （口径警告、下一轮建议这类自由文本）全部保留——拿空键去重会把它们全折成一条。
+func mergeFindings(pinned, system []ReportFinding) []ReportFinding {
+	merged := make([]ReportFinding, 0, len(pinned)+len(system))
+	seen := make(map[string]struct{}, len(pinned)+len(system))
+
+	for _, finding := range pinned {
+		merged = append(merged, finding)
+		if key := finding.dedupeKey(); key != "" {
+			seen[key] = struct{}{}
+		}
+	}
+	for _, finding := range system {
+		key := finding.dedupeKey()
+		if key != "" {
+			if _, taken := seen[key]; taken {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		merged = append(merged, finding)
+	}
+	return merged
+}
+
 // performanceFindings 汇总素材表现那一块：对比、驱动因素、疲劳、异常。
 //
 // 四类分开截断而不是合起来取前 N 条：合起来取的话，对比结论通常强度最高，会把疲劳

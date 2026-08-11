@@ -227,3 +227,89 @@ func TestDigestRecommendsTheWinningDirection(t *testing.T) {
 		t.Fatalf("出处要指向赢的那条素材，实际是 %q", recommendation.SourceRef)
 	}
 }
+
+// 人在分析页记过「素材对比 · 时长」，系统就不该在同一份复盘里再补一条同样的。
+// 复盘会上同一件事被念两遍，第二遍会被当成另一条独立证据——两条相互印证的错觉，
+// 比一条孤证更容易让人下决心。
+func TestMergeFindingsDropsSystemDuplicatesOfWhatSomeonePinned(t *testing.T) {
+	t.Parallel()
+
+	pinned := []ReportFinding{{
+		Kind: SectionAssetPerformance, Text: "15 秒版本点击率更高。",
+		Origin: OriginPinned, Dimension: "comparisons", Variable: "duration",
+		Judgement: judge(ConfidenceSufficient, "样本充分、区间不重叠。"),
+	}}
+	system := []ReportFinding{
+		{Kind: SectionAssetPerformance, Text: "时长 15s 组的点击率高于其余素材。",
+			Origin: OriginSystem, Dimension: "comparisons", Variable: "duration",
+			Judgement: judge(ConfidenceSufficient, "")},
+		{Kind: SectionAssetPerformance, Text: "开场有人脸的一组转化更好。",
+			Origin: OriginSystem, Dimension: "drivers", Variable: "opening_face",
+			Judgement: judge(ConfidenceDirectional, "")},
+	}
+
+	merged := mergeFindings(pinned, system)
+	if len(merged) != 2 {
+		t.Fatalf("撞键的系统发现应该被丢掉，剩 2 条，得到 %d 条：%+v", len(merged), merged)
+	}
+	if merged[0].Origin != OriginPinned {
+		t.Error("人记的应该排在前面——复盘先看自己留的，再看系统补的")
+	}
+	if merged[1].Variable != "opening_face" {
+		t.Errorf("没撞键的系统发现应该留下，得到 %q", merged[1].Variable)
+	}
+}
+
+// 没有维度和变量的发现（口径警告、下一轮建议）去重键是空的，不参与去重。
+// 拿空键去重会把它们全折成一条。
+func TestMergeFindingsKeepsEveryFreeTextFinding(t *testing.T) {
+	t.Parallel()
+
+	system := []ReportFinding{
+		{Kind: SectionRecommendation, Text: "下一轮把时长压到 15 秒。", Origin: OriginSystem},
+		{Kind: SectionRecommendation, Text: "补一组开场有人脸的素材。", Origin: OriginSystem},
+	}
+	merged := mergeFindings(nil, system)
+	if len(merged) != 2 {
+		t.Fatalf("自由文本不该被折叠，期望 2 条，得到 %d 条", len(merged))
+	}
+}
+
+// 系统内部自己也可能重复（同一个变量在对比和驱动里各出现一次）。
+// 这两条不该互相消掉——它们的维度不同，说的确实是两件事。
+// 但同维度同变量的系统重复要消掉。
+func TestMergeFindingsDedupesWithinTheSystemBatch(t *testing.T) {
+	t.Parallel()
+
+	system := []ReportFinding{
+		{Text: "甲", Origin: OriginSystem, Dimension: "drivers", Variable: "duration"},
+		{Text: "乙", Origin: OriginSystem, Dimension: "drivers", Variable: "duration"},
+		{Text: "丙", Origin: OriginSystem, Dimension: "comparisons", Variable: "duration"},
+	}
+	merged := mergeFindings(nil, system)
+	if len(merged) != 2 {
+		t.Fatalf("同维度同变量的系统重复要消掉，期望 2 条，得到 %d 条：%+v", len(merged), merged)
+	}
+	if merged[0].Text != "甲" {
+		t.Errorf("重复时保留先出现的那条，得到 %q", merged[0].Text)
+	}
+}
+
+// 人删掉的那条也占着去重键。删掉不等于「这个维度还空着」——人是看过之后
+// 决定不要的，系统再补一条一模一样的回来，等于否决他的决定。
+func TestMergeFindingsRespectsWhatSomeoneDeleted(t *testing.T) {
+	t.Parallel()
+
+	pinned := []ReportFinding{{
+		Text: "15 秒版本点击率更高。", Origin: OriginPinned,
+		Dimension: "comparisons", Variable: "duration", Dropped: true,
+	}}
+	system := []ReportFinding{{
+		Text: "时长 15s 组的点击率高于其余素材。", Origin: OriginSystem,
+		Dimension: "comparisons", Variable: "duration",
+	}}
+	merged := mergeFindings(pinned, system)
+	if len(merged) != 1 {
+		t.Fatalf("被删掉的那条仍然占着去重键，期望 1 条，得到 %d 条：%+v", len(merged), merged)
+	}
+}
