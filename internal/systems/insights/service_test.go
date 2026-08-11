@@ -636,6 +636,24 @@ func (r *memoryRepository) GetReport(_ context.Context, organizationID contract.
 	}
 	return value, nil
 }
+func (r *memoryRepository) FindDraftByWindow(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, windowStart, windowEnd string) (InsightReport, error) {
+	// map 遍历顺序是随机的，所以这里按 ID 取最小的那份，而不是「碰到的第一份」。
+	// 不定序的伪造仓储会让「记两笔进同一份草稿」这类测试偶发失败。
+	var found InsightReport
+	for _, value := range r.reports {
+		if value.OrganizationID != organizationID || value.ProjectID != projectID ||
+			value.Status != ReportDraft || value.WindowStart != windowStart || value.WindowEnd != windowEnd {
+			continue
+		}
+		if found.ID == "" || value.ID < found.ID {
+			found = value
+		}
+	}
+	if found.ID == "" {
+		return InsightReport{}, ErrNotFound
+	}
+	return found, nil
+}
 func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, actorID string, now time.Time) (InsightReport, error) {
 	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
 	if err != nil {

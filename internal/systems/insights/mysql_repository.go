@@ -105,6 +105,31 @@ func (r MySQLRepository) GetReport(ctx context.Context, organizationID contract.
 	return value, err
 }
 
+// FindDraftByWindow 只找 draft，不找已确认的。已确认的复盘是定格的，
+// 往里加一条新发现等于事后改结论。
+//
+// 同一个 (项目 + 窗口) 下可能有多份草稿——唯一键里还有 execution_id，从投放执行
+// 建出来的草稿和记一笔建出来的草稿会并存。按创建时间取最早那份：人在这个窗口上
+// 第一次记一笔建的那份，就是这轮复盘的正主。
+func (r MySQLRepository) FindDraftByWindow(ctx context.Context, organizationID contract.OrganizationID,
+	projectID contract.ProjectID, windowStart, windowEnd string) (InsightReport, error) {
+	var id string
+	err := r.DB.QueryRowContext(ctx, `
+		SELECT id FROM insight_reports
+		WHERE organization_id = ? AND project_id = ? AND window_start = ? AND window_end = ?
+		  AND status = ?
+		ORDER BY created_at ASC, id ASC LIMIT 1`,
+		string(organizationID), string(projectID), windowStart, windowEnd, string(ReportDraft),
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InsightReport{}, ErrNotFound
+	}
+	if err != nil {
+		return InsightReport{}, err
+	}
+	return r.GetReport(ctx, organizationID, projectID, id)
+}
+
 func (r MySQLRepository) ConfirmReport(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, actorID string, now time.Time) (InsightReport, error) {
 	result, err := r.DB.ExecContext(ctx, `UPDATE insight_reports SET status = ?, confirmed_by = ?, confirmed_at = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ? AND status = ?`,
 		ReportConfirmed, actorID, now, now, organizationID, projectID, id, expectedVersion, ReportDraft)

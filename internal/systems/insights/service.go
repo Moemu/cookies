@@ -397,6 +397,9 @@ type Repository interface {
 	CreateReport(context.Context, InsightReport) (InsightReport, error)
 	ListReports(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]InsightReport, error)
 	GetReport(context.Context, contract.OrganizationID, contract.ProjectID, string) (InsightReport, error)
+	// FindDraftByWindow 按 (项目 + 窗口) 找那份还没提交的复盘草稿。
+	// 「记一笔」不问人要往哪记——问了等于要求人在看数据之前先声明意图。
+	FindDraftByWindow(context.Context, contract.OrganizationID, contract.ProjectID, string, string) (InsightReport, error)
 	ConfirmReport(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (InsightReport, error)
 	UpdateReportDigest(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, []ReportFinding, time.Time) (InsightReport, error)
 	CreateExperience(context.Context, Experience, ExperienceAudit) (Experience, error)
