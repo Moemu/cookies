@@ -127,7 +127,9 @@ function Field({ label, value, options, onChange }: {
   options: Set<string> | undefined
   onChange: (value: string) => void
 }) {
-  const list = options ? [...options].sort() : []
+  // 选项是品牌、产品、渠道这些中文短语。不带比较函数的 sort 按 UTF-16 码元排，
+  // 中文会排成人看不懂的顺序；localeCompare 按中文习惯排。
+  const list = options ? [...options].sort((left, right) => left.localeCompare(right, 'zh-CN')) : []
   return <label className="lookup-field">
     <small>{label}</small>
     {list.length
