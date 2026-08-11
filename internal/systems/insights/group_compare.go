@@ -87,20 +87,20 @@ func compareGroups(input groupCompareInput) GroupComparison {
 	// 因为区间不重叠但存在协变特征时，结论仍然归不到目标变量上。
 	switch {
 	case minImpressions < int64(thresholds.DirectionalImpressions):
-		result.Judgement = judge(ConfidenceLowSample,
+		result.Judgement = judgeAt(thresholds, ConfidenceLowSample,
 			fmt.Sprintf("样本较少的一侧只有 %s 次展示，这个分组还比不出东西。", countText(minImpressions)))
 	case len(result.CovaryingFeatures) > 0:
-		result.Judgement = judge(ConfidenceConfounded,
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
 			fmt.Sprintf("这一组素材在「%s」上也整齐地和其他素材不同，差异不能只算到「%s」头上。",
 				strings.Join(result.CovaryingFeatures, "」「"), input.SubjectLabel))
 	case result.IntervalsOverlap:
-		result.Judgement = judge(ConfidenceDirectional, "两组的点击率置信区间重叠，差异可能只是波动。")
+		result.Judgement = judgeAt(thresholds, ConfidenceDirectional, "两组的点击率置信区间重叠，差异可能只是波动。")
 	case !input.Comparable:
-		result.Judgement = judge(ConfidenceConfounded, "窗口内口径不一致，两组之间的差异可能来自口径而不是内容。")
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded, "窗口内口径不一致，两组之间的差异可能来自口径而不是内容。")
 	case minImpressions < int64(thresholds.SufficientImpressions):
-		result.Judgement = judge(ConfidenceDirectional, directionalNote(input.PreRegistered))
+		result.Judgement = judgeAt(thresholds, ConfidenceDirectional, directionalNote(input.PreRegistered))
 	default:
-		result.Judgement = judge(ConfidenceSufficient, sufficientNote(input.PreRegistered))
+		result.Judgement = judgeAt(thresholds, ConfidenceSufficient, sufficientNote(input.PreRegistered))
 	}
 	return result
 }

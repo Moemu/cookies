@@ -42,6 +42,12 @@ func assertVerdictAccompaniesConfidence(t *testing.T, path string, node any) {
 			if _, hasLabel := typed["verdict_label"]; !hasLabel {
 				t.Errorf("%s 有 confidence 但没有 verdict_label", path)
 			}
+			// 阈值可写之后，一条结论不带版本号就说不清它是按什么标准算出来的。
+			// 这个键必须出现在**每一处**判定上，不能只出现在屏级：发现是从各视图
+			// 抄进复盘草稿的，中间那一层漏了，存下来的那条就永远查不到依据。
+			if _, hasVersion := typed["threshold_version"]; !hasVersion {
+				t.Errorf("%s 有 confidence 但没有 threshold_version——判定没记下它用的那一版阈值", path)
+			}
 		}
 		for key, child := range typed {
 			assertVerdictAccompaniesConfidence(t, path+"."+key, child)

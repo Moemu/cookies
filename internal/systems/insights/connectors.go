@@ -1247,7 +1247,7 @@ func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sou
 	for key, row := range byAsset {
 		row.Objects = len(assetObjects[key])
 		row.Rates = RatesOf(row.Counts)
-		row.Judgement = judge(confidenceOf(row.Counts, row.Attributable, row.Objects, thresholds),
+		row.Judgement = judgeAt(thresholds, confidenceOf(row.Counts, row.Attributable, row.Objects, thresholds),
 			assetRowNote(*row, thresholds))
 		overview.Assets = append(overview.Assets, *row)
 	}
@@ -1300,7 +1300,7 @@ func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sou
 	}
 
 	level, note := overallConfidence(overview, thresholds)
-	overview.Judgement = judge(level, note)
+	overview.Judgement = judgeAt(thresholds, level, note)
 	return overview
 }
 

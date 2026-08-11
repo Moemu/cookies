@@ -13,6 +13,10 @@ export interface Judgement {
   verdict_label: string
   upgrade?: UpgradePath
   note: string
+  // threshold_version 是判出这条结论时生效的阈值版本。0 = 出厂设定。
+  // 可选是为了兼容还没带上它的老数据；缺失时 ThresholdStamp 什么都不显示，
+  // 而不是替一条来历不明的结论说「按出厂阈值判定」。
+  threshold_version?: number
 }
 
 export const verdictIcon: Record<Verdict, string> = {

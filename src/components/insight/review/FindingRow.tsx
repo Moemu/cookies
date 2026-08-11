@@ -1,6 +1,6 @@
 import { RotateCcw, Trash2 } from 'lucide-react'
 import type { ApiReportFinding } from '../../../data/api'
-import { VerdictBadge } from '../shared'
+import { ThresholdStamp, VerdictBadge } from '../shared'
 
 /**
  * 复盘里的一条发现。
@@ -32,6 +32,8 @@ export function FindingRow({ finding, index, editable, onDrop }: {
         upgrade: finding.upgrade,
         note: finding.note ?? '',
       }}/> : null}
+      {/* 一份复盘里的发现可能来自不同时间的分析，所以标在每一条上而不是报告顶部。 */}
+      {finding.verdict ? <ThresholdStamp version={finding.threshold_version}/> : null}
       {finding.note ? <small className="finding-note">{finding.note}</small> : null}
     </div>
     {editable ? <button type="button" className="text-button"

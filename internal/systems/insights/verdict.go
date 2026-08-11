@@ -101,6 +101,19 @@ type Judgement struct {
 	VerdictLabel string          `json:"verdict_label"`
 	Upgrade      UpgradePath     `json:"upgrade,omitempty"`
 	Note         string          `json:"note"`
+
+	// ThresholdVersion 是判出这条结论时生效的阈值版本。**0 和「没有」是两回事**：
+	// 0 表示这条是按出厂设定判的，nil 表示手上没有那一版的号码。
+	//
+	// 用指针就是为了分开这两种。非指针的话，一条从库里按 Confidence 重建出来的
+	// 判定（经验卡、投影）会带着 0 出去，页面上写「按出厂阈值判定」——
+	// 而它实际上可能是第 5 版判的，只是那个号码没存下来。替一条来历不明的结论
+	// 作保，比什么都不标更糟。
+	//
+	// 有号码的那些必须跟着结论走到最远的地方——记一笔存进复盘草稿、定格成报告
+	// 之后仍然读得出来（发现是 JSON 列，这个字段跟着一起落库）。改完阈值之后
+	// 回头看一条老结论，这个号码是唯一能说清「它是按什么标准算的」的东西。
+	ThresholdVersion *int64 `json:"threshold_version,omitempty"`
 }
 
 // judge 是构造 Judgement 的唯一入口。手拼 Judgement 字面量会绕过收敛规则，
@@ -114,6 +127,19 @@ func judge(confidence ConfidenceLevel, note string) Judgement {
 		Upgrade:      verdict.Upgrade(),
 		Note:         note,
 	}
+}
+
+// judgeAt 是「拿着一套阈值算出来的」判定。凡是判定链路上有 thresholds 在手的
+// 地方一律用它，不用 judge——用 judge 的话这条结论会盖成第 0 版，
+// 看的人以为它跑的是出厂设定，而实际上是第 5 版。
+//
+// judge 留给另一种情况：从库里把 Confidence 读回来重建判定（经验、卡片投影）。
+// 那些地方手上没有当初那一版的号码，编一个出来比留空更糟。
+func judgeAt(thresholds ResolvedThresholds, confidence ConfidenceLevel, note string) Judgement {
+	value := judge(confidence, note)
+	version := thresholds.Version
+	value.ThresholdVersion = &version
+	return value
 }
 
 // NewJudgement 是 judge 的导出版本，给包外用（HTTP 层的测试替身等）。

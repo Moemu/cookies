@@ -4035,6 +4035,9 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .verdict-warning { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); }
 .verdict-muted { background: color-mix(in srgb, var(--muted) 12%, transparent); color: var(--muted); }
 .verdict-upgrade { margin-left: 4px; border: none; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-size: 12px; padding: 0; }
+/* 阈值标注是给「这按什么标准算的」这个问题准备的备注，不是结论本身：
+   压到 11px + muted，让它挨着判定徽章但不跟它抢眼睛。 */
+.threshold-stamp { margin-left: 6px; font-size: 11px; line-height: 18px; color: var(--muted); white-space: nowrap; cursor: help; }
 .evidence-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 90vw); background: var(--surface); box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; z-index: 40; }
 .evidence-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .evidence-drawer-head h3 { margin: 0; font-size: 14px; }

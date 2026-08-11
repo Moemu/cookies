@@ -486,12 +486,17 @@ func buildPerformanceAnalysis(window MetricWindow, facts []MetricFactWithMapping
 		verdicts = append(verdicts, item.Verdict)
 	}
 	weakest := weakestVerdict(verdicts...)
+	screenThresholdVersion := thresholds.Version
 	analysis.Judgement = Judgement{
 		Confidence:   worstConfidenceOf(analysis),
 		Verdict:      weakest,
 		VerdictLabel: weakest.Label(),
 		Upgrade:      weakest.Upgrade(),
 		Note:         screenNote(weakest, len(verdicts)),
+		// 屏级是页面上唯一挂标注的地方，这个号码不能空。这里手拼 Judgement 而不
+		// 走 judgeAt，是因为屏级档位由六视图取最弱算出来，不是从一个 confidence
+		// 收敛来的——套 judgeAt 会把已经算好的 weakest 覆盖掉。
+		ThresholdVersion: &screenThresholdVersion,
 	}
 	return analysis
 }
@@ -731,47 +736,47 @@ func compareAssets(baseline, variant *assetSlice, comparable bool,
 	switch {
 	case len(baseline.features) == 0 || len(variant.features) == 0:
 		result.VariantVerdict = VerdictNoFeatures
-		result.Judgement = judge(ConfidenceConfounded,
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
 			"至少一边没有内容特征，两个素材之间到底改了什么无从判断。数字上的差异不能算到任何变量头上。")
 	case minImpressions < int64(thresholds.DirectionalImpressions):
 		result.VariantVerdict = VerdictLowSample
-		result.Judgement = judge(ConfidenceLowSample,
+		result.Judgement = judgeAt(thresholds, ConfidenceLowSample,
 			fmt.Sprintf("样本较少的一边只有 %s 次展示，不到 %s 次的方向性门槛，先不谈差异。",
 				countText(minImpressions), countText(int64(thresholds.DirectionalImpressions))))
 	case len(result.ChangedFeatures) == 0:
 		result.VariantVerdict = VerdictConfounded
-		result.Judgement = judge(ConfidenceConfounded,
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
 			"两个素材在已记录的特征上完全一致，差异来自特征体系没覆盖到的地方——可能是投放设置、时段或受众，不是内容。")
 	case len(admissible) == 0:
 		result.VariantVerdict = VerdictNoFeatures
-		result.Judgement = judge(ConfidenceConfounded,
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
 			fmt.Sprintf("两个素材的差异只出现在模型推断的变量上（%s）。模型推断不进结论——用一个猜测去解释另一个猜测，一层假设都没减少。要归因，先在内容分析里人工确认这几个变量。",
 				joinFeatureLabels(result.ChangedFeatures)))
 	case len(admissible) > 1:
 		result.VariantVerdict = VerdictConfounded
-		result.Judgement = judge(ConfidenceConfounded,
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
 			fmt.Sprintf("这一对同时改了 %d 个变量（%s），差异归不到其中任何一个上。要归因得再做一组只改一个变量的素材。",
 				len(admissible), joinFeatureLabels(admissible)))
 	case result.IntervalsOverlap:
 		result.VariantVerdict = VerdictDirectional
-		result.Judgement = judge(ConfidenceDirectional,
+		result.Judgement = judgeAt(thresholds, ConfidenceDirectional,
 			fmt.Sprintf("只改了「%s」，但两边的点击率置信区间重叠，差异可能只是波动。方向可以参考，不能当结论。",
 				admissible[0].Label))
 	case minImpressions < int64(thresholds.SufficientImpressions):
 		result.VariantVerdict = VerdictDirectional
-		result.Judgement = judge(ConfidenceDirectional,
+		result.Judgement = judgeAt(thresholds, ConfidenceDirectional,
 			fmt.Sprintf("只改了「%s」，区间也不重叠，但样本还没到 %s 次展示的充分门槛。",
 				admissible[0].Label, countText(int64(thresholds.SufficientImpressions))))
 	default:
 		result.VariantVerdict = VerdictAttributable
-		result.Judgement = judge(ConfidenceSufficient,
+		result.Judgement = judgeAt(thresholds, ConfidenceSufficient,
 			fmt.Sprintf("只改了「%s」，其余 %d 个特征取值相同，样本充分且区间不重叠——这个差异可以归到这个变量上。",
 				admissible[0].Label, result.ControlledCount))
 	}
 	// 口径不一致会把所有归因打回方向性：差异可能全部来自口径本身。
 	if !comparable && result.VariantVerdict == VerdictAttributable {
 		result.VariantVerdict = VerdictDirectional
-		result.Judgement = judge(ConfidenceConfounded,
+		result.Judgement = judgeAt(thresholds, ConfidenceConfounded,
 			result.Note+"（但窗口内口径不一致，这一条降级为方向性观察。）")
 	}
 	return result
@@ -850,7 +855,7 @@ func buildTrends(ordered []*assetSlice, thresholds ResolvedThresholds) []AssetTr
 		default:
 			trend.Direction, note = "flat", "前后两段点击率变化在 ±15% 以内。"
 		}
-		trend.Judgement = judge(confidence, note)
+		trend.Judgement = judgeAt(thresholds, confidence, note)
 		trends = append(trends, trend)
 	}
 	return trends
@@ -917,7 +922,7 @@ func buildFatigue(ordered []*assetSlice, window MetricWindow,
 		default:
 			note = "后半段没有出现点击率下滑或成本上升，这一轮看不到疲劳迹象。"
 		}
-		signal.Judgement = judge(confidence, note)
+		signal.Judgement = judgeAt(thresholds, confidence, note)
 
 		if signal.Severity != FatigueNone {
 			signal.AlternativeExplanations = fatigueAlternatives(signal, slice, window)
@@ -1004,7 +1009,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 			anomalies = append(anomalies, MetricAnomaly{
 				Date: date, Scope: "project", Metric: "spend_cents", Kind: kind,
 				Observed: spends[index], Median: median, Deviation: deviation,
-				Judgement: judge(ConfidenceDirectional,
+				Judgement: judgeAt(thresholds, ConfidenceDirectional,
 					fmt.Sprintf("这一天全项目花费明显%s于窗口内的常态水平，先确认是投放动作还是数据问题，再解释素材表现。", word)),
 			})
 		}
@@ -1081,7 +1086,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 				Date: dates[hit.index], Scope: "asset", AssetID: slice.assetID, AssetTitle: slice.title,
 				Metric: "impressions", Kind: kind,
 				Observed: impressions[hit.index], Median: assetMedian, Deviation: hit.deviation,
-				Judgement: judge(ConfidenceDirectional, note),
+				Judgement: judgeAt(thresholds, ConfidenceDirectional, note),
 			})
 		}
 	}
@@ -1096,7 +1101,7 @@ func buildAnomalies(projectByDate map[string]MetricCounts, ordered []*assetSlice
 		anomalies = append(anomalies, MetricAnomaly{
 			Date: gaps[0], Scope: "asset", AssetID: slice.assetID, AssetTitle: slice.title,
 			Metric: "impressions", Kind: AnomalyGap,
-			Judgement: judge(ConfidenceDirectional,
+			Judgement: judgeAt(thresholds, ConfidenceDirectional,
 				fmt.Sprintf("这个素材在投放期间有 %d 天没有数据（从 %s 起）。断档期间是停投还是没回流，这里分不出来，但趋势和疲劳都会因此算偏。",
 					len(gaps), gaps[0])),
 		})

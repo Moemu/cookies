@@ -5,7 +5,7 @@ import { api, type ApiPerformanceAnalysis } from '../../../data/api'
 import { verdictLabel } from '../../../data/verdict'
 import type { DataState } from '../../../types'
 import { StateBoundary } from '../../StateBoundary'
-import { NotEnoughSample, VerdictBadge } from '../shared'
+import { NotEnoughSample, ThresholdStamp, VerdictBadge } from '../shared'
 import { AnomalyView } from './AnomalyView'
 import { ComparisonView } from './ComparisonView'
 import { DriverView } from './DriverView'
@@ -151,6 +151,9 @@ export function AnalysisPage({ state, view, onOpenExperiments }: {
           <div className="core-flow-actions">
             {/* 屏级档位挨着窗口放：先知道这一屏能信到什么程度，再看下面的数字。 */}
             {analysis ? <VerdictBadge judgement={analysis.judgement}/> : null}
+            {/* 每屏只标一处。判定阈值是可调的，不标的话，同一屏在两次调整之间
+                看起来完全一样，实际是按两套标准算的。 */}
+            {analysis ? <ThresholdStamp version={analysis.judgement.threshold_version}/> : null}
             <label>窗口<select aria-label="数据窗口" value={rangeLabel} onChange={event => setRangeLabel(event.target.value)}>
               {rangeOptions.map(option => <option key={option.label}>{option.label}</option>)}
             </select></label>

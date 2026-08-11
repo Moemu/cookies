@@ -118,3 +118,70 @@ func TestSavingThresholdsNeedsAReason(t *testing.T) {
 		t.Errorf("写了理由的合法请求被拒了：%v", err)
 	}
 }
+
+// 每条结论要盖上它用的那一版阈值。
+//
+// 没有这个号码，改完阈值之后所有历史结论都说不清是按什么标准算出来的。
+// 经验库是「新增版本不覆盖、历史可审计」的——一批说不清依据的经验会永远
+// 挂在账上，说不清是对是错。
+func TestJudgementCarriesTheThresholdVersion(t *testing.T) {
+	t.Parallel()
+
+	thresholds := defaultThresholds()
+	thresholds.Version = 7
+
+	input := groupCompareInput{
+		InGroup:      slicesWith(20000, 600),
+		Rest:         slicesWith(20000, 400),
+		SubjectLabel: "开场类型",
+		Comparable:   true,
+		Thresholds:   thresholds,
+	}
+	got := compareGroups(input).ThresholdVersion
+	if got == nil {
+		t.Fatal("判定没有记下阈值版本")
+	}
+	if *got != 7 {
+		t.Errorf("判定应该记下第 7 版阈值，得到 %d", *got)
+	}
+}
+
+// 出厂设定是第 0 版，也要如实盖上——空着的话，页面分不清
+// 「跑的是出厂设定」和「这条结论早于阈值功能」这两种情况。
+func TestDefaultThresholdsStampVersionZero(t *testing.T) {
+	t.Parallel()
+
+	input := groupCompareInput{
+		InGroup:      slicesWith(20000, 600),
+		Rest:         slicesWith(20000, 400),
+		SubjectLabel: "开场类型", Comparable: true,
+	}
+	// 0 和「没有」是两回事：跑出厂设定要如实盖第 0 版，不能留空——
+	// 留空的意思是「不知道这条按什么标准算的」，而这里明明知道。
+	got := compareGroups(input).ThresholdVersion
+	if got == nil {
+		t.Fatal("跑出厂设定也要盖版本号，不能留空")
+	}
+	if *got != 0 {
+		t.Errorf("出厂设定应该盖第 0 版，得到 %d", *got)
+	}
+}
+
+// 屏级判定也要盖号。一屏上只出现一个标注，标的就是这个号——
+// 屏级不盖的话，页面上唯一那处标注只能靠猜，或者干脆不标。
+func TestScreenJudgementCarriesTheThresholdVersion(t *testing.T) {
+	t.Parallel()
+
+	thresholds := defaultThresholds()
+	thresholds.Version = 4
+
+	window := testWindow(10)
+	analysis := buildPerformanceAnalysis(window, nil, nil, thresholds)
+	got := analysis.Judgement.ThresholdVersion
+	if got == nil {
+		t.Fatal("屏级判定没有记下阈值版本")
+	}
+	if *got != 4 {
+		t.Errorf("屏级判定应该记下第 4 版阈值，得到 %d", *got)
+	}
+}

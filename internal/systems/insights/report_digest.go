@@ -95,7 +95,12 @@ func (f *ReportFinding) normalize() {
 		f.Origin = OriginSystem
 	}
 	if f.Verdict == "" {
+		// 阈值版本原样留着。老行本来就没有这个号码（那时阈值还是代码常量），
+		// 补判定的时候顺手清零看不出区别；但将来若有别的原因走到这条分支，
+		// 清零就等于把「按第 5 版判的」改写成「按出厂设定判的」。
+		version := f.ThresholdVersion
 		f.Judgement = judge(f.Confidence, f.Note)
+		f.ThresholdVersion = version
 	}
 }
 

@@ -1095,6 +1095,9 @@ export type ApiReportFinding = {
   verdict_label?: string
   upgrade?: UpgradePath
   note?: string
+  // 判出这条时生效的阈值版本。定格在发现上，之后改阈值也不会改写它——
+  // 一份复盘里的发现可能来自不同时间的分析，报告顶部标一个号是不够的。
+  threshold_version?: number
   // 这条出自哪个视图、说的哪个变量。两者构成去重键：人记过的，系统不再补一条。
   dimension?: string
   variable?: string

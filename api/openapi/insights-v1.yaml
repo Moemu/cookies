@@ -1891,7 +1891,7 @@ components:
       description: |
         报告里的一条发现。四块（素材表现 / 实验结论 / 相关经验 / 下一轮建议）
         按 `kind` 分组，顺序即 `ReportSectionKind` 的枚举顺序。
-        `Judgement` 的四个字段（confidence / verdict / verdict_label / note）平铺在这里。
+        `Judgement` 的字段（confidence / verdict / verdict_label / note，以及知道时才有的 threshold_version）平铺在这里。
       required: [kind, text, dropped, origin, confidence, verdict, verdict_label]
       properties:
         kind:
@@ -1914,6 +1914,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '一句话说明为什么是这个档位。' }
@@ -2116,6 +2117,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
@@ -3061,6 +3063,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '一句话说明为什么是这个档位。' }
@@ -3216,6 +3219,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '一句话说明为什么是这个档位。' }
@@ -3284,6 +3288,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string, description: '三档的中文名，后端给定，前端不得自行翻译。' }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '一句话解释为什么是这个档位。原来叫 confidence_note，改名是为了和其余七处内嵌 Judgement 的地方对齐。' }
@@ -3396,6 +3401,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: 一句话说明为什么是这个判定。 }
@@ -3422,6 +3428,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
@@ -3465,6 +3472,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
@@ -3496,6 +3504,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string }
@@ -3538,6 +3547,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note:
@@ -4181,6 +4191,7 @@ components:
         verdict:
           $ref: '#/components/schemas/Verdict'
         verdict_label: { type: string }
+        threshold_version: { type: integer, format: int64, description: '判出这条结论时生效的阈值版本。0 = 按出厂设定判的；**字段缺失表示不知道**（例如从库里按 confidence 重建出来的判定），此时前端不得显示任何阈值标注。' }
         upgrade:
           $ref: '#/components/schemas/UpgradePath'
         note: { type: string, description: '给人读的一句话，说明这条判定为什么是这个强度。' }
