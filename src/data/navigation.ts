@@ -4,7 +4,7 @@ import {
   FileCheck2, FileSearch, FlaskConical, FolderKanban,
   GalleryHorizontalEnd, Library, Lightbulb, ListChecks,
   Megaphone, MonitorCog, PackageCheck, PlaySquare, Rocket,
-  Send, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
+  Send, Settings2, Sparkles,
   TableProperties, Target, TrendingUp, UsersRound, Video, WandSparkles,
 } from 'lucide-react'
 import type { SystemDefinition } from '../types'
@@ -104,11 +104,21 @@ export const systems: SystemDefinition[] = [
         description: '能拿来分析的素材有哪些、还差什么、样本不够时从哪里补。',
         views: ['总览', '数据接入', '变量', '找相似', '外部素材'],
       },
-      { id: 'quality', label: '数据质量', icon: ShieldCheck, group: '治理', layout: 'operations', description: '监控新鲜度、缺失、口径、异常和修复队列。', views: ['新鲜度', '缺失', '异常', '口径', '对账', '修复队列'] },
-      // 第五个视图原来写「版本与质量」，03 §一级导航和 19 §288 都写「质量看板」，
-      // 这里对齐文档（基线文档 §5 冲突 11）。
-      { id: 'operations', label: '能力运营', icon: SlidersHorizontal, group: '治理', layout: 'operations', description: '治理特征体系、指标字典、Skills 与评测集。', views: ['特征体系', '指标字典', '分析 Skills', '评测集', '质量看板'] },
-      { id: 'settings', label: '系统设置', icon: Settings2, group: '治理', layout: 'settings', description: '查看现在生效的样本门槛、窗口、通知、确认权限、报告模板与名词表。', views: ['样本门槛', '观察窗口', '通知', '确认权限', '报告模板', '名词表'] },
+      // 原来的「数据质量」「能力运营」「系统设置」合成这一个。
+      //
+      // 三个入口回答的是同一个问题：这套系统凭什么这么判。判定阈值是标准，数据体检
+      // 是按这个标准量出来的数据够不够干净，变量字典是这些数和词各自指什么，确认
+      // 权限是谁能把机器说的变成我们认的。摆成三个平级入口，人得先猜「我这个疑问
+      // 归哪一页管」才找得到。
+      //
+      // 「判定阈值」排第一，也是这一版唯一新增的能力：以前那七个数字散在三个 Go
+      // 文件里，看不见也调不了——而一个看不见的阈值和一个错的阈值，在使用者那里是
+      // 同一种东西。
+      {
+        id: 'settings', label: '设置', icon: Settings2, group: '治理', layout: 'settings',
+        description: '判定标准、数据体检、变量字典、确认权限。',
+        views: ['判定阈值', '数据体检', '变量字典', '确认权限'],
+      },
     ],
   },
   {
