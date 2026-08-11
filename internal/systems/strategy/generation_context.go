@@ -215,21 +215,46 @@ func (s Service) generationMemorySummary(ctx context.Context, task agent.Task, c
 	if err != nil {
 		return "", err
 	}
-	if kind != "deterministic" && kind != "model" {
-		return "", fmt.Errorf("conversation memory kind is invalid")
-	}
-	calculated, err := conversationMemorySummaryHash(summary)
+	content, calculated, backfill, err := usableConversationMemorySummary(summary, kind, storedHash)
 	if err != nil {
 		return "", err
 	}
-	if !storedHash.Equal(calculated) {
-		return "", fmt.Errorf("conversation memory content hash mismatch")
+	if backfill {
+		// summary_content_hash was introduced after conversation memories already
+		// existed. Repair those legacy rows opportunistically, but never make this
+		// optional context a new availability dependency for the conversation.
+		_, _ = s.DB.ExecContext(ctx, `UPDATE strategy_conversation_memories
+			SET summary_content_hash = ?
+			WHERE organization_id = ? AND project_id = ? AND conversation_id = ?
+			  AND summary_content_hash = '' AND summary_kind = ? AND summary = ?`,
+			calculated, task.OrganizationID, task.ProjectID, conversationID, kind, summary)
+	}
+	return content, nil
+}
+
+func usableConversationMemorySummary(
+	summary string,
+	kind string,
+	storedHash contract.ContentHash,
+) (string, contract.ContentHash, bool, error) {
+	if kind != "deterministic" && kind != "model" {
+		return "", "", false, nil
+	}
+	calculated, err := conversationMemorySummaryHash(summary)
+	if err != nil {
+		return "", "", false, err
+	}
+	legacy := strings.TrimSpace(string(storedHash)) == ""
+	if !legacy && !storedHash.Equal(calculated) {
+		// Memory is compressed, optional context. Ignore an integrity failure so
+		// the current Brief and recent messages can still drive the next turn.
+		return "", calculated, false, nil
 	}
 	content := []rune(strings.TrimSpace(summary))
 	if len(content) > 4_000 {
 		content = content[:4_000]
 	}
-	return string(content), nil
+	return string(content), calculated, legacy, nil
 }
 
 func evidenceFromBrief(brief BriefVersion) []EvidenceItem {

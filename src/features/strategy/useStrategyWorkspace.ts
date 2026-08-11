@@ -93,6 +93,9 @@ export function agentFailureMessage(code?: string, message?: string, kind?: stri
   if (code === 'MODEL_REQUEST_REJECTED') return '文本模型不支持当前路由参数，请联系管理员检查模型配置后重试。'
   if (code === 'MODEL_OUTPUT_INVALID') return '模型输出未通过策略结构校验，可以重新生成。'
   if (code === 'MODEL_UNAVAILABLE') return '文本模型当前不可用，请检查模型配置后重试。'
+  if (code === 'AGENT_EXECUTION_FAILED' || code === 'JOB_EXECUTION_FAILED') {
+    return 'AI 助手本轮执行未完成，请重新发送。已填写的内容和历史对话不会丢失。'
+  }
   return message || '本轮 Strategy Agent 任务未完成。'
 }
 

@@ -12,6 +12,35 @@ import (
 	strategyskills "github.com/shikanon/cookies/internal/systems/strategy/skills"
 )
 
+func TestUsableConversationMemorySummarySupportsLegacyAndFailsOpenOnCorruption(t *testing.T) {
+	t.Parallel()
+	const summary = "Brand: Cookies; objective: launch"
+	validHash, err := conversationMemorySummaryHash(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content, calculated, backfill, err := usableConversationMemorySummary(summary, "deterministic", validHash)
+	if err != nil || content != summary || backfill || !calculated.Equal(validHash) {
+		t.Fatalf("valid memory: content=%q calculated=%q backfill=%v err=%v", content, calculated, backfill, err)
+	}
+
+	content, calculated, backfill, err = usableConversationMemorySummary(summary, "deterministic", "")
+	if err != nil || content != summary || !backfill || !calculated.Equal(validHash) {
+		t.Fatalf("legacy memory: content=%q calculated=%q backfill=%v err=%v", content, calculated, backfill, err)
+	}
+
+	content, _, backfill, err = usableConversationMemorySummary(summary, "deterministic", contract.ContentHash("sha256:"+strings.Repeat("0", 64)))
+	if err != nil || content != "" || backfill {
+		t.Fatalf("corrupt memory: content=%q backfill=%v err=%v", content, backfill, err)
+	}
+
+	content, _, backfill, err = usableConversationMemorySummary(summary, "unknown", validHash)
+	if err != nil || content != "" || backfill {
+		t.Fatalf("unknown memory kind: content=%q backfill=%v err=%v", content, backfill, err)
+	}
+}
+
 func TestEvidenceFromBriefPreservesConfirmationBoundary(t *testing.T) {
 	t.Parallel()
 	brief := BriefVersion{

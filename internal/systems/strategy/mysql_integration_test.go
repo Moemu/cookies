@@ -179,6 +179,12 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || memory.Version < 2 || memory.LastCompactedAt == nil {
 		t.Fatalf("compacted conversation memory=%#v err=%v", memory, err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE strategy_conversation_memories
+		SET summary_content_hash = ''
+		WHERE organization_id = ? AND project_id = ? AND conversation_id = ?`,
+		actor.OrganizationID, projectID, bundle.Conversation.ID); err != nil {
+		t.Fatalf("simulate legacy conversation memory: %v", err)
+	}
 	draftBeforeProposal, err := service.GetTaskBriefDraft(ctx, actor, bundle.Task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +209,10 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	}
 	if err := runAgentTaskThroughRuntime(ctx, db, service, assistantTurn.AgentTask); err != nil {
 		t.Fatalf("run assistant proposal: %v", err)
+	}
+	memory, err = service.GetConversationMemory(ctx, actor, bundle.Conversation.ID)
+	if err != nil || memory.SummaryContentHash.Validate() != nil {
+		t.Fatalf("legacy conversation memory was not repaired: memory=%#v err=%v", memory, err)
 	}
 	rows, err := db.QueryContext(ctx, `SELECT event_type, stage, duration_ms
 		FROM strategy_product_events
