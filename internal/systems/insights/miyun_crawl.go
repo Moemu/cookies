@@ -19,11 +19,13 @@ const (
 	MiyunMaterialImportJobKind = "insights.miyun.material_import"
 	MiyunQuerySchemaV1         = "miyun-query/v1"
 	MiyunCrawlerCardSchemaV1   = "miyun-crawler-card/v1"
+	DefaultMiyunCrawlMaxPages  = 50
 )
 
 type CreateMiyunCrawlJobRequest struct {
 	ProductProfileID string `json:"product_profile_id"`
 	Operation        string `json:"operation"`
+	MaxPages         int    `json:"max_pages"`
 }
 
 type MiyunMaterialDecisionRequest struct {
@@ -36,11 +38,28 @@ type MiyunMaterialDetail struct {
 	Snapshots []MiyunMaterialSnapshot `json:"snapshots"`
 }
 
+type MiyunMaterialListOptions struct {
+	CrawlJobID      string
+	Search          string
+	Sort            string
+	HandoffEligible bool
+	Limit           int
+	Offset          int
+}
+
+type MiyunMaterialListPage struct {
+	Items  []MiyunMaterial `json:"items"`
+	Total  int             `json:"total"`
+	Limit  int             `json:"limit"`
+	Offset int             `json:"offset"`
+}
+
 type MiyunQuerySnapshot struct {
 	SchemaVersion string                     `json:"schema_version"`
 	Operation     string                     `json:"operation"`
 	ProfileID     string                     `json:"profile_id"`
 	ConnectionID  string                     `json:"connection_id"`
+	MaxPages      int                        `json:"max_pages"`
 	Query         crawler.YouShuQuery        `json:"query"`
 	FrozenAt      time.Time                  `json:"frozen_at"`
 	ProfileInput  json.RawMessage            `json:"profile_input"`
@@ -60,7 +79,7 @@ type MiyunCrawlRepository interface {
 	UpdateMiyunCrawlJob(context.Context, MiyunCrawlJob, int64) (MiyunCrawlJob, error)
 	UpdateMiyunCrawlJobAndConnection(context.Context, MiyunCrawlJob, int64, MiyunConnection, int64) (MiyunCrawlJob, MiyunConnection, error)
 	ApplyMiyunCrawlPage(context.Context, MiyunCrawlJob, int64, []MiyunCrawlPageRecord, bool) (MiyunCrawlJob, error)
-	ListMiyunMaterials(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]MiyunMaterial, error)
+	ListMiyunMaterials(context.Context, contract.OrganizationID, contract.ProjectID, MiyunMaterialListOptions) (MiyunMaterialListPage, error)
 	GetMiyunMaterial(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunMaterial, error)
 	DecideMiyunMaterial(context.Context, MiyunMaterial, int64) (MiyunMaterial, error)
 	MarkMiyunMaterialImporting(context.Context, MiyunMaterial, int64, string) (MiyunMaterial, error)
@@ -133,7 +152,10 @@ func (s Service) CreateMiyunCrawlJob(ctx context.Context, actor contract.ActorCo
 	}
 	request.ProductProfileID = strings.TrimSpace(request.ProductProfileID)
 	request.Operation = strings.ToLower(strings.TrimSpace(request.Operation))
-	if request.ProductProfileID == "" || (request.Operation != "product" && request.Operation != "cid") {
+	if request.MaxPages == 0 {
+		request.MaxPages = DefaultMiyunCrawlMaxPages
+	}
+	if request.ProductProfileID == "" || (request.Operation != "product" && request.Operation != "cid") || request.MaxPages < 1 || request.MaxPages > DefaultMiyunCrawlMaxPages {
 		return MiyunCrawlJob{}, ErrInvalidRequest
 	}
 	profile, err := s.Miyun.GetMiyunProductProfile(ctx, actor.OrganizationID, projectID, request.ProductProfileID)
@@ -165,7 +187,8 @@ func (s Service) CreateMiyunCrawlJob(ctx context.Context, actor contract.ActorCo
 	}
 	snapshot := MiyunQuerySnapshot{
 		SchemaVersion: MiyunQuerySchemaV1, Operation: request.Operation, ProfileID: profile.ID, ConnectionID: connection.ID,
-		Query: query, FrozenAt: now, ProfileInput: append(json.RawMessage(nil), profile.InputSnapshot...),
+		MaxPages: request.MaxPages,
+		Query:    query, FrozenAt: now, ProfileInput: append(json.RawMessage(nil), profile.InputSnapshot...),
 		AssetRefs: append([]contract.AssetVersionRef(nil), profile.ProductAssetRefs...), DocumentIDs: append([]string(nil), profile.KnowledgeDocumentIDs...),
 	}
 	queryJSON, err := json.Marshal(snapshot)
@@ -259,14 +282,34 @@ func (s Service) RetryMiyunCrawlJob(ctx context.Context, actor contract.ActorCon
 	if current.Status != MiyunCrawlJobFailed && current.Status != MiyunCrawlJobPartial && current.Status != MiyunCrawlJobAuthRequired {
 		return MiyunCrawlJob{}, ErrInvalidState
 	}
-	return s.CreateMiyunCrawlJob(ctx, actor, projectID, key, CreateMiyunCrawlJobRequest{ProductProfileID: current.ProductProfileID, Operation: current.Operation})
+	maxPages := DefaultMiyunCrawlMaxPages
+	var frozen MiyunQuerySnapshot
+	if json.Unmarshal(current.QuerySnapshot, &frozen) == nil && frozen.MaxPages >= 1 && frozen.MaxPages <= DefaultMiyunCrawlMaxPages {
+		maxPages = frozen.MaxPages
+	}
+	return s.CreateMiyunCrawlJob(ctx, actor, projectID, key, CreateMiyunCrawlJobRequest{ProductProfileID: current.ProductProfileID, Operation: current.Operation, MaxPages: maxPages})
 }
 
-func (s Service) ListMiyunMaterials(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]MiyunMaterial, error) {
+func (s Service) ListMiyunMaterials(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, options MiyunMaterialListOptions) (MiyunMaterialListPage, error) {
 	if err := s.miyunCrawlReady(actor, projectID, ScopeRead); err != nil {
-		return nil, err
+		return MiyunMaterialListPage{}, err
 	}
-	return s.MiyunCrawl.ListMiyunMaterials(ctx, actor.OrganizationID, projectID, normalizeLimit(limit))
+	options.CrawlJobID = strings.TrimSpace(options.CrawlJobID)
+	options.Search = strings.TrimSpace(options.Search)
+	options.Sort = strings.TrimSpace(options.Sort)
+	options.Limit = normalizeLimit(options.Limit)
+	if options.Offset < 0 || options.Offset > 1000000 || len([]rune(options.Search)) > 200 || !validMiyunMaterialSort(options.Sort) {
+		return MiyunMaterialListPage{}, ErrInvalidRequest
+	}
+	return s.MiyunCrawl.ListMiyunMaterials(ctx, actor.OrganizationID, projectID, options)
+}
+
+func validMiyunMaterialSort(value string) bool {
+	switch value {
+	case "", "delivery_days", "cumulative_impressions", "related_ads", "related_creators", "material_score":
+		return true
+	}
+	return false
 }
 
 func (s Service) GetMiyunMaterial(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, materialID string) (MiyunMaterial, error) {
@@ -444,6 +487,14 @@ func (s Service) HandleMiyunCrawlJob(ctx context.Context, claim jobruntime.Claim
 	if json.Unmarshal(job.QuerySnapshot, &frozen) != nil || frozen.SchemaVersion != MiyunQuerySchemaV1 || frozen.ProfileID != job.ProductProfileID || frozen.ConnectionID != job.ConnectionID {
 		return jobruntime.Result{}, terminalMiyunExecution("MIYUN_QUERY_SNAPSHOT_INVALID", ErrInvalidState)
 	}
+	// Snapshots created before max_pages was introduced remain executable and
+	// adopt the safe default. New snapshots cannot exceed the public limit.
+	if frozen.MaxPages == 0 {
+		frozen.MaxPages = DefaultMiyunCrawlMaxPages
+	}
+	if frozen.MaxPages < 1 || frozen.MaxPages > DefaultMiyunCrawlMaxPages {
+		return jobruntime.Result{}, terminalMiyunExecution("MIYUN_QUERY_SNAPSHOT_INVALID", ErrInvalidState)
+	}
 	pageNumber := job.CompletedPages + 1
 	frozen.Query.Page = int(pageNumber)
 	job.Status, job.CooldownUntil, job.LastErrorKind, job.LastErrorCode, job.UpdatedAt = MiyunCrawlJobRunning, nil, "", "", now
@@ -479,7 +530,7 @@ func (s Service) HandleMiyunCrawlJob(ctx context.Context, claim jobruntime.Claim
 		}
 		records = append(records, record)
 	}
-	finished := miyunPageFinished(page)
+	finished := miyunPageFinished(page) || pageNumber >= int64(frozen.MaxPages)
 	job, err = s.MiyunCrawl.ApplyMiyunCrawlPage(ctx, job, pageNumber, records, finished)
 	if err != nil {
 		return jobruntime.Result{}, err

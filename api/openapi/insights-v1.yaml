@@ -1772,18 +1772,40 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
     get:
-      summary: List Miyun current material projections
+      summary: List Miyun current material projections, optionally scoped to one crawl job
       operationId: listMiyunMaterials
-      parameters: [{$ref: '#/components/parameters/Limit'}]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: crawl_job_id
+          in: query
+          schema: {type: string, minLength: 1}
+          description: Include materials having a snapshot captured by this crawl job, including globally deduplicated materials first seen by another job.
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 200}
+        - name: sort
+          in: query
+          schema: {type: string, enum: [delivery_days, cumulative_impressions, related_ads, related_creators, material_score]}
+        - name: handoff_eligible
+          in: query
+          schema: {type: boolean, default: false}
+          description: Restrict both items and total to confirmed materials whose import status is imported or deduplicated, so handoff pagination uses one consistent result set.
       responses:
         '200':
-          description: Current materials; snapshots remain separate.
+          description: Current materials in project scope or in the requested crawl-job result set; snapshots remain separate.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
-                properties: {items: {type: array, items: {$ref: '#/components/schemas/MiyunMaterial'}}}
+                required: [items, total, limit, offset]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/MiyunMaterial'}}
+                  total: {type: integer, minimum: 0}
+                  limit: {type: integer, minimum: 1}
+                  offset: {type: integer, minimum: 0}
         default: {$ref: '#/components/responses/Problem'}
   /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:
     parameters:
@@ -1870,8 +1892,14 @@ paths:
   /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/export:
     parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
     get:
-      summary: Stream a frozen cookies-draft handoff ZIP; successful streaming, not AI receipt, marks exported
+      summary: Stream one flat frozen handoff package; successful streaming, not AI receipt, marks exported
       operationId: exportMiyunHandoff
+      parameters:
+        - name: package
+          in: query
+          required: true
+          description: Select the source-material ZIP or the project-material ZIP. Both archives contain actual files only and keep every file at the ZIP root; the sources package contains Miyun MP4s only.
+          schema: {type: string, enum: [sources, project]}
       responses: {'200': {description: ZIP stream., content: {application/zip: {schema: {type: string, format: binary}}}}, default: {$ref: '#/components/responses/Problem'}}
   /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}:mark-delivered:
     parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
@@ -1887,6 +1915,31 @@ paths:
       operationId: createMiyunHandoffReturn
       requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
       responses: {'201': {description: Return record., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns:import:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    post:
+      summary: Import one MP4 or a flat ZIP of up to 20 returned MP4s
+      description: An MP4 without metadata is associated with the current crawl job. A filename prefixed with source_material_id followed by two underscores, or a manifest.xlsx row containing output_filename and source_material_id, associates the result with that source material. ZIPs may contain root-level MP4 files and one optional root-level manifest.xlsx only.
+      operationId: importMiyunHandoffReturnBundle
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {type: object, required: [file, expected_version, idempotency_key], properties: {file: {type: string, format: binary}, expected_version: {type: integer, minimum: 1}, idempotency_key: {type: string, minLength: 1}}}
+      responses:
+        '200':
+          description: Imported return records and any per-file failures.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, returns]
+                properties:
+                  status: {type: string, enum: [succeeded, partial, failed]}
+                  returns: {type: array, items: {$ref: '#/components/schemas/MiyunHandoffReturn'}}
+                  failed_filenames: {type: array, items: {type: string}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
   /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_id}:upload:
     parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/MiyunReturnID'}]
     post:
@@ -2354,7 +2407,7 @@ components:
     CreateMiyunHandoff:
       type: object
       additionalProperties: false
-      required: [source_material_ids, product_profile_id]
+      required: [source_material_ids, product_profile_id, crawl_job_id]
       properties:
         source_material_ids:
           type: array
@@ -2362,6 +2415,7 @@ components:
           uniqueItems: true
           items: {type: string, minLength: 1}
         product_profile_id: {type: string, minLength: 1}
+        crawl_job_id: {type: string, minLength: 1}
     MiyunHandoff:
       type: object
       description: Frozen cookies draft handoff; it does not assert AI-system receipt or any cross-system state.
@@ -2373,11 +2427,12 @@ components:
         source_material_id: {type: string, description: Legacy primary source retained for relational lineage.}
         source_material_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
         product_profile_id: {type: string}
+        crawl_job_id: {type: string, description: Crawl batch whose material snapshots were frozen. Omitted only on legacy handoffs.}
         status: {type: string, enum: [exporting, exported, delivered, returned, failed]}
         manifest_version:
           type: string
-          enum: [miyun-handoff-manifest/cookies-draft-v1, miyun-handoff-manifest/cookies-draft-v2]
-          description: cookies draft only; v1 is retained for frozen historical handoffs and v2 is the current per-source import manifest.
+          enum: [miyun-handoff-manifest/cookies-draft-v1, miyun-handoff-manifest/cookies-draft-v2, miyun-handoff-manifest/cookies-draft-v3]
+          description: cookies draft only; v1/v2 are retained for frozen historical handoffs and v3 identifies one of two flat upload packages per manifest row.
         parameter_version: {type: string, const: miyun-handoff-parameters/v1}
         product_files_snapshot: {type: object, additionalProperties: true}
         source_snapshot: {type: object, additionalProperties: true}
@@ -2390,7 +2445,7 @@ components:
         returns: {type: array, items: {$ref: '#/components/schemas/MiyunHandoffReturn'}}
     MiyunHandoffReturn:
       type: object
-      required: [id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, status, version, created_at, updated_at]
+      required: [id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, association_source, status, version, created_at, updated_at]
       properties:
         id: {type: string}
         handoff_id: {type: string}
@@ -2399,6 +2454,10 @@ components:
         input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
         parameter_version: {type: string}
         product_profile_id: {type: string}
+        crawl_job_id: {type: string}
+        source_material_id: {type: string}
+        association_source: {type: string, enum: [crawl_job, filename, manifest_xlsx]}
+        container_filename: {type: string}
         status: {type: string, enum: [created, uploaded, failed, returned]}
         filename: {type: string}
         asset_version: {type: object, properties: {asset_id: {type: string}, version: {type: integer, minimum: 1}}}

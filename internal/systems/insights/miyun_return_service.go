@@ -53,7 +53,7 @@ func (s Service) CreateMiyunHandoffReturn(ctx context.Context, actor contract.Ac
 	if handoff.Version != request.ExpectedVersion {
 		return MiyunHandoffReturn{}, ErrVersionConflict
 	}
-	if handoff.Status != MiyunHandoffExported && handoff.Status != MiyunHandoffDelivered {
+	if handoff.Status != MiyunHandoffExported && handoff.Status != MiyunHandoffDelivered && handoff.Status != MiyunHandoffReturned {
 		return MiyunHandoffReturn{}, ErrInvalidState
 	}
 	id, err := s.idGenerator()("miyunreturn")
@@ -61,7 +61,7 @@ func (s Service) CreateMiyunHandoffReturn(ctx context.Context, actor contract.Ac
 		return MiyunHandoffReturn{}, err
 	}
 	now := s.now()
-	value := MiyunHandoffReturn{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, HandoffID: handoff.ID, HandoffVersion: handoff.Version, ManifestVersion: handoff.ManifestVersion, InputHash: handoff.InputHash, ParameterVersion: handoff.ParameterVersion, ProductProfileID: handoff.ProductProfileID, Status: MiyunHandoffReturnCreated, IdempotencyKey: string(key), RequestHash: hash, UploadedBy: actor.Principal.ID, Version: 1, CreatedAt: now, UpdatedAt: now}
+	value := MiyunHandoffReturn{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, HandoffID: handoff.ID, HandoffVersion: handoff.Version, ManifestVersion: handoff.ManifestVersion, InputHash: handoff.InputHash, ParameterVersion: handoff.ParameterVersion, ProductProfileID: handoff.ProductProfileID, CrawlJobID: handoff.CrawlJobID, AssociationSource: MiyunReturnAssociationCrawlJob, Status: MiyunHandoffReturnCreated, IdempotencyKey: string(key), RequestHash: hash, UploadedBy: actor.Principal.ID, Version: 1, CreatedAt: now, UpdatedAt: now}
 	stored, _, err := r.CreateMiyunHandoffReturn(ctx, value)
 	return stored, err
 }
@@ -84,14 +84,31 @@ func (s Service) UploadMiyunHandoffReturn(ctx context.Context, actor contract.Ac
 	if value.HandoffVersion != request.ExpectedVersion {
 		return MiyunHandoffReturn{}, ErrVersionConflict
 	}
+	handoff, err := s.GetMiyunHandoff(ctx, actor, projectID, handoffID)
+	if err != nil {
+		return MiyunHandoffReturn{}, err
+	}
+	if handoff.Version != request.ExpectedVersion {
+		return MiyunHandoffReturn{}, ErrVersionConflict
+	}
+	if handoff.Status != MiyunHandoffExported && handoff.Status != MiyunHandoffDelivered && handoff.Status != MiyunHandoffReturned {
+		return MiyunHandoffReturn{}, ErrInvalidState
+	}
+	association, sourceMaterialID, err := resolveMiyunReturnAssociation(handoff, request.Filename, request.AssociationSource, request.SourceMaterialID)
+	if err != nil {
+		return MiyunHandoffReturn{}, err
+	}
 	uploadHash, err := contract.CanonicalJSONHash(struct {
-		ReturnID        string  `json:"return_id"`
-		ExpectedVersion int64   `json:"expected_version"`
-		Filename        string  `json:"filename"`
-		MIMEType        string  `json:"mime_type"`
-		SizeBytes       int64   `json:"size_bytes"`
-		DeclaredSHA256  *string `json:"declared_sha256,omitempty"`
-	}{value.ID, request.ExpectedVersion, request.Filename, request.DeclaredMIMEType, request.DeclaredSizeBytes, request.DeclaredSHA256})
+		ReturnID          string                       `json:"return_id"`
+		ExpectedVersion   int64                        `json:"expected_version"`
+		Filename          string                       `json:"filename"`
+		MIMEType          string                       `json:"mime_type"`
+		SizeBytes         int64                        `json:"size_bytes"`
+		DeclaredSHA256    *string                      `json:"declared_sha256,omitempty"`
+		SourceMaterialID  string                       `json:"source_material_id,omitempty"`
+		AssociationSource MiyunReturnAssociationSource `json:"association_source"`
+		ContainerFilename string                       `json:"container_filename,omitempty"`
+	}{value.ID, request.ExpectedVersion, request.Filename, request.DeclaredMIMEType, request.DeclaredSizeBytes, request.DeclaredSHA256, sourceMaterialID, association, request.ContainerFilename})
 	if err != nil {
 		return MiyunHandoffReturn{}, err
 	}
@@ -101,18 +118,9 @@ func (s Service) UploadMiyunHandoffReturn(ctx context.Context, actor contract.Ac
 		}
 		return value, nil
 	}
-	handoff, err := s.GetMiyunHandoff(ctx, actor, projectID, handoffID)
-	if err != nil {
-		return MiyunHandoffReturn{}, err
-	}
-	if handoff.Version != request.ExpectedVersion {
-		return MiyunHandoffReturn{}, ErrVersionConflict
-	}
-	if handoff.Status != MiyunHandoffExported && handoff.Status != MiyunHandoffDelivered {
-		return MiyunHandoffReturn{}, ErrInvalidState
-	}
 	value.UploadIdempotencyKey, value.UploadRequestHash = string(key), uploadHash
-	sources, err := miyunReturnSources(handoff)
+	value.CrawlJobID, value.SourceMaterialID, value.AssociationSource, value.ContainerFilename = handoff.CrawlJobID, sourceMaterialID, association, strings.TrimSpace(request.ContainerFilename)
+	sources, err := miyunReturnSources(handoff, sourceMaterialID)
 	if err != nil {
 		return MiyunHandoffReturn{}, err
 	}
@@ -127,7 +135,11 @@ func (s Service) UploadMiyunHandoffReturn(ctx context.Context, actor contract.Ac
 		_, _ = r.FailMiyunHandoffReturn(context.Background(), value, value.Version, "ASSET_METADATA_INVALID")
 		return MiyunHandoffReturn{}, err
 	}
-	indexed, err := s.IndexAsset(ctx, actor, projectID, IndexAssetRequest{Title: request.Filename, SourceKind: AssetSourceExternal, SourceRef: "miyun_handoff_return:" + handoff.ID, SourceJobID: value.ID, PlatformAssetID: string(result.AssetVersion.AssetID), PlatformAssetVersion: result.AssetVersion.Version})
+	sourceRef := "miyun_handoff_return:" + handoff.ID
+	if sourceMaterialID != "" {
+		sourceRef += ":" + sourceMaterialID
+	}
+	indexed, err := s.IndexAsset(ctx, actor, projectID, IndexAssetRequest{Title: request.Filename, SourceKind: AssetSourceExternal, SourceRef: sourceRef, SourceJobID: value.ID, PlatformAssetID: string(result.AssetVersion.AssetID), PlatformAssetVersion: result.AssetVersion.Version})
 	if err != nil {
 		value.UpdatedAt = s.now()
 		_, _ = r.FailMiyunHandoffReturn(context.Background(), value, value.Version, "INSIGHT_INDEX_FAILED")
@@ -172,7 +184,7 @@ func (s Service) MarkMiyunHandoffReturned(ctx context.Context, actor contract.Ac
 	if handoff.Version != expectedVersion {
 		return MiyunHandoff{}, MiyunHandoffReturn{}, ErrVersionConflict
 	}
-	if handoff.Status != MiyunHandoffExported && handoff.Status != MiyunHandoffDelivered {
+	if handoff.Status != MiyunHandoffExported && handoff.Status != MiyunHandoffDelivered && handoff.Status != MiyunHandoffReturned {
 		return MiyunHandoff{}, MiyunHandoffReturn{}, ErrInvalidState
 	}
 	hash, err := contract.CanonicalJSONHash(struct {
@@ -189,7 +201,7 @@ func (s Service) MarkMiyunHandoffReturned(ctx context.Context, actor contract.Ac
 	return updated, returned, err
 }
 
-func miyunReturnSources(handoff MiyunHandoff) ([]contract.ResourceRef, error) {
+func miyunReturnSources(handoff MiyunHandoff, sourceMaterialID string) ([]contract.ResourceRef, error) {
 	var snapshots miyunHandoffSourcesSnapshot
 	var profile miyunHandoffProfileSnapshot
 	if json.Unmarshal(handoff.SourceSnapshot, &snapshots) != nil || json.Unmarshal(handoff.ProfileSnapshot, &profile) != nil {
@@ -197,8 +209,41 @@ func miyunReturnSources(handoff MiyunHandoff) ([]contract.ResourceRef, error) {
 	}
 	resources := []contract.ResourceRef{{Type: "miyun_handoff", ID: handoff.ID, Version: &handoff.Version}, {Type: "miyun_product_profile", ID: handoff.ProductProfileID, Version: &profile.ProfileVersion}}
 	for _, source := range snapshots.Sources {
+		if sourceMaterialID != "" && source.Material.ID != sourceMaterialID {
+			continue
+		}
 		version := source.AssetRef.Version
 		resources = append(resources, contract.ResourceRef{Type: "asset_version", ID: string(source.AssetRef.AssetID), Version: &version})
 	}
+	if sourceMaterialID != "" && len(resources) != 3 {
+		return nil, ErrInvalidRequest
+	}
 	return resources, nil
+}
+
+func resolveMiyunReturnAssociation(handoff MiyunHandoff, filename string, explicit MiyunReturnAssociationSource, explicitMaterialID string) (MiyunReturnAssociationSource, string, error) {
+	allowed := make(map[string]struct{}, len(handoff.SourceMaterialIDs))
+	for _, id := range handoff.SourceMaterialIDs {
+		allowed[id] = struct{}{}
+	}
+	materialID := strings.TrimSpace(explicitMaterialID)
+	if explicit != "" {
+		if !explicit.valid() {
+			return "", "", ErrInvalidRequest
+		}
+		if explicit == MiyunReturnAssociationCrawlJob {
+			return explicit, "", nil
+		}
+		if _, ok := allowed[materialID]; !ok {
+			return "", "", ErrInvalidRequest
+		}
+		return explicit, materialID, nil
+	}
+	base := filepath.Base(filename)
+	for _, id := range handoff.SourceMaterialIDs {
+		if strings.HasPrefix(base, id+"__") {
+			return MiyunReturnAssociationFilename, id, nil
+		}
+	}
+	return MiyunReturnAssociationCrawlJob, "", nil
 }

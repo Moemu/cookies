@@ -440,17 +440,17 @@ func scanMiyunMaterialSnapshot(row rowScanner) (MiyunMaterialSnapshot, error) {
 	return value, nil
 }
 
-const miyunHandoffSelect = `SELECT id, organization_id, project_id, source_material_id, source_material_ids, product_profile_id,
+const miyunHandoffSelect = `SELECT id, organization_id, project_id, source_material_id, source_material_ids, product_profile_id, crawl_job_id,
 	status, manifest_version, parameter_version, product_files_snapshot, source_snapshot,
 	profile_snapshot, input_hash, version, created_by, created_at, updated_at FROM insight_miyun_handoffs`
 
-const miyunHandoffReturnSelect = `SELECT id, organization_id, project_id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, status, idempotency_key, request_hash, upload_idempotency_key, upload_request_hash, filename, asset_id, asset_version, mime_type, sha256, size_bytes, insight_asset_id, uploaded_by, uploaded_at, failure_code, mark_idempotency_key, mark_request_hash, returned_by, returned_at, version, created_at, updated_at FROM insight_miyun_handoff_returns`
+const miyunHandoffReturnSelect = `SELECT id, organization_id, project_id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, crawl_job_id, source_material_id, association_source, container_filename, status, idempotency_key, request_hash, upload_idempotency_key, upload_request_hash, filename, asset_id, asset_version, mime_type, sha256, size_bytes, insight_asset_id, uploaded_by, uploaded_at, failure_code, mark_idempotency_key, mark_request_hash, returned_by, returned_at, version, created_at, updated_at FROM insight_miyun_handoff_returns`
 
 func (r MySQLRepository) CreateMiyunHandoffReturn(ctx context.Context, value MiyunHandoffReturn) (MiyunHandoffReturn, bool, error) {
 	if err := value.Validate(); err != nil {
 		return MiyunHandoffReturn{}, false, err
 	}
-	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_handoff_returns (id, organization_id, project_id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, status, idempotency_key, request_hash, uploaded_by, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.HandoffID, value.HandoffVersion, value.ManifestVersion, value.InputHash, value.ParameterVersion, value.ProductProfileID, value.Status, value.IdempotencyKey, value.RequestHash, value.UploadedBy, value.Version, value.CreatedAt, value.UpdatedAt)
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_handoff_returns (id, organization_id, project_id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, crawl_job_id, source_material_id, association_source, container_filename, status, idempotency_key, request_hash, uploaded_by, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.HandoffID, value.HandoffVersion, value.ManifestVersion, value.InputHash, value.ParameterVersion, value.ProductProfileID, nullableString(value.CrawlJobID), nullableString(value.SourceMaterialID), value.AssociationSource, nullableString(value.ContainerFilename), value.Status, value.IdempotencyKey, value.RequestHash, value.UploadedBy, value.Version, value.CreatedAt, value.UpdatedAt)
 	if err == nil {
 		return value, true, nil
 	}
@@ -493,7 +493,7 @@ func (r MySQLRepository) ListMiyunHandoffReturns(ctx context.Context, org contra
 	return values, rows.Err()
 }
 func (r MySQLRepository) MarkMiyunHandoffReturnUploaded(ctx context.Context, value MiyunHandoffReturn, expected int64) (MiyunHandoffReturn, error) {
-	result, err := r.DB.ExecContext(ctx, `UPDATE insight_miyun_handoff_returns SET status=?, upload_idempotency_key=?, upload_request_hash=?, filename=?, asset_id=?, asset_version=?, mime_type=?, sha256=?, size_bytes=?, insight_asset_id=?, uploaded_by=?, uploaded_at=?, failure_code=NULL, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND handoff_id=? AND id=? AND version=? AND status IN ('created','failed')`, value.Status, value.UploadIdempotencyKey, value.UploadRequestHash, value.Filename, value.AssetVersion.AssetID, value.AssetVersion.Version, value.MIMEType, value.SHA256, value.SizeBytes, nullableString(value.InsightAssetID), value.UploadedBy, value.UploadedAt, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.HandoffID, value.ID, expected)
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_miyun_handoff_returns SET status=?, upload_idempotency_key=?, upload_request_hash=?, crawl_job_id=?, source_material_id=?, association_source=?, container_filename=?, filename=?, asset_id=?, asset_version=?, mime_type=?, sha256=?, size_bytes=?, insight_asset_id=?, uploaded_by=?, uploaded_at=?, failure_code=NULL, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND handoff_id=? AND id=? AND version=? AND status IN ('created','failed')`, value.Status, value.UploadIdempotencyKey, value.UploadRequestHash, nullableString(value.CrawlJobID), nullableString(value.SourceMaterialID), value.AssociationSource, nullableString(value.ContainerFilename), value.Filename, value.AssetVersion.AssetID, value.AssetVersion.Version, value.MIMEType, value.SHA256, value.SizeBytes, nullableString(value.InsightAssetID), value.UploadedBy, value.UploadedAt, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.HandoffID, value.ID, expected)
 	if err != nil {
 		return MiyunHandoffReturn{}, err
 	}
@@ -531,19 +531,23 @@ func (r MySQLRepository) CompleteMiyunHandoffReturn(ctx context.Context, value M
 	if n == 0 {
 		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
 	}
-	result, err = tx.ExecContext(ctx, `UPDATE insight_miyun_handoffs SET status='returned', version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND status IN ('exported','delivered')`, handoff.UpdatedAt, handoff.OrganizationID, handoff.ProjectID, handoff.ID, handoffVersion)
-	if err != nil {
-		return MiyunHandoffReturn{}, MiyunHandoff{}, err
-	}
-	n, _ = result.RowsAffected()
-	if n == 0 {
-		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
+	if handoff.Status != MiyunHandoffReturned {
+		result, err = tx.ExecContext(ctx, `UPDATE insight_miyun_handoffs SET status='returned', version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND status IN ('exported','delivered')`, handoff.UpdatedAt, handoff.OrganizationID, handoff.ProjectID, handoff.ID, handoffVersion)
+		if err != nil {
+			return MiyunHandoffReturn{}, MiyunHandoff{}, err
+		}
+		n, _ = result.RowsAffected()
+		if n == 0 {
+			return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return MiyunHandoffReturn{}, MiyunHandoff{}, err
 	}
 	value.Status, value.Version = MiyunHandoffReturnReturned, returnVersion+1
-	handoff.Status, handoff.Version = MiyunHandoffReturned, handoffVersion+1
+	if handoff.Status != MiyunHandoffReturned {
+		handoff.Status, handoff.Version = MiyunHandoffReturned, handoffVersion+1
+	}
 	return value, handoff, nil
 }
 
@@ -552,12 +556,12 @@ func (r MySQLRepository) CreateMiyunHandoff(ctx context.Context, value MiyunHand
 		return MiyunHandoff{}, err
 	}
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_handoffs (
-		id, organization_id, project_id, source_material_id, source_material_ids, product_profile_id, status,
+		id, organization_id, project_id, source_material_id, source_material_ids, product_profile_id, crawl_job_id, status,
 		manifest_version, parameter_version, product_files_snapshot, source_snapshot, profile_snapshot, input_hash,
 		version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.SourceMaterialID, sourceMaterialIDsJSON(value.SourceMaterialIDs), value.ProductProfileID,
-		value.Status, value.ManifestVersion, value.ParameterVersion, value.ProductFilesSnapshot,
+		nullableString(value.CrawlJobID), value.Status, value.ManifestVersion, value.ParameterVersion, value.ProductFilesSnapshot,
 		value.SourceSnapshot, value.ProfileSnapshot, value.InputHash, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if isDuplicateKey(err) {
 		return MiyunHandoff{}, fmt.Errorf("%w: Miyun handoff identity already exists", ErrInvalidState)
@@ -621,9 +625,10 @@ func (r MySQLRepository) UpdateMiyunHandoffStatus(ctx context.Context, value Miy
 
 func scanMiyunHandoff(row rowScanner) (MiyunHandoff, error) {
 	var value MiyunHandoff
+	var crawlJobID sql.NullString
 	var sourceMaterialIDs, productFilesSnapshot, sourceSnapshot, profileSnapshot []byte
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.SourceMaterialID,
-		&sourceMaterialIDs, &value.ProductProfileID, &value.Status, &value.ManifestVersion, &value.ParameterVersion,
+		&sourceMaterialIDs, &value.ProductProfileID, &crawlJobID, &value.Status, &value.ManifestVersion, &value.ParameterVersion,
 		&productFilesSnapshot, &sourceSnapshot, &profileSnapshot, &value.InputHash, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return MiyunHandoff{}, err
@@ -631,6 +636,7 @@ func scanMiyunHandoff(row rowScanner) (MiyunHandoff, error) {
 	if err := json.Unmarshal(sourceMaterialIDs, &value.SourceMaterialIDs); err != nil {
 		return MiyunHandoff{}, err
 	}
+	value.CrawlJobID = crawlJobID.String
 	value.ProductFilesSnapshot = json.RawMessage(productFilesSnapshot)
 	value.SourceSnapshot = json.RawMessage(sourceSnapshot)
 	value.ProfileSnapshot = json.RawMessage(profileSnapshot)
@@ -639,10 +645,10 @@ func scanMiyunHandoff(row rowScanner) (MiyunHandoff, error) {
 
 func scanMiyunHandoffReturn(row rowScanner) (MiyunHandoffReturn, error) {
 	var value MiyunHandoffReturn
-	var uploadKey, uploadHash, filename, assetID, mime, digest, insightID, failure, markKey, markHash, returnedBy sql.NullString
+	var crawlJobID, sourceMaterialID, containerFilename, uploadKey, uploadHash, filename, assetID, mime, digest, insightID, failure, markKey, markHash, returnedBy sql.NullString
 	var assetVersion, size sql.NullInt64
 	var uploadedAt, returnedAt sql.NullTime
-	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.HandoffID, &value.HandoffVersion, &value.ManifestVersion, &value.InputHash, &value.ParameterVersion, &value.ProductProfileID, &value.Status, &value.IdempotencyKey, &value.RequestHash, &uploadKey, &uploadHash, &filename, &assetID, &assetVersion, &mime, &digest, &size, &insightID, &value.UploadedBy, &uploadedAt, &failure, &markKey, &markHash, &returnedBy, &returnedAt, &value.Version, &value.CreatedAt, &value.UpdatedAt)
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.HandoffID, &value.HandoffVersion, &value.ManifestVersion, &value.InputHash, &value.ParameterVersion, &value.ProductProfileID, &crawlJobID, &sourceMaterialID, &value.AssociationSource, &containerFilename, &value.Status, &value.IdempotencyKey, &value.RequestHash, &uploadKey, &uploadHash, &filename, &assetID, &assetVersion, &mime, &digest, &size, &insightID, &value.UploadedBy, &uploadedAt, &failure, &markKey, &markHash, &returnedBy, &returnedAt, &value.Version, &value.CreatedAt, &value.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return MiyunHandoffReturn{}, ErrNotFound
 	}
@@ -650,6 +656,7 @@ func scanMiyunHandoffReturn(row rowScanner) (MiyunHandoffReturn, error) {
 		return MiyunHandoffReturn{}, err
 	}
 	value.UploadIdempotencyKey, value.UploadRequestHash = uploadKey.String, uploadHash.String
+	value.CrawlJobID, value.SourceMaterialID, value.ContainerFilename = crawlJobID.String, sourceMaterialID.String, containerFilename.String
 	value.Filename, value.MIMEType, value.SHA256, value.InsightAssetID, value.FailureCode = filename.String, mime.String, digest.String, insightID.String, failure.String
 	value.MarkIdempotencyKey, value.MarkRequestHash, value.ReturnedBy = markKey.String, markHash.String, returnedBy.String
 	value.AssetVersion = contract.AssetVersionRef{AssetID: contract.AssetID(assetID.String), Version: assetVersion.Int64}

@@ -4,6 +4,14 @@ import { useProject } from "../context/ProjectContext";
 import { api, ApiRequestError, type ApiMiyunConnection } from "../data/api";
 
 type ConnectionLoadState = "loading" | "ready" | "error";
+const connectionTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const formatConnectionTime = (value?: string | Date | null) =>
+  value ? connectionTimeFormatter.format(new Date(value)) : "暂无记录";
 
 const connectionCopy: Record<ApiMiyunConnection["status"], { title: string; detail: string }> = {
   unverified: { title: "已保存，尚未验证", detail: "保存后执行一次只读验证，确认会话仍可用。" },
@@ -30,34 +38,63 @@ export function MiyunConnectionSettings() {
   const { currentProject } = useProject();
   const sessionInputRef = useRef<HTMLInputElement>(null);
   const requestIdRef = useRef(0);
+  const lastFocusRefreshRef = useRef(0);
   const [connection, setConnection] = useState<ApiMiyunConnection | null>(null);
   const [loadState, setLoadState] = useState<ConnectionLoadState>("loading");
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [notice, setNotice] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     const requestId = ++requestIdRef.current;
-    setLoadState("loading");
-    setNotice("");
+    if (background) setSyncing(true);
+    else {
+      setLoadState("loading");
+      setNotice("");
+    }
     try {
       const next = await api.getMiyunConnection(currentProject.id);
       if (requestId !== requestIdRef.current) return;
       setConnection(next);
       setLoadState("ready");
+      if (background)
+        setNotice((current) => current.startsWith("状态自动同步暂未完成") ? "" : current);
+      setLastSyncedAt(new Date());
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
       if (error instanceof ApiRequestError && error.status === 404) {
         setConnection(null);
         setLoadState("ready");
+        if (background)
+          setNotice((current) => current.startsWith("状态自动同步暂未完成") ? "" : current);
+        setLastSyncedAt(new Date());
       } else {
-        setLoadState("error");
-        setNotice(connectionError(error));
+        if (!background) setLoadState("error");
+        setNotice(background ? `状态自动同步暂未完成：${connectionError(error)}` : connectionError(error));
       }
+    } finally {
+      if (requestId === requestIdRef.current) setSyncing(false);
     }
   }, [currentProject.id]);
 
   useEffect(() => {
     void load();
+  }, [load]);
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current < 1000) return;
+      lastFocusRefreshRef.current = now;
+      void load(true);
+    };
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
   }, [load]);
 
   const saveSession = async (event: FormEvent<HTMLFormElement>) => {
@@ -81,6 +118,7 @@ export function MiyunConnectionSettings() {
       if (sessionInputRef.current) sessionInputRef.current.value = "";
       setConnection(next);
       setLoadState("ready");
+      setLastSyncedAt(new Date());
       setNotice("会话已加密保存到服务端，未在本页保留或回显。请执行验证。" );
     } catch (error) {
       setNotice(connectionError(error));
@@ -96,6 +134,7 @@ export function MiyunConnectionSettings() {
     try {
       const next = await api.verifyMiyunConnection(currentProject.id, connection.version);
       setConnection(next);
+      setLastSyncedAt(new Date());
       setNotice(verificationNotice(next));
     } catch (error) {
       setNotice(connectionError(error));
@@ -115,10 +154,13 @@ export function MiyunConnectionSettings() {
             <h2 id="miyun-connection-settings-title">米云连接</h2>
             <p>当前 Project：{currentProject.name}</p>
           </div>
-          <span className={`miyun-connection-status ${connection?.status === "ready" ? "ready" : ""}`}>
-            {connection?.status === "ready" ? <Check size={14} /> : <CircleAlert size={14} />}
-            {loadState === "loading" ? "正在读取" : copy.title}
-          </span>
+          <div className="miyun-settings-status-group" aria-live="polite">
+            <span className={`miyun-connection-status ${connection?.status === "ready" ? "ready" : ""}`}>
+              {connection?.status === "ready" ? <Check size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}
+              {loadState === "loading" ? "正在读取" : copy.title}
+            </span>
+            <small>{syncing ? "正在同步状态…" : `页面同步于 ${formatConnectionTime(lastSyncedAt)}`}</small>
+          </div>
         </header>
         <div className="miyun-settings-secret-policy">
           <LockKeyhole size={18} />
@@ -126,11 +168,17 @@ export function MiyunConnectionSettings() {
         </div>
         <form className="miyun-session-form" onSubmit={saveSession}>
           <label htmlFor="miyun-session">米云 Cookie 请求头</label>
-          <input id="miyun-session" ref={sessionInputRef} type="password" autoComplete="off" placeholder="粘贴完整 Cookie 值，仅用于本次保存" aria-describedby="miyun-session-help" />
+          <input id="miyun-session" name="miyun-session" ref={sessionInputRef} type="password" autoComplete="off" placeholder="粘贴完整 Cookie 值，仅用于本次保存…" aria-describedby="miyun-session-help" />
           <small id="miyun-session-help">保存后输入框会立即清空；刷新页面也无法查看已保存内容。</small>
+          {connection ? (
+            <dl className="miyun-connection-metadata">
+              <div><dt>最近验证</dt><dd>{formatConnectionTime(connection.last_verified_at)}</dd></div>
+              <div><dt>最近成功请求</dt><dd>{formatConnectionTime(connection.last_successful_request_at)}</dd></div>
+            </dl>
+          ) : null}
           <div className="miyun-settings-actions">
-            <button className="secondary-button" type="button" onClick={() => void load()} disabled={busy || loadState === "loading"}><RefreshCw size={15} />刷新状态</button>
-            <button className="secondary-button" type="button" onClick={() => void verify()} disabled={busy || !connection || connection.status === "disabled"}><RefreshCw size={15} />验证连接</button>
+            <button className="secondary-button" type="button" onClick={() => void load(true)} disabled={busy || syncing || loadState === "loading"}><RefreshCw size={15} aria-hidden="true" />{syncing ? "同步中" : "立即同步"}</button>
+            <button className="secondary-button" type="button" onClick={() => void verify()} disabled={busy || syncing || !connection || connection.status === "disabled"}><RefreshCw size={15} aria-hidden="true" />验证连接</button>
             <button className="primary-button" type="submit" disabled={busy}><Save size={15} />{busy ? "处理中" : "保存会话"}</button>
           </div>
         </form>

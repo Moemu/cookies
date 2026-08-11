@@ -17,12 +17,14 @@ import (
 )
 
 const MiyunHandoffManifestV1 = "miyun-handoff-manifest/cookies-draft-v1"
-const MiyunHandoffManifestVersion = "miyun-handoff-manifest/cookies-draft-v2"
+const MiyunHandoffManifestV2 = "miyun-handoff-manifest/cookies-draft-v2"
+const MiyunHandoffManifestVersion = "miyun-handoff-manifest/cookies-draft-v3"
 const MiyunHandoffParameterVersion = "miyun-handoff-parameters/v1"
 
 type CreateMiyunHandoffRequest struct {
 	SourceMaterialIDs []string `json:"source_material_ids"`
 	ProductProfileID  string   `json:"product_profile_id"`
+	CrawlJobID        string   `json:"crawl_job_id"`
 }
 
 type miyunHandoffSourceSnapshot struct {
@@ -64,9 +66,17 @@ func (s Service) CreateMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		return MiyunHandoff{}, err
 	}
 	request.ProductProfileID = strings.TrimSpace(request.ProductProfileID)
+	request.CrawlJobID = strings.TrimSpace(request.CrawlJobID)
 	sourceMaterialIDs, err := normalizeMiyunHandoffSourceMaterialIDs(request.SourceMaterialIDs)
-	if err != nil || request.ProductProfileID == "" {
+	if err != nil || request.ProductProfileID == "" || request.CrawlJobID == "" {
 		return MiyunHandoff{}, ErrInvalidRequest
+	}
+	job, err := repository.GetMiyunCrawlJob(ctx, actor.OrganizationID, projectID, request.CrawlJobID)
+	if err != nil {
+		return MiyunHandoff{}, err
+	}
+	if job.ProductProfileID != request.ProductProfileID {
+		return MiyunHandoff{}, fmt.Errorf("%w: crawl job and product profile do not match", ErrInvalidRequest)
 	}
 	profile, err := repository.GetMiyunProductProfile(ctx, actor.OrganizationID, projectID, request.ProductProfileID)
 	if err != nil {
@@ -91,8 +101,14 @@ func (s Service) CreateMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		if readErr != nil {
 			return MiyunHandoff{}, readErr
 		}
-		if len(snapshots) == 0 {
-			return MiyunHandoff{}, fmt.Errorf("%w: source material has no data-card snapshot", ErrInvalidState)
+		var jobSnapshot *MiyunMaterialSnapshot
+		for index := range snapshots {
+			if snapshots[index].CrawlJobID == request.CrawlJobID {
+				jobSnapshot = &snapshots[index]
+			}
+		}
+		if jobSnapshot == nil {
+			return MiyunHandoff{}, fmt.Errorf("%w: source material does not belong to the selected crawl job", ErrInvalidState)
 		}
 		sourceRef := contract.AssetVersionRef{AssetID: material.PlatformAssetID, Version: material.PlatformAssetVersion}
 		sourceAsset, readErr := s.MiyunAssets.ReadMiyunAssetSource(ctx, actor, projectID, sourceRef)
@@ -102,7 +118,7 @@ func (s Service) CreateMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		if !sourceAsset.Ready || sourceAsset.MIMEType != "video/mp4" || len(sourceAsset.SHA256) != 64 {
 			return MiyunHandoff{}, fmt.Errorf("%w: source video is unavailable", ErrInvalidState)
 		}
-		sources = append(sources, miyunHandoffSourceSnapshot{Material: material, DataCard: snapshots[len(snapshots)-1], AssetRef: sourceRef, File: MiyunHandoffExportFile{Reference: "asset:" + string(sourceRef.AssetID) + ":" + fmt.Sprint(sourceRef.Version), Name: "source_" + string(sourceRef.AssetID) + "_v" + fmt.Sprint(sourceRef.Version) + ".mp4", SHA256: sourceAsset.SHA256}})
+		sources = append(sources, miyunHandoffSourceSnapshot{Material: material, DataCard: *jobSnapshot, AssetRef: sourceRef, File: MiyunHandoffExportFile{Reference: "asset:" + string(sourceRef.AssetID) + ":" + fmt.Sprint(sourceRef.Version), Name: "source_" + string(sourceRef.AssetID) + "_v" + fmt.Sprint(sourceRef.Version) + ".mp4", SHA256: sourceAsset.SHA256}})
 	}
 	sourceSnapshot, err := json.Marshal(miyunHandoffSourcesSnapshot{Sources: sources})
 	if err != nil {
@@ -138,12 +154,13 @@ func (s Service) CreateMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		return MiyunHandoff{}, err
 	}
 	identity, err := json.Marshal(struct {
+		CrawlJobID       string          `json:"crawl_job_id"`
 		Source           json.RawMessage `json:"source"`
 		Profile          json.RawMessage `json:"profile"`
 		ProductFiles     json.RawMessage `json:"product_files"`
 		ManifestVersion  string          `json:"manifest_version"`
 		ParameterVersion string          `json:"parameter_version"`
-	}{sourceSnapshot, profileSnapshot, productFiles, MiyunHandoffManifestVersion, MiyunHandoffParameterVersion})
+	}{request.CrawlJobID, sourceSnapshot, profileSnapshot, productFiles, MiyunHandoffManifestVersion, MiyunHandoffParameterVersion})
 	if err != nil {
 		return MiyunHandoff{}, err
 	}
@@ -159,7 +176,7 @@ func (s Service) CreateMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		return MiyunHandoff{}, err
 	}
 	now := s.now()
-	value := MiyunHandoff{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, SourceMaterialID: sourceMaterialIDs[0], SourceMaterialIDs: sourceMaterialIDs, ProductProfileID: profile.ID, Status: MiyunHandoffExporting, ManifestVersion: MiyunHandoffManifestVersion, ParameterVersion: MiyunHandoffParameterVersion, ProductFilesSnapshot: productFiles, SourceSnapshot: sourceSnapshot, ProfileSnapshot: profileSnapshot, InputHash: inputHash, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
+	value := MiyunHandoff{ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, CrawlJobID: request.CrawlJobID, SourceMaterialID: sourceMaterialIDs[0], SourceMaterialIDs: sourceMaterialIDs, ProductProfileID: profile.ID, Status: MiyunHandoffExporting, ManifestVersion: MiyunHandoffManifestVersion, ParameterVersion: MiyunHandoffParameterVersion, ProductFilesSnapshot: productFiles, SourceSnapshot: sourceSnapshot, ProfileSnapshot: profileSnapshot, InputHash: inputHash, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
 	created, err := repository.CreateMiyunHandoff(ctx, value)
 	if err != nil {
 		if existing, lookupErr := repository.FindMiyunHandoffByInputHash(ctx, actor.OrganizationID, projectID, inputHash); lookupErr == nil {
@@ -282,7 +299,7 @@ func (s Service) MarkMiyunHandoffDelivered(ctx context.Context, actor contract.A
 	return r.UpdateMiyunHandoffStatus(ctx, value, expectedVersion)
 }
 
-func (s Service) ExportMiyunHandoff(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, output io.Writer) error {
+func (s Service) ExportMiyunHandoff(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, packageKind MiyunHandoffPackageKind, output io.Writer) error {
 	if err := s.miyunReady(actor, projectID, ScopeRead); err != nil {
 		return err
 	}
@@ -332,7 +349,7 @@ func (s Service) ExportMiyunHandoff(ctx context.Context, actor contract.ActorCon
 		sourceMaterialIDs = append(sourceMaterialIDs, source.Material.MiyunMaterialID)
 	}
 	snapshot := MiyunHandoffExportSnapshot{ManifestVersion: value.ManifestVersion, Manifest: MiyunHandoffManifest{HandoffID: value.ID, HandoffVersion: fmt.Sprint(value.Version), SourceMaterialName: manifestSources.names, MiyunMaterialID: manifestSources.materialIDs, SourceMaterialIDs: sourceMaterialIDs, SourceURL: manifestSources.urls, Source: "miyun", DeliveryDays: manifestSources.deliveryDays, CumulativeImpressions: manifestSources.impressions, RelatedAds: manifestSources.relatedAds, RelatedCreators: manifestSources.relatedCreators, TargetProduct: profile.Profile.ProductName, TargetCategory: profile.Profile.CategoryName, ParameterVersion: value.ParameterVersion, InputHash: value.InputHash}, Sources: sources, ProductMedia: files.Media, ProductDocs: files.Documents}
-	writeErr := ExportMiyunHandoffZIP(ctx, output, snapshot, miyunHandoffContentReader{opener: s.MiyunHandoffContent, actor: actor, projectID: projectID})
+	writeErr := ExportMiyunHandoffPackageZIP(ctx, output, snapshot, packageKind, miyunHandoffContentReader{opener: s.MiyunHandoffContent, actor: actor, projectID: projectID})
 	if writeErr != nil {
 		if value.Status == MiyunHandoffExporting {
 			value.Status, value.UpdatedAt = MiyunHandoffFailed, s.now()

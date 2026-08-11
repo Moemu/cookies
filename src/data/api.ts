@@ -5347,12 +5347,13 @@ export type ApiMiyunMaterialSnapshot = {
   delivery_days: number; cumulative_impressions: number; cumulative_impressions_raw: string; related_ads: number; related_creators: number; related_creators_raw: string; related_creators_known: boolean; material_score: number; views: number; likes: number; comments: number; shares: number; saves: number; sanitized_raw?: Record<string, unknown>; created_at: string
 }
 export type ApiMiyunMaterialDetail = { material: ApiMiyunMaterial; snapshots: ApiMiyunMaterialSnapshot[] }
-export type ApiMiyunHandoffReturn = {
-  id: string; handoff_id: string; handoff_version: number; manifest_version: string; input_hash: string; parameter_version: string; product_profile_id: string
+  export type ApiMiyunHandoffReturn = {
+    id: string; handoff_id: string; handoff_version: number; manifest_version: string; input_hash: string; parameter_version: string; product_profile_id: string
+    crawl_job_id?: string; source_material_id?: string; association_source: 'crawl_job' | 'filename' | 'manifest_xlsx'; container_filename?: string
   status: 'created' | 'uploaded' | 'failed' | 'returned'; filename?: string; asset_version?: { asset_id: string; version: number }; mime_type?: 'video/mp4'; sha256?: string; size_bytes?: number; insight_asset_id?: string; uploaded_by?: string; uploaded_at?: string; failure_code?: string; returned_by?: string; returned_at?: string; version: number; created_at: string; updated_at: string
 }
 export type ApiMiyunHandoff = {
-  id: string; organization_id: string; project_id: string; source_material_id: string; source_material_ids: string[]; product_profile_id: string
+  id: string; organization_id: string; project_id: string; source_material_id: string; source_material_ids: string[]; product_profile_id: string; crawl_job_id?: string
   status: 'exporting' | 'exported' | 'delivered' | 'returned' | 'failed'; manifest_version: string; parameter_version: string
   product_files_snapshot: Record<string, unknown>; source_snapshot: Record<string, unknown>; profile_snapshot: Record<string, unknown>; input_hash: string
   version: number; created_by: string; created_at: string; updated_at: string; returns?: ApiMiyunHandoffReturn[]
@@ -6092,21 +6093,29 @@ export const api = {
   getMiyunProductProfile: (projectId: string, profileId: string) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles/${encodeURIComponent(profileId)}`),
   confirmMiyunProductProfile: (projectId: string, profileId: string, expectedVersion: number, query: ApiMiyunProfileQuery) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles/${encodeURIComponent(profileId)}:confirm`, 'POST', { expected_version: expectedVersion, query }),
   listMiyunCrawlJobs: (projectId: string, limit = 50) => request<{ items: ApiMiyunCrawlJob[] }>(`${miyunProjectPath(projectId)}/crawl-jobs?limit=${limit}`),
-  createMiyunCrawlJob: (projectId: string, body: { product_profile_id: string; operation: ApiMiyunCrawlJob['operation'] }, idempotencyKey: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
+  createMiyunCrawlJob: (projectId: string, body: { product_profile_id: string; operation: ApiMiyunCrawlJob['operation']; max_pages: number }, idempotencyKey: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
   getMiyunCrawlJob: (projectId: string, jobId: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs/${encodeURIComponent(jobId)}`),
   cancelMiyunCrawlJob: (projectId: string, jobId: string, expectedVersion: number) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs/${encodeURIComponent(jobId)}:cancel`, 'POST', { expected_version: expectedVersion }),
   retryMiyunCrawlJob: (projectId: string, jobId: string, idempotencyKey: string) => request<ApiMiyunCrawlJob>(`${miyunProjectPath(projectId)}/crawl-jobs/${encodeURIComponent(jobId)}:retry`, 'POST', undefined, { 'Idempotency-Key': idempotencyKey }),
-  listMiyunMaterials: (projectId: string, limit = 50) => request<{ items: ApiMiyunMaterial[] }>(`${miyunProjectPath(projectId)}/materials?limit=${limit}`),
+  listMiyunMaterials: (projectId: string, options: { crawlJobId?: string; limit?: number; offset?: number; q?: string; sort?: string; handoffEligible?: boolean } = {}) => {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 100) })
+    if (options.crawlJobId) search.set('crawl_job_id', options.crawlJobId)
+    if (options.offset) search.set('offset', String(options.offset))
+    if (options.q) search.set('q', options.q)
+    if (options.sort) search.set('sort', options.sort)
+    if (options.handoffEligible) search.set('handoff_eligible', 'true')
+    return request<{ items: ApiMiyunMaterial[]; total: number; limit: number; offset: number }>(`${miyunProjectPath(projectId)}/materials?${search.toString()}`)
+  },
   getMiyunMaterial: (projectId: string, materialId: string) => request<ApiMiyunMaterialDetail>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}`),
   // This is deliberately a relative, same-origin URL. Never expose source_ref/resource URLs to the browser.
   getMiyunMaterialPreviewUrl: (projectId: string, materialId: string) => `/api${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}/preview`,
   confirmMiyunMaterial: (projectId: string, materialId: string, expectedVersion: number, note?: string) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:confirm`, 'POST', { expected_version: expectedVersion, ...(note === undefined ? {} : { note }) }),
   rejectMiyunMaterial: (projectId: string, materialId: string, expectedVersion: number, note?: string) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:reject`, 'POST', { expected_version: expectedVersion, ...(note === undefined ? {} : { note }) }),
   retryMiyunMaterialImport: (projectId: string, materialId: string, expectedVersion: number) => request<ApiMiyunMaterial>(`${miyunProjectPath(projectId)}/materials/${encodeURIComponent(materialId)}:retry-import`, 'POST', { expected_version: expectedVersion }),
-  createMiyunHandoff: (projectId: string, body: { source_material_ids: string[]; product_profile_id: string }, idempotencyKey: string) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
+  createMiyunHandoff: (projectId: string, body: { source_material_ids: string[]; product_profile_id: string; crawl_job_id: string }, idempotencyKey: string) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
   listMiyunHandoffs: (projectId: string, limit = 50) => request<{ items: ApiMiyunHandoff[] }>(`${miyunProjectPath(projectId)}/handoffs?limit=${limit}`),
   getMiyunHandoff: (projectId: string, handoffId: string) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}`),
-  getMiyunHandoffExportUrl: (projectId: string, handoffId: string) => `/api${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}/export`,
+  getMiyunHandoffExportUrl: (projectId: string, handoffId: string, packageKind: 'sources' | 'project') => `/api${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}/export?package=${packageKind}`,
   markMiyunHandoffDelivered: (projectId: string, handoffId: string, expectedVersion: number) => request<ApiMiyunHandoff>(`${miyunProjectPath(projectId)}/handoffs/${encodeURIComponent(handoffId)}:mark-delivered`, 'POST', { expected_version: expectedVersion }),
   // observed_through 要回传界面上那条问题的 last_observed_at，不要用当前时间：
   // 「你处置的是你看到的那个版本」靠它成立，中间问题若又恶化不会被一并盖掉。

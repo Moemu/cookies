@@ -509,6 +509,7 @@ type MiyunHandoff struct {
 	SourceMaterialID     string               `json:"source_material_id"`
 	SourceMaterialIDs    []string             `json:"source_material_ids"`
 	ProductProfileID     string               `json:"product_profile_id"`
+	CrawlJobID           string               `json:"crawl_job_id,omitempty"`
 	Status               MiyunHandoffStatus   `json:"status"`
 	ManifestVersion      string               `json:"manifest_version"`
 	ParameterVersion     string               `json:"parameter_version"`

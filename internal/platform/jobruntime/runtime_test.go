@@ -99,6 +99,28 @@ func TestWorkerHonorsCancellationRequestedDuringHandler(t *testing.T) {
 	}
 }
 
+func TestWorkerCancellationWinsOverDeferredReschedule(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.July, 23, 9, 5, 0, 0, time.UTC)
+	store := &memoryStore{
+		claim:           Claim{Job: contract.Job{ID: "job_cancel_deferred", Kind: "strategy.generate", OrganizationID: "org_1", Status: contract.JobRunning, CreatedAt: now, UpdatedAt: now, Cancellable: true, AttemptCount: 1, MaxAttempts: 2, Version: 2}, LockOwner: "worker_1"},
+		cancelRequested: true,
+	}
+	worker := Worker{
+		Store: store, Canceller: store,
+		Handlers: map[string]Handler{
+			"strategy.generate": func(context.Context, Claim) (Result, error) {
+				return Result{}, DeferredError{AvailableAt: now.Add(time.Minute)}
+			},
+		},
+		Now: func() time.Time { return now },
+	}
+	processed, err := worker.RunOnce(context.Background(), "worker_1")
+	if err != nil || !processed || !store.cancelled || store.rescheduled || store.failed {
+		t.Fatalf("processed=%v cancelled=%v rescheduled=%v failed=%v err=%v", processed, store.cancelled, store.rescheduled, store.failed, err)
+	}
+}
+
 func TestWorkerReschedulesDeferredJob(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.July, 22, 1, 0, 0, 0, time.UTC)

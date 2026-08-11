@@ -242,25 +242,74 @@ func (r MySQLRepository) ApplyMiyunCrawlPage(ctx context.Context, job MiyunCrawl
 	return r.GetMiyunCrawlJob(ctx, job.OrganizationID, job.ProjectID, job.ID)
 }
 
-func (r MySQLRepository) ListMiyunMaterials(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]MiyunMaterial, error) {
-	if limit < 1 || limit > 100 {
-		limit = 50
+func (r MySQLRepository) ListMiyunMaterials(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, options MiyunMaterialListOptions) (MiyunMaterialListPage, error) {
+	where := ` WHERE organization_id = ? AND project_id = ?`
+	args := []any{organizationID, projectID}
+	if options.CrawlJobID != "" {
+		where += ` AND EXISTS (
+			SELECT 1 FROM insight_miyun_material_snapshots snapshot
+			WHERE snapshot.organization_id = insight_miyun_materials.organization_id
+			  AND snapshot.project_id = insight_miyun_materials.project_id
+			  AND snapshot.material_id = insight_miyun_materials.id
+			  AND snapshot.crawl_job_id = ?
+		)`
+		args = append(args, options.CrawlJobID)
 	}
-	rows, err := r.DB.QueryContext(ctx, miyunMaterialSelect+`
-		WHERE organization_id = ? AND project_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?`, organizationID, projectID, limit)
+	if options.Search != "" {
+		where += ` AND (title LIKE ? OR miyun_material_id LIKE ?)`
+		pattern := "%" + options.Search + "%"
+		args = append(args, pattern, pattern)
+	}
+	if options.HandoffEligible {
+		where += ` AND selection_status = 'confirmed' AND import_status IN ('imported', 'deduplicated')`
+	}
+	var total int
+	if err := r.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM insight_miyun_materials`+where, args...).Scan(&total); err != nil {
+		return MiyunMaterialListPage{}, err
+	}
+	query := miyunMaterialSelect + where
+	if field := miyunMaterialSortField(options.Sort); field != "" {
+		query += ` ORDER BY (SELECT ` + field + ` FROM insight_miyun_material_snapshots sort_snapshot
+			WHERE sort_snapshot.organization_id = insight_miyun_materials.organization_id
+			  AND sort_snapshot.project_id = insight_miyun_materials.project_id
+			  AND sort_snapshot.material_id = insight_miyun_materials.id`
+		if options.CrawlJobID != "" {
+			query += ` AND sort_snapshot.crawl_job_id = ?`
+			args = append(args, options.CrawlJobID)
+		}
+		query += ` ORDER BY sort_snapshot.captured_at DESC, sort_snapshot.id DESC LIMIT 1) DESC, updated_at DESC, id DESC`
+	} else {
+		query += ` ORDER BY updated_at DESC, id DESC`
+	}
+	query += ` LIMIT ? OFFSET ?`
+	args = append(args, options.Limit, options.Offset)
+	rows, err := r.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return MiyunMaterialListPage{}, err
 	}
 	defer rows.Close()
 	values := make([]MiyunMaterial, 0)
 	for rows.Next() {
 		value, scanErr := scanMiyunMaterial(rows)
 		if scanErr != nil {
-			return nil, scanErr
+			return MiyunMaterialListPage{}, scanErr
 		}
 		values = append(values, value)
 	}
-	return values, rows.Err()
+	if err := rows.Err(); err != nil {
+		return MiyunMaterialListPage{}, err
+	}
+	return MiyunMaterialListPage{Items: values, Total: total, Limit: options.Limit, Offset: options.Offset}, nil
+}
+
+func miyunMaterialSortField(value string) string {
+	switch value {
+	case "delivery_days", "cumulative_impressions", "related_ads", "material_score":
+		return value
+	case "related_creators":
+		return `CASE WHEN related_creators_known THEN related_creators ELSE NULL END`
+	}
+	return ""
 }
 
 func (r MySQLRepository) DecideMiyunMaterial(ctx context.Context, value MiyunMaterial, expectedVersion int64) (MiyunMaterial, error) {

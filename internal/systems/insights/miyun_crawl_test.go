@@ -88,8 +88,11 @@ func TestMiyunCrawlCreateIsConfirmedAndIdempotent(t *testing.T) {
 		t.Fatalf("idempotent create duplicated state: first=%s second=%s jobs=%d runtime=%d", first.ID, second.ID, len(repository.jobs), len(runtime.byKey))
 	}
 	var snapshot MiyunQuerySnapshot
-	if json.Unmarshal(first.QuerySnapshot, &snapshot) != nil || snapshot.ProfileID != profile.ID || snapshot.Query.Page != 1 || snapshot.SchemaVersion != MiyunQuerySchemaV1 || len(snapshot.Query.ProductID) != 0 || snapshot.Query.Order != "_score_desc" {
+	if json.Unmarshal(first.QuerySnapshot, &snapshot) != nil || snapshot.ProfileID != profile.ID || snapshot.Query.Page != 1 || snapshot.SchemaVersion != MiyunQuerySchemaV1 || snapshot.MaxPages != DefaultMiyunCrawlMaxPages || len(snapshot.Query.ProductID) != 0 || snapshot.Query.Order != "_score_desc" {
 		t.Fatalf("query snapshot was not frozen: %#v", snapshot)
+	}
+	if _, err := service.CreateMiyunCrawlJob(context.Background(), miyunTestActor(), "project_1", "crawl-key-too-many-pages", CreateMiyunCrawlJobRequest{ProductProfileID: profile.ID, Operation: "product", MaxPages: DefaultMiyunCrawlMaxPages + 1}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("max page validation error = %v", err)
 	}
 
 	draft, err := service.AnalyzeMiyunProductProfile(context.Background(), miyunTestActor(), "project_1", AnalyzeMiyunProductProfileRequest{
@@ -139,6 +142,52 @@ func TestMiyunCrawlResumesPagesAndAppendsSnapshots(t *testing.T) {
 	}
 	if len(repository.materials) != 1 || len(repository.snapshots) != 3 {
 		t.Fatalf("a second crawl should append a snapshot without duplicating current material: materials=%d snapshots=%d", len(repository.materials), len(repository.snapshots))
+	}
+}
+
+func TestMiyunCrawlStopsAtFrozenMaximumPages(t *testing.T) {
+	service, repository, runtime, pages := newMiyunCrawlTestService(t)
+	profile := confirmedMiyunCrawlTestProfile(t, &service)
+	job, err := service.CreateMiyunCrawlJob(context.Background(), miyunTestActor(), "project_1", "crawl-max-pages", CreateMiyunCrawlJobRequest{ProductProfileID: profile.ID, Operation: "product", MaxPages: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages.results = []crawler.YouShuPage{
+		{Materials: []crawler.YouShuMaterial{miyunCrawlTestMaterial("remote-max-1")}, Page: 1, Limit: 1, Total: 999},
+		{Materials: []crawler.YouShuMaterial{miyunCrawlTestMaterial("remote-max-2")}, Page: 2, Limit: 1, Total: 999},
+		{Materials: []crawler.YouShuMaterial{miyunCrawlTestMaterial("remote-max-3")}, Page: 3, Limit: 1, Total: 999},
+	}
+	if _, err := service.HandleMiyunCrawlJob(context.Background(), runtime.claim(job.RuntimeJobID)); !isDeferredMiyunTestError(err) {
+		t.Fatalf("first page should defer: %v", err)
+	}
+	if _, err := service.HandleMiyunCrawlJob(context.Background(), runtime.claim(job.RuntimeJobID)); err != nil {
+		t.Fatal(err)
+	}
+	stored := repository.jobs[job.ID]
+	if stored.Status != MiyunCrawlJobSucceeded || stored.CompletedPages != 2 || pages.calls != 2 {
+		t.Fatalf("max-pages job=%#v calls=%d", stored, pages.calls)
+	}
+}
+
+func TestMiyunCrawlCancelImmediatelyPersistsAndStopsRequests(t *testing.T) {
+	service, repository, runtime, pages := newMiyunCrawlTestService(t)
+	profile := confirmedMiyunCrawlTestProfile(t, &service)
+	job, err := service.CreateMiyunCrawlJob(context.Background(), miyunTestActor(), "project_1", "crawl-cancel-action", CreateMiyunCrawlJobRequest{ProductProfileID: profile.ID, Operation: "product", MaxPages: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := service.CancelMiyunCrawlJob(context.Background(), miyunTestActor(), "project_1", job.ID, job.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Status != MiyunCrawlJobCancelled || !runtime.cancelled {
+		t.Fatalf("cancelled job=%#v runtime_cancelled=%v", cancelled, runtime.cancelled)
+	}
+	if _, err := service.HandleMiyunCrawlJob(context.Background(), runtime.claim(job.RuntimeJobID)); err != nil {
+		t.Fatal(err)
+	}
+	if pages.calls != 0 || repository.jobs[job.ID].Status != MiyunCrawlJobCancelled {
+		t.Fatalf("cancelled job made %d calls and ended %s", pages.calls, repository.jobs[job.ID].Status)
 	}
 }
 
@@ -293,8 +342,8 @@ func (r *miyunCrawlTestRepository) ApplyMiyunCrawlPage(_ context.Context, job Mi
 	r.jobs[current.ID] = current
 	return current, nil
 }
-func (r *miyunCrawlTestRepository) ListMiyunMaterials(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]MiyunMaterial, error) {
-	return nil, nil
+func (r *miyunCrawlTestRepository) ListMiyunMaterials(context.Context, contract.OrganizationID, contract.ProjectID, MiyunMaterialListOptions) (MiyunMaterialListPage, error) {
+	return MiyunMaterialListPage{}, nil
 }
 func (r *miyunCrawlTestRepository) GetMiyunMaterial(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (MiyunMaterial, error) {
 	for _, material := range r.materials {

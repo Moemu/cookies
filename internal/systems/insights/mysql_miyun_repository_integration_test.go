@@ -341,7 +341,7 @@ func TestMiyunFoundationAgainstMySQL(t *testing.T) {
 		t.Fatalf("returned MP4 must be scanned and probed before the handoff transition: %#v", returnedProjectAsset.Version)
 	}
 	returnedAt := now.Add(6 * time.Second)
-	returnRecord := insights.MiyunHandoffReturn{ID: "miyun_return_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID, HandoffID: handoff.ID, HandoffVersion: handoff.Version, ManifestVersion: handoff.ManifestVersion, InputHash: handoff.InputHash, ParameterVersion: handoff.ParameterVersion, ProductProfileID: handoff.ProductProfileID, Status: insights.MiyunHandoffReturnCreated, IdempotencyKey: "miyun_return_create_" + suffix, RequestHash: fmt.Sprintf("%064x", sha256.Sum256([]byte("return-create-"+suffix))), UploadedBy: userID, Version: 1, CreatedAt: returnedAt, UpdatedAt: returnedAt}
+	returnRecord := insights.MiyunHandoffReturn{ID: "miyun_return_it_" + suffix, OrganizationID: organizationID, ProjectID: projectID, HandoffID: handoff.ID, HandoffVersion: handoff.Version, ManifestVersion: handoff.ManifestVersion, InputHash: handoff.InputHash, ParameterVersion: handoff.ParameterVersion, ProductProfileID: handoff.ProductProfileID, CrawlJobID: handoff.CrawlJobID, AssociationSource: insights.MiyunReturnAssociationCrawlJob, Status: insights.MiyunHandoffReturnCreated, IdempotencyKey: "miyun_return_create_" + suffix, RequestHash: fmt.Sprintf("%064x", sha256.Sum256([]byte("return-create-"+suffix))), UploadedBy: userID, Version: 1, CreatedAt: returnedAt, UpdatedAt: returnedAt}
 	returnRecord, _, err = repository.CreateMiyunHandoffReturn(ctx, returnRecord)
 	if err != nil {
 		t.Fatalf("create persistent return: %v", err)

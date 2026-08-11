@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha256"
-	"encoding/csv"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,21 +13,16 @@ import (
 	"unicode"
 )
 
-var miyunHandoffManifestV1Columns = []string{
-	"manifest_version", "handoff_id", "handoff_version", "source_material_name", "source_file",
-	"miyun_material_id", "source_url", "source", "delivery_days", "cumulative_impressions",
-	"related_ads", "related_creators", "target_product", "target_category", "product_media_files",
-	"product_document_files", "notes", "juliang_spend", "parameter_version", "input_hash",
-}
+type MiyunHandoffPackageKind string
 
-var miyunHandoffManifestColumns = []string{
-	"manifest_version", "handoff_id", "handoff_version", "source_material_id", "source_file",
-	"product_media_files", "product_document_files", "parameter_version", "input_hash",
-}
+const (
+	MiyunHandoffPackageSources MiyunHandoffPackageKind = "sources"
+	MiyunHandoffPackageProject MiyunHandoffPackageKind = "project"
+)
 
-// MiyunHandoffManifest is the frozen, draft schema rendered in manifest.csv.
-// All fields are strings so an absent value is represented by the CSV empty
-// value and never by an invented numeric zero.
+// MiyunHandoffManifest is frozen lineage retained by the handoff record. The
+// upload ZIPs deliberately contain binaries only; metadata never appears as a
+// third kind of file in either material package.
 type MiyunHandoffManifest struct {
 	HandoffID             string
 	HandoffVersion        string
@@ -49,7 +43,7 @@ type MiyunHandoffManifest struct {
 }
 
 // MiyunHandoffExportFile is a frozen file reference. Name is presentation
-// metadata only; ExportMiyunHandoffZIP determines the ZIP path itself.
+// metadata only; the package exporter determines the flat ZIP entry name.
 type MiyunHandoffExportFile struct {
 	Reference string
 	Name      string
@@ -73,14 +67,17 @@ type MiyunHandoffExportReader interface {
 	OpenMiyunHandoffExportFile(context.Context, MiyunHandoffExportFile) (io.ReadCloser, error)
 }
 
-// ExportMiyunHandoffZIP writes a complete ZIP incrementally. A successful
-// return means all readers, ZIP entries, and the ZIP central directory closed
-// successfully; callers can then safely transition an export to exported.
-func ExportMiyunHandoffZIP(ctx context.Context, output io.Writer, snapshot MiyunHandoffExportSnapshot, reader MiyunHandoffExportReader) error {
+// ExportMiyunHandoffPackageZIP writes one of the two upload-ready packages.
+// The sources package contains only Miyun MP4s; the project package contains
+// only frozen project media/documents. Every entry is stored at the ZIP root.
+func ExportMiyunHandoffPackageZIP(ctx context.Context, output io.Writer, snapshot MiyunHandoffExportSnapshot, packageKind MiyunHandoffPackageKind, reader MiyunHandoffExportReader) error {
 	if output == nil || reader == nil {
 		return errors.New("Miyun handoff export output and reader are required")
 	}
-	if snapshot.ManifestVersion != MiyunHandoffManifestV1 && snapshot.ManifestVersion != MiyunHandoffManifestVersion {
+	if packageKind != MiyunHandoffPackageSources && packageKind != MiyunHandoffPackageProject {
+		return fmt.Errorf("unsupported Miyun handoff package %q", packageKind)
+	}
+	if snapshot.ManifestVersion != MiyunHandoffManifestV1 && snapshot.ManifestVersion != MiyunHandoffManifestV2 && snapshot.ManifestVersion != MiyunHandoffManifestVersion {
 		return fmt.Errorf("unsupported Miyun handoff manifest version %q", snapshot.ManifestVersion)
 	}
 	if len(snapshot.Sources) == 0 {
@@ -96,89 +93,26 @@ func ExportMiyunHandoffZIP(ctx context.Context, output io.Writer, snapshot Miyun
 	}
 
 	archive := zip.NewWriter(output)
-	if err := writeMiyunHandoffDirectory(archive, "viral/source/"); err != nil {
-		return err
-	}
-	if err := writeMiyunHandoffDirectory(archive, "product/media/"); err != nil {
-		return err
-	}
-	if err := writeMiyunHandoffDirectory(archive, "product/docs/"); err != nil {
-		return err
-	}
-
-	sourceNames := miyunHandoffFileNames(snapshot.Sources)
-	mediaNames := miyunHandoffFileNames(snapshot.ProductMedia)
-	docNames := miyunHandoffFileNames(snapshot.ProductDocs)
-	if err := writeMiyunHandoffManifest(archive, snapshot.ManifestVersion, snapshot.Manifest, sourceNames, mediaNames, docNames); err != nil {
-		return err
-	}
-	for index, source := range snapshot.Sources {
-		if err := writeMiyunHandoffFile(ctx, archive, "viral/source/"+sourceNames[index], source, reader); err != nil {
-			return err
+	sourceNames := miyunHandoffSourceFileNames(snapshot)
+	productFiles := append(append([]MiyunHandoffExportFile{}, snapshot.ProductMedia...), snapshot.ProductDocs...)
+	productNames := miyunHandoffFileNames(productFiles)
+	if packageKind == MiyunHandoffPackageSources {
+		for index, source := range snapshot.Sources {
+			if err := writeMiyunHandoffFile(ctx, archive, sourceNames[index], source, reader); err != nil {
+				return err
+			}
 		}
-	}
-	for index, file := range snapshot.ProductMedia {
-		if err := writeMiyunHandoffFile(ctx, archive, "product/media/"+mediaNames[index], file, reader); err != nil {
-			return err
-		}
-	}
-	for index, file := range snapshot.ProductDocs {
-		if err := writeMiyunHandoffFile(ctx, archive, "product/docs/"+docNames[index], file, reader); err != nil {
-			return err
+	} else {
+		for index, file := range productFiles {
+			if err := writeMiyunHandoffFile(ctx, archive, productNames[index], file, reader); err != nil {
+				return err
+			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return archive.Close()
-}
-
-func writeMiyunHandoffDirectory(archive *zip.Writer, name string) error {
-	_, err := archive.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
-	return err
-}
-
-func writeMiyunHandoffManifest(archive *zip.Writer, manifestVersion string, manifest MiyunHandoffManifest, sourceNames, mediaNames, docNames []string) error {
-	entry, err := archive.CreateHeader(&zip.FileHeader{Name: "manifest.csv", Method: zip.Deflate})
-	if err != nil {
-		return err
-	}
-	if _, err := entry.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
-		return err
-	}
-	writer := csv.NewWriter(entry)
-	if manifestVersion == MiyunHandoffManifestV1 {
-		if err := writer.Write(miyunHandoffManifestV1Columns); err != nil {
-			return err
-		}
-		if err := writer.Write([]string{
-			manifestVersion, manifest.HandoffID, manifest.HandoffVersion, manifest.SourceMaterialName,
-			joinMiyunHandoffPaths("viral/source/", sourceNames), manifest.MiyunMaterialID, manifest.SourceURL, manifest.Source,
-			manifest.DeliveryDays, manifest.CumulativeImpressions, manifest.RelatedAds, manifest.RelatedCreators,
-			manifest.TargetProduct, manifest.TargetCategory, joinMiyunHandoffPaths("product/media/", mediaNames),
-			joinMiyunHandoffPaths("product/docs/", docNames), manifest.Notes, "", manifest.ParameterVersion, manifest.InputHash,
-		}); err != nil {
-			return err
-		}
-	} else {
-		if len(manifest.SourceMaterialIDs) != len(sourceNames) {
-			return fmt.Errorf("Miyun handoff manifest source identity mismatch")
-		}
-		if err := writer.Write(miyunHandoffManifestColumns); err != nil {
-			return err
-		}
-		for index, sourceName := range sourceNames {
-			if err := writer.Write([]string{
-				manifestVersion, manifest.HandoffID, manifest.HandoffVersion, manifest.SourceMaterialIDs[index],
-				"viral/source/" + sourceName, joinMiyunHandoffPaths("product/media/", mediaNames),
-				joinMiyunHandoffPaths("product/docs/", docNames), manifest.ParameterVersion, manifest.InputHash,
-			}); err != nil {
-				return err
-			}
-		}
-	}
-	writer.Flush()
-	return writer.Error()
 }
 
 func writeMiyunHandoffFile(ctx context.Context, archive *zip.Writer, entryName string, file MiyunHandoffExportFile, source MiyunHandoffExportReader) (err error) {
@@ -253,6 +187,16 @@ func miyunHandoffFileNames(files []MiyunHandoffExportFile) []string {
 	return names
 }
 
+func miyunHandoffSourceFileNames(snapshot MiyunHandoffExportSnapshot) []string {
+	files := append([]MiyunHandoffExportFile{}, snapshot.Sources...)
+	if len(snapshot.Manifest.SourceMaterialIDs) == len(files) {
+		for index := range files {
+			files[index].Name = "miyun_" + snapshot.Manifest.SourceMaterialIDs[index] + ".mp4"
+		}
+	}
+	return miyunHandoffFileNames(files)
+}
+
 func cleanMiyunHandoffFileName(value string) string {
 	value = path.Base(strings.ReplaceAll(strings.TrimSpace(value), "\\", "/"))
 	var result strings.Builder
@@ -283,12 +227,4 @@ func isMiyunHandoffWindowsReservedName(name string) bool {
 		return base[3] >= '1' && base[3] <= '9'
 	}
 	return false
-}
-
-func joinMiyunHandoffPaths(directory string, names []string) string {
-	paths := make([]string, len(names))
-	for index, name := range names {
-		paths[index] = directory + name
-	}
-	return strings.Join(paths, ";")
 }

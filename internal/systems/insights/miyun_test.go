@@ -177,7 +177,7 @@ func validMiyunMaterialSnapshot(now time.Time) MiyunMaterialSnapshot {
 func validMiyunHandoff(now time.Time) MiyunHandoff {
 	return MiyunHandoff{
 		ID: "miyun_handoff_1", OrganizationID: "org_1", ProjectID: "project_1",
-		SourceMaterialID: "miyun_material_1", SourceMaterialIDs: []string{"miyun_material_1"}, ProductProfileID: "miyun_profile_1",
+		SourceMaterialID: "miyun_material_1", SourceMaterialIDs: []string{"miyun_material_1"}, ProductProfileID: "miyun_profile_1", CrawlJobID: "miyun_job_1",
 		Status: MiyunHandoffExporting, ManifestVersion: "miyun-manifest-v1", ParameterVersion: "parameters-v1",
 		ProductFilesSnapshot: []byte(`[]`), SourceSnapshot: []byte(`{"snapshot_id":"miyun_snapshot_1"}`), ProfileSnapshot: []byte(`{"profile_id":"miyun_profile_1"}`), InputHash: strings.Repeat("a", 64),
 		Version: 1, CreatedBy: "operator_1", CreatedAt: now, UpdatedAt: now,

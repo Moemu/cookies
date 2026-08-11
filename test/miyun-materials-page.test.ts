@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   latestMiyunCard,
   miyunCrawlErrorCopy,
+  miyunJobMaxPages,
   miyunStateCopy,
   profileQuery,
   sortMiyunMaterials,
@@ -89,6 +90,100 @@ test("页面为加载、409 刷新与空列表提供可见恢复动作", () => {
   assert.match(page, /miyunStateCopy\("empty", "materials"\)/);
 });
 
+test("米云工作流按活动状态自动同步，并在用户返回页面时刷新", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /activeJobStatuses/);
+  assert.match(page, /activeMaterialStatuses/);
+  assert.match(page, /window\.setInterval\(\(\) => void refresh\(\), 5000\)/);
+  assert.match(page, /document\.addEventListener\("visibilitychange", refreshOnReturn\)/);
+  assert.match(page, /window\.addEventListener\("focus", refreshOnReturn\)/);
+  assert.match(page, /已同步至/);
+});
+
+test("米云视图使用独立说明、结构化状态与逐素材备注", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /const viewCopy/);
+  assert.match(page, /miyun-material-card-heading/);
+  assert.match(page, /miyun-metric-grid/);
+  assert.match(page, /notes\[material\.id\]/);
+  assert.match(page, /miyun-profile-card/);
+  assert.match(page, /miyun-job-row/);
+});
+
+test("素材候选分页并以受控并发自动加载当前页预览", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /const materialPageSize = 8/);
+  assert.match(page, /const previewConcurrency = 2/);
+  assert.match(page, /paginatedMaterials\.map/);
+  assert.match(page, /aria-label="素材候选分页"/);
+  assert.match(page, /offset: \(materialPage - 1\) \* materialPageSize/);
+  assert.match(page, /Math\.ceil\(materialTotal \/ materialPageSize\)/);
+  assert.match(page, /remainingPreviewIds\.slice\(0, previewConcurrency\)/);
+  assert.match(page, /previewBatchKey = `\$\{view\}:/);
+  assert.match(page, /activePreviewIds\.includes\(material\.id\)/);
+  assert.match(page, /等待自动加载预览/);
+  assert.match(page, /页面同时只请求 \{previewConcurrency\} 条/);
+  assert.match(page, /onPreviewSettled\(\)/);
+});
+
+test("裂变交接分页只统计服务端判定为可交接的素材", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /handoffEligible: view === "fission"/);
+  assert.match(page, /const handoffMaterials = materials/);
+  assert.doesNotMatch(page, /const handoffMaterials = materials\.filter/);
+});
+
+test("素材、裂变和任务入口共享可恢复的采集任务上下文", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /crawl_job_id/);
+  assert.match(page, /localStorage\.setItem\(crawlContextStorageKey/);
+  assert.match(page, /snapshot\.crawl_job_id === crawlJobId/);
+  assert.match(page, /查看该批次素材/);
+  assert.match(page, /进入该批次裂变/);
+});
+
+test("确认画像后提供采集引导，并用关键词和素材类型区分画像与任务", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /下一步：创建采集任务/);
+  assert.match(page, /profileKeywordPreview/);
+  assert.match(page, /profileMaterialTypePreview/);
+  assert.match(page, /miyun-selected-profile-preview/);
+  assert.match(page, /miyun-job-profile-summary/);
+});
+
+test("创建采集任务限制为 1–50 页，取消动作覆盖冷却任务", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /name="miyun-max-pages"/);
+  assert.match(page, /max="50"/);
+  assert.match(page, /max_pages: parsedMaxPages/);
+  assert.match(page, /onClick=\{\(\) => void cancelJob\(job\)\}/);
+  assert.doesNotMatch(page, /disabled=\{busy \|\| job\.status === "cooling_down"\}/);
+  assert.match(page, /取消后不会再请求下一页/);
+  assert.equal(miyunJobMaxPages({ query_snapshot: { max_pages: 25 } } as any), 25);
+  assert.equal(miyunJobMaxPages({ query_snapshot: {} } as any), null);
+});
+
 test("米云产品身份可选且资料上传按知识文档和项目素材分流", () => {
   const page = readFileSync(
     new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
@@ -111,6 +206,7 @@ test("米云产品身份可选且资料上传按知识文档和项目素材分�
   assert.doesNotMatch(page, />选择文件</);
   assert.match(page, /miyun-connection-banner/);
   assert.match(page, /href="\/settings"/);
+  assert.doesNotMatch(page, /api\.verifyMiyunConnection/);
   assert.doesNotMatch(page, /setSession/);
 });
 

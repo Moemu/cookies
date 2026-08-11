@@ -34,49 +34,72 @@ type UploadMiyunHandoffReturnRequest struct {
 	DeclaredMIMEType  string
 	DeclaredSizeBytes int64
 	DeclaredSHA256    *string
+	CrawlJobID        string
+	SourceMaterialID  string
+	AssociationSource MiyunReturnAssociationSource
+	ContainerFilename string
 	Content           io.Reader
+}
+
+type MiyunReturnAssociationSource string
+
+const (
+	MiyunReturnAssociationCrawlJob     MiyunReturnAssociationSource = "crawl_job"
+	MiyunReturnAssociationFilename     MiyunReturnAssociationSource = "filename"
+	MiyunReturnAssociationManifestXLSX MiyunReturnAssociationSource = "manifest_xlsx"
+)
+
+func (s MiyunReturnAssociationSource) valid() bool {
+	return s == MiyunReturnAssociationCrawlJob || s == MiyunReturnAssociationFilename || s == MiyunReturnAssociationManifestXLSX
 }
 
 // MiyunHandoffReturn is append-only business lineage; it deliberately keeps
 // the source handoff snapshots immutable instead of copying their mutable data.
 type MiyunHandoffReturn struct {
-	ID                   string                   `json:"id"`
-	OrganizationID       contract.OrganizationID  `json:"organization_id"`
-	ProjectID            contract.ProjectID       `json:"project_id"`
-	HandoffID            string                   `json:"handoff_id"`
-	HandoffVersion       int64                    `json:"handoff_version"`
-	ManifestVersion      string                   `json:"manifest_version"`
-	InputHash            string                   `json:"input_hash"`
-	ParameterVersion     string                   `json:"parameter_version"`
-	ProductProfileID     string                   `json:"product_profile_id"`
-	Status               MiyunHandoffReturnStatus `json:"status"`
-	IdempotencyKey       string                   `json:"-"`
-	RequestHash          string                   `json:"-"`
-	UploadIdempotencyKey string                   `json:"-"`
-	UploadRequestHash    string                   `json:"-"`
-	Filename             string                   `json:"filename,omitempty"`
-	AssetVersion         contract.AssetVersionRef `json:"asset_version,omitempty"`
-	MIMEType             string                   `json:"mime_type,omitempty"`
-	SHA256               string                   `json:"sha256,omitempty"`
-	SizeBytes            int64                    `json:"size_bytes,omitempty"`
-	InsightAssetID       string                   `json:"insight_asset_id,omitempty"`
-	UploadedBy           string                   `json:"uploaded_by"`
-	UploadedAt           *time.Time               `json:"uploaded_at,omitempty"`
-	FailureCode          string                   `json:"failure_code,omitempty"`
-	MarkIdempotencyKey   string                   `json:"-"`
-	MarkRequestHash      string                   `json:"-"`
-	ReturnedBy           string                   `json:"returned_by,omitempty"`
-	ReturnedAt           *time.Time               `json:"returned_at,omitempty"`
-	Version              int64                    `json:"version"`
-	CreatedAt            time.Time                `json:"created_at"`
-	UpdatedAt            time.Time                `json:"updated_at"`
+	ID                   string                       `json:"id"`
+	OrganizationID       contract.OrganizationID      `json:"organization_id"`
+	ProjectID            contract.ProjectID           `json:"project_id"`
+	HandoffID            string                       `json:"handoff_id"`
+	HandoffVersion       int64                        `json:"handoff_version"`
+	ManifestVersion      string                       `json:"manifest_version"`
+	InputHash            string                       `json:"input_hash"`
+	ParameterVersion     string                       `json:"parameter_version"`
+	ProductProfileID     string                       `json:"product_profile_id"`
+	CrawlJobID           string                       `json:"crawl_job_id,omitempty"`
+	SourceMaterialID     string                       `json:"source_material_id,omitempty"`
+	AssociationSource    MiyunReturnAssociationSource `json:"association_source"`
+	ContainerFilename    string                       `json:"container_filename,omitempty"`
+	Status               MiyunHandoffReturnStatus     `json:"status"`
+	IdempotencyKey       string                       `json:"-"`
+	RequestHash          string                       `json:"-"`
+	UploadIdempotencyKey string                       `json:"-"`
+	UploadRequestHash    string                       `json:"-"`
+	Filename             string                       `json:"filename,omitempty"`
+	AssetVersion         contract.AssetVersionRef     `json:"asset_version,omitempty"`
+	MIMEType             string                       `json:"mime_type,omitempty"`
+	SHA256               string                       `json:"sha256,omitempty"`
+	SizeBytes            int64                        `json:"size_bytes,omitempty"`
+	InsightAssetID       string                       `json:"insight_asset_id,omitempty"`
+	UploadedBy           string                       `json:"uploaded_by"`
+	UploadedAt           *time.Time                   `json:"uploaded_at,omitempty"`
+	FailureCode          string                       `json:"failure_code,omitempty"`
+	MarkIdempotencyKey   string                       `json:"-"`
+	MarkRequestHash      string                       `json:"-"`
+	ReturnedBy           string                       `json:"returned_by,omitempty"`
+	ReturnedAt           *time.Time                   `json:"returned_at,omitempty"`
+	Version              int64                        `json:"version"`
+	CreatedAt            time.Time                    `json:"created_at"`
+	UpdatedAt            time.Time                    `json:"updated_at"`
 }
 
 func (r MiyunHandoffReturn) Validate() error {
 	if strings.TrimSpace(r.ID) == "" || r.OrganizationID == "" || r.ProjectID == "" || strings.TrimSpace(r.HandoffID) == "" || r.HandoffVersion < 1 ||
 		strings.TrimSpace(r.ManifestVersion) == "" || strings.TrimSpace(r.ParameterVersion) == "" || strings.TrimSpace(r.ProductProfileID) == "" ||
-		!miyunReturnImportSHA256Valid(r.InputHash) || !r.Status.valid() || strings.TrimSpace(r.IdempotencyKey) == "" || !miyunReturnImportSHA256Valid(r.RequestHash) || r.Version < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) {
+		!miyunReturnImportSHA256Valid(r.InputHash) || !r.AssociationSource.valid() || !r.Status.valid() || strings.TrimSpace(r.IdempotencyKey) == "" || !miyunReturnImportSHA256Valid(r.RequestHash) || r.Version < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) {
 		return fmt.Errorf("%w: return identity, frozen lineage, idempotency, and version are required", ErrInvalidRequest)
+	}
+	if r.AssociationSource != MiyunReturnAssociationCrawlJob && strings.TrimSpace(r.SourceMaterialID) == "" {
+		return fmt.Errorf("%w: material-level return association requires a source material", ErrInvalidRequest)
 	}
 	if r.Status == MiyunHandoffReturnCreated {
 		return nil

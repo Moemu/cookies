@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -37,8 +38,44 @@ func (s *Server) registerMiyunRoutes() {
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}", s.getMiyunHandoff)
 	s.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/export", s.exportMiyunHandoff)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns", s.createMiyunHandoffReturn)
+	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns:import", s.importMiyunHandoffReturnBundle)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_action}", s.miyunHandoffReturnAction)
 	s.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_action}", s.miyunHandoffAction)
+}
+
+func (s *Server) importMiyunHandoffReturnBundle(writer http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(writer, request.Body, insights.MiyunReturnBundleMaxBytes+2*1024*1024)
+	if err := request.ParseMultipartForm(2 * 1024 * 1024); err != nil {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	file, header, err := request.FormFile("file")
+	if err != nil {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	defer file.Close()
+	readerAt, ok := file.(io.ReaderAt)
+	if !ok {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	expected, err := strconv.ParseInt(request.FormValue("expected_version"), 10, 64)
+	if err != nil || expected < 1 {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	key := contract.IdempotencyKey(strings.TrimSpace(request.FormValue("idempotency_key")))
+	if key.Validate() != nil {
+		writeMiyunError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	value, err := s.app.ImportMiyunHandoffReturnBundle(request.Context(), mustActor(request), projectID(request), request.PathValue("handoff_id"), key, insights.ImportMiyunHandoffReturnBundleRequest{ExpectedVersion: expected, Filename: header.Filename, DeclaredSizeBytes: header.Size, Content: readerAt})
+	if err != nil {
+		writeMiyunError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) createMiyunHandoffReturn(writer http.ResponseWriter, request *http.Request) {
@@ -160,6 +197,17 @@ func (s *Server) getMiyunHandoff(writer http.ResponseWriter, request *http.Reque
 }
 func (s *Server) exportMiyunHandoff(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("handoff_id")
+	packageKind := insights.MiyunHandoffPackageKind(request.URL.Query().Get("package"))
+	filenameSuffix := ""
+	switch packageKind {
+	case insights.MiyunHandoffPackageSources:
+		filenameSuffix = "source-materials"
+	case insights.MiyunHandoffPackageProject:
+		filenameSuffix = "project-materials"
+	default:
+		writeMiyunError(writer, request, fmt.Errorf("%w: package must be sources or project", insights.ErrInvalidRequest))
+		return
+	}
 	if _, err := s.app.GetMiyunHandoff(request.Context(), mustActor(request), projectID(request), id); err != nil {
 		writeMiyunError(writer, request, err)
 		return
@@ -167,8 +215,8 @@ func (s *Server) exportMiyunHandoff(writer http.ResponseWriter, request *http.Re
 	writer.Header().Set("Content-Type", "application/zip")
 	writer.Header().Set("Cache-Control", "private, no-store")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
-	writer.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "miyun-handoff-" + id + ".zip"}))
-	_ = s.app.ExportMiyunHandoff(request.Context(), mustActor(request), projectID(request), id, writer)
+	writer.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "miyun-handoff-" + id + "-" + filenameSuffix + ".zip"}))
+	_ = s.app.ExportMiyunHandoff(request.Context(), mustActor(request), projectID(request), id, packageKind, writer)
 }
 func (s *Server) miyunHandoffAction(writer http.ResponseWriter, request *http.Request) {
 	action := request.PathValue("handoff_action")
@@ -398,12 +446,29 @@ func (s *Server) miyunCrawlJobAction(writer http.ResponseWriter, request *http.R
 }
 
 func (s *Server) listMiyunMaterials(writer http.ResponseWriter, request *http.Request) {
-	values, err := s.app.ListMiyunMaterials(request.Context(), mustActor(request), projectID(request), queryLimit(request))
+	offset, _ := strconv.Atoi(request.URL.Query().Get("offset"))
+	handoffEligible := false
+	switch request.URL.Query().Get("handoff_eligible") {
+	case "", "false":
+	case "true":
+		handoffEligible = true
+	default:
+		writeMiyunError(writer, request, fmt.Errorf("%w: handoff_eligible must be true or false", insights.ErrInvalidRequest))
+		return
+	}
+	page, err := s.app.ListMiyunMaterials(request.Context(), mustActor(request), projectID(request), insights.MiyunMaterialListOptions{
+		CrawlJobID:      request.URL.Query().Get("crawl_job_id"),
+		Search:          request.URL.Query().Get("q"),
+		Sort:            request.URL.Query().Get("sort"),
+		HandoffEligible: handoffEligible,
+		Limit:           queryLimit(request),
+		Offset:          offset,
+	})
 	if err != nil {
 		writeMiyunError(writer, request, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+	writeJSON(writer, http.StatusOK, page)
 }
 
 func (s *Server) getMiyunMaterial(writer http.ResponseWriter, request *http.Request) {

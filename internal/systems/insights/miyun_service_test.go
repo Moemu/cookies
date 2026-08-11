@@ -217,6 +217,7 @@ func TestMiyunManualImportRequiresRemoteIdentityAndSource(t *testing.T) {
 type memoryMiyunServiceRepository struct {
 	connection MiyunConnection
 	profiles   map[string]MiyunProductProfile
+	jobs       map[string]MiyunCrawlJob
 	manual     map[string]MiyunManualImportResult
 	materials  map[string]MiyunMaterial
 	snapshots  map[string][]MiyunMaterialSnapshot
@@ -228,7 +229,7 @@ func newMiyunServiceRepository(now time.Time) *memoryMiyunServiceRepository {
 	connection := validMiyunConnection(now)
 	connection.Status = MiyunConnectionReady
 	return &memoryMiyunServiceRepository{
-		connection: connection, profiles: map[string]MiyunProductProfile{}, manual: map[string]MiyunManualImportResult{}, materials: map[string]MiyunMaterial{}, snapshots: map[string][]MiyunMaterialSnapshot{}, handoffs: map[string]MiyunHandoff{}, returns: map[string]MiyunHandoffReturn{},
+		connection: connection, profiles: map[string]MiyunProductProfile{}, jobs: map[string]MiyunCrawlJob{"miyun_job_1": validMiyunCrawlJob(now)}, manual: map[string]MiyunManualImportResult{}, materials: map[string]MiyunMaterial{}, snapshots: map[string][]MiyunMaterialSnapshot{}, handoffs: map[string]MiyunHandoff{}, returns: map[string]MiyunHandoffReturn{},
 	}
 }
 
@@ -317,8 +318,12 @@ func (r *memoryMiyunServiceRepository) CreateMiyunProductProfile(context.Context
 func (r *memoryMiyunServiceRepository) CreateMiyunCrawlJob(context.Context, MiyunCrawlJob) (MiyunCrawlJob, error) {
 	return MiyunCrawlJob{}, errors.New("unused")
 }
-func (r *memoryMiyunServiceRepository) GetMiyunCrawlJob(context.Context, contract.OrganizationID, contract.ProjectID, string) (MiyunCrawlJob, error) {
-	return MiyunCrawlJob{}, errors.New("unused")
+func (r *memoryMiyunServiceRepository) GetMiyunCrawlJob(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (MiyunCrawlJob, error) {
+	value, ok := r.jobs[id]
+	if !ok || value.OrganizationID != organizationID || value.ProjectID != projectID {
+		return MiyunCrawlJob{}, ErrNotFound
+	}
+	return value, nil
 }
 func (r *memoryMiyunServiceRepository) CreateMiyunMaterial(context.Context, MiyunMaterial) (MiyunMaterial, error) {
 	return MiyunMaterial{}, errors.New("unused")
@@ -450,7 +455,11 @@ func (r *memoryMiyunServiceRepository) CompleteMiyunHandoffReturn(_ context.Cont
 		return MiyunHandoffReturn{}, MiyunHandoff{}, ErrVersionConflict
 	}
 	value.Status, value.Version = MiyunHandoffReturnReturned, returnVersion+1
-	handoff.Status, handoff.Version = MiyunHandoffReturned, handoffVersion+1
+	if currentHandoff.Status != MiyunHandoffReturned {
+		handoff.Status, handoff.Version = MiyunHandoffReturned, handoffVersion+1
+	} else {
+		handoff = currentHandoff
+	}
 	r.returns[value.ID], r.handoffs[handoff.ID] = value, handoff
 	return value, handoff, nil
 }
@@ -523,20 +532,28 @@ func TestMiyunHandoffCreateFreezesInputAndReplays(t *testing.T) {
 	repository.materials[material.ID] = material
 	snapshot := validMiyunMaterialSnapshot(now)
 	snapshot.MaterialID = material.ID
-	repository.snapshots[material.ID] = []MiyunMaterialSnapshot{snapshot}
+	latestSnapshot := snapshot
+	latestSnapshot.ID = "miyun_snapshot_latest"
+	latestSnapshot.CapturedAt = now.Add(time.Minute)
+	latestSnapshot.MaterialScore = 99
+	repository.snapshots[material.ID] = []MiyunMaterialSnapshot{snapshot, latestSnapshot}
 	profile := validMiyunProductProfile(now)
 	profile.Status, profile.Version = MiyunProfileConfirmed, 2
 	profile.ProductAssetRefs = []contract.AssetVersionRef{{AssetID: "asset_1", Version: 1}}
 	profile.KnowledgeDocumentIDs = []string{}
 	repository.profiles[profile.ID] = profile
 
-	first, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	first, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	second, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"})
 	if err != nil || first.ID != second.ID || first.Status != MiyunHandoffExporting {
 		t.Fatalf("idempotent create = %#v, %#v, %v", first, second, err)
+	}
+	var frozenSources miyunHandoffSourcesSnapshot
+	if err := json.Unmarshal(first.SourceSnapshot, &frozenSources); err != nil || len(frozenSources.Sources) != 1 || frozenSources.Sources[0].DataCard.ID != latestSnapshot.ID {
+		t.Fatalf("handoff did not freeze the latest snapshot in its crawl job: %#v, %v", frozenSources, err)
 	}
 	frozen := append([]byte(nil), first.ProfileSnapshot...)
 	profile.ProductName = "Changed after handoff"
@@ -547,7 +564,7 @@ func TestMiyunHandoffCreateFreezesInputAndReplays(t *testing.T) {
 	}
 	material.SelectionStatus = MiyunMaterialDiscovered
 	repository.materials[material.ID] = material
-	if _, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID}); !errors.Is(err, ErrInvalidState) {
+	if _, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("unconfirmed material create error=%v", err)
 	}
 }
@@ -575,7 +592,7 @@ func TestMiyunHandoffFreezesMultipleSourcesInStableOrder(t *testing.T) {
 		snapshot.MaterialID = material.ID
 		repository.snapshots[material.ID] = []MiyunMaterialSnapshot{snapshot}
 	}
-	created, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{first.ID, second.ID}, ProductProfileID: profile.ID})
+	created, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{first.ID, second.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +603,7 @@ func TestMiyunHandoffFreezesMultipleSourcesInStableOrder(t *testing.T) {
 	if err := json.Unmarshal(created.SourceSnapshot, &frozen); err != nil || len(frozen.Sources) != 2 || frozen.Sources[0].Material.ID != second.ID {
 		t.Fatalf("frozen source snapshot = %#v, %v", frozen, err)
 	}
-	replayed, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{second.ID, first.ID}, ProductProfileID: profile.ID})
+	replayed, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{second.ID, first.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"})
 	if err != nil || replayed.ID != created.ID {
 		t.Fatalf("unordered replay = %#v, %v", replayed, err)
 	}
@@ -610,7 +627,7 @@ func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
 	profile.ProductAssetRefs = []contract.AssetVersionRef{{AssetID: "asset_1", Version: 1}}
 	profile.KnowledgeDocumentIDs = []string{}
 	repository.profiles[profile.ID] = profile
-	handoff, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	handoff, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +636,7 @@ func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
 		t.Fatalf("delivery before export error=%v", err)
 	}
 	var output bytes.Buffer
-	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID, &output); err != nil || output.Len() == 0 {
+	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID, MiyunHandoffPackageSources, &output); err != nil || output.Len() == 0 {
 		t.Fatalf("export error=%v size=%d", err, output.Len())
 	}
 	exported, _ := service.GetMiyunHandoff(context.Background(), miyunTestActor(), "project_1", handoff.ID)
@@ -638,11 +655,11 @@ func TestMiyunHandoffExportAndExplicitDeliveryState(t *testing.T) {
 	}
 	profile.ProductName = "second frozen profile"
 	repository.profiles[profile.ID] = profile
-	failing, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID})
+	failing, err := service.CreateMiyunHandoff(context.Background(), miyunTestActor(), "project_1", CreateMiyunHandoffRequest{SourceMaterialIDs: []string{material.ID}, ProductProfileID: profile.ID, CrawlJobID: "miyun_job_1"})
 	if err != nil || failing.ID == handoff.ID {
 		t.Fatalf("second handoff=%#v err=%v", failing, err)
 	}
-	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", failing.ID, miyunHandoffFailingWriter{}); err == nil {
+	if err := service.ExportMiyunHandoff(context.Background(), miyunTestActor(), "project_1", failing.ID, MiyunHandoffPackageSources, miyunHandoffFailingWriter{}); err == nil {
 		t.Fatal("failed response writer exported a handoff")
 	}
 	failed, _ := service.GetMiyunHandoff(context.Background(), miyunTestActor(), "project_1", failing.ID)
