@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProject } from '../../../context/ProjectContext'
 import { api, type ApiExperience, type ApiExperienceReference } from '../../../data/api'
+import { formatCount, formatDate } from '../analysis/format'
 import { projectPath } from '../../../lib/router'
 import { shortId } from '../../../data/shortId'
 
@@ -34,14 +35,16 @@ export function EvidenceTrail({ experience }: { experience: ApiExperience }) {
   }, [currentProject.id, experience.id])
 
   const basis = experience.data_basis
-  const window = [basis.window_start, basis.window_end].filter(Boolean).join(' ~ ')
+  // 窗口按本地日历天显示。库里存的是带时区的时间戳，原样摆出来是
+  // 「2026-07-12T00:00:00Z」——人要在脑子里做一次时区换算才知道是哪天。
+  const window = [basis.window_start, basis.window_end].filter(Boolean).map(value => formatDate(value!)).join(' ~ ')
 
   return <div className="evidence-trail">
     <section>
       <h5>数据依据</h5>
       <ul>
         {window ? <li>观察窗口：{window}</li> : null}
-        {basis.sample_size ? <li>样本量：{basis.sample_size}</li> : null}
+        {basis.sample_size ? <li>样本量：{formatCount(basis.sample_size)}</li> : null}
         {basis.asset_count ? <li>涉及素材：{basis.asset_count} 个</li> : null}
         {basis.metrics?.length ? <li>看的指标：{basis.metrics.join('、')}</li> : null}
         {basis.baseline ? <li>对照基准：{basis.baseline}</li> : null}

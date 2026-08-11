@@ -4179,9 +4179,9 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .experience-card { margin-bottom: 12px; padding: 13px 15px; border: 1px solid var(--line); background: var(--surface); }
 .experience-card > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .experience-card > header h4 { flex: 1 1 240px; margin: 0; font-size: 12px; line-height: 1.5; }
-/* 只是观察的整张卡压一档：让人一眼看出这批和上面那批不是一回事，
+/* 档位不到 ✅ 的整张卡压一档：让人一眼看出这批和上面那批不是一回事，
    又不至于弱到像被禁用了——它仍然是可以参考的。 */
-.experience-card-observed { border-style: dashed; }
+.experience-card-soft { border-style: dashed; }
 .experience-review-flag { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); font-size: 9px; font-weight: 650; }
 .experience-scope { margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .experience-scope small { margin-left: 4px; font-size: 9px; }
@@ -4207,6 +4207,34 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .reference-outcome { padding: 1px 7px; border-radius: 999px; background: var(--subtle); color: var(--muted); font-size: 9px; }
 .reference-outcome.outcome-adopted { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
 .reference-outcome.outcome-rejected { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+
+/* 「经验」入口的两个模式（P4 Task 4）。两屏共用同一张卡，所以这里只写外层
+   的取景框：查是「筛选条件 + 结果」，管是「待办计数 + 一列要处理的东西」。 */
+.experience-lookup, .experience-manage { display: grid; align-content: start; }
+.lookup-context, .manage-context { margin: 0; padding: 12px 24px 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.experience-lookup > .experience-card, .experience-lookup > .panel-empty,
+.experience-manage > .manage-item, .experience-manage > .panel-empty { margin-left: 24px; margin-right: 24px; }
+.experience-lookup > .panel-empty, .experience-manage > .panel-empty { margin-top: 14px; }
+
+/* 筛选器一行铺开。每格给 148px 的下限：渠道名再长也就四五个字，
+   比这窄会把「广告类型」这种四字标签挤成两行。 */
+.lookup-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 12px 24px 0; padding: 12px 14px; background: var(--subtle); border: 1px solid var(--line); border-radius: 6px; }
+.lookup-field { display: grid; gap: 3px; flex: 1 1 148px; min-width: 148px; }
+.lookup-field small { color: var(--muted); font-size: 9px; }
+.lookup-field select, .lookup-field input { width: 100%; }
+.lookup-toggle { display: flex; align-items: center; gap: 6px; height: 30px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.lookup-toggle input { width: auto; }
+.lookup-filters .text-button { height: 30px; font-size: 10px; }
+
+.manage-item { margin-top: 12px; }
+.manage-item .experience-card { margin-bottom: 0; }
+/* 理由框占满一行再放按钮：和按钮同排的话，一个两行的输入框会把按钮顶到
+   卡片外面去，而且人会以为那是个搜索框。 */
+.manage-reason { flex: 1 1 100%; min-height: 46px; font-size: 10px; resize: vertical; }
+.manage-no-action { color: var(--muted); font-size: 9px; line-height: 1.6; }
+.experience-status { padding: 2px 8px; border-radius: 999px; background: var(--subtle); color: var(--muted); font-size: 9px; font-weight: 650; }
+.experience-status.status-confirmed { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.experience-status.status-pending { background: var(--cobalt-soft); color: var(--cobalt-dark); }
 
 @media (max-width: 1180px) {
   .assets-queues { grid-template-columns: minmax(0, 1fr); }
