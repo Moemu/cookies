@@ -324,7 +324,7 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		actor.OrganizationID, projectID, parsedPDF.ID).Scan(&persistedVisionPages); err != nil || persistedVisionPages != 2 {
 		t.Fatalf("persisted visual pages=%d err=%v", persistedVisionPages, err)
 	}
-	nonContiguousBytes := []byte("%PDF-1.7 non-contiguous visual selection " + suffix)
+	nonContiguousBytes := []byte("%PDF-1.7 non-contiguous visual selection " + suffix + "\n%%EOF\n")
 	nonContiguousPDF, err := service.CreateDocument(
 		ctx, actor, projectID, "non-contiguous-report.pdf", "application/pdf",
 		bytes.NewReader(nonContiguousBytes), int64(len(nonContiguousBytes)),
@@ -518,7 +518,7 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		}
 	}
 
-	notAcceptedBytes := []byte("%PDF-1.7 not-accepted reconciliation " + suffix)
+	notAcceptedBytes := []byte("%PDF-1.7 not-accepted reconciliation " + suffix + "\n%%EOF\n")
 	notAcceptedPDF, err := service.CreateDocument(
 		ctx, actor, projectID, "not-accepted-report.pdf", "application/pdf",
 		bytes.NewReader(notAcceptedBytes), int64(len(notAcceptedBytes)),
@@ -593,7 +593,7 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 	if err != nil || notAcceptedPDF.VisionFallbackStatus != "queued" || notAcceptedPDF.VisionAttemptID == priorAttemptID {
 		t.Fatalf("explicit retry after not-accepted reconciliation=%#v err=%v", notAcceptedPDF, err)
 	}
-	orphanBytes := []byte("%PDF-1.7 orphaned visual fallback " + suffix)
+	orphanBytes := []byte("%PDF-1.7 orphaned visual fallback " + suffix + "\n%%EOF\n")
 	orphanPDF, err := service.CreateDocument(
 		ctx, actor, projectID, "orphaned-visual-report.pdf", "application/pdf",
 		bytes.NewReader(orphanBytes), int64(len(orphanBytes)),
@@ -862,7 +862,7 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		Store: runtimeStore, NewID: func() (string, error) { return "documentjob_" + suffix, nil },
 		Now: func() time.Time { return integrationQueueNow },
 	}
-	controlledPDFBytes := []byte("%PDF-1.7 controlled retry payload " + suffix)
+	controlledPDFBytes := []byte("%PDF-1.7 controlled retry payload " + suffix + "\n%%EOF\n")
 	controlledPDF, err := service.CreateDocument(
 		ctx, actor, projectID, "controlled-report.pdf", "application/pdf",
 		bytes.NewReader(controlledPDFBytes), int64(len(controlledPDFBytes)),
