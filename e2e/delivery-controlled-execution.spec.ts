@@ -31,7 +31,7 @@ test('controlled execution center stays server-authoritative and safe on desktop
   await expect(workspace.getByText('redaction=computer-use-redaction/v1 · selector=fake-selector/v1')).toBeVisible()
   await expect(workspace.getByRole('button', { name: /重试提交/ })).toHaveCount(0)
   await expect(workspace.getByText('approval_fake_1')).toBeVisible()
-  await expect(workspace.getByText('校准基线；实时 DOM 待复核')).toBeVisible()
+  await expect(workspace.getByText('项目表单已复核；单元 DOM 与真实 Driver 待校准')).toBeVisible()
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(workspace).toBeVisible()

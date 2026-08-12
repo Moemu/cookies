@@ -130,7 +130,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
           <div><dt>正式 Approval</dt><dd title={run.authority.approval_id}>{run.authority.approval_id}</dd></div>
           <div><dt>预算上限</dt><dd>¥{formatMinor(run.authority.budget_limit_minor)} {run.authority.currency}</dd></div>
           <div><dt>Workflow</dt><dd title={run.authority.workflow_canonical_hash}>{shortHash(run.authority.workflow_canonical_hash)}</dd></div>
-          <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? <>{run.authority.skill_id} · {run.authority.skill_version}<small>校准基线；实时 DOM 待复核</small></> : '未绑定；真实执行不可用'}</dd></div>
+          <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? <>{run.authority.skill_id} · {run.authority.skill_version}<small>项目表单已复核；单元 DOM 与真实 Driver 待校准</small></> : '未绑定；真实执行不可用'}</dd></div>
           <div><dt>租约</dt><dd title={run.lease_id}>{run.lease_id}</dd></div>
           <div><dt>策略</dt><dd title={run.policy_id}>{run.policy_id}</dd></div>
         </dl>

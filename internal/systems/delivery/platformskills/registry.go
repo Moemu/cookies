@@ -48,15 +48,31 @@ type Definition struct {
 	WriteValidationPending []string `json:"write_validation_pending"`
 	UIBaseline             struct {
 		ObservedAt      string `json:"observed_at"`
+		RevalidatedAt   string `json:"revalidated_at"`
 		PlatformBuild   string `json:"platform_build"`
 		LocatorContract string `json:"locator_contract"`
 		DriftCheck      string `json:"drift_check"`
 	} `json:"ui_baseline"`
+	RuntimePolicy struct {
+		ProjectFormLiveCalibrated     bool   `json:"project_form_live_calibrated"`
+		PromotionFormLiveCalibrated   bool   `json:"promotion_form_live_calibrated"`
+		ControlPlaneEvidenceRecorded  bool   `json:"control_plane_evidence_recorded"`
+		AgentFinalSubmitDocumentation string `json:"agent_final_submit_documentation"`
+	} `json:"runtime_policy"`
+	Rollback struct {
+		Method  string `json:"method"`
+		Trigger string `json:"trigger"`
+	} `json:"rollback"`
 	GateOne struct {
-		Purpose   string   `json:"purpose"`
-		Ready     bool     `json:"ready"`
-		Scope     []string `json:"required_scope"`
-		Checklist []string `json:"acceptance_checklist"`
+		Purpose                    string   `json:"purpose"`
+		Ready                      bool     `json:"ready"`
+		Result                     string   `json:"result"`
+		ProjectFormStatus          string   `json:"project_form_status"`
+		PromotionFormStatus        string   `json:"promotion_form_status"`
+		ControlPlaneEvidenceStatus string   `json:"control_plane_evidence_status"`
+		LiveEvidenceRef            string   `json:"live_evidence_ref"`
+		Scope                      []string `json:"required_scope"`
+		Checklist                  []string `json:"acceptance_checklist"`
 	} `json:"gate_one"`
 }
 
@@ -85,14 +101,25 @@ func (d Definition) Validate() error {
 		d.DisplayName != "巨量引擎·电商手动投放" ||
 		d.Platform != "ocean_engine" ||
 		d.Capability != "ecommerce_manual_delivery" ||
-		d.Status != "realtime_dom_validation_required" ||
+		d.Status != "gate_one_partial_live_calibration" ||
 		d.Owner != "delivery" ||
 		d.Executable || d.RealBrowserDriver || d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
-		d.UIBaseline.LocatorContract != "business_semantic_only" ||
-		d.UIBaseline.DriftCheck != "required_before_gate_one" ||
+		d.UIBaseline.RevalidatedAt != "2026-08-12" ||
+		d.UIBaseline.LocatorContract != "project_form_live_dom_partial" ||
+		d.UIBaseline.DriftCheck != "project_form_revalidated_promotion_form_pending" ||
+		!d.RuntimePolicy.ProjectFormLiveCalibrated ||
+		d.RuntimePolicy.PromotionFormLiveCalibrated ||
+		d.RuntimePolicy.ControlPlaneEvidenceRecorded ||
+		d.RuntimePolicy.AgentFinalSubmitDocumentation != "deferred_until_end_to_end_flow_validated" ||
+		d.Rollback.Method != "disable_skill_version_and_fall_back_to_human_takeover" ||
 		d.GateOne.Ready ||
-		len(d.EvidenceRefs) < 9 ||
+		d.GateOne.Result != "partial" ||
+		d.GateOne.ProjectFormStatus != "passed" ||
+		d.GateOne.PromotionFormStatus != "pending" ||
+		d.GateOne.ControlPlaneEvidenceStatus != "pending" ||
+		d.GateOne.LiveEvidenceRef == "" ||
+		len(d.EvidenceRefs) < 11 ||
 		len(d.PageTypes) < 9 ||
 		len(d.Capabilities.Allowed) == 0 ||
 		len(d.Capabilities.Forbidden) == 0 ||
