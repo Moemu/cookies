@@ -2170,8 +2170,20 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusConflict, "EDIT_OPERATION_VERSION_CONFLICT", "The operation base version no longer matches the current timeline.", false
 	case errors.Is(err, creative.ErrEditTimelineVersionConflict):
 		status, code, message, retryable = http.StatusConflict, "EDIT_TIMELINE_VERSION_CONFLICT", "The timeline version no longer matches the current EditTask.", false
+	case errors.Is(err, creative.ErrStrategyBrandDirectionRequired):
+		status, code, message, retryable = http.StatusConflict, "STRATEGY_BRAND_DIRECTION_REQUIRED", "Select and confirm a brand direction before creating the Strategy-sourced brand task.", false
+	case errors.Is(err, creative.ErrStrategyBrandLineageMismatch):
+		status, code, message, retryable = http.StatusConflict, "STRATEGY_BRAND_LINEAGE_MISMATCH", "The Strategy brand workflow no longer matches its frozen intake lineage.", false
+	case errors.Is(err, creative.ErrStrategyBrandLegacyTaskNeedsReview):
+		status, code, message, retryable = http.StatusConflict, "STRATEGY_BRAND_LEGACY_TASK_REQUIRES_REVIEW", "An earlier brand task contains user work and requires manual review.", false
 	case errors.Is(err, creative.ErrIntakeNotReady):
 		status, code, message, retryable = http.StatusConflict, "INTAKE_NEEDS_CLARIFICATION", "The Creative intake needs the missing fields before a task can be created.", false
+	case errors.Is(err, creative.ErrStrategyBrandDirectionRequired):
+		status, code, message, retryable = http.StatusConflict, "STRATEGY_BRAND_DIRECTION_REQUIRED", "Select and confirm a brand direction before creating the Strategy-sourced brand task.", false
+	case errors.Is(err, creative.ErrStrategyBrandLineageMismatch):
+		status, code, message, retryable = http.StatusConflict, "STRATEGY_BRAND_LINEAGE_MISMATCH", "The Strategy brand workflow no longer matches its frozen intake lineage.", false
+	case errors.Is(err, creative.ErrStrategyBrandLegacyTaskNeedsReview):
+		status, code, message, retryable = http.StatusConflict, "STRATEGY_BRAND_LEGACY_TASK_REQUIRES_REVIEW", "An earlier brand task contains user work and requires manual review.", false
 	case errors.Is(err, creative.ErrProviderJobConflict):
 		status, code, message, retryable = http.StatusConflict, "PRODUCTION_JOB_CONFLICT", "A different cover production job already exists for this task.", false
 	case errors.Is(err, creative.ErrInvalidState):
