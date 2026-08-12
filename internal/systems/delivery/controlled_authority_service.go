@@ -14,6 +14,28 @@ type controlledAuthorityRepository interface {
 	GetControlledChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledChangeSet, error)
 	ApproveControlledChangeSet(context.Context, ControlledChangeSet, RemoteWriteApproval) (ControlledChangeSet, RemoteWriteApproval, error)
 	CreateControlledExecution(context.Context, ControlledExecution) (ControlledExecution, error)
+	GetControlledExecution(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledExecution, error)
+}
+
+func (s Service) GetControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ControlledChangeSet, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return ControlledChangeSet{}, err
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return ControlledChangeSet{}, ErrUnsupportedConfigurationWorkflow
+	}
+	return repo.GetControlledChangeSet(ctx, actor.OrganizationID, projectID, id)
+}
+func (s Service) GetControlledExecution(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ControlledExecution, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return ControlledExecution{}, err
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return ControlledExecution{}, ErrUnsupportedConfigurationWorkflow
+	}
+	return repo.GetControlledExecution(ctx, actor.OrganizationID, projectID, id)
 }
 
 type CompileControlledChangeSetRequest struct {

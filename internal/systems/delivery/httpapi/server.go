@@ -69,6 +69,14 @@ type observatoryApplication interface {
 	ListObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryObservatoryFeedback, error)
 }
 
+type controlledAuthorityApplication interface {
+	CompileControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, delivery.CompileControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
+	GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error)
+	ApproveControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ApproveControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.RemoteWriteApproval, error)
+	CreateControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
+	GetControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
+}
+
 type Server struct {
 	app Application
 	mux *http.ServeMux
@@ -106,6 +114,10 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}", server.getObservatoryRun)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.listObservatoryFeedback)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.submitObservatoryFeedback)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/controlled-change-sets", server.compileControlledChangeSet)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-change-sets/{change_set_id}", server.getControlledChangeSet)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_action}", server.controlledChangeSetAction)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-executions/{execution_id}", server.getControlledExecution)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-runs", server.createOutcomeSimulation)

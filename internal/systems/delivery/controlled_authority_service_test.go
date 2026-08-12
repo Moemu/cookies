@@ -53,6 +53,13 @@ func (r *controlledMemoryRepository) CreateControlledExecution(_ context.Context
 	r.executions[repositoryKey(v.OrganizationID, v.ProjectID, v.ID)] = v
 	return v, nil
 }
+func (r *controlledMemoryRepository) GetControlledExecution(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ControlledExecution, error) {
+	v, ok := r.executions[repositoryKey(org, project, id)]
+	if !ok {
+		return ControlledExecution{}, ErrNotFound
+	}
+	return v, nil
+}
 
 func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *testing.T) {
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
