@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
@@ -15,6 +16,78 @@ type controlledAuthorityRepository interface {
 	ApproveControlledChangeSet(context.Context, ControlledChangeSet, RemoteWriteApproval) (ControlledChangeSet, RemoteWriteApproval, error)
 	CreateControlledExecution(context.Context, ControlledExecution) (ControlledExecution, error)
 	GetControlledExecution(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledExecution, error)
+	AttachComputerUseRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (ControlledExecution, error)
+	CreatePlatformEntityMapping(context.Context, PlatformEntityMapping) (PlatformEntityMapping, error)
+	GetPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string) (PlatformEntityMapping, error)
+	ConfirmPlatformEntityMapping(context.Context, PlatformEntityMapping, int64) (PlatformEntityMapping, error)
+}
+
+type MappingReadback struct{ PlatformObjectID, PlatformStatus, EvidenceID string }
+
+func (s Service) AttachComputerUseRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, expectedVersion int64, runID string) (ControlledExecution, error) {
+	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
+		return ControlledExecution{}, err
+	}
+	if expectedVersion < 1 || strings.TrimSpace(runID) == "" {
+		return ControlledExecution{}, ErrInvalidRequest
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return ControlledExecution{}, ErrUnsupportedConfigurationWorkflow
+	}
+	return repo.AttachComputerUseRun(ctx, actor.OrganizationID, projectID, executionID, expectedVersion, runID, s.now())
+}
+
+func (s Service) CreatePendingPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, value PlatformEntityMapping) (PlatformEntityMapping, error) {
+	if err := s.ready(actor, value.ProjectID, ScopeExecute); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	value.OrganizationID = actor.OrganizationID
+	value.SchemaVersion = PlatformEntityMappingV1
+	value.Status = PlatformEntityMappingPending
+	value.PlatformObjectID = ""
+	value.PlatformStatus = ""
+	value.ResultEvidenceID = ""
+	value.ListEvidenceID = ""
+	value.Version = 1
+	value.CreatedAt = s.now()
+	if err := value.Validate(); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return PlatformEntityMapping{}, ErrUnsupportedConfigurationWorkflow
+	}
+	return repo.CreatePlatformEntityMapping(ctx, value)
+}
+
+func (s Service) ConfirmPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, expectedVersion int64, result, list MappingReadback) (PlatformEntityMapping, error) {
+	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if expectedVersion < 1 || result.PlatformObjectID == "" || result.PlatformStatus == "" || result.EvidenceID == "" || list.EvidenceID == "" || result.EvidenceID == list.EvidenceID {
+		return PlatformEntityMapping{}, ErrInvalidRequest
+	}
+	if result.PlatformObjectID != list.PlatformObjectID || result.PlatformStatus != list.PlatformStatus {
+		return PlatformEntityMapping{}, ErrApprovalContentMismatch
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return PlatformEntityMapping{}, ErrUnsupportedConfigurationWorkflow
+	}
+	value, err := repo.GetPlatformEntityMapping(ctx, actor.OrganizationID, projectID, id)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	value.PlatformObjectID = result.PlatformObjectID
+	value.PlatformStatus = result.PlatformStatus
+	value.ResultEvidenceID = result.EvidenceID
+	value.ListEvidenceID = list.EvidenceID
+	value.Status = PlatformEntityMappingConfirmed
+	if err := value.Validate(); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	return repo.ConfirmPlatformEntityMapping(ctx, value, expectedVersion)
 }
 
 func (s Service) GetControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ControlledChangeSet, error) {

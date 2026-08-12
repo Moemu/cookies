@@ -163,7 +163,8 @@ func (w Worker) appendEvidence(ctx context.Context, run ComputerUseRun, step Run
 	if err != nil {
 		return err
 	}
-	return w.Service.Repository.AppendEvidence(ctx, Evidence{SchemaVersion: EvidenceSchemaV1, ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: page.BeforeFacts, AfterPageFacts: page.Readback, FieldReadback: page.Readback, DiffKeys: page.DiffKeys, PageReference: page.PageRef, ObjectFingerprint: run.Authority.ObjectFingerprint, SkillVersion: run.Authority.SkillVersion, SelectorVersion: "fake-selector/v1", ActionVersion: "fake-action/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now})
+	evidence := Evidence{SchemaVersion: EvidenceSchemaV1, ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: page.BeforeFacts, AfterPageFacts: page.Readback, FieldReadback: page.Readback, DiffKeys: page.DiffKeys, PageReference: page.PageRef, ObjectFingerprint: run.Authority.ObjectFingerprint, SkillVersion: run.Authority.SkillVersion, SelectorVersion: "fake-selector/v1", ActionVersion: "fake-action/v1", CreatedAt: now}
+	return w.Service.Repository.AppendEvidence(ctx, RedactEvidence(evidence))
 }
 
 type ControlAction string

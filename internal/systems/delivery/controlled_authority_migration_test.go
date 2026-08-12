@@ -24,3 +24,21 @@ func TestControlledAuthorityMigrationPreservesLegacyMockAuthority(t *testing.T) 
 		}
 	}
 }
+
+func TestControlledObjectFingerprintMigrationPreventsDuplicateTargets(t *testing.T) {
+	payload, err := os.ReadFile("../../../migrations/delivery/20260812132000_delivery_controlled_object_fingerprint.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, required := range []string{"generated always", "object_fingerprint", "json_extract", "unique key", "organization_id, project_id, object_fingerprint", "distinct_evidence", "result_evidence_id <> list_evidence_id"} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("object fingerprint migration omitted %q", required)
+		}
+	}
+	for _, forbidden := range []string{"update delivery_approvals", "execute_mock", "drop table"} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("object fingerprint migration changes legacy authority with %q", forbidden)
+		}
+	}
+}

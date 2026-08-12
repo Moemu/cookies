@@ -65,6 +65,41 @@ func TestAuthorizeActionFailsClosedForKillSwitchAndStaleFence(t *testing.T) {
 	}
 }
 
+func TestLeaseHeartbeatAndReleaseEnforceVersionAndFence(t *testing.T) {
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	service := Service{Repository: repo, Now: func() time.Time { return now }}
+	lease, err := repo.AcquireLease(context.Background(), validLease(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.HeartbeatLease(context.Background(), "org_1", "project_1", lease.ID, lease.Version, lease.FencingToken+1); err != ErrLeaseUnavailable {
+		t.Fatalf("stale fence heartbeat err=%v", err)
+	}
+	lease, err = service.HeartbeatLease(context.Background(), "org_1", "project_1", lease.ID, lease.Version, lease.FencingToken)
+	if err != nil || lease.Version != 2 || !lease.ValidAt(now.Add(30*time.Second)) {
+		t.Fatalf("heartbeat lease=%#v err=%v", lease, err)
+	}
+	lease, err = service.ReleaseLease(context.Background(), "org_1", "project_1", lease.ID, lease.Version, lease.FencingToken)
+	if err != nil || lease.Version != 3 || lease.ReleasedAt == nil || lease.ValidAt(now) {
+		t.Fatalf("released lease=%#v err=%v", lease, err)
+	}
+	if _, err = repo.AcquireLease(context.Background(), SessionLease{ID: "lease_2", OrganizationID: "org_1", ProjectID: "project_1", RunID: "run_2", EnvironmentID: "env_1", ProfileID: "profile_1", Platform: PlatformOceanEngine, AccountID: "account_1", Holder: "worker_2", FencingToken: 2, Version: 1, ExpiresAt: now.Add(time.Hour), HeartbeatDeadline: now.Add(time.Minute)}); err != nil {
+		t.Fatalf("profile not reusable after release: %v", err)
+	}
+}
+
+func TestLeaseHeartbeatFailsClosedAfterDeadline(t *testing.T) {
+	now := time.Date(2026, 8, 12, 10, 2, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	lease := validLease(now.Add(-2 * time.Minute))
+	_, _ = repo.AcquireLease(context.Background(), lease)
+	service := Service{Repository: repo, Now: func() time.Time { return now }}
+	if _, err := service.HeartbeatLease(context.Background(), "org_1", "project_1", lease.ID, lease.Version, lease.FencingToken); err != ErrLeaseUnavailable {
+		t.Fatalf("expired heartbeat err=%v", err)
+	}
+}
+
 func validRun(now time.Time) ComputerUseRun {
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	a := AuthorityBinding{SchemaVersion: AuthoritySchemaV1, OrganizationID: "org_1", ProjectID: "project_1", BusinessExecutionID: "exec_1", ChangeSetID: "change_1", ApprovalID: "approval_1", ApprovalActionHash: hash, AccountReferenceID: "account_1", ObjectFingerprint: hash, Action: "create_project_and_promotions", BudgetLimitMinor: 100, Currency: "CNY", PlanCanonicalHash: hash, IntentCanonicalHash: hash, FeedbackCanonicalHash: hash, DecisionCanonicalHash: hash, ConfigurationCanonicalHash: hash, WorkflowID: "workflow_1", WorkflowCanonicalHash: hash, WorkflowStepID: "step_1", SkillID: "oceanengine-ecommerce-manual", SkillVersion: "v1"}

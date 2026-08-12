@@ -103,6 +103,30 @@ func (r MySQLRepository) GetLease(ctx context.Context, org contract.Organization
 	return scanLease(r.DB.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
 
+func (r MySQLRepository) HeartbeatLease(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion, fencingToken int64, now, expiresAt, heartbeatDeadline time.Time) (SessionLease, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE computer_use_session_leases SET expires_at=?,heartbeat_deadline=?,version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND version=? AND fencing_token=? AND released_at IS NULL AND expires_at>? AND heartbeat_deadline>?`, expiresAt, heartbeatDeadline, org, project, id, expectedVersion, fencingToken, now, now)
+	if err != nil {
+		return SessionLease{}, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return SessionLease{}, ErrVersionConflict
+	}
+	return r.GetLease(ctx, org, project, id)
+}
+
+func (r MySQLRepository) ReleaseLease(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion, fencingToken int64, now time.Time) (SessionLease, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE computer_use_session_leases SET active_lock_key=NULL,released_at=?,version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND version=? AND fencing_token=? AND released_at IS NULL`, now, org, project, id, expectedVersion, fencingToken)
+	if err != nil {
+		return SessionLease{}, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return SessionLease{}, ErrVersionConflict
+	}
+	return r.GetLease(ctx, org, project, id)
+}
+
 func (r MySQLRepository) PutKillSwitch(ctx context.Context, value KillSwitch, expected int64) (KillSwitch, error) {
 	scopeKey := "*"
 	if value.Scope == KillSwitchPlatform {

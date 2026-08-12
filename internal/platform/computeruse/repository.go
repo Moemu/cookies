@@ -26,6 +26,8 @@ type Repository interface {
 	ListSteps(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]RunStep, error)
 	AcquireLease(context.Context, SessionLease) (SessionLease, error)
 	GetLease(context.Context, contract.OrganizationID, contract.ProjectID, string) (SessionLease, error)
+	HeartbeatLease(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, int64, time.Time, time.Time, time.Time) (SessionLease, error)
+	ReleaseLease(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, int64, time.Time) (SessionLease, error)
 	PutKillSwitch(context.Context, KillSwitch, int64) (KillSwitch, error)
 	ActiveKillSwitch(context.Context, contract.OrganizationID, Platform) (KillSwitch, bool, error)
 	IssueConfirmation(context.Context, FinalConfirmation) (FinalConfirmation, error)

@@ -33,7 +33,7 @@ func TestRemoteWriteApprovalHashBindsEveryAuthorityIdentity(t *testing.T) {
 }
 
 func TestConfirmedPlatformMappingRequiresTwoEvidenceReads(t *testing.T) {
-	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "config_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "project", InternalObjectID: "draft_1", PlatformObjectKind: "project", PlatformObjectID: "platform_1", PlatformStatus: "pending_review", ResultEvidenceID: "evidence_result", Status: PlatformEntityMappingConfirmed, Version: 1}
+	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "config_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "project", InternalObjectID: "draft_1", PlatformObjectKind: "project", PlatformObjectID: "platform_1", PlatformStatus: "pending_review", ResultEvidenceID: "evidence_result", Status: PlatformEntityMappingConfirmed, Version: 1, CreatedAt: time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)}
 	if err := mapping.Validate(); err != ErrInvalidState {
 		t.Fatalf("confirmed mapping without list evidence was accepted: %v", err)
 	}

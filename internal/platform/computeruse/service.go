@@ -13,6 +13,11 @@ import (
 
 const FinalConfirmationTTL = 5 * time.Minute
 
+const (
+	SessionLeaseTTL     = time.Hour
+	SessionHeartbeatTTL = time.Minute
+)
+
 type IDGenerator func(string) (string, error)
 
 type Service struct {
@@ -137,6 +142,29 @@ func (s Service) AuthorizeAction(ctx context.Context, request AuthorizeActionReq
 	}
 	attempt := ControlledActionAttempt{ID: attemptID, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, RunID: run.ID, StepID: request.StepID, ConfirmationID: request.ConfirmationID, ApprovalID: run.Authority.ApprovalID, LeaseID: lease.ID, FencingToken: lease.FencingToken, ActionHash: run.Authority.ApprovalActionHash, IdempotencyKey: request.IdempotencyKey, Status: "authorized", CreatedAt: now}
 	return s.Repository.AuthorizeControlledAction(ctx, FinalConfirmation{ID: request.ConfirmationID, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, RunID: run.ID, BindingHash: run.Authority.ApprovalActionHash}, hex.EncodeToString(digest[:]), lease, attempt, now)
+}
+
+func (s Service) HeartbeatLease(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, leaseID string, expectedVersion, fencingToken int64) (SessionLease, error) {
+	now := s.now()
+	lease, err := s.Repository.GetLease(ctx, organizationID, projectID, leaseID)
+	if err != nil {
+		return SessionLease{}, err
+	}
+	if lease.Version != expectedVersion || lease.FencingToken != fencingToken || !lease.ValidAt(now) {
+		return SessionLease{}, ErrLeaseUnavailable
+	}
+	return s.Repository.HeartbeatLease(ctx, organizationID, projectID, leaseID, expectedVersion, fencingToken, now, now.Add(SessionLeaseTTL), now.Add(SessionHeartbeatTTL))
+}
+
+func (s Service) ReleaseLease(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, leaseID string, expectedVersion, fencingToken int64) (SessionLease, error) {
+	lease, err := s.Repository.GetLease(ctx, organizationID, projectID, leaseID)
+	if err != nil {
+		return SessionLease{}, err
+	}
+	if lease.Version != expectedVersion || lease.FencingToken != fencingToken || lease.ReleasedAt != nil {
+		return SessionLease{}, ErrLeaseUnavailable
+	}
+	return s.Repository.ReleaseLease(ctx, organizationID, projectID, leaseID, expectedVersion, fencingToken, s.now())
 }
 
 func (s Service) now() time.Time {

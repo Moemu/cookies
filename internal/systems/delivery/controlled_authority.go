@@ -232,13 +232,13 @@ func (e ControlledExecution) Validate() error {
 }
 
 func (m PlatformEntityMapping) Validate() error {
-	if m.SchemaVersion != PlatformEntityMappingV1 || m.ID == "" || m.OrganizationID == "" || m.ProjectID == "" || m.AccountReferenceID == "" || m.PlanID == "" || m.ConfigurationID == "" || m.BusinessExecutionID == "" || m.ComputerUseRunID == "" || m.InternalObjectKind == "" || m.InternalObjectID == "" || m.PlatformObjectKind == "" || m.Version < 1 {
+	if m.SchemaVersion != PlatformEntityMappingV1 || m.ID == "" || m.OrganizationID == "" || m.ProjectID == "" || m.AccountReferenceID == "" || m.PlanID == "" || m.ConfigurationID == "" || m.BusinessExecutionID == "" || m.ComputerUseRunID == "" || m.InternalObjectKind == "" || m.InternalObjectID == "" || m.PlatformObjectKind == "" || m.Version < 1 || m.CreatedAt.IsZero() {
 		return ErrInvalidRequest
 	}
 	switch m.Status {
 	case PlatformEntityMappingPending:
 	case PlatformEntityMappingConfirmed:
-		if m.PlatformObjectID == "" || m.PlatformStatus == "" || m.ResultEvidenceID == "" || m.ListEvidenceID == "" {
+		if m.PlatformObjectID == "" || m.PlatformStatus == "" || m.ResultEvidenceID == "" || m.ListEvidenceID == "" || m.ResultEvidenceID == m.ListEvidenceID {
 			return ErrInvalidState
 		}
 	default:

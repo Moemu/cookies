@@ -144,6 +144,42 @@ func (r *MemoryRepository) GetLease(_ context.Context, org contract.Organization
 	return value, nil
 }
 
+func (r *MemoryRepository) HeartbeatLease(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion, fencingToken int64, now, expiresAt, heartbeatDeadline time.Time) (SessionLease, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(org, project, id)
+	value, ok := r.leases[key]
+	if !ok {
+		return SessionLease{}, ErrNotFound
+	}
+	if value.Version != expectedVersion || value.FencingToken != fencingToken || !value.ValidAt(now) {
+		return SessionLease{}, ErrVersionConflict
+	}
+	value.ExpiresAt = expiresAt
+	value.HeartbeatDeadline = heartbeatDeadline
+	value.Version++
+	r.leases[key] = value
+	return value, nil
+}
+
+func (r *MemoryRepository) ReleaseLease(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion, fencingToken int64, now time.Time) (SessionLease, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(org, project, id)
+	value, ok := r.leases[key]
+	if !ok {
+		return SessionLease{}, ErrNotFound
+	}
+	if value.Version != expectedVersion || value.FencingToken != fencingToken || value.ReleasedAt != nil {
+		return SessionLease{}, ErrVersionConflict
+	}
+	value.ReleasedAt = &now
+	value.Version++
+	r.leases[key] = value
+	delete(r.activeProfiles, scopeKey(org, project, value.ProfileID))
+	return value, nil
+}
+
 func (r *MemoryRepository) PutKillSwitch(_ context.Context, value KillSwitch, expected int64) (KillSwitch, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

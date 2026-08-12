@@ -82,6 +82,10 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	if _, err = repo.AcquireLease(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
+	lease, err = service.HeartbeatLease(ctx, run.OrganizationID, run.ProjectID, lease.ID, lease.Version, lease.FencingToken)
+	if err != nil || lease.Version != 2 {
+		t.Fatalf("heartbeat lease=%#v err=%v", lease, err)
+	}
 	stepID := "cu_step_" + suffix
 	if _, err = db.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,attempt,version) VALUES (?,?,?,?,1,'submit','submit_platform_configuration','pending',1,1)`, stepID, org, project, run.ID); err != nil {
 		t.Fatal(err)
@@ -117,5 +121,9 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	}
 	if attempts != 1 || !consumed.Valid {
 		t.Fatalf("attempts=%d consumed=%v", attempts, consumed.Valid)
+	}
+	lease, err = service.ReleaseLease(ctx, run.OrganizationID, run.ProjectID, lease.ID, lease.Version, lease.FencingToken)
+	if err != nil || lease.ReleasedAt == nil {
+		t.Fatalf("release lease=%#v err=%v", lease, err)
 	}
 }
