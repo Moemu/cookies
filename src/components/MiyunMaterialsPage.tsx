@@ -370,8 +370,11 @@ export function MiyunMaterialsPage({
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [notice, setNotice] = useState("");
+  const [productIdentityMode, setProductIdentityMode] = useState<
+    "registered" | "manual"
+  >("manual");
   const [productId, setProductId] = useState("");
-  const [productName, setProductName] = useState("");
+  const [manualProductName, setManualProductName] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [draft, setDraft] = useState<ApiMiyunProductProfile | null>(null);
   const [profileId, setProfileId] = useState("");
@@ -390,6 +393,7 @@ export function MiyunMaterialsPage({
   const materialRequestIdRef = useRef(0);
   const backgroundRefreshInFlightRef = useRef(false);
   const lastFocusRefreshRef = useRef(0);
+  const productIdentityProjectRef = useRef("");
   const sortRef = useRef<CardField>(sort);
   sortRef.current = sort;
   const load = useCallback(async (background = false) => {
@@ -453,9 +457,12 @@ export function MiyunMaterialsPage({
       setAssets(mediaAssets);
       setDocuments(documentPage.items);
       setProductSource(source);
-      if (source.products.length === 1) {
-        setProductId(source.products[0].id);
-        setProductName(source.products[0].name);
+      if (productIdentityProjectRef.current !== currentProject.id) {
+        productIdentityProjectRef.current = currentProject.id;
+        const singleProduct = source.products.length === 1 ? source.products[0] : null;
+        setProductIdentityMode(source.products.length ? "registered" : "manual");
+        setProductId(singleProduct?.id ?? "");
+        setManualProductName("");
       }
       setCategoryName(source.category_name);
       setLoadState("ready");
@@ -915,38 +922,86 @@ export function MiyunMaterialsPage({
                       <p>选择产品身份并添加可帮助识别产品的图片、视频或文档。</p>
                     </div>
                   </header>
-                  <label>
-                    已登记产品
-                    <select
-                      aria-label="选择已登记产品"
-                      value={productId}
-                      onChange={(e) => {
-                        const product = productSource?.products.find(
-                          (item) => item.id === e.target.value,
-                        );
-                        setProductId(e.target.value);
-                        setProductName(product?.name ?? "");
-                      }}
-                    >
-                      <option value="">
-                        {productSource?.products.length
-                          ? "请选择产品"
-                          : "暂无已登记产品"}
-                      </option>
-                      {productSource?.products.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    产品名称（可选）
-                    <input
-                      value={productName}
-                      onChange={(e) => setProductName(e.target.value)}
-                    />
-                  </label>
+                  <fieldset className="miyun-product-identity">
+                    <legend>产品身份</legend>
+                    <div className="miyun-product-identity-options">
+                      <label data-selected={productIdentityMode === "registered"}>
+                        <input
+                          type="radio"
+                          name="miyun-product-identity"
+                          value="registered"
+                          checked={productIdentityMode === "registered"}
+                          disabled={!productSource?.products.length}
+                          onChange={() => {
+                            setProductIdentityMode("registered");
+                            if (!productId && productSource?.products.length === 1)
+                              setProductId(productSource.products[0].id);
+                          }}
+                        />
+                        <span>
+                          <b>选择已登记产品</b>
+                          <small>使用项目产品库中的正式身份</small>
+                        </span>
+                      </label>
+                      <label data-selected={productIdentityMode === "manual"}>
+                        <input
+                          type="radio"
+                          name="miyun-product-identity"
+                          value="manual"
+                          checked={productIdentityMode === "manual"}
+                          onChange={() => {
+                            setProductIdentityMode("manual");
+                            setProductId("");
+                          }}
+                        />
+                        <span>
+                          <b>使用未登记产品</b>
+                          <small>仅建立本次分析的待确认身份</small>
+                        </span>
+                      </label>
+                    </div>
+                    {productIdentityMode === "registered" ? (
+                      <label className="miyun-product-identity-field">
+                        <span className="miyun-required-label">
+                          已登记产品 <span aria-hidden="true">*</span>
+                        </span>
+                        <select
+                          aria-label="选择已登记产品"
+                          required
+                          value={productId}
+                          onChange={(event) => setProductId(event.target.value)}
+                        >
+                          <option value="">请选择已登记产品</option>
+                          {productSource?.products.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <label className="miyun-product-identity-field">
+                        <span className="miyun-required-label">
+                          产品名称 <span aria-hidden="true">*</span>
+                        </span>
+                        <input
+                          aria-describedby="miyun-manual-product-help"
+                          required
+                          value={manualProductName}
+                          placeholder="例如：娇兰第三代黄金复原蜜"
+                          onChange={(event) => setManualProductName(event.target.value)}
+                        />
+                        <small id="miyun-manual-product-help">
+                          不会自动登记到产品库；确认后仍可创建采集任务。
+                        </small>
+                      </label>
+                    )}
+                    {!productSource?.products.length ? (
+                      <small className="miyun-product-identity-empty">
+                        当前项目暂无已登记产品，请填写产品名称继续分析。
+                      </small>
+                    ) : null}
+                  </fieldset>
                   <label>
                     品类名称（可选）
                     <input
@@ -954,12 +1009,6 @@ export function MiyunMaterialsPage({
                       onChange={(e) => setCategoryName(e.target.value)}
                     />
                   </label>
-                  {!productSource?.products.length ? (
-                    <small>
-                      当前未登记产品：分析草稿将使用 Project
-                      名称作为待确认身份。
-                    </small>
-                  ) : null}
                   <div
                     className="miyun-upload-zone"
                     onDragOver={(event) => event.preventDefault()}
@@ -1093,9 +1142,9 @@ export function MiyunMaterialsPage({
                       busy ||
                       !connection ||
                       connection.status !== "ready" ||
-                      (!productId &&
-                        !productName &&
-                        !productSource?.project_name)
+                      (productIdentityMode === "registered"
+                        ? !productId
+                        : !manualProductName.trim())
                     }
                     onClick={() =>
                       void run(async () => {
@@ -1104,14 +1153,9 @@ export function MiyunMaterialsPage({
                             currentProject.id,
                             {
                               connection_id: connection!.id,
-                              ...(productId ? { product_id: productId } : {}),
-                              ...(productName || productSource?.project_name
-                                ? {
-                                    product_name:
-                                      productName ||
-                                      productSource!.project_name,
-                                  }
-                                : {}),
+                              ...(productIdentityMode === "registered"
+                                ? { product_id: productId }
+                                : { product_name: manualProductName.trim() }),
                               ...(categoryName
                                 ? { category_name: categoryName }
                                 : {}),

@@ -200,10 +200,7 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 	} else {
 		pendingProductIdentity = true
 		if productName == "" {
-			productName = strings.TrimSpace(projectSource.ProjectName)
-		}
-		if productName == "" {
-			return MiyunProductProfile{}, fmt.Errorf("%w: product name could not be inferred from Project", ErrInvalidRequest)
+			return MiyunProductProfile{}, fmt.Errorf("%w: product_name is required when product_id is omitted", ErrInvalidRequest)
 		}
 		request.ProductID = pendingMiyunProductID(projectID, productName)
 	}

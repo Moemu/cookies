@@ -87,6 +87,7 @@ type YouShuMaterial struct {
 	PlatformName     string
 	CntAdID          int64
 	ImpressionInc2Y  int64
+	ImpressionRaw    string
 	Resource         YouShuResource
 	Slogan           string
 	Social           YouShuSocial

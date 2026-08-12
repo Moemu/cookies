@@ -145,6 +145,20 @@ func TestMiyunCrawlResumesPagesAndAppendsSnapshots(t *testing.T) {
 	}
 }
 
+func TestMiyunCrawlSnapshotPreservesRawAndNormalizedImpressions(t *testing.T) {
+	service, _, _, _ := newMiyunCrawlTestService(t)
+	record, err := service.miyunCrawlRecord(miyunRuntimePayload{OrganizationID: "org_1", ProjectID: "project_1", ActorID: "user_1"}, MiyunCrawlJob{ID: "crawl_1"}, 1, crawler.YouShuMaterial{
+		MaterialID: "remote-units", ImpressionInc2Y: 44_220_000, ImpressionRaw: "4422万",
+		Resource: crawler.YouShuResource{ID: "resource-1", URL: "https://cdn.example.test/video.mp4"},
+	}, service.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Snapshot.CumulativeImpressions != 44_220_000 || record.Snapshot.CumulativeImpressionsRaw != "4422万" {
+		t.Fatalf("snapshot impressions=%d raw=%q", record.Snapshot.CumulativeImpressions, record.Snapshot.CumulativeImpressionsRaw)
+	}
+}
+
 func TestMiyunCrawlStopsAtFrozenMaximumPages(t *testing.T) {
 	service, repository, runtime, pages := newMiyunCrawlTestService(t)
 	profile := confirmedMiyunCrawlTestProfile(t, &service)

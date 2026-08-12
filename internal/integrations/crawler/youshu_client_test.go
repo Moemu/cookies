@@ -146,7 +146,7 @@ func TestNormalizePageAcceptsUpstreamEmptyListData(t *testing.T) {
 }
 
 func TestNormalizePageAcceptsUpstreamRowAndScalarShapes(t *testing.T) {
-	page, err := normalizePage(json.RawMessage(`{"data":[{"material":{"id":"material-1","channel":[{"id":"105","name":"Channel"}],"isCidMaterial":false,"material_type":202,"duration":15,"material_score":"46","firstTime":"2026-08-10","lastTime":"2026-08-11","platform":[{"name":"Android"}],"cnt_ad_id":"26","impression_inc_2y":"3249","resource":[{"id":"resource-1","url":"https://example.test/video.mp4","poster":"https://example.test/poster.jpg","width":720,"height":1280,"duration":15,"type":"mp4","size":"9828071"}],"slogan":"test","socialInfo":{},"bgm":null,"lines":{"content":"first line"}}}],"total":1,"limit":60,"maxTotal":10000,"page":1}`))
+	page, err := normalizePage(json.RawMessage(`{"data":[{"material":{"id":"material-1","channel":[{"id":"105","name":"Channel"}],"isCidMaterial":false,"material_type":202,"duration":15,"material_score":"46","firstTime":"2026-08-10","lastTime":"2026-08-11","platform":[{"name":"Android"}],"cnt_ad_id":"100+","impression_inc_2y":"12.2万","resource":[{"id":"resource-1","url":"https://example.test/video.mp4","poster":"https://example.test/poster.jpg","width":720,"height":1280,"duration":15,"type":"mp4","size":"9828071"}],"slogan":"test","socialInfo":{"view":{"value":"187万"},"like":{"value":"1万"}},"bgm":null,"lines":{"content":"first line"}}}],"total":1,"limit":60,"maxTotal":10000,"page":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +154,22 @@ func TestNormalizePageAcceptsUpstreamRowAndScalarShapes(t *testing.T) {
 		t.Fatalf("page=%#v", page)
 	}
 	material := page.Materials[0]
-	if material.MaterialType != "202" || material.Duration != 15 || material.Score != 46 || material.Resource.Size != 9828071 || material.FirstLineContent != "first line" {
+	if material.MaterialType != "202" || material.Duration != 15 || material.Score != 46 || material.CntAdID != 100 || material.ImpressionInc2Y != 122000 || material.ImpressionRaw != "12.2万" || material.Social.View != 1870000 || material.Social.Like != 10000 || material.Resource.Size != 9828071 || material.FirstLineContent != "first line" {
 		t.Fatalf("material=%#v", material)
+	}
+}
+
+func TestScalarCountNormalizesUpstreamDisplayUnits(t *testing.T) {
+	for _, test := range []struct {
+		raw  string
+		want int64
+	}{
+		{`"4422万"`, 44_220_000}, {`"12.2万"`, 122_000}, {`"1.8万"`, 18_000},
+		{`"100+"`, 100}, {`"1,524"`, 1_524}, {`1870000`, 1_870_000}, {`"unknown"`, 0},
+	} {
+		if got := scalarCount(json.RawMessage(test.raw)); got != test.want {
+			t.Errorf("scalarCount(%s)=%d want=%d", test.raw, got, test.want)
+		}
 	}
 }
 

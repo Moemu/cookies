@@ -636,8 +636,13 @@ func (s Service) miyunCrawlRecord(payload miyunRuntimePayload, job MiyunCrawlJob
 	}
 	raw, _ := json.Marshal(map[string]any{
 		"schema_version": MiyunCrawlerCardSchemaV1, "material_id": source.MaterialID, "channel_id": source.ChannelID,
-		"material_type": source.MaterialType, "related_creators_status": "unknown",
+		"material_type": source.MaterialType, "impression_inc_2y": source.ImpressionRaw,
+		"related_creators_status": "unknown",
 	})
+	impressionRaw := strings.TrimSpace(source.ImpressionRaw)
+	if impressionRaw == "" {
+		impressionRaw = fmt.Sprintf("%d", source.ImpressionInc2Y)
+	}
 	return MiyunCrawlPageRecord{
 		Material: MiyunMaterial{
 			ID: materialID, OrganizationID: payload.OrganizationID, ProjectID: payload.ProjectID, MiyunMaterialID: source.MaterialID,
@@ -651,7 +656,7 @@ func (s Service) miyunCrawlRecord(payload miyunRuntimePayload, job MiyunCrawlJob
 			ID: snapshotID, OrganizationID: payload.OrganizationID, ProjectID: payload.ProjectID, MaterialID: materialID,
 			CrawlJobID: job.ID, SourcePage: sourcePage, ImportMethod: MiyunImportCrawler, SchemaVersion: MiyunCrawlerCardSchemaV1,
 			CapturedAt: now, FirstPublishedAt: timePointerUnlessZero(source.FirstSeenAt), LastPublishedAt: timePointerUnlessZero(source.LastSeenAt),
-			DeliveryDays: deliveryDays, CumulativeImpressions: source.ImpressionInc2Y, CumulativeImpressionsRaw: fmt.Sprintf("%d", source.ImpressionInc2Y),
+			DeliveryDays: deliveryDays, CumulativeImpressions: source.ImpressionInc2Y, CumulativeImpressionsRaw: impressionRaw,
 			RelatedAds: source.CntAdID, RelatedCreatorsRaw: "unknown", RelatedCreatorsKnown: false, MaterialScore: source.Score,
 			Views: source.Social.View, Likes: source.Social.Like, Comments: source.Social.Comment, Shares: source.Social.Share, Saves: source.Social.Save,
 			SanitizedRaw: raw, CreatedAt: now,

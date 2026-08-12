@@ -184,14 +184,20 @@ test("创建采集任务限制为 1–50 页，取消动作覆盖冷却任务", 
   assert.equal(miyunJobMaxPages({ query_snapshot: {} } as any), null);
 });
 
-test("米云产品身份可选且资料上传按知识文档和项目素材分流", () => {
+test("米云允许选择登记产品或填写必填的未登记产品名称", () => {
   const page = readFileSync(
     new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
     "utf8",
   );
   assert.match(page, /getMiyunProductSource/);
-  assert.match(page, /产品名称（可选）/);
-  assert.match(page, /名称作为待确认身份/);
+  assert.match(page, /productIdentityMode/);
+  assert.match(page, /选择已登记产品/);
+  assert.match(page, /使用未登记产品/);
+  assert.match(page, /className="miyun-required-label"/);
+  assert.match(page, /产品名称 <span aria-hidden="true">\*<\/span>/);
+  assert.match(page, /不会自动登记到产品库/);
+  assert.match(page, /manualProductName\.trim\(\)/);
+  assert.doesNotMatch(page, /productSource!\.project_name/);
   assert.match(page, /pdf\|docx\|md/);
   assert.match(page, /uploadKnowledgeDocument/);
   assert.match(page, /uploadProjectAsset/);

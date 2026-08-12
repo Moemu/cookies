@@ -88,6 +88,13 @@ func TestMiyunAnalyzeCreatesPendingIdentityWhenProjectHasNoRegisteredProduct(t *
 	projectReader.source.Products = []MiyunProjectProduct{}
 	service.MiyunProjects = projectReader
 
+	_, err := service.AnalyzeMiyunProductProfile(context.Background(), miyunTestActor(), "project_1", AnalyzeMiyunProductProfileRequest{
+		ConnectionID: "miyun_connection_1", ProductAssetRefs: []contract.AssetVersionRef{}, KnowledgeDocumentIDs: []string{},
+	})
+	if !errors.Is(err, ErrInvalidRequest) || !strings.Contains(err.Error(), "product_name is required") {
+		t.Fatalf("missing manual product name error=%v", err)
+	}
+
 	draft, err := service.AnalyzeMiyunProductProfile(context.Background(), miyunTestActor(), "project_1", AnalyzeMiyunProductProfileRequest{
 		ConnectionID: "miyun_connection_1", ProductName: "手冲咖啡套装", CategoryName: "咖啡器具",
 		ProductAssetRefs: []contract.AssetVersionRef{}, KnowledgeDocumentIDs: []string{},

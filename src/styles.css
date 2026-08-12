@@ -6577,6 +6577,87 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   padding: 0;
 }
 
+.miyun-materials-page .surface-card .miyun-product-identity {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  gap: 12px;
+  padding: 12px;
+}
+
+.miyun-product-identity > legend {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 750;
+  padding: 0 5px;
+}
+
+.miyun-product-identity-options {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.miyun-materials-page .surface-card fieldset .miyun-product-identity-options > label {
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.miyun-materials-page .surface-card fieldset .miyun-product-identity-options > label[data-selected="true"] {
+  background: var(--cobalt-soft);
+  border-color: color-mix(in srgb, var(--cobalt) 52%, var(--line));
+  box-shadow: inset 3px 0 0 var(--cobalt);
+}
+
+.miyun-product-identity-options label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.miyun-product-identity-options label > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.miyun-product-identity-options b { font-size: 11px; }
+.miyun-product-identity-options small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+
+.miyun-materials-page .surface-card fieldset .miyun-product-identity-field {
+  align-items: stretch;
+  display: grid;
+  gap: 6px;
+}
+
+.miyun-required-label {
+  align-items: baseline;
+  color: var(--text);
+  display: inline-flex;
+  gap: 3px;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.miyun-required-label > span { color: var(--danger); }
+
+.miyun-materials-page .surface-card fieldset .miyun-product-identity-field > input,
+.miyun-materials-page .surface-card fieldset .miyun-product-identity-field > select {
+  min-height: 38px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.miyun-product-identity-field > small,
+.miyun-product-identity-empty {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 .miyun-materials-page .miyun-upload-zone {
   align-content: center;
   background: linear-gradient(135deg, #edf5ff 0%, #f8fbff 100%);
@@ -7622,6 +7703,10 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   }
 
   .miyun-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .miyun-product-identity-options {
     grid-template-columns: 1fr;
   }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -301,7 +302,7 @@ func normalizePage(b json.RawMessage) (YouShuPage, error) {
 			return YouShuPage{}, &YouShuError{Kind: YouShuMalformed, Strategy: YouShuRetry, Source: "last_time"}
 		}
 		id, n := named(m.Channel)
-		o.Materials = append(o.Materials, YouShuMaterial{MaterialID: m.ID, IsCID: m.IsCID, ChannelID: id, ChannelName: n, MaterialType: scalarString(m.MaterialType), Duration: scalarInt(m.Duration), Score: scalarFloat(m.Score), FirstSeenAt: f, LastSeenAt: l, PlatformName: namedName(m.Platform), CntAdID: scalarInt(m.Cnt), ImpressionInc2Y: scalarInt(m.Impression), Resource: resourceValue(m.Resource), Slogan: m.Slogan, Social: socialValue(m.Social), BGMTitle: m.BGM.Title, BGMAuthor: m.BGM.Author, FirstLineContent: linesContent(m.Lines)})
+		o.Materials = append(o.Materials, YouShuMaterial{MaterialID: m.ID, IsCID: m.IsCID, ChannelID: id, ChannelName: n, MaterialType: scalarString(m.MaterialType), Duration: scalarInt(m.Duration), Score: scalarFloat(m.Score), FirstSeenAt: f, LastSeenAt: l, PlatformName: namedName(m.Platform), CntAdID: scalarCount(m.Cnt), ImpressionInc2Y: scalarCount(m.Impression), ImpressionRaw: scalarText(m.Impression), Resource: resourceValue(m.Resource), Slogan: m.Slogan, Social: socialValue(m.Social), BGMTitle: m.BGM.Title, BGMAuthor: m.BGM.Author, FirstLineContent: linesContent(m.Lines)})
 	}
 	sort.Slice(o.Materials, func(i, j int) bool { return o.Materials[i].MaterialID < o.Materials[j].MaterialID })
 	return o, nil
@@ -340,6 +341,13 @@ func named(b json.RawMessage) (string, string) {
 }
 func namedName(b json.RawMessage) string    { _, n := named(b); return n }
 func scalarString(b json.RawMessage) string { return strings.Trim(string(b), "\"") }
+func scalarText(b json.RawMessage) string {
+	var value string
+	if json.Unmarshal(b, &value) == nil {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(string(b))
+}
 func scalarInt(b json.RawMessage) int64 {
 	var n int64
 	if json.Unmarshal(b, &n) != nil {
@@ -349,6 +357,34 @@ func scalarInt(b json.RawMessage) int64 {
 		}
 	}
 	return n
+}
+func scalarCount(b json.RawMessage) int64 {
+	value := scalarText(b)
+	value = strings.NewReplacer(",", "", "，", "", " ", "").Replace(value)
+	value = strings.TrimSuffix(value, "+")
+	multiplier := float64(1)
+	for _, unit := range []struct {
+		suffix     string
+		multiplier float64
+	}{
+		{"亿", 100_000_000}, {"万", 10_000}, {"w", 10_000}, {"W", 10_000},
+		{"千", 1_000}, {"k", 1_000}, {"K", 1_000}, {"m", 1_000_000}, {"M", 1_000_000},
+	} {
+		if strings.HasSuffix(value, unit.suffix) {
+			value = strings.TrimSuffix(value, unit.suffix)
+			multiplier = unit.multiplier
+			break
+		}
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) || number < 0 {
+		return 0
+	}
+	normalized := math.Round(number * multiplier)
+	if normalized > float64(^uint64(0)>>1) {
+		return 0
+	}
+	return int64(normalized)
 }
 func scalarFloat(b json.RawMessage) float64 {
 	var n float64
@@ -384,8 +420,8 @@ func socialValue(b json.RawMessage) YouShuSocial {
 	}
 	json.Unmarshal(b, &x)
 	return YouShuSocial{
-		View: scalarInt(x.View.Value), Like: scalarInt(x.Like.Value), Comment: scalarInt(x.Comment.Value),
-		Share: scalarInt(x.Share.Value), Save: scalarInt(x.Save.Value),
+		View: scalarCount(x.View.Value), Like: scalarCount(x.Like.Value), Comment: scalarCount(x.Comment.Value),
+		Share: scalarCount(x.Share.Value), Save: scalarCount(x.Save.Value),
 	}
 }
 func linesContent(b json.RawMessage) string {
