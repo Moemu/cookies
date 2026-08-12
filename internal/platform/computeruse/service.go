@@ -56,7 +56,14 @@ func (s Service) TransitionRun(ctx context.Context, organizationID contract.Orga
 	} else if active && next != RunCancelled && next != RunFailed {
 		return ComputerUseRun{}, ErrKillSwitchActive
 	}
-	return s.Repository.TransitionRun(ctx, organizationID, projectID, runID, expectedVersion, next, reason, s.now())
+	updated, err := s.Repository.TransitionRun(ctx, organizationID, projectID, runID, expectedVersion, next, reason, s.now())
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	if err := s.recordEvent(ctx, updated, "state_transition", string(current.State)+" -> "+string(next), updated.CreatedBy); err != nil {
+		return ComputerUseRun{}, err
+	}
+	return updated, nil
 }
 
 type IssuedConfirmation struct {
@@ -148,4 +155,15 @@ func (s Service) newID(prefix string) (string, error) {
 		return "", err
 	}
 	return prefix + "_" + hex.EncodeToString(bytes), nil
+}
+
+func (s Service) recordEvent(ctx context.Context, run ComputerUseRun, kind, summary, actor string) error {
+	id, err := s.newID("cuevent")
+	if err != nil {
+		return err
+	}
+	if actor == "" {
+		actor = "computer-use-control-plane"
+	}
+	return s.Repository.AppendEvent(ctx, RunEvent{ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, Sequence: run.Version, Kind: kind, Summary: summary, Actor: actor, CreatedAt: s.now()})
 }

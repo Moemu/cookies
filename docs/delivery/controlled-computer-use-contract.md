@@ -58,3 +58,11 @@ Run-time authorization uses a separate versioned enum and never reports `PHASE_C
 ## Release gates
 
 Gate one may navigate, identify the approved account/page, fill only an unsubmitted local form, read every field back, show the diff, and stop before the first event that can persist remote state. Gate two is disabled unless the user grants a separate, same-turn authorization naming the account, test object, action and budget ceiling. No implementation, general request to continue, old message, or zero account balance substitutes for that authorization.
+
+The deterministic fake adapter has no network client, credentials, Connector
+dependency, or production process wiring. Its terminal outcomes are test
+projections, never evidence of a platform mutation. Project-scoped control
+handlers re-authorize organization, Project and scope, then delegate to the
+authority service; they do not rebuild lease, confirmation, Kill Switch or
+transition policy. The production host will mount this surface only with the
+visible-browser takeover adapter delivered by gate one, never with the fake.

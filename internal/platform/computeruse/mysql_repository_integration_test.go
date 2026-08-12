@@ -36,7 +36,7 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		for _, statement := range []string{`DELETE FROM computer_use_controlled_action_attempts WHERE organization_id=?`, `DELETE FROM computer_use_final_confirmations WHERE organization_id=?`, `DELETE FROM computer_use_run_steps WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
+		for _, statement := range []string{`DELETE FROM computer_use_controlled_action_attempts WHERE organization_id=?`, `DELETE FROM computer_use_final_confirmations WHERE organization_id=?`, `DELETE FROM computer_use_evidence WHERE organization_id=?`, `DELETE FROM computer_use_events WHERE organization_id=?`, `DELETE FROM computer_use_run_steps WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
 			_, _ = db.ExecContext(context.Background(), statement, org)
 		}
 	}()
@@ -53,6 +53,7 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	idSequence := 0
 	run := validRun(now)
 	run.ID = "cu_run_" + suffix
 	run.OrganizationID = contract.OrganizationID(org)
@@ -64,7 +65,10 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	run.PolicyID = policy
 	run.IdempotencyKey = "run_" + suffix
 	repo := MySQLRepository{DB: db}
-	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_" + suffix, nil }}
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+		idSequence++
+		return fmt.Sprintf("%s_%s_%d", prefix, suffix, idSequence), nil
+	}}
 	if _, _, err = service.CreateRun(ctx, CreateRunRequest{Run: run}); err != nil {
 		t.Fatal(err)
 	}

@@ -21,6 +21,9 @@ type Repository interface {
 	CreateRun(context.Context, ComputerUseRun) (ComputerUseRun, bool, error)
 	GetRun(context.Context, contract.OrganizationID, contract.ProjectID, string) (ComputerUseRun, error)
 	TransitionRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, RunState, BlockingReason, time.Time) (ComputerUseRun, error)
+	SetRunControl(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, RunState, bool, bool, BlockingReason, time.Time) (ComputerUseRun, error)
+	PutStep(context.Context, contract.OrganizationID, contract.ProjectID, RunStep) error
+	ListSteps(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]RunStep, error)
 	AcquireLease(context.Context, SessionLease) (SessionLease, error)
 	GetLease(context.Context, contract.OrganizationID, contract.ProjectID, string) (SessionLease, error)
 	PutKillSwitch(context.Context, KillSwitch, int64) (KillSwitch, error)
@@ -29,4 +32,6 @@ type Repository interface {
 	AuthorizeControlledAction(context.Context, FinalConfirmation, string, SessionLease, ControlledActionAttempt, time.Time) (ControlledActionAttempt, error)
 	AppendEvent(context.Context, RunEvent) error
 	AppendEvidence(context.Context, Evidence) error
+	ListEvents(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]RunEvent, error)
+	ListEvidence(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]Evidence, error)
 }

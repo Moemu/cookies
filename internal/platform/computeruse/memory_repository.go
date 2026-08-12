@@ -19,6 +19,7 @@ type MemoryRepository struct {
 	attempts       map[string]ControlledActionAttempt
 	events         []RunEvent
 	evidence       []Evidence
+	steps          []RunStep
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -70,6 +71,53 @@ func (r *MemoryRepository) TransitionRun(_ context.Context, org contract.Organiz
 	value.State, value.BlockingReason, value.Version, value.UpdatedAt = state, reason, value.Version+1, now
 	r.runs[key] = value
 	return value, nil
+}
+
+func (r *MemoryRepository) SetRunControl(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expected int64, state RunState, paused, takeover bool, reason BlockingReason, now time.Time) (ComputerUseRun, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(org, project, id)
+	value, ok := r.runs[key]
+	if !ok {
+		return ComputerUseRun{}, ErrNotFound
+	}
+	if value.Version != expected {
+		return ComputerUseRun{}, ErrVersionConflict
+	}
+	value.State, value.Paused, value.TakeoverActive, value.BlockingReason, value.Version, value.UpdatedAt = state, paused, takeover, reason, value.Version+1, now
+	r.runs[key] = value
+	return value, nil
+}
+
+func (r *MemoryRepository) PutStep(_ context.Context, org contract.OrganizationID, project contract.ProjectID, value RunStep) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.runs[scopeKey(org, project, value.RunID)]; !ok {
+		return ErrNotFound
+	}
+	for index, step := range r.steps {
+		if step.RunID == value.RunID && step.ID == value.ID {
+			r.steps[index] = value
+			return nil
+		}
+	}
+	r.steps = append(r.steps, value)
+	return nil
+}
+
+func (r *MemoryRepository) ListSteps(_ context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]RunStep, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.runs[scopeKey(org, project, runID)]; !ok {
+		return nil, ErrNotFound
+	}
+	values := []RunStep{}
+	for _, step := range r.steps {
+		if step.RunID == runID {
+			values = append(values, step)
+		}
+	}
+	return values, nil
 }
 
 func (r *MemoryRepository) AcquireLease(_ context.Context, value SessionLease) (SessionLease, error) {
@@ -181,4 +229,32 @@ func (r *MemoryRepository) AppendEvidence(_ context.Context, value Evidence) err
 	defer r.mu.Unlock()
 	r.evidence = append(r.evidence, value)
 	return nil
+}
+func (r *MemoryRepository) ListEvents(_ context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]RunEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.runs[scopeKey(org, project, runID)]; !ok {
+		return nil, ErrNotFound
+	}
+	values := []RunEvent{}
+	for _, value := range r.events {
+		if value.OrganizationID == org && value.ProjectID == project && value.RunID == runID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
+func (r *MemoryRepository) ListEvidence(_ context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]Evidence, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.runs[scopeKey(org, project, runID)]; !ok {
+		return nil, ErrNotFound
+	}
+	values := []Evidence{}
+	for _, value := range r.evidence {
+		if value.OrganizationID == org && value.ProjectID == project && value.RunID == runID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
 }

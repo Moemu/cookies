@@ -13,7 +13,9 @@ servers:
 security:
 - cookiesAuth: []
 paths:
-  /platform/v1/computer-use/runs:
+  /platform/v1/computer-use/projects/{project_id}/runs:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
     post:
       operationId: createComputerUseRun
       summary: Create or idempotently replay a controlled UI-session run.
@@ -39,8 +41,9 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ComputerUseRun'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/runs/{run_id}:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     get:
       operationId: getComputerUseRun
@@ -52,8 +55,9 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ComputerUseRun'}
         '404': {$ref: '#/components/responses/NotFound'}
-  /platform/v1/computer-use/runs/{run_id}/events:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/events:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     get:
       operationId: listComputerUseRunEvents
@@ -69,8 +73,9 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvent'}}
                 additionalProperties: false
-  /platform/v1/computer-use/runs/{run_id}/evidence:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/evidence:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     get:
       operationId: listComputerUseRunEvidence
@@ -86,8 +91,9 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvidence'}}
                 additionalProperties: false
-  /platform/v1/computer-use/runs/{run_id}:pause:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:pause:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     post:
       operationId: pauseComputerUseRun
@@ -96,8 +102,9 @@ paths:
       responses:
         '200': {description: Paused run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/runs/{run_id}:resume:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:resume:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     post:
       operationId: resumeComputerUseRun
@@ -106,8 +113,9 @@ paths:
       responses:
         '200': {description: Run returned to environment_check., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/runs/{run_id}:cancel:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:cancel:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     post:
       operationId: cancelComputerUseRun
@@ -116,8 +124,9 @@ paths:
       responses:
         '200': {description: Cancelled run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/runs/{run_id}:takeover:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:takeover:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     post:
       operationId: takeoverComputerUseRun
@@ -126,8 +135,9 @@ paths:
       responses:
         '200': {description: Run awaiting or under takeover., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/runs/{run_id}/confirmations:
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/confirmations:
     parameters:
+    - $ref: '#/components/parameters/ProjectID'
     - $ref: '#/components/parameters/ComputerUseRunID'
     post:
       operationId: issueComputerUseFinalConfirmation
@@ -144,6 +154,41 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IssuedComputerUseConfirmation'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:prepare:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: prepareComputerUseRun
+      summary: Advance environment checks and deterministic/manual page preparation to the final-confirmation boundary.
+      responses:
+        '200': {description: Prepared run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:submit:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: submitComputerUseControlledAction
+      summary: Atomically consume one final confirmation and authorize one fenced action attempt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [step_id, confirmation_id, token, lease_id, fencing_token, idempotency_key]
+              properties:
+                step_id: {type: string}
+                confirmation_id: {type: string}
+                token: {type: string, writeOnly: true}
+                lease_id: {type: string}
+                fencing_token: {type: integer, minimum: 1}
+                idempotency_key: {type: string}
+      responses:
+        '200': {description: Authoritative terminal or recovery run state., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/provider/capabilities:
     get:

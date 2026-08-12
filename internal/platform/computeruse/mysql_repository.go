@@ -57,6 +57,39 @@ func (r MySQLRepository) TransitionRun(ctx context.Context, org contract.Organiz
 	return r.GetRun(ctx, org, project, id)
 }
 
+func (r MySQLRepository) SetRunControl(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expected int64, state RunState, paused, takeover bool, reason BlockingReason, now time.Time) (ComputerUseRun, error) {
+	result, err := r.DB.ExecContext(ctx, `UPDATE computer_use_runs SET state=?,paused=?,takeover_active=?,blocking_reason=?,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=?`, state, paused, takeover, nullableString(string(reason)), now, org, project, id, expected)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return ComputerUseRun{}, ErrVersionConflict
+	}
+	return r.GetRun(ctx, org, project, id)
+}
+
+func (r MySQLRepository) PutStep(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, value RunStep) error {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,blocking_reason,attempt,version) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE status=VALUES(status),blocking_reason=VALUES(blocking_reason),attempt=VALUES(attempt),version=VALUES(version)`, value.ID, org, project, value.RunID, value.Sequence, value.WorkflowStepID, value.Action, value.Status, nullableString(string(value.BlockingReason)), value.Attempt, value.Version)
+	return err
+}
+func (r MySQLRepository) ListSteps(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]RunStep, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT id,run_id,sequence_number,workflow_step_id,action,status,COALESCE(blocking_reason,''),attempt,version FROM computer_use_run_steps WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY sequence_number`, org, project, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []RunStep{}
+	for rows.Next() {
+		var v RunStep
+		if err := rows.Scan(&v.ID, &v.RunID, &v.Sequence, &v.WorkflowStepID, &v.Action, &v.Status, &v.BlockingReason, &v.Attempt, &v.Version); err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, rows.Err()
+}
+
 func (r MySQLRepository) AcquireLease(ctx context.Context, value SessionLease) (SessionLease, error) {
 	activeKey := string(value.OrganizationID) + ":" + string(value.ProjectID) + ":" + string(value.Platform) + ":" + value.AccountID + ":" + value.ProfileID
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO computer_use_session_leases (id,organization_id,project_id,run_id,environment_id,profile_id,platform,account_id,holder,active_lock_key,fencing_token,version,expires_at,heartbeat_deadline,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.RunID, value.EnvironmentID, value.ProfileID, value.Platform, value.AccountID, value.Holder, activeKey, value.FencingToken, value.Version, value.ExpiresAt, value.HeartbeatDeadline, value.ReleasedAt)
@@ -195,6 +228,42 @@ func (r MySQLRepository) AppendEvidence(ctx context.Context, value Evidence) err
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO computer_use_evidence (id,organization_id,project_id,run_id,step_id,evidence_json,object_fingerprint,skill_version,selector_version,action_version,redaction_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.RunID, value.StepID, payload, value.ObjectFingerprint, value.SkillVersion, value.SelectorVersion, value.ActionVersion, value.RedactionVersion, value.CreatedAt)
 	return err
+}
+func (r MySQLRepository) ListEvents(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]RunEvent, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at FROM computer_use_events WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY sequence_number`, org, project, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []RunEvent{}
+	for rows.Next() {
+		var v RunEvent
+		if err := rows.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.RunID, &v.Sequence, &v.Kind, &v.Summary, &v.Actor, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, rows.Err()
+}
+func (r MySQLRepository) ListEvidence(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]Evidence, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT evidence_json FROM computer_use_evidence WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY created_at,id`, org, project, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := []Evidence{}
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var v Evidence
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, rows.Err()
 }
 
 const runSelect = `SELECT id,organization_id,project_id,platform,account_id,authority_json,environment_id,profile_id,COALESCE(lease_id,''),policy_id,state,COALESCE(blocking_reason,''),paused,takeover_active,version,idempotency_key,request_hash,created_by,created_at,updated_at FROM computer_use_runs`
